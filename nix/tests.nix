@@ -30,8 +30,9 @@
 #   and refuses empty/blank and package-less combinations at eval;
 # - the greeter (Linux only: it imports nixpkgs' own regreet module):
 #   `greeter.enable` turns on `services.displayManager.regreet`, forces
-#   the session entry (and its units) on beside it, leaves the backdrop
-#   alone by default and renders a set one as ReGreet's
+#   the session entry (and its units) on beside it, confines cage to one
+#   output (`-m last`, which a user's own `cageArgs` overrides), leaves
+#   the backdrop alone by default and renders a set one as ReGreet's
 #   `background.path`; off changes nothing; GDM/SDDM, an explicitly
 #   disabled session entry, a missing `enable`, and a Stylix-owned
 #   backdrop are each refused at eval, naming the conflict;
@@ -762,6 +763,14 @@ let
       modulesPath = "${pkgs.path}/nixos/modules";
     };
   };
+  # ...with the user's own `cageArgs`: kept verbatim (a plain assignment
+  # beats the one-screen `mkDefault` below, which in turn beats nixpkgs'
+  # option default).
+  osGreeterCageOverride = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    greeter.enable = true;
+  } (greeterUser // { services.displayManager.regreet.cageArgs = [ "-s" ]; });
 
   # --- eval-time structural pins (fail `nix flake check` at eval) ---
   #
@@ -1286,6 +1295,15 @@ let
         assert osRealGreeter.config.services.displayManager.regreet.enable;
         assert osRealGreeter.config.services.greetd.enable;
         assert osRealGreeter.config.systemd.user.units ? "scoot.service";
+        # The one-screen cage default holds in a real NixOS evaluation
+        # too, not only against the stubs.
+        assert
+          osRealGreeter.config.services.displayManager.regreet.cageArgs == [
+            "-s"
+            "-d"
+            "-m"
+            "last"
+          ];
         true
       )
       (
@@ -1518,6 +1536,29 @@ let
       assert contains "${
         wallpaperImage
       }" osGreeterBg.config.services.displayManager.regreet.settings.background.path;
+      true
+    )
+    # One screen by default: cage confined to a single output, on top of
+    # nixpkgs' spanning `[ "-s" "-d" ]` default (our `mkDefault` beats
+    # the option default)...
+    (
+      assert
+        osGreeter.config.services.displayManager.regreet.cageArgs == [
+          "-s"
+          "-d"
+          "-m"
+          "last"
+        ];
+      true
+    )
+    # ...while a user's own `cageArgs` wins over it (a plain assignment
+    # beats our `mkDefault`).
+    (
+      assert allAssertionsHold osGreeterCageOverride.config;
+      true
+    )
+    (
+      assert osGreeterCageOverride.config.services.displayManager.regreet.cageArgs == [ "-s" ];
       true
     )
     # Off changes nothing: no ReGreet, and (no session entry either) no

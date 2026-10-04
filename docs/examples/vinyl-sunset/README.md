@@ -21,6 +21,7 @@ point `[wallpaper] image` at your copy.
 | [`btop/themes/vinyl.theme`](btop/themes/vinyl.theme) | btop: the sunset palette theme |
 | [`lazygit.yml`](lazygit.yml) | lazygit: the palette, rounded borders |
 | [`load.sh`](load.sh), [`cpu.sh`](cpu.sh) | the bar's `load` and `cpu` modules: load average and CPU percent on stdout |
+| [`regreet.css`](regreet.css) | ReGreet: the login screen in espresso, cream and sunset orange (NixOS greeter) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
 modules install it when the settings have a `[wallpaper]` table, from source
@@ -48,6 +49,39 @@ with `btop/themes/vinyl.theme` as `~/.config/btop/themes/vinyl.theme`,
 a copy of the illustration. The prompt in the preview runs under
 `STARSHIP_CONFIG` pointing at `starship.toml`, e.g.
 `env STARSHIP_CONFIG=~/.config/starship.toml bash -i`.
+
+## The login screen
+
+On NixOS the greeter can wear this look too. Copy `regreet.css` next to your
+system configuration, and download the illustration yourself (see "Image
+credit and license": no copy ships here, so the backdrop below points at
+your own file, not a committed one):
+
+```nix
+programs.scoot = {
+  enable = true;
+  greeter = {
+    enable = true;
+    background = /home/alice/Pictures/wallpapers/vinyl-sunset.png;
+  };
+};
+services.displayManager.regreet = {
+  extraCss = ./regreet.css;
+  font = {
+    package = pkgs.nerd-fonts.droid-sans-mono;
+    name = "DroidSansM Nerd Font Propo";
+    size = 12;
+  };
+  settings = {
+    GTK.application_prefer_dark_theme = true;
+    background.fit = "Cover";
+    widget.clock.format = "%-I:%M %P";
+  };
+};
+```
+
+See [the greeter docs](../../nix.md#the-greeter-regreet-opt-in) for the
+one-screen default and the other knobs.
 
 ## The palette
 

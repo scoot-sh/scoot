@@ -11,6 +11,7 @@ scootbar or scootbg changes unless you use these files.
 | [`scoot.toml`](scoot.toml) | the compositor: background, ring colors and widths, rounded corners, column widths with a full-width column on `Super+m`, the wallpaper |
 | [`bar.toml`](bar.toml) | scootbar: a floating, rounded, translucent bar, workspaces as circles with the window title, the clock, status modules (WiFi, volume, brightness, bluetooth, battery), the power menu |
 | [`foot.ini`](foot.ini) | foot: the palette, 80% opacity, padding and font size (needs a foot with `[colors-dark]` sections, 1.26 or later) |
+| [`regreet.css`](regreet.css) | ReGreet: the login screen in plum, ray blue and burst orange (NixOS greeter) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
 modules install it when the settings have a `[wallpaper]` table, from source
@@ -29,6 +30,39 @@ foot --config docs/examples/radial-burst/foot.ini
 To keep it, copy the files to your config directory (`~/.config/scoot/config.toml`,
 `~/.config/scoot/bar.toml`, `~/.config/foot/foot.ini`) and point `[wallpaper] image` at
 a copy of the wallpaper.
+
+## The login screen
+
+On NixOS the greeter can wear this look too. Copy `regreet.css` and
+`docs/assets/wallpapers/radial-burst.png` next to your system configuration:
+
+```nix
+programs.scoot = {
+  enable = true;
+  greeter = {
+    enable = true;
+    background = ./radial-burst.png;
+  };
+};
+services.displayManager.regreet = {
+  extraCss = ./regreet.css;
+  font = {
+    package = pkgs.nerd-fonts.droid-sans-mono;
+    name = "DroidSansM Nerd Font Propo";
+    size = 12;
+  };
+  settings = {
+    GTK.application_prefer_dark_theme = true;
+    background.fit = "Cover";
+    widget.clock.format = "%-I:%M %P";
+  };
+};
+```
+
+This sheet was mixed from the palette without a live greeter in front of it
+(see the note at its top); expect small tuning. See [the greeter
+docs](../../nix.md#the-greeter-regreet-opt-in) for the one-screen default and
+the other knobs.
 
 ## The palette
 

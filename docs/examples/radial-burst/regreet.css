@@ -1,0 +1,75 @@
+/* The "radial burst" look for ReGreet: plum, ray blue and burst orange.
+ * Pair it with `application_prefer_dark_theme = true` (see README.md in this
+ * directory for the whole snippet).
+ *
+ * Copy this beside your NixOS configuration and point
+ * `services.displayManager.regreet.extraCss` at it.
+ *
+ * Nothing here is a default: every rule below is opt-in through that option.
+ * Unlike the music desk and vinyl sunset sheets, this one was mixed from the
+ * look's palette without a live session in front of it: the hues are the
+ * look's own (plum `#241721`, ray blue `#31a9e5`, burst orange `#e36e38` /
+ * `#fa9233`, hot pink `#bf128d`, purple `#6d1d98`, ray yellow `#fdef1d`),
+ * and the shape follows the vinyl sunset sheet.
+ *
+ * The card rules scope to `frame.background`, not bare `frame`: ReGreet's
+ * login card and its clock card both carry the `background` CSS class, while
+ * the third frame -- the empty notification bar above Reboot/Power Off --
+ * carries none (read against ReGreet 0.5.0's `src/gui/templates.rs`). A bare
+ * `frame` rule also inks that empty bar, leaving a blank card when there is
+ * nothing to report (GTK CSS has no `:empty`). Likewise a bare `label` rule
+ * inks button labels too, so the colored buttons below name their labels
+ * explicitly.
+ */
+window {
+  font-family: "DroidSansM Nerd Font Propo";
+}
+frame.background {
+  background-color: alpha(#241721, 0.84);
+  border-radius: 16px;
+  padding: 20px 26px;
+  box-shadow: 0 10px 32px alpha(#000000, 0.35);
+  color: #fdef1d;
+}
+frame.background > border {
+  border: none;
+}
+label {
+  color: #fdef1d;
+}
+button, entry, dropdown > button, combobox > box > button {
+  border-radius: 10px;
+}
+entry, dropdown > button, combobox > box > button, button.image-button {
+  background: alpha(#6d1d98, 0.55);
+  color: #fdef1d;
+  border: 1px solid alpha(#e36e38, 0.6);
+}
+button.suggested-action {
+  background: #31a9e5;
+  border: none;
+  padding: 6px 18px;
+}
+button.suggested-action label {
+  color: #241721;
+}
+button.suggested-action:hover {
+  background: #5bbdeb;
+}
+button.destructive-action {
+  background: alpha(#241721, 0.84);
+  border: 2px solid alpha(#bf128d, 0.7);
+  padding: 4px 16px;
+}
+button.destructive-action label {
+  color: #fa9233;
+}
+button.destructive-action:hover {
+  background: #bf128d;
+}
+button.destructive-action:hover label {
+  color: #fdef1d;
+}
+entry:focus-within {
+  outline-color: #31a9e5;
+}
