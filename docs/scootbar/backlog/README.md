@@ -127,7 +127,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Bluetooth](resolved/bluetooth-module-done.md) (low) — RESOLVED 2026-10-03
 - [Bluetooth: real adapter and headset validation](bluetooth-real-hardware.md) (medium): what the VM cannot prove — real power toggles, Battery1 pacing, real `GetManagedObjects` scale, Waybar beside it
 - [Move the tray onto `dbus::link`](resolved/tray-onto-dbus-link-done.md) (low): one copy of the bus lifecycle, and whether the modules should share one connection — RESOLVED 2026-10-03
- - [Icons on every module that shows a value](module-icons.md) (medium): battery, brightness, bluetooth and media take no icon today; blocked on the WiFi strength-icon form
+ - [Icons on every module that shows a value](resolved/module-icons-done.md) (medium): battery, brightness, bluetooth, media and window-title take icons; workspaces takes none — RESOLVED 2026-10-04 in #411
 - [Network: a second radio's empty scan replaces the real one](network-multi-radio-scan.md) (medium): the last interface's scan dump wins, so a dongle or hotspot interface can empty the list (#403 review)
  - [Network: WiFi signal as a strength icon, not text bars](resolved/network-signal-icon-done.md) (medium): the icon shows the strength, the text is just the SSID
 - [Tray: themed icon names](tray-icon-themes.md) (medium), [Tray: real Qt, GTK and Electron apps](tray-real-apps.md) (medium), [Tray: session buses on abstract sockets](tray-abstract-socket.md) (low), [Tray: coalesce a runaway item's redraws](tray-redraw-coalesce.md) (low): split out of the tray when its menus landed
