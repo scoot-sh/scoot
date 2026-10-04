@@ -11,8 +11,8 @@
 # belongs on each merge to main, not on every PR push: ci.yml's every-PR
 # `nix flake check` already evals every output for its system and runs the
 # module suite (`checks.*.scoot-modules`), so what only this workflow can
-# catch is a *compile* breakage under `buildRustPackage` -- a stale
-# `cargoLock.outputHashes` after a Smithay rev bump, a missing
+# catch is a *compile* breakage under the crane Rust build -- a stale
+# `outputHashes` after a Smithay rev bump, a missing
 # `buildInputs` C library, a file the build reads that fell out of the
 # fileset `src`. Rare, and worth one post-merge run rather than a per-push
 # tax. A red main here names the merge that broke the packaged build, and
@@ -80,17 +80,27 @@
 # of `--version` proves the wrapper passes a command through.
 #
 # Which binaries the cache holds: `scoot` (the GPU-free default,
-# unchanged as the default package), `scoot-gpu-xwayland` (the full build:
-# the `gpu-scanout` and `xwayland` Cargo features plus Xwayland on `PATH`),
-# `scootctl`, `scootbg`, `scootbar` and `scootbar-demo` -- built, checked
-# (`--version` each, so the artifact runs) and pushed on both
-# architectures. The in-between variants `scoot-gpu` and `scoot-xwayland`
-# are deliberately NOT built here: without crane
-# (docs/backlog/packaging/nix-crane.md) each extra package derivation
-# recompiles the whole dependency graph, so each would buy one more full
-# Smithay compile per push per architecture. Reconsider once crane lands
-# -- that entry says so. All three stay covered the way they were before
-# any of this existed (local `nix build .#scoot-gpu`, and likewise).
+# unchanged as the default package), `scoot-gpu` and `scoot-xwayland` (the
+# in-between variants: the `gpu-scanout` and `xwayland` Cargo features),
+# `scoot-gpu-xwayland` (the full build: both features plus Xwayland on
+# `PATH`), `scootctl`, `scootbg`, `scootbar` and `scootbar-demo` -- built,
+# checked (`--version` each, so the artifact runs) and pushed on both
+# architectures. The in-between variants used to be deliberately left out:
+# without crane (docs/backlog/resolved/nix-crane-done.md) each extra package
+# derivation recompiled the whole dependency graph, so each bought one
+# more full Smithay compile per push per architecture. Under crane each
+# variant is one more compiled-dependencies derivation, rebuilt only when
+# `Cargo.lock` or a fork rev changes (rare by design: `docs/forks.md`)
+# and substituted from the cache on every other push -- so on a code-only
+# merge they cost one small first-party-crates-only compile each (measured
+# on 4 M2 cores: 81--96 s per compositor package against 110--132 s for a
+# full-graph rebuild, 4 recompiled crates against 129--136; the client, the
+# wallpaper and the bar recompile their own crates plus a ~10-crate
+# subgraph in 13--39 s). Five dep derivations in all, ~420 MiB each in the
+# store (~130 MB compressed), so a lock change pushes about 690 MB per
+# architecture; code-only merges push only the rebuilt packages.
+# All four stay covered the way they were before any of this existed too
+# (local `nix build .#scoot-gpu`, and likewise).
 #
 # FLAKEHUB (below, `publish` job): after both arch builds succeed on a push
 # to main, the flake itself is published to FlakeHub as a rolling release
@@ -120,7 +130,7 @@ concurrency:
 
 jobs:
   build:
-    name: nix build .#scoot .#scoot-gpu-xwayland .#scootctl .#scootbg .#scootbar (${{ matrix.system }})
+    name: nix build packages (${{ matrix.system }})
     strategy:
       matrix:
         include:
@@ -158,13 +168,17 @@ jobs:
         with:
           name: scoot-sh
 
-      - name: nix build .#scoot .#scoot-gpu-xwayland .#scootctl .#scootbg, and run the packaged binaries
+      - name: nix build the compositor variants, scootctl, scootbg, and run the packaged binaries
         run: |
           nix build .#scoot --out-link result-scoot --print-out-paths
+          nix build .#scoot-gpu --out-link result-scoot-gpu --print-out-paths
+          nix build .#scoot-xwayland --out-link result-scoot-xwayland --print-out-paths
           nix build .#scoot-gpu-xwayland --out-link result-scoot-gpu-xwayland --print-out-paths
           nix build .#scootctl --out-link result-scootctl --print-out-paths
           nix build .#scootbg --out-link result-scootbg --print-out-paths
           ./result-scoot/bin/scoot --version
+          ./result-scoot-gpu/bin/scoot --version
+          ./result-scoot-xwayland/bin/scoot --version
           ./result-scoot-gpu-xwayland/bin/scoot --version
           ./result-scootctl/bin/scootctl --version
           ./result-scootbg/bin/scootbg --version

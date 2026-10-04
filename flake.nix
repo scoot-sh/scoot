@@ -24,8 +24,20 @@
   # agree on every library and nothing is downloaded twice.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe";
 
+  # The Rust build library: each package below is a cheap `buildPackage`
+  # over a shared `buildDepsOnly` compiled-dependencies derivation, so a
+  # code-only change stops recompiling Smithay once per package
+  # (docs/backlog/resolved/nix-crane-done.md). Pinned by rev like nixpkgs
+  # above (this is crane v0.24.0); it takes no inputs of its own, so the
+  # lock gains exactly this one node. `devenv.yaml`/vm revs untouched.
+  inputs.crane.url = "github:ipetkov/crane/32daa78aa882b7a43c508d1d5a5ad18a7968d731";
+
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      crane,
+    }:
     let
       systems = [
         "aarch64-linux"
@@ -84,7 +96,7 @@
           # derivation's cache and force a full rebuild. Everything else
           # this flake reads at eval time (./Cargo.toml for `version`,
           # ./crates/{scoot,scootctl,scootbg,scootbar}/Cargo.toml for
-          # the descriptions, ./Cargo.lock for `cargoLock.lockFile`,
+          # the descriptions, ./Cargo.lock for crane's vendor step,
           # ./vm/compositor-deps.nix for buildInputs) resolves against
           # the flake tree, not `src`, so it stays out of the filter.
           # Verified to cover the build: no build.rs outside crates/, no
@@ -107,195 +119,341 @@
             ];
           };
 
-          cargoLock = {
-            lockFile = ./Cargo.lock;
+          # The Rust builds below are crane (`buildDepsOnly` for the
+          # compiled dependencies, `buildPackage` for each binary), not
+          # `buildRustPackage`: one dependency artifact, reused by every
+          # package build until the lock or a fork rev changes, instead of
+          # one whole-graph compile per package per change.
+          craneLib = crane.mkLib pkgs;
+
+          # Shared by every crane derivation below: the fileset source, the
+          # lockfile, and the hashes of the two git checkouts. `src`
+          # already excludes everything but the workspace (see its
+          # comment); `buildDepsOnly` derives dummy manifests from it, so a
+          # code-only edit leaves the dependency artifact's hash alone.
+          craneCommon = {
+            inherit src;
+            # Read from the flake tree, not from `src`: the vendor step
+            # needs the lock even when it only sees dummy sources.
+            cargoLock = ./Cargo.lock;
             # Two dependencies come from git, both scoot-sh forks pinned by
             # rev (docs/forks.md): Smithay (crates/scoot/Cargo.toml, upstream
             # `0ff00983` plus twenty-five commits) and wayland-backend (the root
             # Cargo.toml's `[patch.crates-io]`, the 0.3.17 release plus two
             # commits). A git source carries no crates.io checksum to vendor
-            # against, so each tree hash has to be recorded here. The
-            # wayland-backend entry covers `wayland-sys` too (one repository,
-            # one fetch) and includes the repository's `wayland-protocols`
-            # submodule. Bumping either rev changes its hash and fails the
-            # build loudly, printing the one it got -- it cannot drift out of
-            # sync quietly. Nothing else in Cargo.lock comes from git.
+            # against, so each checkout hash has to be recorded here, keyed
+            # by the source URL as it appears in Cargo.lock (crane's
+            # `outputHashes` format, unlike `buildRustPackage`'s
+            # name-version keys). The wayland-backend entry covers
+            # `wayland-sys` too (one repository, one fetch) and includes the
+            # repository's `wayland-protocols` submodule. Bumping either rev
+            # changes its hash and fails the build loudly, printing the one
+            # it got -- it cannot drift out of sync quietly. Nothing else
+            # in Cargo.lock comes from git.
             outputHashes = {
-              "smithay-0.7.0" = "sha256-tyghQjngPRYC2yLjtpF9v/xzUW6ktMJ2gqRWwcryl10=";
-              "wayland-backend-0.3.17" = "sha256-cANItBOi9o+Jb1+u86thcBgdb6u0u2becgJoMI/v4T8=";
+              "git+https://github.com/scoot-sh/smithay?rev=035d447cdf6067f8db58a2964937034a2b9e760b#035d447cdf6067f8db58a2964937034a2b9e760b" =
+                "sha256-tyghQjngPRYC2yLjtpF9v/xzUW6ktMJ2gqRWwcryl10=";
+              "git+https://github.com/scoot-sh/wayland-rs?rev=70f81e005179463fb4d46ac68045a7f21eb5aff2#70f81e005179463fb4d46ac68045a7f21eb5aff2" =
+                "sha256-cANItBOi9o+Jb1+u86thcBgdb6u0u2becgJoMI/v4T8=";
             };
+            strictDeps = true;
+            # No test run in any crane derivation here, deliberately, for
+            # two reasons. This workspace's release profile sets
+            # `panic = "abort"`, which cargo ignores for test targets (a
+            # test harness has to unwind), so `cargo test --release`
+            # rebuilds the whole dependency tree a second time -- and on
+            # Linux the tree it would rebuild includes Smithay. On top of
+            # that the compositor's tests bind a real wayland socket and so
+            # need a writable `$XDG_RUNTIME_DIR`, which the build sandbox
+            # has no reason to provide. `nix build` is the path to a
+            # binary; `cargo test` in `nix develop` is where the suite runs.
+            doCheck = false;
           };
 
-          scoot = pkgs.rustPlatform.buildRustPackage {
+          # The `-lEGL` link injection, shared by every derivation below that
+          # links it, so the flag string cannot drift between them. Cargo
+          # hashes `RUSTFLAGS` into every unit's fingerprint: a dependency
+          # artifact built without these flags can serve no package built
+          # with them (and vice versa) -- cargo finds no fingerprint for the
+          # differently-flagged units and recompiles the whole graph. So each
+          # artifact below carries exactly the flags of the package builds
+          # that consume it. (Measured on aarch64-linux: without this parity
+          # a code-only `scoot` rebuild recompiled all 129 units.)
+          eglRustflags = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux (
+            toString (
+              map (arg: "-C link-arg=" + arg) [
+                "-Wl,--push-state,--no-as-needed"
+                "-lEGL"
+                "-Wl,--pop-state"
+              ]
+            )
+          );
+
+          # The `-p`/feature selection, shared by each compositor dependency
+          # artifact and the package builds over it, for the same reason:
+          # cargo unifies features over the selected packages, so `-p scoot`
+          # and a workspace-wide selection resolve shared crates (serde and
+          # friends) to differently-featured, differently-hashed units, and
+          # the package build recompiles that subgraph. Reading byte-identical
+          # here on both sides is what makes the reuse real.
+          scootArgs =
+            features:
+            "--locked -p scoot"
+            + pkgs.lib.optionalString (features != [ ]) (
+              " --features " + pkgs.lib.concatStringsSep "," features
+            );
+
+          # The compiled dependencies, as their own store paths -- one per
+          # distinct (Cargo feature set, RUSTFLAGS) pair, five in all, and
+          # why not fewer: cargo unifies features across the resolve, so
+          # Smithay compiled with `backend_gbm` or `xwayland` is a different
+          # artifact than Smithay without, and sharing one would recompile
+          # Smithay inside each divergent package build. The same holds for
+          # the flags above, which is why the compositor's set is separate
+          # from the base set: `scoot` (and the three variants) link libEGL,
+          # while the client, the wallpaper and the bar link nothing beyond
+          # what std links. The base set is shared by `scootctl`, `scootbg`
+          # and `scootbar` alike: scootbar's feature flags gate only its own
+          # modules' code, and its one dependency-bearing flag (`icon-image`
+          # → `png`) names a crate the base set already compiles for scootbg,
+          # so every `.override` feature set reuses this same artifact --
+          # up to the small subgraph whose unified features differ between
+          # the workspace-wide selection here and a `-p` selection in the
+          # package build (measured: 9--12 crates, seconds, in the serde and
+          # wayland-client graphs; Smithay is recompiled in no package).
+          # On Darwin the base set below is scoped to the two crates that
+          # build there: the wallpaper and the bar refuse non-Linux
+          # (`compile_error!` in `scootbg-mem`), so a workspace-wide check
+          # would fail where today nothing compositor-shaped is ever
+          # compiled.
+          mkDeps =
+            {
+              pname,
+              scope,
+              withEglLink ? false,
+            }:
+            craneLib.buildDepsOnly (
+              craneCommon
+              // {
+                # `buildDepsOnly` appends its own `-deps` suffix, so `scoot`
+                # below lands as `scoot-deps-0.1.0`.
+                inherit pname version;
+                nativeBuildInputs = [ pkgs.pkg-config ];
+                # The -sys build scripts probe and link these, whatever `-p`
+                # scope the artifact is built for.
+                buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
+                  import ./vm/compositor-deps.nix pkgs
+                );
+                cargoExtraArgs = scope;
+                # Exactly the flags of the consuming package builds (see
+                # `eglRustflags` above): present here if and only if present
+                # there. Absent entirely when the consumers link nothing --
+                # an empty string would do the same work, but absence keeps
+                # `nix derivation show` honest about what the build sees.
+                env = pkgs.lib.optionalAttrs withEglLink { RUSTFLAGS = eglRustflags; };
+              }
+            );
+          # No `-p` scope on Linux: the whole workspace, so one artifact
+          # covers every default package (Darwin scopes to the crates that
+          # build there; see the comment above).
+          depsBase = mkDeps {
+            pname = "scoot-base";
+            scope = if pkgs.stdenv.hostPlatform.isDarwin then "--locked -p scoot -p scootctl" else "--locked";
+          };
+          # The compositor's own set: `-p scoot` (byte-identical to the
+          # package build's selection via `scootArgs`) with the link flags.
+          # A separate artifact from the base set above, not a scope tweak
+          # of it: flags and scope both enter the fingerprint, so sharing
+          # would recompile one side's graph inside every build.
+          depsScoot = mkDeps {
             pname = "scoot";
-            inherit version src cargoLock;
-
-            # Just this crate, not the whole workspace: `$out/bin` carries
-            # only `scoot` (the `scoot msg` alias is part of that binary,
-            # not a second one) -- the mirror of the `scootctl` package's
-            # flag below. Without this, `buildRustPackage` builds the
-            # whole workspace and ships a redundant `scootctl` (gh #172).
-            # Behavior-preserving for the shipped binary: the `scootctl`
-            # binary unit enables no features on any shared crate (it
-            # depends on bare `scoot-ipc` plus `serde_json`), so the
-            # `scoot` unit graph is identical either way.
-            cargoBuildFlags = [
-              "-p"
-              "scoot"
+            scope = scootArgs [ ];
+            withEglLink = true;
+          };
+          depsGpuScanout = mkDeps {
+            pname = "scoot-gpu";
+            scope = scootArgs [ "gpu-scanout" ];
+            withEglLink = true;
+          };
+          depsXwayland = mkDeps {
+            pname = "scoot-xwayland";
+            scope = scootArgs [ "xwayland" ];
+            withEglLink = true;
+          };
+          depsGpuXwayland = mkDeps {
+            pname = "scoot-gpu-xwayland";
+            scope = scootArgs [
+              "gpu-scanout"
+              "xwayland"
             ];
-
-            nativeBuildInputs = [ pkgs.pkg-config ];
-            # The same list the dev shell uses, Linux-only for the same reason:
-            # nothing outside the compositor links against them. The dev shell's
-            # LIBRARY_PATH hook below needs no counterpart here -- in a
-            # derivation the stdenv cc wrapper puts every buildInput on the link
-            # path through NIX_LDFLAGS, which is what those -sys crates' bare
-            # -lfoo resolves against. Checked by building, not by assuming.
-            buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
-              import ./vm/compositor-deps.nix pkgs
-            );
-
-            # Smithay reaches libEGL through `dlopen`, not a link-time
-            # `DT_NEEDED`, so the cc wrapper's RUNPATH logic (correct for
-            # `-lfoo` above) puts nothing in the RUNPATH for it -- and
-            # `--renderer gles` dies in Smithay's ffi with `Failed to load
-            # LibEGL` before device enumeration ever runs (gh #177). Forced
-            # the way nixpkgs' own niri package does it
-            # (`pkgs/by-name/ni/niri/package.nix`: "Force linking with
-            # libEGL ... so they can be discovered by `dlopen()`"):
-            # `--no-as-needed -lEGL` lands libEGL.so.1 in `DT_NEEDED`, which
-            # the loader resolves through the RUNPATH the cc wrapper builds
-            # from `buildInputs` -- so the `dlopen` then finds the
-            # already-loaded handle. No wrapper script and no
-            # `LD_LIBRARY_PATH` leaking into every spawned client;
-            # `readelf -d` shows the `NEEDED` entry, which is the audit. A
-            # `postFixup` `patchelf --add-rpath` would do the same job with
-            # a hand-computed store path; this reuses the wrapper's own
-            # path computation instead of duplicating it.
-            #
-            # Deliberately derivation-only, never an in-tree `RUSTFLAGS` or
-            # cargo config: CI's `ldd` gate asserts the plain `cargo build`
-            # links no libEGL, and that gate must keep passing. The closure
-            # always carries libglvnd, so this costs GPU-free operation
-            # nothing: libEGL *loads* everywhere, and what fails on a
-            # driverless box is device enumeration -- the designed startup
-            # error, reached through the compositor's own pre-flight probe.
-            #
-            # Mesa's vendor ICDs are NOT bundled here: they come from the
-            # host OS's OpenGL setup (on NixOS, `hardware.graphics`), the
-            # standard nixpkgs pattern -- bundling Mesa would risk shadowing
-            # the host's drivers (notably Asahi's) with wrong ones. So
-            # `--renderer gles` from this package needs an OS that provides
-            # EGL drivers; see docs/nix.md.
-            #
-            # Linux-only: these are GNU-ld flags and Apple's ld rejects
-            # them (`ld: unknown option: --push-state`), and there is no
-            # libEGL to link on Darwin anyway -- the compositor is cfg'd
-            # out there, so nothing reaches EGL. (Upstream niri, where this
-            # trick comes from, is Linux-only and never hits the question.)
-            env.RUSTFLAGS = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux (
-              toString (
-                map (arg: "-C link-arg=" + arg) [
-                  "-Wl,--push-state,--no-as-needed"
-                  "-lEGL"
-                  "-Wl,--pop-state"
-                ]
-              )
-            );
-
-            # The workspace's release profile sets `strip = true`, but nixpkgs'
-            # cargoBuildHook exports CARGO_PROFILE_RELEASE_STRIP=false to hand
-            # stripping to stdenv -- which by default takes debug info only and
-            # leaves the symbol table, so the binary would ship 1,224,312 bytes
-            # of `.symtab`/`.strtab` the profile asks it not to (4,843,776
-            # against 3,619,464, measured here). This puts the profile back.
-            # `cargo-auditable`'s non-allocated `.dep-v0` section survives
-            # `strip -s`, checked on the built binary, so the dependency
-            # manifest `nix build` embeds is not lost with it.
-            stripAllList = [ "bin" ];
-
-            # No test run here, deliberately, for two reasons. This
-            # workspace's release profile sets `panic = "abort"`, which cargo
-            # ignores for test targets (a test harness has to unwind), so
-            # `cargo test --release` rebuilds the whole dependency tree a
-            # second time -- and on Linux the tree it would rebuild includes
-            # Smithay. On top of that the compositor's tests bind a real
-            # wayland socket and so need a writable `$XDG_RUNTIME_DIR`, which
-            # the build sandbox has no reason to provide. `nix build` is the
-            # path to a binary; `cargo test` in `nix develop` is where the
-            # suite runs.
-            doCheck = false;
-
-            # `scoot-session`, the greeter-started systemd session launcher
-            # (`resources/scoot-session`): beside the binary it launches, so
-            # it finds `scoot` next to itself with no path baked in (and the
-            # `scoot-xwayland` wrapper's `PATH` append survives, since that
-            # is what sits next to it there). A direct store-path reference,
-            # not part of `src`'s fileset: the script changes without
-            # rebuilding the Rust tree, and the tree rebuilds without
-            # re-copying anything but this one file.
-            postInstall = ''
-              cp ${./resources/scoot-session} $out/bin/scoot-session
-              chmod +x $out/bin/scoot-session
-            '';
-
-            meta = {
-              # Linux builds the whole compositor, so the crate's own
-              # description is the honest one; on Darwin the compositor is
-              # cfg'd out and the package is just `scoot msg` (see the
-              # comment on `packages` above and README's Install section), so the
-              # metadata says that instead of advertising a compositor macOS
-              # never runs.
-              description =
-                if pkgs.stdenv.hostPlatform.isDarwin then
-                  "Remote-control client (`scoot msg`) for the scoot scrolling-tiling Wayland compositor"
-                else
-                  crateDescription;
-              homepage = "https://github.com/scoot-sh/scoot";
-              license = pkgs.lib.licenses.mit;
-              mainProgram = "scoot";
-              platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
-            };
+            withEglLink = true;
           };
 
-          scootctl = pkgs.rustPlatform.buildRustPackage {
-            pname = "scootctl";
-            inherit version src cargoLock;
-
-            # Just this crate, not the whole workspace: `$out/bin` carries
-            # only `scootctl`, and on Darwin nothing compositor-shaped (and
-            # no Smithay tree) is compiled at all.
-            cargoBuildFlags = [
-              "-p"
-              "scootctl"
-            ];
-
-            # Nothing to probe or link: the client is pure Rust
-            # (`scoot-ipc` plus `serde_json` plus std), so neither of the
-            # lists the compositor package above needs applies here -- which
-            # is also why this package builds anywhere with zero cfg gating.
-
-            # Same profile-put-back as the compositor package above (see its
-            # comment): the release profile asks for a full strip and the
-            # cargo hook hands stripping to stdenv.
-            stripAllList = [ "bin" ];
-
-            # No test run here, for the same reasons as above (the
-            # `panic = "abort"` double-build plus no `$XDG_RUNTIME_DIR` in
-            # the sandbox). `nix build` is the path to a binary; `cargo
-            # test` in `nix develop` is where the suite runs.
-            doCheck = false;
-
-            meta = {
-              # The crate's own description, no per-system conditional: this
-              # package is the client on every system.
-              description = scootctlDescription;
-              homepage = "https://github.com/scoot-sh/scoot";
-              license = pkgs.lib.licenses.mit;
-              mainProgram = "scootctl";
-              platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
-            };
+          # Arguments shared by every package build below: sources plus the
+          # lock the vendor step needs, with tests off for the reasons
+          # above. Each package adds its own `cargoArtifacts` (the
+          # dependency set matching its features), its `-p` selection, and
+          # the inputs its own link step needs.
+          cranePackage = craneCommon // {
+            inherit version;
           };
+
+          scoot = craneLib.buildPackage (
+            cranePackage
+            // {
+              pname = "scoot";
+              cargoArtifacts = depsScoot;
+
+              # Just this crate, not the whole workspace: `$out/bin` carries
+              # only `scoot` (the `scoot msg` alias is part of that binary,
+              # not a second one) -- the mirror of the `scootctl` package's
+              # flag below. Without this, the build compiles the whole
+              # workspace and ships a redundant `scootctl` (gh #172).
+              # Behavior-preserving for the shipped binary: the `scootctl`
+              # binary unit enables no features on any shared crate (it
+              # depends on bare `scoot-ipc` plus `serde_json`), so the
+              # `scoot` unit graph is identical either way.
+              # Byte-identical to the `depsScoot` selection via `scootArgs`
+              # (see above): any drift recompiles the dependency graph.
+              cargoExtraArgs = scootArgs [ ];
+
+              # Read by CI (`ci.yml` asserts the feature pairs) and kept as
+              # plain data: crane consumes the features through
+              # `cargoExtraArgs` above, while `buildRustPackage` took them as
+              # `cargoBuildFeatures` -- the name stays so existing readers
+              # keep working.
+              passthru.cargoBuildFeatures = [ ];
+
+              nativeBuildInputs = [ pkgs.pkg-config ];
+              # The same list the dev shell uses, Linux-only for the same reason:
+              # nothing outside the compositor links against them. The dev shell's
+              # LIBRARY_PATH hook below needs no counterpart here -- in a
+              # derivation the stdenv cc wrapper puts every buildInput on the link
+              # path through NIX_LDFLAGS, which is what those -sys crates' bare
+              # -lfoo resolves against. Checked by building, not by assuming.
+              buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
+                import ./vm/compositor-deps.nix pkgs
+              );
+
+              # Smithay reaches libEGL through `dlopen`, not a link-time
+              # `DT_NEEDED`, so the cc wrapper's RUNPATH logic (correct for
+              # `-lfoo` above) puts nothing in the RUNPATH for it -- and
+              # `--renderer gles` dies in Smithay's ffi with `Failed to load
+              # LibEGL` before device enumeration ever runs (gh #177). Forced
+              # the way nixpkgs' own niri package does it
+              # (`pkgs/by-name/ni/niri/package.nix`: "Force linking with
+              # libEGL ... so they can be discovered by `dlopen()`"):
+              # `--no-as-needed -lEGL` lands libEGL.so.1 in `DT_NEEDED`, which
+              # the loader resolves through the RUNPATH the cc wrapper builds
+              # from `buildInputs` -- so the `dlopen` then finds the
+              # already-loaded handle. No wrapper script and no
+              # `LD_LIBRARY_PATH` leaking into every spawned client;
+              # `readelf -d` shows the `NEEDED` entry, which is the audit. A
+              # `postFixup` `patchelf --add-rpath` would do the same job with
+              # a hand-computed store path; this reuses the wrapper's own
+              # path computation instead of duplicating it.
+              #
+              # Deliberately derivation-only, never an in-tree `RUSTFLAGS` or
+              # cargo config: CI's `ldd` gate asserts the plain `cargo build`
+              # links no libEGL, and that gate must keep passing. The closure
+              # always carries libglvnd, so this costs GPU-free operation
+              # nothing: libEGL *loads* everywhere, and what fails on a
+              # driverless box is device enumeration -- the designed startup
+              # error, reached through the compositor's own pre-flight probe.
+              #
+              # Mesa's vendor ICDs are NOT bundled here: they come from the
+              # host OS's OpenGL setup (on NixOS, `hardware.graphics`), the
+              # standard nixpkgs pattern -- bundling Mesa would risk shadowing
+              # the host's drivers (notably Asahi's) with wrong ones. So
+              # `--renderer gles` from this package needs an OS that provides
+              # EGL drivers; see docs/nix.md.
+              #
+              # Linux-only: these are GNU-ld flags and Apple's ld rejects
+              # them (`ld: unknown option: --push-state`), and there is no
+              # libEGL to link on Darwin anyway -- the compositor is cfg'd
+              # out there, so nothing reaches EGL. (Upstream niri, where this
+              # trick comes from, is Linux-only and never hits the question.)
+              # Shared with every `buildDepsOnly` artifact that serves a
+              # package built with these flags (see `eglRustflags` above).
+              env.RUSTFLAGS = eglRustflags;
+
+              # The workspace's release profile sets `strip = true`, and unlike
+              # nixpkgs' cargo hook (which used to export
+              # `CARGO_PROFILE_RELEASE_STRIP=false` and hand stripping to
+              # stdenv, keeping the symbol table: 4,843,776 against 3,619,464
+              # measured here) crane leaves the profile alone, so cargo
+              # strips fully itself. `stripAllList` stays as the backstop for
+              # whatever stdenv's fixup still finds.
+              # (No `cargo-auditable` `.dep-v0` section anymore: that came
+              # from the old hook's wrapper, not from the profile. Nothing
+              # reads it -- no check asserts it -- so it is simply gone.)
+              stripAllList = [ "bin" ];
+
+              # `scoot-session`, the greeter-started systemd session launcher
+              # (`resources/scoot-session`): beside the binary it launches, so
+              # it finds `scoot` next to itself with no path baked in (and the
+              # `scoot-xwayland` wrapper's `PATH` append survives, since that
+              # is what sits next to it there). A direct store-path reference,
+              # not part of `src`'s fileset: the script changes without
+              # rebuilding the Rust tree, and the tree rebuilds without
+              # re-copying anything but this one file.
+              postInstall = ''
+                cp ${./resources/scoot-session} $out/bin/scoot-session
+                chmod +x $out/bin/scoot-session
+              '';
+
+              meta = {
+                # Linux builds the whole compositor, so the crate's own
+                # description is the honest one; on Darwin the compositor is
+                # cfg'd out and the package is just `scoot msg` (see the
+                # comment on `packages` above and README's Install section), so the
+                # metadata says that instead of advertising a compositor macOS
+                # never runs.
+                description =
+                  if pkgs.stdenv.hostPlatform.isDarwin then
+                    "Remote-control client (`scoot msg`) for the scoot scrolling-tiling Wayland compositor"
+                  else
+                    crateDescription;
+                homepage = "https://github.com/scoot-sh/scoot";
+                license = pkgs.lib.licenses.mit;
+                mainProgram = "scoot";
+                platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
+              };
+            }
+          );
+
+          scootctl = craneLib.buildPackage (
+            cranePackage
+            // {
+              pname = "scootctl";
+              cargoArtifacts = depsBase;
+
+              # Just this crate, not the whole workspace: `$out/bin` carries
+              # only `scootctl`, and on Darwin nothing compositor-shaped (and
+              # no Smithay tree) is compiled at all.
+              cargoExtraArgs = "--locked -p scootctl";
+
+              passthru.cargoBuildFeatures = [ ];
+
+              # Nothing to probe or link: the client is pure Rust
+              # (`scoot-ipc` plus `serde_json` plus std), so neither of the
+              # lists the compositor package above needs applies here -- which
+              # is also why this package builds anywhere with zero cfg gating.
+
+              # Same strip backstop as the compositor package above.
+              stripAllList = [ "bin" ];
+
+              meta = {
+                # The crate's own description, no per-system conditional: this
+                # package is the client on every system.
+                description = scootctlDescription;
+                homepage = "https://github.com/scoot-sh/scoot";
+                license = pkgs.lib.licenses.mit;
+                mainProgram = "scootctl";
+                platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
+              };
+            }
+          );
 
           # The wallpaper daemon, its own package like `scootctl` (the
           # `scoot` package stays `scoot` only): `-p scootbg` puts just the
@@ -304,34 +462,119 @@
           # what std links (docs/scootbg/backlog/resolved/dependencies-done.md
           # §9). Linux only: it is a Wayland client that never runs on a
           # Mac, and does not build there, so no Darwin package is offered.
-          scootbg = pkgs.rustPlatform.buildRustPackage {
-            pname = "scootbg";
-            inherit version src cargoLock;
-            cargoBuildFlags = [
-              "-p"
-              "scootbg"
-            ];
-            # Same profile-put-back and no-test reasons as the packages
-            # above.
-            stripAllList = [ "bin" ];
-            doCheck = false;
-            meta = {
-              description = scootbgDescription;
-              homepage = "https://github.com/scoot-sh/scoot";
-              license = pkgs.lib.licenses.mit;
-              mainProgram = "scootbg";
-              platforms = pkgs.lib.platforms.linux;
-            };
-          };
+          scootbg = craneLib.buildPackage (
+            cranePackage
+            // {
+              pname = "scootbg";
+              cargoArtifacts = depsBase;
+              cargoExtraArgs = "--locked -p scootbg";
+              passthru.cargoBuildFeatures = [ ];
+              # Same strip backstop and no other inputs as the package above.
+              stripAllList = [ "bin" ];
+              meta = {
+                description = scootbgDescription;
+                homepage = "https://github.com/scoot-sh/scoot";
+                license = pkgs.lib.licenses.mit;
+                mainProgram = "scootbg";
+                platforms = pkgs.lib.platforms.linux;
+              };
+            }
+          );
 
           # The status bar, the same shape as scootbg (Linux only, one
           # binary, nothing linked beyond what std links, no font in its
           # closure), in its own file so that its Cargo features are
           # `callPackage` arguments and a build with other modules is an
-          # `.override` (see nix/scootbar.nix).
+          # `.override` (see nix/scootbar.nix). Shares the base dependency
+          # artifact (see `mkDeps` above for why every feature set can).
           scootbar = pkgs.callPackage ./nix/scootbar.nix {
-            inherit version src cargoLock;
+            inherit version craneLib;
+            inherit (craneCommon)
+              src
+              cargoLock
+              outputHashes
+              strictDeps
+              doCheck
+              ;
+            cargoArtifacts = depsBase;
             description = scootbarDescription;
+          };
+
+          # One compositor build per Cargo feature set, each over the
+          # dependency artifact compiled with that same set (see `mkDeps`).
+          # `overrideAttrs` only reaches a finished derivation's own attrs,
+          # never the feature selection the dependency artifact was built
+          # with, so these are separate `buildPackage` calls through one
+          # helper rather than overrides of `scoot` -- same binaries, names
+          # and metadata either way. `cargoBuildFeatures` is kept as plain
+          # data alongside: crane consumes the features through
+          # `cargoExtraArgs`, while `buildRustPackage` took them as
+          # `cargoBuildFeatures` -- the name stays so existing readers
+          # (`ci.yml`, `nix/tests.nix`) keep working.
+          mkScootVariant =
+            {
+              pname,
+              features,
+              cargoArtifacts,
+              descriptionSuffix,
+            }:
+            craneLib.buildPackage (
+              cranePackage
+              // {
+                inherit pname cargoArtifacts;
+                # Byte-identical to the serving artifact's selection (each
+                # variant names its own `deps*` artifact built with the same
+                # features through `scootArgs`); see above for why drift
+                # costs the whole dependency graph.
+                cargoExtraArgs = scootArgs features;
+                passthru.cargoBuildFeatures = features;
+                nativeBuildInputs = [ pkgs.pkg-config ];
+                buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
+                  import ./vm/compositor-deps.nix pkgs
+                );
+                env.RUSTFLAGS = eglRustflags;
+                stripAllList = [ "bin" ];
+                postInstall = ''
+                  cp ${./resources/scoot-session} $out/bin/scoot-session
+                  chmod +x $out/bin/scoot-session
+                '';
+                meta = {
+                  # Same per-system honesty as the base package above:
+                  # compositor on Linux, `scoot msg` client on Darwin.
+                  description =
+                    (
+                      if pkgs.stdenv.hostPlatform.isDarwin then
+                        "Remote-control client (`scoot msg`) for the scoot scrolling-tiling Wayland compositor"
+                      else
+                        crateDescription
+                    )
+                    + descriptionSuffix;
+                  homepage = "https://github.com/scoot-sh/scoot";
+                  license = pkgs.lib.licenses.mit;
+                  mainProgram = "scoot";
+                  platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
+                };
+              }
+            );
+
+          # The opt-in specs: the base build and the GPU scanout tier, each
+          # naming the dependency artifact compiled with its own features.
+          # The XWayland packages below derive theirs from these.
+          scootSpec = {
+            pname = "scoot";
+            features = [ ];
+            cargoArtifacts = depsScoot;
+            descriptionSuffix = "";
+          };
+          gpuSpec = {
+            pname = "scoot-gpu";
+            features = [ "gpu-scanout" ];
+            cargoArtifacts = depsGpuScanout;
+            descriptionSuffix =
+              if pkgs.stdenv.hostPlatform.isDarwin then
+                " (gpu-scanout build feature: Linux-only, same client binary here)"
+              else
+                " (gpu-scanout build feature: --tty --renderer gles scans out from the GPU)";
           };
         in
         {
@@ -352,47 +595,22 @@
           # the build above because `backend_gbm` is a link-time libgbm
           # dependency and GPU-free operation is a fixed decision (see
           # `crates/scoot/Cargo.toml`), opted into here, where linking
-          # libgbm is the point. `overrideAttrs` keeps everything the base
-          # package sets (`cargoBuildFlags`, `buildInputs` -- libgbm is
-          # already in `vm/compositor-deps.nix` -- the EGL link forcing
-          # above, stripping, `doCheck`); the binary stays named `scoot`
-          # (`mainProgram` unchanged), so this is a second build of the
-          # same binary with the scanout tier compiled in. `ldd` on the two
-          # is the audit: `scoot-gpu` links libgbm, `scoot` does not.
+          # libgbm is the point. A separate `buildPackage` through
+          # `mkScootVariant` over the `gpu-scanout` dependency artifact (not
+          # an `overrideAttrs` of `scoot`: the artifact is chosen when the
+          # derivation is called, and an override cannot reach back into
+          # it); the binary stays named `scoot` (`mainProgram` unchanged),
+          # so this is a second build of the same binary with the scanout
+          # tier compiled in. `ldd` on the two is the audit: `scoot-gpu`
+          # links libgbm, `scoot` does not.
           #
-          # `cargoBuildFeatures`, not `buildFeatures`: the issue proposed
-          # the latter, but the build proved it a no-op -- `buildFeatures`
-          # is an argument to `buildRustPackage` (consumed when the base
-          # derivation is called, turned into `cargoBuildFeatures`), while
-          # `overrideAttrs` can only change the resulting derivation's
-          # own attrs. Overriding `buildFeatures` built an unfeatured
-          # binary (proven by `ldd`: no libgbm); `cargoBuildFeatures` is
-          # the attr the cargo hook actually reads
-          # (`build-rust-package/default.nix`), and the rebuild log shows
-          # `--features=gpu-scanout` in the hook flags.
           # Darwin note: `gpu-scanout` enables Smithay's `backend_gbm`,
           # which only compiles on Linux -- but Smithay itself is a
           # Linux-only dependency of this crate, so on Darwin the feature
           # resolves without building anything new and the package stays
           # the same client-shaped binary. Proven by building, not by
           # assuming; if that ever stops holding, gate this to Linux.
-          scoot-gpu = scoot.overrideAttrs (old: {
-            pname = "scoot-gpu";
-            cargoBuildFeatures = [ "gpu-scanout" ];
-            meta = old.meta // {
-              # The base description already says the honest per-system
-              # thing (compositor on Linux, `scoot msg` client on Darwin);
-              # the suffix names the one difference, per system too.
-              description =
-                old.meta.description
-                + (
-                  if pkgs.stdenv.hostPlatform.isDarwin then
-                    " (gpu-scanout build feature: Linux-only, same client binary here)"
-                  else
-                    " (gpu-scanout build feature: --tty --renderer gles scans out from the GPU)"
-                );
-            };
-          });
+          scoot-gpu = mkScootVariant gpuSpec;
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
           let
@@ -419,28 +637,36 @@
             # `.scoot-wrapped` is the same audit as the unwrapped builds:
             # the feature links nothing new (no libgbm).
             #
-            # `cargoBuildFeatures` appended, so the gpu-scanout variant keeps
-            # its own (see `scoot-gpu` above for why it is this attr). Linux
+            # Each variant is its spec's build with `xwayland` added --
+            # features and the dependency artifact compiled with them both
+            # move together (see `mkScootVariant`), so the gpu-scanout
+            # variant keeps its own -- with the wrapper on top.
+            # `overrideAttrs` only adds the wrapper: it reaches the finished
+            # derivation's own attrs, which is all wrapping needs. Linux
             # only: there is no X server, or compositor, on Darwin.
             withXwayland =
-              base:
-              base.overrideAttrs (old: {
-                pname = "${old.pname}-xwayland";
-                cargoBuildFeatures = (old.cargoBuildFeatures or [ ]) ++ [ "xwayland" ];
-                nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.makeBinaryWrapper ];
-                postFixup = (old.postFixup or "") + ''
-                  wrapProgram $out/bin/scoot \
-                    --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.xwayland ]}
-                '';
-                meta = old.meta // {
-                  description =
-                    old.meta.description + " (xwayland build feature: --xwayland runs X11 apps; Xwayland on PATH)";
-                };
-              });
+              spec: xwaylandDeps:
+              (mkScootVariant (
+                spec
+                // {
+                  pname = "${spec.pname}-xwayland";
+                  features = spec.features ++ [ "xwayland" ];
+                  cargoArtifacts = xwaylandDeps;
+                  descriptionSuffix =
+                    spec.descriptionSuffix + " (xwayland build feature: --xwayland runs X11 apps; Xwayland on PATH)";
+                }
+              )).overrideAttrs
+                (old: {
+                  nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.makeBinaryWrapper ];
+                  postFixup = (old.postFixup or "") + ''
+                    wrapProgram $out/bin/scoot \
+                      --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.xwayland ]}
+                  '';
+                });
           in
           {
-            scoot-xwayland = withXwayland scoot;
-            scoot-gpu-xwayland = withXwayland self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-gpu;
+            scoot-xwayland = withXwayland scootSpec depsXwayland;
+            scoot-gpu-xwayland = withXwayland gpuSpec depsGpuXwayland;
           }
         )
       );

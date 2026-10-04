@@ -65,21 +65,43 @@ Every merge to `main` builds and pushes the same set for `x86_64-linux`
 and `aarch64-linux` (`.github/workflows/nix-build.yml`) and pushes them
 to the public Cachix cache **`scoot-sh`**
 (`https://scoot-sh.cachix.org`): `scoot` (the
-GPU-free default), `scoot-gpu-xwayland` (the full build: `gpu-scanout` and
-`xwayland` features plus Xwayland on `PATH`), `scootctl`, `scootbg`,
-`scootbar` and `scootbar-demo`. Without the cache, installing from the
-flake compiles Smithay from scratch (about 5 minutes on 4 cores). Only
+GPU-free default), `scoot-gpu` and `scoot-xwayland` (the in-between
+variants: the `gpu-scanout` and `xwayland` build features),
+`scoot-gpu-xwayland` (the full build: both features plus Xwayland on
+`PATH`), `scootctl`, `scootbg`, `scootbar` and `scootbar-demo`. Without
+the cache, installing from the flake downloads the compiled-dependencies
+artifacts (Smithay and the forks included, about one Smithay compile the
+first time, then cached) and compiles scoot's own crates on top (the
+compositor packages recompile 4 first-party crates, about a minute or two
+on 4 cores, most of it the final link; the smaller packages recompile
+their own crates plus a ~10-crate subgraph, in under a minute). Only
 merges to `main` push: manual workflow runs build without publishing --
 their Cachix step carries no auth token at all (only the push-to-`main`
 step receives `CACHIX_AUTH_TOKEN`), so a manual run cannot publish even
 if its build were tampered with -- and pull-request code never reaches a
 cache users trust.
 
-Anything else builds locally from source: a `scootbar.override` feature
-set, or the in-between compositor variants `scoot-gpu` and
-`scoot-xwayland` (left out of CI because each would cost another full
-Smithay compile per push per architecture until
-[crane](backlog/packaging/nix-crane.md) lands).
+The builds are split crane-style (`flake.nix`): one
+compiled-dependencies derivation per (Cargo feature set, link-flags) pair
+(five in all: the base set, the compositor's own set, plus one per
+compositor feature combination), which the cache keeps and every package
+build reuses until `Cargo.lock` or a fork rev changes. So a code-only
+merge recompiles no dependency for the four compositor packages (each
+rebuilds 4 first-party crates: measured 81--96 s on 4 M2 cores against
+110--132 s for the same packages' 129--136-crate full-graph rebuilds
+before), and only a small scope-divergent subgraph for the client, the
+wallpaper and the bar (9--12 crates, 13--39 s; Smithay itself is never
+recompiled). The in-between variants cost one such small compile each --
+which is why they are in the cached set (before crane, each would have
+bought another full Smithay compile per push per architecture). Each
+artifact is ~420 MiB in the store (~130 MB compressed over the wire), so
+a lock or fork change pushes about 690 MB per architecture; code-only
+merges push only the rebuilt packages.
+
+Anything else builds locally from source but over the same cached
+dependencies: a `scootbar.override` feature set builds over the same base
+artifact, recompiling the bar's own crates (a no-modules build is
+seconds; the workflow builds one as a check).
 
 The flake declares the cache in its own `nixConfig` (`flake.nix`), but a
 flake's `nixConfig` is not silently trusted: Nix asks whether to accept it

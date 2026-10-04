@@ -410,7 +410,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [A Stylix target for the compositor](./resolved/scoot-stylix-target-done.md) — medium (M6): window borders, background, cursor and wallpaper from the scheme, the way `programs.scootbar` already themes the bar — RESOLVED 2026-10-03 (PR #407)
 - [Nix: a wallpaper color beside Stylix's image is refused, and only the log says so](packaging/stylix-wallpaper-color-trap.md) (low): from the #407 review
 - [Publish: binaries on Cachix, the flake on FlakeHub](resolved/nix-publishing-done.md) (medium) — RESOLVED 2026-10-04 in #410
-- [Nix: crane, so compiled dependencies are cached](./packaging/nix-crane.md) — medium: ready now that Cachix receives pushes
+- [Nix: crane, so compiled dependencies are cached](./resolved/nix-crane-done.md) — medium: was ready once Cachix received pushes — RESOLVED 2026-10-04 in #420
 - [A user-facing docs site, with internal notes moved out of docs/](packaging/docs-site.md) (medium): an outline for the maintainer first
 - [A systemd session for scoot](resolved/scoot-systemd-session-done.md) (medium) — RESOLVED 2026-10-04 in #416: greeter-started sessions get `graphical-session.target`, the activation environment and a clean shutdown
 
