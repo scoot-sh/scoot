@@ -553,3 +553,71 @@ fn levels_read_like_the_ticket() {
     assert_eq!(level.raw, 107);
     assert_eq!(level.max, 509);
 }
+
+#[test]
+fn a_four_glyph_brightness_icon_picks_the_level() {
+    use super::BrightnessIcon;
+    // Quartiles, dim to bright: 24 is still level 0, 25 rises to 1,
+    // and so on to 75 for level 3. A max of 100 keeps raw and percent
+    // the same, so the boundaries are exact.
+    let settings = Settings {
+        icon: Some(BrightnessIcon::Levels(['0', '1', '2', '3'])),
+        ..Settings::default()
+    };
+    for (raw, text, want) in [
+        ("0", "0%", '0'),
+        ("24", "24%", '0'),
+        ("25", "25%", '1'),
+        ("49", "49%", '1'),
+        ("50", "50%", '2'),
+        ("74", "74%", '2'),
+        ("75", "75%", '3'),
+        ("100", "100%", '3'),
+    ] {
+        let device = ("panel", Fixture { raw: Some(raw) }, 100);
+        let (_root, _peer, harness) = started_with(&settings, &[device]);
+        let view = harness.view();
+        assert_eq!(view.text(), text, "at raw {raw} of 100");
+        assert_eq!(view.icon(), Some(want), "at raw {raw} of 100");
+    }
+}
+
+#[test]
+fn a_single_brightness_glyph_shows_at_every_level() {
+    use super::BrightnessIcon;
+    let settings = Settings {
+        icon: Some(BrightnessIcon::One('B')),
+        ..Settings::default()
+    };
+    for raw in ["0", "49", "100"] {
+        let device = ("panel", Fixture { raw: Some(raw) }, 100);
+        let (_root, _peer, harness) = started_with(&settings, &[device]);
+        let view = harness.view();
+        assert_eq!(view.icon(), Some('B'), "at raw {raw} of 100");
+    }
+}
+
+#[test]
+fn icon_only_draws_the_icon_with_the_text_in_the_tooltip() {
+    use super::BrightnessIcon;
+    let settings = Settings {
+        icon: Some(BrightnessIcon::Levels(['0', '1', '2', '3'])),
+        show_text: false,
+        ..Settings::default()
+    };
+    let device = ("apple-panel-bl", Fixture { raw: Some("49") }, 100);
+    let (_root, _peer, harness) = started_with(&settings, &[device]);
+    let view = harness.view();
+    assert_eq!(view.text(), "");
+    assert_eq!(view.icon(), Some('1'));
+    // The tooltip already names the device and the level.
+    assert_eq!(view.tooltip(), "apple-panel-bl: 49%");
+}
+
+#[test]
+fn without_an_icon_the_level_shows_text_alone() {
+    let (_root, _peer, harness) = started_with(&Settings::default(), &[panel("251")]);
+    let view = harness.view();
+    assert_eq!(view.text(), "49%");
+    assert!(view.icon().is_none() && view.art().is_none());
+}

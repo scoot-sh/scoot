@@ -1,8 +1,9 @@
 # Icons and fonts: how they work, and what they cost
 
 The reference for the config keys is [cli.md](cli.md#icons); this is the
-mechanism and the measurements behind it, for the button, volume, network and
-battery modules that will reuse it, and for whoever asks "why not X".
+mechanism and the measurements behind it, for the button, volume,
+microphone, network, battery, brightness, bluetooth, media and
+window-title modules that reuse it, and for whoever asks "why not X".
 
 An icon is one of three things, chosen by which config key a module's section
 sets (at most one):
@@ -13,12 +14,13 @@ sets (at most one):
 | `icon-path = "M12 2 ..."` | SVG path data, filled by the bar's own rasterizer, tinted from the theme | +36.9 KB of binary | always |
 | `icon-image = "/abs/icon.png"` | A PNG, decoded once, scaled at the output's real scale | +115 KB of binary | `--features icon-image` |
 
-The clock is the only module with an icon so far. A module names an icon, never
+The clock was the first module with an icon. A module names an icon, never
 pixels: it holds an `Icon` (`src/icon/mod.rs`) from its settings and shows it
 with `View::show_icon`; `config/icon.rs` turns the three keys into one, and the
 render path measures, lays out and draws it. **The per-module `icon` keys arrive
-with the modules that need them** (button, volume, network, battery, in their
-own tickets): each takes the same three keys through `config::icon`, and none
+with the modules that need them** (button, volume, microphone, network,
+battery, brightness, bluetooth, media, window-title, in their own tickets):
+each takes the same three keys through `config::icon`, and none
 is invented ahead of its module.
 
 ## Path icons

@@ -559,6 +559,7 @@ fn the_menu_needs_a_command_and_devices() {
     );
     let (mut harness, mut fake) = up_with(&Settings {
         menu_command: ["true".to_owned()].into(),
+        ..Settings::default()
     });
     empty_world(&mut fake);
     assert!(!settle(&mut harness, &mut fake));
@@ -568,6 +569,7 @@ fn the_menu_needs_a_command_and_devices() {
     );
     let (mut harness, mut fake) = up_with(&Settings {
         menu_command: ["true".to_owned()].into(),
+        ..Settings::default()
     });
     fake.managed = build::managed(&|body| {
         build::adapter_object(body, HCI0, true);
@@ -583,6 +585,7 @@ fn the_menu_needs_a_command_and_devices() {
 fn the_menu_lists_the_devices() {
     let (mut harness, mut fake) = up_with(&Settings {
         menu_command: ["true".to_owned()].into(),
+        ..Settings::default()
     });
     fake.managed = build::managed(&|body| {
         build::adapter_object(body, HCI0, true);
@@ -737,4 +740,83 @@ fn an_unknown_drop_releases_every_in_flight_read() {
     assert!(live.stale_managed);
     assert!(live.adapters[0].asked.is_none());
     assert!(live.adapters[0].stale);
+}
+
+#[test]
+fn icons_follow_the_state_with_a_static_fallback() {
+    use crate::icon::Icon;
+    let settings = Settings {
+        icon: Some(Icon::Glyph('S')),
+        icon_off: Some(Icon::Glyph('0')),
+        icon_on: Some(Icon::Glyph('1')),
+        // No per-state connected glyph: the static one shows there.
+        ..Settings::default()
+    };
+    let (mut harness, mut fake) = up_with(&settings);
+    fake.managed = build::managed(&|body| {
+        build::adapter_object(body, HCI0, false);
+    });
+    assert!(settle_for(&mut harness, &mut fake, 150));
+    let view = harness.view();
+    assert_eq!(view.text(), "off");
+    assert_eq!(view.icon(), Some('0'));
+    // Power on with nothing connected: its own glyph.
+    let (mut harness, mut fake) = up_with(&settings);
+    fake.managed = build::managed(&|body| {
+        build::adapter_object(body, HCI0, true);
+        build::device_object(body, DEV, false, Some("Headset"), Some("Headset"), None);
+    });
+    assert!(settle_for(&mut harness, &mut fake, 150));
+    let view = harness.view();
+    assert_eq!(view.text(), "on");
+    assert_eq!(view.icon(), Some('1'));
+    // Connected with no per-state glyph: the static one again.
+    let (mut harness, mut fake) = up_with(&settings);
+    fake.managed = build::small_world();
+    assert!(settle_for(&mut harness, &mut fake, 150));
+    let view = harness.view();
+    assert_eq!(view.text(), "Headset 72%");
+    assert_eq!(view.icon(), Some('S'));
+}
+
+#[test]
+fn icon_only_draws_the_icon_with_the_text_in_the_tooltip() {
+    use crate::icon::Icon;
+    let settings = Settings {
+        icon_off: Some(Icon::Glyph('0')),
+        icon_on: Some(Icon::Glyph('1')),
+        icon_connected: Some(Icon::Glyph('C')),
+        show_text: false,
+        ..Settings::default()
+    };
+    let (mut harness, mut fake) = up_with(&settings);
+    fake.managed = build::managed(&|body| {
+        build::adapter_object(body, HCI0, false);
+    });
+    assert!(settle_for(&mut harness, &mut fake, 150));
+    let view = harness.view();
+    assert_eq!(view.text(), "");
+    assert_eq!(view.icon(), Some('0'));
+    assert_eq!(view.tooltip(), "Bluetooth off");
+    let (mut harness, mut fake) = up_with(&settings);
+    fake.managed = build::small_world();
+    assert!(settle_for(&mut harness, &mut fake, 150));
+    let view = harness.view();
+    assert_eq!(view.text(), "");
+    assert_eq!(view.icon(), Some('C'));
+    // The tooltip lists the devices, so the hidden name is moved into
+    // it.
+    assert!(view.tooltip().contains("Headset"), "{}", view.tooltip());
+}
+
+#[test]
+fn without_icons_the_states_show_text_alone() {
+    let (mut harness, mut fake) = up();
+    fake.managed = build::managed(&|body| {
+        build::adapter_object(body, HCI0, false);
+    });
+    assert!(settle_for(&mut harness, &mut fake, 150));
+    let view = harness.view();
+    assert_eq!(view.text(), "off");
+    assert!(view.icon().is_none() && view.art().is_none());
 }

@@ -56,6 +56,7 @@ use super::{
 use crate::action::{Action, ModuleAction, Trigger};
 use crate::dbus::conn;
 use crate::dbus::link::{Addr, Link};
+use crate::icon::Icon;
 
 mod session;
 mod timer;
@@ -110,11 +111,38 @@ const MIN_REFRESH_GAP: Duration = Duration::from_millis(50);
 const DRAW_GAP: Duration = Duration::from_millis(100);
 
 /// The module's options.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// The picker: spawned with the device list on stdin. Empty runs
     /// nothing, and the action is refused saying so.
     pub menu_command: Vec<String>,
+    /// A static icon, when the config sets the icon keys: shown in every
+    /// state for which no per-state icon is set.
+    pub icon: Option<Icon>,
+    /// One glyph per state, when the config sets the per-state keys:
+    /// every adapter off, one powered with nothing connected, and a
+    /// device connected. Each wins over the static icon for its own
+    /// state.
+    pub icon_off: Option<Icon>,
+    pub icon_on: Option<Icon>,
+    pub icon_connected: Option<Icon>,
+    /// Whether the text is drawn beside the icon. `false` draws only the
+    /// icon, with the text moved into the tooltip (which already names
+    /// the state: `Bluetooth off`, `Bluetooth on`, the device list).
+    pub show_text: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            menu_command: Vec::new(),
+            icon: None,
+            icon_off: None,
+            icon_on: None,
+            icon_connected: None,
+            show_text: true,
+        }
+    }
 }
 
 pub fn init(settings: &super::Settings) -> Init {
@@ -146,6 +174,11 @@ fn start_with(settings: &Settings, addr: Addr) -> Box<dyn Module> {
     Box::new(Bluetooth {
         link: Link::start_on("bluetooth", "system bus", addr, session::start),
         menu_command: settings.menu_command.clone(),
+        icon: settings.icon.clone(),
+        icon_off: settings.icon_off.clone(),
+        icon_on: settings.icon_on.clone(),
+        icon_connected: settings.icon_connected.clone(),
+        show_text: settings.show_text,
         menu: None,
         drawn: None,
         held: None,
@@ -162,6 +195,11 @@ struct Menu {
 struct Bluetooth {
     link: Link<Live>,
     menu_command: Vec<String>,
+    icon: Option<Icon>,
+    icon_off: Option<Icon>,
+    icon_on: Option<Icon>,
+    icon_connected: Option<Icon>,
+    show_text: bool,
     menu: Option<Menu>,
     /// When a change was last reported to the bar.
     drawn: Option<Instant>,
@@ -434,7 +472,10 @@ impl Module for Bluetooth {
     /// one is powered with nothing connected, `off` while every adapter
     /// is off (adapter power dominates a device that still claims to be
     /// connected: its disconnect is on its way), and nothing while there
-    /// is no adapter at all, so the module hides.
+    /// is no adapter at all, so the module hides. With an icon the glyph
+    /// (or picture) stands before the text, or alone with `show-text =
+    /// false` (the tooltip already names the state, so the text is moved
+    /// into it).
     fn view(&self, _output: &OutputView<'_>, view: &mut View) {
         let Some(live) = self.link.live() else {
             return;
@@ -443,13 +484,20 @@ impl Module for Bluetooth {
             return;
         }
         if !self.any_powered() {
-            let _ = write!(view.text_mut(), "off");
+            if self.show_text {
+                let _ = write!(view.text_mut(), "off");
+            }
             view.set_class(Class::Muted);
             let _ = write!(view.tooltip_mut(), "Bluetooth off");
+            if let Some(icon) = self.icon_off.clone().or_else(|| self.icon.clone()) {
+                view.show_icon(&icon);
+            }
         } else if let Some((name, battery)) = self.shown_device() {
-            let _ = write!(view.text_mut(), "{name}");
-            if let Some(percentage) = battery {
-                let _ = write!(view.text_mut(), " {percentage}%");
+            if self.show_text {
+                let _ = write!(view.text_mut(), "{name}");
+                if let Some(percentage) = battery {
+                    let _ = write!(view.text_mut(), " {percentage}%");
+                }
             }
             let connected = self.connected();
             let _ = write!(view.tooltip_mut(), "Bluetooth: ");
@@ -462,9 +510,17 @@ impl Module for Bluetooth {
                     let _ = write!(view.tooltip_mut(), " {percentage}%");
                 }
             }
+            if let Some(icon) = self.icon_connected.clone().or_else(|| self.icon.clone()) {
+                view.show_icon(&icon);
+            }
         } else {
-            let _ = write!(view.text_mut(), "on");
+            if self.show_text {
+                let _ = write!(view.text_mut(), "on");
+            }
             let _ = write!(view.tooltip_mut(), "Bluetooth on");
+            if let Some(icon) = self.icon_on.clone().or_else(|| self.icon.clone()) {
+                view.show_icon(&icon);
+            }
         }
     }
 

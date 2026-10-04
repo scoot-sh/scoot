@@ -415,6 +415,8 @@ fn a_window_title_section_is_read_whole() {
     assert_eq!(modules.max_width, DEFAULT_MAX_WIDTH);
     assert!(modules.placeholder.is_empty());
     assert!(!modules.allow_close);
+    assert!(modules.icon.is_none());
+    assert!(modules.show_text);
     let modules = read(
         "left = [\"window-title\"]\n\
          [window-title]\n\
@@ -432,6 +434,52 @@ fn a_window_title_section_is_read_whole() {
     assert_eq!(modules.max_width, 200);
     assert_eq!(modules.placeholder, "empty");
     assert!(modules.allow_close);
+}
+
+#[test]
+#[cfg(feature = "window-title")]
+fn a_window_title_icon_is_read_whole() {
+    use crate::icon::Icon;
+    let modules = read(
+        "left = [\"window-title\"]\n\
+         [window-title]\n\
+         icon = \"W\"\n\
+         show-text = false\n",
+    )
+    .unwrap()
+    .modules
+    .window_title;
+    assert_eq!(modules.icon, Some(Icon::Glyph('W')));
+    assert!(!modules.show_text);
+    // A path icon, and two reads of it are equal configs (a reload
+    // compares).
+    let modules = read("[window-title]\nicon-path = \"M0 0h10v10z\"\n")
+        .unwrap()
+        .modules
+        .window_title;
+    assert!(matches!(modules.icon, Some(Icon::Art(_))));
+    let a = read("[window-title]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    let b = read("[window-title]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    assert_eq!(a, b);
+}
+
+#[test]
+#[cfg(feature = "window-title")]
+fn a_window_title_icon_is_refused_loudly() {
+    for (text, key) in [
+        ("[window-title]\nicon = \"too long\"\n", "window-title.icon"),
+        (
+            "[window-title]\nicon = \"W\"\nicon-path = \"M0 0h10v10z\"\n",
+            "window-title.icon-path",
+        ),
+        (
+            "[window-title]\nicon-viewbox = \"0 0 24 24\"\n",
+            "window-title.icon-viewbox",
+        ),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
 }
 
 #[test]
@@ -587,6 +635,92 @@ fn a_brightness_section_is_read_whole() {
     .brightness;
     assert_eq!(modules.device.as_deref(), Some("apple-panel-bl"));
     assert_eq!(modules.step, 10);
+}
+
+#[test]
+#[cfg(feature = "brightness")]
+fn a_brightness_icon_is_read_whole() {
+    use crate::modules::brightness::BrightnessIcon;
+    let modules = read("").unwrap().modules.brightness;
+    assert!(modules.icon.is_none());
+    assert!(modules.show_text);
+    let modules = read(
+        "left = [\"brightness\"]\n\
+         [brightness]\n\
+         icon = \"B\"\n\
+         show-text = false\n",
+    )
+    .unwrap()
+    .modules
+    .brightness;
+    assert_eq!(modules.icon, Some(BrightnessIcon::One('B')));
+    assert!(!modules.show_text);
+    // Four glyphs, dim to bright: the level picks one.
+    let modules = read("[brightness]\nicon = [\"0\", \"1\", \"2\", \"3\"]\n")
+        .unwrap()
+        .modules
+        .brightness;
+    assert_eq!(
+        modules.icon,
+        Some(BrightnessIcon::Levels(['0', '1', '2', '3']))
+    );
+    // And two reads of it are equal configs (a reload compares).
+    let a = read("[brightness]\nicon = [\"0\", \"1\", \"2\", \"3\"]\n").unwrap();
+    let b = read("[brightness]\nicon = [\"0\", \"1\", \"2\", \"3\"]\n").unwrap();
+    assert_eq!(a, b);
+    // A path icon, and two reads of it are equal configs too.
+    let modules = read("[brightness]\nicon-path = \"M0 0h10v10z\"\n")
+        .unwrap()
+        .modules
+        .brightness;
+    assert!(matches!(modules.icon, Some(BrightnessIcon::Art(_))));
+    let a = read("[brightness]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    let b = read("[brightness]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    assert_eq!(a, b);
+}
+
+#[test]
+#[cfg(feature = "brightness")]
+fn a_brightness_icon_is_refused_loudly() {
+    for (text, key) in [
+        ("[brightness]\nicon = \"too long\"\n", "brightness.icon"),
+        // The 4-glyph array: exactly 4 entries, each one glyph; anything
+        // else is refused naming the key.
+        (
+            "[brightness]\nicon = [\"0\", \"1\", \"2\"]\n",
+            "brightness.icon",
+        ),
+        (
+            "[brightness]\nicon = [\"0\", \"1\", \"2\", \"3\", \"4\"]\n",
+            "brightness.icon",
+        ),
+        (
+            "[brightness]\nicon = [\"0\", \"too long\", \"2\", \"3\"]\n",
+            "brightness.icon",
+        ),
+        (
+            "[brightness]\nicon = [\"0\", 1, \"2\", \"3\"]\n",
+            "brightness.icon",
+        ),
+        ("[brightness]\nicon = 3\n", "brightness.icon"),
+        // At most one static icon, and levels beside a path or picture
+        // are two icons; no viewbox without a path.
+        (
+            "[brightness]\nicon = \"B\"\nicon-path = \"M0 0h10v10z\"\n",
+            "brightness.icon-path",
+        ),
+        (
+            "[brightness]\nicon = [\"0\", \"1\", \"2\", \"3\"]\nicon-path = \"M0 0h10v10z\"\n",
+            "brightness.icon-path",
+        ),
+        (
+            "[brightness]\nicon-viewbox = \"0 0 24 24\"\n",
+            "brightness.icon-viewbox",
+        ),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
 }
 
 #[test]
@@ -860,6 +994,104 @@ fn a_battery_section_is_refused_loudly() {
 }
 
 #[test]
+#[cfg(feature = "battery")]
+fn a_battery_icon_is_read_whole() {
+    use crate::icon::Icon;
+    use crate::modules::battery::BatteryIcon;
+    let modules = read("").unwrap().modules.battery;
+    assert!(modules.icon.is_none());
+    assert!(modules.icon_charging.is_none());
+    assert!(modules.icon_full.is_none());
+    assert!(modules.show_text);
+    let modules = read(
+        "left = [\"battery\"]\n\
+         [battery]\n\
+         icon = \"B\"\n\
+         icon-charging = \"C\"\n\
+         icon-full = \"F\"\n\
+         show-text = false\n",
+    )
+    .unwrap()
+    .modules
+    .battery;
+    assert_eq!(modules.icon, Some(BatteryIcon::One('B')));
+    assert_eq!(modules.icon_charging, Some(Icon::Glyph('C')));
+    assert_eq!(modules.icon_full, Some(Icon::Glyph('F')));
+    assert!(!modules.show_text);
+    // Five glyphs, empty to full: the level picks one.
+    let modules = read("[battery]\nicon = [\"0\", \"1\", \"2\", \"3\", \"4\"]\n")
+        .unwrap()
+        .modules
+        .battery;
+    assert_eq!(
+        modules.icon,
+        Some(BatteryIcon::Levels(['0', '1', '2', '3', '4']))
+    );
+    // And two reads of it are equal configs (a reload compares).
+    let a = read("[battery]\nicon = [\"0\", \"1\", \"2\", \"3\", \"4\"]\n").unwrap();
+    let b = read("[battery]\nicon = [\"0\", \"1\", \"2\", \"3\", \"4\"]\n").unwrap();
+    assert_eq!(a, b);
+    // A path icon, and two reads of it are equal configs too.
+    let modules = read("[battery]\nicon-path = \"M0 0h10v10z\"\n")
+        .unwrap()
+        .modules
+        .battery;
+    assert!(matches!(modules.icon, Some(BatteryIcon::Art(_))));
+    let a = read("[battery]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    let b = read("[battery]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    assert_eq!(a, b);
+}
+
+#[test]
+#[cfg(feature = "battery")]
+fn a_battery_icon_is_refused_loudly() {
+    for (text, key) in [
+        ("[battery]\nicon = \"too long\"\n", "battery.icon"),
+        // The 5-glyph array: exactly 5 entries, each one glyph; anything
+        // else is refused naming the key.
+        (
+            "[battery]\nicon = [\"0\", \"1\", \"2\", \"3\"]\n",
+            "battery.icon",
+        ),
+        (
+            "[battery]\nicon = [\"0\", \"1\", \"2\", \"3\", \"4\", \"5\"]\n",
+            "battery.icon",
+        ),
+        (
+            "[battery]\nicon = [\"0\", \"too long\", \"2\", \"3\", \"4\"]\n",
+            "battery.icon",
+        ),
+        (
+            "[battery]\nicon = [\"0\", 1, \"2\", \"3\", \"4\"]\n",
+            "battery.icon",
+        ),
+        ("[battery]\nicon = 3\n", "battery.icon"),
+        // At most one static icon, and levels beside a path or picture
+        // are two icons; no viewbox without a path.
+        (
+            "[battery]\nicon = \"B\"\nicon-path = \"M0 0h10v10z\"\n",
+            "battery.icon-path",
+        ),
+        (
+            "[battery]\nicon = [\"0\", \"1\", \"2\", \"3\", \"4\"]\nicon-path = \"M0 0h10v10z\"\n",
+            "battery.icon-path",
+        ),
+        (
+            "[battery]\nicon-viewbox = \"0 0 24 24\"\n",
+            "battery.icon-viewbox",
+        ),
+        (
+            "[battery]\nicon-charging = \"too long\"\n",
+            "battery.icon-charging",
+        ),
+        ("[battery]\nicon-full = \"too long\"\n", "battery.icon-full"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+}
+
+#[test]
 #[cfg(feature = "tray")]
 fn a_tray_section_is_read_whole() {
     let modules = read("").unwrap().modules.tray;
@@ -970,6 +1202,21 @@ fn a_media_section_is_refused_loudly() {
         // The actions take no number, and there is no `seek`.
         ("[media]\non-click = \"next 2\"\n", "media.on-click"),
         ("[media]\non-click = \"seek\"\n", "media.on-click"),
+        // The icon keys refuse like the clock's: at most one static
+        // icon, one glyph per state, no viewbox without a path.
+        (
+            "[media]\nicon = \"M\"\nicon-path = \"M0 0h10v10z\"\n",
+            "media.icon-path",
+        ),
+        (
+            "[media]\nicon-playing = \"too long\"\n",
+            "media.icon-playing",
+        ),
+        ("[media]\nicon-paused = \"too long\"\n", "media.icon-paused"),
+        (
+            "[media]\nicon-viewbox = \"0 0 24 24\"\n",
+            "media.icon-viewbox",
+        ),
     ] {
         let error = read(text).unwrap_err().to_string();
         assert!(error.contains(key), "{text:?}: {error}");
@@ -983,6 +1230,42 @@ fn a_media_section_is_refused_loudly() {
         let error = read(text).unwrap_err().to_string();
         assert!(error.contains(key), "{text:?}: {error}");
     }
+}
+
+#[test]
+#[cfg(feature = "media")]
+fn a_media_icon_is_read_whole() {
+    use crate::icon::Icon;
+    let modules = read("").unwrap().modules.media;
+    assert!(modules.icon.is_none());
+    assert!(modules.icon_playing.is_none());
+    assert!(modules.icon_paused.is_none());
+    assert!(modules.show_text);
+    let modules = read(
+        "left = [\"media\"]\n\
+         [media]\n\
+         icon = \"M\"\n\
+         icon-playing = \">\"\n\
+         icon-paused = \"=\"\n\
+         show-text = false\n",
+    )
+    .unwrap()
+    .modules
+    .media;
+    assert_eq!(modules.icon, Some(Icon::Glyph('M')));
+    assert_eq!(modules.icon_playing, Some(Icon::Glyph('>')));
+    assert_eq!(modules.icon_paused, Some(Icon::Glyph('=')));
+    assert!(!modules.show_text);
+    // A path icon, and two reads of it are equal configs (a reload
+    // compares).
+    let modules = read("[media]\nicon-path = \"M0 0h10v10z\"\n")
+        .unwrap()
+        .modules
+        .media;
+    assert!(matches!(modules.icon, Some(Icon::Art(_))));
+    let a = read("[media]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    let b = read("[media]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    assert_eq!(a, b);
 }
 
 /// Without the feature the section is a loud error naming the key, as the
@@ -1028,6 +1311,25 @@ fn a_bluetooth_section_is_refused_loudly() {
             "bluetooth.on-click",
         ),
         ("[bluetooth]\non-click = \"pair\"\n", "bluetooth.on-click"),
+        // The icon keys refuse like the clock's: at most one static
+        // icon, one glyph per state, no viewbox without a path.
+        (
+            "[bluetooth]\nicon = \"B\"\nicon-path = \"M0 0h10v10z\"\n",
+            "bluetooth.icon-path",
+        ),
+        (
+            "[bluetooth]\nicon-off = \"too long\"\n",
+            "bluetooth.icon-off",
+        ),
+        ("[bluetooth]\nicon-on = \"too long\"\n", "bluetooth.icon-on"),
+        (
+            "[bluetooth]\nicon-connected = \"too long\"\n",
+            "bluetooth.icon-connected",
+        ),
+        (
+            "[bluetooth]\nicon-viewbox = \"0 0 24 24\"\n",
+            "bluetooth.icon-viewbox",
+        ),
     ] {
         let error = read(text).unwrap_err().to_string();
         assert!(error.contains(key), "{text:?}: {error}");
@@ -1038,6 +1340,45 @@ fn a_bluetooth_section_is_refused_loudly() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("menu-command"), "{error}");
+}
+
+#[test]
+#[cfg(feature = "bluetooth")]
+fn a_bluetooth_icon_is_read_whole() {
+    use crate::icon::Icon;
+    let modules = read("").unwrap().modules.bluetooth;
+    assert!(modules.icon.is_none());
+    assert!(modules.icon_off.is_none());
+    assert!(modules.icon_on.is_none());
+    assert!(modules.icon_connected.is_none());
+    assert!(modules.show_text);
+    let modules = read(
+        "left = [\"bluetooth\"]\n\
+         [bluetooth]\n\
+         icon = \"B\"\n\
+         icon-off = \"0\"\n\
+         icon-on = \"1\"\n\
+         icon-connected = \"C\"\n\
+         show-text = false\n",
+    )
+    .unwrap()
+    .modules
+    .bluetooth;
+    assert_eq!(modules.icon, Some(Icon::Glyph('B')));
+    assert_eq!(modules.icon_off, Some(Icon::Glyph('0')));
+    assert_eq!(modules.icon_on, Some(Icon::Glyph('1')));
+    assert_eq!(modules.icon_connected, Some(Icon::Glyph('C')));
+    assert!(!modules.show_text);
+    // A path icon, and two reads of it are equal configs (a reload
+    // compares).
+    let modules = read("[bluetooth]\nicon-path = \"M0 0h10v10z\"\n")
+        .unwrap()
+        .modules
+        .bluetooth;
+    assert!(matches!(modules.icon, Some(Icon::Art(_))));
+    let a = read("[bluetooth]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    let b = read("[bluetooth]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    assert_eq!(a, b);
 }
 
 /// Without the feature the section is a loud error naming the key, as the

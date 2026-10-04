@@ -537,3 +537,67 @@ fn truncation_cuts_with_an_ellipsis_by_pixels_not_chars() {
     // A span too narrow for even the ellipsis: blank, not a panic.
     assert!(draw(Span { x: 0, width: 1 }));
 }
+
+#[test]
+fn a_static_icon_stands_before_the_title() {
+    use crate::icon::Icon;
+    let mut settings = with(false, "", false);
+    settings.window_title.icon = Some(Icon::Glyph('W'));
+    let (mut harness, link) = started_with(settings);
+    show(&link, "editor", "foot", true, &["DP-1"]);
+    assert_eq!(harness.dispatch(), Update::Changed);
+    let view = harness.view_on(Some("DP-1"));
+    assert_eq!(view.text(), "editor");
+    assert_eq!(view.icon(), Some('W'));
+}
+
+#[test]
+fn the_placeholder_gets_no_icon() {
+    use crate::icon::Icon;
+    // A placeholder is not a window: the text shows, the icon does not.
+    let mut settings = with(false, "empty", false);
+    settings.window_title.icon = Some(Icon::Glyph('W'));
+    let (harness, _link) = started_with(settings);
+    let view = harness.view_on(Some("DP-1"));
+    assert_eq!(view.text(), "empty");
+    assert!(view.icon().is_none() && view.art().is_none());
+}
+
+#[test]
+fn icon_only_draws_the_icon_with_the_title_in_the_tooltip() {
+    use crate::icon::Icon;
+    let mut settings = with(false, "", false);
+    settings.window_title.icon = Some(Icon::Glyph('W'));
+    settings.window_title.show_text = false;
+    let (mut harness, link) = started_with(settings);
+    show(&link, "editor", "foot", true, &["DP-1"]);
+    assert_eq!(harness.dispatch(), Update::Changed);
+    let view = harness.view_on(Some("DP-1"));
+    assert_eq!(view.text(), "");
+    assert_eq!(view.icon(), Some('W'));
+    // The tooltip already carries the full title.
+    assert_eq!(view.tooltip(), "editor");
+}
+
+#[test]
+fn icon_only_hides_without_a_window() {
+    use crate::icon::Icon;
+    // No window, an empty placeholder and `show-text = false`: the icon
+    // stands for a window, so with none the module hides, as with an
+    // empty placeholder.
+    let mut settings = with(false, "", false);
+    settings.window_title.icon = Some(Icon::Glyph('W'));
+    settings.window_title.show_text = false;
+    let (harness, _link) = started_with(settings);
+    assert!(harness.view_on(Some("DP-1")).is_empty());
+}
+
+#[test]
+fn without_an_icon_the_title_shows_text_alone() {
+    let (mut harness, link) = started();
+    show(&link, "editor", "foot", true, &["DP-1"]);
+    assert_eq!(harness.dispatch(), Update::Changed);
+    let view = harness.view_on(Some("DP-1"));
+    assert_eq!(view.text(), "editor");
+    assert!(view.icon().is_none() && view.art().is_none());
+}

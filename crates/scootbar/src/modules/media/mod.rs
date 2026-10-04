@@ -143,6 +143,19 @@ pub struct Settings {
     pub player: Option<String>,
     /// The most logical pixels wide the module's span may be.
     pub max_width: u32,
+    /// A static icon, when the config sets the icon keys: shown for both
+    /// states instead of the built-in play and pause ones below.
+    pub icon: Option<Icon>,
+    /// One glyph per state, when the config sets the per-state keys:
+    /// playing and paused. Each wins over the static icon for its own
+    /// state. (A stopped player shows nothing, so there is no
+    /// `icon-stopped`: there is nothing to draw it beside.)
+    pub icon_playing: Option<Icon>,
+    pub icon_paused: Option<Icon>,
+    /// Whether the text is drawn beside the icon. `false` draws only the
+    /// icon, with the text moved into the tooltip (which already names
+    /// the player, the state and the line).
+    pub show_text: bool,
 }
 
 impl Default for Settings {
@@ -150,6 +163,10 @@ impl Default for Settings {
         Self {
             player: None,
             max_width: DEFAULT_MAX_WIDTH,
+            icon: None,
+            icon_playing: None,
+            icon_paused: None,
+            show_text: true,
         }
     }
 }
@@ -200,6 +217,10 @@ fn start_with(settings: &Settings, addr: Addr) -> Box<dyn Module> {
         // stops parsing the state shows no icon rather than nothing
         // starting.
         icons: [icon(PLAY), icon(PAUSE)],
+        icon: settings.icon.clone(),
+        icon_playing: settings.icon_playing.clone(),
+        icon_paused: settings.icon_paused.clone(),
+        show_text: settings.show_text,
         last_skip: None,
         drawn: None,
         held: None,
@@ -213,6 +234,14 @@ struct Media {
     max_width: u32,
     /// Playing, paused.
     icons: [Option<Icon>; 2],
+    /// A static icon from the config, shown for both states instead of
+    /// the built-in ones.
+    icon: Option<Icon>,
+    /// One glyph per state from the config, winning over the static
+    /// icon for its own state.
+    icon_playing: Option<Icon>,
+    icon_paused: Option<Icon>,
+    show_text: bool,
     /// When the last skip was sent.
     last_skip: Option<Instant>,
     /// When a change was last reported to the bar.
@@ -285,6 +314,25 @@ impl Media {
     fn player(&self) -> Option<&Player> {
         let live = self.link.live()?;
         live.players.get(live.selected(self.preferred.as_deref())?)
+    }
+
+    /// The icon for `status`: the config's per-state glyph when set, else
+    /// its static icon, else the built-in play or pause vector. `None`
+    /// for stopped (which shows nothing) and where no icon parses.
+    fn icon_for(&self, status: Status) -> Option<Icon> {
+        match status {
+            Status::Playing => self
+                .icon_playing
+                .clone()
+                .or_else(|| self.icon.clone())
+                .or_else(|| self.icons[0].clone()),
+            Status::Paused => self
+                .icon_paused
+                .clone()
+                .or_else(|| self.icon.clone())
+                .or_else(|| self.icons[1].clone()),
+            Status::Stopped => None,
+        }
     }
 }
 
@@ -361,11 +409,16 @@ impl Module for Media {
 
     /// `artist - title` with the state's icon, dimmed while paused;
     /// nothing while no player is playing or paused, so the module hides.
+    /// With a config icon the glyph (or picture) stands before the text,
+    /// or alone with `show-text = false` (the tooltip already names the
+    /// player, the state and the line).
     fn view(&self, _output: &OutputView<'_>, view: &mut View) {
         let Some(player) = self.player() else {
             return;
         };
-        line(player, view.text_mut());
+        if self.show_text {
+            line(player, view.text_mut());
+        }
         let _ = write!(
             view.tooltip_mut(),
             "{} ({}): ",
@@ -373,13 +426,8 @@ impl Module for Media {
             player.status.name()
         );
         line(player, view.tooltip_mut());
-        let icon = match player.status {
-            Status::Playing => self.icons[0].as_ref(),
-            Status::Paused => self.icons[1].as_ref(),
-            Status::Stopped => None,
-        };
-        if let Some(icon) = icon {
-            view.show_icon(icon);
+        if let Some(icon) = self.icon_for(player.status) {
+            view.show_icon(&icon);
         }
         if player.status == Status::Paused {
             view.set_class(Class::Muted);
