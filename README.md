@@ -190,8 +190,9 @@ scrolls and hover do what you'd expect, the volume slider and the WiFi list
 open as popups under the bar, and you can add your own buttons and modules
 that show a command's output, without writing Rust.
 
-It's light: idle, it uses around 4 to 5 MB of memory and doesn't wake up
-until something changes. It speaks D-Bus, PulseAudio and netlink itself,
+It's light: idle, it uses around 4 to 5 MB of memory and wakes only when
+something changes (and every 10 seconds to read the WiFi signal, while
+WiFi is shown). It speaks D-Bus, PulseAudio and netlink itself,
 so it needs no GTK and no libpulse, and the binary links nothing beyond
 the C library. It also works on sway, niri, Hyprland and other compositors with
 `wlr-layer-shell`, and scripts and agents can read every module's state
