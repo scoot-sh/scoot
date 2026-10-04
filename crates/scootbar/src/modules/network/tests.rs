@@ -1117,7 +1117,9 @@ fn the_menu_is_fed_the_scan_and_reaped() {
     assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
     // The menu runs: one more source while it does.
     assert_eq!(harness.source_count(), 4);
-    // A second click while it runs opens nothing more.
+    // A second click replaces it (the first already exited here, so this
+    // only reaps it and opens again): still one menu source, and the
+    // list fed twice over.
     assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
     assert_eq!(harness.source_count(), 4);
     let _ = drive(&mut harness);
@@ -2099,11 +2101,49 @@ mod popup_list {
         let _ = fake.sent();
     }
 
+    /// Whether `pid` names a live process: the tests' way to prove a
+    /// replaced or dropped child is really gone (reaped, not a zombie).
+    fn alive(pid: u32) -> bool {
+        std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
+
+    /// The pids `command` recorded so far, waiting up to 5 s for `want:
+    /// a spawn writes its pidfile at once, but the test never assumes
+    /// when the scheduler runs it.
+    fn wait_pids(pids: &std::path::Path, want: usize) -> Vec<u32> {
+        let start = std::time::Instant::now();
+        loop {
+            let found = std::fs::read_to_string(pids)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| line.trim().parse::<u32>().ok())
+                .collect::<Vec<_>>();
+            if found.len() >= want || start.elapsed() > Duration::from_secs(5) {
+                return found;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// A command that records its pid in `pids` and never exits: the
+    /// stuck child the ticket names (`sleep infinity`). With `trap`,
+    /// the shell ignores `SIGTERM` first, so only `SIGKILL` ends it.
+    fn lingering(dir: &std::path::Path, trap: &str) -> Vec<String> {
+        let pids = dir.join("pids");
+        vec![
+            "sh".to_owned(),
+            "-c".to_owned(),
+            format!("echo $$ >> {}; {trap}exec sleep infinity", pids.display()),
+        ]
+    }
+
     #[test]
-    fn a_second_connect_while_one_runs_is_refused() {
-        // Never exits on its own: the second connect finds it running.
+    fn a_second_connect_replaces_the_running_one() {
+        // `sleep infinity` never exits on its own: the second connect
+        // ends it and starts its own, instead of being refused.
+        let dir = tempdir("connect-replace");
         let settings = Settings {
-            connect_command: vec!["sleep".to_owned(), "30".to_owned()],
+            connect_command: lingering(&dir, ""),
             ..Settings::default()
         };
         let (mut harness, fake) = Fake::start(&settings);
@@ -2117,12 +2157,134 @@ mod popup_list {
             Ok(Update::Unchanged)
         );
         assert_eq!(harness.source_count(), 4);
+        let first = wait_pids(&dir.join("pids"), 1);
+        assert_eq!(first.len(), 1);
+        assert!(alive(first[0]), "the first connect runs");
+        // The replacement: the old child is ended, the new one runs in
+        // the one connect slot.
         assert_eq!(
             harness.invoke(&output, &connect(0), 1),
-            Err(crate::modules::InvokeError::Refused(
-                "a connect is already running"
-            ))
+            Ok(Update::Unchanged)
         );
+        let pids = wait_pids(&dir.join("pids"), 2);
+        assert_eq!(pids.len(), 2);
+        assert_ne!(pids[0], pids[1]);
+        assert!(!alive(pids[0]), "the replaced connect is reaped");
+        assert!(alive(pids[1]), "the new connect runs");
+        assert_eq!(harness.source_count(), 4);
+        // Dropping the module (a reload, a removal) ends the survivor.
+        drop(harness);
+        assert!(!alive(pids[1]), "the dropped module reaps its connect");
+        std::fs::remove_dir_all(&dir).ok();
+        let _ = fake.sent();
+    }
+
+    #[test]
+    fn a_second_menu_replaces_the_running_one() {
+        // A picker left open never blocks the next one: the second menu
+        // ends it and opens fresh, as a second connect does.
+        let dir = tempdir("menu-replace");
+        let settings = Settings {
+            menu_command: lingering(&dir, ""),
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi_many(&fake, b"Wimbly", -50, &[]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let menu = ModuleAction::new("menu", None);
+        let output = crate::modules::OutputView { name: None };
+        assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+        assert_eq!(harness.source_count(), 4);
+        let first = wait_pids(&dir.join("pids"), 1);
+        assert_eq!(first.len(), 1);
+        assert!(alive(first[0]), "the first menu runs");
+        assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+        let pids = wait_pids(&dir.join("pids"), 2);
+        assert_eq!(pids.len(), 2);
+        assert_ne!(pids[0], pids[1]);
+        assert!(!alive(pids[0]), "the replaced menu is reaped");
+        assert!(alive(pids[1]), "the new menu runs");
+        assert_eq!(harness.source_count(), 4);
+        drop(harness);
+        assert!(!alive(pids[1]), "the dropped module reaps its menu");
+        std::fs::remove_dir_all(&dir).ok();
+        let _ = fake.sent();
+    }
+
+    #[test]
+    fn dropping_the_module_ends_both_running_children() {
+        // A reload while a connect and a menu both run: neither child
+        // outlives the module, unreaped.
+        let dir = tempdir("drop-both");
+        let menu_dir = dir.join("menu");
+        let connect_dir = dir.join("connect");
+        std::fs::create_dir_all(&menu_dir).unwrap();
+        std::fs::create_dir_all(&connect_dir).unwrap();
+        let settings = Settings {
+            menu_command: lingering(&menu_dir, ""),
+            connect_command: lingering(&connect_dir, ""),
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi_many(&fake, b"Wimbly", -50, &[]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let output = crate::modules::OutputView { name: None };
+        assert_eq!(
+            harness.invoke(&output, &ModuleAction::new("menu", None), 1),
+            Ok(Update::Unchanged)
+        );
+        let mut content = Content::default();
+        assert!(harness.popup(&mut content));
+        assert_eq!(
+            harness.invoke(&output, &connect(0), 1),
+            Ok(Update::Unchanged)
+        );
+        let menu = wait_pids(&menu_dir.join("pids"), 1);
+        let connect = wait_pids(&connect_dir.join("pids"), 1);
+        assert!(alive(menu[0]) && alive(connect[0]), "both children run");
+        drop(harness);
+        assert!(!alive(menu[0]), "the dropped module reaps its menu");
+        assert!(!alive(connect[0]), "the dropped module reaps its connect");
+        std::fs::remove_dir_all(&dir).ok();
+        let _ = fake.sent();
+    }
+
+    #[test]
+    fn a_child_that_ignores_sigterm_is_killed() {
+        // `trap '' TERM` survives the `exec` (ignored dispositions do),
+        // so `SIGTERM` never ends it: the replacement escalates to
+        // `SIGKILL`, and the drop does too.
+        let dir = tempdir("sigterm-proof");
+        let settings = Settings {
+            connect_command: lingering(&dir, "trap '' TERM; "),
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi_many(&fake, b"Wimbly", -50, &[]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let mut content = Content::default();
+        assert!(harness.popup(&mut content));
+        let output = crate::modules::OutputView { name: None };
+        assert_eq!(
+            harness.invoke(&output, &connect(0), 1),
+            Ok(Update::Unchanged)
+        );
+        let first = wait_pids(&dir.join("pids"), 1);
+        assert!(alive(first[0]), "the proof child runs");
+        assert_eq!(
+            harness.invoke(&output, &connect(0), 1),
+            Ok(Update::Unchanged)
+        );
+        let pids = wait_pids(&dir.join("pids"), 2);
+        assert_eq!(pids.len(), 2);
+        assert!(
+            !alive(pids[0]),
+            "a SIGTERM-proof child is killed on replacement"
+        );
+        assert!(alive(pids[1]), "the new connect runs");
+        drop(harness);
+        assert!(!alive(pids[1]), "a SIGTERM-proof child is killed on drop");
+        std::fs::remove_dir_all(&dir).ok();
         let _ = fake.sent();
     }
 }

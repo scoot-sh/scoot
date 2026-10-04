@@ -689,7 +689,10 @@ no daemon and no child process: two netlink sockets on the bar's own
   it as one argument). With `show-ssid = false` the picker refuses to
   open instead: the scan list would expose the SSIDs the bar hides. The module's own action is `menu`, taking no
   number (`scootbar msg invoke network menu`); it is refused naming why
-  with no command configured or no networks seen.
+  with no command configured or no networks seen. A second `menu` while
+  one runs ends the running picker and opens a fresh one, so a picker
+  left open never blocks the next; only a menu that will open ends the
+  old one.
 - **A native list**, opt-in as the volume popup is: `on-click = "popup"`
   opens the scan as a [popup](#popups) list instead of the dmenu picker
   (the click binding wins over the picker's default). Each row names a
@@ -712,7 +715,14 @@ no daemon and no child process: two netlink sockets on the bar's own
   scan with more shows the first 16, and the picker still lists them all. `N` names what the list showed: a scan that moved underneath
   is refused rather than connected to the wrong network. `connect` is
   refused naming why with no command configured, a row past the list or
-  gone from the scan, or while one runs. With `show-ssid = false` the list
+  gone from the scan. A second `connect` while one runs ends the running
+  command and starts the new one, so a command that hangs (an `nmcli`
+  waiting on a secret agent that never answers) never blocks the next
+  connect; only a `connect` that will start ends the old one, and a
+  refused one leaves the running command alone. Ending a child is
+  `SIGTERM` to its own process group, then `SIGKILL` after 100 ms for
+  one that ignores it; a reload or removal of the module ends both
+  children the same way, so no child outlives the bar unreaped. With `show-ssid = false` the list
   stays closed, as the picker does.
 - **`interface`** (1 to 15 bytes, a kernel interface name) pins what is
   shown; absent is the default route's, tracked by index so a rename
