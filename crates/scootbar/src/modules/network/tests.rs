@@ -2212,6 +2212,97 @@ mod popup_list {
     }
 
     #[test]
+    fn a_late_page_of_the_old_dump_does_not_clear_the_refill() {
+        // N2 (review of #428): menu 1 opens (reset armed, dump D1 queued
+        // and sent) → D1 page P1 arrives (reset consumed, list = P1) →
+        // menu 2 opens (fed P1, re-arms, queues D2) → D1 page P2 arrives.
+        // The late page only appends: the list is P1 and P2, not P2
+        // alone — and D1's terminator leaves it for D2's refill instead
+        // of clearing it.
+        let (command, dir, file) = record_menu("late-page");
+        let settings = Settings {
+            menu_command: command,
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi(&fake, b"Wimbly", -50);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        // Settle the starting scan and station, so D1 below is the only
+        // dump in flight.
+        let (_, genl) = fake.sent();
+        let scan = request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_SCAN,
+        );
+        fake.genl(&fake::done_seq(scan));
+        assert_eq!(drive(&mut harness), Update::Unchanged);
+        let (_, genl) = fake.sent();
+        fake.genl(&fake::station(-50));
+        fake.genl(&fake::done_seq(request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_STATION,
+        )));
+        assert_eq!(drive(&mut harness), Update::Unchanged);
+        let (_, genl) = fake.sent();
+        assert!(scan_targets(&genl).is_empty());
+        let menu = ModuleAction::new("menu", None);
+        let output = crate::modules::OutputView { name: None };
+        // Menu 1 opens, fed the settled list; its refresh (D1) goes out.
+        assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+        let _ = drive(&mut harness);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Wimbly\n");
+        let (_, genl) = fake.sent();
+        let d1 = request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_SCAN,
+        );
+        // D1 page P1 arrives: the reset fires, the list is P1.
+        fake.genl(&fake::scan(&[(b"Alpha", -5000, true)]));
+        assert_eq!(drive(&mut harness), Update::Changed);
+        // Menu 2 opens, fed P1; its refresh (D2) queues behind D1.
+        assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+        let _ = drive(&mut harness);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Alpha\n");
+        // D1 page P2 arrives late: it appends, it must not clear P1.
+        fake.genl(&fake::scan(&[(b"Beta", -7000, false)]));
+        let _ = drive(&mut harness);
+        // Menu 3 proves the list: P1 and P2, not P2 alone.
+        assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+        let _ = drive(&mut harness);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Alpha\nBeta\n");
+        // D1's terminator ends it; the list stands for D2's refill.
+        fake.genl(&fake::done_seq(d1));
+        assert_eq!(drive(&mut harness), Update::Unchanged);
+        assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+        let _ = drive(&mut harness);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Alpha\nBeta\n");
+        // D2 refills: its first page resets, nothing doubles.
+        let (_, genl) = fake.sent();
+        fake.genl(&fake::station(-50));
+        fake.genl(&fake::done_seq(request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_STATION,
+        )));
+        assert_eq!(drive(&mut harness), Update::Unchanged);
+        let (_, genl) = fake.sent();
+        let d2 = request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_SCAN,
+        );
+        fake.genl(&fake::scan(&[
+            (b"Alpha", -5000, true),
+            (b"Beta", -7000, false),
+        ]));
+        fake.genl(&fake::done_seq(d2));
+        assert_eq!(drive(&mut harness), Update::Unchanged);
+        assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+        let _ = drive(&mut harness);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Alpha\nBeta\n");
+        std::fs::remove_dir_all(&dir).ok();
+        let _ = fake.sent();
+    }
+
+    #[test]
     fn dropping_the_module_ends_both_running_children() {
         // A reload while a connect and a menu both run: neither child
         // outlives the module, unreaped.
