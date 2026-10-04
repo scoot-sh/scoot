@@ -73,8 +73,12 @@ item serving a real menu): `menu 0` and a real right-click open it,
 `menu-drill`/`menu-back` walk a submenu, `menu-select` reaches the item
 as `Event clicked` and closes it, a `LayoutUpdated` re-fills a changed
 label, and a `kill -9`'d item closes everything. Screenshots in the
-implementer's report. Cost: `.text` +17,744 B (+0.9%, file bytes
-unchanged), idle tray with one menu item RSS 4,420 kB closed and
+implementer's report. Cost, measured with `readelf -S -W` on release
+builds of base `5c19c0333` and this branch (rebased onto `main`,
+review fixes included; both built minutes apart with the same
+toolchain): `.text` 1,599,176 → 1,614,760 (**+15,584 B, +1.0%**),
+`.rodata` 129,823 → 130,143 (+320 B), file bytes 2,101,984 on both
+sides (+0); idle tray with one menu item RSS 4,420 kB closed and
 4,592 kB open, zero wakeups either way — recorded for the maintainer,
 no waiver claimed.
 
@@ -84,48 +88,7 @@ sockets](tray-abstract-socket.md), [real
 apps](tray-real-apps.md), [runaway
 redraws](tray-redraw-coalesce.md).
 
-Everything in "Done when" is met and the entry stays open only for the
-menus, which have their prerequisite now: [popups](resolved/popups-done.md)
-landed (declarative content: text, a slider, buttons; a list is a column of
-buttons), so a DBusMenu layout can be drawn as one. Landed, on the
-[shared D-Bus client](resolved/dbus-client-done.md): the watcher owned
-(and re-taken when its owner leaves), hosting against another watcher when
-one owns it, items that registered before the bar found by listing the bus,
-pixmap icons at the output's device pixels, click and middle click and the
-wheel as `Activate`, `SecondaryActivate` and `Scroll`, an item vanishing
-with its owner, and the cost published in
-[lightest.md](lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02).
-The reference is [`docs/scootbar/cli.md`](../cli.md#tray).
-
-Checked live (a private `dbus-daemon`, `scoot --headless`, items written
-with jeepney, an independent D-Bus marshaller, and `busctl` reading the
-bar's watcher object): one bar owning the name and another hosting against
-it, the owner `kill -9`'d and the host taking the name and keeping the
-item, an item registered before the bar and one after, a changed icon, a
-click, and an item killed without unregistering.
-
-**What remains**, none of it in the first version:
-
-- **Menus**: `ContextMenu` and the DBusMenu protocol, through
-  [popups](resolved/popups-done.md), which exist now: what is left is the
-  DBusMenu client (`GetLayout`, `Event`, `AboutToShow`, layout-updated
-  signals, bounded like the rest), mapping a layout to popup content (it has
-  no submenu, checkmark or icon widgets yet) and binding `menu N` and a
-  right click to open it. The `menu N` action exists and is refused naming
-  popups; a right click does nothing by default. An item with
-  `ItemIsMenu` true is clicked with `Activate`, which such an item may
-  ignore: its menu is the whole point of it.
-- **Themed icon names**: an item that sends only `IconName` (most
-  GTK and Ayatana apps) is tracked but not drawn: it needs an icon-theme
-  lookup and an image decoder, the "what to decide first" cost, still
-  unmeasured. Attention and overlay icons and `IconThemePath` are read for
-  shape and dropped. [Tooltips](resolved/tooltips-done.md) (the shown items' title list is what
-  the module's tooltip shows; an item's own tooltip text is not drawn).
-- **Session buses on abstract sockets** (`unix:abstract=...`, what
-  `dbus-launch` makes): the client dials a path only.
-- **Real applications**: the items tried are an independent marshaller's,
-  not a Qt, GTK or Electron app, and the sign of `Scroll`'s delta is KDE's
-  by reading, not by testing a host against an item that cares.
-- **A runaway item's redraws**: one that re-announces its icon continuously
-  costs a bus round trip and a redraw every 50 ms; measured in the cost
-  table. Nothing coalesces redraws across items.
+Out of scope: an item's own tooltip text is not drawn. The module's
+tooltip lists the shown items' titles, which identifies every item;
+drawing per-item tooltip bodies (often long help text) serves no split
+entry, so it stays undrawn rather than gaining one.

@@ -925,7 +925,7 @@ socket is one more source in the `poll` loop), which is the
   with controls stripped; at most 32 items, 8 from one service or one registrant, 8 pixmap
   entries each; one `GetAll` in flight per item however many signals it
   sends; a menu's layout is read bounded the same way (at most 8 levels,
-  64 rows, one `GetLayout` in flight, re-read no oftener than every
+  64 nodes including the root — 63 drawable rows — one `GetLayout` in flight, re-read no oftener than every
   50 ms however it floods `LayoutUpdated`), and update signals are
   accepted only from the item that owns the open menu; a call nobody answers is forgotten after 30 seconds when its slot
   is wanted (no bus times a call out by default, measured on a stock
@@ -1364,7 +1364,9 @@ the dmenu-style launcher are still how a click connects); `on-click =
   signal, and the associated one selected. A wheel over the list
   scrolls it a row a notch where it is taller than what the compositor
   configures for it; a row too wide is cut with an ellipsis, as
-  a window title's is. Selecting a row closes the popup and runs
+  a window title's is. A scan that changes the row count while the list
+  is open reopens it at the new size (above), losing the scroll
+  position. Selecting a row closes the popup and runs
   `connect N` on the network module. Keyboard navigation (arrows, Enter)
   is a [separate entry](backlog/popup-list-keyboard.md).
 - **Opened on the press, not the release.** The one exception to "clicks
@@ -1376,6 +1378,15 @@ the dmenu-style launcher are still how a click connects); `on-click =
 - **Where it goes.** Anchored to the module's span on the bar, centered under
   it (above, on a bottom bar), and the compositor slides it along the bar and
   flips it across it where the output's edge would cut it.
+- **A refill that changes the size reopens it.** The content is refilled
+  whenever something changed, and where its computed size differs from the
+  surface it opened at — a tray menu opens on its `...` line and fills a
+  turn later, a network scan adds or drops rows — the popup closes and
+  opens again at the new size with the grab serial the open earned, so the
+  grab survives it. Hover and the scroll position do not survive: the rows
+  moved anyway. A same-size refill keeps the surface it has. The reopened
+  popup reads the same content and revision, so this fires once per size
+  change, never in a loop.
 - **It closes** on: a click anywhere outside it (the compositor's `popup_done`),
   **Escape**, a press on the bar (so a second click on the module toggles it,
   and a click on another module closes it without acting), its module
