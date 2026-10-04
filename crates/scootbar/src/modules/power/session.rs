@@ -179,8 +179,9 @@ impl Live {
 
     /// Calls `Suspend`/`Reboot`/`PowerOff` with `interactive: true`
     /// (polkit may ask, through its own agent). `false` when the call was
-    /// not queued (the table is full of live calls): the row stays armed,
-    /// and the next click tries again.
+    /// not queued (the table is full of live calls). The caller has
+    /// already disarmed the row, so the next click arms it again: never a
+    /// half-performed action.
     pub(super) fn perform(&mut self, row: super::Row) -> bool {
         let member = match row {
             super::Row::Suspend => "Suspend",

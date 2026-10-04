@@ -127,5 +127,9 @@ implementer report. Real logind answered all three `Can*` (rows shown).
 
 Ratchet (Asahi release, clean builds): plus-minus `.text` +43,328 B,
 file +0 (64 KiB quantum), loaded sections +47,961 B. The size row
-regresses on `.text`; the maintainer waives or not — not waived here.
-Idle wakeups, fds and RSS do not regress beyond what one run resolves.
+regresses on `.text`. Idle wakeups, fds and RSS do not regress beyond
+what one run resolves.
+
+**Maintainer's ruling (2026-10-04, given in chat): the `.text` growth of
+the power module is waived**, recorded in
+[lightest.md](../lightest.md#m6-power-menu-measured-2026-10-04).

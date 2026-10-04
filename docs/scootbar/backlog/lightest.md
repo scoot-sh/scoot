@@ -698,6 +698,32 @@ the network popup list is waived.** It covers `.text` +8,320 B (+0.5%)
 and the loaded sections' +7,604 B, and only that row; the file does not
 grow. Nothing else is waived.
 
+## M6 power menu (measured 2026-10-04)
+
+The [power module](../cli.md#power) (PR #414): a popup of Lock, Log out,
+Suspend, Reboot and Shut down, a confirm click on the destructive rows,
+logind over the shared D-Bus client, connected lazily on first use.
+Release builds (`lto = "fat"`, stripped) on the Asahi M2, `readelf -S -W`,
+the same tree with the feature off and on:
+
+| Build | file bytes | `.text` | loaded sections |
+| --- | --- | --- | --- |
+| `main` | 2,167,520 | 1,650,760 | 2,008,783 |
+| branch, default minus `power` | 2,167,520 | 1,652,744 | 2,011,975 |
+| branch, default | 2,167,520 (+0) | 1,696,072 (+43,328) | 2,059,936 (+47,961) |
+
+Idle, the module placed, 60 s windows: with every row overridden and the
+popup never opened, 0 voluntary switches, 7 fds, 5536 kB RSS; with real
+logind, the popup opened once and closed, 0 switches, 8 fds (the one bus
+socket), 5248 kB. `Cargo.lock` unchanged. The `cli.rs` help matrix the
+module doubled (263 to 519 arms) compiles one arm per build, so it costs
+source, not binary (filed as `cli-help-matrix`).
+
+**Maintainer's ruling (2026-10-04, given in chat): the `.text` growth of
+the power module is waived.** It covers `.text` +43,328 B (+2.6%) and the
+loaded sections' +47,961 B, and only that row; the file does not grow.
+Nothing else is waived.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`
