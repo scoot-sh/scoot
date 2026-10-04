@@ -64,3 +64,22 @@ stays under the Unsplash License wherever scoot is redistributed; remove the
 file (and the `[wallpaper]` table in the example) to drop it. The preview
 docs/assets/music-desk-preview.png is a screenshot of that example and shows
 the image, so the same applies to it.
+
+----------------------------------------------------------------------------
+
+docs/assets/vinyl-sunset-preview.png is not part of scoot's MIT-licensed
+code and is not covered by its license. It is a screenshot of the optional
+example in docs/examples/vinyl-sunset, shown with the illustration "Lofi,
+vintage, vinyl, study, audio" by AninditaErina (marked AI-generated) as its
+wallpaper:
+
+  https://pixabay.com/illustrations/lofi-vintage-vinyl-study-audio-8390965/
+
+The illustration is under the Pixabay Content License
+(https://pixabay.com/service/license/), which allows use and modification
+without attribution, but not distributing the content on a standalone basis,
+unchanged, substantially as it exists on Pixabay. The illustration itself is
+not distributed here: the example's `[wallpaper]` table points at a copy the
+user downloads, and only the screenshot above shows it. It stays under the
+Pixabay Content License wherever scoot is redistributed; remove the file (and
+the `[wallpaper]` table in the example) to drop it.

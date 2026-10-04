@@ -10,7 +10,7 @@ scootbar or scootbg changes unless you use these files.
 | --- | --- |
 | [`scoot.toml`](scoot.toml) | the compositor: background, ring colors and widths, rounded corners, column widths with a full-width column on `Super+m`, the wallpaper |
 | [`bar.toml`](bar.toml) | scootbar: a floating, rounded, translucent bar, workspaces as circles with the window title, the clock, status modules (WiFi, volume, brightness, bluetooth, battery), the power menu |
-| [`foot.ini`](foot.ini) | foot: the palette, 80% opacity, padding and font size (needs a foot with `[colors-dark]` sections, 1.24 or later) |
+| [`foot.ini`](foot.ini) | foot: the palette, 80% opacity, padding and font size (needs a foot with `[colors-dark]` sections, 1.26 or later) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
 modules install it when the settings have a `[wallpaper]` table, from source

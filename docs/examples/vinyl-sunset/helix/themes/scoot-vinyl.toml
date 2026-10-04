@@ -1,0 +1,64 @@
+# The "vinyl sunset" Helix theme: the illustration's palette, background left
+# transparent for a translucent terminal. Copy to
+# ~/.config/helix/themes/scoot-vinyl.toml.
+"ui.background" = {}
+"ui.text" = "ink"
+"ui.text.focus" = { fg = "ink", modifiers = ["bold"] }
+"ui.linenr" = "mist"
+"ui.linenr.selected" = { fg = "blue", modifiers = ["bold"] }
+"ui.cursor" = { fg = "paper", bg = "blue" }
+"ui.cursor.primary" = { fg = "paper", bg = "blue" }
+"ui.cursorline.primary" = { bg = "#33242a" }
+"ui.selection" = { bg = "#522c27" }
+"ui.statusline" = { fg = "ink", bg = "#3a2a2e" }
+"ui.statusline.inactive" = { fg = "mist", bg = "#33242a" }
+"ui.statusline.normal" = { fg = "paper", bg = "blue", modifiers = ["bold"] }
+"ui.statusline.insert" = { fg = "paper", bg = "green", modifiers = ["bold"] }
+"ui.statusline.select" = { fg = "paper", bg = "purple", modifiers = ["bold"] }
+"ui.virtual.indent-guide" = "#3a2a2e"
+"ui.virtual.ruler" = { bg = "#33242a" }
+"ui.menu" = { fg = "ink", bg = "#33242a" }
+"ui.menu.selected" = { fg = "paper", bg = "blue" }
+"ui.popup" = { bg = "#33242a" }
+"ui.help" = { bg = "#33242a" }
+"ui.window" = "mist"
+keyword = { fg = "red", modifiers = ["bold"] }
+"keyword.control" = "red"
+function = "blue"
+"function.macro" = "teal"
+type = "purple"
+"type.builtin" = "purple"
+constructor = "purple"
+string = "green"
+"constant.character" = "green"
+constant = "yellow"
+"constant.numeric" = "yellow"
+"constant.builtin" = "yellow"
+comment = { fg = "mist", modifiers = ["italic"] }
+variable = "ink"
+"variable.parameter" = "teal"
+"variable.other.member" = "ink"
+operator = "red"
+punctuation = "slate"
+namespace = "teal"
+attribute = "teal"
+label = "purple"
+special = "red"
+"markup.heading" = { fg = "blue", modifiers = ["bold"] }
+"diagnostic.error" = { underline = { color = "red", style = "curl" } }
+"diagnostic.warning" = { underline = { color = "yellow", style = "curl" } }
+error = "red"
+warning = "yellow"
+info = "blue"
+hint = "teal"
+[palette]
+ink = "#f1e3c6"
+slate = "#ddb590"
+mist = "#7a6567"
+paper = "#271a1f"
+blue = "#e59560"
+red = "#e0866a"
+green = "#a6b67a"
+yellow = "#fdc58b"
+purple = "#8f9bd0"
+teal = "#9cc0bc"
