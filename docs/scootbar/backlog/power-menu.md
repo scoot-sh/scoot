@@ -34,8 +34,14 @@ rows Lock, Log out, Suspend, Reboot, Shut down, each with an optional glyph
 
 Confirm on the destructive rows (Log out, Suspend, Reboot, Shut down): first
 click arms that row ("…? Click again", short window); second click on the
-same row performs and closes; clicking another row, waiting, or closing
-disarms. Lock needs no confirm. Agent `invoke` (`scootbar msg invoke power
+same row performs and closes; clicking another row or waiting disarms.
+Closing disarms only through the window: the arm survives refills and
+reopens (arming lengthens the row, which resizes the popup, which reopens
+it — disarming on a fill makes the arm invisible, measured live), so a
+reopen within the window shows the armed row with its explicit label;
+a daemon-side close hook through ~10 close sites was evaluated and
+rejected (borrow surgery on hot paths for hygiene; the two labeled clicks
+plus the window keep the guard). Lock needs no confirm. Agent `invoke` (`scootbar msg invoke power
 logout`) semantics decided and documented against "never defer a
 user-facing harm": invoke requires explicit confirm (two-step or
 `--confirm`-style argument), justified in `docs/scootbar/cli.md`.

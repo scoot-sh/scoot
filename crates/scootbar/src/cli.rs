@@ -163,6 +163,20 @@ macro_rules! network_head {
     };
 }
 #[allow(unused_macros)]
+#[cfg(feature = "power")]
+macro_rules! power_head {
+    () => {
+        "power, "
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "power"))]
+macro_rules! power_head {
+    () => {
+        ""
+    };
+}
+#[allow(unused_macros)]
 #[cfg(feature = "tray")]
 macro_rules! tray_head {
     () => {
@@ -233,6 +247,20 @@ macro_rules! network_tail {
     };
 }
 #[allow(unused_macros)]
+#[cfg(feature = "power")]
+macro_rules! power_tail {
+    () => {
+        ", power"
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "power"))]
+macro_rules! power_tail {
+    () => {
+        ""
+    };
+}
+#[allow(unused_macros)]
 #[cfg(feature = "tray")]
 macro_rules! tray_tail {
     () => {
@@ -276,6 +304,7 @@ macro_rules! modules {
             media_tail!(),
             microphone_tail!(),
             network_tail!(),
+            power_tail!(),
             tray_tail!(),
             volume_tail!(),
             ", window-title, workspaces
@@ -313,6 +342,7 @@ macro_rules! modules {
             media_tail!(),
             microphone_tail!(),
             network_tail!(),
+            power_tail!(),
             tray_tail!(),
             volume_tail!(),
             ", workspaces
@@ -351,6 +381,7 @@ macro_rules! modules {
             media_tail!(),
             microphone_tail!(),
             network_tail!(),
+            power_tail!(),
             tray_tail!(),
             volume_tail!(),
             ", window-title
@@ -388,6 +419,7 @@ macro_rules! modules {
             media_tail!(),
             microphone_tail!(),
             network_tail!(),
+            power_tail!(),
             tray_tail!(),
             volume_tail!(),
             "\n     --padding N          logical pixels either side of each module, 0 to 1024
@@ -422,6 +454,7 @@ macro_rules! modules {
             media_head!(),
             microphone_head!(),
             network_head!(),
+            power_head!(),
             tray_head!(),
             volume_head!(),
             "window-title, workspaces
@@ -450,6 +483,7 @@ macro_rules! modules {
             media_head!(),
             microphone_head!(),
             network_head!(),
+            power_head!(),
             tray_head!(),
             volume_head!(),
             "workspaces
@@ -478,6 +512,7 @@ macro_rules! modules {
             media_head!(),
             microphone_head!(),
             network_head!(),
+            power_head!(),
             tray_head!(),
             volume_head!(),
             "window-title
@@ -503,7 +538,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -521,6 +557,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -528,7 +590,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -546,6 +609,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -553,7 +642,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -571,6 +661,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -578,7 +694,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -596,6 +713,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -603,7 +746,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -621,6 +765,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -628,7 +798,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -646,6 +817,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -653,7 +850,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -671,6 +869,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -678,7 +902,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -696,6 +921,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -703,7 +954,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -721,6 +973,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -728,7 +1006,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -746,6 +1025,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -753,7 +1058,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -771,6 +1077,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -778,7 +1110,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -796,6 +1129,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -803,7 +1162,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -821,6 +1181,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -828,7 +1214,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -846,6 +1233,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -853,7 +1266,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -871,6 +1285,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -878,7 +1318,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -896,6 +1337,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -903,7 +1370,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -921,6 +1389,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -928,7 +1422,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -946,6 +1441,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -953,7 +1474,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -971,6 +1493,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -978,7 +1526,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -996,6 +1545,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -1003,7 +1578,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1021,6 +1597,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -1028,7 +1630,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1046,6 +1649,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -1053,7 +1682,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1071,6 +1701,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -1078,7 +1734,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1096,6 +1753,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -1103,7 +1786,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1121,6 +1805,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -1128,7 +1838,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1146,6 +1857,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -1153,7 +1890,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1171,6 +1909,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -1178,7 +1942,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1196,6 +1961,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -1203,7 +1994,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1221,6 +2013,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -1228,7 +2046,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1246,6 +2065,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -1253,7 +2098,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1271,6 +2117,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -1278,7 +2150,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1296,6 +2169,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -1303,7 +2202,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1321,6 +2221,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -1328,7 +2254,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1346,6 +2273,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -1353,7 +2306,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1371,6 +2325,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -1378,7 +2358,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1396,6 +2377,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -1403,7 +2410,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1421,6 +2429,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -1428,7 +2462,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1446,6 +2481,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -1453,7 +2514,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1471,6 +2533,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -1478,7 +2566,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1496,6 +2585,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -1503,7 +2618,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1521,6 +2637,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -1528,7 +2670,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1546,6 +2689,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -1553,7 +2722,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1571,6 +2741,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -1578,7 +2774,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1596,6 +2793,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -1603,7 +2826,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1621,6 +2845,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -1628,7 +2878,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1646,6 +2897,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -1653,7 +2930,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1671,6 +2949,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -1678,7 +2982,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1696,6 +3001,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -1703,7 +3034,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1721,6 +3053,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -1728,7 +3086,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1746,6 +3105,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -1753,7 +3138,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1771,6 +3157,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -1778,7 +3190,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1796,6 +3209,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -1803,7 +3242,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1821,6 +3261,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -1828,7 +3294,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1846,6 +3313,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -1853,7 +3346,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1871,6 +3365,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -1878,7 +3398,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1896,6 +3417,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -1903,7 +3450,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1921,6 +3469,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -1928,7 +3502,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1946,6 +3521,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -1953,7 +3554,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1971,6 +3573,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -1978,7 +3606,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -1996,6 +3625,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -2003,7 +3658,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2021,6 +3677,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -2028,7 +3710,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2046,6 +3729,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -2053,7 +3762,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2071,6 +3781,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -2078,7 +3814,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2096,6 +3833,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -2103,7 +3866,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2121,6 +3885,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -2128,7 +3918,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2146,6 +3937,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -2153,7 +3970,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2171,6 +3989,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -2178,7 +4022,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2196,6 +4041,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -2203,7 +4074,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2221,6 +4093,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -2228,7 +4126,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2246,6 +4145,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -2253,7 +4178,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2271,6 +4197,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -2278,7 +4230,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2296,6 +4249,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -2303,7 +4282,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2321,6 +4301,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -2328,7 +4334,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2346,6 +4353,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -2353,7 +4386,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2371,6 +4405,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -2378,7 +4438,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2396,6 +4457,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -2403,7 +4490,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2421,6 +4509,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -2428,7 +4542,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2446,6 +4561,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -2453,7 +4594,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2471,6 +4613,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -2478,7 +4646,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2496,6 +4665,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -2503,7 +4698,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2521,6 +4717,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -2528,7 +4750,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2546,6 +4769,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -2553,7 +4802,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2571,6 +4821,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -2578,7 +4854,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2596,6 +4873,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -2603,7 +4906,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2621,6 +4925,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -2628,7 +4958,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2646,6 +4977,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -2653,7 +5010,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2671,6 +5029,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -2678,7 +5062,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2696,6 +5081,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -2703,7 +5114,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2721,6 +5133,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -2728,7 +5166,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2746,6 +5185,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -2753,7 +5218,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2771,6 +5237,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -2778,7 +5270,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2796,6 +5289,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -2803,7 +5322,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2821,6 +5341,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -2828,7 +5374,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2846,6 +5393,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -2853,7 +5426,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2871,6 +5445,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -2878,7 +5478,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2896,6 +5497,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -2903,7 +5530,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2921,6 +5549,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -2928,7 +5582,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2946,6 +5601,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -2953,7 +5634,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2971,6 +5653,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -2978,7 +5686,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -2996,6 +5705,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -3003,7 +5738,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3021,6 +5757,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -3028,7 +5790,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3046,6 +5809,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -3053,7 +5842,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3071,6 +5861,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -3078,7 +5894,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3096,6 +5913,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: media, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -3103,7 +5946,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3121,6 +5965,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -3128,7 +5998,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3146,6 +6017,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -3153,7 +6050,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3171,6 +6069,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -3178,7 +6102,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3196,6 +6121,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -3203,7 +6154,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3221,6 +6173,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -3228,7 +6206,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3246,6 +6225,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -3253,7 +6258,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3271,6 +6277,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -3278,7 +6310,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3296,6 +6329,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, media, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -3303,7 +6362,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3321,6 +6381,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -3328,7 +6414,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3346,6 +6433,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -3353,7 +6466,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3371,6 +6485,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -3378,7 +6518,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3396,6 +6537,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -3403,7 +6570,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3421,6 +6589,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -3428,7 +6622,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3446,6 +6641,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -3453,7 +6674,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3471,6 +6693,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -3478,7 +6726,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3496,6 +6745,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, media, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -3503,7 +6778,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3521,6 +6797,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -3528,7 +6830,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3546,6 +6849,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -3553,7 +6882,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3571,6 +6901,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -3578,7 +6934,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3596,6 +6953,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -3603,7 +6986,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3621,6 +7005,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -3628,7 +7038,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3646,6 +7057,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -3653,7 +7090,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3671,6 +7109,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -3678,7 +7142,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    not(feature = "bluetooth")
+    not(feature = "bluetooth"),
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3696,6 +7161,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    not(feature = "bluetooth"),
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, brightness, media, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -3703,7 +7194,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3721,6 +7213,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -3728,7 +7246,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3746,6 +7265,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -3753,7 +7298,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3771,6 +7317,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -3778,7 +7350,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3796,6 +7369,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -3803,7 +7402,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3821,6 +7421,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -3828,7 +7454,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3846,6 +7473,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -3853,7 +7506,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3871,6 +7525,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -3878,7 +7558,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3896,6 +7577,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -3903,7 +7610,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3921,6 +7629,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -3928,7 +7662,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3946,6 +7681,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -3953,7 +7714,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3971,6 +7733,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -3978,7 +7766,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -3996,6 +7785,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -4003,7 +7818,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4021,6 +7837,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -4028,7 +7870,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4046,6 +7889,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -4053,7 +7922,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4071,6 +7941,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -4078,7 +7974,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4096,6 +7993,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -4103,7 +8026,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4121,6 +8045,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -4128,7 +8078,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4146,6 +8097,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -4153,7 +8130,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4171,6 +8149,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -4178,7 +8182,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4196,6 +8201,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -4203,7 +8234,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4221,6 +8253,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -4228,7 +8286,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4246,6 +8305,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -4253,7 +8338,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4271,6 +8357,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -4278,7 +8390,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4296,6 +8409,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -4303,7 +8442,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4321,6 +8461,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -4328,7 +8494,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4346,6 +8513,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -4353,7 +8546,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4371,6 +8565,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -4378,7 +8598,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4396,6 +8617,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -4403,7 +8650,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4421,6 +8669,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -4428,7 +8702,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4446,6 +8721,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -4453,7 +8754,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4471,6 +8773,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -4478,7 +8806,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4496,6 +8825,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -4503,7 +8858,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4521,6 +8877,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -4528,7 +8910,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4546,6 +8929,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -4553,7 +8962,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4571,6 +8981,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -4578,7 +9014,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4596,6 +9033,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -4603,7 +9066,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4621,6 +9085,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -4628,7 +9118,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4646,6 +9137,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -4653,7 +9170,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4671,6 +9189,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -4678,7 +9222,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4696,6 +9241,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -4703,7 +9274,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4721,6 +9293,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -4728,7 +9326,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4746,6 +9345,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -4753,7 +9378,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4771,6 +9397,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -4778,7 +9430,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4796,6 +9449,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -4803,7 +9482,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4821,6 +9501,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -4828,7 +9534,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4846,6 +9553,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -4853,7 +9586,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4871,6 +9605,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -4878,7 +9638,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4896,6 +9657,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -4903,7 +9690,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4921,6 +9709,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -4928,7 +9742,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4946,6 +9761,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -4953,7 +9794,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4971,6 +9813,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -4978,7 +9846,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -4996,6 +9865,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -5003,7 +9898,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5021,6 +9917,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -5028,7 +9950,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5046,6 +9969,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -5053,7 +10002,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5071,6 +10021,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -5078,7 +10054,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5096,6 +10073,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -5103,7 +10106,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5121,6 +10125,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -5128,7 +10158,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5146,6 +10177,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -5153,7 +10210,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5171,6 +10229,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -5178,7 +10262,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5196,6 +10281,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -5203,7 +10314,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5221,6 +10333,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -5228,7 +10366,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5246,6 +10385,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -5253,7 +10418,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5271,6 +10437,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -5278,7 +10470,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     not(feature = "media"),
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5296,6 +10489,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    not(feature = "media"),
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -5303,7 +10522,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5321,6 +10541,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -5328,7 +10574,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5346,6 +10593,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -5353,7 +10626,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5371,6 +10645,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -5378,7 +10678,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5396,6 +10697,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -5403,7 +10730,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5421,6 +10749,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -5428,7 +10782,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5446,6 +10801,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -5453,7 +10834,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5471,6 +10853,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -5478,7 +10886,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5496,6 +10905,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -5503,7 +10938,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5521,6 +10957,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -5528,7 +10990,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5546,6 +11009,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -5553,7 +11042,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5571,6 +11061,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -5578,7 +11094,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5596,6 +11113,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -5603,7 +11146,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5621,6 +11165,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -5628,7 +11198,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5646,6 +11217,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -5653,7 +11250,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5671,6 +11269,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -5678,7 +11302,8 @@ macro_rules! modules {
     not(feature = "battery"),
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5696,6 +11321,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -5703,7 +11354,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5721,6 +11373,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -5728,7 +11406,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5746,6 +11425,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -5753,7 +11458,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5771,6 +11477,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -5778,7 +11510,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5796,6 +11529,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -5803,7 +11562,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5821,6 +11581,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -5828,7 +11614,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5846,6 +11633,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -5853,7 +11666,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5871,6 +11685,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -5878,7 +11718,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5896,6 +11737,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -5903,7 +11770,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5921,6 +11789,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -5928,7 +11822,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5946,6 +11841,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -5953,7 +11874,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5971,6 +11893,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, microphone, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -5978,7 +11926,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -5996,6 +11945,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, microphone, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -6003,7 +11978,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6021,6 +11997,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -6028,7 +12030,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6046,6 +12049,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -6053,7 +12082,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6071,6 +12101,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, microphone, network, power
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -6078,7 +12134,8 @@ macro_rules! modules {
     feature = "battery",
     not(feature = "tray"),
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6096,6 +12153,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    not(feature = "tray"),
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, microphone, network, power, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -6103,7 +12186,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6121,6 +12205,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -6128,7 +12238,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6146,6 +12257,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -6153,7 +12290,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6171,6 +12309,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -6178,7 +12342,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6196,6 +12361,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -6203,7 +12394,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6221,6 +12413,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -6228,7 +12446,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6246,6 +12465,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -6253,7 +12498,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6271,6 +12517,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -6278,7 +12550,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6296,6 +12569,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, media, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -6303,7 +12602,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6321,6 +12621,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -6328,7 +12654,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6346,6 +12673,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -6353,7 +12706,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6371,6 +12725,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -6378,7 +12758,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6396,6 +12777,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -6403,7 +12810,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6421,6 +12829,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -6428,7 +12862,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6446,6 +12881,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -6453,7 +12914,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6471,6 +12933,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -6478,7 +12966,8 @@ macro_rules! modules {
     not(feature = "battery"),
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6496,6 +12985,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    not(feature = "battery"),
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: bluetooth, brightness, media, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -6503,7 +13018,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6521,6 +13037,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -6528,7 +13070,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6546,6 +13089,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -6553,7 +13122,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6571,6 +13141,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -6578,7 +13174,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6596,6 +13193,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -6603,7 +13226,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6621,6 +13245,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -6628,7 +13278,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6646,6 +13297,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
@@ -6653,7 +13330,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6671,6 +13349,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, microphone, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     feature = "network",
@@ -6678,7 +13382,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6696,6 +13401,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, media, microphone, network, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
@@ -6703,7 +13434,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6721,6 +13453,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
@@ -6728,7 +13486,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6746,6 +13505,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
@@ -6753,7 +13538,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6771,6 +13557,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, microphone, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
@@ -6778,7 +13590,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6796,6 +13609,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, microphone, power, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
@@ -6803,7 +13642,8 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
@@ -6821,6 +13661,32 @@ macro_rules! modules {
     not(feature = "clock"),
     not(feature = "workspaces"),
     not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, network, power, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
@@ -6828,13 +13694,40 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, network, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, network, power, tray, volume
      --padding N          logical pixels either side of each module, 0 to 1024
                             (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -6853,13 +13746,40 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, microphone, network, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, microphone, network, power, tray
      --padding N          logical pixels either side of each module, 0 to 1024
                             (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -6878,13 +13798,40 @@ macro_rules! modules {
     feature = "battery",
     feature = "tray",
     feature = "media",
-    feature = "bluetooth"
+    feature = "bluetooth",
+    not(feature = "power")
 ))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, microphone, network, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "battery",
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, bluetooth, brightness, media, microphone, network, power, tray, volume
      --padding N          logical pixels either side of each module, 0 to 1024
                             (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -7138,6 +14085,30 @@ macro_rules! bluetooth_help {
     };
 }
 
+// What the power module is, for the help page.
+#[cfg(feature = "power")]
+macro_rules! power_help {
+    () => {
+        "Power (the power module):
+    lock, log out, suspend, reboot and shut down from a popup menu with
+    a confirm step (bind a click to \"popup\" with on-click = \"popup\"):
+    the first click on a row arms it, the second performs it. Lock runs
+    power.lock-command (hidden without one); log out quits scoot (or
+    power.logout-command); the rest call logind over the system bus (or
+    their power.*-command), hidden where logind refuses. Its actions are
+    `lock`, `logout`, `suspend`, `reboot` and `poweroff`, each taking no
+    number; an agent's invoke follows the same two steps. Nothing is
+    shown without an icon (power.icon), and nothing is polled
+"
+    };
+}
+#[cfg(not(feature = "power"))]
+macro_rules! power_help {
+    () => {
+        ""
+    };
+}
+
 pub const USAGE: &str = concat!(
     "\
 scootbar -- status bar for Wayland
@@ -7235,6 +14206,7 @@ Modules:
     tray_help!(),
     media_help!(),
     bluetooth_help!(),
+    power_help!(),
     "
 The config file ($XDG_CONFIG_HOME/scoot/bar.toml, ~/.config/scoot/bar.toml
 without it) holds every option above; `--config PATH` reads another file

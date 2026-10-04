@@ -29,7 +29,12 @@
 #[cfg(any(feature = "bluetooth", test))]
 pub mod bluez;
 pub mod conn;
-#[cfg(any(feature = "tray", feature = "media", feature = "bluetooth"))]
+#[cfg(any(
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
 pub mod link;
 /// The media module's MPRIS shapes, over [`proto`]. Compiled in tests
 /// whatever the features, as the fuzz check reads them.

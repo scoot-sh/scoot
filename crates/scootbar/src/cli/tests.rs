@@ -343,6 +343,7 @@ fn the_help_matches_the_build() {
     let has_battery = crate::modules::find("battery").is_some();
     let has_brightness = crate::modules::find("brightness").is_some();
     let has_bluetooth = crate::modules::find("bluetooth").is_some();
+    let has_power = crate::modules::find("power").is_some();
     assert_eq!(DAEMON_HELP.contains("--clock-format"), has_clock);
     // Battery sorts first, then bluetooth, then brightness, so with the
     // clock the list opens with whichever of them this build has.
@@ -400,9 +401,14 @@ fn the_help_matches_the_build() {
     assert_eq!(DAEMON_HELP.contains("the tray module"), has_tray);
     assert_eq!(DAEMON_HELP.contains("StatusNotifierItem"), has_tray);
     assert_eq!(DAEMON_HELP.contains("tray"), has_tray);
-    // Tray sorts after network, so with both the list names it there.
+    // Tray sorts after network, so with both the list names it there
+    // (after power, when the power module is in the build).
     if has_network && has_tray {
-        assert!(DAEMON_HELP.contains("network, tray"));
+        if has_power {
+            assert!(DAEMON_HELP.contains("network, power, tray"));
+        } else {
+            assert!(DAEMON_HELP.contains("network, tray"));
+        }
     }
     let has_media = crate::modules::find("media").is_some();
     assert_eq!(DAEMON_HELP.contains("the media module"), has_media);
@@ -422,6 +428,17 @@ fn the_help_matches_the_build() {
     // Bluetooth sorts after battery, so with both the list names it there.
     if has_battery && has_bluetooth {
         assert!(DAEMON_HELP.contains("battery, bluetooth"));
+    }
+    assert_eq!(DAEMON_HELP.contains("the power module"), has_power);
+    assert_eq!(DAEMON_HELP.contains("power.lock-command"), has_power);
+    assert_eq!(DAEMON_HELP.contains("power"), has_power);
+    // Power sorts after network and before tray, so with them the list
+    // names it there.
+    if has_network && has_power {
+        assert!(DAEMON_HELP.contains("network, power"));
+    }
+    if has_power && has_tray {
+        assert!(DAEMON_HELP.contains("power, tray"));
     }
     for flag in super::FLAGS {
         assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
