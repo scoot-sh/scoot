@@ -1,4 +1,5 @@
-#!/bin/sh
+#!/usr/bin/env bash
+# bash: its printf expands the \U glyph escapes (dash, Debian's /bin/sh, does not).
 # CPU busy percent every 5 s, from /proc/stat deltas.
 read -r _ a b c d e f g h _ < /proc/stat; pt=$((a+b+c+d+e+f+g+h)); pi=$((d+e))
 while :; do sleep 5

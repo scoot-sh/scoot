@@ -70,20 +70,13 @@ icon = ["\U000F008E", "\U000F007B", "\U000F007E", "\U000F0081", "\U000F0079"]   
 icon-charging = "\U000F0084"
 icon-full = "\U000F0079"
 
-[brightness]
-icon = "\U000F05A8"
-
-[bluetooth]
-icon-off = "\U000F00B2"
-icon-on = "\U000F00AF"
-icon-connected = "\U000F00B1"
-
 [button.terminal]
 icon = "\U000F018D"
 on-click = { exec = ["foot", "--font=FiraCode Nerd Font:size=10"] }
 
 [button.browser]
 icon = "\U000F02AF"
+on-click = { exec = ["firefox"] }   # point this at your browser
 
 [power]
 icon = "\U000F0425"
