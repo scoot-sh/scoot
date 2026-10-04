@@ -607,6 +607,7 @@ fn an_output_snapshot_carries_its_scale_on_the_wire() {
             width: 1920,
             height: 1200,
         },
+        powered: true,
     };
     assert_eq!(
         json_of(&snapshot),
@@ -616,6 +617,7 @@ fn an_output_snapshot_carries_its_scale_on_the_wire() {
             "rect": { "x": 0, "y": 0, "width": 1920, "height": 1200 },
             "scale": 1.5,
             "usable": { "x": 0, "y": 0, "width": 1920, "height": 1200 },
+            "powered": true,
         })
     );
     assert_eq!(
@@ -642,6 +644,7 @@ fn an_output_snapshot_carries_its_usable_rect_on_the_wire() {
             width: 1920,
             height: 1170,
         },
+        powered: true,
     };
     assert_eq!(
         json_of(&snapshot),
@@ -651,6 +654,7 @@ fn an_output_snapshot_carries_its_usable_rect_on_the_wire() {
             "rect": { "x": 0, "y": 0, "width": 1920, "height": 1200 },
             "scale": 1.0,
             "usable": { "x": 0, "y": 30, "width": 1920, "height": 1170 },
+            "powered": true,
         })
     );
 }
@@ -673,6 +677,52 @@ fn an_output_snapshot_from_before_usable_still_decodes() {
             width: 0,
             height: 0
         }
+    );
+}
+
+/// `powered` is additive and defaulted like `scale` before it: an older
+/// server's output snapshot still decodes (as "on" -- such a server could
+/// never power a screen off), and a powered-off snapshot still decodes for
+/// an older client (serde ignores the unknown field) -- which is what keeps
+/// the field off the `PROTOCOL_VERSION`-bump list.
+#[test]
+fn an_output_snapshot_from_before_powered_still_decodes() {
+    let snapshot: OutputSnapshot =
+        decode(r#"{"id":1,"name":"headless","rect":{"x":0,"y":0,"width":1920,"height":1200}}"#)
+            .unwrap();
+    assert!(snapshot.powered);
+
+    #[derive(serde::Deserialize, PartialEq, Debug)]
+    struct OldSnapshot {
+        id: u64,
+    }
+    let raw = r#"{"id":1,"name":"headless","powered":false}"#;
+    let old: OldSnapshot = decode(raw).unwrap();
+    assert_eq!(old, OldSnapshot { id: 1 });
+}
+
+#[test]
+fn an_output_power_request_round_trips() {
+    let request = Request::OutputPower {
+        output: Some(2),
+        powered: false,
+    };
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+    // `all` omits the field, like `screenshot`'s omitted output.
+    let request = Request::OutputPower {
+        output: None,
+        powered: true,
+    };
+    assert_eq!(
+        json_of(&request),
+        json!({"type":"output_power","powered":true})
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
     );
 }
 

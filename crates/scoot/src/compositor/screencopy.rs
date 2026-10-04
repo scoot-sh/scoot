@@ -135,6 +135,20 @@
 //! parked, which is what the protocol's "may wait an indefinite amount of time"
 //! allows, rather than being answered with desktop pixels.
 //!
+//! A powered-off output is the same guarantee through a different gate: its
+//! framebuffer keeps the last drawn frame while the screen is dark, so a
+//! capture due on one is failed with `unknown` rather than served -- the
+//! protocol half of what `screenshot_refusal` is for `scoot msg screenshot`.
+//! `unknown` ("the client may retry") and not `stopped`: the session outlives
+//! the power cycle, and the protocol permits an indefinite wait only past the
+//! first successful frame, so parking a first frame on a screen that may stay
+//! dark would hang a one-shot client (`grim` holds one session per run) where
+//! a fast failure tells the caller to power the screen back on first. In the
+//! power-off-then-lock shape this is what keeps the guarantee airtight: the
+//! lock confirms off the dark output without drawing, and any capture due
+//! between that confirm and the power-on repaint fails instead of serving the
+//! pre-lock desktop the framebuffer still holds.
+//!
 //! ## Cursors
 //!
 //! `create_session`'s `paint_cursors` option is honoured, on every backend
@@ -922,6 +936,34 @@ impl State {
             if capture.due(serials) && capture.output.is_none() {
                 if let Some(frame) = capture.pending.take() {
                     frame.fail(CaptureFailureReason::Stopped);
+                }
+            }
+        }
+        // A powered-off output has no current pixels: its framebuffer keeps
+        // whatever was last drawn there, which may predate the power-off by
+        // an arbitrary amount -- and, across a lock taken while off, the
+        // lock screen itself. Serving it would hand a client a picture
+        // labelled "now" of a screen that is dark, and in the locked case
+        // the very desktop pixels `awaiting_blank` exists to withhold (see
+        // this module's doc). Failed with `unknown` -- "the client may
+        // retry" -- not `stopped`: the session outlives a power cycle, the
+        // way the scanout force-failure and the read-back failures already
+        // treat a transient miss. This is the protocol half of what
+        // `screenshot_refusal` is for IPC: both refuse the stale
+        // framebuffer rather than serve it.
+        //
+        // Only due frames are failed. A parked frame on a static screen that
+        // nothing has changed since is not served stale -- it is not served
+        // at all -- and failing it would end a stream the power-on frame
+        // would have served fresh.
+        let off: Vec<OutputId> = self.output_power.off_ids().to_vec();
+        if !off.is_empty() {
+            for capture in &mut self.screencopy.sessions {
+                if capture.due(serials)
+                    && capture.output.is_some_and(|id| off.contains(&id))
+                    && let Some(frame) = capture.pending.take()
+                {
+                    frame.fail(CaptureFailureReason::Unknown);
                 }
             }
         }

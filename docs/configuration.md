@@ -813,6 +813,39 @@ Three behaviors worth knowing, plus the reload rule:
   skipped-while-locked) and decides the still-pending ones on the first
   unlocked reload instead (see [Reloading the config](#reloading-the-config)).
 
+### Idle: locking and screen power
+
+scoot provides the protocols; the policy is a daemon's config, the swayidle
+way. `spawn` splits on whitespace with no shell and no quoting, so a
+swayidle line (whose quoted subcommands carry spaces) lives in a small
+script the session starts:
+
+```sh
+# ~/.config/scoot/idle.sh
+#!/bin/sh
+exec swayidle timeout 600 'swaylock' timeout 900 'wlopm --off \*' resume 'wlopm --on \*'
+```
+
+(The `\*` is load-bearing: swayidle runs each command through `sh -c`,
+which would glob a bare `*` against its working directory -- the backslash
+reaches `sh` intact inside the single quotes and leaves `wlopm` a literal
+`*`, which is its "every output".)
+
+```toml
+[autostart]
+commands = [
+    "spawn /home/you/.config/scoot/idle.sh",
+]
+```
+
+Lock after ten minutes, panels off after fifteen, back on at the first
+input (`resume` runs on activity, locked or not). The same state is
+drivable over IPC -- `scootctl output-power 1 off`, `scootctl
+output-power all on`, `scootctl outputs` reporting it -- for agents and
+scripts that do not speak Wayland (see [ipc.md](ipc.md#requests) and
+[protocols.md](protocols.md#screen-power)). Input by itself never turns a
+screen back on; only the daemon (or an explicit on) does.
+
 ## `[floating]`
 
 | Field | Type | Default | Meaning |

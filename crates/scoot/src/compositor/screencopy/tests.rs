@@ -509,6 +509,146 @@ fn a_capture_parked_before_a_lock_is_served_from_the_locked_frame() {
     );
 }
 
+#[test]
+fn a_capture_of_a_powered_off_output_is_failed_not_served() {
+    // The framebuffer keeps its last frame while the screen is dark, and
+    // serving it would hand a client a picture labelled "now" of a screen
+    // that is off -- the protocol half of `screenshot_refusal`, which the
+    // IPC path already refuses. Failed with `unknown` (the client may retry
+    // once the screen is back on), not `stopped`: the session outlives the
+    // power state.
+    let mut fixture = Fixture::start();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    let id = fixture
+        .state
+        .outputs
+        .primary_id()
+        .expect("a headless harness has an output");
+    fixture.state.set_output_powered(id, false);
+    assert!(
+        fixture.state.screenshot_refusal(Some(id.0)).is_some(),
+        "the IPC path refuses a powered-off output; the protocol path must agree"
+    );
+
+    let (outcome, captured) = fixture
+        .run(Step::Capture {
+            width: CANVAS,
+            height: CANVAS,
+            format: wl_shm::Format::Argb8888,
+        })
+        .frame();
+
+    assert_eq!(
+        outcome,
+        Outcome::Failed(ext_image_copy_capture_frame_v1::FailureReason::Unknown as u32),
+        "a capture due on a powered-off output must fail, not serve the stale framebuffer"
+    );
+    assert!(
+        captured.chunks_exact(4).all(|pixel| pixel == SENTINEL),
+        "a failed capture must write nothing -- the client keeps its own fill"
+    );
+}
+
+#[test]
+fn a_capture_after_power_off_then_lock_is_failed_not_served() {
+    // The sharper half: power off first (the framebuffer keeps the unlocked
+    // desktop), then lock -- which confirms off the dark output without ever
+    // drawing a blanked frame. A capture taken afterwards, while locked,
+    // must not be served the pre-lock desktop the framebuffer still holds.
+    let mut fixture = Fixture::start();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    let id = fixture
+        .state
+        .outputs
+        .primary_id()
+        .expect("a headless harness has an output");
+    fixture.state.set_output_powered(id, false);
+    fixture.run(Step::Lock);
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "the lock has to have taken for this test to mean anything"
+    );
+
+    let (outcome, captured) = fixture
+        .run(Step::Capture {
+            width: CANVAS,
+            height: CANVAS,
+            format: wl_shm::Format::Argb8888,
+        })
+        .frame();
+
+    assert_eq!(
+        outcome,
+        Outcome::Failed(ext_image_copy_capture_frame_v1::FailureReason::Unknown as u32),
+        "a capture due on a dark output of a locked session must fail, \
+         not serve the pre-lock desktop"
+    );
+    assert!(
+        !captured
+            .chunks_exact(4)
+            .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
+        "no pixel of the unlocked desktop may reach a capture taken while locked"
+    );
+}
+
+#[test]
+fn powering_on_under_lock_presents_the_lock_screen_first() {
+    // The order the normal lock path guarantees, for the dark one: the lock
+    // confirmed while off without drawing, so when the output powers back
+    // on the first presented frame must be the lock screen, never the
+    // desktop the framebuffer held across the dark.
+    let mut fixture = Fixture::start();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    let id = fixture
+        .state
+        .outputs
+        .primary_id()
+        .expect("a headless harness has an output");
+    fixture.state.set_output_powered(id, false);
+    fixture.run(Step::Lock);
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "the lock has to have taken for this test to mean anything"
+    );
+    fixture.state.set_output_powered(id, true);
+
+    let (outcome, captured) = fixture
+        .run(Step::Capture {
+            width: CANVAS,
+            height: CANVAS,
+            format: wl_shm::Format::Argb8888,
+        })
+        .frame();
+
+    assert_eq!(outcome, Outcome::Ready, "powering back on serves again");
+    assert_eq!(
+        captured,
+        fixture.pixels(),
+        "the delivered frame is the framebuffer the power-on tick drew"
+    );
+    assert!(
+        captured
+            .chunks_exact(4)
+            .any(|pixel| pixel == LOCK_BGRA.as_slice()),
+        "the first frame after power-on under lock is the lock screen"
+    );
+    assert!(
+        !captured
+            .chunks_exact(4)
+            .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
+        "no pixel of the desktop the dark framebuffer held may be shown or served first"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // A parked capture across a vblank-deferred lock confirmation (PR #84)
 // ---------------------------------------------------------------------------

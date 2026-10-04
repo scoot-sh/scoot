@@ -115,6 +115,27 @@ pub enum Request {
     Subscribe {
         events: Vec<EventKind>,
     },
+    /// Power an output off or on -- the IPC half of
+    /// `zwlr_output_power_manager_v1`, for agents and idle daemons that do
+    /// not speak Wayland (what `swayidle ... resume 'wlopm --on *'` does over
+    /// the protocol, this does over the socket).
+    ///
+    /// `output` names the output id `outputs` reports; `None` (`all` on the
+    /// command line) means every output. An unknown id is refused with an
+    /// error. Session-level like `outputs`/`reload`/`keyboard`, not an
+    /// `action`: actions are window/focus operations (refused while locked),
+    /// while this is output hardware state -- like gamma it applies while
+    /// locked, which the idle cycle (off after lock, on at resume) needs.
+    ///
+    /// Additive like `Reload`: a client that never sends this tag decodes
+    /// exactly as before, so no `PROTOCOL_VERSION` bump for the request
+    /// half -- and the reply half is the existing `Response::Ok`, so the
+    /// version does not move at all.
+    OutputPower {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<u64>,
+        powered: bool,
+    },
     /// Report the seat keyboard's currently effective layout (xkb group):
     /// its index and the keymap's name for it -- see
     /// [`KeyboardLayout`](crate::KeyboardLayout). What a layout indicator

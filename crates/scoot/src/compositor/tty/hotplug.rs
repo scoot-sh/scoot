@@ -200,6 +200,11 @@ pub(super) fn apply(state: &mut State, changes: Vec<Change>) {
     // A head whose output could not be created is dropped here rather than
     // left driving a CRTC with nothing to show.
     super::retain_attached(state);
+    // A reconfigure re-modesets behind the power state: an output that is
+    // logically off would come back lit. Re-applied here, where every path
+    // that rebuilds heads (hotplug, VT-switch reactivation) funnels
+    // through -- a no-op with no backend or no DRM master.
+    state.reapply_output_power();
 }
 
 /// What [`Tty::reconfigure`] did, and so what its caller still owes the

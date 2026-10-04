@@ -44,9 +44,10 @@ compositor running in a VM.
 | Request | What it does |
 | --- | --- |
 | `version` | Version and IPC protocol of the running compositor — needs a session. `scootctl --version` (or `scoot --version`) answers locally with no session, printing the binaries' own line (`scoot <version> (ipc protocol <N>)`) so a client can check compatibility before connecting. |
-| `outputs` | Every output's name, rectangle, usable rectangle and scale. |
+| `outputs` | Every output's name, rectangle, usable rectangle, scale and power state. |
 | `windows` | Every window: id, app id, title, icon, output, workspace, adoption, focus, popup grab. |
 | `keyboard` | The active keyboard layout's name and index — what a layout indicator shows, and which layout the next `type` will produce. |
+| `output-power ID\|all on\|off` | Switch an output's panel off or on — the IPC half of `zwlr_output_power_v1` (see [protocols.md](protocols.md#screen-power)), for agents and scripts that do not speak Wayland. `all` powers every output at once; an unknown id is refused with an error. Session-level like `outputs`, not an action: it applies while locked (the idle cycle is off-after-lock, on-at-resume). On the wire an additive request tag (`{"type":"output_power","output":1,"powered":false}`, `output` omitted for `all`); `PROTOCOL_VERSION` did not change. |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
 | `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale -- the default and each `[[outputs]]` entry's, appearance, keybindings, new autostart spawn entries; an entry's `mode` is refused as `outputs.<name>.mode`, pending a restart) — see [configuration.md](configuration.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
 | `screenshot [--output ID] [--out FILE] [--no-cursor]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it always means the first output (id 1). The pointer is drawn in unless `--no-cursor` — see [The pointer in a screenshot](#the-pointer-in-a-screenshot). |
@@ -160,6 +161,7 @@ for its modifier only when no key on the layout can hold it.
 | `rect` | The output's full rectangle, in logical pixels. "How big is the screen." |
 | `usable` | The full output minus whatever a bar reserved at its edges (layer-shell exclusive zones) — where windows actually go. "Where can a window be." |
 | `scale` | This output's own scale -- outputs need not share one (see [`[[outputs]]`](configuration.md#outputs)); `rect` and `usable` are logical, screenshots are physical. |
+| `powered` | Whether the output is powered on — `false` while `output-power` (or `wlopm` over `zwlr_output_power_v1`) has it switched off. A powered-off output does no render work and takes no screenshots (refused, naming the recovery). |
 
 **`windows`**, one entry per window, in layout order:
 

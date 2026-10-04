@@ -42,6 +42,7 @@ mod output_clip;
 mod output_config;
 mod output_identity;
 mod output_management;
+mod output_power;
 mod output_scale;
 mod outputs;
 mod pixman_upscale;

@@ -356,6 +356,28 @@ impl State {
                 Some(layout) => Response::Keyboard(layout),
                 None => Response::error("this seat has no keyboard"),
             },
+            // Session-level like `outputs`: output power is hardware
+            // state, not window management, so like gamma -- and unlike
+            // every `Action` -- this applies while locked. The idle cycle
+            // needs it to: off after lock, on at resume, both potentially
+            // under lock. Unknown ids are refused (an agent must know its
+            // change landed); `None` powers every output at once.
+            Request::OutputPower { output, powered } => {
+                let ids: Vec<scoot_core::OutputId> = match output {
+                    Some(wanted) => {
+                        let id = scoot_core::OutputId(wanted);
+                        if self.outputs.get(id).is_none() {
+                            return Response::error(format!("no such output: {wanted}"));
+                        }
+                        vec![id]
+                    }
+                    None => self.outputs.iter_with_ids().map(|(id, _)| id).collect(),
+                };
+                for id in ids {
+                    self.set_output_powered(id, powered);
+                }
+                self.ok()
+            }
             // Refused while the session is locked, and it is the only
             // request here that is. `Action` is the one that bypasses input
             // entirely -- `Spawn` would put a new client's window on a locked
@@ -838,6 +860,11 @@ impl State {
                 // sentinel, and a missing output is the closest thing to
                 // that this server can say.
                 usable: wire(self.world.usable_area(id).unwrap_or_default()),
+                // This side's own power state for the output -- what the
+                // protocol and the `output-power` request agree on. `true`
+                // for an id this side does not have, the same unreachable
+                // case the name covers (an absent output is never off).
+                powered: !self.output_power.is_off(id),
             })
             .collect()
     }

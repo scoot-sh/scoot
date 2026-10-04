@@ -28,6 +28,9 @@ REQUESTS:
                                     what can be re-applied live
     keyboard                        the active keyboard layout's name and
                                     index -- what a layout indicator shows
+    output-power ID|all on|off        switch an output's panel off or on --
+                                     what an idle daemon drives at idle and
+                                     resume (`outputs` reports the state)
     screenshot [--output ID] [--out FILE] [--no-cursor]
                                     the pointer is drawn in unless
                                     --no-cursor

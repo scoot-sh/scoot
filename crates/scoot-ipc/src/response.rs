@@ -49,12 +49,34 @@ pub struct OutputSnapshot {
     /// existed.
     #[serde(default)]
     pub usable: Rect,
+    /// Whether the output is powered on: `false` while
+    /// `zwlr_output_power_v1`/`output-power` has it switched off (no page
+    /// flips, no render work, no frame callbacks -- see
+    /// `docs/protocols.md`'s power section).
+    ///
+    /// Defaulted rather than required, like `scale` above and for the same
+    /// wire reason: adding a field does not change the internally-tagged
+    /// `Response` discriminant an older client keys on, and serde ignores
+    /// an unknown one -- so this strictly adds information without breaking
+    /// a single existing client, which is why it does *not* bump
+    /// `PROTOCOL_VERSION`. Read it asymmetrically: `false` is always
+    /// truthful (only a server new enough to power screens off sends it),
+    /// while `true` means "on, or a server predating the field" (whose
+    /// screens were always on).
+    #[serde(default = "default_powered")]
+    pub powered: bool,
 }
 
 /// The `scale` an [`OutputSnapshot`] carries when the server predates the
 /// field. `1.0` because it is the only scale such a server could have run at.
 fn default_scale() -> f64 {
     1.0
+}
+
+/// The `powered` an [`OutputSnapshot`] carries when the server predates the
+/// field. `true` because such a server could never power a screen off.
+fn default_powered() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -808,6 +808,24 @@ impl SessionLock {
         self.pending.is_some() && expected > 0 && self.confirmed.len() >= expected
     }
 
+    /// Records output `id` as blanked because it was just powered off (see
+    /// `output_power.rs`), reporting whether the wait is now complete like
+    /// [`SessionLock::note_blanked`] does. A dark screen *is* blank -- there
+    /// is nothing of the session on it -- so unlike `note_blanked` this
+    /// skips the undrawn-surface block: no frame will ever be drawn for the
+    /// output while it is off, and waiting for one would hang the locker on
+    /// the fallback timeout. Powering back on resumes drawing locked frames,
+    /// which record the usual way.
+    pub(super) fn note_powered_off(&mut self, id: OutputId, expected: usize) -> bool {
+        if self.pending.is_none() {
+            return false;
+        }
+        if !self.confirmed.contains(&id) {
+            self.confirmed.push(id);
+        }
+        self.confirmed.len() >= expected
+    }
+
     /// Forgets a wait that can no longer confirm anything: the lock it was
     /// recorded for is gone (unlock) or superseded (a fresh `lock`
     /// installing its own `pending`, or the dead-`pending` sweep clearing the
