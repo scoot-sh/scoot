@@ -73,6 +73,20 @@ Proved live with `mac80211_hwsim` (radios=3: station associated to
 hostapd's TestNet0 with TestNet0/1/2 up, two idle radios, three AP-mode
 interfaces): on main the popup lists one wrong network (TestNet1, the
 associated missing); on the branch all three with TestNet0 selected.
-Ratchet: release file unchanged (2,167,520 B), `.text` +1,856
-(+0.11%), idle with network placed 0 wakeups/60 s and level RSS on both
-— the `.text` row is reported, not waived.
+Ratchet (re-measured 2026-10-04 on the review round's code, release
+`lto = "fat"`, stripped, `readelf -S -W`, base `7059028da` vs head, own
+target dirs, `Cargo.lock` identical): release file unchanged
+(2,167,520 B on both), `.text` 1,695,912 vs 1,697,512 (+1,600,
++0.09%) — the +1,856 (+0.11%) first written here reproduced in neither
+this measure nor the independent review's. Idle with network placed 0
+wakeups/60 s and level RSS on both — the `.text` row is waived by the
+maintainer (2026-10-04, given in chat). Nothing else is waived.
+
+Review round (2026-10-04, same PR): two follow-ups, each with a test
+that fails without it — `retarget()` on `DEAUTHENTICATE`/
+`DISASSOCIATE` (the only state mutation that did not re-target, so a
+deauthed radio's scan stayed kept until the next event), and station
+replies attributed to the in-flight dump's interface instead of
+`station_of` (a reply for the old target landed on the new target's
+signal for a dump cycle). Neither adds allocation: the station fix
+reads the already-held in-flight dump.

@@ -744,6 +744,36 @@ both, RSS level, 13 fds and 1 thread both. `Cargo.lock` unchanged.
 exec and push icons is waived.** It covers `.text` +6,528 B (+0.38%) and
 the file's one-page step, and only those rows. Nothing else is waived.
 
+## M6 multi-radio scan (measured 2026-10-04)
+
+The [multi-radio scan filter](../cli.md#network) (PR #422): only the
+shown radio's scan is dumped and listed (the shown interface's where it
+is a scanning station, else the associated station's, else the first
+idle station's), and AP-mode interfaces are never dumped. Release
+builds (`lto = "fat"`, stripped) on the dev VM (aarch64, rustc 1.97.1),
+base `7059028da` against the branch head with the review round's
+follow-ups (`retarget()` on deauth, the in-flight station attribution),
+each built with its own target dir, `readelf -S -W`:
+
+| Build | file bytes | `.text` |
+| --- | --- | --- |
+| base `7059028da` | 2,167,520 | 1,695,912 |
+| branch head | 2,167,520 (+0) | 1,697,512 (+1,600, +0.09%) |
+
+Idle, the network module placed and the popup closed: the ticket's
+ratchet rows read level RSS and 0 wakeups in 60 s on both sides (9 fds,
+1 thread). Nothing in the change adds a timer, a file descriptor or a
+thread — `retarget()` runs on the existing netlink event path, and the
+station fix reads the already-held in-flight dump. `ldd` still shows
+only libc, libm and libgcc_s, and `Cargo.lock` is identical on both
+sides. The +1,600 B matches the independent review's re-measurement;
+the +1,856 B first written in the ticket reproduced in neither.
+
+**Maintainer's ruling (2026-10-04, given in chat): the `.text` growth
+of the multi-radio scan is waived.** It covers `.text` +1,600 B
+(+0.09%) in the default build, and only that row; the file does not
+grow. Nothing else is waived.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`
