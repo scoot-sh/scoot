@@ -110,6 +110,8 @@ pub mod microphone;
 #[cfg(any(feature = "button", feature = "push", feature = "exec"))]
 #[cfg_attr(not(any(feature = "push", feature = "exec")), allow(dead_code))]
 pub mod payload;
+#[cfg(feature = "power")]
+pub mod power;
 #[cfg(feature = "push")]
 pub mod push;
 #[cfg(any(feature = "push", feature = "exec"))]
@@ -544,6 +546,18 @@ pub const REGISTRY: &[Spec] = &[
         #[cfg(test)]
         stand_in: Some(tray::stand_in),
     },
+    #[cfg(feature = "power")]
+    Spec {
+        id: power::ID,
+        init: power::init,
+        actions: power::ACTIONS,
+        // Available on any machine the tests run on: without an icon it
+        // shows nothing, and the bus is only dialled when the popup
+        // first opens, so the contract drives it everywhere with no
+        // stand-in.
+        #[cfg(test)]
+        stand_in: None,
+    },
 ];
 
 /// The registry entry for `id`.
@@ -669,6 +683,8 @@ pub struct Settings {
     pub media: media::Settings,
     #[cfg(feature = "tray")]
     pub tray: tray::Settings,
+    #[cfg(feature = "power")]
+    pub power: power::Settings,
     /// The interaction keys the config sets, by module id: only modules
     /// that bind something are listed.
     pub bindings: Vec<(&'static str, Bindings)>,

@@ -44,7 +44,8 @@ mod custom_tests;
     feature = "brightness",
     feature = "bluetooth",
     feature = "media",
-    feature = "window-title"
+    feature = "window-title",
+    feature = "power"
 ))]
 mod icon;
 #[cfg(all(test, feature = "clock"))]
@@ -337,6 +338,9 @@ struct File {
     /// The bluetooth module's options. Without the `bluetooth` feature
     /// there are none, and any key is a loud error naming it.
     bluetooth: BluetoothFile,
+    /// The power module's options. Without the `power` feature there are
+    /// none, and any key is a loud error naming it.
+    power: PowerFile,
     /// `[button.NAME]`, `[push.NAME]` and `[exec.NAME]`: modules the file
     /// defines, placed by their names (`custom`).
     #[cfg(feature = "button")]
@@ -1201,6 +1205,13 @@ impl File {
                 margins.push((crate::modules::bluetooth::ID, margin));
             }
         }
+        #[cfg(feature = "power")]
+        if let Some(margin) = self.power.margin {
+            let margin = gap(path, "power.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::power::ID, margin));
+            }
+        }
         let layout = self.layout(
             path,
             Gaps {
@@ -1529,6 +1540,10 @@ impl File {
                 &mut modules.bluetooth,
                 &mut modules.bindings,
             )?;
+        }
+        #[cfg(feature = "power")]
+        {
+            apply_power(path, &self.power, &mut modules.power, &mut modules.bindings)?;
         }
         Ok(Config {
             bar: Bar {
@@ -2289,6 +2304,188 @@ struct BluetoothFile {
     #[serde(rename = "on-scroll-up")]
     on_scroll_up: Option<toml::Value>,
     #[cfg(feature = "bluetooth")]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
+}
+
+#[cfg(feature = "power")]
+const POWER_KEYS: [&str; 5] = [
+    "power.on-click",
+    "power.on-right-click",
+    "power.on-middle-click",
+    "power.on-scroll-up",
+    "power.on-scroll-down",
+];
+
+/// The `[power]` table: the icon keys, `rows`, the five `*-command`
+/// overrides and the interaction keys, into the module's settings.
+#[cfg(feature = "power")]
+fn apply_power(
+    path: &Path,
+    table: &PowerFile,
+    settings: &mut crate::modules::power::Settings,
+    bindings: &mut Vec<(&'static str, crate::action::Bindings)>,
+) -> Result<(), Error> {
+    if let Some(rows) = table.rows.as_deref() {
+        let mut hidden = [true; 5];
+        for name in rows {
+            let Some(at) = crate::modules::power::row_index(name) else {
+                return Err(value(
+                    path,
+                    "power.rows",
+                    format_args!(
+                        "takes the rows to show (`{}`), not `{}`",
+                        crate::modules::power::ROW_NAMES.join("`, `"),
+                        name.escape_debug(),
+                    ),
+                ));
+            };
+            hidden[at] = false;
+        }
+        settings.hidden = hidden;
+    }
+    let commands = [
+        ("power.lock-command", &table.lock_command),
+        ("power.logout-command", &table.logout_command),
+        ("power.suspend-command", &table.suspend_command),
+        ("power.reboot-command", &table.reboot_command),
+        ("power.poweroff-command", &table.poweroff_command),
+    ];
+    for (at, &(key, given)) in commands.iter().enumerate() {
+        if let Some(command) = given {
+            // An argv list run directly, never through a shell: the same
+            // bounds the interaction keys' `{ exec = [...] }` holds (at
+            // most 32 arguments of 4096 bytes, no NUL), so a staged
+            // `Action::Exec` always holds its contract.
+            let argv = bindings::exec(command)
+                .map_err(|message| value(path, key, format_args!("{message}")))?;
+            settings.commands[at] = argv;
+        }
+    }
+    let icons = icon::power(table).map_err(|(key, message)| Error::Named {
+        path: path.to_owned(),
+        key,
+        message,
+    })?;
+    settings.icon = icons.icon;
+    settings.row_icons = [
+        icons.lock,
+        icons.logout,
+        icons.suspend,
+        icons.reboot,
+        icons.poweroff,
+    ];
+    let read = bindings::read(
+        crate::modules::power::ID,
+        [
+            table.on_click.as_ref(),
+            table.on_right_click.as_ref(),
+            table.on_middle_click.as_ref(),
+            table.on_scroll_up.as_ref(),
+            table.on_scroll_down.as_ref(),
+        ],
+    )
+    .map_err(|(trigger, message)| {
+        value(
+            path,
+            POWER_KEYS[trigger as usize],
+            format_args!("{message}"),
+        )
+    })?;
+    // A click opens the menu only when bound (`on-click = "popup"`, as
+    // the volume slider's): like every other module, no keys means no
+    // bindings entry at all.
+    if !read.is_empty() {
+        bindings.push((crate::modules::power::ID, read));
+    }
+    Ok(())
+}
+
+/// The power module's options. Without the `power` feature there are
+/// none, and any key is a loud error naming it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct PowerFile {
+    /// Extra logical pixels on each side of the module.
+    #[cfg(feature = "power")]
+    margin: Option<u32>,
+    /// One glyph, drawn with no text (instead of the per-row ones below).
+    #[cfg(feature = "power")]
+    icon: Option<String>,
+    /// SVG path data, drawn with no text (instead of `icon`).
+    #[cfg(feature = "power")]
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    /// The path's viewbox, `min-x min-y width height`; 24 by 24 if absent.
+    #[cfg(feature = "power")]
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// A PNG file, drawn with no text (instead of `icon`). Only in a
+    /// build with the `icon-image` feature: without it the key is taken
+    /// (its value ignored), so that the refusal can say what is missing.
+    #[cfg(all(feature = "power", feature = "icon-image"))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    /// Without the feature the key is still taken (its value ignored), so
+    /// that the refusal can say what is missing, not "unknown field".
+    #[cfg(all(feature = "power", not(feature = "icon-image")))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde::de::IgnoredAny>,
+    /// One glyph each, drawn before its row's label (instead of nothing):
+    /// the lock, log-out, suspend, reboot and shut-down rows. A row with
+    /// none shows its label alone.
+    #[cfg(feature = "power")]
+    #[serde(rename = "icon-lock")]
+    icon_lock: Option<String>,
+    #[cfg(feature = "power")]
+    #[serde(rename = "icon-logout")]
+    icon_logout: Option<String>,
+    #[cfg(feature = "power")]
+    #[serde(rename = "icon-suspend")]
+    icon_suspend: Option<String>,
+    #[cfg(feature = "power")]
+    #[serde(rename = "icon-reboot")]
+    icon_reboot: Option<String>,
+    #[cfg(feature = "power")]
+    #[serde(rename = "icon-poweroff")]
+    icon_poweroff: Option<String>,
+    /// The rows to show: a subset of `lock`, `logout`, `suspend`,
+    /// `reboot` and `poweroff` (all of them, when absent).
+    #[cfg(feature = "power")]
+    rows: Option<Vec<String>>,
+    /// Per-row command overrides: argv lists run directly, never through
+    /// a shell, instead of the row's own path. `lock-command` unset hides
+    /// the lock row (there is no default locker).
+    #[cfg(feature = "power")]
+    #[serde(rename = "lock-command")]
+    lock_command: Option<toml::Value>,
+    #[cfg(feature = "power")]
+    #[serde(rename = "logout-command")]
+    logout_command: Option<toml::Value>,
+    #[cfg(feature = "power")]
+    #[serde(rename = "suspend-command")]
+    suspend_command: Option<toml::Value>,
+    #[cfg(feature = "power")]
+    #[serde(rename = "reboot-command")]
+    reboot_command: Option<toml::Value>,
+    #[cfg(feature = "power")]
+    #[serde(rename = "poweroff-command")]
+    poweroff_command: Option<toml::Value>,
+    /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
+    /// or `{ scoot = "..." }`.
+    #[cfg(feature = "power")]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(feature = "power")]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(feature = "power")]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(feature = "power")]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(feature = "power")]
     #[serde(rename = "on-scroll-down")]
     on_scroll_down: Option<toml::Value>,
 }

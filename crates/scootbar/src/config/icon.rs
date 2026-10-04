@@ -5,8 +5,9 @@
 //! [`read`] (the modules that follow, volume, battery, will); volume adds
 //! its static icon through [`volume`], battery and brightness add one glyph
 //! or one per level through [`battery`] and [`brightness`], and the network,
-//! bluetooth and media modules add their static icons plus one glyph per
-//! state through [`network`], [`bluetooth`] and [`media`].
+//! bluetooth, media and power modules add their static icons plus one glyph
+//! per state — per row for power — through [`network`], [`bluetooth`],
+//! [`media`] and [`power`].
 
 #[cfg(any(feature = "clock", feature = "icon-image"))]
 use std::path::Path;
@@ -497,6 +498,62 @@ pub(super) struct NetworkIcons {
     pub wifi: Option<crate::modules::network::WifiIcon>,
     pub vpn: Option<Icon>,
     pub offline: Option<Icon>,
+}
+
+/// What [`power`] read: the static icon and the per-row glyphs.
+#[cfg(feature = "power")]
+pub(super) struct PowerIcons {
+    pub icon: Option<Icon>,
+    #[cfg_attr(not(feature = "popup"), allow(dead_code))]
+    pub lock: Option<Icon>,
+    #[cfg_attr(not(feature = "popup"), allow(dead_code))]
+    pub logout: Option<Icon>,
+    #[cfg_attr(not(feature = "popup"), allow(dead_code))]
+    pub suspend: Option<Icon>,
+    #[cfg_attr(not(feature = "popup"), allow(dead_code))]
+    pub reboot: Option<Icon>,
+    #[cfg_attr(not(feature = "popup"), allow(dead_code))]
+    pub poweroff: Option<Icon>,
+}
+
+/// The power table's icons, if its section gives any: the static icon
+/// (shown on the bar, with no text) and one glyph per row (`icon-lock`,
+/// `icon-logout`, `icon-suspend`, `icon-reboot`, `icon-poweroff`), each
+/// drawn before its row's label. A row with none shows its label alone.
+/// `Err` is the dotted key at fault and why.
+#[cfg(feature = "power")]
+pub(super) fn power(table: &super::PowerFile) -> Result<PowerIcons, (String, String)> {
+    #[cfg(feature = "icon-image")]
+    let image = table.icon_image.as_deref();
+    #[cfg(not(feature = "icon-image"))]
+    let image = table.icon_image.as_ref().map(|_| "");
+    let icon = read(
+        "power",
+        "a power menu",
+        &Keys {
+            icon: table.icon.as_deref(),
+            icon_path: table.icon_path.as_deref(),
+            icon_viewbox: table.icon_viewbox.as_deref(),
+            icon_image: image,
+        },
+    )?;
+    // One glyph each, like `icon` itself: a per-row path or picture
+    // would need three keys per row, and a row with none shows its label
+    // alone.
+    let glyph = |name: &str, text: Option<&str>| match text {
+        None => Ok(None),
+        Some(text) => parse_glyph(text)
+            .map(|c| Some(Icon::Glyph(c)))
+            .map_err(|message| (format!("power.{name}"), message)),
+    };
+    Ok(PowerIcons {
+        icon,
+        lock: glyph("icon-lock", table.icon_lock.as_deref())?,
+        logout: glyph("icon-logout", table.icon_logout.as_deref())?,
+        suspend: glyph("icon-suspend", table.icon_suspend.as_deref())?,
+        reboot: glyph("icon-reboot", table.icon_reboot.as_deref())?,
+        poweroff: glyph("icon-poweroff", table.icon_poweroff.as_deref())?,
+    })
 }
 
 /// The icon the keys of table `prefix` (`clock`, `button.launcher`) name,

@@ -64,6 +64,17 @@ fn resolve(explicit: Option<OsString>, runtime_dir: Option<OsString>) -> Option<
     })
 }
 
+/// Where scoot's socket is, if the environment names one: `SCOOT_SOCKET`,
+/// else `scoot.sock` in `XDG_RUNTIME_DIR`. The power module probes it to
+/// say whether quitting through scoot is there to offer.
+#[cfg(feature = "power")]
+pub(crate) fn socket_path() -> Option<PathBuf> {
+    resolve(
+        std::env::var_os(SOCKET_ENV),
+        std::env::var_os("XDG_RUNTIME_DIR"),
+    )
+}
+
 /// Sends `action` to the scoot this session runs.
 pub fn send(action: ScootAction) -> Result<(), String> {
     let path = resolve(

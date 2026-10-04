@@ -24,7 +24,12 @@ mod color;
 mod config;
 mod control;
 mod daemon;
-#[cfg(any(feature = "tray", feature = "media", feature = "bluetooth"))]
+#[cfg(any(
+    feature = "tray",
+    feature = "media",
+    feature = "bluetooth",
+    feature = "power"
+))]
 mod dbus;
 mod density;
 mod font;

@@ -18,7 +18,7 @@ license.workspace = true
 # module draws a plain bar and needs no font. `icon-image` is the one
 # feature that is not a module: it is an optional decoder (below).
 [features]
-default = ["clock", "workspaces", "window-title", "volume", "microphone", "network", "brightness", "battery", "tray", "media", "bluetooth", "button", "push", "exec", "popup"]
+default = ["clock", "workspaces", "window-title", "volume", "microphone", "network", "brightness", "battery", "tray", "media", "bluetooth", "button", "push", "exec", "popup", "power"]
 clock = []
 workspaces = []
 window-title = []
@@ -54,6 +54,10 @@ media = []
 # client of the shared D-Bus client, signals only
 # (docs/scootbar/backlog/bluetooth-module.md).
 bluetooth = []
+# Lock, log out, suspend, reboot and shut down from a popup menu with a
+# confirm step, over logind on the system bus where it applies
+# (docs/scootbar/backlog/power-menu.md).
+power = []
 # The three modules the config defines by name (`[button.NAME]`,
 # `[push.NAME]`, `[exec.NAME]`): extend the bar without Rust. `push` and
 # `exec` share the update payload (`src/modules/payload.rs`).

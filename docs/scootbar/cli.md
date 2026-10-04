@@ -376,6 +376,7 @@ cannot:
 | `tray` | The applications' tray icons, StatusNotifierItem ([below](#tray)) | on the session bus's traffic: item registrations, icon changes, owners vanishing |
 | `media` | What the players on the session bus are playing, and their controls, over MPRIS ([below](#media)) | on the bus's MPRIS traffic only: a player appearing or vanishing, its track or state changing |
 | `bluetooth` | The adapter's power and the connected devices over BlueZ, on the system bus ([below](#bluetooth)) | on the bus's BlueZ traffic only: BlueZ appearing or leaving, an adapter or device coming or going, power, connection, name or charge changing |
+| `power` | Lock, log out, suspend, reboot and shut down from a popup menu with a confirm step ([below](#power)) | on nothing while closed: the popup's `Can*` round trips and its own replies only |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
@@ -1222,9 +1223,94 @@ has none of it.
   loaded sections (+3.6%, of which `.text` +58,400 B)** against `main`;
   the feature built but off is +3,032 B loaded and no more on disk. The
   size row is the same shape as every module before it, and the rule's own
-  exception covers only a row the module adds, so it is a regression for
-  the maintainer to waive or not. The table and its method are in the
-  [resource ratchet](backlog/lightest.md#m6-bluetooth-module-level-cost-measured-2026-10-03).
+   exception covers only a row the module adds, so it is a regression for
+   the maintainer to waive or not. The table and its method are in the
+   [resource ratchet](backlog/lightest.md#m6-bluetooth-module-level-cost-measured-2026-10-03).
+
+## Power
+
+Lock, log out, suspend, reboot and shut down from a popup menu with a
+confirm step, so a stray click never ends the session (a bare
+`[button.power]` with `on-click = { scoot = "quit" }` does that today, on
+one click). A Cargo feature (`power`), on by default.
+
+- **What it shows** is one icon and no text. Without an icon the module
+  shows nothing and takes no space: set one (the example is MDI power,
+  U+F0425, in a Nerd Font):
+
+```toml
+[power]
+icon = "\U000F0425"
+on-click = "popup"
+```
+
+  A click bound to `popup` opens the menu (as the volume slider's: with no
+  binding a click does nothing). The tooltip names the rows shown, so a
+  hover says what a click offers.
+
+- **The menu** is one row per action — Lock, Log out, Suspend, Reboot,
+  Shut down — each with an optional glyph before its label (`icon-lock`,
+  `icon-logout`, `icon-suspend`, `icon-reboot`, `icon-poweroff`, each one
+  glyph like `icon` itself; a row with none shows its label alone).
+- **Confirm.** Lock runs at once; every other row arms on its first click
+  (only that row: its label becomes "…? Click again") and performs on a
+  second click on the same row within 5 seconds, closing the popup.
+  Clicking another row re-arms to it, and waiting disarms. The arm
+  survives refills and reopens (arming lengthens the row, which resizes
+  the popup, which reopens it — disarming on a fill would make the arm
+  invisible): reopening within the window shows the armed row with its
+  explicit confirm label, never a hidden trap, and the window bounds any
+  staleness.
+- **What each row does.** Every row is overridable with a `*-command`
+  argv list, run directly and never through a shell (`lock-command`,
+  `logout-command`, `suspend-command`, `reboot-command`,
+  `poweroff-command`, each at most 32 arguments of 4096 bytes, no NUL),
+  and hideable with `rows` (a subset of `lock`, `logout`, `suspend`,
+  `reboot`, `poweroff`; all of them when absent):
+  - Lock runs `lock-command`. There is no default and the row is hidden
+    without one: no locker fits every session, and guessing would fail
+    or run the wrong one.
+  - Log out runs `logout-command` when set, else quits scoot over its
+    control socket (the button modules' path). Without a command and
+    with scoot unreachable the row is absent from the menu, and an
+    invoke of it is refused aloud, rather than flapping with the socket.
+  - Suspend, reboot and shut down run their command when set, else call
+    logind over the system bus (`Suspend`/`Reboot`/`PowerOff` with
+    `interactive: true`, so polkit decides). A row whose `CanSuspend`,
+    `CanReboot` or `CanPowerOff` answers `no` or `na` is hidden (asked
+    when the popup opens — answers older than a minute are re-asked —
+    not per frame or per refill); `yes`, `challenge` (the action call
+    drives authentication), an unknown answer, or no bus yet shows it. A refused call is kept as the module's last error — said on
+    stderr when it arrives, shown as the popup's first line, in the
+    tooltip and in `query` — never silently.
+- **An agent's `invoke` follows the same two steps** (`scootbar msg
+  invoke power logout` arms; a second within 5 seconds performs). A
+  single invoke never ends the session: the confirm guards the
+  pointer's stray click, and the programmatic caller is already explicit
+  — but a buggy agent's stray single call is the same lost work, so the
+  menu does not trust it either. The direct path for an agent that means
+  it stays `scoot msg action quit`, one explicit call with no confirm.
+- **`query`** reports the rows shown, the armed one if any, and the last
+  failure: `{"rows": ["lock", "logout", "reboot"], "armed": "reboot",
+  "error": "logind refused reboot: ..."}`.
+- **Options.** `[power]` takes `icon` (plus `icon-path`, `icon-viewbox`
+  and `icon-image`, at most one, as the clock's), the five per-row
+  glyphs, `rows`, the five `*-command` lists, `margin` and the five
+  [interaction keys](#pointer-input).
+- **Idle cost: nothing while closed.** The system-bus connection is made
+  when the popup first opens (or an invoke first needs logind), never at
+  start: a bar whose menu is never opened holds no bus fd and makes no
+  round trips (measured: zero sources before first use). Afterwards one
+  connection stays, woken only by its own replies; no match rules are
+  installed, so nothing else on the system bus wakes the bar.
+- **Bounds, for a hostile logind.** On a bus without logind anything can
+  own `org.freedesktop.login1` and say anything. What the code
+  guarantees: it cannot crash or hang the bar (a reply that does not
+  parse keeps the last state, said once per connection; one that errors
+  or never comes keeps what was shown, or records the action's error);
+  an answer other than `yes`/`challenge`/`no`/`na` never hides a row;
+  the error text kept is cut to 256 bytes. Replies are matched by serial
+  and sender like every other call.
 
 
 ## Pointer input
@@ -1765,12 +1851,12 @@ An icon is drawn before a module's text, `em` device pixels on a side (the size
 of the text, at the output's real scale, so it is sharp at 1.5x and never a
 smaller bitmap stretched), with a space after it when text follows. Three keys
 give one, at most one of them per module; the clock, `button`, volume,
-microphone, network, battery, brightness, bluetooth, media and window-title
-modules take them, and most of those take one glyph per state or level
-besides ([below](#per-state-and-per-level-icons)). The workspaces module
-takes none: its numbers and pill are the content, and an icon would say
-nothing (per-workspace icons would need the compositor to name one, and no
-protocol carries any).
+microphone, network, battery, brightness, bluetooth, media, window-title
+and power modules take them, and most of those take one glyph per state
+or level besides ([below](#per-state-and-per-level-icons)). The workspaces
+module takes none: its numbers and pill are the content, and an icon would
+say nothing (per-workspace icons would need the compositor to name one,
+and no protocol carries any).
 
 | Key | Takes | Drawn |
 | --- | --- | --- |
@@ -1828,6 +1914,7 @@ vector or PNG icons are out of scope.
 | `bluetooth` | `icon-off`, `icon-on`, `icon-connected` | the state |
 | `media` | `icon-playing`, `icon-paused` | the state (a stopped player shows nothing, so there is no third key) |
 | `window-title` | `icon` | one static glyph, whenever a window is focused (never for the placeholder) |
+| `power` | `icon`, plus `icon-lock`, `icon-logout`, `icon-suspend`, `icon-reboot`, `icon-poweroff` | one glyph per menu row, drawn before its label; a row with none shows its label alone |
 
 `show-text = false` draws only the icon, with the text moved into the
 tooltip — which already names what the text said on every one of these
@@ -1869,6 +1956,9 @@ icon = "\U000F08C6"            # application
 
 [network]
 icon-wifi = ["\U000F091F", "\U000F0922", "\U000F0925", "\U000F0928"]   # wifi-strength-1..4: weakest to strongest
+
+[power]
+icon = "\U000F0425"   # power
 ```
 
 ## Colors

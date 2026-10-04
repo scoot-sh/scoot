@@ -421,7 +421,8 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
                 placed.ready(source, *flags);
             }
         }
-        // A module's hook (the battery module's low-battery command):
+        // A module's hook (the battery module's low-battery command, the
+        // power module's confirmed row: a command or scoot's `quit`):
         // taken once and carried out like a binding, through the same
         // effects, so what the loop runs for a module and for a click
         // cannot diverge.

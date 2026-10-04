@@ -1391,3 +1391,93 @@ fn a_bluetooth_section_without_the_feature_is_refused() {
         .to_string();
     assert!(error.contains("menu-command"), "{error}");
 }
+
+#[test]
+#[cfg(feature = "power")]
+fn a_power_section_is_read_whole() {
+    let modules = read("").unwrap().modules.power;
+    assert_eq!(modules, crate::modules::power::Settings::default());
+    assert!(modules.icon.is_none());
+    assert!(modules.commands.iter().all(Vec::is_empty));
+    assert!(modules.hidden.iter().all(|hidden| !hidden));
+    let config = read(
+        "left = [\"power\"]\n\
+         [power]\n\
+         icon = \"⏻\"\n\
+         icon-logout = \"l\"\n\
+         rows = [\"lock\", \"logout\"]\n\
+         lock-command = [\"loginctl\", \"lock-session\"]\n\
+         logout-command = [\"sh\", \"-c\", \"x\"]\n\
+         on-right-click = \"logout\"\n",
+    )
+    .unwrap();
+    assert!(config.layout.left.contains(&"power"));
+    assert_eq!(
+        config.modules.power.icon,
+        Some(crate::icon::Icon::Glyph('⏻'))
+    );
+    assert_eq!(
+        config.modules.power.row_icons[1],
+        Some(crate::icon::Icon::Glyph('l'))
+    );
+    assert_eq!(
+        config.modules.power.hidden,
+        [false, false, true, true, true]
+    );
+    assert_eq!(
+        config.modules.power.commands[0],
+        ["loginctl", "lock-session"]
+    );
+    // The click binding is the popup's, as read.
+    let bindings = config.modules.bindings_of("power");
+    assert!(!bindings.is_empty());
+    // An explicit click binding wins over nothing: no keys means no
+    // bindings entry at all.
+    let config = read("[power]\n").unwrap();
+    assert!(config.modules.bindings_of("power").is_empty());
+}
+
+#[test]
+#[cfg(feature = "power")]
+fn a_power_section_is_refused_loudly() {
+    for (text, key) in [
+        ("[power]\nrows = [\"quit\"]\n", "power.rows"),
+        ("[power]\nicon = \"ab\"\n", "power.icon"),
+        ("[power]\nicon-lock = \"\"\n", "power.icon-lock"),
+        (
+            "[power]\nicon = \"⏻\"\nicon-path = \"M0 0h24v24H0z\"\n",
+            "power.icon-path",
+        ),
+        ("[power]\nlock-command = [\"\"]\n", "power.lock-command"),
+        ("[power]\nwhatever = 1\n", "whatever"),
+        // The actions take no number, and there is no `quit`.
+        ("[power]\non-click = \"logout 2\"\n", "power.on-click"),
+        ("[power]\non-click = \"quit\"\n", "power.on-click"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+    // An argument past the bound names its key.
+    let long = "x".repeat(crate::action::MAX_EXEC_ARG + 1);
+    let error = read(&format!("[power]\nsuspend-command = [\"s\", \"{long}\"]\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("power.suspend-command"), "{error}");
+    // Type errors come from the TOML layer and name the key without its
+    // section.
+    let error = read("[power]\nlock-command = \"loginctl\"\n")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("lock-command"), "{error}");
+}
+
+/// Without the feature the section is a loud error naming the key, as the
+/// missing flag would be.
+#[test]
+#[cfg(not(feature = "power"))]
+fn a_power_section_without_the_feature_is_refused() {
+    let error = read("[power]\nlock-command = [\"loginctl\"]\n")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("lock-command"), "{error}");
+}
