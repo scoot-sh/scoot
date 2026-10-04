@@ -132,8 +132,11 @@ fi
 # compositor answering IPC lies up to a minute of silence, and a live
 # session can be briefly too busy to answer one probe. So silence
 # alone never means death -- only the lock holder may say so. Lock
-# held by another launcher means live: refuse whatever IPC says. Lock
-# acquired here, with the units active and IPC silent, means stale:
+# held by another launcher means starting or live: refuse at once,
+# whatever IPC or the units say (the holder takes the lock before
+# importing the environment, well before `start`, so the units may
+# not be active yet). Lock acquired here, with the units active and
+# IPC silent, means stale:
 # heal. The kernel releases the lock on SIGKILL (and every exit
 # closes the fd), which is exactly the stale case healing exists for;
 # power loss leaves the file behind but unlocked.
@@ -153,7 +156,9 @@ fi
 # consult, so there is no healing: an active session is refused as
 # live (the pre-healing behaviour), never cleared blind.
 have_lock=0
+have_flock=0
 if command -v flock >/dev/null 2>&1; then
+    have_flock=1
     exec 9>"$XDG_RUNTIME_DIR/scoot-session.lock" \
         || die "cannot open $XDG_RUNTIME_DIR/scoot-session.lock"
     if flock -n 9 2>/dev/null; then
@@ -163,6 +168,18 @@ else
     note "no flock(1) on PATH; stale-session healing disabled (an active session is refused as live)"
 fi
 
+# A lock held by another launcher means a session is starting or
+# live: refuse at once, whatever the units' state. The holder takes
+# the lock before importing the environment, well before `start`, so
+# arriving here while no unit is active yet is the normal shape of a
+# second login racing the first -- without this, both launchers would
+# start and wait on the same service, both importing the display and
+# both tearing down on exit. (Without `flock(1)` there is no lock to
+# consult, so the old refuse-when-active behaviour below stands.)
+if [ "$have_flock" -eq 1 ] && [ "$have_lock" -eq 0 ]; then
+    die "a scoot session is already starting or running for this user"
+fi
+
 if systemctl --user --quiet is-active "$SERVICE" "$GRAPHICAL"; then
     # A live session refuses: two live scoot sessions for one user on
     # one seat is still wrong. A stale one -- units left active with
@@ -170,8 +187,9 @@ if systemctl --user --quiet is-active "$SERVICE" "$GRAPHICAL"; then
     # power loss: paths no trap can cover, and the kernel already
     # released the lock) -- is cleared instead, or every later login
     # would be refused until someone runs systemctl from a VT.
-    # Whoever else holds the lock is live -- starting, or briefly too
-    # busy to answer one probe -- so refuse without probing at all.
+    # No lock to consult here (`flock(1)` missing: a lock held by
+    # another launcher already refused above, before probing) -- so
+    # refuse an active session as live, never clear blind.
     if [ "$have_lock" -eq 0 ]; then
         die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
     fi

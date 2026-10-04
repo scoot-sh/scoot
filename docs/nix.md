@@ -419,16 +419,21 @@ With the default entry, picking scoot at the greeter runs
 `<package>/bin/scoot-session`, the session launcher
 (`resources/scoot-session`, shipped beside the binary):
 
-1. It refuses while a live scoot session is already active for the
-   user (`scoot.service` or `graphical-session.target` active *and*
-   the compositor answering IPC), so a second login cannot fight the
-   first over the user manager. A second login must not judge an
-   IPC-silent session stale on its own: the launcher holds
+1. It refuses while another scoot login is still starting or a
+   live session is already active for the user (a lock held by
+   another launcher refuses at once, even before that launcher has
+   started any unit; otherwise `scoot.service` or
+   `graphical-session.target` active *and* the compositor answering
+   IPC), so a second login cannot fight the first over the user
+   manager. A second login must not judge an IPC-silent session stale
+   on its own: the launcher holds
    `scoot-session.lock` under `$XDG_RUNTIME_DIR` from before that
-   check until it exits, so a login arriving during the first's
+   check until it exits, so a login arriving while the first is
+   still importing its environment (no unit active yet), during its
    up-to-a-minute startup silence (or against a single slow answer
    from a busy session) finds the lock held and refuses instead of
-   stopping a live session — lock held means live, whatever IPC says.
+   stopping a live session — lock held means starting or live,
+   whatever the units or IPC say.
    Units left active with no lock holder by a launcher that died
    without cleanup (SIGKILL, power loss — the kernel releases the
    lock, which is the stale case) are stale, not live: when the lock
