@@ -65,21 +65,32 @@ Every merge to `main` builds and pushes the same set for `x86_64-linux`
 and `aarch64-linux` (`.github/workflows/nix-build.yml`) and pushes them
 to the public Cachix cache **`scoot-sh`**
 (`https://scoot-sh.cachix.org`): `scoot` (the
-GPU-free default), `scoot-gpu-xwayland` (the full build: `gpu-scanout` and
-`xwayland` features plus Xwayland on `PATH`), `scootctl`, `scootbg`,
-`scootbar` and `scootbar-demo`. Without the cache, installing from the
-flake compiles Smithay from scratch (about 5 minutes on 4 cores). Only
+GPU-free default), `scoot-gpu` and `scoot-xwayland` (the in-between
+variants: the `gpu-scanout` and `xwayland` build features),
+`scoot-gpu-xwayland` (the full build: both features plus Xwayland on
+`PATH`), `scootctl`, `scootbg`, `scootbar` and `scootbar-demo`. Without
+the cache, installing from the flake downloads the compiled-dependencies
+artifact (Smithay and the forks included, about one Smithay compile the
+first time, then cached) and compiles only scoot's own crates on top
+(about a minute or two on 4 cores). Only
 merges to `main` push: manual workflow runs build without publishing --
 their Cachix step carries no auth token at all (only the push-to-`main`
 step receives `CACHIX_AUTH_TOKEN`), so a manual run cannot publish even
 if its build were tampered with -- and pull-request code never reaches a
 cache users trust.
 
-Anything else builds locally from source: a `scootbar.override` feature
-set, or the in-between compositor variants `scoot-gpu` and
-`scoot-xwayland` (left out of CI because each would cost another full
-Smithay compile per push per architecture until
-[crane](backlog/packaging/nix-crane.md) lands).
+The builds are split crane-style (`flake.nix`): one
+compiled-dependencies derivation per Cargo feature set (four in all: the
+base set plus one per compositor feature combination), which the cache
+keeps and every package build reuses until `Cargo.lock` or a fork rev
+changes. So a code-only merge rebuilds only scoot's own crates per
+package, and the in-between variants cost one small compile each -- which
+is why they are in the cached set (before crane, each would have bought
+another full Smithay compile per push per architecture).
+
+Anything else builds locally from source but over the same cached
+dependencies: a `scootbar.override` feature set compiles only the bar's
+own crates, whatever modules it names.
 
 The flake declares the cache in its own `nixConfig` (`flake.nix`), but a
 flake's `nixConfig` is not silently trusted: Nix asks whether to accept it
