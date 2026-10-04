@@ -1,9 +1,10 @@
 ---
 title: "Nix: a wallpaper color beside Stylix's image is refused, and only the log says so"
-status: "open"
-area: "packaging"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-04"
 ---
 
 # Nix: a wallpaper color beside Stylix's image is refused, and only the log says so
@@ -46,3 +47,30 @@ though nothing reads it since the accent moved to `base0D`. Drop both.
 
 Changing scootbg to prefer `color` over `image` instead of refusing: a
 deliberate strictness (a typo is an error, not silently ignored).
+
+## Resolution
+
+Took the first option: `programs.scoot.stylix.wallpaper.enable`
+(default true) in `nix/modules/home.nix` gates just the Stylix
+`[wallpaper]` `image`/`mode` defaults. Set it to `false` to choose your
+own wallpaper color; the themed `[appearance]` and cursor defaults stay.
+The condition reads the explicit switch, not the merged
+`settings.wallpaper`, so evaluation stays acyclic (a home-manager
+assertion on the merged section would cycle the same way). Documented in
+`docs/nix.md` (Stylix section + home-manager options table) and
+`docs/configuration.md` (`[wallpaper]`). Also dropped the dead `base0A`
+slot from the `nix/scootbar-tests.nix` Stylix stub and its inherit in
+`scripts/scootbar-stylix-test.sh` (nothing read it since the accent
+moved to `base0D`).
+
+Evidence: `nix build .#checks.aarch64-linux.scoot-modules` green on the
+Asahi M2, including new pins (`hmStylixWallpaperOff`: no `[wallpaper]`
+table, `wallpaper.enable` off, no scootbg, appearance still Stylix's;
+`hmStylixColor`: user `color = "#101014"` with Stylix's image set renders
+just the color; file-content check 9b) that fail before the fix
+(`nix/modules/home.nix` reverted: `The option
+'programs.scoot.stylix.wallpaper' does not exist`, exit 1) and pass
+after; `nix eval
+.#checks.aarch64-linux.scootbar-modules.drvPath` green (stub still
+satisfies every check); `nix fmt -- --check` clean on the three changed
+`.nix` files.

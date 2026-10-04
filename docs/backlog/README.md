@@ -409,7 +409,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [A Nix binary cache for users](./packaging/nix-binary-cache.md) — medium: `nix run` without a cold Smithay compile; distinct from CI's recorded no-store-cache decision
 - [Arch packages](./packaging/arch-package.md), [Debian and Ubuntu packages](./packaging/deb-package.md), [RPM packages](./packaging/rpm-package.md) — low, blocked on the three above
 - [A Stylix target for the compositor](./resolved/scoot-stylix-target-done.md) — medium (M6): window borders, background, cursor and wallpaper from the scheme, the way `programs.scootbar` already themes the bar — RESOLVED 2026-10-03 (PR #407)
-- [Nix: a wallpaper color beside Stylix's image is refused, and only the log says so](packaging/stylix-wallpaper-color-trap.md) (low): from the #407 review
+- [Nix: a wallpaper color beside Stylix's image is refused, and only the log says so](./resolved/stylix-wallpaper-color-trap-done.md) (low): from the #407 review — RESOLVED 2026-10-04
 - [Publish: binaries on Cachix, the flake on FlakeHub](resolved/nix-publishing-done.md) (medium) — RESOLVED 2026-10-04 in #410
 - [Nix: crane, so compiled dependencies are cached](./resolved/nix-crane-done.md) — medium: was ready once Cachix received pushes — RESOLVED 2026-10-04 in #420
 - [A user-facing docs site, with internal notes moved out of docs/](packaging/docs-site.md) (medium): an outline for the maintainer first
