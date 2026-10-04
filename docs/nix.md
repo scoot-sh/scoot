@@ -555,8 +555,12 @@ One screen, not the whole layout: cage spans every output by default
 ReGreet's window covers the layout bounding box and the login card lands
 near one screen's edge. This module sets `cageArgs` to `[ "-s" "-d" "-m"
 "last"` instead — cage on a single output, the shape nixpkgs documents
-as its own `cageArgs` example — at `mkDefault` priority, so anything you
-set wins and nixpkgs' spanning default loses. Back to spanning with
+as its own `cageArgs` example — at `mkDefault` priority, so a value you
+set plainly wins and nixpkgs' spanning default loses (a second
+`mkDefault` would be merged with this list, not replace it). "Last"
+means the most recently connected output, re-chosen on every hotplug:
+with the laptop alone the card is on its panel, and plugging a monitor
+in moves the greeter there until it is unplugged. Back to spanning with
 `services.displayManager.regreet.cageArgs = [ "-s" "-d" ];`.
 
 Theming: `greeter.background` becomes ReGreet's `background.path` (the
