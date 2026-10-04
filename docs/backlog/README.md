@@ -267,6 +267,7 @@ falsify. Read `flexwm` there as `scoot`.
   mouse having to move; recognition is one branch plus one typemap probe,
   zero new state
 - [`ext-workspace-v1` `urgent` state bit](./protocols/ext-workspace-urgent-state.md) — low, filed 2026-09-29 (scootbar planning); needs a policy decision first, since an xdg-activation request always focuses today
+- [Turn screens off when idle (`wlr-output-power-management`)](./resolved/output-power-management-done.md) — RESOLVED 2026-10-04 (daily-drive: idle Asahi laptop keeps both panels lit; agent IPC half included)
 - [Smaller/general protocol gaps (bundled)](./protocols/protocol-gaps-general.md)
 - [Niche protocol gaps (bundled)](./protocols/protocol-gaps-niche.md)
 
