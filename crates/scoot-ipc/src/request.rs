@@ -69,6 +69,9 @@ pub enum Request {
         #[serde(default)]
         button: PointerButton,
     },
+    /// Scroll by a delta, sent as a wheel scroll that also carries its
+    /// detents (eight v120 units per delta unit), so clients that only
+    /// listen for steps still see it.
     Scroll {
         dx: f64,
         dy: f64,

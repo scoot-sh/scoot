@@ -53,7 +53,7 @@ compositor running in a VM.
 | `pointer move X Y` | Move the pointer to logical coordinates. |
 | `pointer click X Y [left\|right\|middle]` | Move, then press and release. |
 | `pointer button left\|right\|middle press\|release` | Half a click, for drags. |
-| `pointer scroll DX DY` | Scroll by a delta. |
+| `pointer scroll DX DY` | Scroll by a delta. Sent as a wheel scroll that also carries its detents (eight v120 units per delta unit, so `pointer scroll 0 15` is exactly one detent) -- clients that only listen for steps still see it. |
 | `key COMBO` | Press one key combination — see [`type` vs `key`](#type-vs-key). |
 | `type TEXT` | Type text on the active keyboard layout. |
 | `wait-idle [--quiet-ms N] [--timeout-ms N]` | Block until nothing on screen has redrawn for `--quiet-ms` (default 200), giving up after `--timeout-ms` (default 5000). |

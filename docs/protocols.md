@@ -2318,6 +2318,28 @@ renders as a solid fill; a client that wants it bigger scales it through
   destroy a `wl_buffer` its surface still names; nothing panics and nobody is
   disconnected for it.
 
+## Pointer scrolling
+
+Every scroll reaches clients with what its source actually sent: a
+touchpad arrives as `axis_source` finger with continuous values and the
+`axis_stop` that ends the gesture, a wheel as `axis_source` wheel with its
+detents in `axis_value120` (and `axis_discrete` for pre-v8 clients), and
+the natural-scroll setting as `axis_relative_direction`. Clients that key
+wheel-vs-finger behavior off those events (Chrome does) see the same
+scroll a bare compositor would send.
+
+- **Sources are forwarded, never rebuilt.** A `--tty` touchpad, mouse
+  wheel, or continuous device keeps the source libinput reported; a
+  `--nested` session keeps the source its host sent (accumulated over the
+  host's pointer frame, so one host frame is one client frame). Injected
+  `pointer scroll` is a wheel that also carries its detents -- see
+  [ipc.md](ipc.md#requests).
+- **A finger scroll ends with a stop.** libinput ends the gesture with a
+  zero-amount event, which arrives as `axis_stop` with no motion -- never
+  as a zero scroll, and never synthesized for any other source.
+- **A bare source with no motion is not a scroll.** A host frame carrying
+  only `axis_source` (or only a direction) sends nothing.
+
 ## Relative pointer and pointer constraints
 
 `zwp_relative_pointer_manager_v1` (version 1) with

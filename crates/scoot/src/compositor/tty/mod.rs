@@ -94,6 +94,7 @@ use self::head::Head;
 use self::presenter::Presenter;
 use self::stale_vblanks::StaleVblanks;
 use super::State;
+use super::input::{ScrollAxis, scroll_frame};
 use super::output_config::ModeRequests;
 use super::render::ScanoutHandoff;
 use crate::cli::RendererKind;
@@ -1622,9 +1623,23 @@ fn libinput_event(event: InputEvent<LibinputInputBackend>, _: &mut (), state: &m
             }
         }
         InputEvent::PointerAxis { event } => {
-            let dx = event.amount(Axis::Horizontal).unwrap_or(0.0);
-            let dy = event.amount(Axis::Vertical).unwrap_or(0.0);
-            state.scroll(dx, dy);
+            // The whole event, not just its continuous values: the source
+            // is what tells a client whether this is fingers on a touchpad
+            // or wheel clicks (Chrome only scrolls when it can tell),
+            // `v120` is the detent count wheel-only clients listen for, and
+            // the direction carries the natural-scroll setting. A finger
+            // scroll's terminating zero amount becomes the `stop` clients
+            // require (see `scroll_frame`); nothing here synthesizes one.
+            let source = event.source();
+            let frame = scroll_frame(
+                event.time(),
+                Some(source),
+                libinput_axis(&event, Axis::Horizontal),
+                libinput_axis(&event, Axis::Vertical),
+            );
+            if let Some(frame) = frame {
+                state.emit_scroll(frame);
+            }
         }
         // Drawing-tablet tools, the `tablet.rs` half: positions map onto
         // the output's *logical* size exactly like the absolute-pointer
@@ -1695,6 +1710,23 @@ fn absolute_position(
         .unwrap_or((0, 0, 0, 0));
     let position = transformed((width, height).into());
     (position.x + f64::from(left), position.y + f64::from(top))
+}
+
+/// One axis of a libinput scroll event, as [`scroll_frame`] takes it:
+/// the continuous amount verbatim (including a finger scroll's terminating
+/// zero, which `scroll_frame` turns into the required `stop`), the wheel
+/// detents in 120ths for stepped sources, no synthesized stop, and the
+/// device's natural-scroll direction. A wheel's `amount_v120` is already in
+/// 120ths (an `f64` the `input` crate reports integral in practice); finger
+/// and continuous sources report none, so their `v120` stays empty the way
+/// the protocol wants step-less motion to arrive.
+fn libinput_axis(event: &impl PointerAxisEvent<LibinputInputBackend>, axis: Axis) -> ScrollAxis {
+    ScrollAxis {
+        value: event.amount(axis),
+        v120: event.amount_v120(axis).map(|steps| steps.round() as i32),
+        stop: false,
+        direction: event.relative_direction(axis),
+    }
 }
 
 /// The axis changes one libinput tool event carries, as the Smithay frame

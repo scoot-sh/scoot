@@ -5,8 +5,9 @@
 //! us an event", nothing else.
 
 use scoot_ipc::PointerButton;
-use smithay::backend::input::KeyState;
+use smithay::backend::input::{AxisRelativeDirection, AxisSource, InputTime, KeyState};
 use smithay::input::keyboard::Keycode;
+use wayland_client::WEnum;
 use wayland_client::globals::GlobalListContents;
 use wayland_client::protocol::wl_buffer::WlBuffer as HostBuffer;
 use wayland_client::protocol::wl_compositor::WlCompositor as HostCompositor;
@@ -353,26 +354,112 @@ impl Dispatch<HostPointer, ()> for State {
                 state.pointer_button(button, pressed);
             }
             wl_pointer::Event::Axis { axis, value, .. } => {
-                let (dx, dy) = match axis {
-                    wayland_client::WEnum::Value(wl_pointer::Axis::HorizontalScroll) => {
-                        (value, 0.0)
-                    }
-                    wayland_client::WEnum::Value(wl_pointer::Axis::VerticalScroll) => (0.0, value),
-                    _ => return,
+                let Some(horizontal) = axis_orientation(axis) else {
+                    return;
                 };
-                state.scroll(dx, dy);
+                let Some(host) = &mut state.host else {
+                    return;
+                };
+                host.pending_axis_mut().push_axis(horizontal, value);
             }
-            // Each event above already ends its own pointer frame (input.rs
-            // calls pointer.frame() per call, not batched), so there's
-            // nothing to do with the host's own frame boundary -- but the
-            // event is matched explicitly, not folded into a catch-all, so
-            // it's clear this was considered rather than missed.
-            wl_pointer::Event::Frame => {}
+            // One host frame's scroll arrives as several events and leaves
+            // as one client frame (see `PendingAxis`): each of these only
+            // buffers, and `Frame` below is what forwards. An unknown source
+            // or direction (a newer host than this client knows) is dropped
+            // rather than guessed at -- the motion still arrives, just
+            // without the annotation.
+            wl_pointer::Event::AxisSource { axis_source } => {
+                let Some(source) = (match axis_source {
+                    WEnum::Value(wl_pointer::AxisSource::Wheel) => Some(AxisSource::Wheel),
+                    WEnum::Value(wl_pointer::AxisSource::Finger) => Some(AxisSource::Finger),
+                    WEnum::Value(wl_pointer::AxisSource::Continuous) => {
+                        Some(AxisSource::Continuous)
+                    }
+                    WEnum::Value(wl_pointer::AxisSource::WheelTilt) => Some(AxisSource::WheelTilt),
+                    _ => None,
+                }) else {
+                    return;
+                };
+                let Some(host) = &mut state.host else {
+                    return;
+                };
+                host.pending_axis_mut().push_source(source);
+            }
+            wl_pointer::Event::AxisStop { axis, .. } => {
+                let Some(horizontal) = axis_orientation(axis) else {
+                    return;
+                };
+                let Some(host) = &mut state.host else {
+                    return;
+                };
+                host.pending_axis_mut().push_stop(horizontal);
+            }
+            wl_pointer::Event::AxisDiscrete { axis, discrete } => {
+                let Some(horizontal) = axis_orientation(axis) else {
+                    return;
+                };
+                let Some(host) = &mut state.host else {
+                    return;
+                };
+                host.pending_axis_mut().push_discrete(horizontal, discrete);
+            }
+            wl_pointer::Event::AxisValue120 { axis, value120 } => {
+                let Some(horizontal) = axis_orientation(axis) else {
+                    return;
+                };
+                let Some(host) = &mut state.host else {
+                    return;
+                };
+                host.pending_axis_mut().push_value120(horizontal, value120);
+            }
+            wl_pointer::Event::AxisRelativeDirection { axis, direction } => {
+                let Some(horizontal) = axis_orientation(axis) else {
+                    return;
+                };
+                let Some(direction) = (match direction {
+                    WEnum::Value(wl_pointer::AxisRelativeDirection::Identical) => {
+                        Some(AxisRelativeDirection::Identical)
+                    }
+                    WEnum::Value(wl_pointer::AxisRelativeDirection::Inverted) => {
+                        Some(AxisRelativeDirection::Inverted)
+                    }
+                    _ => None,
+                }) else {
+                    return;
+                };
+                let Some(host) = &mut state.host else {
+                    return;
+                };
+                host.pending_axis_mut()
+                    .push_direction(horizontal, direction);
+            }
+            // The host's frame boundary is this compositor's frame boundary:
+            // whatever its axis events buffered since the last one goes out
+            // as a single scroll, exactly like one libinput event does on
+            // `--tty`. Motion and button events above already end their own
+            // pointer frame per call (see `input.rs`), so only scroll waits
+            // for this.
+            wl_pointer::Event::Frame => {
+                let mut pending = state
+                    .host
+                    .as_mut()
+                    .map(Host::take_pending_axis)
+                    .unwrap_or_default();
+                let time = InputTime::from_millis(state.millis());
+                if let Some(frame) = pending.finish(time) {
+                    state.emit_scroll(frame);
+                }
+            }
             // The pointer left scoot's window: whatever it does next the
             // host delivers elsewhere, including the release that would end
             // a floating window's drag -- so the drag ends here, as on a VT
-            // switch.
+            // switch. A scroll the host never closed with a `Frame` dies
+            // with it: forwarding that now would scroll whatever still
+            // holds the (stale) focus, and the protocol requires the frame.
             wl_pointer::Event::Leave { .. } => {
+                if let Some(host) = &mut state.host {
+                    let _ = host.take_pending_axis();
+                }
                 state.end_floating_grab();
                 state.settle_floating_grab();
             }
@@ -388,6 +475,18 @@ fn linux_button(code: u32) -> Option<PointerButton> {
         0x110 => Some(PointerButton::Left),
         0x111 => Some(PointerButton::Right),
         0x112 => Some(PointerButton::Middle),
+        _ => None,
+    }
+}
+
+/// Which scroll direction a host `axis` event is for: `true` for
+/// horizontal, `false` for vertical, `None` for an axis value this
+/// compositor has no name for (never sent by a real host today; dropped
+/// rather than guessed at).
+fn axis_orientation(axis: WEnum<wl_pointer::Axis>) -> Option<bool> {
+    match axis {
+        WEnum::Value(wl_pointer::Axis::HorizontalScroll) => Some(true),
+        WEnum::Value(wl_pointer::Axis::VerticalScroll) => Some(false),
         _ => None,
     }
 }
