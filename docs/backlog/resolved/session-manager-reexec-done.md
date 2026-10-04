@@ -1,9 +1,10 @@
 ---
 title: "scoot-session ends the login when the user manager re-executes"
-status: "open"
-area: "packaging"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-04"
 ---
 
 # scoot-session ends the login when the user manager re-executes
@@ -60,3 +61,16 @@ A real greeter run of the fixed launcher (brief forbids touching the
 dev VM's display manager); the launcher-startup-exactly-during-reexec
 race (degrades at once to bare `scoot --tty`, fail-safe: the session
 still runs, nothing is killed or orphaned).
+
+## Resolution (PR #425)
+
+Landed as designed: `resources/scoot-session` asks `show -p ActiveState
+--value` everywhere it used to ask `is-active`/`is-failed`, retries an
+unanswerable manager loudly inside existing bounds (readiness deadline,
+new 30s wait bound), refuses login when unanswerable at the
+refuse-or-heal check, and retries cleanup's shutdown-target start
+(bounded 10) plus the teardown stops (bounded 5). Stub harness 61/61
+(10 new asserts fail on main); live dev-VM proof: main dies on the
+first of 50 `daemon-reexec`s leaving the service orphaned, the fix
+survives 50/50 and quits cleanly. `shellcheck -S warning` clean,
+`scoot-modules` check green, `docs/nix.md` steps 1/3/5 updated.
