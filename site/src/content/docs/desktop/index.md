@@ -454,9 +454,11 @@ render with no symbol font — and a default the font cannot draw fails
 the flake's own checks instead of shipping a missing glyph. The old
 envelope default is gone for exactly that reason: at bar size its fold
 lines read as the X of a missing-glyph box. Each icon is overridable —
-empty means no icon for that state — and each is empty or exactly one
-glyph (anything else fails evaluation, since the bar refuses it per
-update). A Nerd Font glyph works wherever `bar.fallback-fonts`
+an empty `unread` or `dnd` sends no icon, so the static `idle` icon
+shows beside the text (empty `idle` too for none) — and each is empty or
+one glyph: two or more glyphs fail evaluation, since the bar refuses
+them per update (two 2-byte glyphs such as `éé` slip past the check and
+leave that state's last value shown, so do not use them). A Nerd Font glyph works wherever `bar.fallback-fonts`
 provides one:
 
 ```nix

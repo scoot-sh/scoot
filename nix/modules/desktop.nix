@@ -177,10 +177,12 @@ let
   # strings are byte strings and `lib.stringToCharacters` splits bytes
   # (a multibyte glyph reads as several "characters"), so this is a
   # byte rule: one printable ASCII byte, or up to four bytes none of
-  # which is printable ASCII (one UTF-8 sequence -- a control byte can
-  # slip through, but nobody configures those, and the bar sanitizes
-  # them where they would draw). Shared by the feed and the bar half
-  # so both refuse the same values.
+  # which is printable ASCII (meant as one UTF-8 sequence). Two holes
+  # the byte rule cannot close without a codepoint counter Nix lacks:
+  # two 2-byte glyphs ("éé", 4 bytes) and a control byte both pass
+  # here, and the bar refuses such an icon per update (exactly one
+  # non-control `char`), leaving that state's last value shown. Shared
+  # by the feed and the bar half so both refuse the same values.
   isStateIcon =
     icon:
     icon == "" || (builtins.stringLength icon <= 4 && builtins.match "^[ -~]$|^[^ -~]+$" icon != null);
@@ -505,7 +507,9 @@ in
           description = ''
             The icon the feed sends beside the unread count (a
             per-update icon, so it overrides `idle` while set). Empty
-            shows the count alone.
+            sends no icon for this state, so the static `idle` icon
+            shows beside the count (set `idle` empty too for the count
+            alone).
           '';
         };
 
@@ -516,7 +520,9 @@ in
           description = ''
             The icon the feed sends while do-not-disturb is on (a
             per-update icon, so it overrides `idle` while set). Empty
-            shows the DND text alone.
+            sends no icon for this state, so the static `idle` icon
+            shows beside the DND text (set `idle` empty too for the
+            text alone).
           '';
         };
       };
