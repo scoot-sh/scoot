@@ -66,8 +66,7 @@ fn run() -> Result<(), Failure> {
             Ok(())
         }
         scootctl::Command::Verb { verb } => {
-            let row =
-                scootctl::help::verb_text(&verb, "scootctl").unwrap_or_else(|| scootctl::usage());
+            let row = scootctl::help::verb_text(&verb, "scootctl").unwrap_or_else(scootctl::usage);
             scootctl::output::write_str(&row)
                 .map_err(|error| Failure::Runtime(error.to_string()))?;
             Ok(())
