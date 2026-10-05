@@ -74,6 +74,82 @@ fn help_and_version() {
 }
 
 #[test]
+fn help_json_routes_and_typos_teach() {
+    assert_eq!(run(&["--help", "--json"]), Ok(Command::Help(Topic::Json)));
+    assert_eq!(run(&["help", "--json"]), Ok(Command::Help(Topic::Json)));
+    assert!(Topic::Json.text().as_ref().contains("\"schema_version\""));
+    // A typo'd daemon flag names the flag it meant and where to read.
+    assert!(matches!(
+        run(&["daemon", "--heigth", "30"]),
+        Err(Error::Hint { .. })
+    ));
+    let error = run(&["daemon", "--heigth", "30"]).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "unexpected `--heigth` for `daemon` \
+         (did you mean `--height`? see `scootbar help daemon`)"
+    );
+    // A typo'd msg command teaches the same way; garbage stays bare.
+    assert!(matches!(run(&["msg", "qurey"]), Err(Error::Hint { .. })));
+    assert_eq!(run(&["bar"]), Err(Error::Unknown("bar".into())));
+    assert!(matches!(
+        run(&["msg", "xyzzy"]),
+        Err(Error::Msg(MsgError::Unknown(_)))
+    ));
+}
+
+#[test]
+fn help_pages_stay_plain_short_and_ordered() {
+    // The contract: plain text (no color escapes), wrapped under 100
+    // columns, the same section order in every page.
+    let main = Topic::Main.text();
+    let ordered = [
+        "USAGE:",
+        "COMMANDS:",
+        "EXAMPLES:",
+        "EXIT CODES:",
+        "ENVIRONMENT:",
+        "SEE ALSO:",
+    ];
+    let mut cursor = 0;
+    for section in ordered {
+        let found = main[cursor..]
+            .find(section)
+            .unwrap_or_else(|| panic!("`{section}` missing or out of order"));
+        cursor += found + section.len();
+    }
+    let msg = Topic::Msg.text();
+    let mut cursor = 0;
+    for section in ["USAGE:", "EXAMPLES:", "EXIT CODES:", "SEE ALSO:"] {
+        let found = msg[cursor..]
+            .find(section)
+            .unwrap_or_else(|| panic!("msg `{section}` missing or out of order"));
+        cursor += found + section.len();
+    }
+    let daemon = Topic::Daemon.text();
+    assert!(
+        daemon.contains("EXIT CODES:"),
+        "daemon page lost its exit codes"
+    );
+    assert!(
+        daemon.contains("SEE ALSO:"),
+        "daemon page lost its see-also"
+    );
+    for (name, page) in [("main", main), ("msg", msg), ("daemon", daemon)] {
+        assert!(
+            !page.contains('\x1b'),
+            "{name} must not carry color escapes"
+        );
+        for line in page.as_ref().lines() {
+            assert!(
+                line.chars().count() < 100,
+                "{name}: line over 99 columns: `{line}`"
+            );
+        }
+    }
+}
+
+#[test]
 fn usage_errors() {
     assert_eq!(run(&[]), Err(Error::Missing));
     assert_eq!(run(&["bar"]), Err(Error::Unknown("bar".into())));

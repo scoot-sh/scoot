@@ -30,7 +30,8 @@ USAGE:
     scootbg COMMAND
     scootbg COMMAND --help
     scootbg --version
-    scootbg --help
+    scootbg --help [--json]
+    scootbg help [COMMAND|--json]
 
 COMMANDS:
     daemon     run the daemon for this Wayland display
@@ -46,6 +47,27 @@ COMMANDS:
 The daemon listens on $XDG_RUNTIME_DIR/scootbg-NAME.sock, where NAME is the
 last component of $WAYLAND_DISPLAY (wayland-0 when unset); every other
 command talks to it there.
+
+EXAMPLES:
+    scootbg daemon
+    scootbg set '#1e1e2e'
+    scootbg query
+    scootbg kill
+
+EXIT CODES:
+    0  success: the reply is on stdout (help and --version count)
+    1  the run failed: no daemon, a refused value, drawing failed
+    2  usage error: an unknown command, flag or value (the error names it)
+
+ENVIRONMENT:
+    WAYLAND_DISPLAY  the compositor to show the wallpaper on
+    XDG_RUNTIME_DIR  where the control socket lives (scootbg-NAME.sock)
+    XDG_STATE_HOME   where profiles are saved (~/.local/state/scootbg)
+
+SEE ALSO:
+    `scootbg help set`, `scootbg set --help`, `scootbg --help --json`
+    docs: https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/cli.md
+    (published with /llms.txt once the docs site lands)
 ";
 
 pub const DAEMON_HELP: &str = "\
@@ -88,6 +110,19 @@ replaces the file.
 
 One daemon per display: a second one exits with an error while the first
 is alive. A socket left behind by a daemon that crashed is replaced.
+
+EXAMPLE:
+    scootbg daemon --profile work
+
+EXIT CODES:
+    0  `scootbg kill` stopped it (help counts too)
+    1  the compositor went away, or no second daemon while one runs
+    2  usage error: an unknown flag or profile (the error names it)
+
+SEE ALSO:
+    `scootbg help daemon` prints this page; `scootbg --help --json` is the
+    machine-readable form
+    docs: https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/cli.md
 ";
 
 pub const SET_HELP: &str = "\
@@ -151,6 +186,15 @@ Exit status: 0 once shown; 1 when no daemon is running, the output is
 unknown, the image cannot be shown, or drawing failed (the daemon's stderr
 says why); 2 for a usage error, such as a malformed color or an unknown
 mode.
+
+EXAMPLES:
+    scootbg set '#1e1e2e'
+    scootbg set ~/wallpapers/sunset.jpg --mode fill
+    scootbg set ~/wallpapers/grid.png --mode tile --output DP-1
+
+SEE ALSO:
+    `scootbg help set` prints this page; `scootbg --help --json` is the
+    machine-readable form
 ";
 
 pub const CLEAR_HELP: &str = "\
@@ -169,6 +213,10 @@ color was set for it by name.
 Returns once the compositor has processed it, like `set`, and prints
 nothing on success. Saved like a `set`, so the daemon starts with it
 cleared. Exit status as for `set`.
+
+SEE ALSO:
+    `scootbg help clear` prints this page; `scootbg --help --json` is the
+    machine-readable form
 ";
 
 pub const QUERY_HELP: &str = "\
@@ -189,6 +237,10 @@ daemon's stderr says it), and what it shows: {\"color\":\"#rrggbb\"},
 says whether changes are saved for the next start (see `scootbg daemon
 --help`), and \"profile\" whose state is restored and saved: the
 daemon's --profile, or the last one an `apply-config` made it adopt.
+
+SEE ALSO:
+    `scootbg help query` prints this page; `scootbg --help --json` is the
+    machine-readable form
 ";
 
 pub const VERSION_HELP: &str = "\
@@ -200,6 +252,10 @@ USAGE:
 Prints the daemon's reply, one line of JSON:
 {\"type\":\"version\",\"protocol\":N,\"version\":\"X.Y.Z\"}
 `scootbg --version` prints this binary's own version without a daemon.
+
+SEE ALSO:
+    `scootbg help version` prints this page; `scootbg --help --json` is the
+    machine-readable form
 ";
 
 pub const KILL_HELP: &str = "\
@@ -214,6 +270,10 @@ so a new `scootbg daemon` can start straight after.
 Exit status: 0 once the daemon has stopped; 1 with \"no scootbg daemon is
 running\" when none answers (none started, or it died and left its socket
 file behind); 1 for any other error.
+
+SEE ALSO:
+    `scootbg help kill` prints this page; `scootbg --help --json` is the
+    machine-readable form
 ";
 
 pub const APPLY_CONFIG_HELP: &str = "\
@@ -274,6 +334,10 @@ run says so until the file is back, and the first run after shows it,
 unless a `scootbg set` has replaced it there since), drawing failed, or
 the state file could not be written; 2 for a usage error, the section
 refused above included.
+
+SEE ALSO:
+    `scootbg help apply-config` prints this page; `scootbg --help --json`
+    is the machine-readable form
 ";
 
 /// Which help text to print.
@@ -287,19 +351,23 @@ pub enum Topic {
     Version,
     Kill,
     ApplyConfig,
+    /// `--help --json` (or `help --json`): the same content as JSON,
+    /// versioned (see [`crate::help::SCHEMA_VERSION`]).
+    Json,
 }
 
 impl Topic {
-    pub fn text(self) -> &'static str {
+    pub fn text(self) -> Cow<'static, str> {
         match self {
-            Self::Main => USAGE,
-            Self::Daemon => DAEMON_HELP,
-            Self::Set => SET_HELP,
-            Self::Clear => CLEAR_HELP,
-            Self::Query => QUERY_HELP,
-            Self::Version => VERSION_HELP,
-            Self::Kill => KILL_HELP,
-            Self::ApplyConfig => APPLY_CONFIG_HELP,
+            Self::Main => Cow::Borrowed(USAGE),
+            Self::Daemon => Cow::Borrowed(DAEMON_HELP),
+            Self::Set => Cow::Borrowed(SET_HELP),
+            Self::Clear => Cow::Borrowed(CLEAR_HELP),
+            Self::Query => Cow::Borrowed(QUERY_HELP),
+            Self::Version => Cow::Borrowed(VERSION_HELP),
+            Self::Kill => Cow::Borrowed(KILL_HELP),
+            Self::ApplyConfig => Cow::Borrowed(APPLY_CONFIG_HELP),
+            Self::Json => Cow::Owned(crate::help::json()),
         }
     }
 }
@@ -349,6 +417,16 @@ impl Default for DaemonOptions {
 pub enum Error {
     Missing,
     Unknown(String),
+    /// An unknown word with a guess attached: what command it was meant
+    /// for, the closest valid choice, and the help topic that lists them.
+    /// Used at parse sites only; garbage keeps the bare [`Error::Unknown`]
+    /// shape.
+    Hint {
+        command: &'static str,
+        what: String,
+        suggestion: String,
+        topic: &'static str,
+    },
     Unexpected {
         command: &'static str,
         argument: String,
@@ -399,6 +477,15 @@ impl fmt::Display for Error {
         match self {
             Self::Missing => write!(f, "missing command (try --help)"),
             Self::Unknown(what) => write!(f, "unknown command `{what}` (try --help)"),
+            Self::Hint {
+                command,
+                what,
+                suggestion,
+                topic,
+            } => write!(
+                f,
+                "unexpected `{what}` for `{command}` (did you mean `{suggestion}`? see `{topic}`)"
+            ),
             Self::Unexpected { command, argument } => write!(
                 f,
                 "unexpected argument `{argument}` for `{command}` (try `scootbg {command} --help`)"
@@ -469,6 +556,61 @@ fn is_help(arg: &str) -> bool {
     matches!(arg, "--help" | "-h")
 }
 
+/// An unknown word with a guess attached: [`Error::Hint`] naming the
+/// closest candidate, or the bare error the site used before (`or`) when
+/// nothing is close enough to be a typo rather than a guess.
+fn hinted(
+    command: &'static str,
+    what: String,
+    candidates: &[&str],
+    topic: &'static str,
+    or: impl FnOnce(String) -> Error,
+) -> Error {
+    match crate::help::suggest(&what, candidates.iter().copied()) {
+        Some(suggestion) => Error::Hint {
+            command,
+            what,
+            suggestion: suggestion.to_owned(),
+            topic,
+        },
+        None => or(what),
+    }
+}
+
+/// Every command name, for `did you mean` over commands.
+const COMMAND_NAMES: &[&str] = &[
+    "daemon",
+    "set",
+    "clear",
+    "query",
+    "version",
+    "kill",
+    "apply-config",
+];
+
+/// `COMMAND --help --json`: the full document, or the refusal when more
+/// follows. Every command's `--help` spells this the same way.
+fn help_or_json(
+    command: &'static str,
+    topic: Topic,
+    mut args: impl Iterator<Item = Result<String, String>>,
+) -> Result<Command, Error> {
+    match args.next() {
+        None => Ok(Command::Help(topic)),
+        Some(Ok(next)) if next == "--json" => match args.next() {
+            None => Ok(Command::Help(Topic::Json)),
+            Some(extra) => Err(Error::Unexpected {
+                command,
+                argument: extra.unwrap_or_else(|lossy| lossy),
+            }),
+        },
+        Some(extra) => Err(Error::Unexpected {
+            command,
+            argument: extra.unwrap_or_else(|lossy| lossy),
+        }),
+    }
+}
+
 /// Parses the arguments after the program name. Takes `OsString`s so a
 /// non-UTF-8 argument is an error, not a panic.
 pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error> {
@@ -491,7 +633,28 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
         "version" => (Command::Client(Request::Version), Topic::Version),
         "kill" => (Command::Client(Request::Kill), Topic::Kill),
         "apply-config" => return apply_config(args),
-        _ => return Err(Error::Unknown(first)),
+        _ => {
+            return Err(hinted(
+                "scootbg",
+                first,
+                &[
+                    "daemon",
+                    "set",
+                    "clear",
+                    "query",
+                    "version",
+                    "kill",
+                    "apply-config",
+                    "--version",
+                    "-V",
+                    "--help",
+                    "-h",
+                    "help",
+                ],
+                "scootbg --help",
+                Error::Unknown,
+            ));
+        }
     };
     let name = match &command {
         Command::Version => "--version",
@@ -502,13 +665,9 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
     };
     match args.next() {
         None => Ok(command),
-        Some(Ok(arg)) if is_help(&arg) && command != Command::Version => match args.next() {
-            None => Ok(Command::Help(topic)),
-            Some(extra) => Err(Error::Unexpected {
-                command: name,
-                argument: extra.unwrap_or_else(|lossy| lossy),
-            }),
-        },
+        Some(Ok(arg)) if is_help(&arg) && command != Command::Version => {
+            help_or_json(name, topic, args)
+        }
         Some(other) => Err(Error::Unexpected {
             command: name,
             argument: other.unwrap_or_else(|lossy| lossy),
@@ -516,10 +675,11 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
     }
 }
 
-/// `help` / `--help`, optionally followed by one command name.
+/// `help` / `--help`, optionally followed by one command name or `--json`.
 fn help<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Command, Error> {
     let topic = match args.next() {
         None => return Ok(Command::Help(Topic::Main)),
+        Some(Ok(name)) if name == "--json" => return help_or_json("help", Topic::Main, args),
         Some(Ok(name)) => match name.as_str() {
             "daemon" => Topic::Daemon,
             "set" => Topic::Set,
@@ -528,7 +688,15 @@ fn help<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Comma
             "version" => Topic::Version,
             "kill" => Topic::Kill,
             "apply-config" => Topic::ApplyConfig,
-            _ => return Err(Error::Unknown(name)),
+            _ => {
+                return Err(hinted(
+                    "scootbg help",
+                    name,
+                    COMMAND_NAMES,
+                    "scootbg --help",
+                    Error::Unknown,
+                ));
+            }
         },
         Some(Err(lossy)) => return Err(Error::Unknown(lossy)),
     };
@@ -548,9 +716,17 @@ const NO_RESTORE: &str = "--no-restore";
 /// also as `--profile=NAME`; `--help` alone asks for help.
 fn daemon<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Command, Error> {
     const COMMAND: &str = "daemon";
-    let unexpected = |argument: String| Error::Unexpected {
-        command: COMMAND,
-        argument,
+    let unexpected = |argument: String| {
+        hinted(
+            COMMAND,
+            argument,
+            &[PROFILE, NO_RESTORE],
+            "scootbg daemon --help",
+            |what| Error::Unexpected {
+                command: COMMAND,
+                argument: what,
+            },
+        )
     };
     let mut profile: Option<String> = None;
     let mut no_restore = false;
@@ -558,10 +734,7 @@ fn daemon<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Com
     while let Some(arg) = args.next() {
         let arg = arg.map_err(unexpected)?;
         if is_help(&arg) && first {
-            return match args.next() {
-                None => Ok(Command::Help(Topic::Daemon)),
-                Some(extra) => Err(unexpected(extra.unwrap_or_else(|lossy| lossy))),
-            };
+            return help_or_json(COMMAND, Topic::Daemon, args);
         }
         first = false;
         if arg == NO_RESTORE {
@@ -611,9 +784,17 @@ pub const SERVE: &str = "--serve";
 /// internal (see [`ApplyOptions::serve`]).
 fn apply_config<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Command, Error> {
     const COMMAND: &str = "apply-config";
-    let unexpected = |argument: String| Error::Unexpected {
-        command: COMMAND,
-        argument,
+    let unexpected = |argument: String| {
+        hinted(
+            COMMAND,
+            argument,
+            &[PROFILE],
+            "scootbg apply-config --help",
+            |what| Error::Unexpected {
+                command: COMMAND,
+                argument: what,
+            },
+        )
     };
     let mut profile: Option<String> = None;
     let mut json: Option<String> = None;
@@ -628,10 +809,7 @@ fn apply_config<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Resu
             Err(lossy) => return Err(unexpected(lossy)),
         };
         if is_help(&arg) && first {
-            return match args.next() {
-                None => Ok(Command::Help(Topic::ApplyConfig)),
-                Some(extra) => Err(unexpected(extra.unwrap_or_else(|lossy| lossy))),
-            };
+            return help_or_json(COMMAND, Topic::ApplyConfig, args);
         }
         first = false;
         if arg == SERVE {
@@ -697,7 +875,19 @@ fn change<I: Iterator<Item = Result<String, String>>>(
     } else {
         &[OUTPUT]
     };
-    let unexpected = |argument: String| Error::Unexpected { command, argument };
+    let help_topic = if command == "set" {
+        "scootbg set --help"
+    } else {
+        "scootbg clear --help"
+    };
+    let unexpected = |argument: String| {
+        hinted(command, argument, flags, help_topic, |what| {
+            Error::Unexpected {
+                command,
+                argument: what,
+            }
+        })
+    };
     let mut target: Option<String> = None;
     // Indexed as `flags`.
     let mut values: [Option<String>; 4] = Default::default();
@@ -734,10 +924,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
                 return Err(Error::Repeated { command, flag });
             }
         } else if is_help(&arg) && first {
-            return match args.next() {
-                None => Ok(Command::Help(topic)),
-                Some(extra) => Err(unexpected(extra.unwrap_or_else(|lossy| lossy))),
-            };
+            return help_or_json(command, topic, args);
         } else if command == "set" && target.is_none() && !arg.starts_with('-') {
             target = Some(arg);
         } else {

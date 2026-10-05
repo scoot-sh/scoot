@@ -79,13 +79,93 @@ fn nothing_is_an_error() {
 
 #[test]
 fn unknown_commands_are_errors() {
-    for unknown in ["apply", "--daemon", "", "Query", "Set", "--serve"] {
+    for unknown in ["apply", "", "--serve"] {
         assert_eq!(args(&[unknown]), Err(Error::Unknown(unknown.to_owned())));
+    }
+    // Close enough to guess: the nearest command, named with where to read.
+    for (typo, command) in [("--daemon", "daemon"), ("Query", "query"), ("Set", "set")] {
+        assert_eq!(
+            args(&[typo]),
+            Err(Error::Hint {
+                command: "scootbg",
+                what: typo.to_owned(),
+                suggestion: command.to_owned(),
+                topic: "scootbg --help",
+            })
+        );
     }
     assert_eq!(
         args(&["help", "apply"]),
         Err(Error::Unknown("apply".to_owned()))
     );
+}
+
+#[test]
+fn help_json_routes_and_typos_teach() {
+    assert_eq!(args(&["--help", "--json"]), Ok(Command::Help(Topic::Json)));
+    assert_eq!(args(&["help", "--json"]), Ok(Command::Help(Topic::Json)));
+    assert_eq!(
+        args(&["set", "--help", "--json"]),
+        Ok(Command::Help(Topic::Json))
+    );
+    assert_eq!(
+        args(&["daemon", "--help", "--json"]),
+        Ok(Command::Help(Topic::Json))
+    );
+    assert!(Topic::Json.text().contains("\"schema_version\""));
+    // A typo'd flag names the flag it meant and where to read.
+    let error = args(&["daemon", "--profiel", "x"]).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "unexpected `--profiel` for `daemon` \
+         (did you mean `--profile`? see `scootbg daemon --help`)"
+    );
+    let error = args(&["set", "/a.png", "--mod", "fill"]).unwrap_err();
+    assert!(error.to_string().contains("`--mode`"), "{error}");
+}
+
+#[test]
+fn help_pages_stay_plain_short_and_ordered() {
+    // The contract: plain text (no color escapes), wrapped under 100
+    // columns, the same section order in every page.
+    let main = Topic::Main.text();
+    let mut cursor = 0;
+    for section in [
+        "USAGE:",
+        "COMMANDS:",
+        "EXAMPLES:",
+        "EXIT CODES:",
+        "ENVIRONMENT:",
+        "SEE ALSO:",
+    ] {
+        let found = main[cursor..]
+            .find(section)
+            .unwrap_or_else(|| panic!("`{section}` missing or out of order"));
+        cursor += found + section.len();
+    }
+    for topic in [
+        Topic::Main,
+        Topic::Daemon,
+        Topic::Set,
+        Topic::Clear,
+        Topic::Query,
+        Topic::Version,
+        Topic::Kill,
+        Topic::ApplyConfig,
+    ] {
+        let page = topic.text();
+        assert!(
+            !page.contains('\x1b'),
+            "{topic:?} must not carry color escapes"
+        );
+        for line in page.as_ref().lines() {
+            assert!(
+                line.chars().count() < 100,
+                "{topic:?}: line over 99 columns: `{line}`"
+            );
+        }
+        assert!(page.contains("SEE ALSO:"), "{topic:?} lost its see-also");
+    }
 }
 
 #[test]

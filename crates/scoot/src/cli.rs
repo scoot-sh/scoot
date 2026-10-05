@@ -9,50 +9,344 @@ use scoot_ipc::Request;
 
 use scootctl::Error;
 
-pub const USAGE: &str = "\
-scoot -- a scrolling-tiling Wayland compositor
-
-USAGE:
-    scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--renderer pixman|gles] [--xwayland] [--socket PATH] [--config PATH] [-- COMMAND...]
-    scoot --nested [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--xwayland] [--socket PATH] [--config PATH] [-- COMMAND...]
-    scoot --tty [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--xwayland] [--socket PATH] [--config PATH] [-- COMMAND...]
+pub const BACKEND_USAGE: &str = "\
+    scoot --headless [OPTIONS] [-- COMMAND...]
+    scoot --nested [OPTIONS] [-- COMMAND...]
+    scoot --tty [OPTIONS] [-- COMMAND...]
     scoot --print-default-config [--write]
     scoot --version
     scoot msg REQUEST
-    scoot --help
+    scoot msg --help [--json]
+    scoot msg help [TOPIC|VERB|--json]
+    scoot --help [--json]
+    scoot help [TOPIC|--json]
 
-REQUESTS:
-    version | outputs | windows
-    action ACTION [ARGUMENT...]
-    reload                          re-read the config file and re-apply
-                                    what can be re-applied live
-    keyboard                        the active keyboard layout's name and
-                                    index -- what a layout indicator shows
-    output-power ID|all on|off        switch an output's panel off or on --
-                                     what an idle daemon drives at idle and
-                                     resume (`outputs` reports the state)
-    screenshot [--output ID] [--out FILE] [--no-cursor]
-                                    the pointer is drawn in unless
-                                    --no-cursor
-    pointer move X Y | pointer click X Y [left|right|middle]
-    pointer button left|right|middle press|release | pointer scroll DX DY
-    key COMBO                       e.g. Return, ctrl+shift+t -- name the key
-                                    as it is unmodified plus the modifiers to
-                                    hold (shift+1, not exclam)
-    type TEXT                       types text, working out each character's
-                                    own modifiers from the active layout
-    wait-idle [--quiet-ms N] [--timeout-ms N]
-    subscribe [EVENT...]          stream events until killed (default: output;
-                                    known events: output, keyboard, workspace)
-
-ACTIONS:
-    focus-column|move-column|consume-or-expel   left|right
-    focus-window|move-window                    up|down
-    focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N [--output ID] | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
-    toggle-floating | set-floating ID on|off | toggle-floating-focus
-    move-floating ID X Y | resize-floating ID WIDTH HEIGHT
+OPTIONS (backends in brackets: all means --headless, --nested and --tty):
+    --width 1-65535      output width in pixels (default 1600) [headless, nested]
+    --height 1-65535     output height in pixels (default 1000) [headless, nested]
+    --outputs 1-8        headless outputs, left to right (default 1) [headless]
+    --gpu PATH           DRM device, when the automatic choice is wrong [tty]
+    --mode WxH           display mode, when the preferred one is wrong [tty]
+    --renderer pixman|gles  which renderer composites each frame [all]
+    --xwayland           run an XWayland server inside the session [all]
+    --socket PATH        where the IPC socket lives [all]
+    --config PATH        which config file to read [all]
+    -- COMMAND...        run once the compositor is up, with WAYLAND_DISPLAY set
 ";
+
+/// The config-file topics `scoot help config` summarizes: every section
+/// `docs/configuration.md` documents, with the one command that emits them
+/// all. The file itself stays the reference; this is the map to it.
+pub const CONFIG_HELP: &str = "\
+CONFIG:
+    The config file ($XDG_CONFIG_HOME/scoot/config.toml) holds every option;
+    a flag given replaces the file's value for its own option. Sections:
+
+    [layout] [appearance] [output] [[outputs]] [renderer] [tty] [xwayland]
+    [binds] [autostart] [floating] [[window_rule]] [wallpaper]
+
+    `scoot --print-default-config` prints a starting file generated from the
+    compositor's own live defaults; with `--write` it places the file (never
+    overwriting). `scoot msg reload` re-applies what can be re-applied live.
+    Full reference: docs/configuration.md.
+";
+
+/// One `scoot help` page.
+#[derive(Debug, PartialEq)]
+pub enum HelpPage {
+    /// The full text: [`usage`].
+    Main,
+    /// The machine-readable form: [`json`].
+    Json,
+    /// The config-file map: [`CONFIG_HELP`].
+    Config,
+    /// The full client help (`scoot msg --help`), rendered for `scoot msg`.
+    Client,
+    /// One client topic (`scoot msg help requests`, ...), rendered
+    /// for `scoot msg`.
+    ClientTopic(scootctl::help::Topic),
+    /// One client verb's row (`help screenshot`), rendered for `scoot msg`.
+    ClientVerb { verb: String },
+    /// The client document (`scoot msg --help --json`).
+    ClientJson,
+}
+
+impl HelpPage {
+    /// Renders the page to stdout text (the JSON page renders the document).
+    pub fn text(&self) -> String {
+        match self {
+            Self::Main => usage(),
+            Self::Json => json(),
+            Self::Config => CONFIG_HELP.to_owned(),
+            Self::Client => scootctl::help::usage(
+                "scoot msg",
+                scootctl::cli::REQUESTS_HELP,
+                scootctl::cli::ACTIONS_HELP,
+            ),
+            Self::ClientTopic(topic) => scootctl::help::topic_text(*topic),
+            Self::ClientVerb { verb } => scootctl::help::verb_text(verb).unwrap_or_else(usage),
+            Self::ClientJson => scootctl::help::json("scoot msg"),
+        }
+    }
+}
+
+/// The full `--help` text: the compositor's own surface plus the client
+/// surface single-sourced from `scootctl` (its prose blocks and its
+/// table-rendered sections), so `scoot --help` and `scootctl --help` cannot
+/// drift. A function rather than a `const` so the two forms share code.
+pub fn usage() -> String {
+    let mut text = String::from("scoot -- a scrolling-tiling Wayland compositor\n\nUSAGE:\n");
+    text.push_str(BACKEND_USAGE);
+    text.push_str("\nREQUESTS:\n");
+    text.push_str(scootctl::cli::REQUESTS_HELP);
+    text.push_str("\nACTIONS:\n");
+    text.push_str(scootctl::cli::ACTIONS_HELP);
+    text.push_str(
+        "\nEXAMPLES:\n\
+        \x20   scoot --headless --outputs 2 -- foot\n\
+        \x20   scoot --print-default-config > ~/.config/scoot/config.toml\n\
+        \x20   scoot msg windows\n\
+        \x20   scoot msg action focus-workspace-index 2\n\
+        \x20   scoot msg screenshot --out /tmp/shot.png\n\
+        ",
+    );
+    text.push_str("\nEXIT CODES:\n");
+    for (code, meaning) in scootctl::help::EXIT_CODES {
+        text.push_str(&format!("    {code}  {meaning}\n"));
+    }
+    text.push_str("\nENVIRONMENT:\n");
+    for (name, description) in ENVIRONMENT {
+        text.push_str(&format!("    {name}  {description}\n"));
+    }
+    text.push_str(
+        "\nSEE ALSO:\n\
+        \x20   `scoot help config`, `scoot msg help requests`, `scoot msg help actions`\n\
+        \x20   docs: configuration.md, ipc.md (published with /llms.txt once the site lands)\n\
+        \x20   at https://github.com/scoot-sh/scoot/tree/main/docs\n",
+    );
+    text
+}
+
+/// Environment the compositor reads, beyond what the client reads.
+pub const ENVIRONMENT: &[(&str, &str)] = &[
+    (
+        "WAYLAND_DISPLAY",
+        "the caller's display: --nested presents there as a window",
+    ),
+    (
+        "SCOOT_SOCKET",
+        "the IPC socket's path; the default is $XDG_RUNTIME_DIR/scoot.sock",
+    ),
+    (
+        "XDG_RUNTIME_DIR",
+        "where the default socket lives; missing is a one-line startup error",
+    ),
+    (
+        "XDG_CONFIG_HOME",
+        "where the config file lives (~/.config/scoot/config.toml by default)",
+    ),
+];
+
+/// One compositor backend, for the JSON document: its name and the flags it
+/// takes, each with what follows it and its default. Mirrors `compositor()`
+/// below -- the drift test parses every flag here.
+pub struct BackendDoc {
+    pub name: &'static str,
+    pub flags: &'static [FlagDoc],
+}
+
+pub struct FlagDoc {
+    pub flag: &'static str,
+    pub takes: &'static str,
+    pub default: &'static str,
+}
+
+/// Every backend and the flags it takes, in usage order.
+pub const BACKENDS: &[BackendDoc] = &[
+    BackendDoc {
+        name: "--headless",
+        flags: &[
+            FlagDoc {
+                flag: "--width",
+                takes: "1-65535",
+                default: "1600",
+            },
+            FlagDoc {
+                flag: "--height",
+                takes: "1-65535",
+                default: "1000",
+            },
+            FlagDoc {
+                flag: "--outputs",
+                takes: "1-8",
+                default: "1",
+            },
+            FlagDoc {
+                flag: "--renderer",
+                takes: "pixman|gles",
+                default: "pixman (or the config file)",
+            },
+            FlagDoc {
+                flag: "--xwayland",
+                takes: "(none)",
+                default: "off",
+            },
+            FlagDoc {
+                flag: "--socket",
+                takes: "PATH",
+                default: "$SCOOT_SOCKET or $XDG_RUNTIME_DIR/scoot.sock",
+            },
+            FlagDoc {
+                flag: "--config",
+                takes: "PATH",
+                default: "$XDG_CONFIG_HOME/scoot/config.toml",
+            },
+        ],
+    },
+    BackendDoc {
+        name: "--nested",
+        flags: &[
+            FlagDoc {
+                flag: "--width",
+                takes: "1-65535",
+                default: "1600",
+            },
+            FlagDoc {
+                flag: "--height",
+                takes: "1-65535",
+                default: "1000",
+            },
+            FlagDoc {
+                flag: "--renderer",
+                takes: "pixman|gles",
+                default: "pixman (or the config file)",
+            },
+            FlagDoc {
+                flag: "--xwayland",
+                takes: "(none)",
+                default: "off",
+            },
+            FlagDoc {
+                flag: "--socket",
+                takes: "PATH",
+                default: "$SCOOT_SOCKET or $XDG_RUNTIME_DIR/scoot.sock",
+            },
+            FlagDoc {
+                flag: "--config",
+                takes: "PATH",
+                default: "$XDG_CONFIG_HOME/scoot/config.toml",
+            },
+        ],
+    },
+    BackendDoc {
+        name: "--tty",
+        flags: &[
+            FlagDoc {
+                flag: "--gpu",
+                takes: "PATH",
+                default: "automatic",
+            },
+            FlagDoc {
+                flag: "--mode",
+                takes: "WxH",
+                default: "the connector's preferred mode",
+            },
+            FlagDoc {
+                flag: "--renderer",
+                takes: "pixman|gles",
+                default: "pixman (or the config file)",
+            },
+            FlagDoc {
+                flag: "--xwayland",
+                takes: "(none)",
+                default: "off",
+            },
+            FlagDoc {
+                flag: "--socket",
+                takes: "PATH",
+                default: "$SCOOT_SOCKET or $XDG_RUNTIME_DIR/scoot.sock",
+            },
+            FlagDoc {
+                flag: "--config",
+                takes: "PATH",
+                default: "$XDG_CONFIG_HOME/scoot/config.toml",
+            },
+        ],
+    },
+];
+
+/// The `--help --json` document: the compositor surface plus the client
+/// surface embedded from `scootctl`, from the same tables as the text.
+pub fn json() -> String {
+    serde_json::to_string_pretty(&json_value()).unwrap_or_else(|_| "{}".into())
+}
+
+fn json_value() -> serde_json::Value {
+    let mut root = serde_json::Map::new();
+    root.insert(
+        "schema_version".into(),
+        serde_json::Value::from(scootctl::help::SCHEMA_VERSION),
+    );
+    root.insert("binary".into(), serde_json::Value::from("scoot"));
+    root.insert(
+        "about".into(),
+        serde_json::Value::from("a scrolling-tiling Wayland compositor"),
+    );
+    root.insert(
+        "backends".into(),
+        serde_json::Value::from(
+            BACKENDS
+                .iter()
+                .map(|backend| {
+                    let mut entry = serde_json::Map::new();
+                    entry.insert("name".into(), serde_json::Value::from(backend.name));
+                    entry.insert(
+                        "flags".into(),
+                        serde_json::Value::from(
+                            backend
+                                .flags
+                                .iter()
+                                .map(|flag| {
+                                    let mut field = serde_json::Map::new();
+                                    field.insert("flag".into(), serde_json::Value::from(flag.flag));
+                                    field.insert(
+                                        "takes".into(),
+                                        serde_json::Value::from(flag.takes),
+                                    );
+                                    field.insert(
+                                        "default".into(),
+                                        serde_json::Value::from(flag.default),
+                                    );
+                                    serde_json::Value::Object(field)
+                                })
+                                .collect::<Vec<_>>(),
+                        ),
+                    );
+                    serde_json::Value::Object(entry)
+                })
+                .collect::<Vec<_>>(),
+        ),
+    );
+    root.insert("client".into(), scootctl::help::json_value("scoot msg"));
+    root.insert(
+        "config_sections".into(),
+        serde_json::Value::from(vec![
+            serde_json::Value::from("[layout]"),
+            serde_json::Value::from("[appearance]"),
+            serde_json::Value::from("[output]"),
+            serde_json::Value::from("[[outputs]]"),
+            serde_json::Value::from("[renderer]"),
+            serde_json::Value::from("[tty]"),
+            serde_json::Value::from("[xwayland]"),
+            serde_json::Value::from("[binds]"),
+            serde_json::Value::from("[autostart]"),
+            serde_json::Value::from("[floating]"),
+            serde_json::Value::from("[[window_rule]]"),
+            serde_json::Value::from("[wallpaper]"),
+        ]),
+    );
+    serde_json::Value::Object(root)
+}
 
 /// The largest `--width`/`--height` a `--headless`/`--nested` output may ask
 /// for, per axis.
@@ -147,7 +441,7 @@ impl fmt::Display for RendererKind {
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
-    Help,
+    Help(HelpPage),
     /// `scoot --version`: identify this build without starting anything.
     /// Prints [`scootctl::version_string`] -- the same line `scootctl
     /// --version` prints, byte for byte -- and exits. A first-arg flag like
@@ -296,17 +590,120 @@ impl Default for CompositorOptions {
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> {
     let mut args = args.into_iter();
     match args.next().as_deref() {
-        None | Some("--help" | "-h" | "help") => Ok(Command::Help),
+        None => Ok(Command::Help(HelpPage::Main)),
+        Some("--help" | "-h") => help_args(args.collect()),
+        Some("help") => help_args(args.collect()),
         Some("--version") => Ok(Command::Version),
         Some("--print-default-config") => print_default_config(args),
         Some("--headless") => compositor(args, false, false).map(Command::Compositor),
         Some("--nested") => compositor(args, true, false).map(Command::Compositor),
         Some("--tty") => compositor(args, false, true).map(Command::Compositor),
-        Some("msg") => scootctl::parse_msg(args).map(|msg| Command::Msg {
+        Some("msg") => msg_alias(args.collect()),
+        Some(other) => Err(hinted(
+            "argument",
+            other.to_owned(),
+            &[
+                "--headless",
+                "--nested",
+                "--tty",
+                "--version",
+                "--print-default-config",
+                "msg",
+                "--help",
+                "help",
+            ],
+            "scoot --help",
+        )),
+    }
+}
+
+/// `scoot help` / `scoot --help`, optionally followed by one topic, client
+/// verb, or `--json`. Anything else is refused with a guess -- `help` is
+/// where a lost agent lands, so it teaches too.
+fn help_args(args: Vec<String>) -> Result<Command, Error> {
+    match args.as_slice() {
+        [] => Ok(Command::Help(HelpPage::Main)),
+        [only] if only == "--json" => Ok(Command::Help(HelpPage::Json)),
+        [only] if only == "config" => Ok(Command::Help(HelpPage::Config)),
+        [only] if only == "help" => Ok(Command::Help(HelpPage::Main)),
+        [only] => {
+            if let Some(topic) = scootctl::help::Topic::parse(only) {
+                return Ok(Command::Help(HelpPage::ClientTopic(topic)));
+            }
+            if scootctl::help::verb_text(only).is_some() {
+                return Ok(Command::Help(HelpPage::ClientVerb { verb: only.clone() }));
+            }
+            let mut candidates: Vec<&str> = vec!["config", "--json"];
+            candidates.extend(scootctl::help::Topic::names());
+            candidates.extend(scootctl::help::REQUESTS.iter().map(|request| request.verb));
+            Err(hinted(
+                "help topic",
+                only.clone(),
+                &candidates,
+                "scoot help",
+            ))
+        }
+        [_, extra, ..] => Err(Error::Unknown(extra.clone())),
+    }
+}
+
+/// `scoot msg ...`: the client alias. `--help` (or `help [TOPIC|VERB]`)
+/// right after `msg` asks for the client help instead of a request -- every
+/// other word parses through `scootctl`, so the alias cannot drift.
+fn msg_alias(args: Vec<String>) -> Result<Command, Error> {
+    match args.as_slice() {
+        [] => Err(Error::Missing("a request")),
+        [only] if only == "--help" || only == "-h" || only == "help" => {
+            Ok(Command::Help(HelpPage::Client))
+        }
+        [first, rest @ ..] if first == "--help" || first == "-h" || first == "help" => {
+            client_help_page(rest)
+        }
+        _ => scootctl::parse_msg(args.into_iter()).map(|msg| Command::Msg {
             request: msg.request,
             out: msg.out,
         }),
-        Some(other) => Err(Error::Unknown(other.to_owned())),
+    }
+}
+
+/// The client help page for `scoot msg help ...`, rendered for `scoot msg`.
+fn client_help_page(args: &[String]) -> Result<Command, Error> {
+    match args {
+        [] => Ok(Command::Help(HelpPage::Client)),
+        [only] if only == "--json" => Ok(Command::Help(HelpPage::ClientJson)),
+        [only] => {
+            if let Some(topic) = scootctl::help::Topic::parse(only) {
+                return Ok(Command::Help(HelpPage::ClientTopic(topic)));
+            }
+            if scootctl::help::verb_text(only).is_some() {
+                return Ok(Command::Help(HelpPage::ClientVerb { verb: only.clone() }));
+            }
+            let mut candidates: Vec<&str> = scootctl::help::Topic::names().collect();
+            candidates.extend(scootctl::help::REQUESTS.iter().map(|request| request.verb));
+            candidates.push("--json");
+            Err(hinted(
+                "help topic",
+                only.clone(),
+                &candidates,
+                "scoot msg help",
+            ))
+        }
+        [_, extra, ..] => Err(Error::Unknown(extra.clone())),
+    }
+}
+
+/// An unknown word with a guess attached (see `scootctl`'s `hinted`): the
+/// closest candidate, or the bare [`Error::Unknown`] when nothing is close
+/// enough to be a typo.
+fn hinted(kind: &'static str, what: String, candidates: &[&str], topic: &'static str) -> Error {
+    match scootctl::help::suggest(&what, candidates.iter().copied()) {
+        Some(suggestion) => Error::Hinted {
+            kind,
+            what,
+            suggestion: suggestion.to_owned(),
+            topic,
+        },
+        None => Error::Unknown(what),
     }
 }
 
@@ -320,9 +717,19 @@ fn print_default_config(mut args: impl Iterator<Item = String>) -> Result<Comman
         None => Ok(Command::PrintDefaultConfig { write: false }),
         Some("--write") => match args.next().as_deref() {
             None => Ok(Command::PrintDefaultConfig { write: true }),
-            Some(extra) => Err(Error::Unknown(extra.to_owned())),
+            Some(extra) => Err(hinted(
+                "flag",
+                extra.to_owned(),
+                &["--write"],
+                "scoot --help",
+            )),
         },
-        Some(other) => Err(Error::Unknown(other.to_owned())),
+        Some(other) => Err(hinted(
+            "flag",
+            other.to_owned(),
+            &["--write"],
+            "scoot --help",
+        )),
     }
 }
 
@@ -360,7 +767,25 @@ fn compositor(
                 options.command = args.by_ref().collect();
                 break;
             }
-            other => return Err(Error::Unknown(other.to_owned())),
+            other => {
+                return Err(hinted(
+                    "flag",
+                    other.to_owned(),
+                    &[
+                        "--width",
+                        "--height",
+                        "--outputs",
+                        "--socket",
+                        "--config",
+                        "--gpu",
+                        "--renderer",
+                        "--mode",
+                        "--xwayland",
+                        "--",
+                    ],
+                    "scoot --help",
+                ));
+            }
         }
     }
     Ok(options)
@@ -452,7 +877,7 @@ mod tests {
 
     #[test]
     fn no_arguments_prints_help() {
-        assert_eq!(parse_args(&[]), Ok(Command::Help));
+        assert_eq!(parse_args(&[]), Ok(Command::Help(HelpPage::Main)));
     }
 
     #[test]
@@ -483,7 +908,7 @@ mod tests {
         // The `--help` surface for the new flag: its own usage line, so a
         // user reading `--help` can discover it without knowing the ticket.
         assert!(
-            USAGE.lines().any(|line| line.trim() == "scoot --version"),
+            usage().lines().any(|line| line.trim() == "scoot --version"),
             "--help hides the version flag"
         );
     }
@@ -527,7 +952,12 @@ mod tests {
         );
         assert_eq!(
             parse_args(&["--print-default-config", "--wirte"]),
-            Err(Error::Unknown("--wirte".into()))
+            Err(Error::Hinted {
+                kind: "flag",
+                what: "--wirte".into(),
+                suggestion: "--write".into(),
+                topic: "scoot --help",
+            })
         );
         assert_eq!(
             parse_args(&["--print-default-config", "--write", "--write"]),
@@ -545,7 +975,7 @@ mod tests {
         // usage line, so a user reading `--help` can discover it without
         // knowing the ticket.
         assert!(
-            USAGE
+            usage()
                 .lines()
                 .any(|line| line.trim() == "scoot --print-default-config [--write]"),
             "--help hides the default-config flag or its --write argument"
@@ -808,19 +1238,18 @@ mod tests {
     }
 
     #[test]
-    fn usage_names_xwayland_on_every_backend_line() {
-        // The `--help` surface for the flag: each backend line carries it,
-        // so a user reading `--help` can discover it without knowing the
-        // ticket.
-        for mode in ["--headless", "--nested", "--tty"] {
+    fn usage_documents_xwayland_for_every_backend() {
+        // The `--help` surface for the flag: the backends table carries it
+        // on all three backends, and the text documents it -- so a user
+        // reading `--help` can discover it without knowing the ticket.
+        for backend in BACKENDS {
             assert!(
-                USAGE.lines().any(
-                    |line| line.trim_start().starts_with(&format!("scoot {mode}"))
-                        && line.contains("[--xwayland]")
-                ),
-                "--help hides --xwayland on {mode}"
+                backend.flags.iter().any(|flag| flag.flag == "--xwayland"),
+                "{} hides --xwayland",
+                backend.name
             );
         }
+        assert!(usage().contains("--xwayland"), "--help hides --xwayland");
     }
 
     #[test]
@@ -893,34 +1322,194 @@ mod tests {
     fn usage_lists_renderer_on_every_backend_that_parses_it() {
         // Fail-first pin for the `--help` blind spot the README audit found:
         // the parser (`compositor`, one function for all three backends)
-        // accepts `--renderer` everywhere, so every usage line must name it.
-        // Found 2026-09-20 with the `--tty` line missing it while
-        // `README.md`, `docs/configuration.md` and `docs/tty.md` all showed
+        // accepts `--renderer` everywhere, so the backends table and the
+        // text must both name it everywhere. Found 2026-09-20 with the
+        // `--tty` line missing it while `README.md`,
+        // `docs/configuration.md` and `docs/tty.md` all showed
         // `scoot --tty --renderer gles`.
-        fn usage_line(backend: &str) -> &'static str {
-            USAGE
-                .lines()
-                .find(|line| line.trim_start().starts_with(backend))
-                .unwrap_or_else(|| panic!("{backend} has no usage line"))
-        }
-        for backend in ["scoot --headless", "scoot --nested", "scoot --tty"] {
+        let text = usage();
+        for backend in BACKENDS {
             assert!(
-                usage_line(backend).contains("[--renderer pixman|gles]"),
-                "{backend}'s usage line hides a flag its parse accepts"
+                backend.flags.iter().any(|flag| flag.flag == "--renderer"),
+                "{}'s table entry hides a flag its parse accepts",
+                backend.name
+            );
+            assert!(
+                text.contains("--renderer pixman|gles"),
+                "help text hides --renderer"
             );
             for name in ["pixman", "gles"] {
-                let flag = backend.split_whitespace().nth(1).unwrap();
-                let Ok(Command::Compositor(options)) = parse_args(&[flag, "--renderer", name])
+                let Ok(Command::Compositor(options)) =
+                    parse_args(&[backend.name, "--renderer", name])
                 else {
-                    panic!("{backend} should parse --renderer {name}");
+                    panic!("{} should parse --renderer {name}", backend.name);
                 };
                 assert_eq!(
                     options.renderer,
                     RendererKind::parse(name),
-                    "{backend} --renderer {name}"
+                    "{} --renderer {name}",
+                    backend.name
                 );
             }
         }
+    }
+
+    #[test]
+    fn every_tabulated_flag_parses_on_its_backend() {
+        // The drift pin for the JSON table: a flag listed for a backend
+        // must parse there, with a representative value.
+        fn sample(flag: &str) -> Vec<&str> {
+            match flag {
+                "--width" => vec![flag, "800"],
+                "--height" => vec![flag, "600"],
+                "--outputs" => vec![flag, "2"],
+                "--socket" => vec![flag, "/tmp/scoot-help-probe.sock"],
+                "--config" => vec![flag, "/dev/null"],
+                "--gpu" => vec![flag, "/dev/dri/card0"],
+                "--renderer" => vec![flag, "pixman"],
+                "--mode" => vec![flag, "1920x1080"],
+                "--xwayland" => vec![flag],
+                other => panic!("{other} has no sample value"),
+            }
+        }
+        for backend in BACKENDS {
+            for flag in backend.flags {
+                let mut argv = vec![backend.name];
+                argv.extend(sample(flag.flag));
+                assert!(
+                    matches!(parse_args(&argv), Ok(Command::Compositor(_))),
+                    "{:?} does not parse",
+                    argv
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn help_pages_route_to_their_topic_or_json() {
+        use scootctl::help::Topic;
+        assert_eq!(parse_args(&["help"]), Ok(Command::Help(HelpPage::Main)));
+        assert_eq!(parse_args(&["--help"]), Ok(Command::Help(HelpPage::Main)));
+        assert_eq!(
+            parse_args(&["help", "config"]),
+            Ok(Command::Help(HelpPage::Config))
+        );
+        assert_eq!(
+            parse_args(&["help", "--json"]),
+            Ok(Command::Help(HelpPage::Json))
+        );
+        assert_eq!(
+            parse_args(&["--help", "--json"]),
+            Ok(Command::Help(HelpPage::Json))
+        );
+        assert_eq!(
+            parse_args(&["help", "actions"]),
+            Ok(Command::Help(HelpPage::ClientTopic(Topic::Actions)))
+        );
+        assert_eq!(
+            parse_args(&["help", "screenshot"]),
+            Ok(Command::Help(HelpPage::ClientVerb {
+                verb: "screenshot".into()
+            }))
+        );
+        assert_eq!(
+            parse_args(&["msg", "--help"]),
+            Ok(Command::Help(HelpPage::Client))
+        );
+        assert_eq!(
+            parse_args(&["msg", "help"]),
+            Ok(Command::Help(HelpPage::Client))
+        );
+        assert_eq!(
+            parse_args(&["msg", "help", "requests"]),
+            Ok(Command::Help(HelpPage::ClientTopic(Topic::Requests)))
+        );
+        assert_eq!(
+            parse_args(&["msg", "--help", "--json"]),
+            Ok(Command::Help(HelpPage::ClientJson))
+        );
+        assert_eq!(
+            parse_args(&["msg", "help", "--json"]),
+            Ok(Command::Help(HelpPage::ClientJson))
+        );
+        // A typo'd first word teaches, the way the client's does.
+        assert_eq!(
+            parse_args(&["--headles"]),
+            Err(Error::Hinted {
+                kind: "argument",
+                what: "--headles".into(),
+                suggestion: "--headless".into(),
+                topic: "scoot --help",
+            })
+        );
+    }
+
+    #[test]
+    fn help_text_and_json_share_one_source() {
+        // The contract: plain text (no color escapes), wrapped under 100
+        // columns, sections in order -- and the JSON parses, versioned,
+        // carrying both the backends and the embedded client surface.
+        let text = usage();
+        assert!(!text.contains('\x1b'), "help must not carry color escapes");
+        for line in text.lines() {
+            assert!(line.chars().count() < 100, "line over 99 columns: `{line}`");
+        }
+        let sections = [
+            "USAGE:",
+            "OPTIONS",
+            "REQUESTS:",
+            "ACTIONS:",
+            "EXAMPLES:",
+            "EXIT CODES:",
+        ];
+        let mut cursor = 0;
+        for section in sections {
+            let found = text[cursor..]
+                .find(section)
+                .unwrap_or_else(|| panic!("`{section}` missing or out of order"));
+            cursor += found + section.len();
+        }
+        for tail in ["ENVIRONMENT:", "SEE ALSO:"] {
+            assert!(
+                text[cursor..].contains(tail),
+                "`{tail}` missing or out of order"
+            );
+        }
+        for page in [
+            HelpPage::Main,
+            HelpPage::Config,
+            HelpPage::Client,
+            HelpPage::ClientTopic(scootctl::help::Topic::Requests),
+            HelpPage::ClientVerb {
+                verb: "windows".into(),
+            },
+        ] {
+            let rendered = page.text();
+            assert!(!rendered.contains('\x1b'));
+            for line in rendered.lines() {
+                assert!(line.chars().count() < 100, "line over 99 columns: `{line}`");
+            }
+        }
+        let document: serde_json::Value = serde_json::from_str(&json()).unwrap();
+        assert_eq!(
+            document["schema_version"],
+            serde_json::Value::from(scootctl::help::SCHEMA_VERSION)
+        );
+        assert_eq!(document["binary"], serde_json::Value::from("scoot"));
+        let backends = document["backends"].as_array().unwrap();
+        assert_eq!(backends.len(), BACKENDS.len());
+        for backend in BACKENDS {
+            assert!(
+                backends.iter().any(|entry| entry["name"] == backend.name),
+                "{} missing from the JSON",
+                backend.name
+            );
+        }
+        assert_eq!(
+            document["client"]["binary"],
+            serde_json::Value::from("scoot msg")
+        );
+        assert!(document["config_sections"].as_array().unwrap().len() >= 10);
     }
 
     #[test]
@@ -930,11 +1519,11 @@ mod tests {
         // scootctl's `cli` tests), so the alias's documented grammar cannot
         // drift from the client's.
         assert!(
-            USAGE.contains(scootctl::cli::REQUESTS_HELP),
+            usage().contains(scootctl::cli::REQUESTS_HELP),
             "scoot --help lost the shared REQUESTS block"
         );
         assert!(
-            USAGE.contains(scootctl::cli::ACTIONS_HELP),
+            usage().contains(scootctl::cli::ACTIONS_HELP),
             "scoot --help lost the shared ACTIONS block"
         );
     }

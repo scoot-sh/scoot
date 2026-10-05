@@ -1,0 +1,305 @@
+//! Single-sourced wallpaper help: a table of the commands, the exit codes
+//! and the environment; the `--help --json` document renders from it, and
+//! the prose pages (`cli::USAGE` and friends) are checked against it, so
+//! neither form can drift from the other.
+//!
+//! [`suggest`] mirrors `scootctl`'s `help::suggest` (this binary takes no
+//! client dependency, so the thirty lines live here too); the test vectors
+//! below are the same, so a drift in behaviour fails here. A cold path (one
+//! process per `--help`): the small allocations cost nothing at runtime.
+
+use serde_json::{Map, Value};
+
+/// Version of the `--help --json` document below. Bumped whenever a field is
+/// added, renamed or removed, so a script can refuse what it does not know
+/// rather than misread it.
+pub const SCHEMA_VERSION: u32 = 1;
+
+/// Where the human reference lives. There is no published docs site yet (see
+/// `docs/backlog/packaging/docs-site.md`): until it exists, help points at
+/// the reference pages in the repo, which the site will later publish with
+/// `/llms.txt`.
+pub const DOCS_URL: &str = "https://github.com/scoot-sh/scoot/tree/main/docs";
+
+/// One command: its name, its shape, and what it does. Mirrors `cli`'s
+/// command dispatch -- the drift tests pin both directions, so a command
+/// added to the parser without a row here fails.
+pub struct CommandDoc {
+    pub name: &'static str,
+    pub usage: &'static str,
+    pub description: &'static str,
+}
+
+/// Every command, in the order the help lists them.
+pub const COMMANDS: &[CommandDoc] = &[
+    CommandDoc {
+        name: "daemon",
+        usage: "daemon [--profile NAME] [--no-restore]",
+        description: "run the wallpaper daemon for this Wayland display",
+    },
+    CommandDoc {
+        name: "set",
+        usage: "set COLOR|PATH [--output NAME] [--mode MODE] [--fill COLOR] [--filter FILTER]",
+        description: "show a color or an image on every output, or on one",
+    },
+    CommandDoc {
+        name: "clear",
+        usage: "clear [--output NAME]",
+        description: "back to the compositor's own background",
+    },
+    CommandDoc {
+        name: "query",
+        usage: "query",
+        description: "print what each output shows, as JSON",
+    },
+    CommandDoc {
+        name: "version",
+        usage: "version",
+        description: "print the running daemon's version and protocol, as JSON",
+    },
+    CommandDoc {
+        name: "kill",
+        usage: "kill",
+        description: "stop the running daemon",
+    },
+    CommandDoc {
+        name: "apply-config",
+        usage: "apply-config [--profile NAME] JSON",
+        description: "apply scoot's [wallpaper] section (what scoot runs)",
+    },
+];
+
+/// Exit codes the binary uses: 0 for success (help included), 1 when the
+/// run failed, 2 when the invocation itself was wrong.
+pub const EXIT_CODES: &[(i32, &str)] = &[
+    (
+        0,
+        "success: the reply is on stdout (help and --version count)",
+    ),
+    (
+        1,
+        "the run failed: no daemon, a refused value, drawing failed",
+    ),
+    (
+        2,
+        "usage error: an unknown command, flag or value (the error names it)",
+    ),
+];
+
+/// Environment the binary reads.
+pub const ENVIRONMENT: &[(&str, &str)] = &[
+    ("WAYLAND_DISPLAY", "the compositor to show the wallpaper on"),
+    (
+        "XDG_RUNTIME_DIR",
+        "where the control socket lives (scootbg-NAME.sock)",
+    ),
+    (
+        "XDG_STATE_HOME",
+        "where profiles are saved (~/.local/state/scootbg)",
+    ),
+];
+
+/// The closest candidate to `input`, if it is close enough to be a typo
+/// rather than a guess. Mirrors `scootctl`'s `help::suggest`; see that
+/// function for the bar (about a quarter of the longer word).
+pub fn suggest<'a>(input: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+    let mut best: Option<(&'a str, usize)> = None;
+    for candidate in candidates {
+        if candidate == input {
+            continue;
+        }
+        let distance = levenshtein(input, candidate);
+        if best.is_none_or(|(_, d)| distance < d) {
+            best = Some((candidate, distance));
+        }
+    }
+    let (candidate, distance) = best?;
+    let longest = input.chars().count().max(candidate.chars().count());
+    let allowance = (longest / 4 + 1).min(3).max(1);
+    (distance <= allowance && distance < longest).then_some(candidate)
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    if a.is_empty() {
+        return b.len();
+    }
+    if b.is_empty() {
+        return a.len();
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut current = vec![0; b.len() + 1];
+    for (i, &ca) in a.iter().enumerate() {
+        current[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            let substitution = prev[j] + usize::from(ca != cb);
+            current[j + 1] = (prev[j + 1] + 1).min(current[j] + 1).min(substitution);
+        }
+        std::mem::swap(&mut prev, &mut current);
+    }
+    prev[b.len()]
+}
+
+/// The `--help --json` document as a value.
+pub fn json_value() -> Value {
+    let mut root = Map::new();
+    root.insert("schema_version".into(), Value::from(SCHEMA_VERSION));
+    root.insert("binary".into(), Value::from("scootbg"));
+    root.insert("about".into(), Value::from("wallpaper daemon for Wayland"));
+    root.insert(
+        "commands".into(),
+        Value::from(
+            COMMANDS
+                .iter()
+                .map(|command| {
+                    let mut entry = Map::new();
+                    entry.insert("name".into(), Value::from(command.name));
+                    entry.insert("usage".into(), Value::from(command.usage));
+                    entry.insert("description".into(), Value::from(command.description));
+                    Value::Object(entry)
+                })
+                .collect::<Vec<_>>(),
+        ),
+    );
+    root.insert(
+        "set_values".into(),
+        Value::from(vec![
+            values_entry("mode", &["fill", "fit", "stretch", "center", "tile"]),
+            values_entry(
+                "filter",
+                &["lanczos3", "catmull-rom", "bilinear", "nearest"],
+            ),
+        ]),
+    );
+    root.insert(
+        "exit_codes".into(),
+        Value::from(
+            EXIT_CODES
+                .iter()
+                .map(|(code, meaning)| {
+                    let mut entry = Map::new();
+                    entry.insert("code".into(), Value::from(*code));
+                    entry.insert("meaning".into(), Value::from(*meaning));
+                    Value::Object(entry)
+                })
+                .collect::<Vec<_>>(),
+        ),
+    );
+    root.insert(
+        "environment".into(),
+        Value::from(
+            ENVIRONMENT
+                .iter()
+                .map(|(name, description)| {
+                    let mut entry = Map::new();
+                    entry.insert("name".into(), Value::from(*name));
+                    entry.insert("description".into(), Value::from(*description));
+                    Value::Object(entry)
+                })
+                .collect::<Vec<_>>(),
+        ),
+    );
+    root.insert(
+        "docs".into(),
+        Value::from(format!("{DOCS_URL}/scootbg/cli.md")),
+    );
+    Value::Object(root)
+}
+
+fn values_entry(flag: &str, values: &[&str]) -> Value {
+    let mut entry = Map::new();
+    entry.insert("flag".into(), Value::from(flag));
+    entry.insert(
+        "values".into(),
+        Value::from(
+            values
+                .iter()
+                .map(|value| Value::from(*value))
+                .collect::<Vec<_>>(),
+        ),
+    );
+    Value::Object(entry)
+}
+
+/// The `--help --json` document, pretty-printed.
+pub fn json() -> String {
+    serde_json::to_string_pretty(&json_value()).unwrap_or_else(|_| "{}".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_command_is_in_the_prose_and_in_the_json() {
+        let prose = format!(
+            "{}{}{}{}{}{}{}{}",
+            crate::cli::USAGE,
+            crate::cli::DAEMON_HELP,
+            crate::cli::SET_HELP,
+            crate::cli::CLEAR_HELP,
+            crate::cli::QUERY_HELP,
+            crate::cli::VERSION_HELP,
+            crate::cli::KILL_HELP,
+            crate::cli::APPLY_CONFIG_HELP,
+        );
+        let document = json_value();
+        let names: Vec<&str> = document["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap())
+            .collect();
+        for command in COMMANDS {
+            assert!(
+                prose.contains(command.name),
+                "`{}` is tabulated but not in the prose",
+                command.name
+            );
+            assert!(
+                names.contains(&command.name),
+                "`{}` is tabulated but not in the JSON",
+                command.name
+            );
+        }
+    }
+
+    #[test]
+    fn the_set_values_are_what_the_parser_takes() {
+        // The JSON's enums cannot drift from the parsers: every value the
+        // document names must parse, in both spellings the flag takes.
+        let document = json_value();
+        let sets = document["set_values"].as_array().unwrap();
+        let modes = &sets[0]["values"];
+        for mode in modes.as_array().unwrap() {
+            let name = mode.as_str().unwrap();
+            assert!(crate::image::Mode::from_name(name).is_some(), "{name}");
+        }
+        let filters = &sets[1]["values"];
+        for filter in filters.as_array().unwrap() {
+            let name = filter.as_str().unwrap();
+            assert!(crate::image::Filter::from_name(name).is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_json_parses_versioned() {
+        let document: Value = serde_json::from_str(&json()).unwrap();
+        assert_eq!(document["schema_version"], Value::from(SCHEMA_VERSION));
+        assert_eq!(document["binary"], Value::from("scootbg"));
+        assert_eq!(
+            document["commands"].as_array().unwrap().len(),
+            COMMANDS.len()
+        );
+    }
+
+    #[test]
+    fn typos_find_their_command_and_garbage_finds_nothing() {
+        let names: Vec<&str> = COMMANDS.iter().map(|command| command.name).collect();
+        assert_eq!(suggest("qurey", names.clone()), Some("query"));
+        assert_eq!(suggest("queery", names.clone()), Some("query"));
+        assert_eq!(suggest("klll", names.clone()), Some("kill"));
+        assert_eq!(suggest("xyzzy", names), None);
+    }
+}

@@ -33,6 +33,7 @@ mod daemon;
 mod dbus;
 mod density;
 mod font;
+mod help;
 mod icon;
 mod layout;
 mod modules;
