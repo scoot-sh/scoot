@@ -76,6 +76,7 @@ mod tablet;
 mod toplevel_cap;
 mod toplevel_icon;
 mod tty;
+mod virtual_input;
 mod wallpaper;
 mod wayland_accept;
 mod window_commit;
@@ -324,6 +325,14 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     let xwayland = xwayland::resolve(options.xwayland, loaded.xwayland);
     state.startup_xwayland = xwayland;
     state.xwayland_fractional = loaded.xwayland_fractional;
+    // Virtual pointer and keyboard for remote control (wayvnc): after the
+    // outputs exist (absolute motion maps onto them) and before the
+    // `WAYLAND_DISPLAY` export below, so no client can bind before the
+    // globals it should see exist. Records the answer in
+    // `startup_virtual_input` for reload to diff against -- the globals are
+    // advertised once here, never mid-session.
+    state.startup_virtual_input = loaded.virtual_input;
+    virtual_input::init(&mut state, loaded.virtual_input);
     if xwayland {
         #[cfg(feature = "xwayland")]
         match xwayland::start(state.loop_handle.clone(), &mut state) {

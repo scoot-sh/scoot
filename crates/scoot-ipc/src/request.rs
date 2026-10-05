@@ -19,6 +19,10 @@ pub enum PointerButton {
     Left,
     Right,
     Middle,
+    /// The browser-style back button (`BTN_BACK`, `0x115`).
+    Back,
+    /// The browser-style forward button (`BTN_FORWARD`, `0x116`).
+    Forward,
 }
 
 /// One request per line. Coordinates are global logical pixels: the same space

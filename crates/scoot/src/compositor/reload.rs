@@ -61,7 +61,8 @@
 //!   never consults the table mid-hold: the press records its keycode in
 //!   `suppressed_keys` (or doesn't), and the release is routed by that set,
 //!   not by what the table says now (see `input::key`).
-//! - `[tty] gpu`, `[renderer] backend`, `[xwayland] enabled`: refused when
+//! - `[tty] gpu`, `[renderer] backend`, `[xwayland] enabled`,
+//!   `[virtual_input] enabled`: refused when
 //!   they differ from what the session runs, naming restart as the remedy.
 //!   Each names something fixed before the first frame (the device already
 //!   driven, the renderer with client textures in it, the X server started
@@ -191,6 +192,9 @@ mod field {
     pub const GPU: &str = "tty.gpu";
     pub const BACKEND: &str = "renderer.backend";
     pub const XWAYLAND: &str = "xwayland.enabled";
+    /// `[virtual_input] enabled`: whether the virtual-pointer and
+    /// virtual-keyboard globals are advertised.
+    pub const VIRTUAL_INPUT: &str = "virtual_input.enabled";
     /// `[xwayland] fractional`: what X draws at a fractional scale.
     pub const FRACTIONAL: &str = "xwayland.fractional";
     pub const AUTOSTART: &str = "autostart.commands";
@@ -547,6 +551,17 @@ impl State {
             report.refused.push(refused(
                 field::XWAYLAND,
                 "takes effect on restart: the X server starts once at startup (and needs an `xwayland` build)",
+            ));
+        }
+        // The globals are advertised once at startup (or never), so
+        // flipping the knob later cannot do what it says: advertising
+        // mid-session would hand every connected client a new global
+        // (and un-advertising would strand bound devices). Compared
+        // against the request snapshot, like `xwayland` above.
+        if fresh.virtual_input != self.startup_virtual_input {
+            report.refused.push(refused(
+                field::VIRTUAL_INPUT,
+                "takes effect on restart: the virtual-pointer and virtual-keyboard globals are advertised once at startup",
             ));
         }
     }

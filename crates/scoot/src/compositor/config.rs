@@ -311,6 +311,24 @@ struct XwaylandConfig {
     fractional: Option<String>,
 }
 
+/// `[virtual_input]`. One field: `enabled`, whether the session offers the
+/// virtual-pointer (`zwlr_virtual_pointer_manager_v1`) and virtual-keyboard
+/// (`zwp_virtual_keyboard_manager_v1`) globals remote-control tools like
+/// wayvnc need. `Option` for the same reason [`LayoutConfig`] is: an absent
+/// key leaves the default.
+///
+/// Off unless the file says on. Any same-uid client could bind these and
+/// type and click as the user, so unlike the clipboard globals (which every
+/// same-uid process can already reach past) they are not advertised at all
+/// until this is set -- see `virtual_input.rs` and `site/src/content/docs/scoot/protocols.md`.
+/// Takes effect on restart: a reload refuses changes with a message naming
+/// that (see `reload.rs`).
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct VirtualInputConfig {
+    enabled: Option<bool>,
+}
+
 /// `[xwayland] fractional`: what the X server draws at when an `[output]
 /// scale` is fractional (1.25, 1.5, ...). X toolkits scale only by integers,
 /// so at a fractional scale X must draw at a whole one and scoot resamples:
@@ -432,6 +450,8 @@ struct FileConfig {
     #[serde(default)]
     xwayland: Option<XwaylandConfig>,
     #[serde(default)]
+    virtual_input: Option<VirtualInputConfig>,
+    #[serde(default)]
     autostart: Option<AutostartConfig>,
     #[serde(default)]
     floating: Option<FloatingConfig>,
@@ -493,6 +513,13 @@ pub struct LoadedConfig {
     /// `xwayland` Cargo-feature build, and takes effect on restart -- a
     /// reload refuses changes with a message naming that (see `reload.rs`).
     pub xwayland: bool,
+    /// Whether the session offers the virtual-pointer and virtual-keyboard
+    /// globals (`[virtual_input] enabled`, default `false`). `true` lets a
+    /// remote-control tool like wayvnc bind them and type and click as the
+    /// user; `false` (or no table) means the globals are not advertised at
+    /// all. Takes effect on restart -- a reload refuses changes with a
+    /// message naming that (see `reload.rs` and [`VirtualInputConfig`]).
+    pub virtual_input: bool,
     /// What the X server draws at a fractional `[output] scale`: `sharp`
     /// (`ceil`) or `light` (`floor`) -- see [`XwaylandFractional`]. Re-applied
     /// live by a reload through the one X-scale chooser (see
@@ -550,6 +577,7 @@ impl LoadedConfig {
             gpu: None,
             renderer: None,
             xwayland: false,
+            virtual_input: false,
             xwayland_fractional: XwaylandFractional::default(),
             invalid_xwayland_fractional: None,
             autostart: Vec::new(),
@@ -590,6 +618,11 @@ impl LoadedConfig {
             .xwayland
             .as_ref()
             .and_then(|xwayland| xwayland.enabled)
+            .unwrap_or(false);
+        let virtual_input = file
+            .virtual_input
+            .as_ref()
+            .and_then(|virtual_input| virtual_input.enabled)
             .unwrap_or(false);
         let (xwayland_fractional, invalid_xwayland_fractional) = match XwaylandFractional::resolve(
             file.xwayland
@@ -635,6 +668,7 @@ impl LoadedConfig {
             gpu,
             renderer,
             xwayland,
+            virtual_input,
             xwayland_fractional,
             invalid_xwayland_fractional,
             autostart,
@@ -801,8 +835,9 @@ pub fn default_config_toml() -> String {
          # appearance fields, binds, [floating] and [[window_rule]], new\n\
          # [autostart] spawn entries, [wallpaper] and [xwayland] fractional\n\
          # re-apply live with `scootctl reload`; [tty] gpu, [renderer]\n\
-         # backend, [xwayland] enabled and an [[outputs]] mode take effect\n\
-         # on restart and a reload refuses them with a message.\n",
+         # backend, [xwayland] enabled, [virtual_input] enabled and an\n\
+         # [[outputs]] mode take effect on restart and a reload refuses\n\
+         # them with a message.\n",
     );
 
     out.push_str("\n[layout]\n");
@@ -915,6 +950,15 @@ pub fn default_config_toml() -> String {
     );
     out.push_str("# enabled = false\n");
     out.push_str("# fractional = \"sharp\"\n");
+
+    out.push_str("\n[virtual_input]\n");
+    out.push_str(
+        "# Offer the virtual-pointer and virtual-keyboard globals a remote-control\n\
+         # tool like wayvnc needs to drive the session (off by default: any same-uid\n\
+         # client could bind them and type and click as the user). Takes effect on\n\
+         # restart. See site/src/content/docs/scoot/remote-desktop.md.\n",
+    );
+    out.push_str("# enabled = false\n");
 
     out.push_str("\n[autostart]\n");
     out.push_str("# Action strings to run once each, in file order, at session startup.\n");
@@ -3580,6 +3624,47 @@ mod tests {
         let loaded = LoadedConfig::from_file(file);
         assert_eq!(loaded.xwayland_fractional, XwaylandFractional::Sharp);
         assert_eq!(loaded.invalid_xwayland_fractional, None);
+    }
+
+    #[test]
+    fn virtual_input_is_off_unless_the_file_says_on() {
+        let file: FileConfig = toml::from_str("").expect("an empty file parses");
+        assert!(
+            !LoadedConfig::from_file(file).virtual_input,
+            "no table means no virtual globals"
+        );
+        let file: FileConfig =
+            toml::from_str("[virtual_input]\nenabled = true\n").expect("a switch parses");
+        assert!(
+            LoadedConfig::from_file(file).virtual_input,
+            "enabled means advertised"
+        );
+        assert!(
+            toml::from_str::<FileConfig>("[virtual_input]\nenabled = true\nextra = 1\n").is_err(),
+            "a typo in the new table must not parse"
+        );
+    }
+
+    #[test]
+    fn the_emitted_default_config_leaves_virtual_input_off() {
+        // Same shape as the fractional emission test above: uncomment the
+        // line the way a user would and check it parses to the default.
+        // (`# enabled = false` appears twice in the emission -- xwayland's
+        // first -- so this finds the one under the new section header.)
+        let emitted = default_config_toml();
+        let lines: Vec<&str> = emitted.lines().collect();
+        let section = lines
+            .iter()
+            .position(|line| line.trim() == "[virtual_input]")
+            .expect("the emission has a [virtual_input] section");
+        let line = lines[section..]
+            .iter()
+            .find(|line| line.trim() == "# enabled = false")
+            .expect("the emission names the virtual-input default");
+        let uncommented = line.trim().strip_prefix("# ").expect("a comment");
+        let file: FileConfig =
+            toml::from_str(&format!("[virtual_input]\n{uncommented}\n")).expect("valid toml");
+        assert!(!LoadedConfig::from_file(file).virtual_input);
     }
 
     #[test]

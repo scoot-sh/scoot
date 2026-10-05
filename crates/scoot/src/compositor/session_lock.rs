@@ -1489,6 +1489,12 @@ impl State {
         // while locked re-arms from a fresh press, which is unaffected).
         self.cancel_bind_repeat();
         self.drop_input_grabs();
+        // Virtual devices hold no grabs, but they can hold keys and buttons
+        // a remote client pressed: release those first, so the releases
+        // reach whoever held them (focus still names them) and the lock
+        // screen never inherits a stuck modifier. After this nothing
+        // virtual delivers until unlock (see `virtual_input.rs`).
+        self.release_virtual_input();
         // A floating window's drag was one of those grabs: the arrangement
         // it asked for, before focus is re-derived against it.
         self.settle_floating_grab();

@@ -81,6 +81,7 @@ use super::session_lock::SessionLock;
 use super::shm_pools::ShmPools;
 use super::subsurface_role::LiveSubsurfaces;
 use super::tty::Tty;
+use super::virtual_input::VirtualInputState;
 use super::wayland_accept::WaylandListener;
 use super::wl_buffers::WlBuffers;
 #[cfg(feature = "xwayland")]
@@ -123,6 +124,14 @@ pub struct State {
     /// is a request snapshot, not liveness (`xdisplay` says whether the
     /// server is actually up).
     pub startup_xwayland: bool,
+    /// Whether the session offers the virtual-pointer and virtual-keyboard
+    /// globals (`[virtual_input] enabled` -- see `virtual_input::init`),
+    /// seeded once in `run`, never written after. What a reload diffs
+    /// `[virtual_input] enabled` against: the globals are advertised once
+    /// at startup, so a change refuses with "takes effect on restart" (see
+    /// `reload.rs`) -- the same request-snapshot shape as `startup_xwayland`
+    /// above.
+    pub startup_virtual_input: bool,
     /// What the X server draws at a fractional `[output] scale`: `sharp`
     /// (`ceil`) or `light` (`floor`) -- see
     /// [`XwaylandFractional`](super::config::XwaylandFractional). Seeded in
@@ -795,6 +804,13 @@ pub struct State {
     /// above this is read again -- every `get_gamma_control`/`set_gamma`
     /// goes through it (see `gamma_control.rs`).
     pub gamma_control: GammaControlState,
+    /// Virtual pointer and keyboard devices (remote control): what
+    /// `zwlr_virtual_pointer_manager_v1` and
+    /// `zwp_virtual_keyboard_manager_v1` hand out, when `[virtual_input]`
+    /// is on. Read on every virtual request and on the three teardown
+    /// paths (device destroy, session lock, VT switch-away); see
+    /// `virtual_input.rs`.
+    pub virtual_input: VirtualInputState,
     /// `zwlr_output_manager_v1` (version 4): what a shell's Settings ->
     /// Display page and `wlr-randr` read the output's modes, position, scale
     /// and transform from. Read on every bind and on the two sites that change
@@ -1220,6 +1236,7 @@ impl State {
             startup_gpu: None,
             startup_autostart: Vec::new(),
             startup_xwayland: false,
+            startup_virtual_input: false,
             xwayland_fractional: super::config::XwaylandFractional::default(),
             world: World::new(config),
             windows: HashMap::new(),
@@ -1314,6 +1331,7 @@ impl State {
             xdg_toplevel_icon_manager,
             xdg_activation,
             gamma_control,
+            virtual_input: VirtualInputState::new(),
             output_management,
             output_power,
             pointer_constraints_state,

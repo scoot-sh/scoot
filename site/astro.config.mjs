@@ -63,6 +63,7 @@ export default defineConfig({
             { label: 'Windows', slug: 'scoot/windows' },
             { label: 'Backends and rendering', slug: 'scoot/backends' },
             { label: 'XWayland', slug: 'scoot/xwayland' },
+            { label: 'Remote desktop', slug: 'scoot/remote-desktop' },
             { label: 'Theming', slug: 'scoot/theming' },
             { label: 'Protocols', slug: 'scoot/protocols' },
             { label: 'Troubleshooting', slug: 'scoot/troubleshooting' },

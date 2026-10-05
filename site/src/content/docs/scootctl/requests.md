@@ -18,8 +18,8 @@ Ask the compositor questions and tell it to act: every request, `type` vs `key`,
 | `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale -- the default and each `[[outputs]]` entry's, appearance, keybindings, new autostart spawn entries; an entry's `mode` is refused as `outputs.<name>.mode`, pending a restart) — see [configuration.md](../scoot/configure.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
 | `screenshot [--output ID] [--out FILE] [--no-cursor]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it always means the first output (id 1). The pointer is drawn in unless `--no-cursor` — see [The pointer in a screenshot](#the-pointer-in-a-screenshot). |
 | `pointer move X Y` | Move the pointer to logical coordinates. |
-| `pointer click X Y [left\|right\|middle]` | Move, then press and release. |
-| `pointer button left\|right\|middle press\|release` | Half a click, for drags. |
+| `pointer click X Y [left\|right\|middle\|back\|forward]` | Move, then press and release. |
+| `pointer button left\|right\|middle\|back\|forward press\|release` | Half a click, for drags. |
 | `pointer scroll DX DY` | Scroll by a delta. Sent as a wheel scroll that also carries its detents (eight v120 units per delta unit, so `pointer scroll 0 15` is exactly one detent) -- clients that only listen for steps still see it. |
 | `key COMBO` | Press one key combination — see [`type` vs `key`](#type-vs-key). |
 | `type TEXT` | Type text on the active keyboard layout. |

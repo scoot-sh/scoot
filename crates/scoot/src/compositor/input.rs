@@ -35,6 +35,8 @@ mod tests;
 pub(super) const BTN_LEFT: u32 = 0x110;
 pub(super) const BTN_RIGHT: u32 = 0x111;
 pub(super) const BTN_MIDDLE: u32 = 0x112;
+pub(super) const BTN_BACK: u32 = 0x115;
+pub(super) const BTN_FORWARD: u32 = 0x116;
 
 /// Every injected-input entry point needs the seat's keyboard, both to send
 /// keys and to read the keymap. `State::new` always adds one and nothing
@@ -1172,9 +1174,14 @@ impl State {
     /// Invariant, same as [`State::suppressed_keys`]: this stays in step with
     /// Smithay's own set only because [`State::key`] (through `key_with`) is
     /// the one caller of
-    /// `KeyboardHandle::input` in this compositor. Anything that ever feeds
-    /// the seat keyboard another way (`input_forward`, `release_source`) must
-    /// update this too, or a real key will be mistaken for an absorbed one.
+    /// `KeyboardHandle::input` in this compositor. Virtual keyboards feed
+    /// the same seat through `KeyboardHandle::input_from_source` instead
+    /// (see `virtual_input.rs`) -- under per-device auxiliary sources, so
+    /// Smithay tracks their held state separately and this mirror (which
+    /// covers the physical `MAIN` source) stays exact. Anything else that
+    /// ever feeds the seat keyboard another way (`input_forward`,
+    /// `release_source`) must update this too, or a real key will be
+    /// mistaken for an absorbed one.
     ///
     /// [`State::suppressed_keys`]: super::State::suppressed_keys
     fn note_held(&mut self, keycode: Keycode, state: KeyState) -> bool {
@@ -1275,7 +1282,7 @@ impl State {
     /// finds no keyboard kind among them. `Request::Subscribe` refreshes
     /// the recorded group, so skipping the read while unsubscribed cannot
     /// report the unsubscribed interval as one change later.
-    fn check_keyboard_layout(&mut self) {
+    pub(super) fn check_keyboard_layout(&mut self) {
         if !self
             .subscribers
             .iter()
@@ -1486,6 +1493,8 @@ pub(super) fn button_code(button: PointerButton) -> u32 {
         PointerButton::Left => BTN_LEFT,
         PointerButton::Right => BTN_RIGHT,
         PointerButton::Middle => BTN_MIDDLE,
+        PointerButton::Back => BTN_BACK,
+        PointerButton::Forward => BTN_FORWARD,
     }
 }
 

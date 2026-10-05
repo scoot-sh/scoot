@@ -36,8 +36,8 @@ pub const REQUESTS_HELP: &str = "\
     screenshot [--output ID] [--out FILE] [--no-cursor]
                                     the pointer is drawn in unless
                                     --no-cursor
-    pointer move X Y | pointer click X Y [left|right|middle]
-    pointer button left|right|middle press|release | pointer scroll DX DY
+    pointer move X Y | pointer click X Y [left|right|middle|back|forward]
+    pointer button left|right|middle|back|forward press|release | pointer scroll DX DY
     key COMBO                       e.g. Return, ctrl+shift+t -- name the key
                                     as it is unmodified plus the modifiers to
                                     hold (shift+1, not exclam)
@@ -641,6 +641,8 @@ fn button(name: &str) -> Result<PointerButton, Error> {
         "left" => Ok(PointerButton::Left),
         "right" => Ok(PointerButton::Right),
         "middle" => Ok(PointerButton::Middle),
+        "back" => Ok(PointerButton::Back),
+        "forward" => Ok(PointerButton::Forward),
         other => Err(Error::Invalid {
             what: "button",
             value: other.to_owned(),

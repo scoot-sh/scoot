@@ -70,6 +70,7 @@ mod keys;
 mod outputs;
 mod pointer;
 mod relative;
+mod virtual_input;
 mod workspace;
 
 /// The framebuffer each scene renders into. 800 square, matching the
