@@ -156,6 +156,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Robustness and resource limits](robustness-and-limits.md) (medium): a standing checklist, delivered bound by bound with each surface
 - [Decision: no built-in CPU/memory/temperature/disk](system-stats-decision.md) (low)
 - [Seamless in scoot: a `[bar]` section](scoot-integration.md) (low)
+- [Hermetic integration tests: no real config, no sound server needed](scootbar-tests-hermetic.md) (medium)
 
 ## Scoot-side changes the bar wants
 
