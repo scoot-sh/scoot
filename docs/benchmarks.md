@@ -5,11 +5,296 @@ can and cannot show. Every row says what it measured. The caveats sit next
 to the results because some rows are not like-for-like, and each place where
 they aren't is marked.
 
+- [Whole-desktop idle cost on the Asahi M2: scoot vs niri vs Hyprland vs GNOME vs KDE Plasma (2026-10-05)](#whole-desktop-idle-cost-on-the-asahi-m2-scoot-vs-niri-vs-hyprland-vs-gnome-vs-kde-plasma-2026-10-05)
 - [scoot vs niri, nested on the dev VM (2026-09-24)](#scoot-vs-niri-nested-on-the-dev-vm-2026-09-24)
 - [scoot vs niri on a real GPU, nested and `--tty` (2026-09-25)](#scoot-vs-niri-on-a-real-gpu-nested-and---tty-2026-09-25)
 - scoot's own tiers on real hardware (dumb buffers + pixman vs GPU scanout
   on an Apple M2) are in [`Asahi.md`](../Asahi.md) Test 4, summarised in
   [backends](https://www.scoot.sh/scoot/backends.md#which-renderer-draws-the-frames).
+
+## Whole-desktop idle cost on the Asahi M2: scoot vs niri vs Hyprland vs GNOME vs KDE Plasma (2026-10-05)
+
+How much does each desktop cost at rest, set up the way its own project
+recommends — and where should scoot get cheaper? The headline: scoot's
+compositor is the lightest of the five (63.6 MB PSS against niri's 83,
+Hyprland's 128, KWin's 126 and gnome-shell's ~160), its bar is 7–9x
+lighter than waybar and 58x lighter than plasmashell — but its whole
+*session* burns the most CPU (0.60% of a core against niri's 0.05%,
+KDE's 0.17%, Hyprland's 0.40% and GNOME's 0.53%), and essentially all of
+it is scoot's own session plumbing: the launcher's 1-second poll plus
+the user-manager round trips it causes (35 of 36 ticks). Fixing that
+one ticket takes the session to ~0.03% — lightest of all. The ranked
+leads are at the end; each is filed in the backlog and linked here.
+
+### What ran
+
+| | |
+|---|---|
+| Machine | Apple MacBook Air M2 under Asahi Linux (NixOS 26.11pre-git, kernel 7.1.13, Mesa 26.2.2 `asahi`), eDP-1 + DP-1 connected as found, panel at 100% (509/509) for every round, volume 100%, Wi-Fi as is |
+| scoot | 0.1.0, origin/main at `5f96802` (a `path:` input of a throwaway wrapper flake, so the tree is pinned by construction), desktop profile `programs.scoot.desktop.enable = true`, `look = "moonrise"` (idle/lock, notifications, keymap, bar, wallpaper; clipboard slot off — PR #443 is unmerged and the slot is inert) |
+| niri | 26.04 (`programs.niri.enable`) + its wiki's [Important software](https://github.com/YaLTeR/niri/wiki/Important-software) (mako, xdg-desktop-portal-gtk + xdg-desktop-portal-gnome + gnome-keyring, an auth agent, xwayland-satellite) and [Getting Started](https://github.com/YaLTeR/niri/wiki/Getting-Started) defaults (waybar 0.15.0 spawned, animations on, alacritty/fuzzel/swaylock defaults noted, foot used for the measurement) |
+| Hyprland | 0.56.2 (`programs.hyprland.enable`, uwsm off — plain `start-hyprland`, the upstream default) + its wiki's [Must have](https://wiki.hypr.land/Useful-Utilities/Must-have/) (mako, PipeWire, xdg-desktop-portal-hyprland, hyprpolkitagent 0.1.3, Qt 5+6 Wayland, fonts) + the wiki's [status-bar example](https://wiki.hypr.land/Useful-Utilities/Status-bars/) (waybar) + hyprpaper/hypridle/hyprlock |
+| GNOME | `services.desktopManager.gnome.enable` defaults (gnome-session 50.1, gnome-shell + mutter 50.4) |
+| KDE Plasma | `services.desktopManager.plasma6.enable` defaults (plasma-workspace 6.7.5, kwin 6.7.5) |
+
+Matched everywhere: moonrise wallpaper
+(`docs/assets/wallpapers/moonrise.png`) in fill mode, foot 1.28.0 with
+`DroidSansM Nerd Font Propo:size=11` showing an idle shell, bar content
+workspaces + clock + network + volume + battery (scootbar; waybar with
+`niri/workspaces` / `hyprland/workspaces`; GNOME/KDE stock shells, whose
+content is recorded below), DP-1 at scale 1.0, notification daemons
+running with nothing queued, PipeWire + WirePlumber + rtkit for all five
+(the Hyprland Must-have lists PipeWire; GNOME/KDE need it; the scootbar
+volume module speaks the PulseAudio protocol). Idle policy matched
+where possible: dim 2 min, lock 4 min, screens off 5 min (scoot profile
+defaults, mirrored in a swayidle script for niri/Hyprland; GNOME/KDE
+run their own managers at defaults).
+
+Deliberate deviations, each with its reason:
+
+- eDP-1 scale is 1.5 everywhere except Hyprland (1.6) and GNOME (1.667):
+  Hyprland 0.56.2 accepts the `1.5` rule (keyword returns ok) and keeps
+  rendering at 1.6; GNOME offers no 1.5 without fractional scaling, and
+  enabling `scale-monitor-framebuffer` plus a `monitors.xml` with 1.5
+  did not stick across two re-logins. Both are recorded, not forced —
+  at idle (no redraws) scale changes buffer sizes only.
+- scoot's bar is the profile's bar minus the moonrise example's extras
+  (no window title, no `load`/`cpu` exec pollers, no launcher buttons):
+  matched content, and exec pollers would add wakeups with no
+  counterpart elsewhere.
+- niri/Hyprland run waybar with the matched config instead of waybar's
+  own default config (whose sway modules are inert under niri).
+- niri/Hyprland lock with plain swaylock (the profile themes its own;
+  the locker never fires inside any sample window, so theming is out of
+  the idle-cost picture).
+- KDE's wallpaper tool refused the in-tree path, so it runs a copy in
+  `~/Pictures` (same bytes, `preserveAspectCrop` = fill).
+- The profile's user units (`scoot-idle`, `scootbar`, the notification
+  feed, the audio inhibitor) start in *every* session via
+  `graphical-session.target`, so they were stopped post-login everywhere
+  but scoot. mako is the exception: the profile's mako doubles as the
+  niri/Hyprland notification daemon (same binary, themed config —
+  noted); in GNOME/KDE it was stopped so their own daemons own the bus.
+- niri spawns its own xwayland-satellite, so the config's duplicate was
+  removed (killed post-login); hyprpolkitagent ships no `bin/` and has
+  no NixOS module, so it was started from its store `libexec` path.
+- A `systemd-inhibit` sleep/idle lock (block) ran for the whole
+  campaign: an auto-suspend on an unattended box would strand it with
+  nobody to wake it. One sleeping process, outside every sample.
+- Settle is 170 s, not 180 s: the 240 s lock timeout would end a
+  180+60 s window exactly at the mark, so 170 + 60 = 230 s keeps
+  margin. No locker fired in any of the 15 clean rounds (verified in
+  the process lists).
+
+### Method (fixed before measuring; what broke is recorded too)
+
+One temporary system (`~/fx/cmpde-cerval`, a wrapper flake around the
+maintainer's `~/nixos-config` with the same inputs and copied lock, the
+scoot input overridden to the pinned origin/main tree; never committed)
+provides all five `.desktop` sessions. greetd + ReGreet stays the login
+manager throughout (no GDM or SDDM; verified `display-manager` is still
+greetd after the switch). The `scoot-test` user logs in through greetd
+IPC (the `~/fx/greet-login/login.py` pattern, with the session name
+patched per desktop) only when no `scoot-test`/`steve` session holds
+seat0; other agents may use the seat, so every login checks first. Home
+state was wiped to the same baseline before each desktop's first round
+(all non-symlink files under a targeted list — caches, dconf,
+desktop-state dirs — while Home Manager symlinks and nix state stay);
+the whole home was snapshotted beforehand and restored after.
+
+Per desktop, 3 rounds: log in, open one foot, settle 170 s, sample
+60 s. The sampler (`sample.sh`: per-process utime+stime from
+`/proc/<pid>/stat`, voluntary/involuntary switches from `status`,
+PSS/RSS from `smaps_rollup`, plus appeared/exited processes) runs as
+root so every process reads. Settle flatness was polled per 30 s in the
+first campaign (scoot ~16, niri 1–4, Hyprland 0–3, GNOME ~16, KDE 4–7
+ticks per 30 s for uid 1001); the second campaign sleeps the same
+170 s. Reported: median and range. Mapping-class splits (`smaps.sh`:
+heap/stack/shm/drm/file-so/...) were taken for each desktop's
+compositor and companions. Power: `power_now` averaged over 120 s
+(`~/fx/pwr.sh`) per desktop with screens at 509, valid only while
+discharging.
+
+What broke, and what was done about it:
+
+- `sample.sh` read utime/stime with `$12`/`$13` — in shell that is
+  `${1}2`, so every CPU number in the first campaign is void (all
+  zeros). Memory, wakeups and PSS/RSS from that campaign are valid
+  (separate reads). Fixed to `${12}`/`${13}`, verified against
+  `$14+$15`, and the whole CPU series re-measured (the `*-c*`
+  rounds); memory uses both campaigns. The per-role tables give the median of the three
+  `*-c*` rounds; where the six scoot sessions split into a lean and a fat cohort (lead 2), the
+  compositor row says so.
+- `loginctl terminate-session` does not reap everything: sudo-launched
+  foots always linger, and KDE's kwin+plasmashell survived two
+  logouts, so KDE rounds 2–3 ran on round 1's compositor (discarded,
+  redone). Every other round was audited process-by-process (`lstart`
+  in each round's `ps0`): clean. From the redo on, every round ends
+  with `pkill -9 -u scoot-test` and a zero-process check.
+- First login: niri's config with single-line `output … { scale …
+  }` blocks is invalid KDL — niri fell back to its default config
+  (wrong scale, wrong spawns). Rewrote multi-line, proved with `niri
+  validate`, re-measured. That invalid session's numbers are excluded.
+- GNOME needed a longer tail than the method's settle: background
+  activity persists ~15–20 min post-login (a profile mako unit
+  crash-looping on gnome-shell's bus name added ~15 ticks/30 s of
+  churn until stopped — an artifact of the shared test user, excluded
+  from every sample by the endpoint-diff). A 300 s validation sample
+  reads zero ticks anywhere, corroborating the settled median.
+- Screenshots: `grim` works under niri/Hyprland, fails under GNOME
+  (no wlr-screencopy) and KDE; GNOME's Shell screenshot API refused in
+  the unattended session (recorded, skipped); KDE's came via
+  `spectacle -b`. scoot's came through its own IPC.
+
+### Results
+
+Whole-session totals (uid 1001 incl. the user manager, one idle foot,
+and every daemon the session runs): median of 3 rounds, range in
+brackets. CPU is ticks/60 s of `_SC_CLK_TCK` = 100 (36 ticks = 0.60% of
+a core); wakeups are voluntary context switches per 60 s.
+
+| desktop | CPU ticks | % of a core | wakeups | PSS | RSS |
+|---|---|---|---|---|---|
+| scoot | 36 [35–37] | 0.60 | 470 [458–477] | 197 MB [197–203] | 331 MB [331–359] |
+| niri | 3 [3–6] | 0.05 | 184 [179–185] | 443 MB (range not recorded) | 938 MB [937–938] |
+| Hyprland | 24 [21–25] | 0.40 | 1173 [1170–1205] | 385 MB [384–385] | 693 MB [692–693] |
+| GNOME | 32 [23–33] | 0.53 | 295 [190–320] | 657 MB [656–662] | 1563 MB [1562–1569] |
+| KDE Plasma | 10 [9–11] | 0.17 | 213 [154–384] | 764 MB [760–772] | 1752 MB [1748–1785] |
+
+Per-role medians (ticks / wakeups per 60 s / PSS; one idle foot everywhere):
+
+| role | scoot | niri | Hyprland | GNOME | KDE |
+|---|---|---|---|---|---|
+| compositor | 1 / 18 / 63.6 MB (lean cohort; 75.6–75.9 in the fat one, lead 2) | 2 / 85 / 83 MB | 1 / 235 / 128.5 MB | 27 / 58–97 / ~160 MB | 1 / 18–60 / 126–132 MB |
+| bar / shell | 0 / 39 / 4.6 MB (scootbar) | 1–2 / 66 / 34.4 MB (waybar) | 1 / 66 / 42 MB (waybar) | in-shell | 6–7 / 93–135 / 266–271 MB (plasmashell) |
+| wallpaper | 0 / 0 / 2.1–14.7 MB (scootbg, bimodal — see leads) | 0 / 0 / 2.0 MB (swaybg) | 0–1 / 20 / 40.5 MB (hyprpaper) | in-shell | in-shell |
+| notifications | 0 / 0 / 3.7 MB (mako) | 0 / 0 / 7.4 MB (mako) | 0 / 0 / 3.2 MB (mako) | in-shell | in-shell |
+| idle / lock | 0 / 0 / ~1 MB (swayidle) | 0 / 0 / ~1 MB | 0 / 0 / ~1 MB | 2–3 / 44–104 / 2.4 MB (gsd-power) | 1 / 2 / 19 MB (powerdevil) |
+| portals | on-demand (0 at sample) | 0 / ~5 / 52 MB (always on) | on-demand (0 at sample) | 0 / 3 / 44 MB | 1 / 7 / 44 MB |
+| polkit agent | — (profile has none yet) | 0 / 0 / 26 MB | 0 / 0 / 27 MB | in-shell | 0 / 0–1 / 14 MB |
+| audio (PipeWire etc.) | 0 / ~0 / ~44 MB | 0 / ~0 / ~42 MB | 0 / ~0 / ~40 MB | 0 / ~0 / ~40 MB | 0 / ~0 / ~43 MB |
+| terminal (foot+bash) | 0 / ~0 / 26–29 MB | 0 / ~0 / 19 MB | 0 / 45 / 25–26 MB | 0 / ~0 / 14 MB | 0 / ~0 / 20–21 MB |
+| XWayland | — (off by default) | 0 / 0 / 46 MB | 0 / 0 / 41 MB | 0 / 0 / 77 MB | 0 / 0 / 40 MB |
+| session plumbing | 35 / ~410 / 46–51 MB | 0 / ~27 / 110 MB | 22 / ~810 / 32 MB | 0–5 / 126–259 / 262 MB | 1 / 34–180 / 103–110 MB |
+
+Reading it role by role:
+
+- **Compositor.** scoot is the lightest resident (63.6 MB; its `smaps`
+  split: heap 32 kB, anon 8.2 MB, shm 12–24 MB, file `.so` 16–32 MB —
+  with two rows to verify, see leads), then niri (83 MB), KWin
+  (126–132 MB), Hyprland (128–129 MB) and gnome-shell (~160 MB, plus
+  its calendar server). At idle the compositor's CPU is ~0 everywhere
+  except gnome-shell (~25 ticks). scoot apparently draws no frames at idle (compositor 1 tick and ~15–18 wakes per 60 s; no frame
+  counter was sampled) and wakes ~15 times a minute; niri wakes ~85 (about half its session's
+  total); Hyprland wakes ~235.
+- **Bar / shell.** scootbar (4.6 MB, ~39 wakes) against waybar (34
+  MB under niri, 42 MB under Hyprland, 64–68 wakes — same ~1/s clock
+  tick, GTK tax on memory) and plasmashell (266–271 MB, ~100+ wakes:
+  the shell is the desktop). GNOME's top bar lives in the shell
+  process. scootbar is 7–9x lighter than waybar and 58x lighter than
+  plasmashell, with slightly fewer wakeups than waybar.
+- **Wallpaper.** scootbg-lean (2.1 MB) matches swaybg (2.0 MB);
+  scootbg-fat (14.7 MB) does not, and neither matches hyprpaper
+  (40.5 MB — the single heaviest wallpaper daemon here). See leads.
+- **Idle policy.** swayidle costs ~1 MB and nothing anywhere. The
+  desktops' own managers cost more resident (powerdevil 19 MB,
+  gsd-power 2.4 MB with 2–3 ticks) for dim/blank/suspend logic scoot
+  does in one daemon.
+- **Portals.** scoot's and Hyprland's start on demand (nothing resident
+  at the sample); niri's recommended stack keeps 52 MB warm
+  (portal-gnome 28, main 11, gtk 8) plus an ibus stack near 60 MB that
+  nothing else measured pulls in. GNOME/KDE carry 44 MB each.
+- **Session plumbing.** This is where scoot *loses*: 35 of its 36
+  ticks and ~400 of its 470 wakeups are `scoot-session`'s 1 s poll
+  (4–5 ticks, ~200 wakes) plus the user-manager round trips it causes
+  (~30 ticks, ~200 wakes) — the already-filed
+  [idle-poll ticket](backlog/core/session-launcher-idle-poll.md), now
+  quantified: the fix takes the whole session from 0.60% of a core to
+  ~0.03%. Hyprland's plumbing is second noisiest (dbus-broker alone
+  wakes ~600 times a minute — something chats constantly on its bus;
+  its user manager burns 17–18 ticks), while niri's, GNOME's and KDE's
+  managers sleep through the window.
+- **What each desktop gives you for its cost.** The totals above buy
+  different things. GNOME carries evolution-data-server (~106 MB:
+  calendar, address book, alarms), online accounts, ibus, its
+  keyring and a 77 MB XWayland stack. KDE carries Discover's update
+  checker, baloo, kactivitymanagerd, accessibility, the wallet and a
+  40 MB XWayland. niri's recommended stack carries the 52 MB portals,
+  the 60 MB ibus stack and a 46 MB XWayland pair. Hyprland carries Qt,
+  hyprpaper and its portal backend. scoot carries PipeWire (~40 MB, a
+  campaign-level choice shared by all five) and a 15 MB push-notification
+  distributor nothing uses (see leads).
+
+Power (screens at 509, 120 s average, valid only while discharging):
+scoot **9.73 W**, niri **9.67 W**. The battery sits at the 80% charge
+limit, so the method's prescribed drop to 75 bought exactly 5 points
+of discharge (80 → 75) before the limiter held the pack again and
+`power_now` went invalid — Hyprland/GNOME/KDE power has no number for
+that reason, not for lack of trying. The two numbers say the panel and
+backlight dominate: two different desktops agree within 0.06 W, i.e. no measurable difference
+between them (one 120 s average each; 0.6% apart is below what this method resolves). Charge
+state was restored exactly afterwards (threshold 80, timer restarted,
+`scoot-charge sync`).
+
+### Optimization leads for scoot
+
+Biggest expected win first. Each is filed; the first confirms and
+quantifies the ticket this benchmark was built to check.
+
+1. **Kill the 1 s session poll** ([idle-poll ticket](backlog/core/session-launcher-idle-poll.md),
+   already open): 35 of 36 ticks and ~400 of 470 wakeups per minute.
+   Nothing else in the session is within an order of magnitude. The
+   fix takes scoot from the most CPU-hungry session here (0.60%) to
+   the least (~0.03%, compositor 1 tick + foot 0).
+2. **scootbg's bimodal idle image** ([image-retention](../scootbg/backlog/image-retention.md)):
+   14.7 vs 2.1 MB across identical sessions, and the compositor shows
+   the same ~12 MB campaign delta (75.6 vs 63.6 MB). Find the retention
+   trigger, drop the decoded image once every output has its frame.
+3. **Verify the 17 MB `[stack]`** ([compositor-stack-pss](backlog/core/compositor-stack-pss.md)):
+   the mapping split's largest scoot-owned row after file-backed Mesa.
+   If real touched stack, shrink the deep path (up to ~17 MB); if an
+   artifact, fix the classifier both this page and the ticket rely on.
+   (Hyprland shows the same 17 MB stack row — compare notes, not code.)
+4. **Mask the Push portal out** ([kunifiedpush-sessions](backlog/packaging/kunifiedpush-sessions.md)):
+   `kunifiedpush-distributor` at ~15 MB in every session for push
+   notifications nothing uses — bigger than mako, the bar and the idle
+   daemon combined.
+5. **Wake the bar only when its text changes** ([second-wakeups](../scootbar/backlog/second-wakeups.md)):
+   ~40 wakes/min, almost certainly the clock ticking every second for
+   a minute-resolution clock. After lead 1 lands, the bar is the
+   second-biggest waker left.
+
+Where scoot is already lightest, plainly: compositor PSS (63.6 MB, 75.9 in the fat cohort,
+against 83/128/126/~160), bar (4.6 MB against 34/42/270), wallpaper at
+its leanest (2.1 MB, matching swaybg), portals on demand (0 resident
+against niri's 52 and 44 each for GNOME/KDE), and no XWayland tax. The notification daemon is
+the same small mako everywhere it runs (3–4 MB; the 7.4 MB niri reading is its themed config).
+
+### What these numbers do not show
+
+- Foot's PSS (12–28 MB) is not comparable across desktops: window
+  geometry was not controlled, so its shm buffers differ. The
+  compositor-side numbers are largely unaffected (second-order, through the client shm buffers the
+  compositor holds: a few MB against tens-of-MB gaps).
+- The endpoint-diff sampler misses processes that live entirely inside
+  the 60 s window (a crash-looping mako unit's children, one-shot
+  migrators). The 30 s settle sums bound that blind spot; nothing in
+  them contradicts the medians above.
+- GNOME (1.667) and Hyprland (1.6) did not take the 1.5 eDP scale (see
+  deviations). At idle with no redraws that changes buffer sizes only.
+- GNOME's settle never visibly flattens the way the others do
+  (+10–16 ticks/30 s for minutes): first-run/background activity with
+  a long tail. The 60 s medians are corroborated by a 300 s validation
+  sample (zero ticks anywhere) and three extra 60 s probes.
+- Screenshots: scoot/niri/Hyprland/KDE at rest are in the evidence
+  (`ev/*-edp.png`); GNOME refused both paths (grim unsupported, Shell
+  API denied unattended).
+- Totals include what each desktop gives you (settings apps, indexers,
+  online accounts, animations) — bytes alone would punish the fuller
+  desktops for features scoot does not have.
+- Evidence: per-process TSVs, `smaps` splits and screenshots under
+  `~/fx/cmpde-cerval/ev/` on the Asahi box; the wrapper flake, sampler
+  scripts and login helper beside them. Nothing was committed there.
 
 ## scoot vs niri on a real GPU, nested and `--tty` (2026-09-25)
 

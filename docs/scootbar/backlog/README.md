@@ -136,6 +136,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
  - [Network: WiFi signal as a strength icon, not text bars](resolved/network-signal-icon-done.md) (medium): the icon shows the strength, the text is just the SSID
 - [Tray: themed icon names](tray-icon-themes.md) (medium), [Tray: real Qt, GTK and Electron apps](tray-real-apps.md) (medium), [Tray: session buses on abstract sockets](tray-abstract-socket.md) (low), [Tray: coalesce a runaway item's redraws](tray-redraw-coalesce.md) (low): split out of the tray when its menus landed
 - [A power menu: lock, log out, suspend, reboot, shut down, with a confirm](resolved/power-menu-done.md) (medium) — RESOLVED 2026-10-04 in #414
+- [The bar wakes about 40 times a minute at idle](second-wakeups.md) (low, filed 2026-10-05): the five-desktop idle benchmark; the clock module likely ticks every second for a minute-resolution clock — wake only when the text changes
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)
 - [Extract `scootui`](extract-scootui.md) (low): when a second consumer appears

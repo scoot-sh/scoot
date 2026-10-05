@@ -302,6 +302,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [[nested] pointer clicks never reach layer-shell surfaces](./resolved/layer-shell-pointer-clicks-done.md) — CLOSED 2026-09-21 as could-not-reproduce (gh #182): the issue's exact `--nested` probes deliver every click shape on current `main` and on the reported rev alike; kept as a wire-level pinning test, no compositor change. Shared root with #183 refuted for the input path.
 - [Touchpad scrolling does not reach Chrome (axis source/v120/stop dropped)](./resolved/touchpad-scroll-chrome-done.md) — RESOLVED 2026-10-04: scrolls forward their real source, wheel `v120`, finger `stop` and relative direction (tty, nested, injected)
 - [The session launcher's 1 s poll is the desktop's biggest idle wakeup source](./core/session-launcher-idle-poll.md) (medium, filed 2026-10-05): 179+178 wakes/min from `sh` + `systemd --user` in a measured idle session
+- [scoot's `[stack]` mapping reports 17 MB PSS at idle](./core/compositor-stack-pss.md) (medium, filed 2026-10-05): the five-desktop idle benchmark's mapping split; verify what the 17 MB is before trusting the heap-vs-stack story
 
 ### --tty / backend
 - [Config-file key for the DRM device](./resolved/tty-gpu-config-key-done.md)
@@ -427,6 +428,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [scoot-session ends the login when the user manager re-executes](resolved/session-manager-reexec-done.md) (high) — RESOLVED 2026-10-04 in #425: every NixOS switch re-execs the user manager, and one `is-active` poll inside that window read as "scoot stopped"; the launcher now tells "not active" from "could not ask"
 - [`graphical-session.target` is reached before the session has a display](./resolved/graphical-session-after-display-done.md) (high) — RESOLVED 2026-10-05 in #431: the service pulled the target in at fork time, so `ConditionEnvironment=WAYLAND_DISPLAY` units (swayidle) skipped every login; a launcher-started `scoot-session.target` now gates the target on the display import
 - [Fourth example look: moonrise (chill)](./resolved/look-moonrise-done.md) (medium) — RESOLVED 2026-10-05 in #437: the night-sky Unsplash illustration as a registered `desktop.look` with the full example set
+- [kunifiedpush-distributor runs in minimal sessions at 15 MB PSS](./packaging/kunifiedpush-sessions.md) (low, filed 2026-10-05): the five-desktop idle benchmark; mask the Push portal out of the session portal config if no backend hard-requires it
 
 ### Security
 - [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev). **But see the entry below: the fd/mapping bound it documents is not the bound it has.**

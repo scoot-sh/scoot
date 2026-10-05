@@ -120,6 +120,10 @@ full per-feature cycle.
       — open, medium, waiting on a user decision: `pic-scale-safe`'s
       infallible output `Vec` ends the daemon under `RLIMIT_AS` or strict
       overcommit; accept, probe, fork the scaler, or switch scalers
+13. [**Idle image retention**](image-retention.md) — open, medium, filed
+    2026-10-05 from the five-desktop idle benchmark: the decoded
+    wallpaper stays mapped (12 MB anon) in some idle sessions and not
+    others; find the trigger, drop it once every output has its frame
 
 ## Milestone 2: motion
 
