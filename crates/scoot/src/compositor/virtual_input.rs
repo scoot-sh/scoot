@@ -55,7 +55,11 @@
 //! a key *is*, so intercepting would make remote keys behave like neither,
 //! and nothing virtual ever triggers a compositor action -- window
 //! management stays local. The seat keymap itself is never touched, so the
-//! physical keyboard's state survives remote typing untouched.
+//! physical keyboard's held keys survive remote typing untouched -- but a
+//! held virtual modifier does change the seat's shared modifier state until
+//! it is released (a translated modifier press goes through
+//! [`KeyboardHandle::input_from_source`], whose key processing updates the
+//! shared xkb modifiers; Smithay's own keyboard manager behaves the same).
 //!
 //! ## Pointers
 //!

@@ -1839,6 +1839,32 @@ fn lock_releases_held_virtual_key() {
 }
 
 #[test]
+fn lock_releases_held_button() {
+    let mut fixture = Fixture::enabled();
+    map_focused_window(&mut fixture);
+    fixture.run(Step::CreatePointer { with_output: false });
+    let (x, y) = window_point(&fixture);
+    move_to(&mut fixture, x, y);
+    fixture.run(Step::Button {
+        code: 0x110,
+        pressed: true,
+    });
+    fixture.take_log();
+    // Lock with the button still held: the release must arrive on the
+    // window (which still holds focus at that point, before the refresh)
+    // and nothing may reach the lock surface after it maps.
+    lock_session(&mut fixture);
+    assert_eq!(
+        fixture.take_log(),
+        [Seen::PointerButton {
+            code: 0x110,
+            pressed: false
+        }]
+    );
+    assert_eq!(take_locker_log(&mut fixture), []);
+}
+
+#[test]
 fn seat_keymap_survives_remote_typing() {
     let mut fixture = Fixture::enabled();
     map_focused_window(&mut fixture);
