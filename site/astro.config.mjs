@@ -4,16 +4,25 @@ import { defineConfig } from 'astro/config';
 
 // `site` has to be absolute: the llms.txt bundles link every page with a
 // full URL (an agent handed the file as a blob has no base to resolve
-// against), and the plugin throws at config time without it. This is the
-// default GitHub project-pages address for github.com/scoot-sh/scoot.
+// against), and the plugin throws at config time without it.
 // `base` must match `site`'s path: starlight-llms-txt builds its bundle
 // URLs from Astro's `base`, so a subpath `site` with the default base `/`
 // emits bundle links at the domain root (verified against the pinned
-// plugin source, llms.txt.ts: `new URL(base, site)`). Both change together
-// when the maintainer picks the real domain (see site/README.md).
+// plugin source, llms.txt.ts: `new URL(base, site)`).
+//
+// Deployment target — the one-line switch for the scoot.sh move (steps in
+// site/README.md, "Moving to scoot.sh"). `'pages'` serves the repo's
+// project-pages address today; `'apex'` serves the root domain. `site`
+// and `base` both derive from this single value so the switch cannot
+// leave them mismatched.
+const DEPLOY_TARGET = 'pages';
+const { site, base } =
+  DEPLOY_TARGET === 'apex'
+    ? { site: 'https://scoot.sh/', base: '/' }
+    : { site: 'https://scoot-sh.github.io/scoot/', base: '/scoot/' };
 export default defineConfig({
-  site: 'https://scoot-sh.github.io/scoot/',
-  base: '/scoot/',
+  site,
+  base,
   integrations: [
     starlight({
       title: 'scoot',
