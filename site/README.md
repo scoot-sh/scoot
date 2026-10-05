@@ -52,5 +52,28 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
 
 `nix/docs-site.nix`: `fetchPnpmDeps` (hash-pinned `pnpm-lock.yaml`) +
 `pnpmConfigHook` + `astro build` + the llms gate, offline. No network at
-build time beyond the deps hash. `site` URL default is the repo's
-project-pages address; it changes when the maintainer picks the domain.
+build time beyond the deps hash. `site` and `base` both derive from the
+single `DEPLOY_TARGET` value in `astro.config.mjs` (`'pages'` today:
+`https://scoot-sh.github.io/scoot/` with base `/scoot/`).
+
+## Moving to scoot.sh
+
+The site keeps the `/scoot/` base until the maintainer activates the root
+domain. The switch, in order (do not reorder: GitHub only issues the
+certificate once the hostname resolves to it):
+
+1. In Cloudflare, add the apex record for `scoot.sh`: a CNAME-flattened
+   record pointing at `scoot-sh.github.io` (Cloudflare flattens CNAME at
+   the apex; an `A` record to GitHub's Pages IPs works too but drifts).
+   Leave the proxy (orange cloud) **off** — DNS-only — until GitHub has
+   issued the certificate; proxying first breaks domain verification.
+2. Tell GitHub the custom domain (any checkout with `gh` authenticated):
+   `gh api -X PUT repos/scoot-sh/scoot/pages -f cname=scoot.sh`.
+   Wait for the certificate: `gh api repos/scoot-sh/scoot/pages --jq
+   .https_certificate` until it reports `approved` (a few minutes).
+3. One-line change in `site/astro.config.mjs`: `DEPLOY_TARGET = 'apex'`
+   (sets `site: https://scoot.sh` and `base: /` together). Merge to
+   `main`; the deploy workflow publishes; check `https://scoot.sh/`,
+   `https://scoot.sh/llms.txt`, and one per-page twin
+   (e.g. `https://scoot.sh/install.md`). Only then turn the Cloudflare
+   proxy back on if wanted.

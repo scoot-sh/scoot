@@ -152,6 +152,7 @@ in
   imports = [
     ./idle-home.nix
     ./notifications-home.nix
+    ./clipboard-home.nix
     ./keys-home.nix
   ];
 

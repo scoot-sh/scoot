@@ -36,15 +36,92 @@ let
     else
       "makoctl";
 
+  # The clipboard picker's tools: absolute when the clipboard child
+  # names packages, bare otherwise (same fail-quiet contract as above).
+  clip = cfg.desktop.clipboard;
+  cliphistBin =
+    if clip.managerPackage != null then lib.getExe' clip.managerPackage "cliphist" else "cliphist";
+  wlCopyBin =
+    if clip.wlClipboardPackage != null then
+      lib.getExe' clip.wlClipboardPackage "wl-copy"
+    else
+      "wl-copy";
+  fuzzelPickBin =
+    if clip.menuPackage != null then lib.getExe' clip.menuPackage "fuzzel" else "fuzzel";
+  scootBin = if cfg.package != null then lib.getExe' cfg.package "scoot" else "scoot";
+
+  # The lock probe the picker embeds (`@SCOOT_BIN@` replaced, the way
+  # `nixos.nix` substitutes the session units).
+  clipboardGuard = builtins.replaceStrings [ "@SCOOT_BIN@" ] [ scootBin ] (
+    builtins.readFile ./clipboard-guard.sh
+  );
+
+  # Extra cliphist flags for the picker's `list`/`decode` (a trailing
+  # space when set, nothing when the default db stands -- kept as one
+  # string with the space inside, so the call sites read plainly).
+  clipboardDbFlags = lib.optionalString (clip.dbPath != null) "-db-path '${clip.dbPath}' ";
+
+  # The picker's theme: the look's roles as fuzzel CLI colors (opaque:
+  # fuzzel takes `rrggbbaa`), the same roles the bar and the locker are
+  # themed from. Nothing without a look (or opted out): fuzzel's own
+  # style stands, and the future launcher child reuses these flags.
+  clipboardThemed =
+    let
+      look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
+    in
+    look != null && (cfg.desktop.theme.targets.clipboard.enable or true);
+  clipboardThemeFlags =
+    let
+      look = desktop.looks.${cfg.desktop.look};
+      hexA = color: "${lib.removePrefix "#" color}ff";
+    in
+    lib.optionalString clipboardThemed (
+      " --background-color=${hexA look.barColors.background}"
+      + " --text-color=${hexA look.barColors.foreground}"
+      + " --border-color=${hexA look.appearance.focus_ring_active_color}"
+      + " --selection-color=${hexA look.barColors.accent}"
+      + " --selection-text-color=${hexA look.barColors.background}"
+      + " --match-color=${hexA (look.barColors.hover or look.barColors.accent)}"
+      + " --prompt-color=${hexA look.barColors.foreground}"
+    );
+
   # Clipboard picker: `cliphist` history through the launcher menu
-  # back into the clipboard. A script because `[binds]` has no shell
-  # (whitespace-split, no quoting): a pipeline is not expressible
-  # inline. Tool names stay bare on purpose -- `cliphist`,
-  # `wl-clipboard` and the menu arrive with the `desktop-clipboard`
-  # child, and until then this fails quietly like any missing tool.
-  # That child replaces this script keeping the bind.
+  # back into the clipboard -- lines on stdin, selection on stdout (the
+  # launcher slot's dmenu contract, which that child reuses when it
+  # lands). A script because `[binds]` has no shell (whitespace-split,
+  # no quoting): a pipeline is not expressible inline. Absolute tool
+  # paths when the clipboard child names packages, bare names from PATH
+  # otherwise (off Linux, or without the overlay): a missing tool then
+  # fails quietly at runtime -- `State::spawn` warns and reports
+  # `false`, never wedging input -- so the bind is always safe.
+  #
+  # Three guards, each load-bearing:
+  # - locked: the compositor already suppresses every bind while locked;
+  #   this covers a manual run (over ssh, say), refusing with a message
+  #   instead of showing history behind the lock.
+  # - cancel/empty: fuzzel exits nonzero on Escape, and `--no-run-if-empty`
+  #   fires on an empty history -- either must leave the clipboard alone,
+  #   because `wl-copy` with empty stdin *clears* the selection.
+  # - byte-exact restore: the decoded bytes travel through a temp file,
+  #   never command substitution (which would strip trailing newlines and
+  #   corrupt an entry copied with them, the common `echo | wl-copy` shape).
+  # A pick wiped mid-flight (the lock landed between list and decode)
+  # decodes to nothing and is dropped the same way.
   clipboardPick = pkgs.writeShellScriptBin "scoot-clipboard-pick" ''
-    cliphist list | fuzzel --dmenu | cliphist decode | wl-copy
+    ${clipboardGuard}
+    if ! clipboard_unlocked; then
+      echo "scoot-clipboard-pick: the session is locked -- unlock to pick from history" >&2
+      exit 1
+    fi
+    sel="$(${cliphistBin} ${clipboardDbFlags}list | ${fuzzelPickBin} --dmenu --prompt='clipboard: ' --no-run-if-empty --only-match${clipboardThemeFlags})" || exit 0
+    case "$sel" in
+      "") exit 0 ;;
+    esac
+    tmp="$(mktemp)" || exit 1
+    trap 'rm -f "$tmp"' EXIT INT TERM
+    printf '%s\n' "$sel" | ${cliphistBin} ${clipboardDbFlags}decode >"$tmp" || exit 0
+    [ -s "$tmp" ] || exit 0
+    ${wlCopyBin} <"$tmp"
   '';
 
   # Screenshot scripts: dated files into `~/Pictures` (`$HOME`

@@ -279,6 +279,54 @@ in
           '';
         };
       };
+
+      # The clipboard's packages: the shapes are in `desktop.nix`
+      # (shared with the home-manager side) and the watcher units that
+      # run them are that side's (`clipboard-home.nix`); this side
+      # installs them system-wide. The same packages as there, so
+      # either side alone names the same tools. Merged here for the
+      # same one-declaration reason as above. Linux-only: off Linux
+      # each defaults to null, which the assertions below refuse
+      # loudly.
+      clipboard = desktop.options.clipboard // {
+        managerPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              (if pkgs ? cliphist then import ./clipboard-cliphist.nix { inherit pkgs; } else null)
+            else
+              null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then leanCliphist else null";
+          description = ''
+            The clipboard manager to install system-wide (a lean
+            cliphist without its contrib pickers, the same default as
+            the home-manager side -- see `clipboard-cliphist.nix`).
+            Null installs nothing. Linux-only: null off Linux.
+          '';
+        };
+
+        wlClipboardPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wl-clipboard or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.wl-clipboard or null else null";
+          description = ''
+            The copy/paste tools to install system-wide
+            (`wl-copy`/`wl-paste`). Null installs nothing.
+            Linux-only: null off Linux.
+          '';
+        };
+
+        menuPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null";
+          description = ''
+            The dmenu-style menu to install system-wide for the
+            history picker (`fuzzel`). Null installs nothing.
+            Linux-only: null off Linux.
+          '';
+        };
+      };
     };
 
     # `pkgs.scoot` when the flake's overlay (`overlays.default`) is
@@ -586,6 +634,11 @@ in
       # below installs, and the user unit comes from the
       # home-manager side.
       programs.scoot.desktop.notifications.enable = lib.mkDefault true;
+
+      # The clipboard slot on with the profile (still individually
+      # disable-able at plain priority): the packages below install,
+      # and the watcher units come from the home-manager side.
+      programs.scoot.desktop.clipboard.enable = lib.mkDefault true;
     })
     # The notification daemon's system half: its package on PATH. The
     # unit and the config are the home-manager side's
@@ -607,6 +660,47 @@ in
       environment.systemPackages = lib.optional (
         cfg.desktop.notifications.package != null
       ) cfg.desktop.notifications.package;
+    })
+    # The clipboard's system half: its tools on PATH. The watcher units
+    # and the picker are the home-manager side's (`clipboard-home.nix`
+    # and the keymap): without it the tools sit ready for a hand-written
+    # setup, the way a `[wallpaper]` finds scootbg on PATH without the
+    # home-manager side.
+    (lib.mkIf cfg.desktop.clipboard.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.clipboard.managerPackage != null;
+          message = ''
+            programs.scoot.desktop.clipboard.enable is set but
+            programs.scoot.desktop.clipboard.managerPackage is null: set
+            it explicitly (apply the overlay, or point at a cliphist).
+          '';
+        }
+        {
+          assertion = cfg.desktop.clipboard.wlClipboardPackage != null;
+          message = ''
+            programs.scoot.desktop.clipboard.enable is set but
+            programs.scoot.desktop.clipboard.wlClipboardPackage is null:
+            set it explicitly (apply the overlay, or point at a
+            wl-clipboard).
+          '';
+        }
+        {
+          assertion = cfg.desktop.clipboard.menuPackage != null;
+          message = ''
+            programs.scoot.desktop.clipboard.enable is set but
+            programs.scoot.desktop.clipboard.menuPackage is null: set it
+            explicitly (apply the overlay, or point at a fuzzel).
+          '';
+        }
+      ];
+
+      environment.systemPackages =
+        lib.optional (cfg.desktop.clipboard.managerPackage != null) cfg.desktop.clipboard.managerPackage
+        ++ lib.optional (
+          cfg.desktop.clipboard.wlClipboardPackage != null
+        ) cfg.desktop.clipboard.wlClipboardPackage
+        ++ lib.optional (cfg.desktop.clipboard.menuPackage != null) cfg.desktop.clipboard.menuPackage;
     })
     # The idle policy's system half: its tools on PATH, the docked-lid
     # rule, and the locker's PAM service. The timers and the locker
