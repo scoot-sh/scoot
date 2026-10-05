@@ -43,10 +43,21 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
 
 - `pnpm check` (`scripts/check-llms.mjs`): fails the build if `llms.txt`
   misses a page, a `.md` twin is missing/empty, or a linked bundle 404s.
-  Runs in the nix derivation after `astro build` and in CI.
+  Runs in the nix derivation after `astro build` and in CI. Covers the
+  whole tree (`src/content/docs/**/*.md`, nested sections included).
 - `pnpm test-snippets`: toml/sh soundness + the "color"/"compositor"
-  wording rules. Executing snippets against headless scoot is the recorded
-  next step (needs the Linux binary; both runners already call this file).
+  wording rules, over the whole tree. Executing snippets against headless
+  scoot is the recorded next step (needs the Linux binary; both runners
+  already call this file).
+- `pnpm test-nix` (`scripts/check-nix.mjs`): every fenced `nix` block
+  must parse under `nix-instantiate --parse` — as a full file, a closed
+  fragment, or a module body with `inputs`/`pkgs`/`lib`/`config` bound —
+  so the flake/module snippets cannot rot at the syntax level. Runs in
+  the derivation (which provides `nix`) and anywhere with `nix` on
+  `PATH`. Deeper — that the documented NixOS and home-manager desktop
+  configs actually evaluate — is pinned in `nix/tests.nix` ("the
+  documented install configs", run by `nix flake check` in CI); keep
+  that test in step with `desktop/index.md` when the page changes.
 
 ## Nix build
 

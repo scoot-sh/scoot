@@ -1,5 +1,13 @@
 # Docs site outline (proposal for review — phase 1, nothing moves yet)
 
+> Status 2026-10-05: the maintainer approved this outline (scoot desktop
+> as the primary path, three front doors) and PR B (`docs/site-move`)
+> executed the move. The sidebar in `site/astro.config.mjs` is the live
+> structure; this file stays as the mapping record (which `docs/*.md`
+> sections fed each page) and the `dev/` plan for the contributor tree,
+> whose move is still open. One deliberate deviation: `scootbar/modules`
+> is one searchable page rather than thirteen (see the PR).
+
 This is the draft page outline the `docs-site` ticket asks the maintainer to
 review **before** any existing doc is moved or rewritten. The scaffold beside
 it (`site/`, Astro Starlight) proves the shape with 4 adapted pages; every
