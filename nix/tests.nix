@@ -120,6 +120,12 @@
 #   profile and the policy are Linux-only: off Linux each tool defaults
 #   to null, `lock.command` to its bare form, and the policy's own
 #   assertions refuse loudly -- pinned, not skipped.
+# - the documented install configs (site/src/content/docs/desktop/index.md,
+#   "Set up the flake" / NixOS / Home Manager): the minimal NixOS desktop,
+#   the GPU-package plus opt-in-greeter variant, and standalone
+#   home-manager evaluate through the flake wrappers with the profile on
+#   and the moonrise look rendered into the config file -- so the page's
+#   snippets cannot rot (nix flake check runs this; keep the page in step).
 {
   lib,
   pkgs,
@@ -738,6 +744,51 @@ let
   hmDarwin = evalHomeWith flake.homeModule darwinPkgs {
     enable = true;
     settings.wallpaper.image = "~/Pictures/hills.jpg";
+  };
+  # --- the documented install configs (site/src/content/docs/desktop/index.md:
+  # "Set up the flake" / NixOS / Home Manager — keep in step with that
+  # page). The minimal NixOS desktop, exactly the page's snippet, through
+  # the flake wrapper a consumer imports.
+  osDocsDesktop = evalNixosWith [ flake.nixosModule ] pkgs {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+  };
+  # ...plus the page's two commented options switched on: the GPU
+  # package choice and the opt-in greeter (with the login user a real
+  # configuration provides, like the sibling greeter pins).
+  osDocsDesktopFull = evalNixosWith [ flake.nixosModule greeterUser ] pkgs {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+    package = built.scoot-gpu;
+    greeter.enable = true;
+  };
+  # Standalone home-manager desktop: the page's home.nix snippet, through
+  # the legacy `homeManagerModules` spelling (the page documents both;
+  # the current `homeModules` spelling is pinned equal below). (As a
+  # NixOS module it is the same module under `home-manager.users.<name>`
+  # — see the page — so this evaluation covers both forms.)
+  hmDocsDesktop = evalHomeWith flake.homeManagerModules.scoot pkgs {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+  };
+  hmDocsDesktopCurrent = evalHomeWith flake.homeModules.scoot pkgs {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+  };
+  # The same documented options through the pure module (stub packages,
+  # like the sibling look pins): what the rendered-file check below reads.
+  # The flake wrapper above only injects package defaults, pinned by
+  # `hmFlake`; the options and the look render identically here.
+  hmDocsDesktopPure = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "moonrise";
   };
   # The overlay, and the pure module defaulting to what it provides.
   overlaid = pkgs.appendOverlays [ flake.overlays.default ];
@@ -2564,6 +2615,31 @@ let
         assert lib.any (p: (p.pname or "") == "swaylock") osRealIdle.config.environment.systemPackages;
         true
       )
+      # The documented install configs (desktop/index.md) evaluate with
+      # the profile on: the minimal NixOS desktop, the GPU-package plus
+      # opt-in-greeter variant, and standalone home-manager. A renamed
+      # option or a restructured profile breaks the page's snippets, so
+      # it breaks here first.
+      (
+        assert allAssertionsHold osDocsDesktop.config;
+        assert osDocsDesktop.config.programs.scoot.desktop.look == "moonrise";
+        assert osDocsDesktop.config.programs.scoot.session.enable;
+        true
+      )
+      (
+        assert allAssertionsHold osDocsDesktopFull.config;
+        assert osDocsDesktopFull.config.programs.scoot.package.drvPath == built.scoot-gpu.drvPath;
+        assert osDocsDesktopFull.config.services.displayManager.regreet.enable;
+        true
+      )
+      (
+        assert allAssertionsHold hmDocsDesktop.config;
+        assert hmDocsDesktop.config.programs.scoot.desktop.look == "moonrise";
+        # Both documented home-manager import spellings resolve to the
+        # same module: the current spelling evaluates identically.
+        assert hmDocsDesktopCurrent.config.programs.scoot.desktop.look == "moonrise";
+        true
+      )
       (
         assert allAssertionsHold osFlake.config;
         true
@@ -2752,6 +2828,9 @@ let
   hmDeskMusicToml = hmDeskLookMusic.config.xdg.configFile."scoot/config.toml".source;
   hmDeskVinylToml = hmDeskLookVinyl.config.xdg.configFile."scoot/config.toml".source;
   hmDeskMoonToml = hmDeskLookMoon.config.xdg.configFile."scoot/config.toml".source;
+  # The documented standalone home-manager desktop renders the moonrise
+  # look (site/desktop/index.md's home.nix snippet, end to end).
+  hmDocsDesktopToml = hmDocsDesktopPure.config.xdg.configFile."scoot/config.toml".source;
   keysToml = hmKeys.config.xdg.configFile."scoot/config.toml".source;
   keysSlotsToml = hmKeysSlots.config.xdg.configFile."scoot/config.toml".source;
   hmDeskBarToml = hmDeskBar.config.programs.scootbar.configFile;
@@ -5910,6 +5989,16 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     grep -q "locked" "$SCOOT_CLIP_TEST_DIR/stderr"
     [ ! -e "$SCOOT_CLIP_TEST_DIR/pasted" ] || { echo "locked pick pasted"; exit 1; }
     echo "ok: a locked pick is refused"
+
+    # 18. The documented standalone desktop (site/desktop/index.md's
+    #     home.nix snippet) renders the moonrise look end to end.
+    python3 -c '
+    import sys,tomllib
+    got = tomllib.load(open(sys.argv[1],"rb"))
+    assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B"}, got["appearance"]
+    assert got["wallpaper"]["image"].endswith("moonrise.png"), got["wallpaper"]
+    ' ${hmDocsDesktopToml}
+    echo "ok: documented home-manager desktop renders moonrise"
   ''}
 
   touch $out
