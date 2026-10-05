@@ -73,6 +73,19 @@
 #   the cursor package is never installed (Stylix's own cursor target
 #   owns that); and the module evaluates with no Stylix option defined
 #   at all (every pre-existing evaluation below does exactly that).
+# - the desktop profile (`programs.scoot.desktop`, child
+#   `desktop-profile`): `enable` turns on the session entry and its units
+#   plus the wallpaper default on the NixOS side (staying additive: no
+#   default session) and the portal config on the home-manager side, and
+#   through `programs.scootbar` (when imported -- never required) the bar
+#   with its unit; `look` renders the example palette into the compositor
+#   and bar configs (each leaf yielding to a user value, and to Stylix
+#   where present); a look without an in-repo wallpaper (`vinyl-sunset`)
+#   sets no `[wallpaper]` table; the `[xwayland]` knob defaults on; every
+#   future slot defaults off and inert; `enable` without scoot, a look
+#   without the profile, and an unknown look each fail eval;
+#   `desktop.greeter` is the greeter (the session entry forced on beside
+#   it); and `bar.enable = false` leaves the bar entirely alone.
 {
   lib,
   pkgs,
@@ -149,6 +162,14 @@ let
       );
       default = { };
     };
+    # The desktop profile's bar half (`programs.scootbar` from
+    # `nix/modules/scootbar-home.nix`) runs as a user service: only the
+    # combined desktop evaluations below import that module, and this is
+    # what its unit is pinned against.
+    options.systemd.user.services = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
   };
 
   nixosStubs = {
@@ -191,6 +212,13 @@ let
           };
         }
       );
+      default = { };
+    };
+    # The bar's user service (`scootbar.service` from
+    # `nix/modules/scootbar-nixos.nix`): only the combined desktop
+    # evaluations below import that module.
+    options.systemd.user.services = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
       default = { };
     };
   };
@@ -297,6 +325,13 @@ let
   # and miss on a real Stylix; the color, cursor and image reads are the
   # sites to look at. `image` is a store path, as Stylix's `pathInStore`
   # coercion makes it.
+  #
+  # Plus what the scootbar module reads of it (the same rev:
+  # `stylix/target.nix` for the palette, `stylix/fonts.nix` for the font
+  # and size): `base05`/`base08` beside the three the compositor reads,
+  # and the sans-serif family plus the desktop size. Only the combined
+  # desktop-plus-bar evaluations below touch those; the compositor-only
+  # pins above are unchanged by them.
   styImage = builtins.toFile "stylix-wallpaper.png" "fake wallpaper";
   fakeCursorPkg = pkgs.runCommand "fake-cursor-theme" { } ''
     mkdir -p $out/share/icons/Vanilla-DMZ/cursors
@@ -330,14 +365,29 @@ let
         type = lib.types.str;
         default = "fill";
       };
+      options.stylix.fonts.sansSerif = lib.mkOption {
+        type = lib.types.nullOr lib.types.raw;
+        default = null;
+      };
+      options.stylix.fonts.sizes.desktop = lib.mkOption {
+        type = lib.types.int;
+        default = 10;
+      };
       config = {
         stylix.enable = enable;
         stylix.cursor = cursor;
         stylix.image = image;
         stylix.imageScalingMode = mode;
+        stylix.fonts.sansSerif = {
+          name = "DejaVu Sans";
+          package = pkgs.dejavu_fonts.minimal;
+        };
+        stylix.fonts.sizes.desktop = 10;
         lib.stylix.colors.withHashtag = {
           base00 = "#101010";
           base03 = "#303030";
+          base05 = "#e0e0e0";
+          base08 = "#ff0000";
           base0D = "#0000ff";
         };
       };
@@ -793,6 +843,223 @@ let
     package = fakePkg;
     greeter.enable = true;
   } (greeterUser // { services.displayManager.regreet.cageArgs = [ "-s" ]; });
+
+  # --- desktop profile (`programs.scoot.desktop`) evaluations under test ---
+  #
+  # The profile on its own (no scootbar module imported): the bar halves
+  # stay empty (the `options.programs ? scootbar` gate), which is also
+  # what proves the profile never requires the bar module.
+  hmDesk = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+  };
+  # One per look: the example palette as `[appearance]` plus, where the
+  # look ships an in-repo wallpaper, its image and mode (which is what
+  # installs scootbg for it); `vinyl-sunset` ships none, so no table
+  # appears and the session shows the flat `background_color`.
+  hmDeskLookMusic = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  hmDeskLookVinyl = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "vinyl-sunset";
+  };
+  hmDeskLookBurst = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "radial-burst";
+  };
+  # A user value beside a look wins per key; the rest stays the look's.
+  hmDeskUserWins = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    settings.appearance.background_color = "#123456";
+    settings.wallpaper.image = "/user/wall.png";
+    settings.wallpaper.mode = "center";
+  };
+  # Stylix beside a look: Stylix wins every leaf (one priority above the
+  # look), so this renders exactly what the Stylix-only evaluation does.
+  hmDeskStylix = evalHomeStylix { } {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # The `[xwayland]` knob: on means on, off means absent.
+  hmDeskXwayland = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.xwayland.enable = true;
+  };
+  # A future slot enabled today: accepted and inert (assertions hold,
+  # nothing installed beyond the profile's own).
+  hmDeskSlotOn = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.notifications.enable = true;
+  };
+  # Refusals: the profile without scoot, and a look without the profile
+  # (both pinned by message in `_desktopPins`)...
+  hmDeskNoEnable = evalHome { desktop.enable = true; };
+  hmDeskLookNoEnable = evalHome {
+    enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...and an unknown look, which is an option type error (the `enum`'s own
+  # message names the valid values), caught here by `tryEval`.
+  hmDeskUnknownLook =
+    builtins.tryEval
+      (evalHome {
+        enable = true;
+        desktop.enable = true;
+        desktop.look = "bogus-look";
+      }).config.programs.scoot.desktop.look;
+
+  osDesk = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  osDeskSlotOn = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.idle.lock.enable = true;
+  };
+  # The knob is accepted here (its effect is home-manager wiring; the
+  # package choice stays `programs.scoot.package`).
+  osDeskXwayland = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.xwayland.enable = true;
+  };
+  osDeskNoEnable = evalNixos { desktop.enable = true; };
+  osDeskLookNoEnable = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.look = "radial-burst";
+  };
+  # `desktop.greeter` is an alias for `programs.scoot.greeter`: through it
+  # the profile lists a session in a ReGreet login.
+  osDeskGreeter = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.greeter.enable = true;
+  } greeterUser;
+
+  # The profile beside the bar module: the bar halves have something to
+  # set. A stand-in bar package (the pure nixpkgs set has no scootbar, and
+  # a null one is refused by name).
+  fakeBar = pkgs.runCommand "fake-scootbar" { } ''
+    mkdir -p $out/bin
+    echo '#!/bin/sh' > $out/bin/scootbar
+    chmod +x $out/bin/scootbar
+  '';
+  evalHomeDesktopWith =
+    extra: scootCfg: barCfg:
+    lib.evalModules {
+      modules = [
+        ./modules/home.nix
+        ./modules/scootbar-home.nix
+        baseStubs
+        homeStubs
+        ({ config, ... }: {
+          programs.scoot = scootCfg;
+          programs.scootbar = barCfg;
+        })
+      ]
+      ++ extra;
+      specialArgs = { inherit pkgs; };
+    };
+  evalHomeDesktop = evalHomeDesktopWith [ ];
+  evalNixosDesktopWith =
+    extra: scootCfg: barCfg:
+    lib.evalModules {
+      modules = [
+        ./modules/nixos.nix
+        ./modules/scootbar-nixos.nix
+        baseStubs
+        nixosStubs
+        regreetStubs
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        ({ config, ... }: {
+          programs.scoot = scootCfg;
+          programs.scootbar = barCfg;
+        })
+      ]
+      ++ extra;
+      specialArgs = {
+        pkgs = pkgs;
+        modulesPath = "${pkgs.path}/nixos/modules";
+      };
+    };
+  evalNixosDesktop = evalNixosDesktopWith [ ];
+  hmDeskBar = evalHomeDesktop {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  } { package = fakeBar; };
+  hmDeskBarUserWins =
+    evalHomeDesktop
+      {
+        enable = true;
+        package = fakePkg;
+        wallpaper.package = fakeBg;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+      }
+      {
+        package = fakeBar;
+        settings.colors.accent = "#123456";
+      };
+  hmDeskBarStylix = evalHomeDesktopWith [ (stylixStub { }) ] {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  } { package = fakeBar; };
+  hmDeskBarOff = evalHomeDesktop {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.bar.enable = false;
+  } { package = fakeBar; };
+  osDeskBar = evalNixosDesktop {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.look = "radial-burst";
+  } { package = fakeBar; };
+  osDeskBarOff = evalNixosDesktop {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.look = "radial-burst";
+    desktop.bar.enable = false;
+  } { package = fakeBar; };
 
   # --- eval-time structural pins (fail `nix flake check` at eval) ---
   #
@@ -1566,6 +1833,10 @@ let
   hmWallNotTableToml = hmWallNotTable.config.xdg.configFile."scoot/config.toml".source;
   hmStylixToml = hmStylix.config.xdg.configFile."scoot/config.toml".source;
   hmStylixColorToml = hmStylixColor.config.xdg.configFile."scoot/config.toml".source;
+  hmDeskMusicToml = hmDeskLookMusic.config.xdg.configFile."scoot/config.toml".source;
+  hmDeskVinylToml = hmDeskLookVinyl.config.xdg.configFile."scoot/config.toml".source;
+  hmDeskBarToml = hmDeskBar.config.programs.scootbar.configFile;
+  osDeskBarToml = osDeskBar.config.programs.scootbar.configFile;
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
   #
@@ -1717,9 +1988,412 @@ let
       true
     )
   ];
+
+  # --- desktop profile structural pins (fail `nix flake check` at eval) ---
+  _desktopPins = [
+    # The profile alone (no bar module): assertions hold, portals on, and
+    # nothing themed without a look...
+    (
+      assert allAssertionsHold hmDesk.config;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.portals.enable;
+      true
+    )
+    (
+      assert !(hmDesk.config.programs.scoot.settings ? appearance);
+      true
+    )
+    (
+      assert !(hmDesk.config.programs.scoot.settings ? wallpaper);
+      true
+    )
+    # ...and every future slot off and empty (spot-check across the tree).
+    (
+      assert !hmDesk.config.programs.scoot.desktop.idle.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.idle.lock.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.notifications.enable;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.notifications.package == null;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.launcher.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.capture.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.auth.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.secrets.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.audio.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.clipboard.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.nightlight.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.power.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.theme.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.apps.terminal.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.apps.fileManager.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.keys.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.displays.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.inputMethod.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.automount.enable;
+      true
+    )
+    # music-desk: the example palette in the compositor config...
+    (
+      assert allAssertionsHold hmDeskLookMusic.config;
+      true
+    )
+    (
+      assert
+        hmDeskLookMusic.config.programs.scoot.settings.appearance == {
+          background_color = "#FCFBFB";
+          focus_ring_active_color = "#3D579A";
+          focus_ring_inactive_color = "#D5D7DD";
+        };
+      true
+    )
+    (
+      assert hmDeskLookMusic.config.programs.scoot.settings.wallpaper.mode == "fill";
+      true
+    )
+    (
+      assert lib.hasSuffix "music-desk.png"
+        hmDeskLookMusic.config.programs.scoot.settings.wallpaper.image;
+      true
+    )
+    # ...which is what installs scootbg for it.
+    (
+      assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    (
+      assert
+        drvs hmDeskLookMusic.config.home.packages == drvs [
+          fakePkg
+          fakeBg
+        ];
+      true
+    )
+    # vinyl-sunset: colors but no wallpaper table (the illustration cannot
+    # be committed), so no scootbg for it -- the flat background_color shows.
+    (
+      assert
+        hmDeskLookVinyl.config.programs.scoot.settings.appearance == {
+          background_color = "#271A1F";
+          focus_ring_active_color = "#E59560";
+          focus_ring_inactive_color = "#423F51";
+        };
+      true
+    )
+    (
+      assert !(hmDeskLookVinyl.config.programs.scoot.settings ? wallpaper);
+      true
+    )
+    (
+      assert !hmDeskLookVinyl.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    # radial-burst: colors plus its shipped image.
+    (
+      assert
+        hmDeskLookBurst.config.programs.scoot.settings.appearance == {
+          background_color = "#241721";
+          focus_ring_active_color = "#31a9e5";
+          focus_ring_inactive_color = "#e36e38";
+        };
+      true
+    )
+    (
+      assert lib.hasSuffix "radial-burst.png"
+        hmDeskLookBurst.config.programs.scoot.settings.wallpaper.image;
+      true
+    )
+    # A user value beside a look wins per key; the rest stays the look's.
+    (
+      assert hmDeskUserWins.config.programs.scoot.settings.appearance.background_color == "#123456";
+      true
+    )
+    (
+      assert
+        hmDeskUserWins.config.programs.scoot.settings.appearance.focus_ring_active_color == "#3D579A";
+      true
+    )
+    (
+      assert hmDeskUserWins.config.programs.scoot.settings.wallpaper.image == "/user/wall.png";
+      true
+    )
+    (
+      assert hmDeskUserWins.config.programs.scoot.settings.wallpaper.mode == "center";
+      true
+    )
+    # Stylix beside a look wins every leaf: identical to Stylix alone.
+    (
+      assert hmDeskStylix.config.programs.scoot.settings == hmStylix.config.programs.scoot.settings;
+      true
+    )
+    # The xwayland knob defaults the compositor flag on...
+    (
+      assert hmDeskXwayland.config.programs.scoot.settings.xwayland.enabled;
+      true
+    )
+    # ...and a future slot on is accepted and inert.
+    (
+      assert allAssertionsHold hmDeskSlotOn.config;
+      true
+    )
+    (
+      assert drvs hmDeskSlotOn.config.home.packages == drvs hmDesk.config.home.packages;
+      true
+    )
+    # Refusals: the profile without scoot...
+    (
+      assert builtins.length (failing hmDeskNoEnable.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "desktop.enable needs" (builtins.head (failing hmDeskNoEnable.config));
+      true
+    )
+    # ...a look without the profile...
+    (
+      assert builtins.length (failing hmDeskLookNoEnable.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "desktop.look needs" (builtins.head (failing hmDeskLookNoEnable.config));
+      true
+    )
+    # ...and an unknown look, an enum type error (verified by hand to name
+    # the three valid values).
+    (
+      assert !hmDeskUnknownLook.success;
+      true
+    )
+    # NixOS: the profile turns on the session entry and its units, the
+    # wallpaper default, and stays additive (no default session, ever)...
+    (
+      assert allAssertionsHold osDesk.config;
+      true
+    )
+    (
+      assert builtins.length osDesk.config.services.displayManager.sessionPackages == 1;
+      true
+    )
+    (
+      assert osDesk.config.systemd.user.units ? "scoot.service";
+      true
+    )
+    (
+      assert osDesk.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    (
+      assert osDesk.config.services.displayManager.defaultSession == null;
+      true
+    )
+    # ...a future slot on is accepted and inert there too...
+    (
+      assert allAssertionsHold osDeskSlotOn.config;
+      true
+    )
+    (
+      assert
+        drvs osDeskSlotOn.config.environment.systemPackages
+        == drvs osDesk.config.environment.systemPackages;
+      true
+    )
+    # ...the xwayland knob is accepted (its effect is home-manager wiring;
+    # the package choice stays `programs.scoot.package`)...
+    (
+      assert allAssertionsHold osDeskXwayland.config;
+      true
+    )
+    # ...and the refusals name the profile on this side as well.
+    (
+      assert lib.any (m: lib.hasInfix "desktop.enable needs" m) (failing osDeskNoEnable.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "desktop.look needs" m) (failing osDeskLookNoEnable.config);
+      true
+    )
+    # `desktop.greeter` is the greeter: through it the profile lists a
+    # session in a ReGreet login (entry forced on beside it).
+    (
+      assert allAssertionsHold osDeskGreeter.config;
+      true
+    )
+    (
+      assert osDeskGreeter.config.services.displayManager.regreet.enable;
+      true
+    )
+    (
+      assert builtins.length osDeskGreeter.config.services.displayManager.sessionPackages == 1;
+      true
+    )
+    # With the bar module: enable turns the bar on with the look's colors
+    # and its unit...
+    (
+      assert allAssertionsHold hmDeskBar.config;
+      true
+    )
+    (
+      assert hmDeskBar.config.programs.scootbar.enable;
+      true
+    )
+    (
+      assert hmDeskBar.config.systemd.user.services ? scootbar;
+      true
+    )
+    (
+      assert
+        hmDeskBar.config.programs.scootbar.settings.colors == {
+          background = "#FCFBFB";
+          foreground = "#1A2032";
+          accent = "#3D579A";
+          hover = "#5D7AB0";
+          dim = "#C9CBD0";
+          urgent = "#EE6F5E";
+        };
+      true
+    )
+    # ...a user color wins per key there too...
+    (
+      assert hmDeskBarUserWins.config.programs.scootbar.settings.colors.accent == "#123456";
+      true
+    )
+    (
+      assert hmDeskBarUserWins.config.programs.scootbar.settings.colors.background == "#FCFBFB";
+      true
+    )
+    # ...Stylix wins every bar leaf as well...
+    (
+      assert
+        hmDeskBarStylix.config.programs.scootbar.settings.colors == {
+          background = "#101010";
+          foreground = "#e0e0e0";
+          accent = "#0000ff";
+          hover = "#0000ff";
+          dim = "#303030";
+          urgent = "#ff0000";
+        };
+      true
+    )
+    (
+      assert hmDeskBarStylix.config.programs.scootbar.settings.bar."font-size" == 13;
+      true
+    )
+    (
+      assert lib.hasPrefix builtins.storeDir hmDeskBarStylix.config.programs.scootbar.settings.bar.font;
+      true
+    )
+    (
+      assert hmDeskBarStylix.config.programs.scoot.settings == hmStylix.config.programs.scoot.settings;
+      true
+    )
+    # ...and `bar.enable = false` leaves the bar entirely alone.
+    (
+      assert !hmDeskBarOff.config.programs.scootbar.enable;
+      true
+    )
+    (
+      assert hmDeskBarOff.config.systemd.user.services == { };
+      true
+    )
+    # NixOS with the bar module: the unit and the /etc file beside the
+    # session entry, in the look's colors...
+    (
+      assert allAssertionsHold osDeskBar.config;
+      true
+    )
+    (
+      assert osDeskBar.config.programs.scootbar.enable;
+      true
+    )
+    (
+      assert osDeskBar.config.systemd.user.services ? scootbar;
+      true
+    )
+    (
+      assert osDeskBar.config.environment.etc ? "scootbar/bar.toml";
+      true
+    )
+    (
+      assert
+        osDeskBar.config.programs.scootbar.settings.colors == {
+          background = "#241721";
+          foreground = "#fdef1d";
+          accent = "#31a9e5";
+          dim = "#99911d";
+          urgent = "#bf128d";
+        };
+      true
+    )
+    (
+      assert osDeskBar.config.services.displayManager.defaultSession == null;
+      true
+    )
+    (
+      assert !osDeskBarOff.config.programs.scootbar.enable;
+      true
+    )
+    (
+      assert osDeskBarOff.config.systemd.user.services == { };
+      true
+    )
+  ];
 in
 assert lib.all (x: x) _pins;
 assert lib.all (x: x) _greeterPins;
+assert lib.all (x: x) _desktopPins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   set -euo pipefail
@@ -1874,6 +2548,45 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   assert got["appearance"]["background_color"] == "#101010", got["appearance"]
   ' ${hmStylixColorToml} '${fakeBg}/bin/scootbg'
   echo "ok: stylix.wallpaper.enable = false leaves a user color alone"
+
+  # 10. Desktop profile, music-desk: the example palette in the compositor
+  #     config (appearance plus the shipped wallpaper beside the injected
+  #     scootbg command), and the same palette in the bar file.
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got["appearance"] == {"background_color": "#FCFBFB", "focus_ring_active_color": "#3D579A", "focus_ring_inactive_color": "#D5D7DD"}, got["appearance"]
+  assert got["wallpaper"]["mode"] == "fill", got["wallpaper"]
+  assert got["wallpaper"]["image"].endswith("music-desk.png"), got["wallpaper"]
+  assert got["wallpaper"]["command"].endswith("/bin/scootbg"), got["wallpaper"]
+  ' ${hmDeskMusicToml}
+  echo "ok: desktop look renders the example palette plus its wallpaper"
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got["colors"] == {"background": "#FCFBFB", "foreground": "#1A2032", "accent": "#3D579A", "hover": "#5D7AB0", "dim": "#C9CBD0", "urgent": "#EE6F5E"}, got["colors"]
+  ' ${hmDeskBarToml}
+  echo "ok: desktop look renders the example palette into the bar config"
+
+  # 10b. Desktop profile, vinyl-sunset: colors but no wallpaper table (the
+  #      illustration cannot be committed -- the flat background_color is
+  #      the session's flat color).
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got["appearance"]["background_color"] == "#271A1F", got["appearance"]
+  assert "wallpaper" not in got, got
+  ' ${hmDeskVinylToml}
+  echo "ok: a look without an in-repo wallpaper sets no wallpaper table"
+
+  # 10c. Desktop profile, radial-burst on the NixOS side: the bar file
+  #      carries that look's colors (five tokens: no hover there).
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got["colors"] == {"background": "#241721", "foreground": "#fdef1d", "accent": "#31a9e5", "dim": "#99911d", "urgent": "#bf128d"}, got["colors"]
+  ' ${osDeskBarToml}
+  echo "ok: desktop look renders into the NixOS-side bar config"
 
   touch $out
   echo "scoot-modules: all file-content checks passed"

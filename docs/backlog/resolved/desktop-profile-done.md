@@ -1,9 +1,10 @@
 ---
 title: "Desktop profile: programs.scoot.desktop.enable plus a look choice"
-status: "open"
-area: "packaging"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-04"
 ---
 
 # Desktop profile: programs.scoot.desktop.enable plus a look choice
@@ -56,3 +57,27 @@ look applied.
 
 Any new daemon (children 2-12 fill the slots); compositor changes; the
 non-Stylix GTK/Qt/dark-mode derivation (child `desktop-theme-look`).
+
+## Resolution
+
+Landed as `feat(nix): desktop profile` (PR #432): `nix/modules/desktop.nix`
+(shared option subtree + the three look palettes), wiring in
+`nix/modules/home.nix` / `nix/modules/nixos.nix` (session entry, wallpaper
+defaults, portal config, the `[xwayland]` knob, `desktop.greeter` as an
+alias for `programs.scoot.greeter`) and `nix/modules/scootbar.nix` (the
+bar half reads the profile — the profile never sets across the module
+boundary, since a conditional set of an undeclared option fails eval
+whatever the condition is). Look leaves sit at `mkOptionDefault`, below
+Stylix's `mkDefault`: user values win per key, Stylix wins where present.
+`vinyl-sunset` sets no `[wallpaper]` keys (its illustration cannot be
+committed); the session shows the flat `background_color`.
+
+Evidence: `nix build .#checks.aarch64-linux.scoot-modules` and
+`.#checks.aarch64-linux.scootbar-modules` green on the Asahi M2 (eval pins
+plus rendered-file content checks, including an unknown `look` failing
+with `not of type 'null or one of "vinyl-sunset", "music-desk",
+"radial-burst"'`); tree-wide `nixfmt --check` clean (CI's
+`git ls-files | xargs nix fmt -- --check` form). Real greeter-started login
+as `scoot-test` with `look = "radial-burst"`: wallpaper + ring + bar
+colors on screen (screenshot pixels: `#31a9e5` ring 149947,
+`#fdef1d` clock text, `#241721` bar zone), all three units active.

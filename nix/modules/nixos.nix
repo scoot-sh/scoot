@@ -9,6 +9,10 @@
 let
   cfg = config.programs.scoot;
 
+  # The desktop profile's shared option subtree (the look palettes stay
+  # where they are applied: the home-manager side and the bar module).
+  desktop = import ./desktop.nix { inherit lib; };
+
   # The login-screen entry. Built as a package exposing
   # `share/wayland-sessions/scoot.desktop` with `providedSessions`,
   # which is the shape `services.displayManager.sessionPackages`
@@ -98,10 +102,30 @@ in
   # modules being imported); `modulesPath` is a `specialArgs` value
   # every NixOS evaluation provides, and the path it gives is the one
   # NixOS lists itself, so the repeat import dedups.
-  imports = [ "${modulesPath}/services/display-managers/regreet.nix" ];
+  #
+  # Plus the desktop profile's greeter half as an alias: `desktop.greeter`
+  # IS `programs.scoot.greeter` (passthrough, not a copy), so its
+  # assertions, its forced session entry and its never-strand shape all
+  # hold unchanged through the profile's name for it.
+  imports = [
+    "${modulesPath}/services/display-managers/regreet.nix"
+    (lib.mkAliasOptionModule
+      [ "programs" "scoot" "desktop" "greeter" ]
+      [ "programs" "scoot" "greeter" ]
+    )
+  ];
 
   options.programs.scoot = {
     enable = lib.mkEnableOption "scoot, the scrolling-tiling Wayland compositor";
+
+    # One switch plus a look choice for a working desktop (see
+    # `desktop.nix` and docs/nix.md). Each side wires only what it owns;
+    # this side owns the session entry, the system packages and the
+    # greeter (aliased above). The compositor config itself
+    # (`[appearance]`, `[wallpaper]`, the `[xwayland]` knob) is the
+    # home-manager side's, and the bar is the bar module's (which reads
+    # this profile): this side renders no config file.
+    desktop = desktop.options;
 
     # `pkgs.scoot` when the flake's overlay (`overlays.default`) is
     # applied, else null: nothing is guessed, since a `scoot` from anywhere
@@ -364,6 +388,49 @@ in
       # never a unit naming a binary that is not there.
       systemd.user.units = lib.mkIf (cfg.session.enable && cfg.package != null) sessionUnits;
     })
+    # The desktop profile's system half: `enable` turns on the session
+    # wiring (the entry plus the launcher's units) and the wallpaper
+    # defaults, each at `mkDefault` so an explicit value still wins. The
+    # greeter stays opt-in through `desktop.greeter` (the alias above):
+    # replacing the login screen is never smuggled in by this switch.
+    # The `[xwayland]` knob itself is config-file (home-manager) wiring;
+    # this side honors whatever `package` names (including the
+    # `scoot-xwayland` builds) in the entry above. In its own element
+    # (not under `cfg.enable`): with `enable` off and `desktop.enable`
+    # on, the assertion below must still fire rather than going quiet.
+    (lib.mkIf cfg.desktop.enable {
+      assertions = [
+        {
+          assertion = cfg.enable;
+          message = ''
+            programs.scoot.desktop.enable needs programs.scoot.enable:
+            the profile serves a scoot session, so scoot itself must be
+            installed.
+          '';
+        }
+      ];
+
+      programs.scoot.session.enable = lib.mkDefault true;
+      programs.scoot.wallpaper.enable = lib.mkDefault true;
+    })
+    # A look without the profile is a silent no-op; refuse it loudly
+    # instead (kept outside `desktop.enable` so it still fires then).
+    (lib.mkIf (cfg.desktop.look != null) {
+      assertions = [
+        {
+          assertion = cfg.desktop.enable;
+          message = ''
+            programs.scoot.desktop.look needs programs.scoot.desktop.enable:
+            the look is applied by the profile, so the profile must be on.
+          '';
+        }
+      ];
+    })
+    # The bar half lives in the bar module (`nix/modules/scootbar.nix`
+    # reads this profile): a set of `programs.scootbar` here would need
+    # that module imported, and a conditional set of an undeclared option
+    # fails eval whatever the condition is, so the profile never sets
+    # across the module boundary.
     # The login screen, in its own element (not under `cfg.enable`):
     # with `enable` off and `greeter.enable` on, the assertions below
     # must still fire rather than the whole element going quiet.

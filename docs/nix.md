@@ -11,6 +11,7 @@
 - [NixOS module](#nixos-module)
 - [The wallpaper: scootbg](#the-wallpaper-scootbg)
 - [The status bar: scootbar](#the-status-bar-scootbar)
+- [The desktop profile](#the-desktop-profile)
 - [The overlay](#the-overlay)
 - [Migrating from a hand-rolled packaging](#migrating-from-a-hand-rolled-packaging)
 - [Settings failure modes](#settings-failure-modes)
@@ -1019,6 +1020,125 @@ and runs the **real `scootbar` binary** over each rendered file with
 (the config, the flags over it, the modules and the font, as a start does
 them, with no compositor and nothing written to the runtime directory); a
 file with an unknown key is refused by name.
+
+## The desktop profile
+
+One switch plus a look choice for essentially a full lightweight desktop,
+instead of hand-wiring the pieces above from prose:
+
+```nix
+# Home configuration:
+programs.scoot.desktop = {
+  enable = true;
+  look = "music-desk";   # "vinyl-sunset" | "radial-burst" | null (no theming)
+};
+
+# System configuration:
+programs.scoot.desktop = {
+  enable = true;
+  # Greeter passthrough (opt-in login screen, default off):
+  # greeter.enable = true;
+};
+```
+
+`enable` turns on the session wiring and the bar plus wallpaper defaults:
+on the NixOS side the login-screen session entry (`session.enable`) and the
+system-wide scootbg (`wallpaper.enable`, so a `[wallpaper]` section finds it
+on `PATH`); on the home-manager side the portal config (`portals.enable`);
+on either side the bar (`programs.scootbar.enable`, but only when that
+module is imported — the profile never requires it). Either side alone
+degrades to what it can do: NixOS without home-manager gets the entry and
+the packages but no themed config file (the compositor config is per-user),
+and home-manager without NixOS gets the themed files and the user units but
+no login-screen entry.
+
+`look` applies that example's palette to every piece the flake owns today:
+the compositor `[appearance]` colors, the bar `colors`, and the session
+wallpaper where one ships in the repository:
+
+| Look | Compositor ring / background | Bar | Wallpaper |
+|---|---|---|---|
+| `music-desk` | blue ring `#3D579A`, paper `#FCFBFB` | paper, ink and blue | ships (`docs/assets/wallpapers/music-desk.png`, copied to the store) |
+| `radial-burst` | blue ring `#31a9e5`, plum `#241721` | plum, yellow and blue | ships (`docs/assets/wallpapers/radial-burst.png`, copied to the store) |
+| `vinyl-sunset` | orange ring `#E59560`, espresso `#271A1F` | espresso, cream and orange | **no image ships**: the illustration's license forbids passing it on standalone, so the session shows the flat espresso `background_color` unless you set `wallpaper` yourself (below) |
+
+`null` (the default) themes nothing. What the look does not theme yet stays
+yours: layout details (gaps, corner radius, column widths — copy them from
+the example's `scoot.toml` if you want the whole look), the terminal palette
+(the flake installs no terminal), and the login screen's stylesheet (each
+example ships a `regreet.css`; the greeter child themes it later).
+
+**Precedence**, highest first, per key: a value you set in `settings`, then
+Stylix's (Stylix stays the override path where present), then the look's.
+So `settings.appearance.background_color = "#123456"` beside
+`look = "music-desk"` replaces that one color and keeps the rest of the
+look, and under Stylix the look yields every leaf (this is pinned in
+`nix/tests.nix`). One combination is invalid the same way the Stylix one
+is: a `wallpaper.color` you set yourself beside a look's shipped `image`
+(the two together are refused by scoot, fail-safe — the session carries on
+with `background_color`). Set your own `image` instead (it wins per key),
+or drop to `look = null`.
+
+For `vinyl-sunset`, the illustration is yours to download (see
+[its README](examples/vinyl-sunset/README.md) for the source and license);
+point the wallpaper at your copy and the flat color steps aside:
+
+```nix
+programs.scoot.settings.wallpaper = {
+  image = "~/Pictures/wallpapers/vinyl-sunset.png";
+  mode = "fill";
+};
+```
+
+**The greeter is passthrough, not profiled.**
+`programs.scoot.desktop.greeter` is `programs.scoot.greeter` under the
+profile's name (same options, same assertions, same forced session entry),
+so everything in [The greeter](#the-greeter-regreet-opt-in) holds through
+it. In particular `desktop.enable` never touches the login screen: no
+default session, no autologin, nothing that could strand a login — the
+greeter stays an explicit opt-in on top of the profile.
+
+**XWayland** is a knob plus your existing package choice: the profile's
+`desktop.xwayland.enable` defaults the compositor's `[xwayland] enabled`
+on (home-manager side; the NixOS side accepts and reserves it), and you
+point `programs.scoot.package` at the XWayland build as in
+[XWayland](#xwayland-from-the-flake). With the default package the knob
+warns and the session runs Wayland-only.
+
+**Every later piece has its slot already**, off and inert: one boolean
+(plus a package override where a package is involved) per paved-path child,
+so those children fill bodies without renaming options. Enabling one today
+is accepted and does nothing yet:
+
+| Slot | Child | Default tool |
+|---|---|---|
+| `desktop.idle.enable` / `desktop.idle.lock.enable` | idle policy + locker | swayidle; swaylock/waylock/gtklock/hyprlock |
+| `desktop.notifications.enable` | notifications (mako now, scootnotify later) | mako |
+| `desktop.launcher.enable` | launcher | fuzzel (the default binds still name wofi until that child reconciles them) |
+| `desktop.capture.enable` | screenshots bound to keys | grim + slurp |
+| `desktop.auth.enable` / `desktop.secrets.enable` | polkit agent + keyring | — |
+| `desktop.audio.enable` | audio, brightness and media keys + OSD | pipewire + wireplumber |
+| `desktop.clipboard.enable` | clipboard persistence + history | cliphist + wl-clipboard |
+| `desktop.nightlight.enable` | night light | wlsunset or gammastep |
+| `desktop.power.enable` | power profiles, suspend, charge limit | power-profiles-daemon |
+| `desktop.theme.enable` | GTK/Qt theme, dark mode (non-Stylix fallback) | — |
+| `desktop.apps.terminal.enable` / `desktop.apps.fileManager.enable` | terminal + (optional) file manager | foot; — |
+| `desktop.keys.enable` | the shared keymap every other child registers into | — |
+| `desktop.displays.enable` | output policy | — |
+| `desktop.inputMethod.enable` | input-method wiring | — |
+| `desktop.automount.enable` | removable-media automount (no child filed yet) | udiskie |
+
+Portal backend packages (`xdg-desktop-portal`, `-wlr`, `-gtk`) have no slot
+yet: the profile owns the portal *config* half today, and the capture child
+brings `grim`; the rest arrives with its child. Network/Bluetooth pickers
+likewise (the bar's `network`/`bluetooth` modules are display-only today).
+
+Two loud refusals instead of silent no-ops: `desktop.enable` without
+`programs.scoot.enable`, and a `look` without `desktop.enable`, each fail
+evaluation naming the missing switch; an unknown `look` fails naming the
+three valid ones. All three are pinned in `nix/tests.nix`, with the
+rendered compositor and bar files checked content-equal to the examples'
+palettes.
 
 ## The overlay
 
