@@ -1,0 +1,20 @@
+# The "moonrise" lazygit colors: the illustration's palette, rounded borders, no
+# fetch and no update checks. Copy to ~/.config/lazygit/config.yml (lazygit
+# also reads ~/.config/lazygit/config.yaml).
+gui:
+  nerdFontsVersion: "3"
+  showBottomLine: false
+  showRandomTip: false
+  border: rounded
+  theme:
+    activeBorderColor: ["#FFA45C", bold]
+    inactiveBorderColor: ["#9C8B95"]
+    selectedLineBgColor: ["#4E3B40"]
+    optionsTextColor: ["#FFA45C"]
+    unstagedChangesColor: ["#E87F6A"]
+    defaultFgColor: ["#F6EEDC"]
+git:
+  autoFetch: false
+  autoRefresh: false
+update:
+  method: never

@@ -1030,7 +1030,7 @@ instead of hand-wiring the pieces above from prose:
 # Home configuration:
 programs.scoot.desktop = {
   enable = true;
-  look = "music-desk";   # "vinyl-sunset" | "radial-burst" | null (no theming)
+  look = "music-desk";   # "vinyl-sunset" | "radial-burst" | "moonrise" | null (no theming)
 };
 
 # System configuration:
@@ -1060,6 +1060,7 @@ wallpaper where one ships in the repository:
 |---|---|---|---|
 | `music-desk` | blue ring `#3D579A`, paper `#FCFBFB` | paper, ink and blue | ships (`docs/assets/wallpapers/music-desk.png`, copied to the store) |
 | `radial-burst` | blue ring `#31a9e5`, plum `#241721` | plum, yellow and blue | ships (`docs/assets/wallpapers/radial-burst.png`, copied to the store) |
+| `moonrise` | amber ring `#FF9A49`, slate navy `#2B3648` | navy, cream and amber | ships (`docs/assets/wallpapers/moonrise.png`, copied to the store) |
 | `vinyl-sunset` | orange ring `#E59560`, espresso `#271A1F` | espresso, cream and orange | **no image ships**: the illustration's license forbids passing it on standalone, so the session shows the flat espresso `background_color` unless you set `wallpaper` yourself (below) |
 
 `null` (the default) themes nothing. What the look does not theme yet stays
@@ -1136,7 +1137,7 @@ likewise (the bar's `network`/`bluetooth` modules are display-only today).
 Two loud refusals instead of silent no-ops: `desktop.enable` without
 `programs.scoot.enable`, and a `look` without `desktop.enable`, each fail
 evaluation naming the missing switch; an unknown `look` fails naming the
-three valid ones. All three are pinned in `nix/tests.nix`, with the
+four valid ones. All three are pinned in `nix/tests.nix`, with the
 rendered compositor and bar files checked content-equal to the examples'
 palettes.
 

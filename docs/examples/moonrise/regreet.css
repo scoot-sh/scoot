@@ -1,0 +1,70 @@
+/* The "moonrise" look for ReGreet: slate navy, cream and disc amber.
+ * Pair it with `application_prefer_dark_theme = true` (see README.md in this
+ * directory for the whole snippet).
+ *
+ * Copy this beside your NixOS configuration and point
+ * `services.displayManager.regreet.extraCss` at it.
+ *
+ * Nothing here is a default: every rule below is opt-in through that option.
+ *
+ * The card rules scope to `frame.background`, not bare `frame`: ReGreet's
+ * login card and its clock card both carry the `background` CSS class, while
+ * the third frame -- the empty notification bar above Reboot/Power Off --
+ * carries none (read against ReGreet 0.5.0's `src/gui/templates.rs`). A bare
+ * `frame` rule also inks that empty bar, leaving a blank card when there is
+ * nothing to report (GTK CSS has no `:empty`). Likewise a bare `label` rule
+ * inks button labels too, so the colored buttons below name their labels
+ * explicitly.
+ */
+window {
+  font-family: "DroidSansM Nerd Font Propo";
+}
+frame.background {
+  background-color: alpha(#2B3648, 0.84);
+  border-radius: 14px;
+  padding: 20px 26px;
+  box-shadow: 0 10px 32px alpha(#000000, 0.35);
+  color: #F6EEDC;
+}
+frame.background > border {
+  border: none;
+}
+label {
+  color: #F6EEDC;
+}
+button, entry, dropdown > button, combobox > box > button {
+  border-radius: 10px;
+}
+entry, dropdown > button, combobox > box > button, button.image-button {
+  background: alpha(#5E4B5B, 0.75);
+  color: #F6EEDC;
+  border: 1px solid alpha(#9C8B95, 0.8);
+}
+button.suggested-action {
+  background: #FFA45C;
+  border: none;
+  padding: 6px 18px;
+}
+button.suggested-action label {
+  color: #2B3648;
+}
+button.suggested-action:hover {
+  background: #FFD54A;
+}
+button.destructive-action {
+  background: alpha(#2B3648, 0.84);
+  border: 2px solid alpha(#E87F6A, 0.7);
+  padding: 4px 16px;
+}
+button.destructive-action label {
+  color: #E87F6A;
+}
+button.destructive-action:hover {
+  background: #E87F6A;
+}
+button.destructive-action:hover label {
+  color: #F6EEDC;
+}
+entry:focus-within {
+  outline-color: #FFA45C;
+}

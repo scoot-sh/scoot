@@ -1,0 +1,86 @@
+# The "moonrise" look for scootbar: a floating, rounded, slightly translucent
+# bar with the workspaces and the focused window's title on the left, the clock
+# in the middle, and system modules, two command-fed modules, launcher buttons
+# and the power menu on the right.
+#
+#   scootbar daemon --config docs/examples/moonrise/bar.toml
+#
+# This look was tuned with Droid Sans Mono Nerd Font Propo, which has the glyphs
+# the module icons below need. scootbar tries a few well-known fonts; name one
+# if yours is elsewhere (NixOS keeps fonts in the store):
+# [bar]
+# font = "/path/to/DroidSansMNerdFontPropo-Regular.otf"
+# fallback-fonts = ["/path/to/SymbolsNerdFont-Regular.ttf"]
+#
+# The `load` and `cpu` modules run the `load.sh` and `cpu.sh` scripts next to
+# this file: copy both somewhere on your PATH (e.g. ~/.local/bin) first, or
+# point their `command` at wherever you put them.
+
+left = ["workspaces", "window-title"]
+center = ["clock"]
+right = ["load", "cpu", "network", "volume", "battery", "terminal", "browser", "power"]
+
+[bar]
+height = 38
+margin = "10,14"     # the layer-shell margin around the bar: vertical,horizontal
+radius = 14
+opacity = 0.82       # translucent: a little more memory (an ARGB buffer) and no opaque region
+font-size = 13
+padding = 10
+spacing = 8
+separator = 1        # a 1 px line in dim, centered in each 8 px gap
+
+[colors]
+background = "#2B3648"
+foreground = "#F6EEDC"
+accent = "#FFA45C"
+hover = "#FFD54A"
+dim = "#9C8B95"
+urgent = "#E87F6A"
+
+[workspaces]
+pill-shape = "circle"
+pill-inset = 7
+item-gap = 3           # spaces between the numbers
+margin = 8             # room either side of the module
+disc = true            # grow the span to the disc, so a digit is round at any padding
+inactive-color = "#B595AD"
+
+[window-title]
+icon = "\U000F08C6"    # application
+show-app-id = false    # the title alone reads cleaner than "title - app"
+max-width = 360        # the title yields to the clock past this
+
+[clock]
+format = "%-I:%M %P"
+icon = "\U000F0150"
+
+[exec.load]
+command = ["load.sh"]
+icon = "\U000F061A"   # the load glyph, drawn before the value
+
+[exec.cpu]
+command = ["cpu.sh"]
+icon = "\U000F0EE0"   # the CPU glyph, drawn before the value
+
+[network]
+icon-wifi = ["\U000F091F", "\U000F0922", "\U000F0925", "\U000F0928"]   # weakest to strongest signal
+icon-ethernet = "\U000F0200"
+show-text = false      # the icon alone; the SSID and signal stay in the tooltip
+
+[battery]
+icon = ["\U000F008E", "\U000F007B", "\U000F007E", "\U000F0081", "\U000F0079"]   # empty to full
+icon-charging = "\U000F0084"
+icon-full = "\U000F0079"
+
+[button.terminal]
+icon = "\U000F018D"
+on-click = { exec = ["foot", "--font=FiraCode Nerd Font:size=10"] }
+
+[button.browser]
+icon = "\U000F02AF"
+on-click = { exec = ["firefox"] }   # point this at your browser
+
+[power]
+icon = "\U000F0425"
+on-click = "popup"

@@ -68,13 +68,14 @@ in
 
     # Null (the default) themes nothing: every value below is a default
     # the user or Stylix beats per key. An unknown value is an eval error
-    # naming these three (the `enum` type's own message).
+    # naming these four (the `enum` type's own message).
     look = lib.mkOption {
       type = lib.types.nullOr (
         lib.types.enum [
           "vinyl-sunset"
           "music-desk"
           "radial-burst"
+          "moonrise"
         ]
       );
       default = null;
@@ -282,6 +283,25 @@ in
       };
       wallpaper = {
         image = ../../docs/assets/wallpapers/radial-burst.png;
+        mode = "fill";
+      };
+    };
+    moonrise = {
+      appearance = {
+        background_color = "#2B3648";
+        focus_ring_active_color = "#FF9A49";
+        focus_ring_inactive_color = "#5E4B5B";
+      };
+      barColors = {
+        background = "#2B3648";
+        foreground = "#F6EEDC";
+        accent = "#FFA45C";
+        hover = "#FFD54A";
+        dim = "#9C8B95";
+        urgent = "#E87F6A";
+      };
+      wallpaper = {
+        image = ../../docs/assets/wallpapers/moonrise.png;
         mode = "fill";
       };
     };
