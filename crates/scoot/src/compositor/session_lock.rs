@@ -71,11 +71,13 @@
 //!   test -- `wl_pointer.button` goes to whatever the pointer last *entered*,
 //!   so without moving focus at the moment of locking, the first click after
 //!   a lock would still land in the window underneath.
-//! - **Keybindings** (`input.rs::key`): only `Bound::ChangeVt` may still
-//!   fire. A `spawn` bind reaching a terminal from a locked screen would be a
-//!   complete bypass; VT switching is the deliberate exception, because the
-//!   VT it switches to has its own login and this compositor's session stays
-//!   locked behind it.
+//! - **Keybindings** (`input.rs::key`): only `Bound::ChangeVt` and a
+//!   `spawn` bind flagged `allow_when_locked` may still fire. Any other
+//!   `spawn` reaching a terminal from a locked screen would be a complete
+//!   bypass; the flagged ones run only their config-pinned command (volume,
+//!   brightness, media), and `State::act_bind` re-checks the shape itself.
+//!   VT switching is the other exception, because the VT it switches to has
+//!   its own login and this compositor's session stays locked behind it.
 //! - **IPC** (`ipc.rs::handle_request`): `Request::Action` is refused, for
 //!   the same reason as the `spawn` bind. Injected keyboard/pointer input is
 //!   *not* refused -- it goes through the focus paths above, so it can only

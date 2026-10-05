@@ -1569,8 +1569,9 @@ fn parse_bind(
 /// bind at all and is refused; a table's unknown keys warn and are ignored
 /// (the bind still applies with what was recognized -- losing a working bind
 /// over a flag typo would be worse than running it once-per-press); a
-/// non-string `action`, or a non-boolean flag, is refused the same way a bad
-/// action string is.
+/// non-string `action` is refused the same way a bad action string is, and a
+/// non-boolean flag warns and is treated as off (the rest of the entry
+/// applies).
 ///
 /// Two flags are clamped beyond parsing, loudly: `repeat` on `quit` or
 /// `close` is ignored (holding quit must never end the session, and holding

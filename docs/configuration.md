@@ -453,8 +453,9 @@ Two guarantees the applied set pins:
 A reload applies while the session is locked: nothing in the applied set
 can disclose locked content (appearance changes touch nothing the locked
 frame draws; gap, column widths and binds are input-side -- widths only
-re-derive column frames from config proportions -- and binds cannot fire actions
-while locked anyway; a scale change only re-derives the same geometry the
+re-derive column frames from config proportions -- and the only binds that fire
+while locked are `spawn`s flagged `allow_when_locked`, which draw nothing and
+take no focus over the lock screen; a scale change only re-derives the same geometry the
 lock path already publishes and re-sends config-derived scale values to
 surfaces still showing the blanked frame). New autostart entries are the
 one thing a locked reload skips: a spawned program at lock time could
@@ -686,9 +687,10 @@ To hold volume-up and have it keep stepping, that is the whole recipe:
 Both default off, so a plain `"combo" = "action"` string behaves exactly
 as before: fire once, never locked. A reload applies flag changes like
 any other bind change (and reports `binds` as applied); a table entry
-missing its `action`, or holding a value of the wrong type, is skipped
-with a warning naming just that bind, and an unknown field warns and is
-ignored while the rest of the entry applies.
+missing its `action`, or whose `action` is not a string, is skipped with a
+warning naming just that bind; a flag that is not a boolean warns and is
+treated as off, and an unknown field warns and is ignored, while the rest of
+the entry applies.
 
 ### Moving across outputs
 

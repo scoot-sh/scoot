@@ -1945,7 +1945,9 @@ a layer surface asking politely. The global is
   from the lock screen, which a daily-driven laptop needs. The rule is
   narrow on purpose — only `spawn`, only when flagged, only its
   config-pinned command (a locked session can never be made to launch
-  anything but the opted-in commands), and only through a real keypress:
+  anything but the opted-in commands), and only through a keypress, real
+  or IPC-injected (both go through the same key filter, so either can run
+  only the config-pinned command):
   flagging any other action warns and stays refused, at the key filter and
   at the `act` backstop alike.
 - **`scoot msg action ...` is refused**, with an error saying why — even a
