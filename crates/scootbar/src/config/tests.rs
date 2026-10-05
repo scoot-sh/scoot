@@ -1160,6 +1160,44 @@ fn without_popups_there_is_no_tooltip_delay_key() {
     assert!(error.contains("tooltip-delay"), "{error}");
 }
 
+#[cfg(feature = "popup")]
+#[test]
+fn a_popup_radius_follows_the_bar_and_is_bounded() {
+    assert_eq!(read("").unwrap().popup_radius, 0);
+    assert_eq!(read("[bar]\nradius = 12\n").unwrap().popup_radius, 12);
+    let config = read("[bar]\nradius = 12\npopup-radius = 4\n").unwrap();
+    assert_eq!(config.popup_radius, 4);
+    assert_eq!(config.style().popup_radius, 4);
+    assert_eq!(
+        read("[bar]\nradius = 12\npopup-radius = 0\n")
+            .unwrap()
+            .popup_radius,
+        0
+    );
+    assert_eq!(
+        read("[bar]\npopup-radius = 512\n").unwrap().popup_radius,
+        512
+    );
+}
+
+#[cfg(feature = "popup")]
+#[test]
+fn a_popup_radius_past_its_max_or_not_a_whole_number_is_refused() {
+    for bad in ["513", "-1", "1.5", "\"8\"", "true"] {
+        let error = read(&format!("[bar]\npopup-radius = {bad}\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("popup-radius"), "{bad}: {error}");
+    }
+}
+
+#[cfg(not(feature = "popup"))]
+#[test]
+fn without_popups_there_is_no_popup_radius_key() {
+    let error = read("[bar]\npopup-radius = 8\n").unwrap_err().to_string();
+    assert!(error.contains("popup-radius"), "{error}");
+}
+
 #[test]
 #[cfg(feature = "media")]
 fn a_media_section_is_read_whole() {

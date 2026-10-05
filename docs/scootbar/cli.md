@@ -97,6 +97,7 @@ exclusive = true      # false: float over the windows, reserving nothing
 height = 28           # 1 to 1024
 margin = "8,4"        # one number, or the CSS shorthand "VERTICAL,HORIZONTAL", ...
 radius = 8            # 0 to 512, and at most half the height; 0 is square
+popup-radius = 8      # 0 to 512; unset is the bar's radius: see Popups
 opacity = 0.9         # 0 (transparent) to 1 (opaque), the background's alpha
 font = "/path/to/Font.ttf"
 fallback-fonts = ["/path/to/Symbols.ttf", "/path/to/Cjk.otf"]   # at most 2: see Fonts
@@ -185,7 +186,7 @@ right = ["clock"]
 ```
 
 `margin` takes an integer (every side) or the `--margin` shorthand
-string. `radius`, `opacity`, `separator`, the modules' `margin` and the
+string. `radius`, `popup-radius`, `opacity`, `separator`, the modules' `margin` and the
 pill's keys are file-only: they have no flags (see
 [Shape and opacity](#shape-and-opacity), [Spacing](#spacing) and
 [the pill](#the-active-workspaces-pill)). The module lists take the ids in [Modules](#modules); giving any
@@ -1476,8 +1477,22 @@ the dmenu-style launcher are still how a click connects); `on-click =
   `set N` action per new value (the module coalesces a fast drag into the
   latest, one request in flight); the button runs `toggle-mute` on release.
   It follows the module, so a level changed elsewhere moves the slider, and it
-  is drawn in the bar's own colors (the `bg`, `fg`, `accent` and `dim`
-  tokens, one pixel frame) at the output's real scale.
+   is drawn in the bar's own colors (the `bg`, `fg`, `accent` and `dim`
+   tokens, one pixel frame) at the output's real scale.
+- **Shape.** A popup is square until the config rounds it: `[bar]
+  popup-radius` rounds its four corners, in logical pixels, 0 to 512 and cut
+  back per popup to what it holds; unset it follows the bar's own `radius`.
+  The corners are transparent (the popup's surface is the bar's own client
+  surface, so the compositor's window rounding does not apply: the bar draws
+  the arc itself). The border follows the arc at the same width (one logical
+  pixel at every scale), and the rows are clipped to the inside arc, so a
+  hover fill, a glyph or a slider's end never squares a corner. The corner
+  tables are built once per open popup and read every frame it is drawn (no
+  allocation while open); the buffers are `ARGB8888` only while rounded (a
+  square popup stays `XRGB8888`, as before). The compositor is told the rest
+  is opaque, and the surface's input shape is the rounded one, as the bar's
+  own is. Tooltips round the same way. Measured in [the resource
+  ratchet](backlog/lightest.md#m6-popup-corners).
 - **What the network list shows**: one row per named network in scan
   order (unnamed ones are not rows), each starting with its strength
   glyph where `icon-wifi` names four glyphs and the scan carries a
@@ -1594,13 +1609,13 @@ There is no flag for it: the config file only.
   and nothing under it is hidden from a click.
 - **Where it goes and how big.** Anchored to the module's span like a popup,
   centered under it (above, on a bottom bar), slid along the bar and flipped
-  across it by the compositor where the output's edge would cut it. Text is
-  wrapped at spaces at 30 ems (never wider than the bar), at most six lines,
-  the last ending in an ellipsis (`…`) where it was cut; a word longer than
-  the line is broken where it fills it. A newline in a tooltip
-  breaks a line (the `push` and `exec` payloads turn control characters,
-  newlines included, into spaces, so theirs wrap only). The frame and colors
-  are the popup's.
+   across it by the compositor where the output's edge would cut it. Text is
+   wrapped at spaces at 30 ems (never wider than the bar), at most six lines,
+   the last ending in an ellipsis (`…`) where it was cut; a word longer than
+   the line is broken where it fills it. A newline in a tooltip
+   breaks a line (the `push` and `exec` payloads turn control characters,
+   newlines included, into spaces, so theirs wrap only). The frame, shape and
+   colors are the popup's.
 - **While it is shown** a changed tooltip text (a clock-like tooltip) redraws it
   in place when the new text fits the size it opened at, damage limited to the
   tooltip's own surface; a text that needs more room, or its module moving
@@ -2337,7 +2352,10 @@ opacity = 0.9
   under a square bar does not. The region is in logical pixels, so it is the
   same at every scale (at a fractional scale it can differ from the drawn
   edge by a device pixel). A compositor that ignores input regions leaves
-  the corners clickable, which is the protocol's fallback.
+   the corners clickable, which is the protocol's fallback.
+- **Popups round separately**: `[bar] radius` never rounds a popup; that is
+  `[bar] popup-radius` ([Popups](#popups)), which follows this radius when
+  unset.
 - Measured costs (release build, 1600x28 bar, radius 14): filling the whole
   bar takes 4.9 us square and 6.1 us rounded and translucent; 3200x56 (scale
   2), 16.2 us and 29.2 us. A repaint of one module's span, the common case,

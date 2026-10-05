@@ -1623,6 +1623,7 @@ fn disc_style() -> Style {
         spacing: 6,
         separator: 0,
         radius: 0,
+        popup_radius: 0,
         opacity: u8::MAX,
     }
 }

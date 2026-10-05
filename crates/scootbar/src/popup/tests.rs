@@ -3,7 +3,9 @@
 
 use ab_glyph::{FontArc, FontVec};
 
-use super::{Activate, Content, Interaction, Kind, Layout, MAX_TEXT, MAX_WIDGETS, Wheel, paint};
+use super::{
+    Activate, Content, Interaction, Kind, Layout, MAX_TEXT, MAX_WIDGETS, Round, Wheel, paint,
+};
 use crate::paint::Canvas;
 use crate::testfont;
 use crate::text::Text;
@@ -521,6 +523,7 @@ fn render(content: &Content, interaction: &Interaction) -> (Layout, Vec<u8>, u32
     let (w, h) = (layout.width, layout.height);
     let mut pixels = vec![0u8; (w * h * 4) as usize];
     let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
+    let sharp = Round::new(0, FRAME, w, h);
     paint(
         &mut canvas,
         &mut text(),
@@ -529,6 +532,7 @@ fn render(content: &Content, interaction: &Interaction) -> (Layout, Vec<u8>, u32
         &layout,
         interaction,
         EM,
+        &sharp,
     );
     (layout, pixels, w)
 }
@@ -536,6 +540,35 @@ fn render(content: &Content, interaction: &Interaction) -> (Layout, Vec<u8>, u32
 fn rgb(pixels: &[u8], w: u32, x: u32, y: u32) -> [u8; 3] {
     let at = ((y * w + x) * 4) as usize;
     [pixels[at + 2], pixels[at + 1], pixels[at]]
+}
+
+fn alpha(pixels: &[u8], w: u32, x: u32, y: u32) -> u8 {
+    pixels[((y * w + x) * 4 + 3) as usize]
+}
+
+/// `content` painted with corners of `radius` device pixels: the layout,
+/// the pixels and the width.
+fn render_rounded(
+    content: &Content,
+    interaction: &Interaction,
+    radius: u32,
+) -> (Layout, Vec<u8>, u32) {
+    let layout = laid(content);
+    let (w, h) = (layout.width, layout.height);
+    let round = Round::new(radius, FRAME, w, h);
+    let mut pixels = vec![0u8; (w * h * 4) as usize];
+    let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
+    paint(
+        &mut canvas,
+        &mut text(),
+        &Theme::default(),
+        content,
+        &layout,
+        interaction,
+        EM,
+        &round,
+    );
+    (layout, pixels, w)
 }
 
 fn color(c: crate::color::Color) -> [u8; 3] {
@@ -622,6 +655,7 @@ fn painting_into_a_canvas_smaller_than_the_layout_clips() {
     let layout = laid(&content);
     let mut pixels = vec![0u8; 10 * 10 * 4];
     let mut canvas = Canvas::new(&mut pixels, 10, 10).unwrap();
+    let sharp = Round::new(0, FRAME, layout.width, layout.height);
     paint(
         &mut canvas,
         &mut text(),
@@ -630,6 +664,7 @@ fn painting_into_a_canvas_smaller_than_the_layout_clips() {
         &layout,
         &Interaction::default(),
         EM,
+        &sharp,
     );
 }
 
@@ -658,6 +693,10 @@ fn a_warm_popup_allocates_nothing() {
     let (w, h) = (layout.width, layout.height);
     let mut pixels = vec![0u8; (w * h * 4) as usize];
     let x = i64::from(layout.knob_x(1, 50, 100));
+    // Both shapes: the rounded tables are built once here, read (never
+    // built) every frame below.
+    let sharp = Round::new(0, FRAME, w, h);
+    let arc = Round::new(12, FRAME, w, h);
     // Warm: one of everything, including a different level so the glyphs
     // of both are cached.
     for level in [41, 40, 99] {
@@ -670,7 +709,17 @@ fn a_warm_popup_allocates_nothing() {
         state.scroll_by(&layout, 1);
         state.scroll_by(&layout, -1);
         let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
-        paint(&mut canvas, &mut text, &theme, &shown, &layout, &state, EM);
+        let shape = if level % 2 == 0 { &sharp } else { &arc };
+        paint(
+            &mut canvas,
+            &mut text,
+            &theme,
+            &shown,
+            &layout,
+            &state,
+            EM,
+            shape,
+        );
     }
     let ((), allocations) = scootbg_mem::count_allocations(|| {
         for round in 0..200u32 {
@@ -688,8 +737,198 @@ fn a_warm_popup_allocates_nothing() {
             state.scroll_by(&layout, 1);
             state.scroll_by(&layout, -1);
             let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
-            paint(&mut canvas, &mut text, &theme, &shown, &layout, &state, EM);
+            let shape = if round % 2 == 0 { &sharp } else { &arc };
+            paint(
+                &mut canvas,
+                &mut text,
+                &theme,
+                &shown,
+                &layout,
+                &state,
+                EM,
+                shape,
+            );
         }
     });
     assert_eq!(allocations, 0);
+}
+
+#[test]
+fn a_huge_radius_is_cut_back_to_what_the_popup_holds() {
+    let big = Round::new(100, 1, 30, 20);
+    assert!(big.rounded());
+    assert_eq!(big.outer().radius(), 10);
+    assert_eq!(big.inner().radius(), 9);
+    assert_eq!(big.frame(), 1);
+    let sharp = Round::new(0, 1, 30, 20);
+    assert!(!sharp.rounded());
+    // A border wider than the radius leaves a square inside.
+    let eaten = Round::new(4, 9, 40, 24);
+    assert!(eaten.rounded());
+    assert_eq!((eaten.outer().radius(), eaten.inner().radius()), (4, 0));
+}
+
+#[test]
+fn a_resized_frame_cuts_its_radius_back_again() {
+    // A configure smaller than asked (a list taller than the output):
+    // clamping twice is clamping once.
+    let small = Round::new(20, 1, 200, 100).resize(30, 20);
+    assert!(small.rounded());
+    assert_eq!((small.outer().radius(), small.inner().radius()), (10, 9));
+    assert_eq!(small.frame(), 1);
+    let same = Round::new(12, 2, 200, 100).resize(200, 100);
+    assert_eq!((same.outer().radius(), same.inner().radius()), (12, 10));
+}
+
+#[test]
+fn rounded_corners_are_transparent_and_the_middle_is_opaque() {
+    let (layout, pixels, w) = render_rounded(&sample(), &Interaction::default(), 12);
+    let theme = Theme::default();
+    for (x, y) in [
+        (0, 0),
+        (w - 1, 0),
+        (0, layout.height - 1),
+        (w - 1, layout.height - 1),
+    ] {
+        assert_eq!(alpha(&pixels, w, x, y), 0, "corner ({x},{y}) is cut");
+    }
+    // The border runs unbroken between them, all four sides.
+    for (x, y) in [
+        (w / 2, 0),
+        (w / 2, layout.height - 1),
+        (0, layout.height / 2),
+        (w - 1, layout.height / 2),
+    ] {
+        assert_eq!(alpha(&pixels, w, x, y), 255, "border ({x},{y})");
+        assert_eq!(rgb(&pixels, w, x, y), color(theme.dim), "border ({x},{y})");
+    }
+    // Inside is the background (well inside the corner's arc: two pixels
+    // from the edge is already outside a 12 px round).
+    assert_eq!(
+        rgb(&pixels, w, w / 2, layout.height - 2),
+        color(theme.background)
+    );
+}
+
+#[test]
+fn all_four_corners_round_even_the_edge_flush_with_the_bar() {
+    // The popup opens flush against the bar (under a top bar, above a
+    // bottom one): the bar-adjacent edge rounds like the other three, so
+    // no square corner juts into the bar.
+    for radius in [4, 8, 16] {
+        let (layout, pixels, w) = render_rounded(&sample(), &Interaction::default(), radius);
+        assert_eq!(alpha(&pixels, w, 0, 0), 0, "top-left at radius {radius}");
+        assert_eq!(
+            alpha(&pixels, w, w - 1, 0),
+            0,
+            "top-right at radius {radius}"
+        );
+        assert_eq!(
+            alpha(&pixels, w, 0, layout.height - 1),
+            0,
+            "bottom-left at radius {radius}"
+        );
+        assert_eq!(
+            rgb(&pixels, w, w / 2, 0),
+            color(Theme::default().dim),
+            "the flush edge keeps its border at radius {radius}"
+        );
+    }
+}
+
+#[test]
+fn the_rounded_border_is_one_frame_wide_at_every_scale() {
+    use crate::density::Scale;
+    use crate::render::device;
+    let mut font = text();
+    // One logical pixel of border at each scale the bar draws at.
+    for scale in [
+        Scale::Integer(1),
+        Scale::Integer(2),
+        Scale::Integer(3),
+        Scale::Fractional(144),
+        Scale::Fractional(180),
+        Scale::Fractional(240),
+        Scale::Fractional(300),
+    ] {
+        let frame = device(1, scale).max(1);
+        let em = 14.0 * scale.factor() as f32;
+        let pad = device(8, scale);
+        let mut layout = Layout::default();
+        layout.compute(&sample(), &font, em, pad, frame);
+        let (w, h) = (layout.width, layout.height);
+        let round = Round::new(device(12, scale), frame, w, h);
+        let mut pixels = vec![0u8; (w * h * 4) as usize];
+        let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
+        paint(
+            &mut canvas,
+            &mut font,
+            &Theme::default(),
+            &sample(),
+            &layout,
+            &Interaction::default(),
+            em,
+            &round,
+        );
+        // The left edge at half height is straight: exactly one frame of
+        // border, then the background.
+        let y = h / 2;
+        let border = (0..w)
+            .take_while(|&x| rgb(&pixels, w, x, y) == color(Theme::default().dim))
+            .count() as u32;
+        assert_eq!(border, frame, "border at {scale}");
+        assert_eq!(alpha(&pixels, w, frame, y), 255);
+    }
+}
+
+#[test]
+fn a_hovered_last_row_does_not_square_the_corners() {
+    // The last row is a button: hovering it fills the row full width,
+    // past the inner arc. The first row is text (no fill of its own).
+    let content = sample();
+    let layout = laid(&content);
+    let mut state = Interaction::default();
+    state.motion(
+        &content,
+        &layout,
+        i64::from(layout.width / 2),
+        mid(&layout, 3),
+    );
+    let (layout, pixels, w) = render_rounded(&content, &state, 12);
+    for (x, y) in [
+        (0, 0),
+        (w - 1, 0),
+        (0, layout.height - 1),
+        (w - 1, layout.height - 1),
+    ] {
+        assert_eq!(alpha(&pixels, w, x, y), 0, "corner ({x},{y}) stays cut");
+    }
+    // The hover itself still fills the row's middle.
+    let row = layout.rows()[3];
+    assert_eq!(
+        rgb(&pixels, w, w / 2, (row.y0 + row.y1) / 2),
+        color(Theme::default().dim)
+    );
+}
+
+#[test]
+fn a_rounded_popup_smaller_than_its_layout_clips_without_panicking() {
+    // A tiny canvas under a big layout (a compositor that configured less
+    // than asked): the arcs at the buffer's edge still cut.
+    let content = sample();
+    let layout = laid(&content);
+    let round = Round::new(12, FRAME, layout.width, layout.height);
+    let mut pixels = vec![0u8; 10 * 10 * 4];
+    let mut canvas = Canvas::new(&mut pixels, 10, 10).unwrap();
+    paint(
+        &mut canvas,
+        &mut text(),
+        &Theme::default(),
+        &content,
+        &layout,
+        &Interaction::default(),
+        EM,
+        &round,
+    );
+    assert_eq!(pixels[3], 0, "the buffer's corner is cut");
 }

@@ -200,6 +200,7 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
         spacing: if look.separator > 0 { 10 } else { 6 },
         separator: look.separator,
         radius: look.radius,
+        popup_radius: 0,
         opacity: look.opacity,
     };
     let frame = Frame {

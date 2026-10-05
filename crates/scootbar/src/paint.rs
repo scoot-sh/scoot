@@ -168,6 +168,200 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Clears the canvas to transparent black, for a surface whose corners
+    /// are cut (a rounded popup's `ARGB8888` buffer): what the rounded
+    /// fills then draw over.
+    #[cfg_attr(not(feature = "popup"), allow(dead_code))] // Only the popup's paint clears.
+    pub fn clear(&mut self) {
+        self.pixels.fill(0);
+    }
+
+    /// Fills the rounded rectangle `x0 .. x1` by `y0 .. y1`, clipped to the
+    /// canvas, with `color` opaque. `corners` is the rectangle's own corner
+    /// table ([`Corners::new`] of its radius, cut back to what the rectangle
+    /// holds before it was built), reused across frames; with square corners
+    /// this is a plain fill. The straight runs are written whole, the corner
+    /// pixels blended over what is there, so an inner fill composites over
+    /// an outer one. No allocation. Only for a buffer with an alpha channel:
+    /// on an `XRGB8888` buffer the blend would corrupt the pad byte.
+    #[cfg_attr(not(feature = "popup"), allow(dead_code))] // Only the popup's paint rounds.
+    pub fn fill_rounded(
+        &mut self,
+        x0: u32,
+        y0: u32,
+        x1: u32,
+        y1: u32,
+        color: Color,
+        corners: &Corners,
+    ) {
+        let (x0, x1) = (x0.min(self.width) as usize, x1.min(self.width) as usize);
+        let (y0, y1) = (y0.min(self.height) as usize, y1.min(self.height) as usize);
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        if corners.radius == 0 {
+            self.fill_rect(
+                Span {
+                    x: x0 as u32,
+                    width: (x1 - x0) as u32,
+                },
+                y0 as u32,
+                y1 as u32,
+                color,
+            );
+            return;
+        }
+        let radius = corners.radius as usize;
+        if x0.saturating_add(radius) > x1.saturating_sub(radius) {
+            // A table that does not fit its rectangle (the canvas clipped
+            // it, or a programming error: the popup cuts the radius back
+            // first): square, not a panic. The bytes are the same opaque
+            // ones either way.
+            self.fill_rect(
+                Span {
+                    x: x0 as u32,
+                    width: (x1 - x0) as u32,
+                },
+                y0 as u32,
+                y1 as u32,
+                color,
+            );
+            return;
+        }
+        let pixel = color.argb8888(255).to_le_bytes();
+        let width = self.width;
+        let full = Span { x: 0, width };
+        for y in y0..y1 {
+            let from_edge = (y - y0).min(y1 - 1 - y);
+            if from_edge >= radius {
+                self.fill_rect(
+                    Span {
+                        x: x0 as u32,
+                        width: (x1 - x0) as u32,
+                    },
+                    y as u32,
+                    y as u32 + 1,
+                    color,
+                );
+                continue;
+            }
+            // Between the corners the row is whole.
+            self.fill_rect(
+                Span {
+                    x: (x0 + radius) as u32,
+                    width: (x1 - x0 - 2 * radius) as u32,
+                },
+                y as u32,
+                y as u32 + 1,
+                color,
+            );
+            // The table is symmetric: the left pixel and its mirror share
+            // one coverage.
+            for lx in 0..radius {
+                let coverage = corners.at(lx, from_edge);
+                if coverage == 0 {
+                    continue;
+                }
+                for x in [x0 + lx, x1 - 1 - lx] {
+                    if coverage == 255 {
+                        let cell = (y * width as usize + x) * 4;
+                        if let Some(dest) = self.pixels.get_mut(cell..cell + 4) {
+                            dest.copy_from_slice(&pixel);
+                        }
+                    } else {
+                        self.blend(x as i64, y as i64, coverage, color, full);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Restores the rounded frame's own edge over the rectangle `x0 .. x1`
+    /// by `y0 .. y1`'s four corner squares: pixels the content painted
+    /// outside the frame's inner shape return to the frame's colors, so
+    /// text, hover fills and slider ends are clipped to the rounded shape.
+    /// Pixels fully inside keep what the content drew. `frame` is the
+    /// border's width in device pixels, `frame_color` its color and `fill`
+    /// the inside's; `outer` and `inner` are the frame's own corner tables
+    /// (the [`crate::popup::Round`]). No allocation.
+    #[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
+    #[cfg_attr(not(feature = "popup"), allow(dead_code))] // Only the popup's paint restores.
+    pub fn restore_frame_edge(
+        &mut self,
+        x0: u32,
+        y0: u32,
+        x1: u32,
+        y1: u32,
+        frame: u32,
+        frame_color: Color,
+        fill: Color,
+        outer: &Corners,
+        inner: &Corners,
+    ) {
+        let radius = outer.radius as usize;
+        if radius == 0 {
+            return;
+        }
+        let frame_px = frame_color.argb8888(255);
+        let fill_px = fill.argb8888(255);
+        let edge = |coverage: u8, inside: u8| {
+            let framed = scaled(frame_px.to_le_bytes(), coverage);
+            let over = |fg: u8, bg: u8| {
+                ((u32::from(fg) * u32::from(inside)
+                    + u32::from(bg) * (255 - u32::from(inside))
+                    + 127)
+                    / 255) as u8
+            };
+            [
+                over(fill_px.to_le_bytes()[0], framed[0]),
+                over(fill_px.to_le_bytes()[1], framed[1]),
+                over(fill_px.to_le_bytes()[2], framed[2]),
+                over(fill_px.to_le_bytes()[3], framed[3]),
+            ]
+        };
+        let (ix0, iy0) = (x0.saturating_add(frame), y0.saturating_add(frame));
+        let (ix1, iy1) = (x1.saturating_sub(frame), y1.saturating_sub(frame));
+        // The table is symmetric: a pixel's coverage is its distance from
+        // the rectangle's edges, whichever corner square it is in.
+        for (cx, cy) in [
+            (x0, y0),
+            (x1.saturating_sub(radius as u32), y0),
+            (x0, y1.saturating_sub(radius as u32)),
+            (
+                x1.saturating_sub(radius as u32),
+                y1.saturating_sub(radius as u32),
+            ),
+        ] {
+            for ly in 0..radius {
+                for lx in 0..radius {
+                    let (x, y) = (cx.saturating_add(lx as u32), cy.saturating_add(ly as u32));
+                    if x >= self.width || y >= self.height {
+                        continue;
+                    }
+                    let coverage = outer.at(
+                        (x.saturating_sub(x0)).min(x1.saturating_sub(x + 1)) as usize,
+                        (y.saturating_sub(y0)).min(y1.saturating_sub(y + 1)) as usize,
+                    );
+                    let inside = if x >= ix0 && x < ix1 && y >= iy0 && y < iy1 {
+                        inner.at(
+                            ((x - ix0).min(ix1 - 1 - x)) as usize,
+                            ((y - iy0).min(iy1 - 1 - y)) as usize,
+                        )
+                    } else {
+                        0
+                    };
+                    if coverage == 255 && inside == 255 {
+                        continue;
+                    }
+                    let cell = (y as usize * self.width as usize + x as usize) * 4;
+                    if let Some(dest) = self.pixels.get_mut(cell..cell + 4) {
+                        dest.copy_from_slice(&edge(coverage, inside));
+                    }
+                }
+            }
+        }
+    }
+
     /// Fills the rounded rectangle `span` x rows `y0 .. y1`, clipped to the
     /// canvas, with `color`: corners of `radius` (cut back to what it can
     /// hold), antialiased over what is there, the rest opaque. The

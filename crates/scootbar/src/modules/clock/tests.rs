@@ -171,6 +171,7 @@ fn a_warm_tick_allocates_nothing() {
         spacing: 0,
         separator: 0,
         radius: 0,
+        popup_radius: 0,
         opacity: u8::MAX,
     };
     let scale = Scale::Integer(1);

@@ -23,6 +23,8 @@ right = ["load", "cpu", "network", "volume", "battery", "terminal", "browser", "
 height = 40
 margin = 0             # edge to edge: the bar meets the output's edges
 radius = 0
+popup-radius = 14      # the popups match scoot's windows (corner_radius = 14
+                       # in scoot.toml); the bar itself stays square
 opacity = 0.7          # translucent: a little more memory (an ARGB buffer) and no opaque region
 font-size = 13
 padding = 10

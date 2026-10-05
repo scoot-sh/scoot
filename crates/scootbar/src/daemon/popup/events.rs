@@ -269,6 +269,9 @@ impl Dispatch<XdgSurface, PopupId> for State {
                 open.dims = dims;
                 open.layout.width = dims.0;
                 open.layout.height = dims.1;
+                // The frame's shape follows the size: the radius cut back
+                // to what the configured size holds.
+                open.round = open.round.resize(dims.0, dims.1);
             }
         }
         open.dirty = true;

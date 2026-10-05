@@ -92,6 +92,11 @@ pub struct Config {
     /// The bar's corner radius, in logical pixels: 0 to [`MAX_RADIUS`], and
     /// at most half the height.
     pub radius: u32,
+    /// The popup's corner radius, in logical pixels: 0 to [`MAX_RADIUS`],
+    /// cut back per popup to what it holds. Unset it follows the bar's
+    /// radius. No flag: config file only.
+    #[cfg(feature = "popup")]
+    pub popup_radius: u32,
     /// The background's alpha: 255 opaque, 0 transparent.
     pub opacity: u8,
     /// `bar.tooltip-delay`: how long the pointer rests on a module with a
@@ -116,6 +121,8 @@ impl Default for Config {
             radius: 0,
             opacity: u8::MAX,
             #[cfg(feature = "popup")]
+            popup_radius: 0,
+            #[cfg(feature = "popup")]
             tooltip_delay: DEFAULT_TOOLTIP_DELAY,
             modules: Settings::default(),
             outputs: Policy::default(),
@@ -132,6 +139,10 @@ impl Config {
             spacing: self.layout.spacing,
             separator: self.layout.separator,
             radius: self.radius,
+            #[cfg(feature = "popup")]
+            popup_radius: self.popup_radius,
+            #[cfg(not(feature = "popup"))]
+            popup_radius: 0,
             opacity: self.opacity,
         }
     }
@@ -366,6 +377,11 @@ struct BarFile {
     height: Option<u32>,
     margin: Option<toml::Value>,
     radius: Option<u32>,
+    /// Without the `popup` feature there is no such key (and so no
+    /// rounded popup), and `deny_unknown_fields` refuses it loudly.
+    #[cfg(feature = "popup")]
+    #[serde(rename = "popup-radius")]
+    popup_radius: Option<u32>,
     opacity: Option<toml::Value>,
     font: Option<String>,
     #[serde(rename = "fallback-fonts")]
@@ -1051,6 +1067,22 @@ impl File {
                 )
             })?,
         };
+        #[cfg(feature = "popup")]
+        let popup_radius = match bar.popup_radius {
+            // Unset, the popup follows the bar's own radius.
+            None => radius,
+            Some(popup_radius) if popup_radius <= MAX_RADIUS => popup_radius,
+            Some(popup_radius) => {
+                return Err(value(
+                    path,
+                    "bar.popup-radius",
+                    format_args!(
+                        "takes a whole number of logical pixels from 0 to {MAX_RADIUS}, \
+                         not `{popup_radius}`"
+                    ),
+                ));
+            }
+        };
         let font = bar.font.as_ref().map(PathBuf::from);
         let fallback_fonts: Vec<PathBuf> = match &bar.fallback_fonts {
             None => Vec::new(),
@@ -1562,6 +1594,8 @@ impl File {
             font_size,
             radius,
             opacity,
+            #[cfg(feature = "popup")]
+            popup_radius,
             #[cfg(feature = "popup")]
             tooltip_delay,
             modules,

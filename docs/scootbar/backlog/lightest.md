@@ -804,6 +804,70 @@ binary-size row is waived.** It covers `.text` +1,248 B (+0.07%) and
 `.rodata` +128 B in the default build (the file's on-disk size is unchanged),
 and only that row. Nothing else is waived.
 
+## M6 popup corners (measured 2026-10-04)
+
+The [rounded popups](../cli.md#popups) (`popup-corners.md`, PR #429):
+`bar.popup-radius` (unset: the bar's `radius`), drawn by scootbar itself
+in the popup's own buffer with transparent corners, the border following
+the arc at one logical pixel at every scale, the rows clipped to the
+inside arc. The corner tables are built once per open popup and read
+every frame it is drawn; the buffers are `ARGB8888` only while rounded.
+
+**Method.** Release builds (`lto = "fat"`, stripped) on the Asahi M2
+(NixOS aarch64, rustc 1.97.1), `main` at `802019d1e` against the branch
+head, each with its own target dir (`readelf -S -W` for the sections);
+`tests/popup_bench.rs` `idle` (60 s, volume placed, popup closed) and
+`cycles` (100 open/close against the pulse fake, release bar, debug
+headless scoot) on both builds; the paint cost from a temporary
+`--release` unit timer over 500 full repaints of a 262x162 volume popup
+(removed before the PR). One run per row, on a box other agents were
+building on, so treat small deltas as unresolved.
+
+| Build | file bytes | `.text` | loaded sections (`.text`+`.rodata`+`.eh_frame*`+`.gcc_except_table`+`.data*`) |
+|---|---|---|---|
+| `main` (`802019d1e`) | 2,233,056 | 1,704,040 | 2,069,431 |
+| branch, default | 2,233,056 (+0) | 1,708,776 (+4,736, +0.28%) | 2,074,495 (+5,064, +0.24%) |
+
+`ldd` still shows only libc, libm and libgcc_s, and `Cargo.lock` is
+identical on both sides: no new dependency.
+
+| Row | `main` | branch |
+|---|---|---|
+| idle RSS kB (60 s) | 4752 | 4736 (-16, one run) |
+| idle wakeups | 0 | 0 |
+| threads / fds / shm mappings | 1 / 8 / 2 | 1 / 8 / 2 |
+| popup open RSS kB | 4896 | 4896 (+144 over idle, both) |
+| open fds / shm mappings | 8 / 3 | 8 / 3 |
+| CPU per open+close | 548.8 us | 573.1 us (+24.3 us, +4.4%, one run each) |
+| wakeups per open+close | 4.00 | 4.00 |
+| after 100 cycles: RSS / fds / mappings | level | level (no leak either way) |
+| one full popup repaint | n/a (square) | 14,948 ns square, 25,615 ns rounded (+10,667 ns, +71%) |
+
+How to read it. Nothing in the change adds a timer, a file descriptor
+or a thread — a closed popup holds no memory (its buffers drop with
+it), an open one that nothing changes makes no wakeups — so idle RSS,
+wakeups, fds and threads are level by construction, and the runs agree.
+The repaint cost is per dirty frame of an open popup only (the popup
+draws nothing while closed): 25.6 us against 14.9 us square, about an
+eighth of a whole-bar redraw, from clearing to transparent and the two
+arc fills. The +24.3 us a cycle is one run each on a shared box and is
+not resolved from noise; the paint timer beside it bounds the bar's own
+share at about +10.7 us a frame. Screenshots of the volume, network and
+power popups in all three example looks, before and after, are linked
+from the ticket; the tray menu has none (no dbusmenu peer on the box —
+see the ticket).
+
+**Which rows of the rules regress.** Rule 1: the stripped binary size
+row regresses by 4,736 B of `.text` (+0.28%, 5,064 B or +0.24% of
+loaded sections; the file does not grow), for the maintainer to waive
+or not. No other row regresses beyond what one run resolves.
+
+**Maintainer's ruling (2026-10-04, given in chat): the popup corners'
+binary-size row is waived.** It covers `.text` +4,736 B (+0.28%; +5,064 B of
+loaded sections) in the default build, and only that row. Nothing else is
+waived: the CPU per open+close row stays a one-run observation, not an
+accepted cost.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`

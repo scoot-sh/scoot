@@ -60,6 +60,8 @@
 use std::fmt::{self, Write};
 use std::ops::Range;
 
+use crate::paint::Corners;
+
 mod hover;
 mod interact;
 mod layout;
@@ -214,4 +216,59 @@ pub struct Activate {
     pub action: &'static str,
     pub arg: Option<i32>,
     pub closes: bool,
+}
+
+/// The popup's rounded frame: the border's width and the two corner tables.
+/// Built once per open popup (the radius is fixed for its size and scale)
+/// and read every frame it is drawn, so rounding costs table lookups for
+/// the few pixels in a corner, never an allocation. The outer table is the
+/// frame's own arc, the inner one the arc a border inside it; both are cut
+/// back to what the popup holds, so a tiny popup rounds into a stadium
+/// rather than breaking.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Round {
+    frame: u32,
+    outer: Corners,
+    inner: Corners,
+}
+
+impl Round {
+    /// A frame `frame` device pixels wide for a popup `width` by `height`
+    /// device pixels, rounded by `radius` device pixels: the radius cut back
+    /// to half the smaller side, the inner arc one border inside it (square
+    /// where the border eats it).
+    pub fn new(radius: u32, frame: u32, width: u32, height: u32) -> Self {
+        let radius = radius.min(width / 2).min(height / 2);
+        let inner = radius.saturating_sub(frame);
+        Self {
+            frame,
+            outer: Corners::new(radius),
+            inner: Corners::new(inner),
+        }
+    }
+
+    /// Whether the frame is rounded: what decides the buffer's format (an
+    /// `ARGB8888` buffer only then) and the paint's path.
+    pub fn rounded(&self) -> bool {
+        self.outer.radius() > 0
+    }
+
+    /// The same frame at a new size (a configure smaller than asked): the
+    /// radius cut back again to what the new size holds. Clamping twice is
+    /// clamping once, so rebuilding from the cut radius is exact.
+    pub fn resize(&self, width: u32, height: u32) -> Self {
+        Self::new(self.outer.radius(), self.frame, width, height)
+    }
+
+    pub fn frame(&self) -> u32 {
+        self.frame
+    }
+
+    pub fn outer(&self) -> &Corners {
+        &self.outer
+    }
+
+    pub fn inner(&self) -> &Corners {
+        &self.inner
+    }
 }
