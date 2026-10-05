@@ -1,14 +1,22 @@
 # `scoot.service`: the compositor inside the user session.
 #
 # Started by `scoot-session` (the greeter entry command), never enabled
-# directly: the launcher waits for IPC readiness and only then imports
-# `WAYLAND_DISPLAY`/`XDG_CURRENT_DESKTOP`, which is what makes units
-# ordered after `graphical-session.target` see the display. `BindsTo`
-# ties this unit to the session target lifetime -- when the target
-# stops (see `scoot-shutdown.target`), so does the compositor -- and
-# `Before` orders target activation after this unit starts. (The
-# target carries `RefuseManualStart=yes` and can only be pulled in by a
-# dependency like this one, never by `systemctl start`.)
+# directly: the launcher waits for IPC readiness, imports
+# `WAYLAND_DISPLAY`/`XDG_CURRENT_DESKTOP`, and only then starts
+# `scoot-session.target`, which is what pulls in
+# `graphical-session.target` -- so units ordered after the session
+# target (and `ConditionEnvironment=WAYLAND_DISPLAY` ones, which a
+# start before the import would skip without retry) see the display.
+# This unit deliberately names no session target in `Wants=` /
+# `Requires=` / `BindsTo=`: any of those would pull the session -- and
+# with it the graphical target -- in the moment the service forks, long
+# before the import, which is the bug this shape fixes. `PartOf=`
+# propagates stops only (never starts), so stopping the session target
+# stops the compositor, and -- through the session target `BindsTo`
+# the graphical target -- stopping the graphical target or logging out
+# stops it too. (`Before=graphical-session.target` does not fix the
+# old shape: `BindsTo=` starts the listed units regardless of order,
+# measured by the sway project against the same target.)
 #
 # `Type=simple` and no notify: scoot reports readiness over its IPC
 # socket (`scoot msg version`), which the launcher polls -- the
@@ -19,13 +27,16 @@
 #
 # Install: the NixOS module (`programs.scoot.session.enable`) writes
 # these files with the package binary path filled in. The dependency
-# shape follows the niri `niri.service` unit (niri is GPL-3.0, scoot is
-# MIT: the semantics belong to systemd, and the files are written for
-# scoot, not copied).
+# shape follows the session-target pattern systemd documents in
+# systemd.special(7) (a session target starts and stops
+# `graphical-session.target` with `BindsTo=`; leaf services ride
+# `PartOf=`), the shape sway and Hyprland use for their session
+# targets (both permissively licensed -- sway MIT, Hyprland
+# BSD-3-Clause -- and scoot is MIT: the semantics belong to systemd,
+# and the files are written for scoot, not copied).
 [Unit]
 Description=scoot scrolling-tiling Wayland compositor
-BindsTo=graphical-session.target
-Before=graphical-session.target
+PartOf=scoot-session.target
 Wants=graphical-session-pre.target
 After=graphical-session-pre.target
 

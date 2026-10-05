@@ -1,0 +1,27 @@
+# `scoot-session.target`: the session, reached only once it has a display.
+#
+# Started by `scoot-session` (the greeter entry command) after it waits
+# for IPC readiness and imports `WAYLAND_DISPLAY`/`XDG_CURRENT_DESKTOP`
+# into the user manager and the D-Bus activation environment -- never
+# enabled directly, like `scoot-shutdown.target`. `BindsTo` pulls in
+# `graphical-session.target` (a requirement dependency, so starting this
+# target starts that one; the target carries `RefuseManualStart=yes` and
+# can only be pulled in by a dependency like this one, never by
+# `systemctl start`), which is what makes units ordered after the
+# session target start with the display already in the manager --
+# including `ConditionEnvironment=WAYLAND_DISPLAY` ones, which a start
+# before the import would skip without retry. Stopping this target
+# stops `scoot.service` (which is `PartOf` it: stop propagation only,
+# no start pull, so starting the service never starts the session) and
+# -- through `BindsTo` -- follows `graphical-session.target` down on
+# logout and `stop`. `Wants`/`After graphical-session-pre.target` is
+# the pre-session hook, the same shape sway and Hyprland use for their
+# session targets (both permissively licensed, sway MIT and Hyprland
+# BSD-3-Clause, and scoot is MIT: the dependency shape belongs to
+# systemd -- see systemd.special(7) -- and the files are written for
+# scoot, not copied).
+[Unit]
+Description=scoot session (display ready)
+BindsTo=graphical-session.target
+Wants=graphical-session-pre.target
+After=graphical-session-pre.target
