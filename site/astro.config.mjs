@@ -15,11 +15,13 @@ import { defineConfig } from 'astro/config';
 // project-pages address today; `'apex'` serves the root domain. `site`
 // and `base` both derive from this single value so the switch cannot
 // leave them mismatched.
-const DEPLOY_TARGET = 'pages';
+const DEPLOY_TARGET = 'www';
 const { site, base } =
-  DEPLOY_TARGET === 'apex'
-    ? { site: 'https://scoot.sh/', base: '/' }
-    : { site: 'https://scoot-sh.github.io/scoot/', base: '/scoot/' };
+  DEPLOY_TARGET === 'www'
+    ? { site: 'https://www.scoot.sh/', base: '/' }
+    : DEPLOY_TARGET === 'apex'
+      ? { site: 'https://scoot.sh/', base: '/' }
+      : { site: 'https://scoot-sh.github.io/scoot/', base: '/scoot/' };
 export default defineConfig({
   site,
   base,
