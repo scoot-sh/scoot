@@ -139,6 +139,24 @@ let
   notifOn = (notifProfile.enable or false);
   notifDaemon = (notifProfile.daemon or "mako");
   notifPkg = (notifProfile.package or null);
+  # The per-state icons (`desktop.notifications.bar.icons` in the scoot
+  # modules). Only `idle` is read here (the push module's static icon,
+  # shown until the first update and whenever an update names none);
+  # `unread` and `dnd` ride the feed's per-update icons (see
+  # `nix/modules/notifications-home.nix`). Each `or` keeps this
+  # evaluating with the scoot module absent or older than the icons
+  # (the defaults then come from this file's own `desktop.nix`, so the
+  # two cannot drift).
+  notifIcons =
+    let
+      iconDefaults = (import ./desktop.nix { inherit lib; }).options.notifications.bar.icons;
+    in
+    {
+      idle = iconDefaults.idle.default;
+      unread = iconDefaults.unread.default;
+      dnd = iconDefaults.dnd.default;
+    }
+    // (notifProfile.bar.icons or { });
   notifPushNeeded =
     profileOn && profileManagesBar && notifOn && notifPkg != null && notifDaemon == "mako";
 in
@@ -294,6 +312,16 @@ in
             features null for the default build, which has it).
           '';
         }
+        {
+          # The static idle icon obeys the same one-glyph rule the
+          # feed's per-update icons do (the bar refuses anything else
+          # where it is drawn).
+          assertion = !notifPushNeeded || (import ./desktop.nix { inherit lib; }).isStateIcon notifIcons.idle;
+          message = ''
+            programs.scoot.desktop.notifications.bar.icons.idle is
+            empty (no icon while idle) or exactly one glyph: got ${notifIcons.idle}.
+          '';
+        }
       ];
 
       # A font only when something draws text; the bar refuses to start
@@ -325,18 +353,23 @@ in
     # value set in `settings` wins per key. Placement stays yours (the
     # module is defined, not placed -- add `"notifications"` to a list
     # to show it; see site/src/content/docs/scootbar/theming.md). Like the look's colors, a bar the
-    # user turned off stays unthemed too. The envelope stands while the
-    # text is empty (a quiet desktop keeps a clickable bell, not a
-    # hole); it is in DejaVu Sans, the bar's own default font.
+    # user turned off stays unthemed too. The idle icon stands while
+    # the text is empty (a quiet desktop keeps a clickable indicator,
+    # not a hole); it is in DejaVu Sans, the bar's own default font,
+    # and empty (`bar.icons.idle = ""`) sets no static icon at all, so
+    # a quiet desktop shows nothing. The unread and DND states arrive
+    # as per-update icons from the feed, overriding this while set.
     (lib.mkIf (notifPushNeeded && cfg.enable) {
-      programs.scootbar.settings.push.notifications.icon = lib.mkOptionDefault "✉";
-      programs.scootbar.settings.push.notifications.on-click = lib.mkOptionDefault {
-        exec = [
-          "${lib.getExe' notifPkg "makoctl"}"
-          "mode"
-          "-t"
-          "do-not-disturb"
-        ];
+      programs.scootbar.settings.push.notifications = {
+        icon = lib.mkIf (notifIcons.idle != "") (lib.mkOptionDefault notifIcons.idle);
+        on-click = lib.mkOptionDefault {
+          exec = [
+            "${lib.getExe' notifPkg "makoctl"}"
+            "mode"
+            "-t"
+            "do-not-disturb"
+          ];
+        };
       };
     })
 
