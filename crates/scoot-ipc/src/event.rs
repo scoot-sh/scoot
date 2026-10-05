@@ -29,7 +29,7 @@
 //!   Open another connection for requests -- requests pipeline, so one is
 //!   enough for any number of them.
 //! - **Filtering is by kind, not by field.** The subscription names event
-//!   kinds (`output`, `keyboard`, `workspace`); the server sends every event of those
+//!   kinds (`output`, `keyboard`, `workspace`, `lock`); the server sends every event of those
 //!   kinds,
 //!   and the client filters or debounces further itself. Standby cycles
 //!   fire removal/restore pairs routinely -- that is accepted, and stated
@@ -48,7 +48,8 @@ use serde::{Deserialize, Serialize};
 /// [`EventKind::Keyboard`] covers the active keyboard layout changing -- see
 /// [`KeyboardLayout`].
 /// [`EventKind::Workspace`] covers workspace occupancy changing -- see
-/// [`WorkspaceSnapshot`]. Adding a kind is additive on
+/// [`WorkspaceSnapshot`]. [`EventKind::Lock`] covers the session locking
+/// and unlocking -- see [`Request::Locked`](crate::Request::Locked). Adding a kind is additive on
 /// the request half, like adding an action: a client that never names it
 /// sends -- and a server decodes -- byte-for-byte what it did before, and
 /// an older server meets the new name with an ordinary `Error`, not a kill.
@@ -81,6 +82,13 @@ pub enum EventKind {
     /// and the one `active` bit, but no "holds windows" bit, and no other
     /// standard protocol maps a toplevel to a workspace.
     Workspace,
+    /// The session locked or unlocked: what tells an agent "injected input
+    /// now reaches the lock screen" without polling `locked`, and what a
+    /// clipboard watcher leans on instead of its probe interval. No
+    /// standard Wayland protocol reports this to an unfocused client --
+    /// `ext-session-lock-v1` events go only to the lock client itself.
+    /// Read-only: nothing over IPC locks or unlocks the session.
+    Lock,
 }
 
 /// An output was removed: its workspaces were adopted onto a remaining

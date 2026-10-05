@@ -54,7 +54,9 @@ The focus-family actions do take the keyboard back. `focus-column`,
 `focus-window`, `focus-window-id`, `focus-workspace` and
 `focus-workspace-index` -- with or without `--output ID` -- each spend a click that had given a *click-focused*
 (`on_demand`) layer surface the keyboard, so after one, keystrokes go to the
-window `windows` reports as focused. The other actions — `move-*`, `close`,
+window `windows` reports as focused. A `focus-window-id` naming no window
+is a miss: it answers `ok` and changes nothing, leaving the click -- and
+the keyboard it placed -- alone. The other actions — `move-*`, `close`,
 `spawn`, `cycle-column-width`, `set-column-width`, `toggle-fullscreen`, `set-fullscreen`, `toggle-maximize`, `set-maximized`, `quit` — change arrangement rather than where
 focus is reported to be, so they leave a deliberate keyboard placement alone,
 as does a keybinding. An `exclusive` layer surface keeps the keyboard through

@@ -1273,6 +1273,7 @@ impl SessionLockHandler for State {
         } else {
             tracing::info!("locking the session");
         }
+        let was_locked = self.session_lock.is_locked();
         self.session_lock.owner = Some(confirmation.ext_session_lock().clone());
         // Whatever is left belongs to the lock just replaced -- and the
         // replaced client may still be connected, holding a live `wl_surface`,
@@ -1321,6 +1322,12 @@ impl SessionLockHandler for State {
         // transition below redraws the whole screen anyway.
         self.cursor_changed();
         self.lock_transition();
+        // A fresh lock is the false → true transition `Lock` subscribers
+        // wait for; a takeover of an already-locked session is no
+        // transition, so it emits nothing (see `emit_lock_changed`).
+        if !was_locked {
+            self.emit_lock_changed(true);
+        }
     }
 
     /// The owning client unlocked. Smithay has already checked that the
@@ -1358,6 +1365,8 @@ impl SessionLockHandler for State {
         // still there at unlock): re-arm over it if the pointer is.
         self.update_cursor_hide(Instant::now());
         self.request_render();
+        // The true → false transition `Lock` subscribers wait for.
+        self.emit_lock_changed(false);
     }
 
     /// The lock client created a surface for an output.

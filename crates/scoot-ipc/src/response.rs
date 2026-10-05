@@ -341,6 +341,32 @@ pub enum Response {
     /// constant's doc): an older client handed one would fail its decode,
     /// which can only happen to a client new enough to have subscribed.
     Workspaces(WorkspaceSnapshot),
+    /// The answer to [`Request::Locked`](crate::Request::Locked): whether
+    /// the session is locked, read live off the compositor's lock state on
+    /// every request -- there is no scoot-side copy to go stale.
+    ///
+    /// A new variant, so this shares the 7 → 8 `PROTOCOL_VERSION` move with
+    /// `LockChanged` below: an older client handed one would fail its
+    /// decode, which can only happen to a client new enough to have asked.
+    /// An older server meets the new request tag with an ordinary `Error`,
+    /// like any unknown request tag -- so a `locked` probe against one
+    /// fails open (no answer), never misread.
+    Locked {
+        locked: bool,
+    },
+    /// The session locked or unlocked; see [`Request::Locked`](crate::Request::Locked)
+    /// for what the flag means. Sent only to connections subscribed to
+    /// [`EventKind::Lock`], under the same version move as `Locked` above.
+    ///
+    /// Fires once per transition, never per request: a lock that is refused
+    /// (another client holds it) changes nothing and sends nothing, and a
+    /// takeover of an already-locked session is no transition either. A
+    /// fresh subscription starts silent -- read `locked` once for the
+    /// baseline, then apply changes after it -- so subscribing never replays
+    /// the unsubscribed interval as one change.
+    LockChanged {
+        locked: bool,
+    },
     Error {
         message: String,
     },

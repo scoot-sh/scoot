@@ -13,6 +13,7 @@ Ask the compositor questions and tell it to act: every request, `type` vs `key`,
 | `outputs` | Every output's name, rectangle, usable rectangle, scale and power state. |
 | `windows` | Every window: id, app id, title, icon, output, workspace, adoption, focus, popup grab. |
 | `keyboard` | The active keyboard layout's name and index — what a layout indicator shows, and which layout the next `type` will produce. |
+| `locked` | Whether the session is locked — the side-effect-free lock probe, answered locked or not (`{"type":"locked","locked":false}`). What the desktop clipboard asks before recording, and what tells an agent whether injected input would reach the lock screen instead of the desktop. |
 | `output-power ID\|all on\|off` | Switch an output's panel off or on — the IPC half of `zwlr_output_power_v1` (see [protocols.md](../scoot/protocols.md#screen-power)), for agents and scripts that do not speak Wayland. `all` powers every output at once; an unknown id is refused with an error. Session-level like `outputs`, not an action: it applies while locked (the idle cycle is off-after-lock, on-at-resume). On the wire an additive request tag (`{"type":"output_power","output":1,"powered":false}`, `output` omitted for `all`); `PROTOCOL_VERSION` did not change. |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
 | `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale -- the default and each `[[outputs]]` entry's, appearance, keybindings, new autostart spawn entries; an entry's `mode` is refused as `outputs.<name>.mode`, pending a restart) — see [configuration.md](../scoot/configure.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
@@ -24,7 +25,7 @@ Ask the compositor questions and tell it to act: every request, `type` vs `key`,
 | `key COMBO` | Press one key combination — see [`type` vs `key`](#type-vs-key). |
 | `type TEXT` | Type text on the active keyboard layout. |
 | `wait-idle [--quiet-ms N] [--timeout-ms N]` | Block until nothing on screen has redrawn for `--quiet-ms` (default 200), giving up after `--timeout-ms` (default 5000). |
-| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output`, `keyboard`, `workspace`; naming none is refused — bare `scootctl subscribe` sends `output`), streaming them until the session ends or drops the subscription — see [Events](#events). A fresh `keyboard` subscription starts silent, so issue one `keyboard` query for the baseline and listen for changes after it. A fresh `workspace` subscription starts silent too — read `windows` once for the baseline and apply snapshots after it. |
+| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output`, `keyboard`, `workspace`, `lock`; naming none is refused — bare `scootctl subscribe` sends `output`), streaming them until the session ends or drops the subscription — see [Events](#events). A fresh `keyboard` subscription starts silent, so issue one `keyboard` query for the baseline and listen for changes after it. A fresh `workspace` subscription starts silent too — read `windows` once for the baseline and apply snapshots after it. A fresh `lock` subscription starts silent too — read `locked` once for the baseline and apply changes after it. |
 
 ```sh
 scootctl windows
@@ -33,9 +34,11 @@ scootctl reload
 scootctl screenshot --out /tmp/shot.png
 scootctl type "hello"
 scootctl keyboard
+scootctl locked
 scootctl wait-idle --quiet-ms 200
 scootctl subscribe
 scootctl subscribe keyboard
+scootctl subscribe lock
 ```
 
 ## `type` vs `key`
@@ -143,7 +146,31 @@ layout; the group moves only through the keymap's own mechanics (a toggle
 key from the `XKB_DEFAULT_OPTIONS` the session started with, e.g.
 `grp:caps_toggle`).
 
-Every success reply also carries **`locked`**: the session-lock state it was
+**`locked`**, whether the session is locked:
+
+| Field | Meaning |
+| --- | --- |
+| `locked` | `true` while the session is locked, `false` otherwise — read live off the compositor's lock state on every request, so there is no copy to go stale. |
+
+Unlike every `action`, this answers locked or not: it is the
+side-effect-free probe the desktop clipboard runs before recording, and
+what tells an agent whether injected keyboard and pointer input would
+reach the lock screen instead of the desktop. A `focus-window-id` for an
+id no window can hold used to serve as that probe; it spent an
+`on_demand` layer surface's keyboard focus on every probe, and a miss now
+leaves focus state alone — one `locked` round trip replaces two requests.
+Read-only, like the event below: nothing over IPC locks or unlocks the
+session.
+
+```sh
+$ scootctl locked
+{
+  "type": "locked",
+  "locked": false
+}
+```
+
+Every success reply also carries a **`locked` field**: the session-lock state it was
 built under. An agent typing a password over IPC learns the unlock landed
 from the very next reply.
 

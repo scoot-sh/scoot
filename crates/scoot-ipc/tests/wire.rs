@@ -472,14 +472,14 @@ fn a_reload_report_round_trips_with_both_lists() {
 
 /// The Phase 4-6 record: the refusal *strings* moved (restart wording, the
 /// autostart spawn delta) while the reply *shape* did not -- so this still
-/// decodes as the same two string lists. (The protocol is at 7 now for the
-/// workspace occupancy event below; these strings are still payload, not wire.)
+/// decodes as the same two string lists. (The protocol is at 8 now for the
+/// lock query and event below; these strings are still payload, not wire.)
 /// Strings are payload, not wire format: an older client parses this reply
 /// exactly as it parsed the old strings.
 #[test]
 fn reworded_reload_refusals_are_payload_not_wire_format() {
     assert_eq!(
-        PROTOCOL_VERSION, 7,
+        PROTOCOL_VERSION, 8,
         "no new reply variant or field shipped with the reload completion"
     );
     let response = Response::Reloaded {
@@ -551,7 +551,11 @@ fn every_request_round_trips_on_one_line() {
         Request::Subscribe {
             events: vec![EventKind::Output, EventKind::Keyboard],
         },
+        Request::Subscribe {
+            events: vec![EventKind::Lock],
+        },
         Request::Keyboard,
+        Request::Locked,
     ];
     for request in requests {
         let line = encode(&request).unwrap();
@@ -1167,4 +1171,73 @@ fn a_workspace_snapshot_event_round_trips_with_counts() {
         decode::<Response>(&encode(&response).unwrap()).unwrap(),
         response
     );
+}
+
+/// The side-effect-free lock probe on the wire: a bare `locked` request,
+/// answered with a `locked` reply carrying the live state.
+#[test]
+fn a_locked_query_round_trips_with_the_live_state() {
+    let request = Request::Locked;
+    assert_eq!(json_of(&request), json!({ "type": "locked" }));
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+
+    for locked in [false, true] {
+        let response = Response::Locked { locked };
+        assert_eq!(
+            json_of(&response),
+            json!({ "type": "locked", "locked": locked })
+        );
+        assert_eq!(
+            decode::<Response>(&encode(&response).unwrap()).unwrap(),
+            response
+        );
+    }
+}
+
+/// A lock subscription names its kind the same way, and the reply echoes
+/// it back -- the same shape the workspace subscription pins above.
+#[test]
+fn a_lock_subscribe_names_its_kind_and_the_reply_echoes_it() {
+    let request = Request::Subscribe {
+        events: vec![EventKind::Lock],
+    };
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "subscribe", "events": ["lock"] })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+
+    let response = Response::Subscribed {
+        events: vec![EventKind::Lock],
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({ "type": "subscribed", "events": ["lock"] })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
+/// The lock/unlock event on the wire: one flag, both transitions.
+#[test]
+fn a_lock_changed_event_round_trips_for_both_transitions() {
+    for locked in [true, false] {
+        let response = Response::LockChanged { locked };
+        assert_eq!(
+            json_of(&response),
+            json!({ "type": "lock_changed", "locked": locked })
+        );
+        assert_eq!(
+            decode::<Response>(&encode(&response).unwrap()).unwrap(),
+            response
+        );
+    }
 }

@@ -151,4 +151,19 @@ pub enum Request {
     /// half. (The reply half is a new `Response` variant, which is why the
     /// version still moved -- see `Response::Keyboard`.)
     Keyboard,
+    /// Whether the session is locked: the side-effect-free lock probe.
+    ///
+    /// Answered whether or not the session is locked -- unlike
+    /// `Request::Action`, which is refused while locked, and unlike the old
+    /// `focus-window-id u64::MAX` probe, which spent an `on_demand` layer
+    /// surface's keyboard focus on every copy (see the compositor's
+    /// `handle_request`). What the desktop clipboard asks before recording,
+    /// and what tells an agent whether injected input would reach the lock
+    /// screen instead of the desktop.
+    ///
+    /// Additive like `Reload`: a client that never sends this tag decodes
+    /// exactly as before, so no `PROTOCOL_VERSION` bump for the request
+    /// half. (The reply half is a new `Response` variant, which is why the
+    /// version still moved -- see `Response::Locked`.)
+    Locked,
 }

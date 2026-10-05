@@ -30,6 +30,8 @@ pub const REQUESTS_HELP: &str = "\
                                     what can be re-applied live
     keyboard                        the active keyboard layout's name and
                                     index -- what a layout indicator shows
+    locked                          whether the session is locked -- the
+                                    side-effect-free lock probe
     output-power ID|all on|off        switch an output's panel off or on --
                                      what an idle daemon drives at idle and
                                      resume (`outputs` reports the state)
@@ -45,7 +47,7 @@ pub const REQUESTS_HELP: &str = "\
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
     subscribe [EVENT...]          stream events until killed (default: output;
-                                    known events: output, keyboard, workspace)
+                                    known events: output, keyboard, workspace, lock)
 ";
 
 /// The action grammar both clients print in their `--help`. Same single-owner
@@ -295,6 +297,7 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
         "windows" => Request::Windows,
         "reload" => Request::Reload,
         "keyboard" => Request::Keyboard,
+        "locked" => Request::Locked,
         "output-power" => {
             let target = args.next().ok_or(Error::Missing("an output id or `all`"))?;
             let output = match target.as_str() {
@@ -384,9 +387,13 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                     "output" => events.push(EventKind::Output),
                     "keyboard" => events.push(EventKind::Keyboard),
                     "workspace" => events.push(EventKind::Workspace),
+                    "lock" => events.push(EventKind::Lock),
                     other => {
                         return Err(
-                            match crate::help::suggest(other, ["output", "keyboard", "workspace"]) {
+                            match crate::help::suggest(
+                                other,
+                                ["output", "keyboard", "workspace", "lock"],
+                            ) {
                                 Some(suggestion) => Error::Hinted {
                                     kind: "event",
                                     what: other.to_owned(),
@@ -394,7 +401,7 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                                     topic: "help subscribe",
                                 },
                                 None => Error::Unknown(format!(
-                                    "event {other} (known events: output, keyboard, workspace)"
+                                    "event {other} (known events: output, keyboard, workspace, lock)"
                                 )),
                             },
                         );
@@ -906,6 +913,13 @@ mod tests {
                 out: None,
             })
         );
+        assert_eq!(
+            parse_args(&["locked"]),
+            Ok(Command::Msg {
+                request: Request::Locked,
+                out: None,
+            })
+        );
     }
 
     #[test]
@@ -955,6 +969,16 @@ mod tests {
                 .lines()
                 .any(|line| line.trim().starts_with("keyboard")),
             "--help hides the keyboard verb"
+        );
+    }
+
+    #[test]
+    fn usage_names_locked_on_its_own_line() {
+        assert!(
+            usage()
+                .lines()
+                .any(|line| line.trim().starts_with("locked")),
+            "--help hides the locked verb"
         );
     }
 
@@ -1010,6 +1034,15 @@ mod tests {
             Ok(Msg {
                 request: Request::Subscribe {
                     events: vec![EventKind::Output, EventKind::Workspace]
+                },
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["subscribe", "lock"]),
+            Ok(Msg {
+                request: Request::Subscribe {
+                    events: vec![EventKind::Lock]
                 },
                 out: None,
             })
