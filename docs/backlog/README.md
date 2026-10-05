@@ -291,6 +291,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [`scoot msg` panics when its stdout reader goes away](./resolved/msg-client-broken-pipe-done.md) — RESOLVED 2026-09-17 (PR #62): per-write EPIPE handling at every client-binary stdio site, quiet exit 0; compositor unaffected
 - [IPC focus actions run a full `apply` even when nothing moves](./resolved/focus-action-no-op-fast-path-done.md) — RESOLVED 2026-09-17 (PR #67): already-there focus actions skip `act` and run only the keyboard half, mirroring PR #54; relative steps deliberately left on the full path
 - [Probe Sunshine/Moonlight on the M2](./testing/moonlight-sunshine-on-m2.md) (low, filed 2026-10-04): KMS capture + uinput may already stream a `--tty` session; Asahi's DCP is the open question
+- [Run the scoot-session launcher harness in CI](./testing/scoot-session-harness-in-ci.md) (medium, filed 2026-10-04 from #431's review): 17 asserts run by hand only; the fake cannot see the carried stale-graphical-target limitation
 
 ### Input
 - [`msg key` hard-codes `_L` modifier keysyms](./resolved/msg-key-modifier-resolution-done.md) — RESOLVED 2026-09-17 (PR #83): modifiers resolve through the keymap probe like `type_text` (either hand's key; toggle-option layouts work); `msg key A` still refuses
