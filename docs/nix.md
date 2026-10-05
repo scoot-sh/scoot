@@ -1442,6 +1442,173 @@ Troubleshooting, by symptom:
   a desktop's own) owns the bus name instead: only one can. Turn this
   one off (`notifications.enable = false`) or uninstall the other.
 
+## Clipboard
+
+Copy in one window, close it, and the paste still works: every copy
+lands in a history kept by cliphist, restorable with one keypress.
+Without this slot, a copy dies with the app that offered it -- from
+your side of the screen that reads as data loss, and agents move text
+through the clipboard constantly, so the profile turns it on.
+
+```nix
+programs.scoot.desktop = {
+  enable = true;
+  # A longer tail in a moved db:
+  # clipboard.maxItems = 250;
+  # clipboard.dbPath = "/home/you/.cache/cliphist-test/db";
+  # No history at all on this box (each switch below is its own):
+  # clipboard.enable = false;
+};
+```
+
+What runs: two watcher units (`scoot-clipboard-store` for the regular
+clipboard, `scoot-clipboard-primary-store` for the primary selection,
+both wanted by `graphical-session.target` -- which the launcher reaches
+past the display import -- retried rather than conditioned, gated on
+the display like the mako unit), each a `wl-paste --watch` feeding one
+shared history, plus `wl-copy`/`wl-paste` on PATH for scripts and
+terminals. The history keeps 100 entries by default (oldest dropped
+first, each entry at most 5 MB -- cliphist's own cap), byte-for-byte:
+trailing newlines survive, and so do images. Press `Super+v` and the
+picker shows the newest first; Enter restores the picked entry to the
+clipboard, then paste as usual:
+
+![The clipboard history picker over the session: four entries, newest first and highlighted, in the music-desk paper and ink](assets/clipboard-picker.png)
+
+Know exactly what "the paste still works" promises, because Wayland
+selections are owner-held: the *history* survives the source app
+closing (and a reboot -- it lives in a db on disk, below), while the
+*live* selection still dies with its owner (no manager can change
+that without re-owning every copy, which would fight the lock policy
+below). So `Ctrl+v` right after closing the source finds nothing --
+open the picker, Enter, paste. One keypress, always the same path.
+
+Why cliphist, measured at the pinned rev (`8ce4ef6`, `aarch64-linux`,
+`nix path-info`, marginals over the profile's own tools -- the eight
+the idle, notification and keymap children already ship):
+
+| Tool | Version | Closure marginal | Why / why not |
+|---|---|---|---|
+| cliphist (stock nixpkgs) | 0.7.0 | 207.8 MiB | the manager -- but its contrib picker scripts embed wofi (gtk+3 with the tinysparql/cups/at-spi2 train), fuzzel, fzf, chafa and perl, none of which the profile runs |
+| cliphist (lean, what ships) | 0.7.0 | 2.5 MiB | stock minus those scripts (`nix/modules/clipboard-cliphist.nix`, the mako treatment): the binary plus its Go runtime only |
+| clipman | 1.7.0 | 85.5 MiB | an active fork of an archived project, JSON history, and its picker is built in (`pick -t wofi`) -- a second picker UI, which is exactly what this slot refuses to add |
+| wl-clipboard | 2.3.0 | 80.0 MiB | ships regardless: the watcher behind the units and `wl-copy`/`wl-paste` on PATH (a C tools package, already lean) |
+| fuzzel (dmenu mode) | 1.14.1 | 41.7 MiB | the picker's menu: 4 new paths over the profile (cairo/pango ride along already), layer-shell `overlay` native, no toolkit -- and the reserved launcher choice, which the launcher child reuses |
+| tofi | 0.9.1 | 0.2 MiB | lighter, measured -- passed over for the reuse: a second menu tool would theme, document and maintain twice for 40 MiB |
+| bemenu | 0.6.23 | 0.6 MiB | same call as tofi |
+| wofi | 1.5.3 | 67.4 MiB | heavier than fuzzel and GTK-based |
+
+cliphist over clipman, then, for fit at an acceptable weight: bounded
+SQLite history with dedupe and previews (clipman's is an unbounded
+JSON file the project itself tells you not to persist), no picker of
+its own (lines on stdin, selection on stdout -- the dmenu contract the
+launcher slot reuses), and an upstream that is maintained (the fork
+exists because clipman's is not). Both managers are GPL-3.0-only, which
+matters nowhere here (packaging, not copying).
+
+The manager speaks whichever data-control generation it was written
+for through `wl-paste`: `ext-data-control-v1` first,
+`zwlr-data-control-v1` v2 as fallback (verified in the built binary),
+so exposing both generations side by side is what lets the stock tools
+work -- an older client speaking only `wlr` still lands in the same
+history.
+
+Password-manager copies never land in history, by construction: such
+an offer carries the `x-kde-passwordManagerHint` MIME type, and
+`wl-paste --watch` sets `CLIPBOARD_STATE=sensitive` for exactly those
+offers (checked in `wl-clipboard`'s source at the pinned rev: presence
+of that one MIME, value unchecked), for which cliphist's `store`
+stores nothing. Managers that do not set the hint are *not* excluded
+-- nothing else is checked at this rev -- so treat the history as
+sensitive-adjacent anyway (below). Try it: `wl-copy --sensitive` (the
+hint with value `secret`, what a password manager offers) copies, and
+the history stays empty.
+
+Over the session lock, two halves: the history is wiped as the session
+locks (clear-on-lock: the wipe runs before the locker on the idle
+policy's `lock` and `before-sleep` lines, so pre-lock copies never
+sit on disk behind the lock screen), and nothing copied during the
+lock is recorded (refuse-while-locked: the store entry asks the
+compositor first and drops the copy when locked, failing open without
+IPC so a broken probe costs the lock guarantee, never the history).
+The picker needs no such machinery: while locked no `[binds]` action
+fires at all, so `Super+v` never runs (and a manual run is refused
+naming the lock). Without the idle policy there is no lock event to
+ride, so a standalone clipboard wipes manually (`cliphist wipe`).
+
+The primary selection is captured, not replaced: middle-click keeps
+pasting what it always did (the live primary stays
+compositor-native), while every primary copy joins the same history --
+the picker restores either selection to the regular clipboard, the one
+predictable target. A manager that re-owned the primary itself would
+fight the compositor's focus gate (only the focus holder may set it),
+so it does not.
+
+The history db lives at cliphist's default (`~/.cache/cliphist/db`,
+honoring `XDG_CACHE_HOME`) unless `dbPath` moves it: on disk, so
+history survives reboots. That is the privacy trade-off, stated whole:
+convenience (yesterday's copies one keypress away) against exposure
+(any same-uid process reads the db file -- the same boundary the
+protocol docs draw for the live selection). Secrets never land there
+by the mechanism above, the lock wipes it every lock, and `wipe`
+empties it any time; there is deliberately no encrypt-at-rest (a key
+on the same login protects nothing).
+
+Every value is an option, applied on rebuild/switch (the units restart
+into the new config; no re-login):
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `desktop.clipboard.enable` | bool | `true` with the profile | keep history (two watcher units), `wl-copy`/`wl-paste` on PATH, the picker bind |
+| `desktop.clipboard.maxItems` | int (at least 1) | `100` | history entries kept, oldest dropped first |
+| `desktop.clipboard.dbPath` | string or null | `null` (cliphist's default) | history db path: absolute, letters, digits and `._/+@-` only (no `~`, spaces, quotes or other shell characters); anything else fails evaluation |
+| `desktop.theme.targets.clipboard.enable` | bool | `true` | theme the picker from the look (menu background and text, selection and border); `false` keeps fuzzel's own style |
+| `desktop.clipboard.managerPackage`, `.wlClipboardPackage`, `.menuPackage` | package or null | lean cliphist, wl-clipboard, fuzzel (Linux-only: null off Linux) | point one at your own build; null with the switch on fails evaluation naming it |
+
+The picker follows the look: menu background and text, selection and
+border from its palette (the exact flags are pinned in
+`nix/tests.nix`), a value you set in fuzzel's own config winning per
+key as usual, `theme.targets.clipboard.enable = false` dropping the
+themed flags while the rest follows the look. Stylix and `look =
+"auto"` slot into the usual precedence when the theme-look child
+lands.
+
+Troubleshooting, by symptom:
+
+- *Close the app and the paste is empty.* That is the live selection,
+  not the history: it dies with its owner, always. Open the picker
+  (`Super+v`), Enter on the entry, paste. If the *picker* is empty
+  too, the watcher never stored it: `systemctl --user status
+  scoot-clipboard-store` (and `-primary-store`), then `cliphist
+  list` -- an empty list with a running watcher means the copy never
+  reached the compositor (no keyboard focus at copy time, or an X app
+  copying while unfocused, which the compositor refuses).
+- *`Super+v` opens nothing.* The slot renders that bind only with
+  `clipboard.enable` beside the keymap (both on with the profile);
+  either off leaves the combo unbound. Then check the menu:
+  `fuzzel --dmenu` from a terminal -- with an empty history it exits
+  at once (`--no-run-if-empty`), which is the picker staying quiet,
+  not an error.
+- *Escape clears my clipboard.* It does not: a cancelled pick exits
+  before `wl-copy` runs, precisely because an empty `wl-copy` would
+  clear the selection. If the selection changed anyway, something else
+  claimed it (another manager running beside this one -- only one
+  watcher per selection should run).
+- *A password is in the history.* The offering app did not set
+  `x-kde-passwordManagerHint` (only that MIME is checked): delete it
+  (`cliphist list | fuzzel --dmenu | cliphist delete`, or `delete-query
+  "part of it"`, or `wipe` for all of it) and tell the app to set the
+  hint. Verify the mechanism any time: `wl-copy --sensitive` must
+  leave `cliphist list` empty.
+- *Copies made while locked are in the history.* The store entry's
+  probe failed open (no IPC when it ran): `systemctl --user status
+  scoot-clipboard-store` and the compositor's socket (the probe needs
+  the session's `scoot`, not a files-only setup). The wipe still ran
+  at lock, so pre-lock entries are gone regardless.
+- *Two pickers / two histories.* Another manager (clipman, a desktop's
+  own) runs beside this one: only one should. Turn this one off
+  (`clipboard.enable = false`) or uninstall the other.
+
 ## Hardware keys and desktop actions
 
 A laptop whose brightness and volume keys do nothing is not
@@ -1560,10 +1727,11 @@ Troubleshooting, by symptom:
   until it lands, press per step.
 - *`Super+d` opens nothing.* The launcher slot is still a stub:
   that bind renders only with `launcher.enable`, and nothing
-  installs fuzzel until the launcher child lands. Same for
-  `Super+v` (clipboard) and `Print` (capture) -- while the
-  `Super+n` family works today: it runs mako's own commands (see
-  above) whenever `notifications.enable` is on beside the keymap.
+  installs a launcher until that child lands. Same for `Print`
+  (capture) -- while `Super+v` works today: it runs the clipboard
+  picker (see above) whenever `clipboard.enable` is on beside the
+  keymap, as does the `Super+n` family (mako's own commands)
+  whenever `notifications.enable` is.
 
 **Every later piece has its slot already**, off and inert: one boolean
 (plus a package override where a package is involved) per paved-path child,
@@ -1582,7 +1750,7 @@ every other option here:
 | `desktop.capture.enable` | bool + package | `false` | screenshots bound to keys | grim + slurp |
 | `desktop.auth.enable` / `desktop.secrets.enable` | bool + package | `false` | polkit agent + keyring | — |
 | `desktop.audio.enable` | bool + package | `false` | audio baseline and OSD (the keymap above is its keys half) | pipewire + wireplumber |
-| `desktop.clipboard.enable` | bool + package | `false` | clipboard persistence + history | cliphist + wl-clipboard |
+| `desktop.clipboard.enable` (+ `maxItems`, `dbPath`, three packages) | bool (+ int, path, packages) | `true` ([Clipboard](#clipboard): history kept, picker bound, wiped at lock) | clipboard persistence + history | lean cliphist + wl-clipboard + fuzzel |
 | `desktop.nightlight.enable` | bool + package | `false` | night light | wlsunset or gammastep |
 | `desktop.power.enable` | bool + package | `false` | power profiles, suspend, charge limit | power-profiles-daemon |
 | `desktop.theme.enable` | bool + package | `false` | GTK/Qt theme, dark mode (non-Stylix fallback) | — |

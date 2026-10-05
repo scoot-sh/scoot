@@ -104,6 +104,14 @@
 #   the bar's `push` module, a click toggling DND through `makoctl`,
 #   which needs the `push` feature built in); a null package, and a
 #   `features` list without `push` beside the feed, each fail eval;
+#   the clipboard slot (`desktop-clipboard` child) runs with the
+#   profile -- a lean cliphist watched by `wl-paste` (one watcher per
+#   selection, into one history), `wl-copy`/`wl-paste` on PATH, the
+#   history picker on the keymap's `Super+v` (cliphist through
+#   fuzzel's dmenu mode, themed by the look unless
+#   `theme.targets.clipboard.enable` opts out) and the history wiped
+#   on the idle policy's lock lines; a null tool, a zero `maxItems`
+#   and a non-absolute or shell-special `dbPath` each fail eval;
 #   every remaining future slot
 #   defaults off and inert; `enable` without scoot, a look without the
 #   profile, and an unknown look each fail eval;
@@ -503,6 +511,16 @@ let
   # no-GTK-stack content check). Building it needs no network; off
   # Linux it is never referenced.
   leanMakoClosure = if isLinux then pkgs.closureInfo { rootPaths = [ leanMako ]; } else null;
+  # The clipboard manager's package as the modules default it: the lean
+  # cliphist (no contrib pickers -- `nix/modules/clipboard-cliphist.nix`).
+  # The same expression the two `managerPackage` defaults import, so the
+  # pins below test what ships. Null off Linux, where `pkgs.cliphist`
+  # refuses evaluation when forced.
+  leanClip = if isLinux then import ./modules/clipboard-cliphist.nix { inherit pkgs; } else null;
+  # The lean manager's runtime closure, as store paths (for the
+  # no-picker-fat content check). Building it needs no network; off
+  # Linux it is never referenced.
+  leanClipClosure = if isLinux then pkgs.closureInfo { rootPaths = [ leanClip ]; } else null;
 
   # --- scootbg ([wallpaper]) evaluations under test ---
   # NixOS: on by default with `enable`, installing the package.
@@ -751,6 +769,14 @@ let
       ) (throw "no ${name} in home.packages") eval.config.home.packages;
     in
     "${found}/bin/${name}";
+  # The script derivation itself, for package-list pins (the picker is
+  # installed beside the binds, so every profile-packages list with
+  # the slot on names it).
+  slotScriptDrv =
+    eval: name:
+    lib.findFirst (
+      p: (p.name or "") == name
+    ) (throw "no ${name} in home.packages") eval.config.home.packages;
 
   # --- home-manager evaluations under test ---
   hmEmpty = evalHome { enable = true; };
@@ -1359,6 +1385,254 @@ let
   # The real bridge script under test (the feed unit runs it with
   # `--watch`; the behavior tests run it bare for one sync).
   feedBridge = lib.removeSuffix " --watch" hmNotifFeedTest.config.systemd.user.services.scoot-notify-sync.Service.ExecStart;
+
+  # --- clipboard (`programs.scoot.desktop.clipboard`) evaluations ---
+  #
+  # The profile with a look: the whole slot on (two watcher units, the
+  # tools on PATH), the picker themed by the look.
+  hmClip = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...without a look: the slot runs unthemed (fuzzel's own colors --
+  # pinned by content below).
+  hmClipNoLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...the slot off (the profile turns it on, like the idle policy;
+  # each switch back off disables just its half).
+  hmClipOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.clipboard.enable = false;
+  };
+  # ...standalone (no profile): the slot runs, unthemed.
+  hmClipStandalone = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+  };
+  # ...with history bounds (a longer tail in a moved db -- an
+  # absolute path without shell specials, the only shape that passes
+  # eval: the store, the picker and the lock wipe must all name the
+  # same file).
+  hmClipBounds = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.clipboard.maxItems = 250;
+    desktop.clipboard.dbPath = "/home/scoot-test/.cache/cliphist-test/db";
+  };
+  # ...opted out of picker theming (the look leaves fuzzel alone).
+  hmClipTargetOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.clipboard.enable = false;
+  };
+  # ...in radial-burst (whose bar palette has no `hover`: the match
+  # highlight falls back to the accent -- pinned by content below).
+  hmClipLookBurst = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "radial-burst";
+  };
+  # Refusals: the slot with each tool missing (pinned by message in
+  # `_clipPins`)...
+  hmClipNoManager = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.managerPackage = null;
+  };
+  hmClipNoTools = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.wlClipboardPackage = null;
+  };
+  hmClipNoMenu = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.menuPackage = null;
+  };
+  # ...a history of nothing, and a db path in each refused shape (a
+  # `~` path would expand on the lock line but stay literal in the
+  # scripts, a relative path resolves against three different CWDs, and
+  # a space, quote, `$`, backtick or `;` splits or breaks out of the
+  # lock line's quoting -- each pinned by message in `_clipPins`).
+  hmClipBadMax = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.maxItems = 0;
+  };
+  hmClipBadDbTilde = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "~/.cache/cliphist/db";
+  };
+  hmClipBadDbRelative = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = ".cache/cliphist/db";
+  };
+  hmClipBadDbSpace = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/my clips/db";
+  };
+  hmClipBadDbQuote = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/cliphist'; reboot #";
+  };
+  hmClipBadDbDollar = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/$USER/db";
+  };
+  hmClipBadDbBacktick = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/`id`/db";
+  };
+  hmClipBadDbSemi = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/cliphist;wipe/db";
+  };
+  hmClipBadDbGlob = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/*/db";
+  };
+  hmClipBadDbPipe = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/a|b/db";
+  };
+  hmClipBadDbEmpty = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "";
+  };
+
+  # A fake clipboard toolchain for the store-entry and picker behavior
+  # tests: stub `cliphist`, `wl-copy`, `fuzzel` and `scoot`, scripted at
+  # RUN time through files under `$SCOOT_CLIP_TEST_DIR`, so one HM
+  # evaluation per script covers every scenario. `cliphist` appends its
+  # argv plus stdin plus `CLIPBOARD_STATE` to `calls`; `list` prints
+  # `list`, `decode` prints `decode-bytes` (exit `decode-code`);
+  # `fuzzel` prints `pick` (exit `pick-code`); `wl-copy` copies stdin to
+  # `pasted`; `scoot msg version` exits `version-code`, `scoot msg
+  # action ...` exits `action-code`. The scripts under test resolve
+  # every tool by absolute path into this package (the evaluations
+  # below point each package option at the stubs, and the lock probe at
+  # the stub `scoot` through `package`).
+  clipStubs = pkgs.runCommand "clip-stubs" { } ''
+    mkdir -p $out/bin
+    cat > $out/bin/cliphist <<'EOF'
+    #!${pkgs.runtimeShell}
+    while :; do case "$1" in -db-path|-max-items) shift 2 ;; *) break ;; esac; done
+    case "$1" in
+      list) cat "$SCOOT_CLIP_TEST_DIR/list"; exit 0 ;;
+      decode)
+        printf 'decode-argv:%s\n' "$*" >> "$SCOOT_CLIP_TEST_DIR/calls"
+        cat "$SCOOT_CLIP_TEST_DIR/decode-bytes"; exit "$(cat "$SCOOT_CLIP_TEST_DIR/decode-code")" ;;
+      store)
+        printf 'store-argv:%s state:%s\n' "$*" "$CLIPBOARD_STATE" >> "$SCOOT_CLIP_TEST_DIR/calls"
+        cat >> "$SCOOT_CLIP_TEST_DIR/calls"; exit 0 ;;
+      wipe) printf 'wipe\n' >> "$SCOOT_CLIP_TEST_DIR/calls"; exit 0 ;;
+      *) echo "unexpected cliphist args: $*" >&2; exit 99 ;;
+    esac
+    EOF
+    cat > $out/bin/fuzzel <<'EOF'
+    #!${pkgs.runtimeShell}
+    cat > "$SCOOT_CLIP_TEST_DIR/menu-input"
+    cat "$SCOOT_CLIP_TEST_DIR/pick"; exit "$(cat "$SCOOT_CLIP_TEST_DIR/pick-code")"
+    EOF
+    cat > $out/bin/wl-copy <<'EOF'
+    #!${pkgs.runtimeShell}
+    cat > "$SCOOT_CLIP_TEST_DIR/pasted"
+    exit 0
+    EOF
+    cat > $out/bin/wl-paste <<'EOF'
+    #!${pkgs.runtimeShell}
+    echo "unexpected wl-paste call: $*" >&2; exit 99
+    EOF
+    cat > $out/bin/scoot <<'EOF'
+    #!${pkgs.runtimeShell}
+    case "$*" in
+      "msg version") exit "$(cat "$SCOOT_CLIP_TEST_DIR/version-code")" ;;
+      "msg action focus-window-id 18446744073709551615") exit "$(cat "$SCOOT_CLIP_TEST_DIR/action-code")" ;;
+      *) echo "unexpected scoot args: $*" >&2; exit 99 ;;
+    esac
+    EOF
+    chmod +x $out/bin/cliphist $out/bin/fuzzel $out/bin/wl-copy $out/bin/wl-paste $out/bin/scoot
+  '';
+  # The slot on, running the stubs: the store entry below is the real
+  # `scoot-clipboard-store-entry` from the module (extracted from the
+  # watcher unit's `ExecStart`, whose last word is the script), and the
+  # picker below is the real `scoot-clipboard-pick` from the keymap
+  # (installed beside the binds, found by derivation name like the
+  # capture scripts).
+  hmClipStoreTest = evalHome {
+    enable = true;
+    package = clipStubs;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.managerPackage = clipStubs;
+    desktop.clipboard.wlClipboardPackage = clipStubs;
+    desktop.clipboard.menuPackage = clipStubs;
+  };
+  hmClipPickTest = evalHome {
+    enable = true;
+    package = clipStubs;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.clipboard.enable = true;
+    desktop.clipboard.managerPackage = clipStubs;
+    desktop.clipboard.wlClipboardPackage = clipStubs;
+    desktop.clipboard.menuPackage = clipStubs;
+    desktop.launcher.enable = true;
+    desktop.notifications.enable = true;
+    desktop.capture.enable = true;
+  };
+  clipEntryOf =
+    eval: service:
+    lib.last (lib.splitString " " eval.config.systemd.user.services.${service}.Service.ExecStart);
+  clipStoreEntry = clipEntryOf hmClipStoreTest "scoot-clipboard-store";
+  clipPrimaryEntry = clipEntryOf hmClipStoreTest "scoot-clipboard-primary-store";
+  clipPicker = slotScriptBin hmClipPickTest "scoot-clipboard-pick";
+
+  # --- clipboard system evaluations ---
+  osClip = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  osClipOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.clipboard.enable = false;
+  };
+  osClipNoManager = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.clipboard.managerPackage = null;
+  };
+  osClipNoTools = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.clipboard.wlClipboardPackage = null;
+  };
+  osClipNoMenu = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.clipboard.menuPackage = null;
+  };
 
   # Refusals: the profile without scoot, and a look without the profile
   # (both pinned by message in `_desktopPins`)...
@@ -2505,6 +2779,20 @@ let
   notifSettingsConf = hmNotifSettings.config.xdg.configFile."mako/config".source;
   notifTargetOffConf = hmNotifTargetOff.config.xdg.configFile."mako/config".source;
   notifBarToml = hmDeskBarNotif.config.programs.scootbar.configFile;
+  # The clipboard slot's generated files: the swayidle config with the
+  # slot off (lock lines without the wipe), plus the store entry and
+  # the picker as the units and the keymap run them -- themed (the
+  # profile with music-desk), lookless, opt-out, rebound and relocated
+  # variants the content checks read.
+  idleClipOffConf = hmClipOff.config.xdg.configFile."swayidle/config".source;
+  idleClipBoundsConf = hmClipBounds.config.xdg.configFile."swayidle/config".source;
+  clipEntry = clipEntryOf hmClip "scoot-clipboard-store";
+  clipBoundsEntry = clipEntryOf hmClipBounds "scoot-clipboard-store";
+  clipPickerThemed = slotScriptBin hmClip "scoot-clipboard-pick";
+  clipBoundsPicker = slotScriptBin hmClipBounds "scoot-clipboard-pick";
+  clipPickerNoLook = slotScriptBin hmClipNoLook "scoot-clipboard-pick";
+  clipPickerTargetOff = slotScriptBin hmClipTargetOff "scoot-clipboard-pick";
+  clipPickerBurst = slotScriptBin hmClipLookBurst "scoot-clipboard-pick";
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
   #
@@ -2728,9 +3016,30 @@ let
       assert !hmDesk.config.programs.scoot.desktop.theme.enable;
       true
     )
+    # ...the clipboard slot on with the profile (the
+    # `desktop-clipboard` child): history kept, the tools named, the
+    # picker themed unless opted out (without forcing the half-built
+    # `theme` slot on)...
+    (
+      assert hmDesk.config.programs.scoot.desktop.clipboard.enable;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.clipboard.maxItems == 100;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.clipboard.dbPath == null;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.theme.targets.clipboard.enable;
+      true
+    )
     # ...and every remaining future slot off and empty (spot-check
     # across the tree; `notifications` left this list when the
-    # `desktop-notifications` child filled it).
+    # `desktop-notifications` child filled it, `clipboard` when the
+    # `desktop-clipboard` child did).
     (
       assert !hmDesk.config.programs.scoot.desktop.launcher.enable;
       true
@@ -2749,10 +3058,6 @@ let
     )
     (
       assert !hmDesk.config.programs.scoot.desktop.audio.enable;
-      true
-    )
-    (
-      assert !hmDesk.config.programs.scoot.desktop.clipboard.enable;
       true
     )
     (
@@ -2818,8 +3123,9 @@ let
       true
     )
     # ...which is what installs scootbg for it (beside the idle
-    # policy's five tools, the notification daemon and the keymap's
-    # three, all on with the profile).
+    # policy's five tools, the notification daemon, the clipboard
+    # slot's three, its picker script and the keymap's three, all on
+    # with the profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
       true
@@ -2838,6 +3144,10 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          leanClip
+          pkgs.wl-clipboard
+          pkgs.fuzzel
+          (slotScriptDrv hmDeskLookMusic "scoot-clipboard-pick")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -3223,13 +3533,13 @@ let
         hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
       true
     )
-    # ...exactly the nine tools installed (swayidle, dim, off,
-    # locker, inhibitor, mako -- no scoot package set here, so nothing
-    # else -- plus the keymap's brightness, volume and media tools;
-    # `brightnessctl` is one package serving two features, so it
-    # appears twice).
+    # ...exactly the thirteen tools installed (swayidle, dim, off,
+    # locker, inhibitor, mako, the clipboard slot's three, its picker
+    # script -- no scoot package set here, so nothing else -- plus the
+    # keymap's brightness, volume and media tools; `brightnessctl` is
+    # one package serving two features, so it appears twice).
     (
-      assert builtins.length hmIdle.config.home.packages == 9;
+      assert builtins.length hmIdle.config.home.packages == 13;
       true
     )
     (
@@ -3241,6 +3551,10 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          leanClip
+          pkgs.wl-clipboard
+          pkgs.fuzzel
+          (slotScriptDrv hmIdle "scoot-clipboard-pick")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -3264,8 +3578,10 @@ let
     )
     # The policy off: no units, no files beyond the profile's own --
     # but the notification daemon stays (its switch is its own, on
-    # with the profile) and the keymap stays too (the other child,
-    # still on with the profile), so mako and its three tools stay.
+    # with the profile), the clipboard slot stays too (its switch is
+    # its own as well) and the keymap stays too (the other child,
+    # still on with the profile), so mako, the clipboard watchers and
+    # their tools stay.
     (
       assert allAssertionsHold hmIdleOff.config;
       true
@@ -3274,6 +3590,8 @@ let
       assert
         builtins.attrNames hmIdleOff.config.systemd.user.services == [
           "mako"
+          "scoot-clipboard-primary-store"
+          "scoot-clipboard-store"
           "scoot-notify-sync"
         ];
       true
@@ -3294,6 +3612,10 @@ let
       assert
         sorted hmIdleOff.config.home.packages == sorted [
           leanMako
+          leanClip
+          pkgs.wl-clipboard
+          pkgs.fuzzel
+          (slotScriptDrv hmIdleOff "scoot-clipboard-pick")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -3301,8 +3623,9 @@ let
       true
     )
     # The lock off: the policy stays (dim and screens-off), the locker
-    # leaves (no config, no package, four policy tools plus mako and
-    # the keymap's three left).
+    # leaves (no config, no package, four policy tools plus mako, the
+    # clipboard slot's three, its picker script and the keymap's three
+    # left).
     (
       assert allAssertionsHold hmLockOff.config;
       true
@@ -3316,11 +3639,12 @@ let
       true
     )
     (
-      assert builtins.length hmLockOff.config.home.packages == 8;
+      assert builtins.length hmLockOff.config.home.packages == 12;
       true
     )
     # The inhibitor off: the policy without the audio hold (four
-    # policy tools plus mako and the keymap's three).
+    # policy tools plus mako, the clipboard slot's three, its picker
+    # script and the keymap's three).
     (
       assert allAssertionsHold hmInhibitOff.config;
       true
@@ -3330,7 +3654,7 @@ let
       true
     )
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 8;
+      assert builtins.length hmInhibitOff.config.home.packages == 12;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -3436,10 +3760,10 @@ let
       true
     )
 
-    # NixOS: the profile installs the five policy tools, mako and
-    # the keymap's three beside scoot and scootbg, locks docked lids,
-    # and names the locker's PAM service -- staying additive (no
-    # default session, ever)...
+    # NixOS: the profile installs the five policy tools, mako, the
+    # clipboard slot's three and the keymap's three beside scoot and
+    # scootbg, locks docked lids, and names the locker's PAM service --
+    # staying additive (no default session, ever)...
     (
       assert allAssertionsHold osIdle.config;
       true
@@ -3455,6 +3779,9 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          leanClip
+          pkgs.wl-clipboard
+          pkgs.fuzzel
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -3475,8 +3802,9 @@ let
     )
     # ...the policy off: the rule untouched (logind's own default
     # applies), no PAM -- but the daemon stays (its switch is its
-    # own) and the keymap stays too (the other child), so mako and
-    # its three tools stay...
+    # own), the clipboard slot stays too (its switch is its own as
+    # well) and the keymap stays too (the other child), so mako, the
+    # clipboard tools and the keymap's three stay...
     (
       assert allAssertionsHold osIdleOff.config;
       true
@@ -3495,6 +3823,9 @@ let
           fakePkg
           fakeBg
           leanMako
+          leanClip
+          pkgs.wl-clipboard
+          pkgs.fuzzel
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -3503,7 +3834,7 @@ let
     )
     # ...the lock off: no PAM and no locker, the lid rule still
     # locking (dim and screens-off still run from the home-manager
-    # side, the keymap's tools beside them)...
+    # side, the clipboard tools and the keymap's tools beside them)...
     (
       assert allAssertionsHold osLockOff.config;
       true
@@ -3522,6 +3853,9 @@ let
           pkgs.wlopm
           pkgs.sway-audio-idle-inhibit
           leanMako
+          leanClip
+          pkgs.wl-clipboard
+          pkgs.fuzzel
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -3887,6 +4221,443 @@ let
     )
   ];
 
+  # --- clipboard slot structural pins (fail `nix flake check` at eval) ---
+  # Linux only, like the daemon above: every evaluation here runs the
+  # slot, whose tools refuse evaluation on Darwin (the null degradation
+  # itself is pinned in `_darwinClipPins`).
+  _clipPins = lib.optionals isLinux [
+    # Home-manager: the whole slot on (two watcher units, three tools
+    # beside the profile's own)...
+    (
+      assert allAssertionsHold hmClip.config;
+      true
+    )
+    (
+      assert hmClip.config.programs.scoot.desktop.clipboard.enable;
+      true
+    )
+    (
+      assert hmClip.config.programs.scoot.desktop.clipboard.maxItems == 100;
+      true
+    )
+    (
+      assert hmClip.config.programs.scoot.desktop.clipboard.dbPath == null;
+      true
+    )
+    # ...running the lean cliphist (no contrib pickers), not stock
+    # nixpkgs cliphist: the default is the very derivation `leanClip`
+    # names (same `drvPath`, so a revert to `pkgs.cliphist` fails
+    # here), hence a different store path than stock...
+    (
+      assert hmClip.config.programs.scoot.desktop.clipboard.managerPackage.drvPath == leanClip.drvPath;
+      true
+    )
+    (
+      assert
+        hmClip.config.programs.scoot.desktop.clipboard.managerPackage.outPath != pkgs.cliphist.outPath;
+      true
+    )
+    # ...and the other two tools stock from nixpkgs...
+    (
+      assert
+        hmClip.config.programs.scoot.desktop.clipboard.wlClipboardPackage.drvPath
+        == pkgs.wl-clipboard.drvPath;
+      true
+    )
+    (
+      assert hmClip.config.programs.scoot.desktop.clipboard.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+      true
+    )
+    # ...and the NixOS side defaults to the same three derivations
+    # (either side alone names the same tools)...
+    (
+      assert osClip.config.programs.scoot.desktop.clipboard.managerPackage.drvPath == leanClip.drvPath;
+      true
+    )
+    (
+      assert
+        osClip.config.programs.scoot.desktop.clipboard.wlClipboardPackage.drvPath
+        == pkgs.wl-clipboard.drvPath;
+      true
+    )
+    (
+      assert osClip.config.programs.scoot.desktop.clipboard.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+      true
+    )
+    (
+      assert hmClip.config.systemd.user.services ? scoot-clipboard-store;
+      true
+    )
+    (
+      assert hmClip.config.systemd.user.services ? scoot-clipboard-primary-store;
+      true
+    )
+    # ...both watchers bound to the graphical session (which the
+    # launcher reaches past the display import), retried rather than
+    # conditioned...
+    (
+      assert
+        hmClip.config.systemd.user.services.scoot-clipboard-store.Install.WantedBy
+        == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        hmClip.config.systemd.user.services.scoot-clipboard-store.Unit.PartOf
+        == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        hmClip.config.systemd.user.services.scoot-clipboard-store.Unit.After
+        == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        hmClip.config.systemd.user.services.scoot-clipboard-primary-store.Install.WantedBy
+        == [ "graphical-session.target" ];
+      true
+    )
+    # ...watching through `wl-paste` (this package's binary, absolute so
+    # it works off PATH), the primary watcher with `--primary`, each
+    # running the store entry...
+    (
+      assert contains "${pkgs.wl-clipboard}/bin/wl-paste --watch"
+        hmClip.config.systemd.user.services.scoot-clipboard-store.Service.ExecStart;
+      true
+    )
+    (
+      assert contains "${pkgs.wl-clipboard}/bin/wl-paste --primary --watch"
+        hmClip.config.systemd.user.services.scoot-clipboard-primary-store.Service.ExecStart;
+      true
+    )
+    (
+      assert lib.hasSuffix "/bin/scoot-clipboard-store-entry" (
+        clipEntryOf hmClip "scoot-clipboard-store"
+      );
+      true
+    )
+    # ...gated on the display (a start before the session reaches the
+    # graphical target skips cleanly instead of spinning restarts)...
+    (
+      assert lib.hasInfix "WAYLAND_DISPLAY"
+        hmClip.config.systemd.user.services.scoot-clipboard-store.Service.ExecCondition;
+      true
+    )
+    # Without a look the slot runs unthemed (the units and the tools are
+    # still there; the picker keeps fuzzel's own colors -- pinned by
+    # content below).
+    (
+      assert allAssertionsHold hmClipNoLook.config;
+      true
+    )
+    (
+      assert hmClipNoLook.config.systemd.user.services ? scoot-clipboard-store;
+      true
+    )
+    (
+      assert hmClipNoLook.config.systemd.user.services ? scoot-clipboard-primary-store;
+      true
+    )
+    # The slot off: no units, no tools beyond the profile's own (the
+    # idle policy stays: this switch is its own).
+    (
+      assert allAssertionsHold hmClipOff.config;
+      true
+    )
+    (
+      assert !(hmClipOff.config.systemd.user.services ? scoot-clipboard-store);
+      true
+    )
+    (
+      assert !(hmClipOff.config.systemd.user.services ? scoot-clipboard-primary-store);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "cliphist") hmClipOff.config.home.packages);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "wl-clipboard") hmClipOff.config.home.packages);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "fuzzel") hmClipOff.config.home.packages);
+      true
+    )
+    (
+      assert hmClipOff.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    # Standalone (no profile): the slot runs, unthemed.
+    (
+      assert allAssertionsHold hmClipStandalone.config;
+      true
+    )
+    (
+      assert hmClipStandalone.config.systemd.user.services ? scoot-clipboard-store;
+      true
+    )
+    (
+      assert hmClipStandalone.config.systemd.user.services ? scoot-clipboard-primary-store;
+      true
+    )
+    # Rebounded, relocated and re-looked: every assertion still holds
+    # (the content checks below prove the values land in the entry
+    # script and the picker).
+    (
+      assert allAssertionsHold hmClipBounds.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmClipTargetOff.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmClipLookBurst.config;
+      true
+    )
+    # Refusals: the slot with each tool missing...
+    (
+      assert builtins.length (failing hmClipNoManager.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.managerPackage is null" (
+        builtins.head (failing hmClipNoManager.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmClipNoTools.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.wlClipboardPackage is null" (
+        builtins.head (failing hmClipNoTools.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmClipNoMenu.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.menuPackage is null" (builtins.head (failing hmClipNoMenu.config));
+      true
+    )
+    # ...a history of nothing, and a db path in each refused shape
+    # (`~`, relative, space, quote, `$`, backtick, `;`, empty -- each
+    # naming a file the three render sites would disagree on)...
+    (
+      assert builtins.length (failing hmClipBadMax.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "maxItems" (builtins.head (failing hmClipBadMax.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbTilde.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbTilde.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbRelative.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbRelative.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbSpace.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbSpace.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbQuote.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbQuote.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbDollar.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbDollar.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbBacktick.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbBacktick.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbSemi.config) == 1;
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbGlob.config) == 1;
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbPipe.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbSemi.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbEmpty.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbEmpty.config));
+      true
+    )
+
+    # NixOS: the profile installs the three tools beside scoot and
+    # scootbg -- staying additive (no default session, ever)...
+    (
+      assert allAssertionsHold osClip.config;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "cliphist") osClip.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "wl-clipboard") osClip.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "fuzzel") osClip.config.environment.systemPackages;
+      true
+    )
+    (
+      assert osClip.config.services.displayManager.defaultSession == null;
+      true
+    )
+    # ...the slot off: the profile's own packages only...
+    (
+      assert allAssertionsHold osClipOff.config;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "cliphist") osClipOff.config.environment.systemPackages);
+      true
+    )
+    (
+      assert
+        !(lib.any (p: (p.pname or "") == "wl-clipboard") osClipOff.config.environment.systemPackages);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "fuzzel") osClipOff.config.environment.systemPackages);
+      true
+    )
+    # ...and each refusal naming its tool on this side as well.
+    (
+      assert builtins.length (failing osClipNoManager.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.managerPackage is null" (
+        builtins.head (failing osClipNoManager.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing osClipNoTools.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.wlClipboardPackage is null" (
+        builtins.head (failing osClipNoTools.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing osClipNoMenu.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.menuPackage is null" (builtins.head (failing osClipNoMenu.config));
+      true
+    )
+  ];
+
+  # --- clipboard slot off Linux (fail `nix flake check` at eval) ---
+  #
+  # The tools above are Linux-only: off Linux each package defaults to
+  # null, which the slot's own assertions refuse loudly instead of
+  # installing nothing silently. Empty off Linux (the Linux check above
+  # is where the slot is pinned).
+  _darwinClipPins = lib.optionals (!isLinux) [
+    # Home-manager: every tool null, nothing installed for the slot...
+    (
+      assert hmClip.config.programs.scoot.desktop.clipboard.managerPackage == null;
+      true
+    )
+    (
+      assert hmClip.config.programs.scoot.desktop.clipboard.wlClipboardPackage == null;
+      true
+    )
+    (
+      assert hmClip.config.programs.scoot.desktop.clipboard.menuPackage == null;
+      true
+    )
+    # ...and the slot's own assertions refusing loudly, naming each
+    # switch (the idle policy's five plus the daemon's one plus the
+    # slot's three: the profile is on in this evaluation).
+    (
+      assert builtins.length (failing hmClip.config) == 9;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "clipboard.managerPackage is null" m) (failing hmClip.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "clipboard.wlClipboardPackage is null" m) (failing hmClip.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "clipboard.menuPackage is null" m) (failing hmClip.config);
+      true
+    )
+    # Standalone (no profile): just the slot's own three.
+    (
+      assert builtins.length (failing hmClipStandalone.config) == 3;
+      true
+    )
+    # NixOS: the same nulls (no tools installed for the slot)...
+    (
+      assert osClip.config.programs.scoot.desktop.clipboard.managerPackage == null;
+      true
+    )
+    # ...refused loudly there too.
+    (
+      assert builtins.length (failing osClip.config) == 9;
+      true
+    )
+  ];
+
   # --- notification daemon off Linux (fail `nix flake check` at eval) ---
   #
   # mako is Linux-only: off Linux its package defaults to null, which
@@ -3894,13 +4665,16 @@ let
   # nothing silently. Empty off Linux (the Linux check above is where
   # the daemon is pinned).
   _darwinNotifPins = lib.optionals (!isLinux) [
-    # Home-manager: null, and the daemon's assertion refusing loudly.
+    # Home-manager: null, and the daemon's assertion refusing loudly
+    # (the idle policy's five plus the daemon's one plus the clipboard
+    # slot's three: the profile is on in this evaluation, so its slot
+    # is open).
     (
       assert hmNotif.config.programs.scoot.desktop.notifications.package == null;
       true
     )
     (
-      assert builtins.length (failing hmNotif.config) == 6;
+      assert builtins.length (failing hmNotif.config) == 9;
       true
     )
     (
@@ -3913,9 +4687,10 @@ let
       true
     )
     # ...refused loudly there too (the idle policy's five plus the
-    # daemon's one).
+    # daemon's one plus the clipboard slot's three: the profile is on
+    # in this evaluation, so its slot is open).
     (
-      assert builtins.length (failing osNotif.config) == 6;
+      assert builtins.length (failing osNotif.config) == 9;
       true
     )
     (
@@ -3945,10 +4720,11 @@ let
       assert hmKeys.config.programs.scoot.desktop.keys.enable;
       true
     )
-    # ...rendering exactly the fifteen binds beside the profile (the
-    # twelve keymap-owned binds plus the three notification binds --
-    # the daemon is on with the profile, so its slot is open; every
-    # other future slot is off: its binds stay out)...
+    # ...rendering exactly the sixteen binds beside the profile (the
+    # twelve keymap-owned binds plus the three notification binds and
+    # the clipboard picker -- the daemon and the clipboard slot are on
+    # with the profile, so their slots are open; every other future
+    # slot is off: its binds stay out)...
     (
       assert
         hmKeys.config.programs.scoot.settings.binds == {
@@ -3968,6 +4744,7 @@ let
           "XF86AudioNext" = "spawn ${lib.getExe pkgs.playerctl} next";
           "XF86AudioPrev" = "spawn ${lib.getExe pkgs.playerctl} previous";
           "super+escape" = "spawn ${lib.getExe' pkgs.systemd "loginctl"} lock-session";
+          "super+v" = "spawn ${slotScriptBin hmKeys "scoot-clipboard-pick"}";
           "super+n" = "spawn ${leanMako}/bin/makoctl dismiss";
           "super+shift+n" = "spawn ${leanMako}/bin/makoctl mode -t do-not-disturb";
           "super+ctrl+n" = "spawn ${leanMako}/bin/makoctl restore";
@@ -3975,7 +4752,8 @@ let
       true
     )
     # ...beside the profile's and the policy's packages (scoot, the
-    # five idle tools, mako and the keymap's three)...
+    # five idle tools, mako, the clipboard slot's three, its picker
+    # script and the keymap's three)...
     (
       assert
         sorted hmKeys.config.home.packages == sorted [
@@ -3986,6 +4764,10 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          leanClip
+          pkgs.wl-clipboard
+          pkgs.fuzzel
+          (slotScriptDrv hmKeys "scoot-clipboard-pick")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -4066,8 +4848,9 @@ let
       assert lib.any (p: (p.name or "") == "scoot-capture-region") hmKeysSlots.config.home.packages;
       true
     )
-    # ...one bind removed: its combo unbound, the other thirteen
-    # still there (fifteen with the daemon on, minus two)...
+    # ...one bind removed: its combo unbound, the other fourteen
+    # still there (sixteen with the daemon and the clipboard slot on,
+    # minus two)...
     (
       assert allAssertionsHold hmKeysOmit.config;
       true
@@ -4081,7 +4864,7 @@ let
       true
     )
     (
-      assert builtins.length (builtins.attrNames hmKeysOmit.config.programs.scoot.settings.binds) == 13;
+      assert builtins.length (builtins.attrNames hmKeysOmit.config.programs.scoot.settings.binds) == 14;
       true
     )
     # ...one bind overridden: the user's own `[binds]` entry wins...
@@ -4092,7 +4875,7 @@ let
     )
     (
       assert
-        builtins.length (builtins.attrNames hmKeysOverride.config.programs.scoot.settings.binds) == 15;
+        builtins.length (builtins.attrNames hmKeysOverride.config.programs.scoot.settings.binds) == 16;
       true
     )
     # ...a slot bind overridden the same way (the slot's command
@@ -4112,8 +4895,10 @@ let
       true
     )
     # ...the whole keymap off: no `[binds]` from it (no other eval
-    # sets binds here, so the table is absent entirely), the idle
-    # policy's five and mako beside scoot only...
+    # sets binds here, so the table is absent entirely) and no slot
+    # scripts either (the keymap installs those beside the binds), so
+    # the idle policy's five, mako and the clipboard slot's three
+    # beside scoot only...
     (
       assert allAssertionsHold hmKeysOff.config;
       true
@@ -4132,11 +4917,15 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          leanClip
+          pkgs.wl-clipboard
+          pkgs.fuzzel
         ];
       true
     )
     # NixOS: the keymap off leaves the profile's other packages
-    # only (the five idle tools and mako beside scoot and scootbg).
+    # only (the five idle tools, mako and the clipboard slot's three
+    # beside scoot and scootbg).
     (
       assert allAssertionsHold osKeysOff.config;
       true
@@ -4152,6 +4941,9 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          leanClip
+          pkgs.wl-clipboard
+          pkgs.fuzzel
         ];
       true
     )
@@ -4196,14 +4988,19 @@ let
     # ...and the policy's own assertions refusing loudly, naming the
     # switch (one per null tool: the policy, the dim and screens-off
     # steps, the inhibitor, the locker -- plus the notification
-    # daemon's one, on with the profile; order-insensitive: the
-    # daemon's module contributes its refusal first).
+    # daemon's one and the clipboard slot's three, on with the
+    # profile; order-insensitive: the daemon's module contributes its
+    # refusal first).
     (
-      assert builtins.length (failing hmIdle.config) == 6;
+      assert builtins.length (failing hmIdle.config) == 9;
       true
     )
     (
       assert lib.any (m: lib.hasInfix "idle.package is null" m) (failing hmIdle.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "clipboard.managerPackage is null" m) (failing hmIdle.config);
       true
     )
     # NixOS: the same nulls (no tools installed for the policy)...
@@ -4219,10 +5016,11 @@ let
       assert osIdle.config.programs.scoot.desktop.idle.lock.command == "loginctl lock-session";
       true
     )
-    # ...refused loudly there too, while the docked-lid rule (plain
-    # values, no tools) still lands.
+    # ...refused loudly there too (the idle policy's five plus the
+    # daemon's one plus the clipboard slot's three), while the
+    # docked-lid rule (plain values, no tools) still lands.
     (
-      assert builtins.length (failing osIdle.config) == 6;
+      assert builtins.length (failing osIdle.config) == 9;
       true
     )
     (
@@ -4261,14 +5059,19 @@ let
     # ...the keymap still on with the profile, its binds in bare
     # form (the lock action bare too: logind is Linux-only -- and the
     # notification binds bare as well: mako is Linux-only, while its
-    # slot is open with the profile)...
+    # slot is open with the profile -- and the clipboard picker through
+    # its own script, whose tools are bare there too while the slot is
+    # open with the profile)...
     (
       assert hmKeys.config.programs.scoot.desktop.keys.enable;
       true
     )
+    # Sixteen binds: the fifteen above plus the picker, whose store
+    # path is unknowable in the pin (so it is matched by suffix, and
+    # the rest byte-equal without it).
     (
       assert
-        hmKeys.config.programs.scoot.settings.binds == {
+        builtins.removeAttrs hmKeys.config.programs.scoot.settings.binds [ "super+v" ] == {
           "XF86MonBrightnessUp" = "spawn brightnessctl -e set +5%";
           "XF86MonBrightnessDown" = "spawn brightnessctl -e set 5%-";
           "XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+";
@@ -4287,13 +5090,23 @@ let
         };
       true
     )
-    # ...and the keymap refuses nothing itself: the only failing
-    # assertions are the idle policy's five plus the daemon's one
-    # (its package is null off Linux -- pinned in
-    # `_darwinNotifPins`), so bare tool names stay valid config,
-    # just quiet at runtime.
     (
-      assert builtins.length (failing hmKeys.config) == 6;
+      assert lib.hasSuffix "/bin/scoot-clipboard-pick"
+        hmKeys.config.programs.scoot.settings.binds."super+v";
+      true
+    )
+    (
+      assert builtins.length (builtins.attrNames hmKeys.config.programs.scoot.settings.binds) == 16;
+      true
+    )
+    # ...and the keymap refuses nothing itself: the only failing
+    # assertions are the idle policy's five plus the daemon's one plus
+    # the clipboard slot's three (their packages are null off Linux --
+    # the daemon's pinned in `_darwinNotifPins`, the slot's in
+    # `_darwinClipPins`), so bare tool names stay valid config, just
+    # quiet at runtime.
+    (
+      assert builtins.length (failing hmKeys.config) == 9;
       true
     )
     (
@@ -4320,9 +5133,11 @@ assert lib.all (x: x) _greeterPins;
 assert lib.all (x: x) _desktopPins;
 assert lib.all (x: x) _idlePins;
 assert lib.all (x: x) _notifPins;
+assert lib.all (x: x) _clipPins;
 assert lib.all (x: x) _keysPins;
 assert lib.all (x: x) _darwinIdlePins;
 assert lib.all (x: x) _darwinNotifPins;
+assert lib.all (x: x) _darwinClipPins;
 assert lib.all (x: x) _darwinKeysPins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
@@ -4566,14 +5381,15 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     # 11. Idle policy: the generated swayidle config carries the M2's
     #     timeouts -- dim at 2 min with save/restore, lock at 4 min
     #     through loginctl, screens off at 5 min with the output wildcard
-    #     quoted intact -- plus the sleep lock and the lock event behind
-    #     `swaylock -f` with its config. (Fixed-string matches throughout:
-    #     the quoting is the assertion.)
+    #     quoted intact -- plus the sleep lock and the lock event, each
+    #     wiping the clipboard history before `swaylock -f` with its
+    #     config (the profile has the clipboard slot on). (Fixed-string
+    #     matches throughout: the quoting is the assertion.)
     grep -F "timeout 120 '${pkgs.brightnessctl}/bin/brightnessctl -s set 10%' resume '${pkgs.brightnessctl}/bin/brightnessctl -r'" ${idleConf}
     grep -F "timeout 240 '${pkgs.systemd}/bin/loginctl lock-session'" ${idleConf}
     grep -F "timeout 300 '${pkgs.wlopm}/bin/wlopm --off \"*\"' resume '${pkgs.wlopm}/bin/wlopm --on \"*\"'" ${idleConf}
-    grep -F "before-sleep '${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
-    grep -F "lock '${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
+    grep -F "before-sleep '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
+    grep -F "lock '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
     echo "ok: swayidle config carries the idle timeouts, the sleep lock and the lock event"
 
     # 11b. The lock off: dim and screens-off stay, and no line locks
@@ -4781,18 +5597,21 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     echo "ok: garbage monitor line is skipped"
 
     # 15. Keymap content: the rendered `[binds]` carries the
-    #     fifteen profile binds with absolute tool paths (the sigils --
+    #     sixteen profile binds with absolute tool paths (the sigils --
     #     `@...@`, `%`, `+` -- intact through TOML; the notification
-    #     binds through mako's absolute path, the daemon being on with
-    #     the profile), and with every slot on all nineteen (slot
-    #     scripts as store paths, the launcher bind by bare tool name).
+    #     binds through mako's absolute path, the daemon and the
+    #     clipboard slot being on with the profile -- and the picker
+    #     through its own script), and with every slot on all nineteen
+    #     (slot scripts as store paths, the launcher bind by bare tool
+    #     name).
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
-    assert len(got) == 15, got.keys()
+    assert len(got) == 16, got.keys()
     assert got["XF86AudioRaiseVolume"].startswith("spawn ") and got["XF86AudioRaiseVolume"].endswith(" set-volume @DEFAULT_AUDIO_SINK@ 5%+"), got["XF86AudioRaiseVolume"]
     assert got["XF86MonBrightnessUp"].endswith(" -e set +5%"), got["XF86MonBrightnessUp"]
     assert got["super+escape"].endswith(" lock-session"), got["super+escape"]
+    assert "/bin/scoot-clipboard-pick" in got["super+v"], got["super+v"]
     assert got["super+n"].startswith("spawn ") and got["super+n"].endswith("/bin/makoctl dismiss"), got["super+n"]
     assert got["super+shift+n"].endswith("/bin/makoctl mode -t do-not-disturb"), got["super+shift+n"]
     assert got["super+ctrl+n"].endswith("/bin/makoctl restore"), got["super+ctrl+n"]
@@ -4807,7 +5626,195 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     assert "/bin/scoot-capture-output" in got["print"], got["print"]
     assert "/bin/scoot-capture-region" in got["shift+print"], got["shift+print"]
     ' ${keysSlotsToml}
-    echo "ok: rendered [binds] carries the keymap (fifteen with the daemon, nineteen with slots)"
+    echo "ok: rendered [binds] carries the keymap (sixteen with the daemon and the slot, nineteen with slots)"
+
+    # 16. Clipboard slot content: the idle policy's lock lines carry
+    #     the wipe (absolute cliphist path, before the locker, on both
+    #     lock paths); with the slot off the lock lines stay wipe-free;
+    #     the picker is themed by the look (music-desk roles as fuzzel
+    #     CLI colors, opaque), unthemed without a look or opted out;
+    #     the store entry bounds the history and guards the lock; the
+    #     lean manager carries no picker fat.
+    grep -F "lock '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock" ${idleConf}
+    grep -F "before-sleep '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock" ${idleConf}
+    echo "ok: the lock lines wipe the history before the locker"
+    if grep -F "lock '" ${idleClipOffConf} | grep -q cliphist; then echo "wipe present with the slot off" >&2; exit 1; fi
+    grep -F "lock '${pkgs.swaylock}/bin/swaylock" ${idleClipOffConf}
+    echo "ok: with the slot off the lock lines stay wipe-free"
+
+    # 16b. The picker, music-desk: the look's roles as fuzzel colors
+    #      (opaque `rrggbbaa`), the dmenu contract flags, the lock
+    #      probe, and the byte-exact restore (temp file, never command
+    #      substitution -- which would strip trailing newlines).
+    grep -F -q -- "--background-color=FCFBFBff" ${clipPickerThemed}
+    grep -F -q -- "--text-color=1A2032ff" ${clipPickerThemed}
+    grep -F -q -- "--border-color=3D579Aff" ${clipPickerThemed}
+    grep -F -q -- "--selection-color=3D579Aff" ${clipPickerThemed}
+    grep -F -q -- "--selection-text-color=FCFBFBff" ${clipPickerThemed}
+    grep -F -q -- "--match-color=5D7AB0ff" ${clipPickerThemed}
+    grep -F -q -- "--prompt-color=1A2032ff" ${clipPickerThemed}
+    grep -F -q -- "--dmenu --prompt='clipboard: ' --no-run-if-empty --only-match" ${clipPickerThemed}
+    grep -F -q "clipboard_unlocked" ${clipPickerThemed}
+    grep -F -q "focus-window-id 18446744073709551615" ${clipPickerThemed}
+    grep -F -q 'wl-copy <"$tmp"' ${clipPickerThemed}
+    if grep -F -q 'wl-copy <<<' ${clipPickerThemed}; then echo "here-string restore (strips newlines)" >&2; exit 1; fi
+    echo "ok: the picker carries the look, the dmenu contract and the lock probe"
+
+    # 16c. Lookless (or opted out): no themed flag at all -- the probe
+    #      and the dmenu contract stay (behavior, not theme).
+    if grep -q -- "--background-color=" ${clipPickerNoLook}; then echo "themed flag present with no look" >&2; exit 1; fi
+    grep -F -q -- "--dmenu --prompt='clipboard: '" ${clipPickerNoLook}
+    grep -F -q "clipboard_unlocked" ${clipPickerNoLook}
+    if grep -q -- "--background-color=" ${clipPickerTargetOff}; then echo "themed flag present with theming off" >&2; exit 1; fi
+    grep -F -q "clipboard_unlocked" ${clipPickerTargetOff}
+    echo "ok: opting out (or no look) leaves fuzzel unthemed but guarded"
+
+    # 16c2. radial-burst: no `hover` in its bar palette, so the match
+    #       highlight falls back to the accent (blue `31a9e5`).
+    grep -F -q -- "--background-color=241721ff" ${clipPickerBurst}
+    grep -F -q -- "--match-color=31a9e5ff" ${clipPickerBurst}
+    echo "ok: a look without hover falls back to the accent"
+
+    # 16d. The store entry: the lock probe first (fail-open without
+    #      IPC, so a broken probe costs the lock guarantee rather than
+    #      the history), then the bounded store (oldest dropped first
+    #      past the cap).
+    grep -F -q "clipboard_unlocked" ${clipEntry}
+    grep -F -q "focus-window-id 18446744073709551615" ${clipEntry}
+    grep -F -q -- "-max-items 100 store" ${clipEntry}
+    if grep -q -- "-db-path" ${clipEntry}; then echo "db flag present with the default db" >&2; exit 1; fi
+    grep -F -q -- "-max-items 250 store" ${clipBoundsEntry}
+    grep -F -q -- "-db-path '/home/scoot-test/.cache/cliphist-test/db'" ${clipBoundsEntry}
+    echo "ok: the store entry guards the lock and bounds the history"
+
+    # 16d2. One moved db: the store entry, the picker (`list` and
+    #       `decode`) and the lock wipe all name the same absolute path
+    #       (the eval refusal above is what keeps a `~` or spaced path
+    #       from reaching these lines naming different files).
+    grep -F -q -- "-db-path '/home/scoot-test/.cache/cliphist-test/db' list" ${clipBoundsPicker}
+    grep -F -q -- "-db-path '/home/scoot-test/.cache/cliphist-test/db' decode" ${clipBoundsPicker}
+    grep -F "lock '${leanClip}/bin/cliphist -db-path '/home/scoot-test/.cache/cliphist-test/db' wipe; " ${idleClipBoundsConf}
+    echo "ok: the store, the picker and the wipe name the same db"
+
+    # 16e. The lean manager: its runtime closure names no picker fat
+    #      (the contrib scripts' weight the profile refuses to ship:
+    #      wofi and fuzzel, fzf and chafa, gtk+3 and its
+    #      tinysparql/cups/at-spi2 train, perl, resvg). Any of those
+    #      names reappearing -- a rebase silently restoring the
+    #      scripts, say -- fails loudly here.
+    if grep -E "wofi|fuzzel|fzf|chafa|gtk\+3|tinysparql|cups|at-spi2|avahi|resvg|perl-5" ${leanClipClosure}/store-paths; then echo "picker fat in lean cliphist closure" >&2; exit 1; fi
+    echo "ok: lean cliphist closure carries no picker fat"
+
+    # 17. The store entry and the picker, against stub tools (the REAL
+    #     scripts from the modules, scenario files below -- `list` is
+    #     what `cliphist list` prints, `pick`/`pick-code` how `fuzzel`
+    #     answers, `decode-bytes`/`decode-code` how `cliphist decode`
+    #     answers, `version-code`/`action-code` how the lock probe's
+    #     `scoot` answers, `calls` what `cliphist` was asked,
+    #     `menu-input` what the menu was offered, `pasted` what
+    #     `wl-copy` received). Every scenario asserts the exit status
+    #     and the exact resulting files.
+    export SCOOT_CLIP_TEST_DIR="$PWD/clip-test"
+    mkdir -p "$SCOOT_CLIP_TEST_DIR"
+    clip_setup() {
+      # $1 version-code, $2 action-code
+      printf '%s' "$1" > "$SCOOT_CLIP_TEST_DIR/version-code"
+      printf '%s' "$2" > "$SCOOT_CLIP_TEST_DIR/action-code"
+      : > "$SCOOT_CLIP_TEST_DIR/calls"
+      : > "$SCOOT_CLIP_TEST_DIR/menu-input"
+      rm -f "$SCOOT_CLIP_TEST_DIR/pasted"
+    }
+
+    # 17a. Unlocked copy: the entry stores (argv, sensitivity and bytes
+    #      all land in the call log), exit 0.
+    clip_setup 0 0
+    printf 'hello' > "$SCOOT_CLIP_TEST_DIR/stdin"
+    printf 'data' > "$SCOOT_CLIP_TEST_DIR/state"
+    CLIPBOARD_STATE="$(cat "$SCOOT_CLIP_TEST_DIR/state")" ${clipStoreEntry} < "$SCOOT_CLIP_TEST_DIR/stdin"
+    grep -q "store-argv:.*store state:data" "$SCOOT_CLIP_TEST_DIR/calls"
+    grep -q "^hello$" "$SCOOT_CLIP_TEST_DIR/calls"
+    echo "ok: unlocked copy stores with its bytes and sensitivity"
+
+    # 17b. Sensitive copy: the wrapper passes it through (cliphist
+    #      itself skips the store -- pinned by its upstream suite and
+    #      proved live with `wl-copy --sensitive`; the wrapper must not
+    #      second-guess the state).
+    clip_setup 0 0
+    printf 's3cret' > "$SCOOT_CLIP_TEST_DIR/stdin"
+    CLIPBOARD_STATE="sensitive" ${clipStoreEntry} < "$SCOOT_CLIP_TEST_DIR/stdin"
+    grep -q "store-argv:.*store state:sensitive" "$SCOOT_CLIP_TEST_DIR/calls"
+    echo "ok: sensitive copy reaches the store entry untouched"
+
+    # 17c. Locked copy: nothing recorded, exit 0 (refuse-while-locked).
+    clip_setup 0 1
+    printf 'while-locked' > "$SCOOT_CLIP_TEST_DIR/stdin"
+    CLIPBOARD_STATE="data" ${clipStoreEntry} < "$SCOOT_CLIP_TEST_DIR/stdin"
+    [ ! -s "$SCOOT_CLIP_TEST_DIR/calls" ] || { echo "locked copy recorded"; cat "$SCOOT_CLIP_TEST_DIR/calls"; exit 1; }
+    echo "ok: locked copy records nothing"
+
+    # 17d. No IPC (no compositor yet): fail open and store, exit 0 -- a
+    #      broken probe costs the lock guarantee, never the history.
+    clip_setup 1 1
+    printf 'no-ipc' > "$SCOOT_CLIP_TEST_DIR/stdin"
+    CLIPBOARD_STATE="data" ${clipStoreEntry} < "$SCOOT_CLIP_TEST_DIR/stdin"
+    grep -q "store-argv:.*store" "$SCOOT_CLIP_TEST_DIR/calls"
+    echo "ok: without IPC the entry stores (fail-open)"
+
+    # 17e. Both selections share the one entry (and so the one
+    #      history): the primary unit runs the same script.
+    [ "${clipPrimaryEntry}" = "${clipStoreEntry}" ]
+    echo "ok: clipboard and primary share one history"
+
+    # 17f. Pick the second of three: the menu is offered the whole
+    #      list, `wl-copy` receives the decoded bytes byte-exact
+    #      (trailing newlines intact -- the tempfile restore, not
+    #      command substitution), exit 0.
+    clip_setup 0 0
+    printf '1\tfirst\n2\tsecond\n3\tthird\n' > "$SCOOT_CLIP_TEST_DIR/list"
+    printf '2\tsecond' > "$SCOOT_CLIP_TEST_DIR/pick"
+    printf '0' > "$SCOOT_CLIP_TEST_DIR/pick-code"
+    printf 'SECOND-BYTES\nwith newline\n\n' > "$SCOOT_CLIP_TEST_DIR/decode-bytes"
+    printf '0' > "$SCOOT_CLIP_TEST_DIR/decode-code"
+    ${clipPicker}
+    cmp "$SCOOT_CLIP_TEST_DIR/decode-bytes" "$SCOOT_CLIP_TEST_DIR/pasted"
+    cmp "$SCOOT_CLIP_TEST_DIR/list" "$SCOOT_CLIP_TEST_DIR/menu-input"
+    echo "ok: picking restores the decoded bytes exactly"
+
+    # 17g. Cancelled pick (Escape): exit 0, the clipboard untouched (no
+    #      `wl-copy` call at all -- with empty stdin it would *clear*
+    #      the selection).
+    clip_setup 0 0
+    printf '1\tfirst\n' > "$SCOOT_CLIP_TEST_DIR/list"
+    : > "$SCOOT_CLIP_TEST_DIR/pick"
+    printf '1' > "$SCOOT_CLIP_TEST_DIR/pick-code"
+    ${clipPicker}
+    [ ! -e "$SCOOT_CLIP_TEST_DIR/pasted" ] || { echo "cancel cleared the clipboard"; exit 1; }
+    if grep -q "decode-argv" "$SCOOT_CLIP_TEST_DIR/calls"; then echo "cancel decoded"; exit 1; fi
+    echo "ok: a cancelled pick touches nothing"
+
+    # 17h. Wiped mid-pick (the lock landed between list and decode):
+    #      exit 0, the clipboard untouched.
+    clip_setup 0 0
+    printf '1\tfirst\n' > "$SCOOT_CLIP_TEST_DIR/list"
+    printf '1\tfirst' > "$SCOOT_CLIP_TEST_DIR/pick"
+    printf '0' > "$SCOOT_CLIP_TEST_DIR/pick-code"
+    : > "$SCOOT_CLIP_TEST_DIR/decode-bytes"
+    printf '1' > "$SCOOT_CLIP_TEST_DIR/decode-code"
+    ${clipPicker}
+    [ ! -e "$SCOOT_CLIP_TEST_DIR/pasted" ] || { echo "wiped pick pasted"; exit 1; }
+    echo "ok: a pick wiped mid-flight pastes nothing"
+
+    # 17i. Locked pick: refused naming the lock, exit 1, the clipboard
+    #      untouched (the compositor suppresses the bind already; this
+    #      covers a manual run).
+    clip_setup 0 1
+    printf '1\tfirst\n' > "$SCOOT_CLIP_TEST_DIR/list"
+    printf '1\tfirst' > "$SCOOT_CLIP_TEST_DIR/pick"
+    printf '0' > "$SCOOT_CLIP_TEST_DIR/pick-code"
+    if ${clipPicker} 2>"$SCOOT_CLIP_TEST_DIR/stderr"; then echo "locked pick succeeded" >&2; exit 1; fi
+    grep -q "locked" "$SCOOT_CLIP_TEST_DIR/stderr"
+    [ ! -e "$SCOOT_CLIP_TEST_DIR/pasted" ] || { echo "locked pick pasted"; exit 1; }
+    echo "ok: a locked pick is refused"
   ''}
 
   touch $out

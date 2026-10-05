@@ -480,10 +480,68 @@ in
       child = "desktop-audio-osd";
       tool = "pipewire plus wireplumber, with the bar's volume, brightness, media and microphone modules as the display half";
     };
-    # Clipboard persistence plus history and a picker bind.
-    clipboard = slot {
-      child = "desktop-clipboard";
-      tool = "`cliphist` plus `wl-clipboard`";
+    # Clipboard persistence plus history and a picker bind. Filled by
+    # the `desktop-clipboard` child: a lean cliphist (its contrib
+    # pickers dropped -- see `clipboard-cliphist.nix`) watched by
+    # `wl-paste`, `wl-copy`/`wl-paste` on PATH, and the history picker
+    # on the keymap's `Super+v` (cliphist through fuzzel's dmenu mode,
+    # themed by the look). Each `package` and the history bounds beside
+    # them are declared in the side modules (`clipboard-home.nix`
+    # installs and runs for the user, `nixos.nix` system-wide), which
+    # is also where their defaults live; everything here is plain
+    # values, so this file stays `lib`-only.
+    #
+    # On with the profile (still individually disable-able); without
+    # it, `enable` works standalone (unthemed: a look needs the
+    # profile, and the user units need the home-manager side, the way
+    # the themed picker does).
+    clipboard = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Keep the clipboard after its source closes: every copy lands
+          in cliphist's history (its package beside this), restorable
+          with the keymap's picker, with password-manager copies and
+          anything copied while locked kept out (see docs/nix.md).
+          `wl-copy`/`wl-paste` land on PATH beside it.
+        '';
+      };
+
+      # How many entries the history keeps (cliphist's `max-items`,
+      # oldest dropped first). 100 previews stay scannable in the
+      # picker and bound the cache db (each entry at most 5 MB,
+      # cliphist's own cap); raise it for a longer tail.
+      maxItems = lib.mkOption {
+        type = lib.types.int;
+        default = 100;
+        example = 250;
+        description = ''
+          History entries kept (oldest dropped first). At least 1.
+        '';
+      };
+
+      # Where the history db lives. Null keeps cliphist's default
+      # (`~/.cache/cliphist/db`, honoring `XDG_CACHE_HOME`): on disk,
+      # so history survives reboots -- with secrets never landing in
+      # it by construction (see docs/nix.md for the trade-off). Set it
+      # to move the db: an absolute path without shell specials (no
+      # `~`, spaces, quotes, `$`, backticks, `;` or backslashes -- the
+      # store entry, the picker and the idle policy's lock wipe all
+      # render it inside single quotes, so anything the shell would
+      # expand or split names a different file on one line than the
+      # others). Anything else fails evaluation.
+      dbPath = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "/home/you/.cache/cliphist/db";
+        description = ''
+          History db path (absolute; letters, digits and `._/+@-` only). Null keeps
+          cliphist's default. Anything but an absolute path free of
+          `~`, whitespace, quotes, `$`, backticks, `;` and backslashes
+          fails evaluation.
+        '';
+      };
     };
     # Night light over `wlr-gamma-control-v1`.
     nightlight = slot {
@@ -526,6 +584,15 @@ in
             and urgent leaves from its palette). Set to `false` to
             keep mako's own style (`notifications.settings` still
             applies).
+          '';
+        };
+        targets.clipboard.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Theme the history picker from the look (menu background
+            and text, selection and border from its palette). Set to
+            `false` to keep fuzzel's own style.
           '';
         };
       };
