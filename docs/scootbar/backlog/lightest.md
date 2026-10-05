@@ -862,6 +862,12 @@ row regresses by 4,736 B of `.text` (+0.28%, 5,064 B or +0.24% of
 loaded sections; the file does not grow), for the maintainer to waive
 or not. No other row regresses beyond what one run resolves.
 
+**Maintainer's ruling (2026-10-04, given in chat): the popup corners'
+binary-size row is waived.** It covers `.text` +4,736 B (+0.28%; +5,064 B of
+loaded sections) in the default build, and only that row. Nothing else is
+waived: the CPU per open+close row stays a one-run observation, not an
+accepted cost.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`
