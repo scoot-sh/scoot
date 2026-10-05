@@ -82,4 +82,4 @@ about a missing library, re-check the `apt` line above; if it says
 something about `--headless` on macOS, that is expected: on a Mac only the
 `scootctl` remote-control client builds.
 
-Next: [First session](./first-session.md) — log in, open a terminal, learn five keys.
+Next: [First session](./first-session.md) — run scoot, open a terminal, learn five keys.

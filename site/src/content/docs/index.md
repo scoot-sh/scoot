@@ -23,7 +23,7 @@ ones — the strip just grows, and you move along it.
 ## Start here
 
 - [Install](./install.md) — the flake, the binary cache, or one `nix run` to try it.
-- [First session](./first-session.md) — log in, open a terminal, learn five keys.
+- [First session](./first-session.md) — run scoot, open a terminal, learn five keys.
 - [Keybindings](./keybindings.md) — the full default map and how to rebind it.
 
 ## Why scoot
