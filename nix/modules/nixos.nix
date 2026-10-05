@@ -122,10 +122,164 @@ in
     # `desktop.nix` and docs/nix.md). Each side wires only what it owns;
     # this side owns the session entry, the system packages and the
     # greeter (aliased above). The compositor config itself
-    # (`[appearance]`, `[wallpaper]`, the `[xwayland]` knob) is the
-    # home-manager side's, and the bar is the bar module's (which reads
-    # this profile): this side renders no config file.
-    desktop = desktop.options;
+    # (`[appearance]`, `[wallpaper]`, the `[xwayland]` knob, the
+    # `[binds]` keymap) is the home-manager side's, and the bar is the
+    # bar module's (which reads this profile): this side renders no
+    # config file.
+    desktop = desktop.options // {
+      # The shared keymap's tool packages: the shapes are in
+      # `desktop.nix` (shared with the home-manager side) and the
+      # `[binds]` they run are that side's (`keys-home.nix`); this
+      # side installs the tools system-wide. Same packages as there,
+      # so either side alone names the same tools. Merged here (not
+      # declared separately below) because one module cannot declare
+      # the same option path twice. The tools are Linux-only: off
+      # Linux each defaults to null and nothing installs.
+      keys = desktop.options.keys // {
+        brightnessPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.brightnessctl or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.brightnessctl or null else null";
+          description = ''
+            The backlight tool to install system-wide for the
+            brightness binds. Null installs nothing. Linux-only:
+            null off Linux.
+          '';
+        };
+
+        volumePackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wireplumber or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.wireplumber or null else null";
+          description = ''
+            The audio tool to install system-wide for the volume
+            and mute binds (`wpctl`). Null installs nothing.
+            Linux-only: null off Linux.
+          '';
+        };
+
+        mediaPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.playerctl or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.playerctl or null else null";
+          description = ''
+            The MPRIS tool to install system-wide for the media
+            binds. Null installs nothing. Linux-only: null off
+            Linux.
+          '';
+        };
+      };
+      # The idle policy's tool packages: the shapes are in `desktop.nix`
+      # (shared with the home-manager side) and the user units that run
+      # them are that side's (`idle-home.nix`); this side installs the
+      # tools system-wide. Same packages as there, so either side alone
+      # names the same tools. Merged here (not declared separately
+      # below) because one module cannot declare the same option path
+      # twice. The tools are Linux-only: off Linux each defaults to
+      # null (their attributes exist on Darwin but refuse evaluation
+      # when forced), which the assertions below refuse loudly.
+      idle = desktop.options.idle // {
+        package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.swayidle or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.swayidle or null else null";
+          description = ''
+            The swayidle package to install system-wide for the idle
+            policy. Null installs nothing. Linux-only: null off Linux.
+          '';
+        };
+
+        dimPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.brightnessctl or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.brightnessctl or null else null";
+          description = ''
+            The backlight tool to install system-wide for the dim step.
+            Null installs nothing. Linux-only: null off Linux.
+          '';
+        };
+
+        offPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wlopm or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.wlopm or null else null";
+          description = ''
+            The output-power tool to install system-wide for the
+            screens-off step. Null installs nothing. Linux-only: null
+            off Linux.
+          '';
+        };
+
+        mediaInhibit = desktop.options.idle.mediaInhibit // {
+          package = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.sway-audio-idle-inhibit or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.sway-audio-idle-inhibit or null else null";
+            description = ''
+              The audio inhibitor to install system-wide. Null installs
+              nothing. Linux-only: null off Linux.
+            '';
+          };
+        };
+
+        lock = desktop.options.idle.lock // {
+          package = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.swaylock or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.swaylock or null else null";
+            description = ''
+              The locker package to install system-wide (must speak the
+              daemon's flags). Null installs nothing. Linux-only: null
+              off Linux.
+            '';
+          };
+
+          command = lib.mkOption {
+            type = lib.types.str;
+            default =
+              if pkgs.stdenv.hostPlatform.isLinux then
+                "${lib.getExe' pkgs.systemd "loginctl"} lock-session"
+              else
+                "loginctl lock-session";
+            defaultText = lib.literalExpression ''if pkgs.stdenv.hostPlatform.isLinux then "''${lib.getExe' pkgs.systemd "loginctl"} lock-session" else "loginctl lock-session"'';
+            example = "loginctl lock-session";
+            description = ''
+              The stable lock action: the same default and meaning as
+              the home-manager side's `idle.lock.command` (the idle
+              timeout, the lid and manual locks all share this path
+              through logind).
+            '';
+          };
+        };
+      };
+
+      # The notification daemon's package: the shape is in
+      # `desktop.nix` (shared with the home-manager side) and the user
+      # unit that runs it is that side's (`notifications-home.nix`);
+      # this side installs it system-wide. The same package as there,
+      # so either side alone names the same daemon. Merged here for
+      # the same one-declaration reason as above. Linux-only: off
+      # Linux it defaults to null, which the assertion below refuses
+      # loudly.
+      notifications = desktop.options.notifications // {
+        package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              (if pkgs ? mako then import ./notifications-mako.nix { inherit pkgs; } else null)
+            else
+              null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then leanMako else null";
+          description = ''
+            The mako package to install system-wide for the
+            notification daemon (a lean mako without the GTK stack,
+            the same default as the home-manager side -- see
+            `notifications-mako.nix`). Null installs nothing.
+            Linux-only: null off Linux.
+          '';
+        };
+      };
+    };
 
     # `pkgs.scoot` when the flake's overlay (`overlays.default`) is
     # applied, else null: nothing is guessed, since a `scoot` from anywhere
@@ -412,6 +566,189 @@ in
 
       programs.scoot.session.enable = lib.mkDefault true;
       programs.scoot.wallpaper.enable = lib.mkDefault true;
+
+      # The shared keymap on with the profile (each bind still
+      # individually removable, the whole map disable-able at plain
+      # priority): the tools below install, the `[binds]` come from
+      # the home-manager side.
+      programs.scoot.desktop.keys.enable = lib.mkDefault true;
+
+      # The idle policy on with the profile (each still individually
+      # disable-able at plain priority): the tools below install, the
+      # lid rule locks docked lids, and the user units come from the
+      # home-manager side.
+      programs.scoot.desktop.idle.enable = lib.mkDefault true;
+      programs.scoot.desktop.idle.lock.enable = lib.mkDefault true;
+      programs.scoot.desktop.idle.mediaInhibit.enable = lib.mkDefault true;
+
+      # The notification daemon on with the profile (still
+      # individually disable-able at plain priority): the package
+      # below installs, and the user unit comes from the
+      # home-manager side.
+      programs.scoot.desktop.notifications.enable = lib.mkDefault true;
+    })
+    # The notification daemon's system half: its package on PATH. The
+    # unit and the config are the home-manager side's
+    # (`notifications-home.nix`): without it the daemon sits ready for
+    # a hand-written setup, the way a `[wallpaper]` finds scootbg on
+    # PATH without the home-manager side.
+    (lib.mkIf cfg.desktop.notifications.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.notifications.package != null;
+          message = ''
+            programs.scoot.desktop.notifications.enable is set but
+            programs.scoot.desktop.notifications.package is null: set
+            it explicitly (apply the overlay, or point at a mako).
+          '';
+        }
+      ];
+
+      environment.systemPackages = lib.optional (
+        cfg.desktop.notifications.package != null
+      ) cfg.desktop.notifications.package;
+    })
+    # The idle policy's system half: its tools on PATH, the docked-lid
+    # rule, and the locker's PAM service. The timers and the locker
+    # config are the home-manager side's (`idle-home.nix`): without it
+    # the tools sit ready for a hand-written setup, the way a `[wallpaper]`
+    # finds scootbg on PATH without the home-manager side.
+    #
+    # The shared keymap's system half just below it: its tools on
+    # PATH (`keys-home.nix` owns the `[binds]`); the slot scripts
+    # beside those binds are per-user, so they stay on that side.
+    (lib.mkIf cfg.desktop.keys.enable {
+      environment.systemPackages =
+        lib.optional (cfg.desktop.keys.brightnessPackage != null) cfg.desktop.keys.brightnessPackage
+        ++ lib.optional (cfg.desktop.keys.volumePackage != null) cfg.desktop.keys.volumePackage
+        ++ lib.optional (cfg.desktop.keys.mediaPackage != null) cfg.desktop.keys.mediaPackage;
+    })
+    (lib.mkIf cfg.desktop.idle.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.idle.package != null;
+          message = ''
+            programs.scoot.desktop.idle.enable is set but
+            programs.scoot.desktop.idle.package is null: set it
+            explicitly (apply the overlay, or point at a swayidle).
+          '';
+        }
+        {
+          assertion = cfg.desktop.idle.dimPackage != null;
+          message = ''
+            programs.scoot.desktop.idle.enable is set but
+            programs.scoot.desktop.idle.dimPackage is null: set it
+            explicitly.
+          '';
+        }
+        {
+          assertion = cfg.desktop.idle.offPackage != null;
+          message = ''
+            programs.scoot.desktop.idle.enable is set but
+            programs.scoot.desktop.idle.offPackage is null: set it
+            explicitly.
+          '';
+        }
+      ];
+
+      environment.systemPackages =
+        lib.optional (cfg.desktop.idle.package != null) cfg.desktop.idle.package
+        ++ lib.optional (cfg.desktop.idle.dimPackage != null) cfg.desktop.idle.dimPackage
+        ++ lib.optional (cfg.desktop.idle.offPackage != null) cfg.desktop.idle.offPackage
+        ++ lib.optional (
+          cfg.desktop.idle.lock.enable && cfg.desktop.idle.lock.package != null
+        ) cfg.desktop.idle.lock.package
+        ++ lib.optional (
+          cfg.desktop.idle.mediaInhibit.enable && cfg.desktop.idle.mediaInhibit.package != null
+        ) cfg.desktop.idle.mediaInhibit.package;
+
+      # Lid closed on a docked or multi-output box: lock, don't suspend
+      # blindly. `HandleLidSwitchDocked` fires only when a dock is
+      # detected or more than one display is connected (external power
+      # alone does not count -- that is the separate
+      # `HandleLidSwitchExternalPower`, ignored by default), so an
+      # undocked laptop keeps the plain `HandleLidSwitch` behavior
+      # (suspend; the suspend policy itself is the `desktop-power`
+      # child's). The lock lands through logind's Lock, which the
+      # policy's `lock` event listens on. The canonical
+      # `settings.Login.*` path, not the renamed `lidSwitchDocked`
+      # alias. `mkDefault`, so an explicit value still wins.
+      services.logind.settings.Login.HandleLidSwitchDocked = lib.mkDefault "lock";
+    })
+    # The locker's PAM service (password auth for the locker): without
+    # it swaylock cannot validate, loud here instead of a locker that
+    # never unlocks. Kept in its own element (not under `idle.enable`):
+    # with `enable` off and `lock.enable` on, the refusal below must
+    # still fire rather than going quiet.
+    (lib.mkIf
+      (
+        cfg.desktop.idle.enable
+        && cfg.desktop.idle.lock.enable
+        && cfg.desktop.idle.lock.daemon == "swaylock"
+      )
+      {
+        security.pam.services.swaylock = { };
+      }
+    )
+    # Refusals that must fire whatever else is on (kept outside
+    # `idle.enable` so they still fire then).
+    (lib.mkIf cfg.desktop.idle.lock.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.idle.enable;
+          message = ''
+            programs.scoot.desktop.idle.lock.enable needs
+            programs.scoot.desktop.idle.enable: without the policy
+            nothing listens for logind's Lock, and the locker would
+            never start.
+          '';
+        }
+        {
+          assertion = cfg.desktop.idle.lock.package != null;
+          message = ''
+            programs.scoot.desktop.idle.lock.enable is set but
+            programs.scoot.desktop.idle.lock.package is null: set it
+            explicitly (apply the overlay, or point at a locker that
+            speaks the daemon's flags).
+          '';
+        }
+        {
+          # Loud at eval, like `session.command`'s: the action renders
+          # inside single quotes on the swayidle timeout line, so an
+          # explicitly empty or whitespace-only value would run a no-op
+          # (the session never locking while `lock.enable` says it
+          # does), and a single quote would break out of the quoting
+          # and corrupt the config line.
+          assertion =
+            builtins.match "^[[:space:]]*$" cfg.desktop.idle.lock.command == null
+            && builtins.match ".*'.*" cfg.desktop.idle.lock.command == null;
+          message = ''
+            programs.scoot.desktop.idle.lock.command is empty, blank
+            or contains a single quote: set the full lock action to run
+            (e.g. `loginctl lock-session`).
+          '';
+        }
+      ];
+    })
+    (lib.mkIf cfg.desktop.idle.mediaInhibit.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.idle.enable;
+          message = ''
+            programs.scoot.desktop.idle.mediaInhibit.enable needs
+            programs.scoot.desktop.idle.enable: an inhibitor with no
+            policy holds nothing off.
+          '';
+        }
+        {
+          assertion = cfg.desktop.idle.mediaInhibit.package != null;
+          message = ''
+            programs.scoot.desktop.idle.mediaInhibit.enable is set but
+            programs.scoot.desktop.idle.mediaInhibit.package is null:
+            set it explicitly.
+          '';
+        }
+      ];
     })
     # A look without the profile is a silent no-op; refuse it loudly
     # instead (kept outside `desktop.enable` so it still fires then).

@@ -34,12 +34,13 @@
 //! # What scoot checks, and what it leaves to scootbg
 //!
 //! scoot checks what it owns: the keys (`image`, `color`, `mode`, `fill`,
-//! `filter`, `output` and `command`; each output table the first five), that
-//! each value is a string (the output list a table of tables), and the
-//! paths it resolves. It does not check the values' meaning (a color's
-//! syntax, a mode's name): scootbg validates the section strictly and
-//! refuses it with exit status 2, which the reaper logs. One parser for
-//! those rules, not two that can disagree.
+//! `filter`, `sha256`, `output` and `command`; each output table the first
+//! six), that each value is a string (the output list a table of tables),
+//! and the paths it resolves: an `image` with a `scheme://` is a link and
+//! passes through untouched. It does not check the values' meaning (a
+//! color's syntax, a mode's name, a URL's scheme, a hash's shape): scootbg
+//! validates the section strictly and refuses it with exit status 2, which
+//! the reaper logs. One parser for those rules, not two that can disagree.
 //!
 //! # Only the keys the user wrote
 //!
@@ -81,7 +82,7 @@ const TOML_DATETIME: &str = "$__toml_private_datetime";
 /// (`MAX_ARG_STRLEN`, 128 KiB), where the spawn itself would fail.
 pub const MAX_JSON: usize = 64_512;
 
-/// The five keys a wallpaper table has, at the top level and per output.
+/// The six keys a wallpaper table has, at the top level and per output.
 /// Each is exactly as written (images before resolution), `None` when absent.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct Table {
@@ -95,6 +96,8 @@ pub struct Table {
     pub fill: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 /// `[wallpaper]` as the file has it. Never fails to deserialize: see the
@@ -132,7 +135,8 @@ pub struct Section {
     /// anything with a `/` is an absolute path by now.
     pub command: OsString,
     /// The section's wallpaper values as one JSON object, images resolved
-    /// to absolute paths, `command` left out.
+    /// to absolute paths (URLs passed through untouched), `command` left
+    /// out.
     pub json: String,
 }
 
@@ -183,6 +187,7 @@ impl WallpaperConfig {
             mode: top.mode.as_deref(),
             fill: top.fill.as_deref(),
             filter: top.filter.as_deref(),
+            sha256: top.sha256.as_deref(),
             output: output.as_ref(),
         })
         .map_err(|error| format!("the [wallpaper] section cannot be encoded as JSON: {error}"))?;
@@ -211,6 +216,8 @@ struct Json<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     filter: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    sha256: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     output: Option<&'a BTreeMap<String, Table>>,
 }
 
@@ -227,6 +234,13 @@ fn quoted(name: &str) -> String {
     } else {
         serde_json::to_string(name).unwrap_or_else(|_| format!("\"{name}\""))
     }
+}
+
+/// Whether `image` is a link (`scheme://...`), not a path: anything with a
+/// scheme passes through to scootbg untouched. Paths take precedence only
+/// where they cannot be links: an absolute path, or `~`.
+fn is_url(image: &str) -> bool {
+    !image.starts_with('/') && !image.starts_with('~') && image.contains("://")
 }
 
 /// Resolving the section's paths: `~` and `~/...` against `HOME`, a relative
@@ -262,6 +276,12 @@ impl<'a> Paths<'a> {
     fn image(&self, image: &str, at: &str) -> Result<String, String> {
         if image.is_empty() {
             return Err(format!("`{at}.image` is empty"));
+        }
+        // A link, not a file: scootbg downloads and caches it. Passed
+        // through untouched (no `~` expansion, no resolution against the
+        // config directory); scootbg validates the scheme and the hash.
+        if is_url(image) {
+            return Ok(image.to_owned());
         }
         let path = self.resolve(image, &format!("{at}.image"))?;
         path.into_os_string()
@@ -362,7 +382,7 @@ impl<'de> Visitor<'de> for SectionVisitor {
                         map.next_value_seed(Drain::TOP)?;
                         config.problems.push(format!(
                             "unknown key `wallpaper.{}` (expected image, color, mode, fill, \
-                             filter, output or command)",
+                             filter, sha256, output or command)",
                             quoted(&key)
                         ));
                     }
@@ -422,6 +442,7 @@ fn read_table_key<'de, A: MapAccess<'de>>(
         "mode" => &mut table.mode,
         "fill" => &mut table.fill,
         "filter" => &mut table.filter,
+        "sha256" => &mut table.sha256,
         _ => return Ok(false),
     };
     let value = map.next_value::<Text>()?;
@@ -632,8 +653,8 @@ impl<'de> Visitor<'de> for OutputSeed<'_> {
             if !read_table_key(&mut map, &key, self.at, &mut table, self.problems)? {
                 map.next_value_seed(Drain::TOP)?;
                 self.problems.push(format!(
-                    "unknown key `{}.{}` (an output's table takes image, color, mode, fill \
-                     and filter)",
+                    "unknown key `{}.{}` (an output's table takes image, color, mode, fill, \
+                     filter and sha256)",
                     self.at,
                     quoted(&key)
                 ));

@@ -12,6 +12,7 @@
 - [The wallpaper: scootbg](#the-wallpaper-scootbg)
 - [The status bar: scootbar](#the-status-bar-scootbar)
 - [The desktop profile](#the-desktop-profile)
+- [Hardware keys and desktop actions](#hardware-keys-and-desktop-actions)
 - [The overlay](#the-overlay)
 - [Migrating from a hand-rolled packaging](#migrating-from-a-hand-rolled-packaging)
 - [Settings failure modes](#settings-failure-modes)
@@ -724,7 +725,10 @@ scoot on is enough: nothing else to install, no path to write.
   `PATH`, for every user and for a session the greeter starts, with or
   without home-manager. Installing it changes nothing until a config asks
   for a wallpaper, which is why it is on by default while the login
-  entry stays opt-in.
+  entry stays opt-in. Direct-module use without the overlay (no package):
+  it defaults off, and only an explicit `wallpaper.enable = true` fails
+  at eval — set `wallpaper.package`, or leave it off with
+  `wallpaper.enable = false` where no wallpaper daemon is wanted at all.
 - **home-manager** installs it whenever `settings` has a `wallpaper`
   table, and renders `command` as the package's store path, so the
   section works whatever is on `PATH`. The path changes with every
@@ -764,6 +768,40 @@ programs.scoot = {
 Either half alone works too: home-manager alone installs scootbg into the
 user profile and points `command` at it; NixOS alone puts it on the
 system `PATH` for a hand-written config.
+
+**The wallpaper can be a link.** A look's `image` — and a `settings.wallpaper.image`
+you write — takes `{ url = "..."; hash = "sha256-..."; }` (the hash as
+SRI or hex) as well as a
+path: the profile fetches it once with `pkgs.fetchurl` (the hash verified
+by Nix, the file cached in the store), and scootbg sees an ordinary file.
+A set without string `url` and `hash` fails evaluation. A per-output
+`output.<name>.image` takes the same `{ url, hash }` set and is fetched
+the same way. A plain string URL
+works too, and then scootbg itself downloads and caches it at runtime:
+
+```nix
+# Fetched at build time (verified, in the store, no network at runtime):
+programs.scoot.settings.wallpaper = {
+  image = {
+    url = "https://example.com/hills.jpg";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  };
+  mode = "fill";
+};
+
+# Or fetched by scootbg at runtime (cached under ~/.cache/scootbg/):
+programs.scoot.settings.wallpaper = {
+  image = "https://example.com/hills.jpg";
+  sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+  mode = "fill";
+};
+```
+
+Runtime downloads need `curl` on `PATH`: the flake's `scootbg` package
+carries it (appended after your own `PATH`, so yours still wins); a
+`scootbg` from anywhere else needs `curl` installed.
+How the cache works, and what each failure says, is in
+[scootbg's command reference](scootbg/cli.md#a-wallpaper-from-a-link).
 
 No NixOS VM test boots a session to look at the wallpaper: CI proves the
 same path end to end without one (`scripts/smoke-test.sh` and
@@ -1091,6 +1129,14 @@ programs.scoot.settings.wallpaper = {
 };
 ```
 
+The look does not fetch it for you, deliberately: the illustration's
+license forbids passing it on standalone (naming wallpaper) and automated
+downloading is at best unclear under Pixabay's terms, so no URL is wired
+into the look — your machine downloads it from Pixabay, under Pixabay's
+license, when you choose to. To drop the illustration entirely, remove the
+`[wallpaper]` table: the flat espresso `background_color` is the look
+without it.
+
 **The greeter is passthrough, not profiled.**
 `programs.scoot.desktop.greeter` is `programs.scoot.greeter` under the
 profile's name (same options, same assertions, same forced session entry),
@@ -1106,28 +1152,447 @@ point `programs.scoot.package` at the XWayland build as in
 [XWayland](#xwayland-from-the-flake). With the default package the knob
 warns and the session runs Wayland-only.
 
+**Idle and lock** come on with the profile: a laptop that never dims,
+locks, or sleeps its panels is not daily-drivable, so this is a default,
+not a slot you wire yourself. After this many seconds without input:
+
+| At | What | Why this step |
+|---|---|---|
+| 2 min | the panel dims to 10% (`brightnessctl -s set 10%`, restored on activity) | the backlight is most of idle draw (measured on the M2: 4.55 W screens on, 1.52 W both off) |
+| 4 min | the session locks (`loginctl lock-session`, locker over `ext-session-lock-v1`) | after dim, **before** screens off, so the lock is already up when the panel goes dark and no unlocked frame is ever visible on wake |
+| 5 min | every output powers off (`wlopm --off '*'`, back on at the first input, locked or not) | the measured 3 W saving |
+| sleep | locks first, then sleeps (swayidle's `before-sleep`, waited on) | suspend must never land on an unlocked session |
+| docked lid close | locks, does not suspend | a closed lid on a multi-output box means the user walked away, not that the session should die |
+
+Audio holds the whole sequence off while anything plays
+(`sway-audio-idle-inhibit`: any sink or source running), so music or a
+call never dims the panel. Any input restarts every timer from zero
+(resume commands fire on activity, locked or not), so there is nothing
+to reset after unlock. There is one timeout set for AC and battery
+alike -- dim and screens-off already capture the measured saving, and
+dual sets would need a supervisor swayidle does not have; per-machine
+tuning is an override away, and power profiles arrive with
+`desktop.power`.
+
+The pieces, and which side owns them: the home-manager side runs swayidle
+as a user unit (`scoot-idle.service`, wanted by `graphical-session.target`
+-- which the launcher reaches past the display import, so the display is
+there when it starts) plus the inhibitor unit, writes the swayidle and
+swaylock config files, and installs the tools for the user; the NixOS side
+installs the tools system-wide, sets the docked-lid rule
+(`HandleLidSwitchDocked = "lock"`: docked or multi-output only -- an
+undocked laptop keeps suspending on lid close, whose policy is the
+`desktop-power` child's), and names the locker's PAM service (without it
+swaylock cannot validate a password). Either side alone degrades to what
+it can do: without home-manager the tools sit ready for a hand-written
+setup; without NixOS the units run but dim needs the backlight rights and
+unlock needs a PAM service (below).
+
+Every value is an option, applied on rebuild/switch (the units restart
+into the new config; no re-login):
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `desktop.idle.enable` | bool | `true` with the profile | run the policy (dim, screens off, sleep lock, audio hold) |
+| `desktop.idle.dimTimeout` | int (seconds) | `120` | inactivity before dimming; `0` disables the step |
+| `desktop.idle.dimLevel` | int (percent, 1-100) | `10` | brightness the dim step sets |
+| `desktop.idle.lockTimeout` | int (seconds) | `240` | inactivity before locking; `0` disables the step (sleep still locks) |
+| `desktop.idle.offTimeout` | int (seconds) | `300` | inactivity before outputs power off; `0` disables the step |
+| `desktop.idle.mediaInhibit.enable` | bool | `true` with the profile | hold idle while audio plays (needs PipeWire or PulseAudio running) |
+| `desktop.idle.lock.enable` | bool | `true` with the profile | lock through the locker below |
+| `desktop.idle.lock.command` | string | `<systemd>/bin/loginctl lock-session` (bare `loginctl lock-session` off Linux) | the stable lock action: what the timeout runs, and what the keymap's `Super+Escape` bind runs ([Hardware keys](#hardware-keys-and-desktop-actions)) -- lid-close and manual locks share this path through logind; empty, blank or quote-carrying values fail evaluation (the bind reads it too, so the check holds with the policy off) |
+| `desktop.idle.lock.daemon` | enum (`"swaylock"`) | `"swaylock"` | the locker behind the action (smallest working closure, plain-text config, CPU-only; a future scootlock widens this without renaming anything) |
+| `desktop.idle.lock.settings` | attrset of string | `{ }` | extra swaylock lines over the themed ones (a value here wins per key; `""` renders a bare flag, e.g. `{ show-failed-attempts = ""; }`) |
+| `desktop.theme.targets.lock.enable` | bool | `true` | theme the locker from the look (screen and indicator from its palette); `false` keeps swaylock's own style while the rest follows the look |
+| `desktop.idle.package` and friends | package or null | the tool named (Linux-only: null off Linux) | `package` (swayidle), `dimPackage` (brightnessctl), `offPackage` (wlopm), `mediaInhibit.package`, `lock.package`: point one at your own build; null with the switch on fails evaluation naming it |
+
+```nix
+programs.scoot.desktop = {
+  enable = true;
+  # Later to bed: lock at 10 min, screens off at 15.
+  idle.lockTimeout = 600;
+  idle.offTimeout = 900;
+  # No audio hold on this box:
+  # idle.mediaInhibit.enable = false;
+  # No idle policy at all (each of the three switches back off: the
+  # profile turns the set on, and the lock and inhibitor refuse to run
+  # without it):
+  # idle.enable = false;
+  # idle.lock.enable = false;
+  # idle.mediaInhibit.enable = false;
+};
+```
+
+The locker follows the look: screen and indicator from its palette
+(background, ring, accent, urgent -- the exact leaves are pinned in
+`nix/tests.nix`), a value in `lock.settings` winning per key today, and
+`theme.targets.lock.enable = false` dropping the themed block while the
+rest follows the look. Stylix and `look = "auto"` slot into the usual
+precedence (user > Stylix > look, per key) when the theme-look child
+lands. Locked, it looks like this (the music-desk palette: paper
+screen, no windows, the indicator hidden until you type -- captured
+from a real session through scoot's own IPC screenshot path):
+
+![The scoot lock screen in the music-desk look: a plain paper screen](assets/idle-lock-screen.png)
+
+Troubleshooting, by symptom:
+
+- *Screens never dim or power off.* Check the unit is running:
+  `systemctl --user status scoot-idle` -- and that it started with the
+  display: units wanted by `graphical-session.target` need the launcher
+  (a hand-started session must reach that target with `WAYLAND_DISPLAY`
+  imported, or the unit retries until the burst limit). The generated
+  config is at `~/.config/swayidle/config`: read it, the timeouts are
+  literal. Dim specifically needs the seat: logind grants the *active*
+  login backlight access, so dim works in the seat session and logs
+  EPERM anywhere else (over ssh, from a timer with no session) -- the
+  step then does nothing. If dim fails inside your own seat session,
+  the device node stays root-owned outside logind's reach; that is a
+  machine quirk to note, not a config error.
+- *The locker appears but no password works.* Unlock needs PAM: the
+  NixOS side names `security.pam.services.swaylock` itself, but a
+  home-manager-only setup needs it set wherever PAM is configured.
+  Check Caps Lock second -- the indicator shows its state while you
+  type (`swaylock` names it, the profile keeps that default).
+- *The timeout passes and the session never locks.* The locker is
+  probably exiting immediately: run `swaylock -f -C
+  ~/.config/swaylock/config` by hand -- if it drops straight back to
+  the prompt, its error names the cause (a broken PAM setup on a
+  home-manager-only box, or a bad `lock.package`, are the usual ones).
+  Until the locker stays up, every lock signal spawns a locker that
+  dies and the screen stays up.
+- *`loginctl lock-session` does nothing visible.* Something must
+  listen for logind's Lock: that is the policy's `lock` event, so this
+  means `scoot-idle` is not running (above) or `lock.enable` is off.
+- *Music dims the panel.* The hold needs the inhibitor unit *and* an
+  audio server: `systemctl --user status scoot-audio-inhibit` plus
+  something actually playing through PipeWire (a paused player holds
+  nothing). Without a server the unit backs off and stays stopped --
+  that is the `desktop-audio-osd` child's half to wire, not an error.
+- *Closing the docked lid suspends.* Something beat the profile's
+  `HandleLidSwitchDocked = "lock"`: your own logind setting wins over
+  it (plain priority beats the profile's default), and the
+  `desktop-power` child will own suspend policy when it lands.
+
+Without the flake, the same policy is a hand-written swayidle setup --
+see [Idle: locking and screen
+power](configuration.md#idle-locking-and-screen-power), which keeps the
+manual recipe.
+
+**Notifications** come on with the profile: a desktop with no
+notification daemon drops password prompts, calendar pings and
+low-battery warnings on the floor. The daemon is mako (lightest
+well-maintained layer-shell daemon -- see why below), owning
+`org.freedesktop.Notifications` on the session bus as a user unit
+(`mako.service`, wanted by `graphical-session.target` -- which the
+launcher reaches past the display import, so the display is there when
+it starts), with its popups on the **`overlay`** layer:
+
+```nix
+programs.scoot.desktop = {
+  enable = true;
+  # A popup at the bottom-right, at most three visible:
+  # notifications.settings = { anchor = "bottom-right"; max-visible = "3"; };
+  # No daemon at all on this box (each switch below is its own):
+  # notifications.enable = false;
+};
+```
+
+The one setting that matters most is already set: `layer=overlay`.
+mako's own default is `top`, which the compositor hides under a
+fullscreen window ([Fullscreen](protocols.md#fullscreen)) -- so a
+fullscreen game would swallow every popup. `overlay` stays above it
+(the frame then composites instead of scanning out directly; nothing
+changes on screen, at the cost of one compositing pass). A critical
+popup over a fullscreen window looks like this (blue ring for normal,
+urgent ring for critical -- captured from a real session through
+scoot's own IPC screenshot path):
+
+![A critical notification over a fullscreen terminal: the popup draws above it](assets/notifications-fullscreen.png)
+
+Overriding `layer` back to `top` re-hides popups under fullscreen.
+
+Icons come from the pixbuf loaders the lean daemon wraps
+explicitly (see why mako, below): a png and an svg from absolute
+image paths draw as expected -- captured live from the profile's own
+build through the same IPC screenshot path:
+
+![A notification with an svg icon: the image draws beside the text](assets/notifications-icon.png)
+
+DND state and the unread count reach the bar through its `push`
+module, and a click toggles DND -- the half the future `scootnotify`
+keeps unchanged (the daemon name is the only visible change when it
+replaces mako). The module is defined, not placed: show it with one
+line in your bar config:
+
+```toml
+right = ["notifications", "clock"]
+```
+
+What it shows: the count while any are up (`urgent` when one is
+critical), `DND` (muted) while held, an envelope alone otherwise (so a
+quiet desktop keeps a clickable bell, not a hole -- the glyph is in
+DejaVu Sans, the bar's own default font; set
+`settings.push.notifications.icon` to your own). The feed is a
+small watcher, not a poll: it syncs once at start, then re-syncs on
+mako's bus signals (arrivals, dismissals, timeouts and mode changes
+emit `PropertiesChanged`; a daemon restart emits none, so the feed
+also watches the bus name itself -- a restart re-syncs, and a daemon
+going away clears the bar instead of leaving the stale state up), so
+overriding any mako key in `settings` never breaks it. A push the bar
+refuses is one line naming why: a module that is not placed yet (the
+one-liner above) says the module is missing, instead of blaming a bar
+that is running. Do-not-disturb itself is mako's mode (`[mode=do-not-disturb]
+invisible=1`, toggled by `makoctl mode -t do-not-disturb` -- the same
+command the bar's click runs, by absolute path). Held popups wait in
+the daemon; the bar reads `DND 2` (muted) while two are held:
+
+![The bar with do-not-disturb on and two notifications held (cropped to the bar from the same IPC shot, doubled for legibility)](assets/notifications-dnd.png)
+
+Over the session lock, nothing of a notification's content ever shows:
+while locked the compositor draws nothing but the lock client's own
+surfaces -- windows and layer surfaces on every layer, `overlay`
+included, are not gathered into the frame at all
+([Screen locking](protocols.md#screen-locking-ext-session-lock-v1)).
+mako itself knows nothing of the lock: popups that arrive while locked
+wait in its visible list (no timeout by default) and appear on unlock;
+dismissed ones sit in its history buffer (`max-history`, default 5).
+A notification arriving mid-lock draws nothing -- the frame stays the
+lock screen alone (same IPC screenshot path, password prompt never
+disturbed). The shot below is intentionally blank: it is byte-identical
+to the frame just before the notification arrived, which is the whole
+proof -- no popup content reaches the locked frame, and mako holds the
+popup queued until unlock:
+
+![The session lock with a notification queued: only the lock screen shows -- the blank frame is the proof](assets/notifications-locked.png)
+Sandboxed apps fall out for free: the portal's Notification interface
+forwards to whoever owns `org.freedesktop.Notifications`, which is
+this daemon (once a portal backend runs -- that wiring is the
+`desktop-capture` child's).
+
+Every value is an option, applied on rebuild/switch (the units restart
+into the new config; no re-login):
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `desktop.notifications.enable` | bool | `true` with the profile | run mako plus the bar feed |
+| `desktop.notifications.daemon` | enum (`"mako"`) | `"mako"` | the daemon behind `enable` (a future scootnotify widens this without renaming anything) |
+| `desktop.notifications.settings` | attrset of string | `{ }` | extra mako lines over the generated ones (a value here wins per key, rendered verbatim, e.g. `{ anchor = "bottom-right"; }`) |
+| `desktop.theme.targets.notifications.enable` | bool | `true` | theme mako from the look (popup background and text, ring, urgent critical ring); `false` keeps mako's own style while the rest follows the look |
+| `desktop.notifications.package` | package or null | lean mako without the GTK stack (Linux-only: null off Linux) | point at your own mako build; null with the switch on fails evaluation naming it |
+
+Why mako, measured at the pinned rev (`8ce4ef6`, `aarch64-linux`,
+`nix path-info --closure-size`, marginals against swaylock's closure
+-- the idle/lock child the profile already ships): stock mako
+357.4 MiB (210.4 MiB marginal), dunst 174.7 MiB (43.8 MiB; 172.9/41.9
+MiB built Wayland-only), SwayNotificationCenter 1.3 GiB. Stock mako's
+weight is almost all one hook: `wrapGAppsHook3` in its
+`nativeBuildInputs` references gtk+3 directly (324.8 MiB cumulative
+with its tinysparql/cups/at-spi2/avahi train) -- not
+`systemdMinimal`, which is already in every NixOS closure, and not
+pango/cairo, which the lock child already pays for. The profile does
+not ship stock mako: `nix/modules/notifications-mako.nix` drops the
+hook and wraps only what the daemon uses (the pixbuf icon loaders
+through an explicit loaders cache, an icon theme dir, `PATH` for its
+helpers -- the same wrapping dunst's own package does), for a
+183.4 MiB closure, 53.3 MiB marginal, and zero references to the GTK
+stack (pinned in `nix/tests.nix`: the closure check fails if any of
+those names reappears). The true backend distinction is not the
+closure (X client libraries ride along in both daemons through
+cairo/pango) but that mako has no X11 backend at all and cannot run
+on X11, where dunst compiles both (`withX11`/`withWayland` in its
+package). dunst draws on pure Wayland too -- re-tested with no
+config and with a minimal `layer = overlay` config, it owned the bus
+name and drew on the second output while reporting the notification
+displayed (the earlier "drew nothing" was captured on the wrong
+output). The pick stays mako for the feed contract: mode-based DND
+is exactly the bar-toggle contract above, and `makoctl list -j`
+gives the feed per-notification urgency for the `urgent` class --
+dunst's counts (`dunstctl count`) carry no urgency without parsing
+its history JSON. SwayNotificationCenter is a GTK control center
+indifferent to the slot. Upstream is active (1.11.0, MIT, same
+license as scoot).
+
+Troubleshooting, by symptom:
+
+- *No popups at all.* Check the unit is running:
+  `systemctl --user status mako` -- and that D-Bus knows it:
+  `busctl --user list | grep -F Notifications` should name mako's
+  owner. A `Notify` with the daemon down activates the unit through
+  mako's own activation file; if activation skip-logs, the display was
+  not imported yet (the unit's start condition) and the next `Notify`
+  retries.
+- *Popups vanish under fullscreen.* Something set `layer` back to
+  `top`: read `~/.config/mako/config` (the generated file), the first
+  content line is the layer. A `layer` in `settings` wins over the
+  default -- remove it.
+- *The bar shows nothing.* The module needs placing (the one line
+  above), the bar needs rebuilding with the `push` feature (the
+  default build has it; a `features` list without it fails evaluation
+  naming it), and the feed needs running:
+  `systemctl --user status scoot-notify-sync`.
+- *DND is stuck on.* `makoctl mode` lists the modes; an empty line
+  besides `default` means off. Toggle it back:
+  `makoctl mode -r do-not-disturb`.
+- *A popup stayed up for hours.* That is mako's default (no timeout):
+  dismiss it (`makoctl dismiss -a` clears them all into history) or
+  set one: `notifications.settings.default-timeout = "10000";`
+  (milliseconds).
+- *Two daemons fight over popups.* Another notifier (dunst, swaync,
+  a desktop's own) owns the bus name instead: only one can. Turn this
+  one off (`notifications.enable = false`) or uninstall the other.
+
+## Hardware keys and desktop actions
+
+A laptop whose brightness and volume keys do nothing is not
+daily-drivable, so the profile ships one keymap for them and for the
+desktop actions the other children add -- and it is on with the
+profile. The compositor's own built-in defaults stay window management
+only (see [Default keybindings](configuration.md#default-keybindings)):
+hardware binds spawn tools scoot does not ship, so they belong to the
+profile that installs those tools, not to every scoot session.
+
+| Press | Does | Needs (beside the profile) |
+|---|---|---|
+| `XF86MonBrightnessUp` / `Down` | panel `+5%` / `-5%` (`-e`, so low steps stay usable) | brightnessctl (installed) |
+| `XF86AudioRaiseVolume` / `LowerVolume` | default sink `+5%` / `-5%` | PipeWire running |
+| `XF86AudioMute` | default sink mute toggle | PipeWire running |
+| `XF86AudioMicMute` | default source mute toggle | PipeWire running |
+| `XF86AudioPlay` / `Pause` / `Stop` / `Next` / `Prev` | `playerctl play-pause` / `pause` / `stop` / `next` / `previous` | a player speaking MPRIS |
+| `Super+Escape` | lock (`idle.lock.command`, through logind) | the locker |
+| `Super+d` | launcher | `launcher.enable` (fuzzel) |
+| `Super+v` | clipboard picker | `clipboard.enable` (cliphist through fuzzel) |
+| `Super+n` | dismiss visible notifications | `notifications.enable` (mako) |
+| `Super+Shift+n` | do-not-disturb toggle | `notifications.enable` (mako) |
+| `Super+Ctrl+n` | show hidden notifications | `notifications.enable` (mako) |
+| `Print` | screenshot every output into `~/Pictures` | `capture.enable` (grim) |
+| `Shift+Print` | screenshot a picked region into `~/Pictures` | `capture.enable` (grim plus slurp) |
+
+The do-not-disturb bind and the bar's notification toggle agree by
+construction: both run mako's `mode -t do-not-disturb` from
+`notifications.package` by absolute path (pinned in `nix/tests.nix`),
+so the key and a bar click never diverge -- overriding the package
+moves both. The other two notification binds run mako's `dismiss`
+and `restore` the same way, and only while `notifications.enable`
+is on beside the keymap.
+
+On an Apple keyboard these are the Fn row: `F1`/`F2` brightness,
+`F7`/`F8`/`F9` previous/play/next, `F10` mute, `F11`/`F12` volume
+down/up. There is deliberately no on-screen display yet: volume and
+brightness step silently until the `desktop-audio-osd` child wires
+one (the bar's volume, brightness, media and microphone modules are
+the display half).
+
+Reserved but unbound (their child binds them; nothing else may take
+the combo): `XF86KbdBrightnessUp`/`Down` (no stable device name --
+the reference machine exposes no keyboard-backlight device, and
+`brightnessctl` without `-d` would drive the panel instead),
+`Super+Shift+s` (window capture, for the capture child),
+`Super+Shift+p` (power menu, for the power child).
+
+Why these combos and not the alternatives: `Super+d` is the launcher
+in niri and fuzzel's own documentation, and `Super+Space` -- the
+other candidate -- already moves focus between floating windows and
+the strip, so taking it would rename a shipped default out from
+under existing users. `Super+v` is the clipboard convention
+everywhere else. `Super+Escape` is free (the compositor binds no
+`Escape` combo), sits beside the quit combo without sharing a
+modifier-slip path with it, and matches the `idle.lock.command`
+action the idle child already declared for exactly this bind. Every
+hardware keysym and every `Super` combo above was checked against
+[Default keybindings](configuration.md#default-keybindings): no
+overlap with any built-in, including `Super+Shift+e` (quit),
+`Super+Shift+Space` (float) and the `Super+Shift+1..9` workspace
+moves.
+
+Every value is an option, applied on rebuild/switch plus a session
+reload (`scootctl reload`) or re-login:
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `desktop.keys.enable` | bool | `true` with the profile | render the keymap into `[binds]` |
+| `desktop.keys.binds.<name>.enable` | bool | `true` | bind that key (`brightnessUp`, `brightnessDown`, `volumeUp`, `volumeDown`, `volumeMute`, `micMute`, `mediaPlay`, `mediaPause`, `mediaStop`, `mediaNext`, `mediaPrev`, `lock`, `launcher`, `clipboard`, `notifDismiss`, `notifDnd`, `notifHistory`, `captureOutput`, `captureRegion`); `false` leaves its combo unbound |
+| `desktop.keys.brightnessPackage` | package or null | brightnessctl (Linux-only: null off Linux) | the backlight tool the brightness binds run |
+| `desktop.keys.volumePackage` | package or null | wireplumber (Linux-only: null off Linux) | the audio tool the volume and mute binds run (`wpctl`) |
+| `desktop.keys.mediaPackage` | package or null | playerctl (Linux-only: null off Linux) | the MPRIS tool the media binds run |
+
+Each bind renders as a `mkDefault` a value you set in
+`settings.binds` wins over -- so one bind is overridden and one
+removed like this (both shapes are evaluated in `nix/tests.nix`,
+which pins every default bind beside them):
+
+```nix
+programs.scoot.desktop.keys.binds.volumeUp.enable = false;
+programs.scoot.settings.binds."XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 3%+";
+```
+
+Off Linux the tools default to null and the binds render with bare
+tool names for the Linux box the config deploys to, installing
+nothing. A bind whose tool is missing fails quietly -- scoot logs a
+warning and carries on, input never wedges -- so a partial setup
+(stub slots, no PipeWire, no player) degrades to dead keys, never to
+a broken session.
+
+Troubleshooting, by symptom:
+
+- *A Fn key does nothing.* First check the tool, not the bind:
+  `brightnessctl get`, `wpctl get-volume @DEFAULT_AUDIO_SINK@`,
+  `playerctl status` -- a missing tool (or no PipeWire, no player)
+  is the usual cause, and the bind is correctly quiet about it.
+  Then check the bind reached the file: the rendered binds are
+  `[binds]` in `~/.config/scoot/config.toml` (re-login or
+  `scootctl reload` after a rebuild). Then check scoot saw the key:
+  `scoot msg key XF86AudioRaiseVolume` should do what the key
+  does -- if it does, the compositor never received the keystroke
+  (wrong keyboard map on the seat, or a host compositor eating the
+  key under `--nested`).
+- *Volume or brightness keys die at the lock screen.* Known
+  limitation, not a config error: while locked, no `[binds]` action
+  fires except VT switching (the bypass a `spawn` bind from behind
+  the lock would be), so the hardware keys go to the locker as
+  ordinary keystrokes. An explicit per-bind allowlist is filed as a
+  compositor follow-up; until it lands, step before you lock.
+- *Holding volume up steps once.* Also a known compositor gap:
+  Smithay absorbs a repeat press of an already-held key before the
+  bind filter (deliberately, against double-firing shortcuts), and
+  scoot runs no repeat timer of its own -- so a held key fires its
+  bind once. Repeat support is filed as a compositor follow-up;
+  until it lands, press per step.
+- *`Super+d` opens nothing.* The launcher slot is still a stub:
+  that bind renders only with `launcher.enable`, and nothing
+  installs fuzzel until the launcher child lands. Same for
+  `Super+v` (clipboard) and `Print` (capture) -- while the
+  `Super+n` family works today: it runs mako's own commands (see
+  above) whenever `notifications.enable` is on beside the keymap.
+
 **Every later piece has its slot already**, off and inert: one boolean
 (plus a package override where a package is involved) per paved-path child,
 so those children fill bodies without renaming options. Enabling one today
-is accepted and does nothing yet:
+is accepted and does nothing yet -- except where the keymap above says
+otherwise (a slot the keymap gates a bind on: enabling it beside the
+keymap binds that key). Changes apply on rebuild/switch, like
+every other option here:
 
-| Slot | Child | Default tool |
-|---|---|---|
-| `desktop.idle.enable` / `desktop.idle.lock.enable` | idle policy + locker | swayidle; swaylock/waylock/gtklock/hyprlock |
-| `desktop.notifications.enable` | notifications (mako now, scootnotify later) | mako |
-| `desktop.launcher.enable` | launcher | fuzzel (the default binds still name wofi until that child reconciles them) |
-| `desktop.capture.enable` | screenshots bound to keys | grim + slurp |
-| `desktop.auth.enable` / `desktop.secrets.enable` | polkit agent + keyring | — |
-| `desktop.audio.enable` | audio, brightness and media keys + OSD | pipewire + wireplumber |
-| `desktop.clipboard.enable` | clipboard persistence + history | cliphist + wl-clipboard |
-| `desktop.nightlight.enable` | night light | wlsunset or gammastep |
-| `desktop.power.enable` | power profiles, suspend, charge limit | power-profiles-daemon |
-| `desktop.theme.enable` | GTK/Qt theme, dark mode (non-Stylix fallback) | — |
-| `desktop.apps.terminal.enable` / `desktop.apps.fileManager.enable` | terminal + (optional) file manager | foot; — |
-| `desktop.keys.enable` | the shared keymap every other child registers into | — |
-| `desktop.displays.enable` | output policy | — |
-| `desktop.inputMethod.enable` | input-method wiring | — |
-| `desktop.automount.enable` | removable-media automount (no child filed yet) | udiskie |
+| Slot | Type | Default | Child | Default tool |
+|---|---|---|---|---|
+| `desktop.idle.enable` / `desktop.idle.lock.enable` (+ timeouts, `lock.command`, `lock.settings`) | bool (+ timeout ints, action string, package per tool) | `true` ([Idle and lock](#idle-and-lock): dim 2 min / 10%, lock 4 min, off 5 min) | idle policy + locker | swayidle + swaylock |
+| `desktop.keys.enable` (+ per-bind `binds.<name>.enable`, tool packages) | bool (+ 19 bools, 3 packages) | `true` ([Hardware keys](#hardware-keys-and-desktop-actions): brightness, volume, media, lock; slot binds with their slots) | the shared keymap every other child registers into | brightnessctl + wireplumber + playerctl |
+| `desktop.notifications.enable` (+ `daemon`, `settings`) | bool (+ enum, lines, package) | `true` ([Notifications](#notifications): mako unit, overlay layer, bar feed) | notifications (mako now, scootnotify later) | mako |
+| `desktop.launcher.enable` | bool + package | `false` | launcher | fuzzel (the default binds still name wofi until that child reconciles them) |
+| `desktop.capture.enable` | bool + package | `false` | screenshots bound to keys | grim + slurp |
+| `desktop.auth.enable` / `desktop.secrets.enable` | bool + package | `false` | polkit agent + keyring | — |
+| `desktop.audio.enable` | bool + package | `false` | audio baseline and OSD (the keymap above is its keys half) | pipewire + wireplumber |
+| `desktop.clipboard.enable` | bool + package | `false` | clipboard persistence + history | cliphist + wl-clipboard |
+| `desktop.nightlight.enable` | bool + package | `false` | night light | wlsunset or gammastep |
+| `desktop.power.enable` | bool + package | `false` | power profiles, suspend, charge limit | power-profiles-daemon |
+| `desktop.theme.enable` | bool + package | `false` | GTK/Qt theme, dark mode (non-Stylix fallback) | — |
+| `desktop.apps.terminal.enable` / `desktop.apps.fileManager.enable` | bool + package | `false` | terminal + (optional) file manager | foot; — |
+| `desktop.displays.enable` | bool | `false` | output policy | — |
+| `desktop.inputMethod.enable` | bool | `false` | input-method wiring | — |
+| `desktop.automount.enable` | bool + package | `false` | removable-media automount (no child filed yet) | udiskie |
+
+Every slot that installs something also takes `<slot>.package` (a package
+or null, default null): null installs nothing.
 
 Portal backend packages (`xdg-desktop-portal`, `-wlr`, `-gtk`) have no slot
 yet: the profile owns the portal *config* half today, and the capture child

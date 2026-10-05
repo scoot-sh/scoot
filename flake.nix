@@ -471,6 +471,21 @@
               passthru.cargoBuildFeatures = [ ];
               # Same strip backstop and no other inputs as the package above.
               stripAllList = [ "bin" ];
+              # `curl` on `PATH` for runtime downloads: `fetch.rs` spawns
+              # `curl` by name, so a session `PATH` without it (a minimal
+              # NixOS, a container) would fail every URL download loudly
+              # (`FetchError::Spawn`). The wrapper appends nixpkgs' curl to
+              # `PATH` -- appends, so a `curl` already on the session's
+              # `PATH` still wins, and a `scootbg` from anywhere else keeps
+              # its plain `PATH` lookup. `makeBinaryWrapper`, not the shell
+              # `makeWrapper`, like the Xwayland wrapper below: `scootbg`
+              # stays an ELF binary. No new linkage either way -- `curl`
+              # is spawned, never linked.
+              nativeBuildInputs = [ pkgs.makeBinaryWrapper ];
+              postFixup = ''
+                wrapProgram $out/bin/scootbg \
+                  --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.curl ]}
+              '';
               meta = {
                 description = scootbgDescription;
                 homepage = "https://github.com/scoot-sh/scoot";
@@ -917,7 +932,8 @@
             # cover what a flake consumer imports, not just the pure modules;
             # and aarch64-darwin's package set, evaluated (never built) to
             # prove a macOS home-manager config with a `[wallpaper]` table
-            # evaluates.
+            # evaluates (the Linux-only idle tools stay null there, refused
+            # loudly if the policy is enabled).
             flake = {
               inherit (self) overlays packages;
               homeModule = self.homeModules.scoot;

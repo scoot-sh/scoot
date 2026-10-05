@@ -219,10 +219,36 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
                 }
             }
             Err(error) => {
+                // One download, one line: a fetch served every target, so
+                // it is said once here, not once per output below. Nothing
+                // still wants it (superseded while it downloaded): silence,
+                // as for any superseded job.
+                if let JobError::Fetch(fetch) = &error {
+                    let mut names: Vec<String> = Vec::new();
+                    for target in &job.targets {
+                        if let Some(entry) = outputs.get_mut(target.output) {
+                            if wants(choices, entry, &image) {
+                                names.push(entry.output.label().to_string());
+                            }
+                        }
+                    }
+                    if !names.is_empty() {
+                        warn(format_args!(
+                            "scootbg: cannot show {} on {}: {fetch}; showing the compositor's \
+                             own background there",
+                            describe(&image),
+                            names.join(", "),
+                        ));
+                    }
+                }
                 for target in &job.targets {
                     if let Some(entry) = outputs.get_mut(target.output) {
                         if wants(choices, entry, &image) {
-                            failed(entry, &image, &error);
+                            if error.is_fetch() {
+                                entry.output.draw_failed(error.to_string());
+                            } else {
+                                failed(entry, &image, &error);
+                            }
                         }
                     }
                 }
@@ -233,7 +259,10 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
     let rendered = match done {
         Ok(rendered) => rendered,
         Err(error) => {
-            let message = format!("cannot show {:?}: {error}; nothing was changed", image.path);
+            let message = format!(
+                "cannot show {}: {error}; nothing was changed",
+                describe(&image)
+            );
             ready.push((trial.conn, Ready::Refused(message)));
             return;
         }
@@ -337,4 +366,12 @@ fn failed(entry: &mut Entry<Objects>, image: &Image, error: &JobError) {
         entry.output.label()
     ));
     entry.output.draw_failed(error.to_string());
+}
+
+/// The image, for a message: the URL for a download, else the path.
+fn describe(image: &Image) -> String {
+    match &image.fetch {
+        Some(fetch) => format!("{:?}", fetch.url),
+        None => format!("{:?}", image.path),
+    }
 }

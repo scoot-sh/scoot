@@ -1,4 +1,4 @@
-use super::hex;
+use super::{digest, hex, hex_bytes};
 
 /// FIPS 180-4's examples, and NIST's million-`a` vector.
 #[test]
@@ -18,6 +18,16 @@ fn the_standard_vectors() {
     assert_eq!(
         hex(&vec![b'a'; 1_000_000]),
         "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
+    );
+}
+
+/// `hex_bytes` shows a digest as `hex` shows its data: no double hashing.
+#[test]
+fn hex_bytes_shows_a_digest() {
+    assert_eq!(hex_bytes(&digest(b"test")), hex(b"test"));
+    assert_eq!(
+        hex_bytes(&digest(b"test")),
+        "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
     );
 }
 

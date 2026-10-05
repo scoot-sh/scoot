@@ -38,7 +38,8 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   v1 by the user (2026-09-28); every other row is a win or a tie
   ([the comparison](#against-the-other-daemons)).
 - **Colors and images.** A solid color or a PNG, JPEG or WebP image per
-  output, changed live with one command and restored at login. That is
+  output — a file, or an `http(s)` URL downloaded once and cached —
+  changed live with one command and restored at login. That is
   v1.
 - **Seamless in scoot.** A `[wallpaper]` section in scoot's `config.toml`
   is all it takes: scoot starts scootbg and re-applies the section on
@@ -213,7 +214,7 @@ shows it again when it starts.
 chose it over TOML, 180 KB lighter):
 
 ```text
-scootbg-state 1
+scootbg-state 2
 profile default
 fingerprint 9c1e…
 all color #1e1e2e
@@ -224,11 +225,16 @@ output HDMI-A-1 clear
 - The first line is `scootbg-state` and the version. Each other line is a
   key and its fields, single spaces between. `all` and `output NAME` take
   `clear`, `color #rrggbb`, or `image PATH MODE FILL FILTER` (a path is
-  absolute). `profile` names the profile the file belongs to (the file
-  name is the authority; a mismatch is a warning). `fingerprint` is the
+  absolute), with a download's link and pin after that: `image PATH MODE
+  FILL FILTER url URL`, and `image PATH MODE FILL FILTER url URL sha256
+  HEX` when the hash is pinned (PATH is the cache file; the URL is what
+  re-downloads it). `profile` names the profile the file belongs to (the
+  file name is the authority; a mismatch is a warning). `fingerprint` is the
   fingerprint of the last `[wallpaper]` section `apply-config` applied for
   this profile ([below](#apply-config-scoots-wallpaper-section)): only
   `apply-config` writes it, and every other save keeps it as read.
+  Version 2 adds the `url` (and `sha256`) trailer; a version-1 file still
+  reads (its `image` lines have no trailer).
 - **Fields are escaped:** `%`, space and every ASCII control byte (newline
   and tab included) are written `%XX`, so any path or connector name
   round-trips exactly, `#` and spaces included. Other bytes, UTF-8
@@ -248,10 +254,11 @@ output HDMI-A-1 clear
   two cases **saving is off until the daemon restarts**: stderr says at
   start-up which file to remove or fix, then restart, to save again, and
   `query` reports `"saving":false` meanwhile.
-- **Compatibility:** within version 1 a key may be added only if a reader
+- **Compatibility:** within version 2 a key may be added only if a reader
   that skips it (with its warning) loses nothing it needs; anything else
   bumps the version. `profile` and `fingerprint` are read and kept from
-  version 1 on, so the scoot integration writes them with no bump.
+  version 1 on, so the scoot integration writes them with no bump; version
+  1 files read under version 2 with no bump either.
 
 ## `apply-config`: scoot's `[wallpaper]` section
 
@@ -272,10 +279,11 @@ scootbg apply-config --profile scoot '{}'     # the section is gone: clear
 
 | Key | |
 |---|---|
-| `image` | an absolute path (scoot resolves `~/` and relative paths against its config file first) |
+| `image` | an absolute path (scoot resolves `~/` and relative paths against its config file first), or an `http(s)` URL (downloaded once and cached: [cli.md](cli.md#a-wallpaper-from-a-link)) |
 | `color` | `#rrggbb`; `image` or `color`, never both; neither is nothing (the compositor's own background) |
 | `mode`, `fill`, `filter` | with an `image` only, as `scootbg set` takes them: `fill`/`fit`/`stretch`/`center`/`tile`, `#rrggbb`, `lanczos3`/`catmull-rom`/`bilinear`/`nearest` |
-| `output` | per-output tables by connector name, each with the five keys above and nothing else; an empty table is nothing on that output |
+| `sha256` | with a URL `image` only: 64 hex digits pinning the download's bytes |
+| `output` | per-output tables by connector name, each with the six keys above and nothing else; an empty table is nothing on that output |
 | `command` | scoot's (where to find `scootbg`): accepted, ignored, and never part of the fingerprint |
 
 - **Each table stands alone**, as a `scootbg set` does: an output's own
@@ -283,8 +291,9 @@ scootbg apply-config --profile scoot '{}'     # the section is gone: clear
 - **Strict.** Refused, as a usage error (exit 2) that starts and changes
   nothing, so a typo is never a setting silently not applied: an unknown
   key at either level, a key given twice, `null` or a value of the wrong
-  type, an array where an object belongs, a relative path, a path with a
-  NUL byte or over 4095 bytes, a malformed color, an unknown mode or
+  type, an array where an object belongs, a relative path, a non-`http(s)`
+  URL, a path with a NUL byte or over 4095 bytes, a URL over 4096 bytes or
+  with a NUL byte, a malformed color or hash, an unknown mode or
   filter, an empty output name, more than 256 outputs, more than 63 KiB
   (64,512 bytes) of JSON, JSON that is not UTF-8.
 
@@ -423,6 +432,8 @@ object per line each way, each request naming the protocol it speaks.
 {"protocol":1,"type":"set","image":"/abs/a.jpg"}              -> {"type":"ok"}
 {"protocol":1,"type":"set","image":"/abs/a.jpg","mode":"fit","fill":"#101014","filter":"lanczos3","output":"DP-1"}
                                                               -> {"type":"ok"}
+{"protocol":1,"type":"set","image":"https://example.com/a.jpg","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}
+                                                              -> {"type":"ok"}
 {"protocol":1,"type":"clear"}                                 -> {"type":"ok"}
 {"protocol":1,"type":"clear","output":"DP-1"}                 -> {"type":"ok"}
 {"protocol":1,"type":"query"}                                 -> {"type":"outputs","outputs":[...],"saving":true,"profile":"default"}
@@ -459,15 +470,19 @@ anything wrong                                                -> {"type":"error"
 - `set` takes a `color` or an `image`, never both. An `image` is an
   absolute path (the daemon's working directory is not the client's;
   `scootbg set` resolves a relative one before sending it) to a PNG, JPEG
-  or WebP; `mode` (`fill`, `fit`, `stretch`, `center`, `tile`), `fill`
+  or WebP, or an `http(s)` URL to one (downloaded once and cached, with an
+  optional `sha256` pin in hex); `mode` (`fill`, `fit`, `stretch`,
+  `center`, `tile`), `fill`
   (`#rrggbb`) and `filter` (`lanczos3`, `catmull-rom`, `bilinear`,
   `nearest`) may be left out, for `fill`, `#000000` and `lanczos3`, and
   are refused with a `color`.
 - **An image changes nothing until it has been decoded.** One that cannot
   be shown gets an error reply saying why (no such file, not a regular
   file, not an image scootbg reads, image too large, truncated or
-  corrupt), and every output keeps what it showed. Decoding runs on a
-  worker thread; other requests are served meanwhile.
+  corrupt; for a URL: no `curl`, no network, an HTTP error, an error page,
+  a file past 32 MiB, a `sha256` mismatch), and every output keeps what it
+  showed. Decoding — and a download before it — runs on a worker thread;
+  other requests are served meanwhile.
 - **The newest request wins**, whatever order the work finishes in: a
   `set` or `clear` sent after an image's `set` is never undone when that
   image finishes decoding. An image request that newer ones have replaced
@@ -478,7 +493,9 @@ anything wrong                                                -> {"type":"error"
   waiting"), nothing changed.
 - A request refused outright changes nothing: an unknown `output` name
   (the name must belong to an output present now), a `color` that is not
-  `#rrggbb`, a relative `image` path, an unknown `mode` or `filter`. A
+  `#rrggbb`, a relative `image` path, an `image` URL that is not `http(s)`,
+  a `sha256` that is not 64 hex digits (or one with a file), an unknown
+  `mode` or `filter`. A
   draw that fails on an output (a buffer too large for `wl_shm`, out of
   memory) is different: the choice is recorded and every other targeted
   output shows it; the reply is an error once they have, and the daemon's

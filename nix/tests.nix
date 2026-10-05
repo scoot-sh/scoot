@@ -45,8 +45,10 @@
 #   off installs nothing, with no package it defaults off and only an
 #   explicit `true` fails loudly at eval; the
 #   home-manager side installs it whenever `settings.wallpaper` exists and
-#   renders `command` as its store path (a user's own `command` wins);
-#   the flake wrappers default both packages to the flake's own builds;
+#   renders `command` as its store path (a user's own `command` wins); a
+#   `{ url, hash }` image is fetched once at build time and renders as the
+#   fetched file's store path (a set without both fails loudly), over a
+#   `file://` fixture so the check needs no network;
 #   a macOS home-manager config with a `[wallpaper]` table evaluates, with
 #   no scootbg; and the overlay provides `pkgs.scootbg` (Linux only) and
 #   is what the pure modules default to.
@@ -81,11 +83,35 @@
 #   with its unit; `look` renders the example palette into the compositor
 #   and bar configs (each leaf yielding to a user value, and to Stylix
 #   where present); a look without an in-repo wallpaper (`vinyl-sunset`)
-#   sets no `[wallpaper]` table; the `[xwayland]` knob defaults on; every
-#   future slot defaults off and inert; `enable` without scoot, a look
-#   without the profile, and an unknown look each fail eval;
+#   sets no `[wallpaper]` table; the `[xwayland]` knob defaults on; the
+#   idle policy (`desktop-idle-lock` child) runs with the profile -- dim
+#   2 min to 10%, lock at 4, screens off at 5, lock-before-sleep, audio
+#   hold -- each timeout overridable and each of the three switches
+#   individually disable-able, the locker themed by the look unless
+#   `theme.targets.lock.enable` opts out; an empty or quote-carrying
+#   `lock.command`, and an out-of-range `dimLevel` while the dim step is
+#   on, each fail eval; the shared keymap (`desktop-keys` child) runs
+#   with the profile -- the twelve hardware and lock binds, each a
+#   `mkDefault` a user `[binds]` entry wins over and each removable
+#   through `binds.<name>.enable`, the seven slot-gated binds only
+#   while their slot is on;
+#   the notification daemon (`desktop-notifications` child) runs with
+#   the profile -- mako owning `org.freedesktop.Notifications` as a
+#   `Type=dbus` user unit (activatable, retried like the bar's unit),
+#   its config on the `overlay` layer (popups above fullscreen) and
+#   themed by the look unless `theme.targets.notifications.enable`
+#   opts out, plus the bar feed (DND state and the unread count into
+#   the bar's `push` module, a click toggling DND through `makoctl`,
+#   which needs the `push` feature built in); a null package, and a
+#   `features` list without `push` beside the feed, each fail eval;
+#   every remaining future slot
+#   defaults off and inert; `enable` without scoot, a look without the
+#   profile, and an unknown look each fail eval;
 #   `desktop.greeter` is the greeter (the session entry forced on beside
-#   it); and `bar.enable = false` leaves the bar entirely alone.
+#   it); and `bar.enable = false` leaves the bar entirely alone. The
+#   profile and the policy are Linux-only: off Linux each tool defaults
+#   to null, `lock.command` to its bare form, and the policy's own
+#   assertions refuse loudly -- pinned, not skipped.
 {
   lib,
   pkgs,
@@ -218,6 +244,22 @@ let
     # `nix/modules/scootbar-nixos.nix`): only the combined desktop
     # evaluations below import that module.
     options.systemd.user.services = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+    # The idle policy's docked-lid rule (the canonical
+    # `settings.Login.HandleLidSwitchDocked` path, as far as the stub
+    # goes: the real option is a freeform submodule, this proves the
+    # value lands, and the real-NixOS pin below checks it against
+    # nixpkgs' own module). Unset here, as there (logind's own
+    # default, "ignore", then applies).
+    options.services.logind.settings.Login = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+    };
+    # The locker's PAM service (any key goes: the real option is an
+    # attrs-of-submodule, this proves presence, not its schema).
+    options.security.pam.services = lib.mkOption {
       type = lib.types.attrsOf lib.types.raw;
       default = { };
     };
@@ -451,6 +493,17 @@ let
   isLinux = pkgs.stdenv.hostPlatform.isLinux;
   failing = cfg: map (a: a.message) (lib.filter (a: !a.assertion) cfg.assertions);
 
+  # The notification daemon's package as the modules default it: the
+  # lean mako (no GTK stack -- `nix/modules/notifications-mako.nix`).
+  # The same expression the two `package` defaults import, so the pins
+  # below test what ships. Null off Linux, where `pkgs.mako` refuses
+  # evaluation when forced.
+  leanMako = if isLinux then import ./modules/notifications-mako.nix { inherit pkgs; } else null;
+  # The lean daemon's runtime closure, as store paths (for the
+  # no-GTK-stack content check). Building it needs no network; off
+  # Linux it is never referenced.
+  leanMakoClosure = if isLinux then pkgs.closureInfo { rootPaths = [ leanMako ]; } else null;
+
   # --- scootbg ([wallpaper]) evaluations under test ---
   # NixOS: on by default with `enable`, installing the package.
   osWallOn = evalNixos {
@@ -515,6 +568,47 @@ let
     enable = true;
     wallpaper.package = fakeBg;
     settings.wallpaper = "blue";
+  };
+  # ...a `{ url, hash }` image: fetched once at build time (a `file://`
+  # fixture, so the check needs no network: fixed-output fetching runs
+  # anywhere), the settings and the rendered TOML naming the fetched file.
+  urlWallpaperFile = builtins.toFile "url-wallpaper.png" "fake downloaded wallpaper";
+  urlWallpaperHash = builtins.hashFile "sha256" urlWallpaperFile;
+  hmWallUrl = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    settings.wallpaper = {
+      image = {
+        url = "file://${urlWallpaperFile}";
+        hash = urlWallpaperHash;
+      };
+      mode = "fill";
+    };
+  };
+  # ...a set without string `url` and `hash` fails loudly at eval (caught
+  # here by `tryEval`, forcing the rendered config file).
+  hmWallUrlBad =
+    builtins.tryEval
+      (evalHome {
+        enable = true;
+        settings.wallpaper.image = {
+          url = "file://${urlWallpaperFile}";
+        };
+      }).config.xdg.configFile."scoot/config.toml".source;
+  # ...and a per-output `{ url, hash }` image resolves the same way: the
+  # top-level string renders as written beside the fetched per-output file.
+  hmWallPerOutputUrl = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    settings.wallpaper = {
+      image = "~/Pictures/hills.jpg";
+      output."DP-2".image = {
+        url = "file://${urlWallpaperFile}";
+        hash = urlWallpaperHash;
+      };
+    };
   };
 
   # --- Stylix evaluations under test ---
@@ -609,6 +703,14 @@ let
     enable = true;
     greeter.enable = true;
   };
+  # The desktop profile in a real NixOS evaluation: the idle policy's
+  # system half against nixpkgs' own logind and PAM modules (not the
+  # stubs above) -- in particular the canonical `settings.Login`
+  # path, not the renamed alias.
+  osRealIdle = evalRealNixos {
+    enable = true;
+    desktop.enable = true;
+  };
   hmFlake = evalHomeWith flake.homeModule pkgs {
     enable = true;
     settings.wallpaper.color = "#1e1e2e";
@@ -638,6 +740,17 @@ let
     buildFeatures = [ "clock" ];
   };
   sorted = packages: lib.sort lib.lessThan (drvs packages);
+  # A keymap slot script's `bin/` path, found in an evaluation's
+  # installed packages by derivation name (the store hash is not
+  # knowable in the pin, the name is).
+  slotScriptBin =
+    eval: name:
+    let
+      found = lib.findFirst (
+        p: (p.name or "") == name
+      ) (throw "no ${name} in home.packages") eval.config.home.packages;
+    in
+    "${found}/bin/${name}";
 
   # --- home-manager evaluations under test ---
   hmEmpty = evalHome { enable = true; };
@@ -922,8 +1035,331 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
+    desktop.launcher.enable = true;
+  };
+
+  # --- shared keymap (`programs.scoot.desktop.keys`) evaluations ---
+  #
+  # The profile alone: the keymap on, future slots off -- the twelve
+  # keymap-owned binds (brightness, volume, mute, media, lock) render,
+  # the slot-gated seven stay out.
+  hmKeys = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+  };
+  # ...every future slot on: all nineteen binds render, the slot
+  # scripts beside them.
+  hmKeysSlots = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.launcher.enable = true;
+    desktop.clipboard.enable = true;
+    desktop.notifications.enable = true;
+    desktop.capture.enable = true;
+  };
+  # ...one bind removed: its combo stays unbound, the rest render.
+  hmKeysOmit = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.keys.binds.volumeUp.enable = false;
+    desktop.keys.binds.lock.enable = false;
+  };
+  # ...one bind overridden: the user's own `[binds]` entry wins.
+  hmKeysOverride = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    settings.binds."XF86AudioRaiseVolume" = "spawn sh -c true";
+  };
+  # ...a slot bind overridden: the user's entry beats the slot's.
+  hmKeysSlotOverride = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.launcher.enable = true;
+    settings.binds."super+d" = "spawn foot";
+  };
+  # ...the whole keymap off: no binds, no tools beyond the profile's
+  # own (the idle policy's five and mako stay -- those are the other
+  # children).
+  hmKeysOff = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.keys.enable = false;
+  };
+  # ...keys only (policy and locker off): an empty lock action still
+  # fails -- it renders into the keymap's `super+escape` bind.
+  hmKeysLockCmdEmpty = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.idle.enable = false;
+    desktop.idle.lock.enable = false;
+    desktop.idle.mediaInhibit.enable = false;
+    desktop.idle.lock.command = "";
+  };
+
+  # --- idle policy (`programs.scoot.desktop.idle`) evaluations ---
+  #
+  # The profile with a look: the whole policy on (swayidle unit, audio
+  # inhibitor, locker config), themed by the look.
+  hmIdle = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...without a look: the policy runs unthemed (swaylock's own colors).
+  hmIdleNoLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...the policy off (each of the three switches back off: the
+  # profile turns the set on, and the lock and inhibitor refuse to run
+  # without it).
+  hmIdleOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.enable = false;
+    desktop.idle.lock.enable = false;
+    desktop.idle.mediaInhibit.enable = false;
+  };
+  # ...the lock off: dim and screens-off stay, nothing locks.
+  hmLockOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.lock.enable = false;
+  };
+  # ...the inhibitor off: the policy without audio hold.
+  hmInhibitOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.mediaInhibit.enable = false;
+  };
+  # ...retimed (each timeout and the dim level overridable, per the M2
+  # reference they default from).
+  hmIdleTimeouts = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.dimTimeout = 60;
+    desktop.idle.dimLevel = 20;
+    desktop.idle.lockTimeout = 90;
+    desktop.idle.offTimeout = 120;
+  };
+  # ...with steps disabled (0 omits that timeout's line).
+  hmIdleZero = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.dimTimeout = 0;
+    desktop.idle.offTimeout = 0;
+  };
+  # ...with the lock action overridden (what a future `desktop-keys`
+  # bind runs).
+  hmLockCmd = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.lock.command = "loginctl lock-session";
+  };
+  # ...with an empty lock action, and a quote-carrying one (each
+  # refused at eval: the action renders inside single quotes on the
+  # swayidle timeout line).
+  hmLockCmdEmpty = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.lock.command = "";
+  };
+  hmLockCmdQuote = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.lock.command = "loginctl lock-session'; reboot";
+  };
+  # ...with the dim step off and an out-of-range level (unread, so no
+  # refusal: the range applies only while the step is on).
+  hmIdleZeroBadLevel = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.dimTimeout = 0;
+    desktop.idle.dimLevel = 0;
+  };
+  # ...with locker settings (a color winning per key, plus a bare
+  # flag).
+  hmLockSettings = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.idle.lock.settings = {
+      ring-color = "#123456";
+      show-failed-attempts = "";
+    };
+  };
+  # ...opted out of locker theming (the look leaves the locker alone,
+  # the settings still apply).
+  hmThemeTargetOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.lock.enable = false;
+    desktop.idle.lock.settings = {
+      ring-color = "#123456";
+    };
+  };
+  # ...standalone (no profile): the policy runs, unthemed.
+  hmIdleStandalone = evalHome {
+    enable = true;
+    desktop.idle.enable = true;
+  };
+  # Refusals: the lock without the policy, and the inhibitor without it
+  # (each pinned by message in `_idlePins`).
+  hmLockNoIdle = evalHome {
+    enable = true;
+    desktop.idle.lock.enable = true;
+  };
+  hmInhibitNoIdle = evalHome {
+    enable = true;
+    desktop.idle.mediaInhibit.enable = true;
+  };
+  # ...the policy with no swayidle to run it.
+  hmIdleNoPkg = evalHome {
+    enable = true;
+    desktop.idle.enable = true;
+    desktop.idle.package = null;
+  };
+  # ...a dim level outside 1..100, and a negative timeout.
+  hmIdleBadLevel = evalHome {
+    enable = true;
+    desktop.idle.enable = true;
+    desktop.idle.dimLevel = 0;
+  };
+  hmIdleNeg = evalHome {
+    enable = true;
+    desktop.idle.enable = true;
+    desktop.idle.lockTimeout = -1;
+  };
+
+  # --- notification daemon (`programs.scoot.desktop.notifications`) evaluations ---
+  #
+  # The profile with a look: the whole slot on (mako unit, feed unit,
+  # mako config), themed by the look.
+  hmNotif = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...without a look: the daemon runs unthemed (mako's own colors,
+  # the DND behavior still on -- pinned by content below).
+  hmNotifNoLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...the daemon off (the profile turns it on, like the idle policy;
+  # each switch back off disables just its half).
+  hmNotifOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.notifications.enable = false;
+  };
+  # ...standalone (no profile): the daemon runs, unthemed.
+  hmNotifStandalone = evalHome {
+    enable = true;
     desktop.notifications.enable = true;
   };
+  # ...with settings (a global winning per key -- including the layer
+  # default -- plus a new key, verbatim).
+  hmNotifSettings = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.notifications.settings = {
+      anchor = "bottom-right";
+      layer = "top";
+      background-color = "#123456";
+    };
+  };
+  # ...opted out of daemon theming (the look leaves mako alone, the
+  # settings still apply).
+  hmNotifTargetOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.notifications.enable = false;
+    desktop.notifications.settings = {
+      border-color = "#123456";
+    };
+  };
+  # Refusals: the daemon with no mako to run it (pinned by message in
+  # `_notifPins`)...
+  hmNotifNoPkg = evalHome {
+    enable = true;
+    desktop.notifications.enable = true;
+    desktop.notifications.package = null;
+  };
+  # ...and an unknown daemon, which is an option type error (the
+  # `enum`'s own message names the valid value), caught here by
+  # `tryEval`.
+  hmNotifDaemonBogus =
+    builtins.tryEval
+      (evalHome {
+        enable = true;
+        desktop.notifications.enable = true;
+        desktop.notifications.daemon = "bogus-daemon";
+      }).config.programs.scoot.desktop.notifications.daemon;
+
+  # A fake notification toolchain for the feed's behavior tests: stub
+  # `makoctl`, `busctl` and `scootbar`, scripted at RUN time through
+  # files under `$SCOOT_FEED_TEST_DIR`, so one HM evaluation covers
+  # every scenario. `makoctl mode` prints `mode` (exit `mode-code`),
+  # `makoctl list` prints `list` (exit `list-code`); `busctl` prints
+  # `bus` and exits 0 (the monitor ending); `scootbar` appends its
+  # argv to `calls`, prints `bar-err` to stderr and exits `bar-code`.
+  # The bridge under test resolves all three by bare name through its
+  # wrapper PATH, where this package's `bin` sorts first (no bar
+  # module is imported beside it, so `scootbar` stays a bare name
+  # too); `jq` stays the real one from the bridge's own inputs.
+  feedStubs = pkgs.runCommand "feed-stubs" { } ''
+    mkdir -p $out/bin
+    cat > $out/bin/makoctl <<'EOF'
+    #!${pkgs.runtimeShell}
+    case "$1" in
+      mode) cat "$SCOOT_FEED_TEST_DIR/mode"; exit "$(cat "$SCOOT_FEED_TEST_DIR/mode-code")" ;;
+      list) cat "$SCOOT_FEED_TEST_DIR/list"; exit "$(cat "$SCOOT_FEED_TEST_DIR/list-code")" ;;
+      *) echo "unexpected makoctl args: $*" >&2; exit 99 ;;
+    esac
+    EOF
+    cat > $out/bin/busctl <<'EOF'
+    #!${pkgs.runtimeShell}
+    cat "$SCOOT_FEED_TEST_DIR/bus"
+    exit 0
+    EOF
+    cat > $out/bin/scootbar <<'EOF'
+    #!${pkgs.runtimeShell}
+    printf '%s\n' "$*" >> "$SCOOT_FEED_TEST_DIR/calls"
+    cat "$SCOOT_FEED_TEST_DIR/bar-err" >&2
+    exit "$(cat "$SCOOT_FEED_TEST_DIR/bar-code")"
+    EOF
+    chmod +x $out/bin/makoctl $out/bin/busctl $out/bin/scootbar
+  '';
+  # The daemon on, running the stubs: the bridge below is the real
+  # `scoot-notify-sync` from the module, with its wrapper PATH aimed
+  # at the stubs.
+  hmNotifFeedTest = evalHome {
+    enable = true;
+    desktop.notifications.enable = true;
+    desktop.notifications.package = feedStubs;
+  };
+  # The real bridge script under test (the feed unit runs it with
+  # `--watch`; the behavior tests run it bare for one sync).
+  feedBridge = lib.removeSuffix " --watch" hmNotifFeedTest.config.systemd.user.services.scoot-notify-sync.Service.ExecStart;
+
   # Refusals: the profile without scoot, and a look without the profile
   # (both pinned by message in `_desktopPins`)...
   hmDeskNoEnable = evalHome { desktop.enable = true; };
@@ -950,7 +1386,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.idle.lock.enable = true;
+    desktop.launcher.enable = true;
   };
   # The knob is accepted here (its effect is home-manager wiring; the
   # package choice stays `programs.scoot.package`).
@@ -965,6 +1401,108 @@ let
     enable = true;
     package = fakePkg;
     desktop.look = "radial-burst";
+  };
+  # The shared keymap off: the profile's other packages only.
+  osKeysOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.keys.enable = false;
+  };
+  # --- idle policy (`programs.scoot.desktop.idle`) system evaluations ---
+  #
+  # The profile: the tools installed, the docked-lid rule locking, the
+  # locker's PAM service present, still additive (no default session).
+  osIdle = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  # ...the policy off: the rule untouched, no PAM, the profile's own
+  # packages only.
+  osIdleOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.idle.enable = false;
+    desktop.idle.lock.enable = false;
+    desktop.idle.mediaInhibit.enable = false;
+  };
+  # ...the lock off: no PAM and no locker, the lid rule still locking
+  # (dim and screens-off still run from the home-manager side).
+  osLockOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.idle.lock.enable = false;
+  };
+  # ...with an explicit lid rule: the user's value wins over the
+  # profile's docked-lock default (a separate module, the way the
+  # greeter's overrides ride along -- the evaluation above can only
+  # set `programs.scoot`).
+  osIdleLidOverride =
+    evalNixosWith
+      [
+        ./modules/nixos.nix
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        { services.logind.settings.Login.HandleLidSwitchDocked = "ignore"; }
+      ]
+      pkgs
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+      };
+  # Refusals: the lock without the policy (pinned by message), and the
+  # policy with no swayidle to install.
+  osLockNoIdle = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.idle.lock.enable = true;
+  };
+  osIdleNoPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.idle.package = null;
+  };
+  # --- notification daemon system evaluations ---
+  #
+  # The profile: mako installed beside scoot and scootbg, still
+  # additive (no default session).
+  osNotif = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  # ...the daemon off: the profile's own packages only.
+  osNotifOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.notifications.enable = false;
+  };
+  # Refusal: the daemon with no mako to install (pinned by message in
+  # `_notifPins`).
+  osNotifNoPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.notifications.package = null;
+  };
+  # ...with an empty lock action, and a quote-carrying one (each
+  # refused at eval on this side as well).
+  osLockCmdEmpty = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.idle.lock.command = "";
+  };
+  osLockCmdQuote = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.idle.lock.command = "loginctl lock-session'; reboot";
   };
   # `desktop.greeter` is an alias for `programs.scoot.greeter`: through it
   # the profile lists a session in a ReGreet login.
@@ -1076,6 +1614,50 @@ let
     desktop.look = "radial-burst";
     desktop.bar.enable = false;
   } { package = fakeBar; };
+  # The notification feed's bar half: the profile beside the bar
+  # module (music-desk, so the daemon runs themed).
+  hmDeskBarNotif = evalHomeDesktop {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  } { package = fakeBar; };
+  # ...with the daemon off: no feed module (the bar is entirely the
+  # user's, the push table absent).
+  hmDeskBarNoNotif = evalHomeDesktop {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.notifications.enable = false;
+  } { package = fakeBar; };
+  # ...with the daemon on but a bar built without the push module:
+  # refused at eval, naming it (pinned by message in `_notifPins`).
+  # The stand-in bar is a plain derivation, so it gains the `.override`
+  # the features option asks of a real package (returning itself: only
+  # the option plumbing is under test here, not a rebuild).
+  hmDeskBarNoPush =
+    evalHomeDesktopWith [ ]
+      {
+        enable = true;
+        package = fakePkg;
+        wallpaper.package = fakeBg;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+      }
+      {
+        package = fakeBar // {
+          override =
+            {
+              buildNoDefaultFeatures ? false,
+              buildFeatures ? [ ],
+            }:
+            fakeBar;
+        };
+        features = [ "clock" ];
+      };
 
   # --- eval-time structural pins (fail `nix flake check` at eval) ---
   #
@@ -1446,6 +2028,33 @@ let
       assert drvs hmWallNotTable.config.home.packages == drvs [ fakeBg ];
       true
     )
+    # ...a `{ url, hash }` image is fetched at build time (which is what
+    # turns `wallpaper.enable` on and installs scootbg for it; the
+    # rendered TOML below names the fetched file, while `settings` keeps
+    # the user's value verbatim until render)...
+    (
+      assert allAssertionsHold hmWallUrl.config;
+      true
+    )
+    (
+      assert hmWallUrl.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    # ...and a set without string `url` and `hash` never renders.
+    (
+      assert !hmWallUrlBad.success;
+      true
+    )
+    # ...and a per-output `{ url, hash }` image is fetched at build time
+    # too (the rendered TOML below names the fetched file).
+    (
+      assert allAssertionsHold hmWallPerOutputUrl.config;
+      true
+    )
+    (
+      assert hmWallPerOutputUrl.config.programs.scoot.wallpaper.enable;
+      true
+    )
 
     # --- Stylix (`programs.scoot.stylix.enable`) ---
     # On: the ring and background colors from base16, the cursor name
@@ -1666,6 +2275,21 @@ let
           ];
         true
       )
+      # The profile's idle half in a real NixOS evaluation too: the
+      # docked-lid rule on the canonical logind path, the locker's PAM
+      # service, the tools installed -- and still no default session.
+      # (No `allAssertionsHold`: a bare `eval-config.nix` always carries
+      # the generic no-filesystem/no-bootloader failures, the way
+      # `osRealGreeter` shows; the stubs above are where every
+      # assertion is held.)
+      (
+        assert osRealIdle.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+        assert osRealIdle.config.security.pam.services ? swaylock;
+        assert osRealIdle.config.services.displayManager.defaultSession == null;
+        assert lib.any (p: (p.pname or "") == "swayidle") osRealIdle.config.environment.systemPackages;
+        assert lib.any (p: (p.pname or "") == "swaylock") osRealIdle.config.environment.systemPackages;
+        true
+      )
       (
         assert allAssertionsHold osFlake.config;
         true
@@ -1847,14 +2471,40 @@ let
   hmWallOffToml = hmWallOff.config.xdg.configFile."scoot/config.toml".source;
   hmNoWallToml = hmNoWall.config.xdg.configFile."scoot/config.toml".source;
   hmWallNotTableToml = hmWallNotTable.config.xdg.configFile."scoot/config.toml".source;
+  hmWallUrlToml = hmWallUrl.config.xdg.configFile."scoot/config.toml".source;
+  hmWallPerOutputUrlToml = hmWallPerOutputUrl.config.xdg.configFile."scoot/config.toml".source;
   hmStylixToml = hmStylix.config.xdg.configFile."scoot/config.toml".source;
   hmStylixColorToml = hmStylixColor.config.xdg.configFile."scoot/config.toml".source;
   hmDeskMusicToml = hmDeskLookMusic.config.xdg.configFile."scoot/config.toml".source;
   hmDeskVinylToml = hmDeskLookVinyl.config.xdg.configFile."scoot/config.toml".source;
   hmDeskMoonToml = hmDeskLookMoon.config.xdg.configFile."scoot/config.toml".source;
+  keysToml = hmKeys.config.xdg.configFile."scoot/config.toml".source;
+  keysSlotsToml = hmKeysSlots.config.xdg.configFile."scoot/config.toml".source;
   hmDeskBarToml = hmDeskBar.config.programs.scootbar.configFile;
   hmDeskBarMoonToml = hmDeskBarMoon.config.programs.scootbar.configFile;
   osDeskBarToml = osDeskBar.config.programs.scootbar.configFile;
+  # The idle policy's generated files: the swayidle config (timeouts,
+  # sleep lock, lock event) and the swaylock config (themed leaves),
+  # plus the lock-off, zeroed, retimed, rebound, recolored, unthemed
+  # and opt-out variants the content checks read.
+  idleConf = hmIdle.config.xdg.configFile."swayidle/config".source;
+  idleLockConf = hmIdle.config.xdg.configFile."swaylock/config".source;
+  idleNoLockConf = hmLockOff.config.xdg.configFile."swayidle/config".source;
+  idleTimeoutsConf = hmIdleTimeouts.config.xdg.configFile."swayidle/config".source;
+  idleZeroConf = hmIdleZero.config.xdg.configFile."swayidle/config".source;
+  idleCmdConf = hmLockCmd.config.xdg.configFile."swayidle/config".source;
+  idleSettingsConf = hmLockSettings.config.xdg.configFile."swaylock/config".source;
+  idleTargetOffConf = hmThemeTargetOff.config.xdg.configFile."swaylock/config".source;
+  idleNoLookConf = hmIdleNoLook.config.xdg.configFile."swaylock/config".source;
+  # The notification daemon's generated files: the mako config
+  # (overlay layer, DND section, themed leaves, critical ring), plus
+  # the lookless, recolored and opt-out variants the content checks
+  # read, and the bar file carrying the feed's push module.
+  notifConf = hmNotif.config.xdg.configFile."mako/config".source;
+  notifNoLookConf = hmNotifNoLook.config.xdg.configFile."mako/config".source;
+  notifSettingsConf = hmNotifSettings.config.xdg.configFile."mako/config".source;
+  notifTargetOffConf = hmNotifTargetOff.config.xdg.configFile."mako/config".source;
+  notifBarToml = hmDeskBarNotif.config.programs.scootbar.configFile;
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
   #
@@ -2008,7 +2658,11 @@ let
   ];
 
   # --- desktop profile structural pins (fail `nix flake check` at eval) ---
-  _desktopPins = [
+  # The desktop profile is Linux-only (user units, logind, seat
+  # rights): off Linux its tools default to null and the policy's own
+  # assertions refuse loudly (pinned in `_darwinIdlePins` below), so
+  # these pins run only where the policy can run.
+  _desktopPins = lib.optionals isLinux [
     # The profile alone (no bar module): assertions hold, portals on, and
     # nothing themed without a look...
     (
@@ -2027,23 +2681,56 @@ let
       assert !(hmDesk.config.programs.scoot.settings ? wallpaper);
       true
     )
-    # ...and every future slot off and empty (spot-check across the tree).
+    # ...and the idle policy on with the profile (the
+    # `desktop-idle-lock` child): swayidle, the dim and screens-off
+    # tools, the locker and the audio inhibitor.
     (
-      assert !hmDesk.config.programs.scoot.desktop.idle.enable;
+      assert hmDesk.config.programs.scoot.desktop.idle.enable;
       true
     )
     (
-      assert !hmDesk.config.programs.scoot.desktop.idle.lock.enable;
+      assert hmDesk.config.programs.scoot.desktop.idle.lock.enable;
       true
     )
     (
-      assert !hmDesk.config.programs.scoot.desktop.notifications.enable;
+      assert hmDesk.config.programs.scoot.desktop.idle.mediaInhibit.enable;
+      true
+    )
+    # ...the M2's timeouts as defaults (dim 2 min to 10%, lock at 4,
+    # screens off at 5)...
+    (
+      assert hmDesk.config.programs.scoot.desktop.idle.dimTimeout == 120;
       true
     )
     (
-      assert hmDesk.config.programs.scoot.desktop.notifications.package == null;
+      assert hmDesk.config.programs.scoot.desktop.idle.dimLevel == 10;
       true
     )
+    (
+      assert hmDesk.config.programs.scoot.desktop.idle.lockTimeout == 240;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.idle.offTimeout == 300;
+      true
+    )
+    # ...the swaylock daemon behind the lock, and the locker theme
+    # opt-out on (without forcing the half-built `theme` slot on)...
+    (
+      assert hmDesk.config.programs.scoot.desktop.idle.lock.daemon == "swaylock";
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.theme.targets.lock.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.theme.enable;
+      true
+    )
+    # ...and every remaining future slot off and empty (spot-check
+    # across the tree; `notifications` left this list when the
+    # `desktop-notifications` child filled it).
     (
       assert !hmDesk.config.programs.scoot.desktop.launcher.enable;
       true
@@ -2088,8 +2775,11 @@ let
       assert !hmDesk.config.programs.scoot.desktop.apps.fileManager.enable;
       true
     )
+    # ...while the profile turns the keymap on (a laptop whose Fn
+    # keys do nothing is not daily-drivable): its binds are the
+    # `_keysPins` below.
     (
-      assert !hmDesk.config.programs.scoot.desktop.keys.enable;
+      assert hmDesk.config.programs.scoot.desktop.keys.enable;
       true
     )
     (
@@ -2127,16 +2817,30 @@ let
         hmDeskLookMusic.config.programs.scoot.settings.wallpaper.image;
       true
     )
-    # ...which is what installs scootbg for it.
+    # ...which is what installs scootbg for it (beside the idle
+    # policy's five tools, the notification daemon and the keymap's
+    # three, all on with the profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
       true
     )
     (
+      # `brightnessctl` twice is one package, not two tools: the
+      # idle policy's dim tool and the keymap's brightness tool are
+      # the same derivation, each declared beside its own binds.
       assert
-        drvs hmDeskLookMusic.config.home.packages == drvs [
+        sorted hmDeskLookMusic.config.home.packages == sorted [
           fakePkg
           fakeBg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
+          leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
         ];
       true
     )
@@ -2215,9 +2919,12 @@ let
       assert hmDeskUserWins.config.programs.scoot.settings.wallpaper.mode == "center";
       true
     )
-    # Stylix beside a look wins every leaf: identical to Stylix alone.
+    # Stylix beside a look wins every leaf: identical to Stylix alone
+    # (minus the keymap's `[binds]`, which only the profile side has).
     (
-      assert hmDeskStylix.config.programs.scoot.settings == hmStylix.config.programs.scoot.settings;
+      assert
+        builtins.removeAttrs hmDeskStylix.config.programs.scoot.settings [ "binds" ]
+        == hmStylix.config.programs.scoot.settings;
       true
     )
     # The xwayland knob defaults the compositor flag on...
@@ -2390,16 +3097,30 @@ let
       true
     )
     (
-      assert hmDeskBarStylix.config.programs.scoot.settings == hmStylix.config.programs.scoot.settings;
+      assert
+        builtins.removeAttrs hmDeskBarStylix.config.programs.scoot.settings [ "binds" ]
+        == hmStylix.config.programs.scoot.settings;
       true
     )
-    # ...and `bar.enable = false` leaves the bar entirely alone.
+    # ...and `bar.enable = false` leaves the bar entirely alone (no
+    # bar service beside the profile's idle ones).
     (
       assert !hmDeskBarOff.config.programs.scootbar.enable;
       true
     )
+    # ...and no look colors reach it either (no `colors` at all).
     (
-      assert hmDeskBarOff.config.systemd.user.services == { };
+      assert (hmDeskBarOff.config.programs.scootbar.settings.colors or { }) == { };
+      true
+    )
+    (
+      assert !(hmDeskBarOff.config.systemd.user.services ? scootbar);
+      true
+    )
+    # ...including unthemed: no look color reaches a bar the profile
+    # does not manage.
+    (
+      assert (hmDeskBarOff.config.programs.scootbar.settings.colors or { }) == { };
       true
     )
     # NixOS with the bar module: the unit and the /etc file beside the
@@ -2440,7 +3161,1156 @@ let
       true
     )
     (
+      assert (osDeskBarOff.config.programs.scootbar.settings.colors or { }) == { };
+      true
+    )
+    (
       assert osDeskBarOff.config.systemd.user.services == { };
+      true
+    )
+    (
+      assert (osDeskBarOff.config.programs.scootbar.settings.colors or { }) == { };
+      true
+    )
+  ];
+
+  # --- idle policy structural pins (fail `nix flake check` at eval) ---
+  # Linux only, like the profile above: every evaluation here runs the
+  # policy, whose tools refuse evaluation on Darwin (the null
+  # degradation itself is pinned in `_darwinIdlePins`).
+  _idlePins = lib.optionals isLinux [
+    # Home-manager: the whole policy on (units, files, tools beside
+    # the profile's own)...
+    (
+      assert allAssertionsHold hmIdle.config;
+      true
+    )
+    (
+      assert hmIdle.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    (
+      assert hmIdle.config.systemd.user.services ? scoot-audio-inhibit;
+      true
+    )
+    (
+      assert hmIdle.config.xdg.configFile ? "swayidle/config";
+      true
+    )
+    (
+      assert hmIdle.config.xdg.configFile ? "swaylock/config";
+      true
+    )
+    # ...bound to the graphical session (which the launcher reaches
+    # past the display import), retried rather than conditioned...
+    (
+      assert
+        hmIdle.config.systemd.user.services.scoot-idle.Install.WantedBy == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert hmIdle.config.systemd.user.services.scoot-idle.Unit.PartOf == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert hmIdle.config.systemd.user.services.scoot-idle.Unit.After == [ "graphical-session.target" ];
+      true
+    )
+    # ...waiting for each command (the before-sleep lock lands before
+    # logind sleeps) from the generated config...
+    (
+      assert lib.hasInfix "/bin/swayidle -w -C "
+        hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
+      true
+    )
+    # ...exactly the nine tools installed (swayidle, dim, off,
+    # locker, inhibitor, mako -- no scoot package set here, so nothing
+    # else -- plus the keymap's brightness, volume and media tools;
+    # `brightnessctl` is one package serving two features, so it
+    # appears twice).
+    (
+      assert builtins.length hmIdle.config.home.packages == 9;
+      true
+    )
+    (
+      assert
+        sorted hmIdle.config.home.packages == sorted [
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
+          leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
+        ];
+      true
+    )
+    # Without a look the policy runs unthemed (the files and units are
+    # still there; the locker keeps swaylock's own colors -- pinned by
+    # content below).
+    (
+      assert allAssertionsHold hmIdleNoLook.config;
+      true
+    )
+    (
+      assert hmIdleNoLook.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    (
+      assert hmIdleNoLook.config.xdg.configFile ? "swaylock/config";
+      true
+    )
+    # The policy off: no units, no files beyond the profile's own --
+    # but the notification daemon stays (its switch is its own, on
+    # with the profile) and the keymap stays too (the other child,
+    # still on with the profile), so mako and its three tools stay.
+    (
+      assert allAssertionsHold hmIdleOff.config;
+      true
+    )
+    (
+      assert
+        builtins.attrNames hmIdleOff.config.systemd.user.services == [
+          "mako"
+          "scoot-notify-sync"
+        ];
+      true
+    )
+    (
+      assert !(hmIdleOff.config.xdg.configFile ? "swayidle/config");
+      true
+    )
+    (
+      assert !(hmIdleOff.config.xdg.configFile ? "swaylock/config");
+      true
+    )
+    (
+      assert hmIdleOff.config.xdg.configFile ? "mako/config";
+      true
+    )
+    (
+      assert
+        sorted hmIdleOff.config.home.packages == sorted [
+          leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
+        ];
+      true
+    )
+    # The lock off: the policy stays (dim and screens-off), the locker
+    # leaves (no config, no package, four policy tools plus mako and
+    # the keymap's three left).
+    (
+      assert allAssertionsHold hmLockOff.config;
+      true
+    )
+    (
+      assert hmLockOff.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    (
+      assert !(hmLockOff.config.xdg.configFile ? "swaylock/config");
+      true
+    )
+    (
+      assert builtins.length hmLockOff.config.home.packages == 8;
+      true
+    )
+    # The inhibitor off: the policy without the audio hold (four
+    # policy tools plus mako and the keymap's three).
+    (
+      assert allAssertionsHold hmInhibitOff.config;
+      true
+    )
+    (
+      assert !(hmInhibitOff.config.systemd.user.services ? scoot-audio-inhibit);
+      true
+    )
+    (
+      assert builtins.length hmInhibitOff.config.home.packages == 8;
+      true
+    )
+    # Retimed, zeroed, rebound and recolored: every assertion still
+    # holds (the content checks below prove the values land).
+    (
+      assert allAssertionsHold hmIdleTimeouts.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmIdleZero.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmLockCmd.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmLockSettings.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmThemeTargetOff.config;
+      true
+    )
+    # Standalone (no profile): the policy runs, unthemed and unlocked
+    # (the locker's opt-in stays off with it).
+    (
+      assert allAssertionsHold hmIdleStandalone.config;
+      true
+    )
+    (
+      assert hmIdleStandalone.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    (
+      assert !(hmIdleStandalone.config.xdg.configFile ? "swaylock/config");
+      true
+    )
+    # Refusals: the lock without the policy...
+    (
+      assert builtins.length (failing hmLockNoIdle.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.enable needs" (builtins.head (failing hmLockNoIdle.config));
+      true
+    )
+    # ...the inhibitor without it...
+    (
+      assert builtins.length (failing hmInhibitNoIdle.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.mediaInhibit.enable needs" (
+        builtins.head (failing hmInhibitNoIdle.config)
+      );
+      true
+    )
+    # ...the policy with no swayidle to run it...
+    (
+      assert builtins.length (failing hmIdleNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.package is null" (builtins.head (failing hmIdleNoPkg.config));
+      true
+    )
+    # ...a dim level outside 1..100, and a negative timeout.
+    (
+      assert builtins.length (failing hmIdleBadLevel.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "dimLevel" (builtins.head (failing hmIdleBadLevel.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmIdleNeg.config) == 1;
+      true
+    )
+    # ...an out-of-range dim level with the dim step off (the level is
+    # unread then, so the range does not fire)...
+    (
+      assert allAssertionsHold hmIdleZeroBadLevel.config;
+      true
+    )
+    # ...an empty lock action, and a quote-carrying one (each refused
+    # naming the command)...
+    (
+      assert builtins.length (failing hmLockCmdEmpty.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.command" (builtins.head (failing hmLockCmdEmpty.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmLockCmdQuote.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.command" (builtins.head (failing hmLockCmdQuote.config));
+      true
+    )
+
+    # NixOS: the profile installs the five policy tools, mako and
+    # the keymap's three beside scoot and scootbg, locks docked lids,
+    # and names the locker's PAM service -- staying additive (no
+    # default session, ever)...
+    (
+      assert allAssertionsHold osIdle.config;
+      true
+    )
+    (
+      assert
+        sorted osIdle.config.environment.systemPackages == sorted [
+          fakePkg
+          fakeBg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
+          leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
+        ];
+      true
+    )
+    (
+      assert osIdle.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+      true
+    )
+    (
+      assert osIdle.config.security.pam.services ? swaylock;
+      true
+    )
+    (
+      assert osIdle.config.services.displayManager.defaultSession == null;
+      true
+    )
+    # ...the policy off: the rule untouched (logind's own default
+    # applies), no PAM -- but the daemon stays (its switch is its
+    # own) and the keymap stays too (the other child), so mako and
+    # its three tools stay...
+    (
+      assert allAssertionsHold osIdleOff.config;
+      true
+    )
+    (
+      assert osIdleOff.config.services.logind.settings.Login == { };
+      true
+    )
+    (
+      assert !(osIdleOff.config.security.pam.services ? swaylock);
+      true
+    )
+    (
+      assert
+        sorted osIdleOff.config.environment.systemPackages == sorted [
+          fakePkg
+          fakeBg
+          leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
+        ];
+      true
+    )
+    # ...the lock off: no PAM and no locker, the lid rule still
+    # locking (dim and screens-off still run from the home-manager
+    # side, the keymap's tools beside them)...
+    (
+      assert allAssertionsHold osLockOff.config;
+      true
+    )
+    (
+      assert !(osLockOff.config.security.pam.services ? swaylock);
+      true
+    )
+    (
+      assert
+        sorted osLockOff.config.environment.systemPackages == sorted [
+          fakePkg
+          fakeBg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.sway-audio-idle-inhibit
+          leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
+        ];
+      true
+    )
+    (
+      assert osLockOff.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+      true
+    )
+    # ...an explicit lid rule winning over the profile's default...
+    (
+      assert allAssertionsHold osIdleLidOverride.config;
+      true
+    )
+    (
+      assert osIdleLidOverride.config.services.logind.settings.Login.HandleLidSwitchDocked == "ignore";
+      true
+    )
+    # ...and the refusals naming the policy on this side as well.
+    (
+      assert builtins.length (failing osLockNoIdle.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.enable needs" (builtins.head (failing osLockNoIdle.config));
+      true
+    )
+    (
+      assert builtins.length (failing osIdleNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.package is null" (builtins.head (failing osIdleNoPkg.config));
+      true
+    )
+    # ...and an empty lock action, and a quote-carrying one (each
+    # refused naming the command on this side as well).
+    (
+      assert builtins.length (failing osLockCmdEmpty.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.command" (builtins.head (failing osLockCmdEmpty.config));
+      true
+    )
+    (
+      assert builtins.length (failing osLockCmdQuote.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.command" (builtins.head (failing osLockCmdQuote.config));
+      true
+    )
+  ];
+
+  # --- notification daemon structural pins (fail `nix flake check` at eval) ---
+  # Linux only, like the policy above: every evaluation here runs the
+  # daemon, whose package refuses evaluation on Darwin (the null
+  # degradation itself is pinned in `_darwinNotifPins`).
+  _notifPins = lib.optionals isLinux [
+    # Home-manager: the whole slot on (units, file, tool beside the
+    # profile's own)...
+    (
+      assert allAssertionsHold hmNotif.config;
+      true
+    )
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.enable;
+      true
+    )
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.daemon == "mako";
+      true
+    )
+    # ...running the lean mako (no GTK stack), not stock nixpkgs mako:
+    # the default is the very derivation `leanMako` names (same `drvPath`,
+    # so a revert to `pkgs.mako` fails here), hence a different store
+    # path than stock...
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.package.drvPath == leanMako.drvPath;
+      true
+    )
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.package.outPath != pkgs.mako.outPath;
+      true
+    )
+    # ...and the NixOS side defaults to the same derivation (either
+    # side alone names the same daemon)...
+    (
+      assert osNotif.config.programs.scoot.desktop.notifications.package.drvPath == leanMako.drvPath;
+      true
+    )
+    (
+      assert hmNotif.config.systemd.user.services ? mako;
+      true
+    )
+    (
+      assert hmNotif.config.systemd.user.services ? scoot-notify-sync;
+      true
+    )
+    (
+      assert hmNotif.config.xdg.configFile ? "mako/config";
+      true
+    )
+    # ...the daemon bound to the graphical session (which the launcher
+    # reaches past the display import), retried rather than
+    # conditioned...
+    (
+      assert hmNotif.config.systemd.user.services.mako.Install.WantedBy == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert hmNotif.config.systemd.user.services.mako.Unit.PartOf == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert hmNotif.config.systemd.user.services.mako.Unit.After == [ "graphical-session.target" ];
+      true
+    )
+    # ...activatable over D-Bus (a `Notify` with the daemon down
+    # starts the unit through mako's activation file), running this
+    # package's binary, reloaded through its `makoctl`...
+    (
+      assert hmNotif.config.systemd.user.services.mako.Service.Type == "dbus";
+      true
+    )
+    (
+      assert hmNotif.config.systemd.user.services.mako.Service.BusName == "org.freedesktop.Notifications";
+      true
+    )
+    (
+      assert lib.hasInfix "/bin/mako" hmNotif.config.systemd.user.services.mako.Service.ExecStart;
+      true
+    )
+    (
+      assert lib.hasInfix "/bin/makoctl reload"
+        hmNotif.config.systemd.user.services.mako.Service.ExecReload;
+      true
+    )
+    # ...gated on the display (an activation before the session
+    # reaches the graphical target skips cleanly instead of spinning
+    # restarts)...
+    (
+      assert lib.hasInfix "WAYLAND_DISPLAY"
+        hmNotif.config.systemd.user.services.mako.Service.ExecCondition;
+      true
+    )
+    # ...and the feed ordered after it, wanted by the same target.
+    (
+      assert
+        hmNotif.config.systemd.user.services.scoot-notify-sync.Install.WantedBy
+        == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        hmNotif.config.systemd.user.services.scoot-notify-sync.Unit.After == [
+          "graphical-session.target"
+          "mako.service"
+        ];
+      true
+    )
+    (
+      assert lib.hasInfix "scoot-notify-sync --watch"
+        hmNotif.config.systemd.user.services.scoot-notify-sync.Service.ExecStart;
+      true
+    )
+    # Without a look the daemon runs unthemed (the units and the file
+    # are still there; mako keeps its own colors -- pinned by content
+    # below).
+    (
+      assert allAssertionsHold hmNotifNoLook.config;
+      true
+    )
+    (
+      assert hmNotifNoLook.config.systemd.user.services ? mako;
+      true
+    )
+    (
+      assert hmNotifNoLook.config.systemd.user.services ? scoot-notify-sync;
+      true
+    )
+    (
+      assert hmNotifNoLook.config.xdg.configFile ? "mako/config";
+      true
+    )
+    # The daemon off: no units, no file beyond the profile's own, no
+    # tool (the idle policy stays: this switch is its own).
+    (
+      assert allAssertionsHold hmNotifOff.config;
+      true
+    )
+    (
+      assert !(hmNotifOff.config.systemd.user.services ? mako);
+      true
+    )
+    (
+      assert !(hmNotifOff.config.systemd.user.services ? scoot-notify-sync);
+      true
+    )
+    (
+      assert !(hmNotifOff.config.xdg.configFile ? "mako/config");
+      true
+    )
+    (
+      assert hmNotifOff.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    # Standalone (no profile): the daemon runs, unthemed.
+    (
+      assert allAssertionsHold hmNotifStandalone.config;
+      true
+    )
+    (
+      assert hmNotifStandalone.config.systemd.user.services ? mako;
+      true
+    )
+    (
+      assert hmNotifStandalone.config.systemd.user.services ? scoot-notify-sync;
+      true
+    )
+    (
+      assert hmNotifStandalone.config.xdg.configFile ? "mako/config";
+      true
+    )
+    # Rethemed, rebound and recolored: every assertion still holds
+    # (the content checks below prove the values land).
+    (
+      assert allAssertionsHold hmNotifSettings.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmNotifTargetOff.config;
+      true
+    )
+    # Refusals: the daemon with no mako to run it...
+    (
+      assert builtins.length (failing hmNotifNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "notifications.package is null" (builtins.head (failing hmNotifNoPkg.config));
+      true
+    )
+    # ...and an unknown daemon, an enum type error (verified by hand
+    # to name the one valid value).
+    (
+      assert !hmNotifDaemonBogus.success;
+      true
+    )
+
+    # NixOS: the profile installs mako beside scoot and scootbg --
+    # staying additive (no default session, ever)...
+    (
+      assert allAssertionsHold osNotif.config;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "mako") osNotif.config.environment.systemPackages;
+      true
+    )
+    (
+      assert osNotif.config.services.displayManager.defaultSession == null;
+      true
+    )
+    # ...the daemon off: the profile's own packages only...
+    (
+      assert allAssertionsHold osNotifOff.config;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "mako") osNotifOff.config.environment.systemPackages);
+      true
+    )
+    # ...and the refusal naming the daemon on this side as well.
+    (
+      assert builtins.length (failing osNotifNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "notifications.package is null" (builtins.head (failing osNotifNoPkg.config));
+      true
+    )
+
+    # With the bar module: the feed's `push` module is defined, with
+    # the DND toggle as its click (the daemon's own command, by
+    # absolute path)...
+    (
+      assert allAssertionsHold hmDeskBarNotif.config;
+      true
+    )
+    (
+      assert
+        hmDeskBarNotif.config.programs.scootbar.settings.push.notifications.on-click.exec == [
+          "${leanMako}/bin/makoctl"
+          "mode"
+          "-t"
+          "do-not-disturb"
+        ];
+      true
+    )
+    # ...a user's own click winning per leaf (pinned structurally:
+    # the whole table is defined leaf by leaf, the way the colors
+    # are)...
+    (
+      assert
+        (evalHomeDesktopWith [ ]
+          {
+            enable = true;
+            package = fakePkg;
+            wallpaper.package = fakeBg;
+            desktop.enable = true;
+            desktop.look = "music-desk";
+          }
+          {
+            package = fakeBar;
+            settings.push.notifications.on-click.exec = [ "true" ];
+          }
+        ).config.programs.scootbar.settings.push.notifications.on-click.exec == [ "true" ];
+      true
+    )
+    # ...and on NixOS too, in that side's look.
+    (
+      assert allAssertionsHold osDeskBar.config;
+      true
+    )
+    (
+      assert
+        osDeskBar.config.programs.scootbar.settings.push.notifications.on-click.exec == [
+          "${leanMako}/bin/makoctl"
+          "mode"
+          "-t"
+          "do-not-disturb"
+        ];
+      true
+    )
+    # With the daemon off, or the bar unmanaged, the table stays
+    # absent (the bar is entirely the user's then: no feed, no
+    # toggle).
+    (
+      assert (hmDeskBarNoNotif.config.programs.scootbar.settings.push or { }) == { };
+      true
+    )
+    (
+      assert (hmDeskBarOff.config.programs.scootbar.settings.push or { }) == { };
+      true
+    )
+    (
+      assert (osDeskBarOff.config.programs.scootbar.settings.push or { }) == { };
+      true
+    )
+    # With a bar built without the push module: exactly one failing
+    # assertion, naming it (the bar itself would refuse the table at
+    # startup).
+    (
+      assert builtins.length (failing hmDeskBarNoPush.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "needs the push" (builtins.head (failing hmDeskBarNoPush.config));
+      true
+    )
+  ];
+
+  # --- notification daemon off Linux (fail `nix flake check` at eval) ---
+  #
+  # mako is Linux-only: off Linux its package defaults to null, which
+  # the daemon's own assertion refuses loudly instead of installing
+  # nothing silently. Empty off Linux (the Linux check above is where
+  # the daemon is pinned).
+  _darwinNotifPins = lib.optionals (!isLinux) [
+    # Home-manager: null, and the daemon's assertion refusing loudly.
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.package == null;
+      true
+    )
+    (
+      assert builtins.length (failing hmNotif.config) == 6;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "notifications.package is null" m) (failing hmNotif.config);
+      true
+    )
+    # NixOS: the same null (no daemon installed)...
+    (
+      assert osNotif.config.programs.scoot.desktop.notifications.package == null;
+      true
+    )
+    # ...refused loudly there too (the idle policy's five plus the
+    # daemon's one).
+    (
+      assert builtins.length (failing osNotif.config) == 6;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "notifications.package is null" m) (failing osNotif.config);
+      true
+    )
+    # ...while the bar feed stays unwritten (no daemon, no toggle).
+    (
+      assert (hmDeskBarNotif.config.programs.scootbar.settings.push or { }) == { };
+      true
+    )
+  ];
+
+  # --- shared keymap (fail `nix flake check` at eval) ---
+  #
+  # Linux only: the actions name absolute store paths here (the bare
+  # fallbacks are pinned in `_darwinKeysPins`). Every default bind is
+  # pinned by combo and action below; an override and a removal prove
+  # the two user paths.
+  _keysPins = lib.optionals isLinux [
+    # Home-manager: the profile turns the keymap on...
+    (
+      assert allAssertionsHold hmKeys.config;
+      true
+    )
+    (
+      assert hmKeys.config.programs.scoot.desktop.keys.enable;
+      true
+    )
+    # ...rendering exactly the fifteen binds beside the profile (the
+    # twelve keymap-owned binds plus the three notification binds --
+    # the daemon is on with the profile, so its slot is open; every
+    # other future slot is off: its binds stay out)...
+    (
+      assert
+        hmKeys.config.programs.scoot.settings.binds == {
+          "XF86MonBrightnessUp" = "spawn ${lib.getExe pkgs.brightnessctl} -e set +5%";
+          "XF86MonBrightnessDown" = "spawn ${lib.getExe pkgs.brightnessctl} -e set 5%-";
+          "XF86AudioRaiseVolume" =
+            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
+          "XF86AudioLowerVolume" =
+            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
+          "XF86AudioMute" =
+            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SINK@ toggle";
+          "XF86AudioMicMute" =
+            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+          "XF86AudioPlay" = "spawn ${lib.getExe pkgs.playerctl} play-pause";
+          "XF86AudioPause" = "spawn ${lib.getExe pkgs.playerctl} pause";
+          "XF86AudioStop" = "spawn ${lib.getExe pkgs.playerctl} stop";
+          "XF86AudioNext" = "spawn ${lib.getExe pkgs.playerctl} next";
+          "XF86AudioPrev" = "spawn ${lib.getExe pkgs.playerctl} previous";
+          "super+escape" = "spawn ${lib.getExe' pkgs.systemd "loginctl"} lock-session";
+          "super+n" = "spawn ${leanMako}/bin/makoctl dismiss";
+          "super+shift+n" = "spawn ${leanMako}/bin/makoctl mode -t do-not-disturb";
+          "super+ctrl+n" = "spawn ${leanMako}/bin/makoctl restore";
+        };
+      true
+    )
+    # ...beside the profile's and the policy's packages (scoot, the
+    # five idle tools, mako and the keymap's three)...
+    (
+      assert
+        sorted hmKeys.config.home.packages == sorted [
+          fakePkg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
+          leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
+        ];
+      true
+    )
+    # ...every other future slot on: all nineteen binds (the
+    # launcher bind by bare tool name -- its slot installs nothing
+    # yet -- the notification binds through mako's absolute path, the
+    # clipboard and capture binds through the keymap's own scripts)...
+    (
+      assert allAssertionsHold hmKeysSlots.config;
+      true
+    )
+    (
+      assert builtins.length (builtins.attrNames hmKeysSlots.config.programs.scoot.settings.binds) == 19;
+      true
+    )
+    (
+      assert hmKeysSlots.config.programs.scoot.settings.binds."super+d" == "spawn fuzzel";
+      true
+    )
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."super+v"
+        == "spawn ${slotScriptBin hmKeysSlots "scoot-clipboard-pick"}";
+      true
+    )
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."super+n"
+        == "spawn ${leanMako}/bin/makoctl dismiss";
+      true
+    )
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."super+shift+n"
+        == "spawn ${leanMako}/bin/makoctl mode -t do-not-disturb";
+      true
+    )
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."super+ctrl+n"
+        == "spawn ${leanMako}/bin/makoctl restore";
+      true
+    )
+    # ...and the DND key runs the bar toggle's own command (both read
+    # `notifications.package`, pinned here so a later change to either
+    # side fails loudly)...
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."super+shift+n"
+        == "spawn ${lib.concatStringsSep " " hmDeskBarNotif.config.programs.scootbar.settings.push.notifications.on-click.exec}";
+      true
+    )
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."print"
+        == "spawn ${slotScriptBin hmKeysSlots "scoot-capture-output"}";
+      true
+    )
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."shift+print"
+        == "spawn ${slotScriptBin hmKeysSlots "scoot-capture-region"}";
+      true
+    )
+    # ...the three slot scripts installed beside the keymap's tools...
+    (
+      assert lib.any (p: (p.name or "") == "scoot-clipboard-pick") hmKeysSlots.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-capture-output") hmKeysSlots.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-capture-region") hmKeysSlots.config.home.packages;
+      true
+    )
+    # ...one bind removed: its combo unbound, the other thirteen
+    # still there (fifteen with the daemon on, minus two)...
+    (
+      assert allAssertionsHold hmKeysOmit.config;
+      true
+    )
+    (
+      assert !(hmKeysOmit.config.programs.scoot.settings.binds ? "XF86AudioRaiseVolume");
+      true
+    )
+    (
+      assert !(hmKeysOmit.config.programs.scoot.settings.binds ? "super+escape");
+      true
+    )
+    (
+      assert builtins.length (builtins.attrNames hmKeysOmit.config.programs.scoot.settings.binds) == 13;
+      true
+    )
+    # ...one bind overridden: the user's own `[binds]` entry wins...
+    (
+      assert
+        hmKeysOverride.config.programs.scoot.settings.binds."XF86AudioRaiseVolume" == "spawn sh -c true";
+      true
+    )
+    (
+      assert
+        builtins.length (builtins.attrNames hmKeysOverride.config.programs.scoot.settings.binds) == 15;
+      true
+    )
+    # ...a slot bind overridden the same way (the slot's command
+    # loses to the user's)...
+    (
+      assert hmKeysSlotOverride.config.programs.scoot.settings.binds."super+d" == "spawn foot";
+      true
+    )
+    # ...and keys-only (policy and locker off): an empty lock action
+    # still fails -- it renders into `super+escape`...
+    (
+      assert builtins.length (failing hmKeysLockCmdEmpty.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.command" (builtins.head (failing hmKeysLockCmdEmpty.config));
+      true
+    )
+    # ...the whole keymap off: no `[binds]` from it (no other eval
+    # sets binds here, so the table is absent entirely), the idle
+    # policy's five and mako beside scoot only...
+    (
+      assert allAssertionsHold hmKeysOff.config;
+      true
+    )
+    (
+      assert !(hmKeysOff.config.programs.scoot.settings ? binds);
+      true
+    )
+    (
+      assert
+        sorted hmKeysOff.config.home.packages == sorted [
+          fakePkg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
+          leanMako
+        ];
+      true
+    )
+    # NixOS: the keymap off leaves the profile's other packages
+    # only (the five idle tools and mako beside scoot and scootbg).
+    (
+      assert allAssertionsHold osKeysOff.config;
+      true
+    )
+    (
+      assert
+        sorted osKeysOff.config.environment.systemPackages == sorted [
+          fakePkg
+          fakeBg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
+          leanMako
+        ];
+      true
+    )
+  ];
+
+  # --- idle policy off Linux (fail `nix flake check` at eval) ---
+  #
+  # The tools above are Linux-only: off Linux each package defaults to
+  # null (their attributes exist on Darwin but refuse evaluation when
+  # forced, so `or null` alone does not save them), the lock action
+  # falls back to its bare form, and the policy's own assertions refuse
+  # loudly instead of installing nothing silently. Empty off Linux (the
+  # Linux check above is where the policy is pinned).
+  _darwinIdlePins = lib.optionals (!isLinux) [
+    # Home-manager: every tool null, nothing installed for the policy...
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.package == null;
+      true
+    )
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.dimPackage == null;
+      true
+    )
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.offPackage == null;
+      true
+    )
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.mediaInhibit.package == null;
+      true
+    )
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.lock.package == null;
+      true
+    )
+    # ...the lock action in its bare form (no store path: logind is
+    # Linux-only)...
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.lock.command == "loginctl lock-session";
+      true
+    )
+    # ...and the policy's own assertions refusing loudly, naming the
+    # switch (one per null tool: the policy, the dim and screens-off
+    # steps, the inhibitor, the locker -- plus the notification
+    # daemon's one, on with the profile; order-insensitive: the
+    # daemon's module contributes its refusal first).
+    (
+      assert builtins.length (failing hmIdle.config) == 6;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "idle.package is null" m) (failing hmIdle.config);
+      true
+    )
+    # NixOS: the same nulls (no tools installed for the policy)...
+    (
+      assert osIdle.config.programs.scoot.desktop.idle.package == null;
+      true
+    )
+    (
+      assert osIdle.config.programs.scoot.desktop.idle.lock.package == null;
+      true
+    )
+    (
+      assert osIdle.config.programs.scoot.desktop.idle.lock.command == "loginctl lock-session";
+      true
+    )
+    # ...refused loudly there too, while the docked-lid rule (plain
+    # values, no tools) still lands.
+    (
+      assert builtins.length (failing osIdle.config) == 6;
+      true
+    )
+    (
+      assert osIdle.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+      true
+    )
+  ];
+
+  # --- shared keymap off Linux (fail `nix flake check` at eval) ---
+  #
+  # The keymap's tools are Linux-only like the policy's, but the
+  # binds stay benign without them (a missing tool fails quietly at
+  # runtime), so off Linux the tools are null, the binds render in
+  # their bare form for the Linux box the config deploys to, and --
+  # unlike the policy -- the keymap itself refuses nothing (the
+  # daemon's null-package refusal beside it is pinned below).
+  _darwinKeysPins = lib.optionals (!isLinux) [
+    # Home-manager: every keymap tool null, nothing installed for it
+    # (scoot itself aside: this eval sets `package`)...
+    (
+      assert hmKeys.config.programs.scoot.desktop.keys.brightnessPackage == null;
+      true
+    )
+    (
+      assert hmKeys.config.programs.scoot.desktop.keys.volumePackage == null;
+      true
+    )
+    (
+      assert hmKeys.config.programs.scoot.desktop.keys.mediaPackage == null;
+      true
+    )
+    (
+      assert hmKeys.config.home.packages == [ fakePkg ];
+      true
+    )
+    # ...the keymap still on with the profile, its binds in bare
+    # form (the lock action bare too: logind is Linux-only -- and the
+    # notification binds bare as well: mako is Linux-only, while its
+    # slot is open with the profile)...
+    (
+      assert hmKeys.config.programs.scoot.desktop.keys.enable;
+      true
+    )
+    (
+      assert
+        hmKeys.config.programs.scoot.settings.binds == {
+          "XF86MonBrightnessUp" = "spawn brightnessctl -e set +5%";
+          "XF86MonBrightnessDown" = "spawn brightnessctl -e set 5%-";
+          "XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+";
+          "XF86AudioLowerVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-";
+          "XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle";
+          "XF86AudioMicMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+          "XF86AudioPlay" = "spawn playerctl play-pause";
+          "XF86AudioPause" = "spawn playerctl pause";
+          "XF86AudioStop" = "spawn playerctl stop";
+          "XF86AudioNext" = "spawn playerctl next";
+          "XF86AudioPrev" = "spawn playerctl previous";
+          "super+escape" = "spawn loginctl lock-session";
+          "super+n" = "spawn makoctl dismiss";
+          "super+shift+n" = "spawn makoctl mode -t do-not-disturb";
+          "super+ctrl+n" = "spawn makoctl restore";
+        };
+      true
+    )
+    # ...and the keymap refuses nothing itself: the only failing
+    # assertions are the idle policy's five plus the daemon's one
+    # (its package is null off Linux -- pinned in
+    # `_darwinNotifPins`), so bare tool names stay valid config,
+    # just quiet at runtime.
+    (
+      assert builtins.length (failing hmKeys.config) == 6;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "notifications.package is null" m) (failing hmKeys.config);
+      true
+    )
+    # NixOS: the same nulls, nothing installed for the keymap.
+    (
+      assert osIdle.config.programs.scoot.desktop.keys.brightnessPackage == null;
+      true
+    )
+    (
+      assert osIdle.config.programs.scoot.desktop.keys.volumePackage == null;
+      true
+    )
+    (
+      assert osIdle.config.programs.scoot.desktop.keys.mediaPackage == null;
       true
     )
   ];
@@ -2448,6 +4318,12 @@ in
 assert lib.all (x: x) _pins;
 assert lib.all (x: x) _greeterPins;
 assert lib.all (x: x) _desktopPins;
+assert lib.all (x: x) _idlePins;
+assert lib.all (x: x) _notifPins;
+assert lib.all (x: x) _keysPins;
+assert lib.all (x: x) _darwinIdlePins;
+assert lib.all (x: x) _darwinNotifPins;
+assert lib.all (x: x) _darwinKeysPins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   set -euo pipefail
@@ -2567,6 +4443,27 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   assert tomllib.load(open(sys.argv[2],"rb")) == {"wallpaper": "blue"}
   ' ${hmNoWallToml} ${hmWallNotTableToml}
   echo "ok: no [wallpaper] table is added, and a non-table renders as written"
+  #    ...a `{ url, hash }` image renders as the fetched file's store path
+  #    (beside the injected scootbg `command`).
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))["wallpaper"]
+  assert got["mode"] == "fill", got
+  assert got["image"].endswith("url-wallpaper.png"), got
+  assert got["command"].endswith("/bin/scootbg"), got
+  ' ${hmWallUrlToml}
+  echo "ok: a [wallpaper] { url, hash } image renders as the fetched file"
+  #    ...and a per-output `{ url, hash }` image renders as the fetched
+  #    file's store path beside the top-level image as written.
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))["wallpaper"]
+  assert got["image"] == "~/Pictures/hills.jpg", got
+  per = got["output"]["DP-2"]
+  assert per["image"].endswith("url-wallpaper.png"), got
+  assert got["command"].endswith("/bin/scootbg"), got
+  ' ${hmWallPerOutputUrlToml}
+  echo "ok: a per-output [wallpaper] { url, hash } image renders as the fetched file"
 
   # 9. Stylix: the rendered file carries the themed appearance, cursor
   #    and wallpaper (with the injected scootbg `command` beside the
@@ -2660,6 +4557,258 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   assert got["colors"] == {"background": "#2B3648", "foreground": "#F6EEDC", "accent": "#FFA45C", "hover": "#FFD54A", "dim": "#9C8B95", "urgent": "#E87F6A"}, got["colors"]
   ' ${hmDeskBarMoonToml}
   echo "ok: desktop look renders moonrise into the bar config"
+
+  # 11-12c. Idle policy and locker content (Linux only: every line
+  # below names a Linux-only tool's store path, and the files
+  # themselves exist only where the policy runs -- off Linux the
+  # tools default to null and no config is written).
+  ${lib.optionalString isLinux ''
+    # 11. Idle policy: the generated swayidle config carries the M2's
+    #     timeouts -- dim at 2 min with save/restore, lock at 4 min
+    #     through loginctl, screens off at 5 min with the output wildcard
+    #     quoted intact -- plus the sleep lock and the lock event behind
+    #     `swaylock -f` with its config. (Fixed-string matches throughout:
+    #     the quoting is the assertion.)
+    grep -F "timeout 120 '${pkgs.brightnessctl}/bin/brightnessctl -s set 10%' resume '${pkgs.brightnessctl}/bin/brightnessctl -r'" ${idleConf}
+    grep -F "timeout 240 '${pkgs.systemd}/bin/loginctl lock-session'" ${idleConf}
+    grep -F "timeout 300 '${pkgs.wlopm}/bin/wlopm --off \"*\"' resume '${pkgs.wlopm}/bin/wlopm --on \"*\"'" ${idleConf}
+    grep -F "before-sleep '${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
+    grep -F "lock '${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
+    echo "ok: swayidle config carries the idle timeouts, the sleep lock and the lock event"
+
+    # 11b. The lock off: dim and screens-off stay, and no line locks
+    #      (no timeout through loginctl, no before-sleep, no lock event).
+    grep -F "timeout 120 '" ${idleNoLockConf}
+    grep -F "timeout 300 '" ${idleNoLockConf}
+    if grep -q lock ${idleNoLockConf}; then echo "lock lines present with the locker off" >&2; exit 1; fi
+    echo "ok: with the lock off, dim and screens-off stay and nothing locks"
+
+    # 11c. Retimed: every override lands (timeouts and the dim level).
+    grep -F "timeout 60 '${pkgs.brightnessctl}/bin/brightnessctl -s set 20%'" ${idleTimeoutsConf}
+    grep -F "timeout 90 '" ${idleTimeoutsConf}
+    grep -F "timeout 120 '" ${idleTimeoutsConf}
+    echo "ok: retimed idle policy renders its overrides"
+
+    # 11d. Zeroed: a 0 timeout omits that step's line (the lock step
+    #      stays: sleep still locks while the locker is on).
+    if grep -q "timeout 120\|timeout 300" ${idleZeroConf}; then echo "disabled step still present" >&2; exit 1; fi
+    grep -F "timeout 240 '" ${idleZeroConf}
+    grep -F "before-sleep '" ${idleZeroConf}
+    echo "ok: a 0 timeout omits that step"
+
+    # 11e. Rebound: the lock action override is what the timeout runs
+    #      (and what the keymap's `super+escape` bind runs).
+    grep -F "timeout 240 'loginctl lock-session'" ${idleCmdConf}
+    echo "ok: the lock action override reaches the timeout"
+
+    # 12. Locker config, music-desk: the look's roles as swaylock leaves
+    #     (screen and indicator backgrounds, active ring, accent key
+    #     highlight, ink text, urgent wrong-ring).
+    grep -F -x "color=FCFBFB" ${idleLockConf}
+    grep -F -x "inside-color=FCFBFB" ${idleLockConf}
+    grep -F -x "ring-color=3D579A" ${idleLockConf}
+    grep -F -x "key-hl-color=3D579A" ${idleLockConf}
+    grep -F -x "text-color=1A2032" ${idleLockConf}
+    grep -F -x "ring-wrong-color=EE6F5E" ${idleLockConf}
+    echo "ok: locker config carries the look's colors"
+
+    # 12b. A locker setting wins per key (verbatim, leading `#` kept --
+    #      swaylock's own parser strips it), and an empty string renders
+    #      a bare flag.
+    grep -F -x "ring-color=#123456" ${idleSettingsConf}
+    grep -F -x "show-failed-attempts" ${idleSettingsConf}
+    grep -F -x "color=FCFBFB" ${idleSettingsConf}
+    echo "ok: locker settings win per key, flags render bare"
+
+    # 12c. Opted out (or lookless): no themed leaf at all -- with the
+    #      opt-out the settings still apply, so the locker is theirs.
+    if grep -q "^color=" ${idleTargetOffConf}; then echo "themed leaf present with theming off" >&2; exit 1; fi
+    grep -F -x "ring-color=#123456" ${idleTargetOffConf}
+    if grep -q "color=" ${idleNoLookConf}; then echo "themed leaf present with no look" >&2; exit 1; fi
+    echo "ok: opting out (or no look) leaves the locker unthemed"
+
+    # 13. Notification daemon, music-desk: the overlay layer (popups
+    #     above fullscreen -- mako's own default is `top`, which the
+    #     compositor hides), the DND section hiding, the look's roles
+    #     as mako leaves (its `#rrggbb` colors kept verbatim), and the
+    #     critical ring in urgent.
+    grep -F -x "layer=overlay" ${notifConf}
+    grep -F -x "[mode=do-not-disturb]" ${notifConf}
+    grep -F -x "invisible=1" ${notifConf}
+    grep -F -x "background-color=#FCFBFB" ${notifConf}
+    grep -F -x "text-color=#1A2032" ${notifConf}
+    grep -F -x "border-color=#3D579A" ${notifConf}
+    grep -F -x "progress-color=over #3D579A" ${notifConf}
+    grep -F -x "[urgency=critical]" ${notifConf}
+    grep -F -x "border-color=#EE6F5E" ${notifConf}
+    echo "ok: mako config carries the overlay layer, DND and the look"
+
+    # 13b. A daemon setting wins per key (verbatim, leading `#` kept),
+    #      a new key lands, and the generated sections stay.
+    grep -F -x "layer=top" ${notifSettingsConf}
+    if grep -q "^layer=overlay$" ${notifSettingsConf}; then echo "overridden default still present" >&2; exit 1; fi
+    grep -F -x "anchor=bottom-right" ${notifSettingsConf}
+    grep -F -x "background-color=#123456" ${notifSettingsConf}
+    grep -F -x "[mode=do-not-disturb]" ${notifSettingsConf}
+    grep -F -x "[urgency=critical]" ${notifSettingsConf}
+    echo "ok: daemon settings win per key, generated sections stay"
+
+    # 13c. Opted out (or lookless): no themed leaf at all -- with the
+    #      opt-out the settings still apply, so the daemon is theirs.
+    #      The DND section stays in both (it is behavior, not theme).
+    if grep -q "^background-color=" ${notifTargetOffConf}; then echo "themed leaf present with theming off" >&2; exit 1; fi
+    grep -F -x "border-color=#123456" ${notifTargetOffConf}
+    grep -F -x "[mode=do-not-disturb]" ${notifTargetOffConf}
+    if grep -q "background-color=" ${notifNoLookConf}; then echo "themed leaf present with no look" >&2; exit 1; fi
+    if grep -q "urgency=critical" ${notifNoLookConf}; then echo "critical section present with no look" >&2; exit 1; fi
+    grep -F -x "layer=overlay" ${notifNoLookConf}
+    grep -F -x "[mode=do-not-disturb]" ${notifNoLookConf}
+    echo "ok: opting out (or no look) leaves mako unthemed but hiding"
+
+    # 13d. The bar feed: the push table carries the envelope icon and
+    #      the DND toggle (the daemon's own command, absolute, so it
+    #      works off PATH).
+    python3 -c '
+    import sys,tomllib
+    got = tomllib.load(open(sys.argv[1],"rb"))
+    assert got["push"]["notifications"]["icon"] == "✉", got["push"]
+    assert got["push"]["notifications"]["on-click"]["exec"] == [sys.argv[2], "mode", "-t", "do-not-disturb"], got["push"]
+    ' ${notifBarToml} '${leanMako}/bin/makoctl'
+    echo "ok: bar push module toggles do-not-disturb"
+
+    # 13e. The lean daemon: its runtime closure names no GTK stack
+    #      (the `wrapGAppsHook3` weight the profile refuses to ship:
+    #      gtk+3, tinysparql, cups, at-spi2-core, avahi). Any of those
+    #      names reappearing -- a rebase silently restoring the hook,
+    #      say -- fails loudly here.
+    if grep -E "gtk\+3|tinysparql|cups|at-spi2|avahi" ${leanMakoClosure}/store-paths; then echo "GTK-stack path in lean mako closure" >&2; exit 1; fi
+    echo "ok: lean mako closure carries no GTK stack"
+
+    # 13f. ...while its wrapper still sets what icons need: the pixbuf
+    #      loaders cache and an icon theme dir (both gtk-free: the
+    #      cache names only gdk-pixbuf and librsvg).
+    grep -q "GDK_PIXBUF_MODULE_FILE=" ${leanMako}/bin/mako
+    grep -q "hicolor-icon-theme" ${leanMako}/bin/mako
+    if grep -E "gtk\+3|tinysparql" ${leanMako}/bin/mako ${leanMako}/bin/makoctl; then echo "GTK-stack reference in lean mako wrapper" >&2; exit 1; fi
+    echo "ok: lean mako wrapper sets the pixbuf loaders and the icon theme"
+
+    # 14. The bar feed, against stub tools (the REAL bridge script from
+    #     the module, scenario files below -- `mode`/`list` are what
+    #     `makoctl` prints, `bus` what `busctl monitor` prints,
+    #     `bar-err`/`bar-code` how `scootbar` answers, `calls` what it
+    #     was asked). Every scenario asserts the exit status (bare:
+    #     any other status fails the check) and the exact stderr lines.
+    export SCOOT_FEED_TEST_DIR="$PWD/feed-test"
+    mkdir -p "$SCOOT_FEED_TEST_DIR"
+    feed_setup() {
+      # $1 mode, $2 mode-code, $3 list, $4 list-code, $5 bar-err, $6 bar-code
+      printf '%s' "$1" > "$SCOOT_FEED_TEST_DIR/mode"
+      printf '%s' "$2" > "$SCOOT_FEED_TEST_DIR/mode-code"
+      printf '%s' "$3" > "$SCOOT_FEED_TEST_DIR/list"
+      printf '%s' "$4" > "$SCOOT_FEED_TEST_DIR/list-code"
+      printf '%s' "$5" > "$SCOOT_FEED_TEST_DIR/bar-err"
+      printf '%s' "$6" > "$SCOOT_FEED_TEST_DIR/bar-code"
+      : > "$SCOOT_FEED_TEST_DIR/calls"
+      : > "$SCOOT_FEED_TEST_DIR/stderr"
+    }
+
+    # 14a. The module not placed: the guidance names the missing
+    #      module (not a dead bar), exactly one stderr line, exit 0.
+    feed_setup 'default' 0 '[]' 0 'daemon: `notifications` is not placed in this bar (it shows: clock)' 1
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14a)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "no notifications module" "$SCOOT_FEED_TEST_DIR/stderr"
+    if grep -q "not running" "$SCOOT_FEED_TEST_DIR/stderr"; then echo "blamed the bar for an unplaced module (14a)" >&2; exit 1; fi
+    grep -q '^msg set notifications' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: feed names the unplaced module, once"
+
+    # 14b. The bar not running: that is what the line says, once.
+    feed_setup 'default' 0 '[]' 0 'scootbar: no scootbar daemon is running for eDP-1 (nothing listens on /run/user/1000/scootbar-eDP-1.sock); start one with `scootbar daemon`' 1
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14b)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "cannot reach the bar" "$SCOOT_FEED_TEST_DIR/stderr"
+    echo "ok: feed names the dead bar, once"
+
+    # 14c. Malformed `makoctl list`: counts as empty, never as a
+    #      crash -- exit 0, so `Restart=on-failure` does not respawn
+    #      into a 2 s crash loop. One warning line; the push shows
+    #      the empty bell.
+    feed_setup 'default' 0 'this is not json' 0 "" 0
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14c)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "malformed JSON" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -qF '{"text":""}' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: malformed list shows empty, no crash loop"
+
+    # 14d. mako gone: the bar is cleared instead of left stale, one
+    #      line saying so, exit 0.
+    feed_setup "" 1 '[]' 0 "" 0
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14d)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "cleared the bar" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -qF '{"text":""}' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: mako gone clears the bar"
+
+    # 14e. `--watch`: losing the bus name clears the bar (the initial
+    #      sync pushes the urgent count first). The monitor ending is
+    #      exit 1, which is what restarts the feed.
+    feed_setup 'default' 0 '[{"urgency": 2}]' 0 "" 0
+    printf '%s\n' '{"type":"signal","sender":"org.freedesktop.DBus","path":"/org/freedesktop/DBus","interface":"org.freedesktop.DBus","member":"NameOwnerChanged","payload":{"type":"sss","data":["org.freedesktop.Notifications",":1.5",""]}}' > "$SCOOT_FEED_TEST_DIR/bus"
+    if ${feedBridge} --watch 2>"$SCOOT_FEED_TEST_DIR/stderr"; then echo "monitor end should exit 1 (14e)" >&2; exit 1; fi
+    grep -qF '"urgent"' "$SCOOT_FEED_TEST_DIR/calls"
+    grep -qF '{"text":""}' "$SCOOT_FEED_TEST_DIR/calls"
+    grep -q "cleared the bar" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -q "bus monitor ended" "$SCOOT_FEED_TEST_DIR/stderr"
+    echo "ok: bus-name loss clears the bar on watch"
+
+    # 14f. `--watch`: a new owner re-syncs (no clear, the state is
+    #      fresh from the restarted daemon).
+    feed_setup 'default' 0 '[{"urgency": 1}]' 0 "" 0
+    printf '%s\n' '{"type":"signal","sender":"org.freedesktop.DBus","path":"/org/freedesktop/DBus","interface":"org.freedesktop.DBus","member":"NameOwnerChanged","payload":{"type":"sss","data":["org.freedesktop.Notifications","",":1.9"]}}' > "$SCOOT_FEED_TEST_DIR/bus"
+    if ${feedBridge} --watch 2>"$SCOOT_FEED_TEST_DIR/stderr"; then echo "monitor end should exit 1 (14f)" >&2; exit 1; fi
+    [ "$(grep -c '^msg set notifications' "$SCOOT_FEED_TEST_DIR/calls")" = 2 ] || { echo "want initial sync plus re-sync (14f)"; cat "$SCOOT_FEED_TEST_DIR/calls"; exit 1; }
+    if grep -q "cleared the bar" "$SCOOT_FEED_TEST_DIR/stderr"; then echo "re-sync cleared instead (14f)" >&2; exit 1; fi
+    echo "ok: bus-name gain re-syncs on watch"
+
+    # 14g. `--watch`: a monitor line that is not JSON is skipped,
+    #      never fatal (the initial sync still lands).
+    feed_setup 'default' 0 '[]' 0 "" 0
+    printf '%s\n' 'this is not a bus message' > "$SCOOT_FEED_TEST_DIR/bus"
+    if ${feedBridge} --watch 2>"$SCOOT_FEED_TEST_DIR/stderr"; then echo "monitor end should exit 1 (14g)" >&2; exit 1; fi
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly the monitor-ended line (14g)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "bus monitor ended" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -q '^msg set notifications' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: garbage monitor line is skipped"
+
+    # 15. Keymap content: the rendered `[binds]` carries the
+    #     fifteen profile binds with absolute tool paths (the sigils --
+    #     `@...@`, `%`, `+` -- intact through TOML; the notification
+    #     binds through mako's absolute path, the daemon being on with
+    #     the profile), and with every slot on all nineteen (slot
+    #     scripts as store paths, the launcher bind by bare tool name).
+    python3 -c '
+    import sys,tomllib
+    got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
+    assert len(got) == 15, got.keys()
+    assert got["XF86AudioRaiseVolume"].startswith("spawn ") and got["XF86AudioRaiseVolume"].endswith(" set-volume @DEFAULT_AUDIO_SINK@ 5%+"), got["XF86AudioRaiseVolume"]
+    assert got["XF86MonBrightnessUp"].endswith(" -e set +5%"), got["XF86MonBrightnessUp"]
+    assert got["super+escape"].endswith(" lock-session"), got["super+escape"]
+    assert got["super+n"].startswith("spawn ") and got["super+n"].endswith("/bin/makoctl dismiss"), got["super+n"]
+    assert got["super+shift+n"].endswith("/bin/makoctl mode -t do-not-disturb"), got["super+shift+n"]
+    assert got["super+ctrl+n"].endswith("/bin/makoctl restore"), got["super+ctrl+n"]
+    ' ${keysToml}
+    python3 -c '
+    import sys,tomllib
+    got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
+    assert len(got) == 19, got.keys()
+    assert got["super+d"] == "spawn fuzzel", got["super+d"]
+    assert got["super+n"].endswith("/bin/makoctl dismiss"), got["super+n"]
+    assert "/bin/scoot-clipboard-pick" in got["super+v"], got["super+v"]
+    assert "/bin/scoot-capture-output" in got["print"], got["print"]
+    assert "/bin/scoot-capture-region" in got["shift+print"], got["shift+print"]
+    ' ${keysSlotsToml}
+    echo "ok: rendered [binds] carries the keymap (fifteen with the daemon, nineteen with slots)"
+  ''}
 
   touch $out
   echo "scoot-modules: all file-content checks passed"

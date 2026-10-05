@@ -16,6 +16,7 @@ fn image(serial: u64) -> Arc<Image> {
             filter: Filter::Lanczos3,
         },
         serial,
+        fetch: None,
     })
 }
 

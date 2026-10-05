@@ -7,7 +7,9 @@ use super::respond::{ChangeError, Changes, Ready, Responder, write_ready};
 use crate::color::Color;
 use crate::control::{Answer, ConnId, Handler};
 use crate::image::{Filter, Mode};
-use crate::protocol::{ImageRequest, OutputEntry, OutputList, PROTOCOL_VERSION, Request, Show};
+use crate::protocol::{
+    ImageRequest, OutputEntry, OutputList, PROTOCOL_VERSION, Request, Show, Source,
+};
 use crate::section::Section;
 use crate::state::Profile;
 use crate::waiters::Outcome;
@@ -19,7 +21,13 @@ fn owned(show: Show<'_>) -> Show<'static> {
     match show {
         Show::Color(color) => Show::Color(color),
         Show::Image(image) => Show::Image(ImageRequest {
-            path: Cow::Owned(image.path.into_owned()),
+            source: match image.source {
+                Source::Path(path) => Source::Path(Cow::Owned(path.into_owned())),
+                Source::Url { url, sha256 } => Source::Url {
+                    url: Cow::Owned(url.into_owned()),
+                    sha256,
+                },
+            },
             mode: image.mode,
             fill: image.fill,
             filter: image.filter,
@@ -83,7 +91,7 @@ impl Changes for Fake<'_> {
         output: Option<&str>,
         show: Option<Show<'_>>,
     ) -> Result<(), ChangeError> {
-        if let Some(error) = self.refuse {
+        if let Some(error) = self.refuse.clone() {
             return Err(error);
         }
         let id = if conn == ConnId::for_test(1) { 1 } else { 0 };
@@ -171,7 +179,7 @@ fn set_and_clear_change_the_wallpaper_and_answer_later() {
     let red = Color::parse("#c03020").unwrap();
     let quoted = "DP-\"1\"";
     let image = Show::Image(ImageRequest {
-        path: "/p/a.jpg".into(),
+        source: Source::Path("/p/a.jpg".into()),
         mode: Mode::Center,
         fill: red,
         filter: Filter::Bilinear,
@@ -576,6 +584,7 @@ fn a_superseded_image_request_waits_like_a_color() {
             filter: Filter::Lanczos3,
         },
         serial: 1,
+        fetch: None,
     });
     jobs.trial(image, Trial { conn, output: None }).unwrap();
     // A color for every output, generation 2, recorded; its output (stamp

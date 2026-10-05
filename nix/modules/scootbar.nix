@@ -127,6 +127,20 @@ let
       null
     else
       (import ./desktop.nix { inherit lib; }).looks.${desktopProfile.look};
+
+  # The notification daemon (`programs.scoot.desktop.notifications`
+  # in the scoot modules), when those are imported beside this one.
+  # Each `or` keeps this evaluating with the scoot module absent or
+  # older than the notifications slot. The daemon behind it is the
+  # only half that changes when scootnotify replaces mako (the module
+  # id, the feed and the toggle stay); the toggle below names mako's
+  # own command, so a future daemon brings its own.
+  notifProfile = (desktopProfile.notifications or { });
+  notifOn = (notifProfile.enable or false);
+  notifDaemon = (notifProfile.daemon or "mako");
+  notifPkg = (notifProfile.package or null);
+  notifPushNeeded =
+    profileOn && profileManagesBar && notifOn && notifPkg != null && notifDaemon == "mako";
 in
 {
   options.programs.scootbar = {
@@ -267,6 +281,18 @@ in
             with the features you want.
           '';
         }
+        {
+          # The notification feed writes this module: a build without
+          # it refuses the table at startup, naming it. Loud here
+          # instead, at eval. Null `features` keeps the default build,
+          # which has it.
+          assertion = !notifPushNeeded || cfg.features == null || builtins.elem "push" cfg.features;
+          message = ''
+            programs.scoot.desktop.notifications.enable needs the push
+            module: add "push" to programs.scootbar.features (or leave
+            features null for the default build, which has it).
+          '';
+        }
       ];
 
       # A font only when something draws text; the bar refuses to start
@@ -287,6 +313,30 @@ in
       programs.scootbar.settings.colors = lib.mapAttrs (
         name: value: lib.mkOptionDefault value
       ) profileLook.barColors;
+    })
+
+    # The notification daemon's bar half: the `push` module its feed
+    # writes (DND state and the unread count -- see
+    # `nix/modules/notifications-home.nix`), with a click toggling
+    # do-not-disturb through the daemon's own command, by absolute
+    # path, so it works whatever is on PATH. Each leaf a priority
+    # below the user's and Stylix's, the way the look's colors are: a
+    # value set in `settings` wins per key. Placement stays yours (the
+    # module is defined, not placed -- add `"notifications"` to a list
+    # to show it; see docs/nix.md). Like the look's colors, a bar the
+    # user turned off stays unthemed too. The envelope stands while the
+    # text is empty (a quiet desktop keeps a clickable bell, not a
+    # hole); it is in DejaVu Sans, the bar's own default font.
+    (lib.mkIf (notifPushNeeded && cfg.enable) {
+      programs.scootbar.settings.push.notifications.icon = lib.mkOptionDefault "✉";
+      programs.scootbar.settings.push.notifications.on-click = lib.mkOptionDefault {
+        exec = [
+          "${lib.getExe' notifPkg "makoctl"}"
+          "mode"
+          "-t"
+          "do-not-disturb"
+        ];
+      };
     })
 
     (lib.mkIf (cfg.enable && cfg.stylix.enable && stylix) {

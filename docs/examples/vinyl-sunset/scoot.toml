@@ -22,7 +22,8 @@ focus_ring_active_color = "#E59560"
 focus_ring_inactive_color = "#423F51"
 
 [wallpaper]
-# Download the illustration (see README.md) and point this at your copy.
+# Download the illustration (see README.md) and point this at your copy,
+# or at its Pixabay link (downloaded once and cached on your machine).
 # A relative path is resolved against this file's directory.
 image = "~/Pictures/wallpapers/vinyl-sunset.png"
 mode = "fill"
