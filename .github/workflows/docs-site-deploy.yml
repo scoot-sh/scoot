@@ -22,11 +22,13 @@ on:
 permissions:
   contents: read
 
-# One deploy at a time; a newer run cancels the queued older one, never a
-# live deploy mid-publish.
+# One deploy at a time. `cancel-in-progress: false` lets a running deploy
+# finish (GitHub's recommendation for Pages: cancelling mid-publish can leave
+# a half-deployed site); a newer run waits, and GitHub drops all but the
+# newest queued one.
 concurrency:
   group: docs-site-pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
