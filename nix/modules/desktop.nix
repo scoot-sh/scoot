@@ -525,18 +525,21 @@ in
       # (`~/.cache/cliphist/db`, honoring `XDG_CACHE_HOME`): on disk,
       # so history survives reboots -- with secrets never landing in
       # it by construction (see docs/nix.md for the trade-off). Set it
-      # to move the db (a path under `$HOME`, expanded by the shell).
-      # An empty value or one carrying a single quote fails evaluation
-      # (it renders inside single quotes on the idle policy's lock
-      # line).
+      # to move the db: an absolute path without shell specials (no
+      # `~`, spaces, quotes, `$`, backticks, `;` or backslashes -- the
+      # store entry, the picker and the idle policy's lock wipe all
+      # render it inside single quotes, so anything the shell would
+      # expand or split names a different file on one line than the
+      # others). Anything else fails evaluation.
       dbPath = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        example = "~/.cache/cliphist/db";
+        example = "/home/you/.cache/cliphist/db";
         description = ''
-          History db path (a shell word, `~` expanded). Null keeps
-          cliphist's default. Empty or quote-carrying values fail
-          evaluation.
+          History db path (absolute, no shell specials). Null keeps
+          cliphist's default. Anything but an absolute path free of
+          `~`, whitespace, quotes, `$`, backticks, `;` and backslashes
+          fails evaluation.
         '';
       };
     };

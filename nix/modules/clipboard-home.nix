@@ -59,10 +59,11 @@ let
   # The watch command both store units run: stdin carries one selection's
   # bytes, `CLIPBOARD_STATE` its sensitivity (`wl-paste --watch` sets it
   # to `sensitive` for password-manager offers -- cliphist then stores
-  # nothing -- and to `clear` for a cleared clipboard, which deletes the
-  # last entry). The guard in front refuses while locked (fail-open
-  # without IPC, so a broken probe costs the lock guarantee rather than
-  # the history); `max-items` bounds the db, oldest dropped first.
+  # nothing -- and to `nil` for a cleared clipboard, which arrives on
+  # empty stdin and is dropped by cliphist's whitespace check). The guard
+  # in front refuses while locked (fail-open without IPC, so a broken
+  # probe costs the lock guarantee rather than the history); `max-items`
+  # bounds the db, oldest dropped first.
   storeEntry = pkgs.writeShellScriptBin "scoot-clipboard-store-entry" ''
     ${guard}
     if ! clipboard_unlocked; then
@@ -187,23 +188,25 @@ in
           '';
         }
         {
-          # The db path renders inside single quotes on the idle
-          # policy's lock line (and double-quoted in the store entry):
-          # an empty value would render a bare `-db-path` flag, a quote
-          # would break out of the lock line's quoting and corrupt it
-          # (`builtins.match` returns null on no match, so each
-          # disjunct is false exactly for empty/blank and
-          # quote-carrying strings).
-          assertion =
-            clip.dbPath == null
-            || (
-              builtins.match "^[[:space:]]*$" clip.dbPath == null && builtins.match ".*'.*" clip.dbPath == null
-            );
+          # The db path renders inside single quotes in three shell
+          # contexts that must agree on one file: the store entry, the
+          # picker's `list`/`decode`, and the idle policy's lock line
+          # (swayidle wordexp-parses that line, then `sh -c` runs it --
+          # an unquoted `~` there would expand to `$HOME` while the
+          # scripts keep a literal `~`, wiping a different db than the
+          # history lives in; a space would field-split the wipe). So
+          # only an absolute path without shell specials passes: no
+          # `~` (unexpanded in single quotes), no whitespace, quotes,
+          # `$`, backticks, `;` or backslashes (`builtins.match` needs
+          # the whole value, so one anchored class decides it).
+          assertion = clip.dbPath == null || builtins.match "^/[^'\"`$;\\\\[:space:]]*$" clip.dbPath != null;
           message = ''
-            programs.scoot.desktop.clipboard.dbPath is empty, blank or
-            contains a single quote: set the history db path to store
-            (e.g. `~/.cache/cliphist/db`), or leave it null for
-            cliphist's default.
+            programs.scoot.desktop.clipboard.dbPath must be an absolute
+            path without shell-special characters (no `~`, spaces,
+            quotes, `$`, backticks, `;` or backslashes -- e.g.
+            `/home/you/.cache/cliphist/db`), or null for cliphist's
+            default. A `~` or relative path would name a different file
+            on the lock line than in the store entry and the picker.
           '';
         }
       ];

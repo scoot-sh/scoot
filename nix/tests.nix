@@ -111,7 +111,7 @@
 #   fuzzel's dmenu mode, themed by the look unless
 #   `theme.targets.clipboard.enable` opts out) and the history wiped
 #   on the idle policy's lock lines; a null tool, a zero `maxItems`
-#   and an empty or quote-carrying `dbPath` each fail eval;
+#   and a non-absolute or shell-special `dbPath` each fail eval;
 #   every remaining future slot
 #   defaults off and inert; `enable` without scoot, a look without the
 #   profile, and an unknown look each fail eval;
@@ -1413,13 +1413,16 @@ let
     enable = true;
     desktop.clipboard.enable = true;
   };
-  # ...with history bounds (a longer tail in a moved db).
+  # ...with history bounds (a longer tail in a moved db -- an
+  # absolute path without shell specials, the only shape that passes
+  # eval: the store, the picker and the lock wipe must all name the
+  # same file).
   hmClipBounds = evalHome {
     enable = true;
     desktop.enable = true;
     desktop.look = "music-desk";
     desktop.clipboard.maxItems = 250;
-    desktop.clipboard.dbPath = "~/.cache/cliphist-test/db";
+    desktop.clipboard.dbPath = "/home/scoot-test/.cache/cliphist-test/db";
   };
   # ...opted out of picker theming (the look leaves fuzzel alone).
   hmClipTargetOff = evalHome {
@@ -1452,17 +1455,50 @@ let
     desktop.clipboard.enable = true;
     desktop.clipboard.menuPackage = null;
   };
-  # ...a history of nothing, and a db path that never renders (each
-  # pinned by message in `_clipPins`).
+  # ...a history of nothing, and a db path in each refused shape (a
+  # `~` path would expand on the lock line but stay literal in the
+  # scripts, a relative path resolves against three different CWDs, and
+  # a space, quote, `$`, backtick or `;` splits or breaks out of the
+  # lock line's quoting -- each pinned by message in `_clipPins`).
   hmClipBadMax = evalHome {
     enable = true;
     desktop.clipboard.enable = true;
     desktop.clipboard.maxItems = 0;
   };
-  hmClipBadDb = evalHome {
+  hmClipBadDbTilde = evalHome {
     enable = true;
     desktop.clipboard.enable = true;
-    desktop.clipboard.dbPath = "~/.cache/cliphist'; reboot #";
+    desktop.clipboard.dbPath = "~/.cache/cliphist/db";
+  };
+  hmClipBadDbRelative = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = ".cache/cliphist/db";
+  };
+  hmClipBadDbSpace = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/my clips/db";
+  };
+  hmClipBadDbQuote = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/cliphist'; reboot #";
+  };
+  hmClipBadDbDollar = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/$USER/db";
+  };
+  hmClipBadDbBacktick = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/`id`/db";
+  };
+  hmClipBadDbSemi = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/cliphist;wipe/db";
   };
   hmClipBadDbEmpty = evalHome {
     enable = true;
@@ -2739,9 +2775,11 @@ let
   # profile with music-desk), lookless, opt-out, rebound and relocated
   # variants the content checks read.
   idleClipOffConf = hmClipOff.config.xdg.configFile."swayidle/config".source;
+  idleClipBoundsConf = hmClipBounds.config.xdg.configFile."swayidle/config".source;
   clipEntry = clipEntryOf hmClip "scoot-clipboard-store";
   clipBoundsEntry = clipEntryOf hmClipBounds "scoot-clipboard-store";
   clipPickerThemed = slotScriptBin hmClip "scoot-clipboard-pick";
+  clipBoundsPicker = slotScriptBin hmClipBounds "scoot-clipboard-pick";
   clipPickerNoLook = slotScriptBin hmClipNoLook "scoot-clipboard-pick";
   clipPickerTargetOff = slotScriptBin hmClipTargetOff "scoot-clipboard-pick";
   clipPickerBurst = slotScriptBin hmClipLookBurst "scoot-clipboard-pick";
@@ -4399,7 +4437,9 @@ let
       assert lib.hasInfix "clipboard.menuPackage is null" (builtins.head (failing hmClipNoMenu.config));
       true
     )
-    # ...a history of nothing, and a db path that never renders...
+    # ...a history of nothing, and a db path in each refused shape
+    # (`~`, relative, space, quote, `$`, backtick, `;`, empty -- each
+    # naming a file the three render sites would disagree on)...
     (
       assert builtins.length (failing hmClipBadMax.config) == 1;
       true
@@ -4409,11 +4449,59 @@ let
       true
     )
     (
-      assert builtins.length (failing hmClipBadDb.config) == 1;
+      assert builtins.length (failing hmClipBadDbTilde.config) == 1;
       true
     )
     (
-      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDb.config));
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbTilde.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbRelative.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbRelative.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbSpace.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbSpace.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbQuote.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbQuote.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbDollar.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbDollar.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbBacktick.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbBacktick.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbSemi.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "clipboard.dbPath" (builtins.head (failing hmClipBadDbSemi.config));
       true
     )
     (
@@ -5578,8 +5666,17 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     grep -F -q -- "-max-items 100 store" ${clipEntry}
     if grep -q -- "-db-path" ${clipEntry}; then echo "db flag present with the default db" >&2; exit 1; fi
     grep -F -q -- "-max-items 250 store" ${clipBoundsEntry}
-    grep -F -q -- "-db-path '~/.cache/cliphist-test/db'" ${clipBoundsEntry}
+    grep -F -q -- "-db-path '/home/scoot-test/.cache/cliphist-test/db'" ${clipBoundsEntry}
     echo "ok: the store entry guards the lock and bounds the history"
+
+    # 16d2. One moved db: the store entry, the picker (`list` and
+    #       `decode`) and the lock wipe all name the same absolute path
+    #       (the eval refusal above is what keeps a `~` or spaced path
+    #       from reaching these lines naming different files).
+    grep -F -q -- "-db-path '/home/scoot-test/.cache/cliphist-test/db' list" ${clipBoundsPicker}
+    grep -F -q -- "-db-path '/home/scoot-test/.cache/cliphist-test/db' decode" ${clipBoundsPicker}
+    grep -F "lock '${leanClip}/bin/cliphist -db-path '/home/scoot-test/.cache/cliphist-test/db' wipe; " ${idleClipBoundsConf}
+    echo "ok: the store, the picker and the wipe name the same db"
 
     # 16e. The lean manager: its runtime closure names no picker fat
     #      (the contrib scripts' weight the profile refuses to ship:
