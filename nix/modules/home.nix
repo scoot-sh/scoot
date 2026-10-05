@@ -311,8 +311,10 @@ in
         line (an absolute path -- `Exec=` lines get no shell expansion)
         so the login-screen entry runs it instead of the `scoot-session`
         launcher. That entry runs without the launcher's session wiring
-        (no `graphical-session.target`, no activation import); for wired
-        startup programs, use `[autostart]` instead. Null writes no file.
+        (no `scoot-session.target`, no `graphical-session.target`, no
+        activation import: the profile's user units never start there);
+        for wired startup programs, use `[autostart]` instead. Null
+        writes no file.
       '';
     };
 
@@ -398,6 +400,44 @@ in
         source = ../../resources/scoot-portals.conf;
       };
     })
+
+    # `scoot-session.target` for the user units the profile owns: scoot's
+    # own session scope, which every one of them starts in -- and which
+    # no other desktop starts, unlike the shared
+    # `graphical-session.target` it pulls in (`BindsTo`). The NixOS side
+    # installs the same file beside its login entry (its
+    # `systemd.user.units` carry it whenever `session.enable` is); this
+    # side installs its own copy so a home-manager-only setup -- no
+    # launcher, no login entry -- still has the target to start: import
+    # `WAYLAND_DISPLAY` (and `XDG_CURRENT_DESKTOP`) into the user
+    # manager, then `systemctl --user start scoot-session.target`
+    # (stopped the same way on the way out; see
+    # site/src/content/docs/desktop/index.md). It is the same file, not
+    # a second definition: `xdg.configFile` sources
+    # `resources/systemd/user/scoot-session.target` itself -- the bytes
+    # the NixOS side installs verbatim -- so the two installs cannot
+    # drift (a new directive in the file reaches both). The typed
+    # `systemd.user.targets` option would render into that same
+    # `systemd/user/scoot-session.target` path with its own INI
+    # rendering (lists as duplicate keys, comments dropped), so a
+    # hand-written copy there could silently diverge; the raw file is
+    # byte-identical by construction. A user file wins over the system
+    # one, so both paths stay identical where both are installed.
+    # Present whenever a unit below can want it (any slot on, with the
+    # profile or standalone); an idle file with nothing wanting it
+    # starts nothing.
+    (lib.mkIf
+      (
+        cfg.desktop.enable
+        || cfg.desktop.idle.enable
+        || cfg.desktop.notifications.enable
+        || cfg.desktop.clipboard.enable
+      )
+      {
+        xdg.configFile."systemd/user/scoot-session.target".source =
+          ../../resources/systemd/user/scoot-session.target;
+      }
+    )
 
     # The desktop profile's user half. `enable` owns the session-adjacent
     # defaults this side has (the portal config; the session entry and the

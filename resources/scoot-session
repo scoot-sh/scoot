@@ -341,8 +341,8 @@ captured=1
 # Tear the session down even when this script, not scoot, dies first
 # (a HUP at logout, a TERM around it): stopping the session targets
 # stops everything bound to them -- the compositor through `PartOf`
-# `scoot-session.target`, the bar through `PartOf`
-# `graphical-session.target` -- so nothing leaks into the next login.
+# `scoot-session.target`, the profile's units through theirs -- so
+# nothing leaks into the next login.
 # `replace-irreversibly` so teardown wins over stray start jobs.
 # Installed here, right after the environment capture and before
 # `start`: `cleanup` (unlike `die`) restores unconditionally, so any

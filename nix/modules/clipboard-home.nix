@@ -81,15 +81,20 @@ let
   mkStoreUnit = description: extraArgs: {
     Unit = {
       Description = description;
-      PartOf = [ "graphical-session.target" ];
-      After = [ "graphical-session.target" ];
+      # `scoot-session.target`: scoot's own session scope (started by
+      # the launcher past the display import) -- never the shared
+      # `graphical-session.target`, which every other desktop reaches
+      # too and would start these watchers inside someone else's
+      # session.
+      PartOf = [ "scoot-session.target" ];
+      After = [ "scoot-session.target" ];
       # A new entry script restarts the watcher (it starts in
       # milliseconds).
       X-Restart-Triggers = [ "${storeEntry}" ];
     };
     Service = {
       # An activation can arrive before the session reaches the
-      # graphical target: skip cleanly then -- no restart -- and the
+      # session target: skip cleanly then -- no restart -- and the
       # wanted-by below starts it with the display in the common case
       # (the same condition the mako unit uses).
       ExecCondition = "${lib.getExe' pkgs.bash "bash"} -c '[ -n \"$WAYLAND_DISPLAY\" ]'";
@@ -101,7 +106,7 @@ let
       # limit.
       StartLimitIntervalSec = 0;
     };
-    Install.WantedBy = [ "graphical-session.target" ];
+    Install.WantedBy = [ "scoot-session.target" ];
   };
 in
 {

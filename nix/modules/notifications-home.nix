@@ -251,10 +251,13 @@ in
 
   config = lib.mkMerge [
     # The daemon: its package, its config file, and the unit that runs
-    # it. Wanted by the graphical session (which the launcher reaches
-    # past the display import, so the display is there when mako
-    # starts), retried like the bar's unit rather than conditioned
-    # (a skipped start is never retried). Named `mako.service`, after
+    # it. Wanted by `scoot-session.target` -- scoot's own session scope
+    # (started by the launcher past the display import, so the display
+    # is there when mako starts) -- never the shared
+    # `graphical-session.target`, which every other desktop reaches too
+    # and would start this daemon inside someone else's session.
+    # Retried like the bar's unit rather than conditioned (a skipped
+    # start is never retried). Named `mako.service`, after
     # the daemon: mako ships a D-Bus activation file for
     # `org.freedesktop.Notifications` routing through
     # `SystemdService=mako.service`, so a `Notify` with the daemon
@@ -284,8 +287,8 @@ in
       systemd.user.services.mako = lib.mkIf toolsReady {
         Unit = {
           Description = "mako notification daemon (desktop.notifications)";
-          PartOf = [ "graphical-session.target" ];
-          After = [ "graphical-session.target" ];
+          PartOf = [ "scoot-session.target" ];
+          After = [ "scoot-session.target" ];
           # A new config restarts the daemon (it starts in
           # milliseconds; `makoctl reload` would do, but a restart is
           # what the bar and idle units do).
@@ -298,7 +301,7 @@ in
           Type = "dbus";
           BusName = "org.freedesktop.Notifications";
           # Activation can arrive before the session reaches the
-          # graphical target (a `Notify` in an early autostart): skip
+          # session target (a `Notify` in an early autostart): skip
           # cleanly then -- no restart -- and the next `Notify`
           # re-activates. The wanted-by below starts it with the
           # display in the common case.
@@ -313,7 +316,7 @@ in
           # silent).
           StartLimitIntervalSec = 0;
         };
-        Install.WantedBy = [ "graphical-session.target" ];
+        Install.WantedBy = [ "scoot-session.target" ];
       };
     })
 
@@ -324,9 +327,9 @@ in
       systemd.user.services.scoot-notify-sync = {
         Unit = {
           Description = "desktop.notifications bar feed (DND + count into the bar)";
-          PartOf = [ "graphical-session.target" ];
+          PartOf = [ "scoot-session.target" ];
           After = [
-            "graphical-session.target"
+            "scoot-session.target"
             "mako.service"
           ];
           # A new bridge restarts the feed.
@@ -338,7 +341,7 @@ in
           RestartSec = 2;
           StartLimitIntervalSec = 0;
         };
-        Install.WantedBy = [ "graphical-session.target" ];
+        Install.WantedBy = [ "scoot-session.target" ];
       };
     })
 

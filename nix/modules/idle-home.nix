@@ -221,10 +221,13 @@ in
 
   config = lib.mkMerge [
     # The policy: its tools, its config file, and the unit that runs
-    # it. Wanted by the graphical session (which the launcher reaches
-    # past the display import, so the display is there when swayidle
-    # starts), retried like the bar's unit rather than conditioned
-    # (a skipped start is never retried).
+    # it. Wanted by `scoot-session.target` -- scoot's own session scope
+    # (started by the launcher past the display import, so the display
+    # is there when swayidle starts) -- never the shared
+    # `graphical-session.target`, which every other desktop reaches too
+    # and would start this policy inside someone else's session.
+    # Retried like the bar's unit rather than conditioned (a skipped
+    # start is never retried).
     (lib.mkIf idle.enable {
       assertions = [
         {
@@ -284,8 +287,8 @@ in
       systemd.user.services.scoot-idle = lib.mkIf toolsReady {
         Unit = {
           Description = "scoot idle policy (swayidle: dim, lock, screens off)";
-          PartOf = [ "graphical-session.target" ];
-          After = [ "graphical-session.target" ];
+          PartOf = [ "scoot-session.target" ];
+          After = [ "scoot-session.target" ];
           # New timeouts restart the daemon (it starts in milliseconds).
           X-Restart-Triggers = [ "${swayidleConfig}" ];
         };
@@ -301,7 +304,7 @@ in
           # silent).
           StartLimitIntervalSec = 0;
         };
-        Install.WantedBy = [ "graphical-session.target" ];
+        Install.WantedBy = [ "scoot-session.target" ];
       };
     })
 
@@ -322,8 +325,8 @@ in
       systemd.user.services.scoot-audio-inhibit = lib.mkIf (idle.mediaInhibit.package != null) {
         Unit = {
           Description = "scoot idle inhibitor while audio plays";
-          PartOf = [ "graphical-session.target" ];
-          After = [ "graphical-session.target" ];
+          PartOf = [ "scoot-session.target" ];
+          After = [ "scoot-session.target" ];
         };
         Service = {
           ExecStart = lib.getExe idle.mediaInhibit.package;
@@ -331,7 +334,7 @@ in
           RestartSec = 2;
           StartLimitIntervalSec = 0;
         };
-        Install.WantedBy = [ "graphical-session.target" ];
+        Install.WantedBy = [ "scoot-session.target" ];
       };
     })
 
