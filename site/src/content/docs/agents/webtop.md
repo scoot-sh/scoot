@@ -27,6 +27,6 @@ operation is a hard requirement, so there is no driver to install and
 no device to pass through. The one-command check on
 [Install](../start/install.md#which-build-do-i-need) answers "no
 render node" here — take the default `scoot`, not the GPU build.
-Drive it over [IPC](../scootctl/index.md) and read it back with
-[Screenshots](../scootctl/screenshots.md), exactly like a headless
+Drive it over [IPC](../msg/index.md) and read it back with
+[Screenshots](../msg/screenshots.md), exactly like a headless
 agent session.

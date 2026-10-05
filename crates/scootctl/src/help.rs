@@ -40,98 +40,98 @@ pub const REQUESTS: &[RequestDoc] = &[
         verb: "version",
         syntax: "version",
         description: "the running compositor's version and IPC protocol",
-        example: "scootctl version",
+        example: "scoot msg version",
         reply: "`{\"type\":\"version\",...}`",
     },
     RequestDoc {
         verb: "outputs",
         syntax: "outputs",
         description: "every output's name, rectangle, scale and power state",
-        example: "scootctl outputs",
+        example: "scoot msg outputs",
         reply: "`{\"type\":\"outputs\",\"outputs\":[...]}`",
     },
     RequestDoc {
         verb: "windows",
         syntax: "windows",
         description: "every window: id, app id, title, output, workspace, focus",
-        example: "scootctl windows",
+        example: "scoot msg windows",
         reply: "`{\"type\":\"windows\",\"windows\":[{\"id\":7,...}]}`",
     },
     RequestDoc {
         verb: "reload",
         syntax: "reload",
         description: "re-read the config file and re-apply what can be re-applied live",
-        example: "scootctl reload",
+        example: "scoot msg reload",
         reply: "`{\"type\":\"reloaded\",...}`",
     },
     RequestDoc {
         verb: "keyboard",
         syntax: "keyboard",
         description: "the active keyboard layout's name and index",
-        example: "scootctl keyboard",
+        example: "scoot msg keyboard",
         reply: "`{\"type\":\"keyboard\",\"index\":0,\"name\":\"English (US)\"}`",
     },
     RequestDoc {
         verb: "locked",
         syntax: "locked",
         description: "whether the session is locked (answered locked or not)",
-        example: "scootctl locked",
+        example: "scoot msg locked",
         reply: "`{\"type\":\"locked\",\"locked\":false}`",
     },
     RequestDoc {
         verb: "output-power",
         syntax: "output-power ID|all on|off",
         description: "switch an output's panel off or on",
-        example: "scootctl output-power all off",
+        example: "scoot msg output-power all off",
         reply: "`{\"type\":\"ok\",...}`",
     },
     RequestDoc {
         verb: "action",
         syntax: "action ACTION [ARGUMENT...]",
         description: "run a layout action (see `help actions`)",
-        example: "scootctl action focus-column left",
+        example: "scoot msg action focus-column left",
         reply: "`{\"type\":\"ok\",...}`",
     },
     RequestDoc {
         verb: "screenshot",
         syntax: "screenshot [--output ID] [--out FILE] [--no-cursor]",
         description: "capture the screen as PNG (stdout, or FILE with --out)",
-        example: "scootctl screenshot --out /tmp/shot.png",
+        example: "scoot msg screenshot --out /tmp/shot.png",
         reply: "prints `800x600, 12345 bytes -> /tmp/shot.png`; without `--out`, raw PNG on stdout",
     },
     RequestDoc {
         verb: "pointer",
         syntax: "pointer move X Y | pointer click X Y [left|right|middle|back|forward]",
         description: "move, click, press/release, or scroll (also: pointer button, pointer scroll)",
-        example: "scootctl pointer click 800 500",
+        example: "scoot msg pointer click 800 500",
         reply: "`{\"type\":\"ok\",...}`",
     },
     RequestDoc {
         verb: "key",
         syntax: "key COMBO",
         description: "press one key combination (e.g. Return, ctrl+shift+t)",
-        example: "scootctl key super+Return",
+        example: "scoot msg key super+Return",
         reply: "`{\"type\":\"ok\",...}`",
     },
     RequestDoc {
         verb: "type",
         syntax: "type TEXT",
         description: "type text on the active keyboard layout",
-        example: "scootctl type \"hello\"",
+        example: "scoot msg type \"hello\"",
         reply: "`{\"type\":\"ok\",...}`",
     },
     RequestDoc {
         verb: "wait-idle",
         syntax: "wait-idle [--quiet-ms N] [--timeout-ms N]",
         description: "block until nothing has redrawn for --quiet-ms (default 200)",
-        example: "scootctl wait-idle --quiet-ms 200",
+        example: "scoot msg wait-idle --quiet-ms 200",
         reply: "`{\"type\":\"idle\",\"waited_ms\":213}`",
     },
     RequestDoc {
         verb: "subscribe",
         syntax: "subscribe [EVENT...]",
         description: "stream events (output, keyboard, workspace, lock; default: output) until killed",
-        example: "scootctl subscribe workspace",
+        example: "scoot msg subscribe workspace",
         reply: "one compact JSON object per line, e.g. `{\"type\":\"subscribed\",...}` then events",
     },
 ];
@@ -419,10 +419,10 @@ fn levenshtein(a: &str, b: &str) -> usize {
 }
 
 /// The full `--help` text: the prose grammar blocks plus the sections
-/// rendered from the tables below. `binary` is `scootctl` or `scoot msg`,
-/// so the examples name the binary being read; `version` says whether that
-/// front-end answers `--version` (`scootctl` does, `scoot msg` does not --
-/// there it would be a request verb, and is refused as one).
+/// rendered from the tables below. `binary` names the client (`scoot msg`,
+/// the one client); `version` says whether that front-end answers
+/// `--version` (`scoot msg` does not -- there it would be a request verb,
+/// and is refused as one).
 pub fn usage(binary: &str, requests_help: &str, actions_help: &str, version: bool) -> String {
     let mut text = String::new();
     text.push_str(&format!(
@@ -445,7 +445,7 @@ pub fn usage(binary: &str, requests_help: &str, actions_help: &str, version: boo
     ));
     text.push_str("EXAMPLES:\n");
     for request in REQUESTS.iter().take(6) {
-        let example = request.example.replace("scootctl", binary);
+        let example = request.example.replace("scoot msg", binary);
         text.push_str(&format!(
             "    {example}\n        {reply}\n",
             reply = request.reply
@@ -463,13 +463,13 @@ pub fn usage(binary: &str, requests_help: &str, actions_help: &str, version: boo
     text.push_str(&format!(
         "\nSEE ALSO:\n\
          \x20   `help requests`, `help actions`, `help exit-codes`, `help environment`\n\
-         \x20   docs: {DOCS_URL}/scootctl/ (with /llms.txt)\n"
+         \x20   docs: {DOCS_URL}/msg/ (with /llms.txt)\n"
     ));
     text
 }
 
 /// One topic's page: the rows it names, rendered plain. `binary` names the
-/// front-end, so the examples read `scoot msg ...` under the alias.
+/// client, so the examples read `scoot msg ...`.
 pub fn topic_text(topic: Topic, binary: &str) -> String {
     let mut text = String::new();
     match topic {
@@ -480,7 +480,7 @@ pub fn topic_text(topic: Topic, binary: &str) -> String {
                     "    {}\n        {}\n        e.g. `{}`\n",
                     request.syntax,
                     request.description,
-                    request.example.replace("scootctl", binary)
+                    request.example.replace("scoot msg", binary)
                 ));
             }
         }
@@ -512,8 +512,8 @@ pub fn topic_text(topic: Topic, binary: &str) -> String {
 /// One verb's row, for `help <verb>`: its syntax, description, example and
 /// reply shape. `None` when no verb is named that.
 /// One verb's row, for `help <verb>`: its syntax, description, one example
-/// and its reply shape. `binary` names the front-end, so the example reads
-/// `scoot msg ...` under the alias. `None` when no verb is named that.
+/// and its reply shape. `binary` names the client, so the example reads
+/// `scoot msg ...`. `None` when no verb is named that.
 pub fn verb_text(verb: &str, binary: &str) -> Option<String> {
     REQUESTS
         .iter()
@@ -524,7 +524,7 @@ pub fn verb_text(verb: &str, binary: &str) -> Option<String> {
                 request.verb,
                 request.syntax,
                 request.description,
-                request.example.replace("scootctl", binary),
+                request.example.replace("scoot msg", binary),
                 request.reply
             )
         })
@@ -622,7 +622,7 @@ pub fn json_value(binary: &str, version: bool) -> Value {
                 .collect::<Vec<_>>(),
         ),
     );
-    root.insert("docs".into(), Value::from(format!("{DOCS_URL}/scootctl/")));
+    root.insert("docs".into(), Value::from(format!("{DOCS_URL}/msg/")));
     Value::Object(root)
 }
 
@@ -640,7 +640,7 @@ mod tests {
         // The drift pin, both directions: a verb added to one form without
         // the other fails here.
         let prose = format!("{}{}", crate::cli::REQUESTS_HELP, crate::cli::ACTIONS_HELP);
-        let document = json_value("scootctl", true);
+        let document = json_value("scoot msg", false);
         let names: Vec<&str> = document["requests"]
             .as_array()
             .unwrap()
@@ -682,7 +682,7 @@ mod tests {
     #[test]
     fn the_full_text_covers_every_row_and_section_in_order() {
         let text = usage(
-            "scootctl",
+            "scoot msg",
             crate::cli::REQUESTS_HELP,
             crate::cli::ACTIONS_HELP,
             true,
@@ -720,7 +720,7 @@ mod tests {
         // The contract: plain text (no color escapes), wrapped under 100
         // columns, and the JSON parses with the versioned schema.
         let text = usage(
-            "scootctl",
+            "scoot msg",
             crate::cli::REQUESTS_HELP,
             crate::cli::ACTIONS_HELP,
             true,
@@ -729,7 +729,7 @@ mod tests {
         for line in text.lines() {
             assert!(line.chars().count() < 100, "line over 99 columns: `{line}`");
         }
-        let document: Value = serde_json::from_str(&json("scootctl", true)).unwrap();
+        let document: Value = serde_json::from_str(&json("scoot msg", false)).unwrap();
         assert_eq!(document["schema_version"], Value::from(SCHEMA_VERSION));
         assert_eq!(
             document["requests"].as_array().unwrap().len(),
@@ -743,7 +743,7 @@ mod tests {
         for (name, _) in TOPICS {
             let topic = Topic::parse(name).unwrap_or_else(|| panic!("`{name}` does not parse"));
             assert!(
-                !topic_text(topic, "scootctl").is_empty(),
+                !topic_text(topic, "scoot msg").is_empty(),
                 "`{name}` has no page"
             );
         }
@@ -753,12 +753,12 @@ mod tests {
     #[test]
     fn every_verb_has_its_own_row() {
         for request in REQUESTS {
-            let row = verb_text(request.verb, "scootctl")
+            let row = verb_text(request.verb, "scoot msg")
                 .unwrap_or_else(|| panic!("`{}` has no row", request.verb));
             assert!(row.contains(request.syntax));
             assert!(row.contains(request.example));
         }
-        assert_eq!(verb_text("frobnicate", "scootctl"), None);
+        assert_eq!(verb_text("frobnicate", "scoot msg"), None);
     }
 
     #[test]

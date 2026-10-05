@@ -115,7 +115,7 @@ img.hero-image {
   box-shadow: 0 32px 64px -24px rgb(0 0 0 / 0.5);
 }
 
-/* Keybinding action strings are copy-paste tokens (`scootctl action`
+/* Keybinding action strings are copy-paste tokens (`scoot msg action`
  * takes the same grammar `[binds]` uses): never break one mid-token at a
  * hyphen or pipe. Starlight already gives tables a horizontal scroll
  * container (`display: block; overflow: auto`), so a wide table scrolls

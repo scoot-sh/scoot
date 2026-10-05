@@ -51,9 +51,9 @@ def count_windows(reply, kind):
 
 class Stage:
     def __init__(self, compositor, bins, tools, keep=False):
-        """``bins``: ``scoot`` and ``scootctl``, or ``sway`` and
-        ``swaymsg``; ``tools``: ``foot``, ``dbus`` (the package) and
-        ``fonts`` (a directory of font files)."""
+        """``bins``: ``scoot`` (driven via ``scoot msg``, the only
+        client), or ``sway`` and ``swaymsg``; ``tools``: ``foot``, ``dbus``
+        (the package) and ``fonts`` (a directory of font files)."""
         self.kind = compositor
         self.bins = bins
         self.tools = tools
@@ -103,7 +103,7 @@ class Stage:
 
     def ipc(self, *args):
         if self.kind == "scoot":
-            argv = [self.bins["scootctl"], *args]
+            argv = [self.bins["scoot"], "msg", *args]
             env = dict(os.environ, SCOOT_SOCKET=self.sess.ipc, XDG_RUNTIME_DIR=self.sess.dir)
         else:
             argv = [self.bins["swaymsg"], "-s", self.sess.ipc, *args]
@@ -114,7 +114,7 @@ class Stage:
         """The command that shows workspace ``index`` (0-based), as M0 ran
         it: one short-lived client per switch."""
         if self.kind == "scoot":
-            return [self.bins["scootctl"], "action", "focus-workspace-index", str(index)]
+            return [self.bins["scoot"], "msg", "action", "focus-workspace-index", str(index)]
         return [self.bins["swaymsg"], "-s", self.sess.ipc, "workspace", "number", str(index + 1)]
 
     def switch(self, index):

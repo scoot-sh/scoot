@@ -28,7 +28,7 @@
 #              -- the same input path for both compositors
 #   relayout   focus-column / move-column cycling at RELAYOUT_HZ for
 #              RELAYOUT_SECS, through each compositor's own IPC client
-#              (`scootctl action focus-column left` vs `niri msg action
+#              (`scoot msg action focus-column left` vs `niri msg action
 #              focus-column-left`): an unavoidable asymmetry, the clients
 #              are different programs (their CPU is not counted)
 #   shot-ipc   SHOTS captures through each compositor's own screenshot path
@@ -54,15 +54,14 @@
 # first frame. That log costs the host CPU and perturbs pacing, which is why
 # it is a separate pass: CPU numbers from a DIAG run are not results.
 #
-# Needs: cage, wlr-randr, foot, grim on PATH; niri (NIRI=), scoot and
-# scootctl from the same build (SCOOT=, SCOOTCTL=), and the nab-vptr helper
+# Needs: cage, wlr-randr, foot, grim on PATH; niri (NIRI=), scoot
+# from the same build (SCOOT=, driven via `scoot msg`), and the nab-vptr helper
 # (VPTR=, built from scripts/niri-ab/vptr with `cargo build
 # --release`). Nothing here needs a seat or a GPU.
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCOOT=${SCOOT:-${CARGO_TARGET_DIR:-$HERE/../target}/release/scoot}
-SCOOTCTL=${SCOOTCTL:-$(dirname "$SCOOT")/scootctl}
 NIRI=${NIRI:-$(command -v niri || true)}
 VPTR=${VPTR:-}
 NIRI_CONF=${NIRI_CONF:-$HERE/niri-ab/niri-anim-off.kdl}
@@ -95,8 +94,8 @@ NIRI_LOG=niri=debug,smithay::backend::renderer::gles=info
 HOST_RENDERER=${HOST_RENDERER:-pixman}
 
 die() { echo "niri-ab: $*" >&2; exit 1; }
-for b in "$SCOOT" "$SCOOTCTL" "$NIRI" "$VPTR"; do
-    [ -n "$b" ] && [ -x "$b" ] || die "missing binary ('$b'): set SCOOT, SCOOTCTL, NIRI and VPTR"
+for b in "$SCOOT" "$NIRI" "$VPTR"; do
+    [ -n "$b" ] && [ -x "$b" ] || die "missing binary ('$b'): set SCOOT, NIRI and VPTR"
 done
 for t in cage wlr-randr foot grim; do command -v "$t" >/dev/null || die "$t is not on PATH"; done
 [ -n "${XDG_RUNTIME_DIR:-}" ] || die "XDG_RUNTIME_DIR is unset"
@@ -124,7 +123,6 @@ printf '#!/bin/sh\ni=0\nwhile :; do i=$((i + 1)); echo "nab-anim $i"; sleep 0.01
 {
     echo "date_utc	$(date -u +%FT%TZ)"
     echo "scoot	$SCOOT	$("$SCOOT" --version)	sha256=$(sha256sum "$SCOOT" | cut -d' ' -f1)	bytes=$(stat -c %s "$SCOOT")"
-    echo "scootctl	$SCOOTCTL	$("$SCOOTCTL" --version)"
     echo "niri	$(readlink -f "$NIRI")	$("$NIRI" --version)	bytes=$(stat -c %s "$(readlink -f "$NIRI")")"
     echo "cage	$(readlink -f "$(command -v cage)")"
     echo "foot	$(readlink -f "$(command -v foot)")	$(foot --version)"
@@ -270,11 +268,11 @@ run_session() { # round variant
     exec_ns=$(cat "$dir/exec-ns")
     if [ $kind = scoot ]; then
         export SCOOT_SOCKET="$dir/ipc.sock"
-        act() { "$SCOOTCTL" action "$@"; }
-        spawn() { timeout 5 "$SCOOTCTL" action spawn "$@"; }
-        nwin() { timeout 5 "$SCOOTCTL" windows 2>/dev/null | grep -c '"app_id"'; }
+        act() { "$SCOOT" msg action "$@"; }
+        spawn() { timeout 5 "$SCOOT" msg action spawn "$@"; }
+        nwin() { timeout 5 "$SCOOT" msg windows 2>/dev/null | grep -c '"app_id"'; }
         # Not wrapped in `timeout`: this poll stamps the startup column.
-        ready() { "$SCOOTCTL" version >/dev/null 2>&1; }
+        ready() { "$SCOOT" msg version >/dev/null 2>&1; }
     else
         nsock() { ls "$XDG_RUNTIME_DIR"/niri.*."$PID".sock 2>/dev/null | head -1; }
         act() { "$NIRI" msg action "$@"; }
@@ -353,7 +351,7 @@ run_session() { # round variant
         f="$dir/shot-ipc-$k.png"
         t0=$(now_ns)
         if [ $kind = scoot ]; then
-            "$SCOOTCTL" screenshot --no-cursor --out "$f" >/dev/null 2>&1
+            "$SCOOT" msg screenshot --no-cursor --out "$f" >/dev/null 2>&1
         else
             "$NIRI" msg action screenshot-screen --show-pointer false --path "$f" >/dev/null 2>&1
             # niri writes the file after it answers; wait for a whole PNG.

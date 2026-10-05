@@ -70,14 +70,14 @@ export default defineConfig({
           ],
         },
         {
-          label: 'scootctl / IPC',
+          label: 'scoot msg / IPC',
           items: [
-            { label: 'Overview', slug: 'scootctl' },
-            { label: 'Requests', slug: 'scootctl/requests' },
-            { label: 'Actions', slug: 'scootctl/actions' },
-            { label: 'Events', slug: 'scootctl/events' },
-            { label: 'Screenshots', slug: 'scootctl/screenshots' },
-            { label: 'Troubleshooting', slug: 'scootctl/troubleshooting' },
+            { label: 'Overview', slug: 'msg' },
+            { label: 'Requests', slug: 'msg/requests' },
+            { label: 'Actions', slug: 'msg/actions' },
+            { label: 'Events', slug: 'msg/events' },
+            { label: 'Screenshots', slug: 'msg/screenshots' },
+            { label: 'Troubleshooting', slug: 'msg/troubleshooting' },
           ],
         },
         {
@@ -161,8 +161,8 @@ export default defineConfig({
                 'The scoot compositor: configure, keybindings, backends, theming, protocols.',
             },
             {
-              label: 'scootctl / IPC',
-              paths: ['scootctl', 'scootctl/**'],
+              label: 'scoot msg / IPC',
+              paths: ['msg', 'msg/**'],
               description:
                 'Drive scoot from a script or agent: requests, actions, events, screenshots.',
             },

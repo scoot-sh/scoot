@@ -10,30 +10,30 @@ Subscribe instead of polling: dedicate a connection to the event stream and lear
 A connection that wants push notifications subscribes instead of polling.
 `subscribe` names the event kinds it wants (`output`, `keyboard`,
 `workspace`, `lock` — the four
-kinds; naming none is refused, and bare `scootctl subscribe` sends
+kinds; naming none is refused, and bare `scoot msg subscribe` sends
 `output`); the reply echoes the subscription; and
 afterwards that connection carries events until the session ends:
 
 ```sh
-$ scootctl subscribe
+$ scoot msg subscribe
 {"type":"subscribed","events":["output"]}
 {"type":"output_removed","output":2,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":0,"adopter_active":2,"origin":"DP-1"}
 {"type":"output_restored","output":3,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":2,"adopter_active":0,"origin":"DP-1","moved":3}
 {"type":"output_changed","output":1,"name":"DP-1","width":2952,"height":1660,"scale":1.5}
-$ scootctl subscribe keyboard
+$ scoot msg subscribe keyboard
 {"type":"subscribed","events":["keyboard"]}
 {"type":"keyboard_changed","name":"Russian","index":1}
-$ scootctl subscribe workspace
+$ scoot msg subscribe workspace
 {"type":"subscribed","events":["workspace"]}
 {"type":"workspaces","output":1,"name":"DP-1","active":0,"counts":[2,0,1]}
-$ scootctl subscribe lock
+$ scoot msg subscribe lock
 {"type":"subscribed","events":["lock"]}
 {"type":"lock_changed","locked":true}
 ```
 
-`scootctl subscribe` prints the answer, then one compact JSON object per
+`scoot msg subscribe` prints the answer, then one compact JSON object per
 line per event, until killed or the connection ends — so a desktop
-notification is one pipe away (`scootctl subscribe | ... notify-send`), and
+notification is one pipe away (`scoot msg subscribe | ... notify-send`), and
 an agent learns about a monitor leaving without polling `windows`. It exits
 0 at a clean end of stream; re-run to resubscribe.
 

@@ -7,9 +7,9 @@ Capture the screen reproducibly — the same path the docs' own screenshots use,
 ## Take one
 
 ```sh
-scootctl screenshot --out /tmp/shot.png
-scootctl screenshot --output 2 --out /tmp/second.png
-scootctl screenshot --no-cursor --out /tmp/clean.png
+scoot msg screenshot --out /tmp/shot.png
+scoot msg screenshot --output 2 --out /tmp/second.png
+scoot msg screenshot --no-cursor --out /tmp/clean.png
 ```
 
 | Flag | Type | Default | Meaning |
@@ -55,7 +55,7 @@ renderer**, unless the request says not to. On the wire that is an optional
 ```
 
 Omitted means drawn in (`SCREENSHOT_CURSOR_DEFAULT` in `scoot-ipc`);
-`false` leaves it out, and `scootctl screenshot --no-cursor` sends that.
+`false` leaves it out, and `scoot msg screenshot --no-cursor` sends that.
 "The same everywhere" is the point: an agent's script sees the pointer the
 same way under `--headless` and `--nested` (whose screens have no drawn
 cursor at all), on `--tty`'s default renderer, and on the GPU scanout tier

@@ -5,7 +5,7 @@ description: "Every default keybinding, grouped by what you want to do, plus how
 
 Every default binding, grouped by intent. `Super` is scoot's own modifier
 throughout; directions are vim's <kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd>.
-The rightmost column is the action string — the same grammar `scootctl action`
+The rightmost column is the action string — the same grammar `scoot msg action`
 takes and `[binds]` uses, so each row is also its own rebind recipe.
 
 ## Cheat sheet
@@ -103,7 +103,7 @@ terminal:
 Then apply it without restarting:
 
 ```sh
-scootctl reload
+scoot msg reload
 ```
 
 Keybindings reload live — like the layout, outputs, appearance, floating

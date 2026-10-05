@@ -379,7 +379,7 @@ impl XwaylandFractional {
 }
 
 /// `[autostart]`. One field: `commands`, a flat list of action strings in
-/// exactly the grammar `scootctl action ...` (and a config file's `[binds]`
+/// exactly the grammar `scoot msg action ...` (and a config file's `[binds]`
 /// values) use -- see `scootctl::action`, reused here rather than duplicated.
 /// No ordering, no conditionals, no supervision: entries run once each, in
 /// file order, before the `--` command (see `compositor::run`), and anything
@@ -834,7 +834,7 @@ pub fn default_config_toml() -> String {
          # Gap, column widths, the output scale, the ring/background/cursor\n\
          # appearance fields, binds, [floating] and [[window_rule]], new\n\
          # [autostart] spawn entries, [wallpaper] and [xwayland] fractional\n\
-         # re-apply live with `scootctl reload`; [tty] gpu, [renderer]\n\
+         # re-apply live with `scoot msg reload`; [tty] gpu, [renderer]\n\
          # backend, [xwayland] enabled, [virtual_input] enabled and an\n\
          # [[outputs]] mode take effect on restart and a reload refuses\n\
          # them with a message.\n",
@@ -914,7 +914,7 @@ pub fn default_config_toml() -> String {
     out.push_str(
         "\n# Per-output overrides of [output] scale (and of --mode, or --width/--height\n\
          # under --headless), one table per output, matched by the name\n\
-         # `scootctl outputs` lists. Scale re-applies on reload; mode on restart.\n\
+         # `scoot msg outputs` lists. Scale re-applies on reload; mode on restart.\n\
          # [[outputs]]\n\
          # name = \"eDP-1\"\n\
          # scale = 2.0\n\
@@ -1091,7 +1091,7 @@ fn combo_string(mods: Modifiers, keysym: Keysym) -> String {
 }
 
 /// One action back in the string form the file loader parses
-/// (`scootctl::action`): the same grammar `scootctl action ...` and a
+/// (`scootctl::action`): the same grammar `scoot msg action ...` and a
 /// `[binds]` value use, so whatever this spells loads back to the same
 /// [`Action`]. Total over every variant -- including ones the defaults hold
 /// none of -- so a future default needs no second change here.
@@ -1554,7 +1554,7 @@ fn apply_binds(keybindings: &mut Keybindings, binds: &HashMap<String, toml::Valu
 }
 
 /// Parses one `[binds]` entry: `key` is the TOML key (`"super+h"`), `value`
-/// is either an action string in exactly the grammar `scootctl action ...`
+/// is either an action string in exactly the grammar `scoot msg action ...`
 /// (and its `scoot msg action ...` alias) uses (`"focus-column left"`,
 /// `"close"`, `"spawn" "foot"`, ...) -- see `scootctl::action`, reused here
 /// rather than duplicated -- or a table with that string under `action` plus
@@ -1671,7 +1671,7 @@ fn parse_bind_value<'a>(key: &str, value: &'a toml::Value) -> Result<(&'a str, B
 }
 
 /// Parses one `[autostart]` entry: `value` is an action string in exactly the
-/// grammar `scootctl action ...` (and a `[binds]` value) uses -- see
+/// grammar `scoot msg action ...` (and a `[binds]` value) uses -- see
 /// `scootctl::action`, reused here rather than duplicated. No spawn-only
 /// restriction: a non-`spawn` action at startup (say, `focus-workspace-index
 /// 2`) is the user's choice, documented as such where `[autostart]` is

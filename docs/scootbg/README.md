@@ -43,7 +43,7 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   v1.
 - **Seamless in scoot.** A `[wallpaper]` section in scoot's `config.toml`
   is all it takes: scoot starts scootbg and re-applies the section on
-  `scootctl reload`. No autostart entry, no session script.
+  `scoot msg reload`. No autostart entry, no session script.
 - **Free when idle.** A static wallpaper costs nothing after it is on
   screen: no timers, no frame callbacks, no wakeups, one buffer per output
   at most (outputs of one size showing one image share one), no file
@@ -56,7 +56,7 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   pixels, fractional scales included, never scaled up by the compositor.
   Working, and measured ([below](#measured-so-far)).
 - **Scriptable.** A small CLI over a control socket with JSON replies, like
-  `scootctl`, so an agent or a script can set, query and clear wallpapers.
+  `scoot msg`, so an agent or a script can set, query and clear wallpapers.
 
 Transitions (fade, wipe, grow) and animated images (GIF, APNG, animated
 WebP) are the next milestone, not v1. They are the features people move to
@@ -981,7 +981,7 @@ gated rows weigh the floor by allocated pages.
   `[wallpaper]` and the config's wallpaper shows. Run `scootbg set` after
   that and your choice shows, across restarts and unrelated reloads, until
   you next change `[wallpaper]` itself.
-- **Packaging.** `scootbg` is its own package, like `scootctl`
+- **Packaging.** `scootbg` is its own package
   (`packages.<system>.scootbg`, Linux only, and `pkgs.scootbg` from the
   flake's overlay). scoot runs it from `PATH` (or `[wallpaper] command`).
   The home-manager module installs it and points `command` at it whenever
@@ -991,12 +991,12 @@ gated rows weigh the floor by allocated pages.
 - scoot's `[appearance] background_color` stays: it is the frame clear
   color, what shows with no wallpaper client at all. scootbg draws over it
   on the background layer.
-- The compositor's `scootctl screenshot` and `ext-image-copy-capture-v1`
+- The compositor's `scoot msg screenshot` and `ext-image-copy-capture-v1`
   already include layer surfaces, so screenshots show the wallpaper with no
   extra work.
 - scoot's headless backend is the test harness: start
   `scoot --headless --outputs 2`, run scootbg in it, and check real pixels
-  with `scootctl screenshot --output N`, the way `scripts/smoke-test.sh`
+  with `scoot msg screenshot --output N`, the way `scripts/smoke-test.sh`
   already checks the compositor.
 - A wallpaper per workspace is planned through `ext-workspace-v1`, a
   standard protocol, so it is not scoot-only either.

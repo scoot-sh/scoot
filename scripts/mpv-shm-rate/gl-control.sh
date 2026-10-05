@@ -4,7 +4,6 @@
 set -u
 D=$1
 SCOOT=/var/cargo-target/debug/scoot
-SCOOTCTL=/var/cargo-target/debug/scootctl
 GEARS=/nix/store/8l6kj814gkkq8yw1qcjw9pr8hdy98wbz-mesa-demos-9.0.0/bin/es2gears_wayland
 mkdir -p "$D"
 for R in pixman gles; do
@@ -16,7 +15,7 @@ for R in pixman gles; do
     CPID=$!
     for t in $(seq 1 50); do [ -S "$T/scoot.sock" ] && break; sleep 0.1; done
     sleep 4
-    SCOOT_SOCKET="$T/scoot.sock" "$SCOOTCTL" windows > "$T/windows.json" 2>&1
+    SCOOT_SOCKET="$T/scoot.sock" "$SCOOT" msg windows > "$T/windows.json" 2>&1
     json=$(cat "$T/windows.json")
     x=$(echo "$json" | grep -o '"x": [0-9]*' | head -1 | grep -o '[0-9]*')
     y=$(echo "$json" | grep -o '"y": [0-9]*' | head -1 | grep -o '[0-9]*')
@@ -24,7 +23,7 @@ for R in pixman gles; do
     h=$(echo "$json" | grep -o '"height": [0-9]*' | head -1 | grep -o '[0-9]*')
     crop="$((w-16))x$((h-16))+$((x+8))+$((y+8))"
     for s in 1 2; do
-      SCOOT_SOCKET="$T/scoot.sock" "$SCOOTCTL" screenshot --out "$T/shot-$s.png" > /dev/null 2>&1
+      SCOOT_SOCKET="$T/scoot.sock" "$SCOOT" msg screenshot --out "$T/shot-$s.png" > /dev/null 2>&1
       stats=$(magick "$T/shot-$s.png" -crop "$crop" +repage \
         -format '%[fx:mean],%[fx:standard_deviation]' info: 2>/dev/null)
       echo "$R-$i/shot-$s: $stats"

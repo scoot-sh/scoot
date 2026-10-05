@@ -3,16 +3,14 @@
 //! This module owns the whole client surface -- the request grammar, the
 //! `Error` display strings (several are byte-pinned by tests, e.g. the
 //! `OutOfRange` echo, so they must not drift), and the help text's prose
-//! blocks. Both front-ends (`scootctl` directly, `scoot msg` as its alias)
-//! parse through here, and both render their full help through
+//! blocks. `scoot msg` parses through here, and renders its full help through
 //! [`crate::help::usage`] -- one table, two renderings (text and JSON) --
 //! rather than a second copy of the grammar.
 //!
 //! The help text is single-sourced by construction: [`REQUESTS_HELP`] and
 //! [`ACTIONS_HELP`] are the one copy of the request/action grammar prose,
-//! and both this crate's [`usage`] and the compositor binary's `scoot --help`
-//! print those same blocks (a containment test here and one in `scoot`'s
-//! `cli` tests pin that). The tables in [`crate::help`] are the other half
+//! and the compositor binary's `scoot --help` prints those same blocks
+//! (a containment test in `scoot`'s `cli` tests pins that). The tables in [`crate::help`] are the other half
 //! of the source: the examples, exit codes, environment and JSON render
 //! from them, and drift tests pin that every row appears in both forms.
 
@@ -68,49 +66,6 @@ pub const ACTIONS_HELP: &str = "\
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
-
-/// The full `--help` text, rendered from the single source in [`crate::help`]:
-/// the prose grammar blocks below plus the examples, exit codes, environment
-/// and see-also sections the tables generate. A function rather than a
-/// `const` so the two forms cannot drift -- the tests pin that every table
-/// row appears here and in the JSON.
-pub fn usage() -> String {
-    crate::help::usage("scootctl", REQUESTS_HELP, ACTIONS_HELP, true)
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Command {
-    Help,
-    /// `help [TOPIC]`: one topic's page (`help requests`, `help actions`,
-    /// `help exit-codes`, `help environment`).
-    Topic(crate::help::Topic),
-    /// `help <verb>`: one request verb's own row -- its syntax, one example
-    /// and its reply shape. The per-verb spelling (rather than
-    /// `<verb> --help`) keeps `type --help` and `action spawn --help`
-    /// meaning what they say: `--help` there is text to type or a command
-    /// to run, not a plea for help.
-    Verb {
-        verb: String,
-    },
-    /// `--help --json` (or `help --json`): the same content as JSON,
-    /// versioned (see [`crate::help::SCHEMA_VERSION`]).
-    Json,
-    /// `scootctl --version`: identify this build without touching the
-    /// socket. A first-arg flag like `--help`, answered locally -- never a
-    /// request, so it needs no running compositor.
-    ///
-    /// Deliberately *not* the bare `version` word: that already means the
-    /// IPC `Request::Version`, answered by the compositor over the socket.
-    /// Giving one spelling two transports (local when idle, remote when a
-    /// session happens to be up) would make `scootctl version`'s failure
-    /// mode depend on whether a compositor is running; the flag keeps the
-    /// two apart.
-    Version,
-    Msg {
-        request: Request,
-        out: Option<PathBuf>,
-    },
-}
 
 /// One parsed client invocation: the request to send, plus where a
 /// screenshot's PNG goes (`None` means stdout).
@@ -181,7 +136,7 @@ impl std::error::Error for Error {}
 /// nothing is close enough to be a typo rather than a guess (so garbage
 /// keeps the old shape). Topics name the `help` page that lists the
 /// candidates (`help requests`, `help actions`, ...), without a binary
-/// prefix: both front-ends (`scootctl`, `scoot msg`) spell them the same.
+/// prefix: `scoot msg` is the one client, so there is only one spelling.
 fn hinted(kind: &'static str, what: String, candidates: &[&str], topic: &'static str) -> Error {
     match crate::help::suggest(&what, candidates.iter().copied()) {
         Some(suggestion) => Error::Hinted {
@@ -210,7 +165,7 @@ fn action_names() -> Vec<&'static str> {
         .collect()
 }
 
-/// The `scoot --version` / `scootctl --version` line: the suite's own
+/// The `scoot --version` line: the suite's own
 /// version plus the IPC protocol number, so a client can check
 /// compatibility against a remote compositor before connecting.
 ///
@@ -218,13 +173,12 @@ fn action_names() -> Vec<&'static str> {
 /// `env!("CARGO_PKG_VERSION")`, which the IPC `version` reply also reads
 /// (so the two agree by construction), and [`scoot_ipc::PROTOCOL_VERSION`]
 /// -- never a duplicated literal, so the string cannot go stale when
-/// either moves. Both binaries print this one helper's return, byte for
-/// byte, so a packaging check can compare their outputs directly.
+/// either moves.
 ///
 /// `env!` here reads *this* crate's version, which is `version.workspace`
 /// -- the same workspace version the `scoot` binary's own `env!` reads --
-/// so the two binaries' lines agree as long as the workspace version is
-/// shared (a test below pins that).
+/// so the line agrees with the IPC reply as long as the workspace version
+/// is shared (a test below pins that).
 pub fn version_string() -> String {
     format!(
         "scoot {} (ipc protocol {})",
@@ -233,57 +187,8 @@ pub fn version_string() -> String {
     )
 }
 
-/// Parses a full client argv (without the program name): `--help` (or
-/// nothing) is help, `help [TOPIC|VERB]` is one page of it, `--help --json`
-/// (or `help --json`) is the machine-readable form, `--version` is the local
-/// version line, anything else is a request verb.
-///
-/// Collects into one `Vec` first so the verb stays at the head for
-/// [`parse_msg`]'s contract -- a cold path (one process per invocation), so
-/// the single small allocation is not load-bearing.
-pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> {
-    let args: Vec<String> = args.into_iter().collect();
-    match args.first().map(String::as_str) {
-        None => Ok(Command::Help),
-        Some("--help" | "-h" | "help") => help_page(&args[1..]),
-        Some("--version") => Ok(Command::Version),
-        Some(_) => {
-            let Msg { request, out } = message(args.into_iter())?;
-            Ok(Command::Msg { request, out })
-        }
-    }
-}
-
-/// `help` / `--help`, optionally followed by one topic name, verb, or
-/// `--json`. Anything else is refused with a guess, the way an unknown verb
-/// is -- `help` is where a lost agent lands, so it teaches too.
-fn help_page(args: &[String]) -> Result<Command, Error> {
-    match args {
-        [] => Ok(Command::Help),
-        [only] if only == "--json" => Ok(Command::Json),
-        [only] if only == "help" => Ok(Command::Help),
-        [only] => {
-            if let Some(topic) = crate::help::Topic::parse(only) {
-                return Ok(Command::Topic(topic));
-            }
-            if crate::help::REQUESTS
-                .iter()
-                .any(|request| request.verb == only)
-            {
-                return Ok(Command::Verb { verb: only.clone() });
-            }
-            let mut candidates: Vec<&str> = crate::help::Topic::names().collect();
-            candidates.extend(request_verbs());
-            candidates.push("--json");
-            Err(hinted("help topic", only.clone(), &candidates, "help"))
-        }
-        [_, extra, ..] => Err(Error::Unknown(extra.clone())),
-    }
-}
-
-/// Parses the arguments after the request verb (`scootctl windows ...`, or
-/// `scoot msg windows ...` with `msg` already stripped): the verb plus its
-/// flags into a [`Msg`].
+/// Parses the arguments after the request verb (`scoot msg windows ...`
+/// with `msg` already stripped): the verb plus its flags into a [`Msg`].
 pub fn parse_msg<I: IntoIterator<Item = String>>(args: I) -> Result<Msg, Error> {
     message(args.into_iter())
 }
@@ -426,9 +331,8 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
 }
 
 /// Parses one action and its arguments (`"focus-column" "left"`, ...) the
-/// same way for both `scootctl action ...` (and its `scoot msg action ...`
-/// alias) and a config file's `[binds]` values (see
-/// `scoot::compositor::config::parse_bind`) -- one grammar, one parser,
+/// same way for `scoot msg action ...` and a config file's `[binds]` values
+/// (see `scoot::compositor::config::parse_bind`) -- one grammar, one parser,
 /// rather than a second copy for the config-file case.
 pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> {
     let name = args.next().ok_or(Error::Missing("an action"))?;
@@ -695,91 +599,12 @@ mod tests {
         parse_msg(args.iter().map(|a| (*a).to_owned()))
     }
 
-    fn parse_args(args: &[&str]) -> Result<Command, Error> {
-        parse(args.iter().map(|a| (*a).to_owned()))
-    }
-
-    #[test]
-    fn no_arguments_and_help_flags_print_help() {
-        assert_eq!(parse_args(&[]), Ok(Command::Help));
-        for flag in ["--help", "-h", "help"] {
-            assert_eq!(parse_args(&[flag]), Ok(Command::Help), "{flag}");
-        }
-    }
-
-    #[test]
-    fn usage_prints_the_shared_grammar_blocks() {
-        // The single-ownership pin: the full help text embeds the same two
-        // blocks `scoot --help` embeds (pinned from that side in scoot's
-        // `cli` tests), so editing one copy without the other fails here.
-        let text = usage();
-        assert!(text.contains(REQUESTS_HELP), "usage lost REQUESTS_HELP");
-        assert!(text.contains(ACTIONS_HELP), "usage lost ACTIONS_HELP");
-    }
-
-    #[test]
-    fn help_pages_route_to_their_topic_verb_or_json() {
-        assert_eq!(parse_args(&[]), Ok(Command::Help));
-        assert_eq!(
-            parse_args(&["help", "requests"]),
-            Ok(Command::Topic(crate::help::Topic::Requests))
-        );
-        assert_eq!(
-            parse_args(&["help", "actions"]),
-            Ok(Command::Topic(crate::help::Topic::Actions))
-        );
-        assert_eq!(
-            parse_args(&["help", "exit-codes"]),
-            Ok(Command::Topic(crate::help::Topic::ExitCodes))
-        );
-        assert_eq!(
-            parse_args(&["help", "environment"]),
-            Ok(Command::Topic(crate::help::Topic::Environment))
-        );
-        assert_eq!(
-            parse_args(&["help", "screenshot"]),
-            Ok(Command::Verb {
-                verb: "screenshot".into()
-            })
-        );
-        assert_eq!(parse_args(&["help", "--json"]), Ok(Command::Json));
-        assert_eq!(parse_args(&["--help", "--json"]), Ok(Command::Json));
-        assert_eq!(parse_args(&["help", "help"]), Ok(Command::Help));
-        assert_eq!(
-            parse_args(&["--help", "actions"]),
-            Ok(Command::Topic(crate::help::Topic::Actions))
-        );
-    }
-
-    #[test]
-    fn an_unknown_help_topic_teaches() {
-        // Close enough to guess: the nearest topic, named with where to
-        // read. Garbage stays a bare refusal.
-        assert_eq!(
-            parse_args(&["help", "request"]),
-            Err(Error::Hinted {
-                kind: "help topic",
-                what: "request".into(),
-                suggestion: "requests".into(),
-                topic: "help",
-            })
-        );
-        assert!(matches!(
-            parse_args(&["help", "xyzzy"]),
-            Err(Error::Unknown(_))
-        ));
-        assert!(matches!(
-            parse_args(&["help", "requests", "extra"]),
-            Err(Error::Unknown(_))
-        ));
-    }
-
     #[test]
     fn usage_errors_name_the_nearest_valid_choice() {
         // The agent test: a typo'd verb is answered with the verb it meant
         // and the topic that lists them, not just "unknown argument".
         assert_eq!(
-            parse_args(&["windwos"]),
+            parse_msg_args(&["windwos"]),
             Err(Error::Hinted {
                 kind: "request",
                 what: "windwos".into(),
@@ -788,7 +613,7 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_args(&["action", "togle-fullscreen"]),
+            parse_msg_args(&["action", "togle-fullscreen"]),
             Err(Error::Hinted {
                 kind: "action",
                 what: "togle-fullscreen".into(),
@@ -797,7 +622,7 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_args(&["screenshot", "--ouput", "1"]),
+            parse_msg_args(&["screenshot", "--ouput", "1"]),
             Err(Error::Hinted {
                 kind: "flag",
                 what: "--ouput".into(),
@@ -805,7 +630,7 @@ mod tests {
                 topic: "help screenshot",
             })
         );
-        let error = parse_args(&["windwos"]).expect_err("a typo is refused");
+        let error = parse_msg_args(&["windwos"]).expect_err("a typo is refused");
         assert_eq!(
             error.to_string(),
             "unknown request `windwos` (did you mean `windows`? see `help requests`)"
@@ -813,42 +638,28 @@ mod tests {
     }
 
     #[test]
-    fn version_flag_parses_to_its_own_command() {
-        // A first-arg flag like `--help`, not a request: it is answered
-        // locally, with no socket and no running compositor.
-        assert_eq!(parse_args(&["--version"]), Ok(Command::Version));
-    }
-
-    #[test]
-    fn version_flag_is_first_arg_like_help() {
-        // Trailing arguments are ignored, the way `--help foo` still
-        // prints help; a flag in front is not `--version` at all, the way
-        // `--headless --help` is not help either.
-        assert_eq!(
-            parse_args(&["--version", "--headless", "foo"]),
-            Ok(Command::Version)
-        );
-        assert_eq!(
-            parse_args(&["--headless", "--version"]),
-            Err(Error::Unknown("--headless".into()))
-        );
-    }
-
-    #[test]
-    fn a_bare_version_word_stays_the_ipc_request() {
+    fn a_bare_version_word_is_the_ipc_request_and_the_flag_is_not() {
         // The spelling decision, pinned: `version` (bare) is the remote
-        // request answered by the compositor over the socket --
-        // `scootctl version` with no session running must fail, not answer
-        // locally -- while `--version` is the local flag. One spelling, one
-        // transport each.
+        // request answered by the compositor over the socket -- `scoot msg
+        // version` with no session running fails there, it never answers
+        // locally. And `--version` is not a request at all: it is close
+        // enough to `version` to earn a guess naming it.
         assert_eq!(
-            parse_args(&["version"]),
-            Ok(Command::Msg {
+            parse_msg_args(&["version"]),
+            Ok(Msg {
                 request: Request::Version,
                 out: None,
             })
         );
-        assert_eq!(parse_args(&["--version"]), Ok(Command::Version));
+        assert_eq!(
+            parse_msg_args(&["--version"]),
+            Err(Error::Hinted {
+                kind: "request",
+                what: "--version".into(),
+                suggestion: "version".into(),
+                topic: "help requests",
+            })
+        );
     }
 
     #[test]
@@ -872,50 +683,38 @@ mod tests {
     }
 
     #[test]
-    fn usage_names_version_on_its_own_line() {
-        // The `--help` surface for the new flag: its own usage line, so a
-        // user reading `--help` can discover it without knowing the ticket.
-        assert!(
-            usage()
-                .lines()
-                .any(|line| line.trim() == "scootctl --version"),
-            "--help hides the version flag"
-        );
-    }
-
-    #[test]
     fn a_bare_request_parses() {
         assert_eq!(
-            parse_args(&["windows"]),
-            Ok(Command::Msg {
+            parse_msg_args(&["windows"]),
+            Ok(Msg {
                 request: Request::Windows,
                 out: None,
             })
         );
         assert_eq!(
-            parse_args(&["reload"]),
-            Ok(Command::Msg {
+            parse_msg_args(&["reload"]),
+            Ok(Msg {
                 request: Request::Reload,
                 out: None,
             })
         );
         assert_eq!(
-            parse_args(&["keyboard"]),
-            Ok(Command::Msg {
+            parse_msg_args(&["keyboard"]),
+            Ok(Msg {
                 request: Request::Keyboard,
                 out: None,
             })
         );
         assert_eq!(
-            parse_args(&["version"]),
-            Ok(Command::Msg {
+            parse_msg_args(&["version"]),
+            Ok(Msg {
                 request: Request::Version,
                 out: None,
             })
         );
         assert_eq!(
-            parse_args(&["locked"]),
-            Ok(Command::Msg {
+            parse_msg_args(&["locked"]),
+            Ok(Msg {
                 request: Request::Locked,
                 out: None,
             })
@@ -954,9 +753,9 @@ mod tests {
 
     #[test]
     fn usage_names_output_power_on_its_own_line() {
+        let help = crate::help::usage("scoot msg", REQUESTS_HELP, ACTIONS_HELP, false);
         assert!(
-            usage()
-                .lines()
+            help.lines()
                 .any(|line| line.trim().starts_with("output-power ID|all")),
             "--help hides the output-power verb"
         );
@@ -964,20 +763,18 @@ mod tests {
 
     #[test]
     fn usage_names_keyboard_on_its_own_line() {
+        let help = crate::help::usage("scoot msg", REQUESTS_HELP, ACTIONS_HELP, false);
         assert!(
-            usage()
-                .lines()
-                .any(|line| line.trim().starts_with("keyboard")),
+            help.lines().any(|line| line.trim().starts_with("keyboard")),
             "--help hides the keyboard verb"
         );
     }
 
     #[test]
     fn usage_names_locked_on_its_own_line() {
+        let help = crate::help::usage("scoot msg", REQUESTS_HELP, ACTIONS_HELP, false);
         assert!(
-            usage()
-                .lines()
-                .any(|line| line.trim().starts_with("locked")),
+            help.lines().any(|line| line.trim().starts_with("locked")),
             "--help hides the locked verb"
         );
     }
@@ -985,8 +782,8 @@ mod tests {
     #[test]
     fn subscribe_defaults_to_output_and_names_what_it_takes() {
         assert_eq!(
-            parse_args(&["subscribe"]),
-            Ok(Command::Msg {
+            parse_msg_args(&["subscribe"]),
+            Ok(Msg {
                 request: Request::Subscribe {
                     events: vec![EventKind::Output]
                 },
@@ -1049,7 +846,7 @@ mod tests {
         );
         assert!(
             matches!(
-                parse_args(&["subscribe", "hypothetical_future_kind"]),
+                parse_msg_args(&["subscribe", "hypothetical_future_kind"]),
                 Err(Error::Unknown(_))
             ),
             "an unknown event kind is a loud refusal naming the rule, not a guess"
@@ -1058,9 +855,9 @@ mod tests {
 
     #[test]
     fn usage_names_subscribe_on_its_own_line() {
+        let help = crate::help::usage("scoot msg", REQUESTS_HELP, ACTIONS_HELP, false);
         assert!(
-            usage()
-                .lines()
+            help.lines()
                 .any(|line| line.trim().starts_with("subscribe [EVENT...]")),
             "--help hides the subscribe verb"
         );
@@ -1279,7 +1076,7 @@ mod tests {
     #[test]
     fn the_output_actions_take_an_output_id() {
         // Output ids, not workspace positions: ids are stable for the
-        // session (`scootctl outputs` reports them), while a workspace index
+        // session (`scoot msg outputs` reports them), while a workspace index
         // only means anything within one output's list.
         assert_eq!(
             parse_msg_args(&["action", "focus-output", "2"]),
@@ -1451,7 +1248,7 @@ mod tests {
 
     #[test]
     fn bad_input_explains_itself() {
-        assert_eq!(parse_args(&["fly"]), Err(Error::Unknown("fly".into())));
+        assert_eq!(parse_msg_args(&["fly"]), Err(Error::Unknown("fly".into())));
         assert_eq!(parse_msg_args(&[]), Err(Error::Missing("a request")));
         assert_eq!(
             parse_msg_args(&["action", "focus-column", "sideways"]),

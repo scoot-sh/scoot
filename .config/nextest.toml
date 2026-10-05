@@ -1,9 +1,9 @@
 # Nextest profile: fail loudly on a hung test instead of wedging the run.
 #
-# Background: `scootctl::msg_broken_pipe a_full_read_is_unchanged` once stuck
+# Background: `scoot::msg_broken_pipe a_full_read_is_unchanged` once stuck
 # >840s in a parallel run (0.00s solo) — an unbounded `accept()` in the test
 # fixture, fixed with a 30s accept deadline in the fixture itself
-# (`crates/scootctl/tests/msg_broken_pipe.rs`). That fixture timeout names
+# (`crates/scoot/tests/msg_broken_pipe.rs`). That fixture timeout names
 # the cause; this knob is the backstop for the *next* infinite hang anywhere
 # else: a test still running after two 60s slow periods is terminated and
 # fails, instead of wedging the suite until someone kills it.

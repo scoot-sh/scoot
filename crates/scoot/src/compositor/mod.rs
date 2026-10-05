@@ -452,7 +452,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // The SIGHUP reload trigger, next to the reaper: a HUP arriving before
     // this install keeps its default disposition and kills the session, so
     // this must not run after the first spawn either. Only the compositor
-    // installs it -- `scootctl` keeps the default meaning of HUP.
+    // installs it -- `scoot msg` keeps the default meaning of HUP.
     sighup::install(&event_loop.handle())?;
 
     // The `[wallpaper]` section, handed to `scootbg apply-config` (see

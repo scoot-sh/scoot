@@ -68,7 +68,7 @@ What to know before pointing wayvnc at a session:
   keybindings: they are forwarded to the focused window like text, so
   remote `Super` moves no windows (unlike some compositors, where a remote
   Super drives the local binds) — window management stays local, or over
-  `scoot msg` (see [Requests](../scootctl/requests.md#requests)).
+  `scoot msg` (see [Requests](../msg/requests.md#requests)).
 - **Absolute motion maps onto the named output, or the whole layout.**
   wayvnc names the output it captures (manager version 2), so the pointer
   lands where the remote screen shows it; a client that names no output

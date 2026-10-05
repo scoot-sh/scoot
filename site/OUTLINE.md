@@ -50,17 +50,19 @@ keep working unchanged.
 | `/scoot/protocols` (reference) | Which Wayland protocols work and what each means for your apps | `docs/protocols.md` per-protocol sections (user half; measurement prose moves to `dev/`) |
 | `/scoot/troubleshooting` | Compositor symptoms ("black screen", "key not working", "no output") | `docs/tty.md` When nothing works, VT switching; `docs/configuration.md` Failure semantics |
 
-### scootctl / IPC (agents and scripts)
+### scoot msg / IPC (agents and scripts)
+
+> Renamed 2026-10-05: `/scootctl/*` → `/msg/*` when the standalone client
+> went away (`scoot msg` is the only client).
 
 | Page (slug at move) | One-line purpose | Fed by (current sections) |
 |---|---|---|
-| `/scootctl/` (overview) | Drive scoot from an agent or script: socket, rules, resource bounds | `docs/ipc.md` socket, Rules an agent needs, Resource bounds |
-| `/scootctl/requests` | The request grammar and replies | `docs/ipc.md` Requests, Replies |
-| `/scootctl/actions` | Every action, with arguments | `docs/ipc.md` Actions |
-| `/scootctl/events` | Subscribing to compositor events | `docs/ipc.md` Events |
-| `/scootctl/screenshots` | Capturing outputs reproducibly (the same path the docs' own screenshots use) | `docs/ipc.md` screenshots (plus the site screenshot script) |
-| `/scootctl/cli` (reference) | **Not built in phase 1.** Generated from `--help --json` per `agent-friendly-help.md` | Future: `crates/scootctl/src/cli.rs` (other CLIs gain their own generated pages the same way) |
-| `/scootctl/troubleshooting` | Agent symptoms ("socket not there", "action refused", "screenshot blank") | `docs/ipc.md` failure modes |
+| `/msg/` (overview) | Drive scoot from an agent or script: socket, rules, resource bounds | `docs/ipc.md` socket, Rules an agent needs, Resource bounds |
+| `/msg/requests` | The request grammar and replies | `docs/ipc.md` Requests, Replies |
+| `/msg/actions` | Every action, with arguments | `docs/ipc.md` Actions |
+| `/msg/events` | Subscribing to compositor events | `docs/ipc.md` Events |
+| `/msg/screenshots` | Capturing outputs reproducibly (the same path the docs' own screenshots use) | `docs/ipc.md` screenshots (plus the site screenshot script) |
+| `/msg/troubleshooting` | Agent symptoms ("socket not there", "action refused", "screenshot blank") | `docs/ipc.md` failure modes |
 
 ### scootbar (phase 2)
 

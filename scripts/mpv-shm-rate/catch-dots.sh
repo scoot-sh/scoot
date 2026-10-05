@@ -5,7 +5,6 @@
 set -u
 RENDERER=$1; D=$2; MAXTRIES=${3:-8}
 SCOOT=/var/cargo-target/debug/scoot
-SCOOTCTL=/var/cargo-target/debug/scootctl
 MPV=/nix/store/dddlcx6mfwrjxlscbf1rhxswj17987vs-mpv-0.41.0/bin/mpv
 CLIP=/home/dev/evidence/gdf/testsrc-nv12.mkv
 mkdir -p "$D"
@@ -38,7 +37,7 @@ while [ "$scored" -lt "$MAXTRIES" ]; do
     kill $CPID 2>/dev/null; wait $CPID 2>/dev/null
     continue
   fi
-  SCOOT_SOCKET="$T/scoot.sock" "$SCOOTCTL" windows > "$T/windows.json" 2>&1
+  SCOOT_SOCKET="$T/scoot.sock" "$SCOOT" msg windows > "$T/windows.json" 2>&1
   if ! grep -q '"width"' "$T/windows.json" 2>/dev/null; then
     echo "try-$try: zero windows (client crashed?), retrying without scoring"
     pkill -f "testsrc-nv12.mkv" 2>/dev/null
@@ -46,7 +45,7 @@ while [ "$scored" -lt "$MAXTRIES" ]; do
     kill $CPID 2>/dev/null; wait $CPID 2>/dev/null
     continue
   fi
-  SCOOT_SOCKET="$T/scoot.sock" "$SCOOTCTL" screenshot --out "$T/shot.png" > /dev/null 2>&1
+  SCOOT_SOCKET="$T/scoot.sock" "$SCOOT" msg screenshot --out "$T/shot.png" > /dev/null 2>&1
   stats=$(magick "$T/shot.png" -crop 766x960+20+20 +repage \
     -format '%[fx:mean],%[fx:standard_deviation],%[fx:maxima]' info: 2>/dev/null)
   echo "try-$try: $stats"

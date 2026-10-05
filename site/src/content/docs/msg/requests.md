@@ -3,13 +3,13 @@ title: Requests and replies
 description: "Every IPC request, type vs key, and what outputs, windows, keyboard and reload replies carry."
 ---
 
-Ask the compositor questions and tell it to act: every request, `type` vs `key`, and what the replies carry. All of these work as `scootctl <request>` or `scoot msg <request>`.
+Ask the compositor questions and tell it to act: every request, `type` vs `key`, and what the replies carry. All of these work as `scoot msg <request>` or `scoot msg <request>`.
 
 ## Requests
 
 | Request | What it does |
 | --- | --- |
-| `version` | Version and IPC protocol of the running compositor — needs a session. `scootctl --version` (or `scoot --version`) answers locally with no session, printing the binaries' own line (`scoot <version> (ipc protocol <N>)`) so a client can check compatibility before connecting. |
+| `version` | Version and IPC protocol of the running compositor — needs a session. `scoot msg --version` (or `scoot --version`) answers locally with no session, printing the binaries' own line (`scoot <version> (ipc protocol <N>)`) so a client can check compatibility before connecting. |
 | `outputs` | Every output's name, rectangle, usable rectangle, scale and power state. |
 | `windows` | Every window: id, app id, title, icon, output, workspace, adoption, focus, popup grab. |
 | `keyboard` | The active keyboard layout's name and index — what a layout indicator shows, and which layout the next `type` will produce. |
@@ -25,26 +25,26 @@ Ask the compositor questions and tell it to act: every request, `type` vs `key`,
 | `key COMBO` | Press one key combination — see [`type` vs `key`](#type-vs-key). |
 | `type TEXT` | Type text on the active keyboard layout. |
 | `wait-idle [--quiet-ms N] [--timeout-ms N]` | Block until nothing on screen has redrawn for `--quiet-ms` (default 200), giving up after `--timeout-ms` (default 5000). |
-| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output`, `keyboard`, `workspace`, `lock`; naming none is refused — bare `scootctl subscribe` sends `output`), streaming them until the session ends or drops the subscription — see [Events](#events). A fresh `keyboard` subscription starts silent, so issue one `keyboard` query for the baseline and listen for changes after it. A fresh `workspace` subscription starts silent too — read `windows` once for the baseline and apply snapshots after it. A fresh `lock` subscription starts silent too — read `locked` once for the baseline and apply changes after it. |
+| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output`, `keyboard`, `workspace`, `lock`; naming none is refused — bare `scoot msg subscribe` sends `output`), streaming them until the session ends or drops the subscription — see [Events](#events). A fresh `keyboard` subscription starts silent, so issue one `keyboard` query for the baseline and listen for changes after it. A fresh `workspace` subscription starts silent too — read `windows` once for the baseline and apply snapshots after it. A fresh `lock` subscription starts silent too — read `locked` once for the baseline and apply changes after it. |
 
 ```sh
-scootctl windows
-scootctl action focus-column left
-scootctl reload
-scootctl screenshot --out /tmp/shot.png
-scootctl type "hello"
-scootctl keyboard
-scootctl locked
-scootctl wait-idle --quiet-ms 200
-scootctl subscribe
-scootctl subscribe keyboard
-scootctl subscribe lock
+scoot msg windows
+scoot msg action focus-column left
+scoot msg reload
+scoot msg screenshot --out /tmp/shot.png
+scoot msg type "hello"
+scoot msg keyboard
+scoot msg locked
+scoot msg wait-idle --quiet-ms 200
+scoot msg subscribe
+scoot msg subscribe keyboard
+scoot msg subscribe lock
 ```
 
 ## `type` vs `key`
 
-**`scootctl type TEXT` types text the way a person would**, on whatever
-keyboard layout the session is running (ask `scootctl keyboard` which one
+**`scoot msg type TEXT` types text the way a person would**, on whatever
+keyboard layout the session is running (ask `scoot msg keyboard` which one
 that is): for each character it finds the key
 that carries it and holds down whatever modifiers that key's level needs —
 Shift for `A` or `!`, AltGr for a German layout's `@` — so a client receives
@@ -84,12 +84,12 @@ characters type on every one of the fourteen swept Latin layouts (`us`,
   plus a key; if a character does hit a bind, the compositor logs a warning
   naming it rather than swallowing it silently.
 
-**`scootctl key COMBO` is not the same.** It presses exactly the
+**`scoot msg key COMBO` is not the same.** It presses exactly the
 combination named and holds exactly the modifiers named, nothing more. Name
 the key as it is with nothing held, plus the modifiers: `shift+1`, not
 `exclam`; `shift+a`, not `A`. A name this layout only carries above its
 unmodified level is refused, because the key that carries it types a
-*different* character when pressed bare — `scootctl key exclam` would press
+*different* character when pressed bare — `scoot msg key exclam` would press
 the `1` key and deliver `1`. Some characters can't be named as a combination
 at all (`@` on a German layout needs AltGr, which `key` has no name for);
 `type` is the one that works the modifiers out from the layout, and the one
@@ -124,7 +124,7 @@ for its modifier only when no key on the layout can hold it.
 | `workspace` | Which workspace of that output the window sits on, 0-based — the same numbering `focus-workspace-index N` and `move-window-to-workspace-index N` take, so an agent can switch to the window's workspace without converting. (Bars see the 1-based twin over `ext-workspace-v1`.) |
 | `adopted` | Whether the window's workspace was adopted from an unplugged monitor. With `origin`, what tells an agent where an unplugged monitor's windows went. |
 | `origin` | Which connector the window's workspace was adopted from (`"DP-1"`), or `null` for a workspace that was never adopted. |
-| `rect` | Where the window is, in logical pixels — what you click. That is the part of its layout slot the window has actually drawn: the slot's top-left corner, and the smaller of the slot and what the window last committed on each axis. Normally that is the whole slot. It is smaller for a window that draws less than it was given (a fixed-size dialog, a video player keeping its own size), and for the frame or two after its slot grows until the window's larger frame arrives. It is the same area the focus ring surrounds and rounded corners cut, and it never reaches past the slot. A window that has drawn nothing yet reports its whole slot. Its toplevel surface only: its open menus and other popups can draw outside `rect`. Whatever the window draws, only the part inside its own output's `rect` (`scootctl outputs`) is shown and clickable: a column scrolled part-way past its output's edge is cut there (so is a menu crossing it, unless it lets the compositor adjust it — toolkit menus do — in which case it is flipped or slid back onto the window's output when it opens; see [protocols.md](../scoot/protocols.md#popup-menus-xdg_popup)), and a click past that edge lands on whatever the neighbouring output shows there — or on nothing, past the last output. A window that is not visible still reports the frame it *would* have — except a window stacked in the same column as a fullscreen one, which reports that fullscreen window's frame (it is behind it) until the fullscreen ends. The drawn-area rule applies only to visible windows. A window that is not visible reports its layout frame unchanged, because it draws nothing there. |
+| `rect` | Where the window is, in logical pixels — what you click. That is the part of its layout slot the window has actually drawn: the slot's top-left corner, and the smaller of the slot and what the window last committed on each axis. Normally that is the whole slot. It is smaller for a window that draws less than it was given (a fixed-size dialog, a video player keeping its own size), and for the frame or two after its slot grows until the window's larger frame arrives. It is the same area the focus ring surrounds and rounded corners cut, and it never reaches past the slot. A window that has drawn nothing yet reports its whole slot. Its toplevel surface only: its open menus and other popups can draw outside `rect`. Whatever the window draws, only the part inside its own output's `rect` (`scoot msg outputs`) is shown and clickable: a column scrolled part-way past its output's edge is cut there (so is a menu crossing it, unless it lets the compositor adjust it — toolkit menus do — in which case it is flipped or slid back onto the window's output when it opens; see [protocols.md](../scoot/protocols.md#popup-menus-xdg_popup)), and a click past that edge lands on whatever the neighbouring output shows there — or on nothing, past the last output. A window that is not visible still reports the frame it *would* have — except a window stacked in the same column as a fullscreen one, which reports that fullscreen window's frame (it is behind it) until the fullscreen ends. The drawn-area rule applies only to visible windows. A window that is not visible reports its layout frame unchanged, because it draws nothing there. |
 | `visible` | `false` when the window is scrolled out of view, on an inactive workspace, or hidden behind a fullscreen window (every other window on an output a fullscreen window covers, including windows stacked in its own column, and every floating window on it). A floating window is also `false` before its first frame, and while it is fullscreen without focus. |
 | `focused` | Compositor *window* focus — not necessarily where keystrokes go; see below. |
 | `popup_grab` | Whether this window's own popup tree holds the keyboard — see below. |
@@ -163,7 +163,7 @@ Read-only, like the event below: nothing over IPC locks or unlocks the
 session.
 
 ```sh
-$ scootctl locked
+$ scoot msg locked
 {
   "type": "locked",
   "locked": false
@@ -209,4 +209,4 @@ fields that *differed*: two empty lists together mean the reload changed
 nothing it was asked to -- except an unusable window rule and a
 `[wallpaper]` section with a problem, each refused on every reload that
 finds it, since neither is ever in effect. A reload that could not load or validate the file answers
-`error` with the running config untouched (`scootctl` exits non-zero).
+`error` with the running config untouched (`scoot msg` exits non-zero).

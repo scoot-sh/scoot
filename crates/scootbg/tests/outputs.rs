@@ -214,7 +214,7 @@ fn each_output_gets_one_configured_background_surface() {
 /// A fractional scale: `wl_output` says 2 (1.5 rounded up), so a size
 /// derived from it would be 800×500. The surface gets the compositor's own
 /// size, 1067×667, and so does `logical`. A live change to 2.0 through
-/// `scootctl reload` reconfigures it to 800×500.
+/// `scoot msg reload` reconfigures it to 800×500.
 #[test]
 fn a_fractional_scale_takes_the_compositors_size_and_follows_changes() {
     let Some(session) = Session::start_with("frac", 1, "[output]\nscale = 1.5\n") else {

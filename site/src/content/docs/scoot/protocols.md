@@ -249,7 +249,7 @@ Some clients still draw less than their slot, tiled or not. On the dev VM a
 GTK 4 dialog (`zenity --info`) kept its own 300x223 size in a 966x1083 slot,
 and `mpv` kept its video's size. scoot rounds the corners and draws the focus
 ring around what such a window actually draws, and reports that area as its
-`rect` over IPC ([ipc.md](../scootctl/requests.md#what-the-replies-carry)). It does not use the whole slot.
+`rect` over IPC ([ipc.md](../msg/requests.md#what-the-replies-carry)). It does not use the whole slot.
 
 One case needed its own fix. libadwaita dialogs (`zenity --info` above)
 round their own corners, with a larger radius than scoot's. With
@@ -377,7 +377,7 @@ A client's fullscreen button works: `xdg_toplevel.set_fullscreen` puts the
 window into scoot's fullscreen state, and `unset_fullscreen` takes it out.
 The same state is reachable three more ways — a taskbar's
 `wlr-foreign-toplevel` `set_fullscreen`, the `Super+f` bind, and IPC
-`toggle-fullscreen` / `set-fullscreen ID on|off` ([ipc.md](../scootctl/actions.md#actions)).
+`toggle-fullscreen` / `set-fullscreen ID on|off` ([ipc.md](../msg/actions.md#actions)).
 
 **What the window is told.** Every request is answered with a configure, as
 the protocol requires, even one that changed nothing. Entering sends the
@@ -484,7 +484,7 @@ A client's maximize button works: `xdg_toplevel.set_maximized` puts the
 window into scoot's maximized state, and `unset_maximized` takes it out.
 The same state is reachable three more ways — a taskbar's
 `wlr-foreign-toplevel` `set_maximized`, the `Super+m` bind, and IPC
-`toggle-maximize` / `set-maximized ID on|off` ([ipc.md](../scootctl/actions.md#actions)).
+`toggle-maximize` / `set-maximized ID on|off` ([ipc.md](../msg/actions.md#actions)).
 
 **What the window is told.** Every request is answered with a configure, as
 the protocol requires, even one that changed nothing. Entering sends the
@@ -1166,7 +1166,7 @@ away". Keybindings still win over a grab, so a client cannot wedge the
 session by holding a menu open.
 
 For what a grab means to an agent driving the socket, see
-[ipc.md](../scootctl/index.md#rules-an-agent-needs).
+[ipc.md](../msg/index.md#rules-an-agent-needs).
 
 ### Subsurfaces (`wl_subsurface`)
 
@@ -1373,7 +1373,7 @@ What a client can ask for:
   the keyboard when the user clicked it, `activate` hands the keyboard on to
   the window. It does that whether or not the window was already focused.
   `scoot msg action focus-window-id N` behaves the same way — see
-  [ipc.md](../scootctl/index.md#rules-an-agent-needs).
+  [ipc.md](../msg/index.md#rules-an-agent-needs).
 - **`close`** sends the window's `xdg_toplevel.close`. Whether the window
   actually goes is up to its own client; `closed` follows if and when it
   does.
@@ -1429,7 +1429,7 @@ only because no `ext-` successor exists yet.
 **It is read-only. `apply` and `test` always answer `failed`.** scoot's
 outputs are never moved, disabled, rescaled or re-moded by a client; each
 output's scale and mode come from the config file
-([`[[outputs]]`](./outputs.md)), whose scales a `scootctl
+([`[[outputs]]`](./outputs.md)), whose scales a `scoot msg
 reload` re-applies -- so there is nothing a configuration could change; a
 configuration that reported `succeeded` and changed nothing would give you
 a Display page whose buttons appear to work. `wlr-randr --output <name>
@@ -2082,7 +2082,7 @@ simply paint late; nothing they committed is lost), while the pointer and
 keyboard keep working. Input by itself never turns a screen back on — that
 is the daemon's `resume` job. Every `mode` event goes to every object for
 the output, including when scoot itself changed the mode (the IPC
-`output-power` request, see [ipc.md](../scootctl/requests.md#requests)); `failed` means the
+`output-power` request, see [ipc.md](../msg/requests.md#requests)); `failed` means the
 object is dead — the output went away, or the hardware refused the change.
 
 Only `--tty` touches hardware (the connector's DPMS property). Under
@@ -2329,7 +2329,7 @@ advertised three ways, matching what clients actually support:
 
 Real limits rather than polish:
 
-- **Per output, one answer per surface.** `scootctl reload` re-applies
+- **Per output, one answer per surface.** `scoot msg reload` re-applies
   every output's scale live (re-advertised on every output's `wl_output`, moved or not,
   re-sent to every live surface, geometry recomputed). A surface is told
   one scale -- the scale of the output it belongs to, not of every output
@@ -2352,7 +2352,7 @@ Real limits rather than polish:
   it; scoot logs a warning and uses `1.0`, and ignores every `[[outputs]]`
   entry the same way.
 - **Screenshots are physical pixels; layout coordinates are logical** — see
-  [ipc.md](../scootctl/index.md#rules-an-agent-needs).
+  [ipc.md](../msg/index.md#rules-an-agent-needs).
 
 ## Single-pixel buffers
 
@@ -2389,7 +2389,7 @@ scroll a bare compositor would send.
   `--nested` session keeps the source its host sent (accumulated over the
   host's pointer frame, so one host frame is one client frame). Injected
   `pointer scroll` is a wheel that also carries its detents -- see
-  [ipc.md](../scootctl/requests.md#requests).
+  [ipc.md](../msg/requests.md#requests).
 - **A finger scroll ends with a stop.** libinput ends the gesture with a
   zero-amount event, which arrives as `axis_stop` with no motion -- never
   as a zero scroll, and never synthesized for any other source.
@@ -2439,7 +2439,7 @@ relative motion deltas off its relative-pointer object.
   resumes with absolute still held.
 
 An agent driving the pointer during a game or 3D session sees `ok` replies
-with a frozen cursor — see [ipc.md](../scootctl/index.md#rules-an-agent-needs).
+with a frozen cursor — see [ipc.md](../msg/index.md#rules-an-agent-needs).
 
 ## Drawing tablets (`tablet-v2`)
 

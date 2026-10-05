@@ -6,11 +6,10 @@
 # tear down. Scoring is scripts/mpv-shm-rate/score.sh (ImageMagick mean/std
 # over the window's content rect).
 #
-# usage: run.sh <pixman|gles> <nruns> <outdir> [scoot-bin] [scootctl-bin]
+# usage: run.sh <pixman|gles> <nruns> <outdir> [scoot-bin]
 set -u
 RENDERER=$1; N=$2; OUTBASE=$3
 SCOOT=${4:-/var/cargo-target/debug/scoot}
-SCOOTCTL=${5:-/var/cargo-target/debug/scootctl}
 MPV=/nix/store/dddlcx6mfwrjxlscbf1rhxswj17987vs-mpv-0.41.0/bin/mpv
 CLIP=/home/dev/evidence/gdf/testsrc-nv12.mkv
 mkdir -p "$OUTBASE"
@@ -28,9 +27,9 @@ for i in $(seq 1 "$N"); do
   if [ "$ok" = 0 ]; then echo "run-$i: NO SOCKET" | tee -a "$OUTBASE/SETUP"; kill $CPID 2>/dev/null; wait $CPID 2>/dev/null; continue; fi
   sleep 4
   if pgrep -f "testsrc-nv12.mkv" > /dev/null; then echo alive > "$D/client"; else echo exited > "$D/client"; fi
-  SCOOT_SOCKET=$SOCK "$SCOOTCTL" windows > "$D/windows.json" 2>&1
+  SCOOT_SOCKET=$SOCK "$SCOOT" msg windows > "$D/windows.json" 2>&1
   for s in 1 2 3 4; do
-    SCOOT_SOCKET=$SOCK "$SCOOTCTL" screenshot --out "$D/shot-$s.png" > /dev/null 2>&1 \
+    SCOOT_SOCKET=$SOCK "$SCOOT" msg screenshot --out "$D/shot-$s.png" > /dev/null 2>&1 \
       || echo "run-$i shot-$s FAILED" | tee -a "$OUTBASE/SETUP"
     sleep 0.3
   done

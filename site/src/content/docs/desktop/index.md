@@ -679,7 +679,7 @@ there is nothing to refuse — and a manual run behind the lock only
 lists app names, never clipboard or notification content.
 
 Every value is an option, applied on rebuild/switch (the binds
-re-render into `[binds]`; no re-login, `scootctl reload` is enough):
+re-render into `[binds]`; no re-login, `scoot msg reload` is enough):
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
@@ -761,7 +761,7 @@ example used (hands that already know it keep a menu there; the drun
 half moves to `Super+d`, where the rest of the desktop expects it).
 
 Every value is an option, applied on rebuild/switch plus a session
-reload (`scootctl reload`) or re-login:
+reload (`scoot msg reload`) or re-login:
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|

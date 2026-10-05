@@ -1,4 +1,4 @@
-//! `scootctl`: one request, one reply, for scripts and agents.
+//! `scoot msg`: one request, one reply, for scripts and agents.
 
 use std::error::Error;
 use std::path::Path;
@@ -20,7 +20,7 @@ pub fn run(request: &Request, out: Option<&Path>) -> Result<(), Box<dyn Error>> 
     // A human-readable heads-up on stderr, independent of what goes to
     // stdout below -- every non-error response's JSON goes to stdout the
     // same way regardless of which variant it is (see the catch-all arm),
-    // so e.g. `scootctl key ... | jq .` keeps working and reflects what
+    // so e.g. `scoot msg key ... | jq .` keeps working and reflects what
     // actually happened whether or not there's a warning attached to it.
     // Advisory: if stderr itself is closed, the reply below still goes out.
     if let Response::Warning { message } = &response {
@@ -32,7 +32,7 @@ pub fn run(request: &Request, out: Option<&Path>) -> Result<(), Box<dyn Error>> 
                 Some(path) => {
                     std::fs::write(path, &shot.png)?;
                     // A closed stdout is a quiet success, not an error (see
-                    // `output`): `scootctl screenshot | head -c0` exits 0.
+                    // `output`): `scoot msg screenshot | head -c0` exits 0.
                     output::print_line(&format!(
                         "{}x{}, {} bytes -> {}",
                         shot.width,
@@ -41,7 +41,7 @@ pub fn run(request: &Request, out: Option<&Path>) -> Result<(), Box<dyn Error>> 
                         path.display()
                     ))?;
                 }
-                // Straight to stdout, so `scootctl screenshot > shot.png` works.
+                // Straight to stdout, so `scoot msg screenshot > shot.png` works.
                 None => output::write_bytes(&shot.png)?,
             }
             Ok(())
@@ -57,7 +57,7 @@ pub fn run(request: &Request, out: Option<&Path>) -> Result<(), Box<dyn Error>> 
 /// Streams a subscription: prints the `Subscribed` answer, then one compact
 /// JSON object per line per event, until the server closes the connection.
 ///
-/// One object per line is the scriptable shape: `scootctl subscribe | jq`
+/// One object per line is the scriptable shape: `scoot msg subscribe | jq`
 /// stays a line protocol, and a `notify-send` wiring reads one line per
 /// plug event. Exits 0 at a clean end of stream -- the session ended, or
 /// the server dropped this subscription for not reading -- so re-run to
@@ -76,7 +76,7 @@ fn subscribe(client: &mut Client, request: &Request) -> Result<(), Box<dyn Error
         match client.next_message()? {
             Some(event) => output::print_line(&serde_json::to_string(&event)?)?,
             // A closed stdout is a quiet success, not an error (see
-            // `output`): `scootctl subscribe | head -1` exits 0.
+            // `output`): `scoot msg subscribe | head -1` exits 0.
             None => return Ok(()),
         }
     }

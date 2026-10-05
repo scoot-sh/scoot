@@ -1,9 +1,9 @@
-//! scoot: the compositor, with the `msg` client alias.
+//! scoot: the compositor, with the `msg` client.
 //!
 //! Starting the session is this binary's own job; talking to a running one
-//! is `scootctl`'s. `scoot msg ...` stays as a permanent alias for it --
-//! parsed and run through that crate, never reimplemented here, so the two
-//! entry points cannot drift.
+//! is the client's (`scoot msg`, built on the `scootctl` library crate --
+//! parsed and run through that crate, never reimplemented here, so there is
+//! exactly one client).
 
 mod cli;
 

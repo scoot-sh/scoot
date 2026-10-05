@@ -12,8 +12,8 @@ Run it from the repository root inside the dev shell (``devenv shell --
 python3 scripts/scootbar-bench/bench.py run ...``: it needs ``nix``,
 ``strip`` and ImageMagick), as root or with rights to make a cgroup (CPU is
 accounted per bar run by one), after ``cargo build --release -p scootbar``
-and a build of ``scoot`` and ``scootctl`` (any profile: the compositor's
-own cost is not measured). The competitors, sway, foot, the session bus
+and a build of ``scoot`` (any profile: the compositor's
+own cost is not measured; driven via ``scoot msg``, the only client). The competitors, sway, foot, the session bus
 and DejaVu come from the flake's pinned nixpkgs.
 
 It reuses ``scripts/scootbg-bench``'s runner: the headless compositor with
@@ -143,9 +143,9 @@ def cmd_run(a):
         sys.exit(f"unknown bars: {', '.join(sorted(unknown))}")
     if a.scope not in B.SCOPES:
         sys.exit(f"unknown scope {a.scope}: one of {', '.join(B.SCOPES)}")
-    for path in (a.scootbar, a.scoot, a.scootctl):
+    for path in (a.scootbar, a.scoot):
         if not os.path.isfile(path):
-            sys.exit(f"no {path}: cargo build --release -p scootbar, and build scoot and scootctl")
+            sys.exit(f"no {path}: cargo build --release -p scootbar, and build scoot")
 
     tools = {}
     for attr in ("foot", "dbus", "dejavu_fonts"):
@@ -155,7 +155,7 @@ def cmd_run(a):
     stage_tools = {"foot": tools["foot"], "dbus": tools["dbus"],
                    "fonts": os.path.join(tools["dejavu_fonts"], "share", "fonts")}
     sway_bin = None
-    bins = {"scoot": a.scoot, "scootctl": a.scootctl}
+    bins = {"scoot": a.scoot}
     if "sway" in compositors:
         sway_store, _ = nix_resolve("sway", REPO)
         sway_bin = os.path.join(sway_store, "bin", "sway")
@@ -295,7 +295,6 @@ def main():
     r.add_argument("--switch-hz", type=float, default=4.0)
     r.add_argument("--scootbar", default=os.path.join(target, "release", "scootbar"))
     r.add_argument("--scoot", default=os.path.join(target, "release", "scoot"))
-    r.add_argument("--scootctl", default=os.path.join(target, "release", "scootctl"))
     r.add_argument("--scootbar-source", default=REPO,
                    help="the source tree --scootbar was built from, for the code rows "
                         "(default: this one)")

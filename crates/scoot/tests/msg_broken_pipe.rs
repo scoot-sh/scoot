@@ -1,9 +1,10 @@
 #![cfg(unix)]
-//! `scootctl` must exit quietly when its stdout reader goes away.
+//! `scoot msg` must exit quietly when its stdout reader goes away.
 //!
 //! Each test serves one canned IPC reply from a fake Unix-socket server
-//! (no compositor needed), runs the real `scootctl` binary against it via
-//! `SCOOT_SOCKET`, and either reads stdout fully (normal path) or closes
+//! (no compositor needed), runs the real `scoot` binary's `msg` client
+//! against it via `SCOOT_SOCKET`, and either reads stdout fully (normal
+//! path) or closes
 //! the read end before the child can write (truncated path). The truncated
 //! reply is ~1 MiB, far past the 64 KiB pipe buffer, so a small reply that
 //! "fits and never errors" cannot weaken the test: the child necessarily
@@ -14,10 +15,8 @@
 //! pipe`); post-fix the truncated path exits 0, matching the standard Unix
 //! tool contract (`head -1` pipelines stay green under `pipefail`).
 //!
-//! The `scoot msg` alias shares this exact code path (it parses and runs
-//! through this crate), so one binary's suite covers both entry points;
-//! byte-equivalence between the two is pinned separately, by the smoke
-//! test's equivalence section and scoot's alias unit test.
+//! The client runs through the `scootctl` library crate, so this suite
+//! covers the only client there is.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -25,8 +24,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-fn scootctl() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_scootctl"))
+fn scoot() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_scoot"))
 }
 
 /// Builds a fresh Unix-socket path under `$TMPDIR` for one fixture test.
@@ -61,7 +60,7 @@ fn socket_path(tag: &str) -> PathBuf {
     ))
 }
 
-/// How long the fake server waits for the `scootctl` child to connect
+/// How long the fake server waits for the `scoot msg` child to connect
 /// before failing loudly. A connect that never arrives used to wedge the
 /// whole suite: `listener.accept()` blocks forever and `server.join()`
 /// never returns (observed as a >840s stick under parallel nextest).
@@ -103,7 +102,7 @@ fn accept_with_deadline(
                         std::io::ErrorKind::TimedOut,
                         format!(
                             "fake IPC server: no client connected within {:?} \
-                             — the scootctl child failed to spawn or connect",
+                             — the scoot msg child failed to spawn or connect",
                             deadline
                         ),
                     ));
@@ -120,7 +119,7 @@ fn accept_with_deadline(
 /// writes before reading never blocks on a full socket buffer.
 ///
 /// Takes an already-bound listener rather than a path: binding on the
-/// calling thread *before* the server thread and the `scootctl` child are
+/// calling thread *before* the server thread and the `scoot msg` child are
 /// spawned is the happens-before edge that a thread-internal `bind()` (the
 /// pre-fix shape) lacked. Without it, the child could `connect()` before
 /// the server thread bound, take ENOENT, and exit 1 in milliseconds while
@@ -201,9 +200,9 @@ fn closed_stdout_on_a_large_reply_exits_quietly() {
     let listener = UnixListener::bind(&path).unwrap();
     let server = serve_once(listener, big_windows_reply());
 
-    let mut child = Command::new(scootctl())
+    let mut child = Command::new(scoot())
         .env("SCOOT_SOCKET", &path)
-        .args(["windows"])
+        .args(["msg", "windows"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -222,8 +221,8 @@ fn closed_stdout_on_a_large_reply_exits_quietly() {
 
 #[test]
 fn closed_stdout_on_help_exits_quietly() {
-    let mut child = Command::new(scootctl())
-        .arg("--help")
+    let mut child = Command::new(scoot())
+        .args(["msg", "--help"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -244,9 +243,9 @@ fn a_full_read_is_unchanged() {
     let listener = UnixListener::bind(&path).unwrap();
     let server = serve_once(listener, small_windows_reply());
 
-    let output = Command::new(scootctl())
+    let output = Command::new(scoot())
         .env("SCOOT_SOCKET", &path)
-        .args(["windows"])
+        .args(["msg", "windows"])
         .stderr(Stdio::null())
         .output()
         .unwrap();

@@ -1,5 +1,5 @@
-//! Stdout/stderr writes for the client (`scootctl`, and the `scoot msg`
-//! alias through it) that survive a closed pipe.
+//! Stdout/stderr writes for the client (`scoot msg`) that survive a closed
+//! pipe.
 //!
 //! Rust ignores SIGPIPE process-wide, so a `println!` to a closed stdout
 //! panics (`failed printing to stdout: Broken pipe`, exit 101) instead of

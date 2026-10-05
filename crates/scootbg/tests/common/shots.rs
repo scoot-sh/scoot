@@ -1,6 +1,6 @@
 //! Screenshots, to check real pixels.
 //!
-//! - scoot: its IPC `screenshot` request (what `scootctl screenshot`
+//! - scoot: its IPC `screenshot` request (what `scoot msg screenshot`
 //!   sends), a base64 PNG of one output's framebuffer.
 //! - sway (or any wlroots compositor): a minimal `wlr-screencopy-v1` client
 //!   written here, so the tests need no screenshot tool on the machine. The

@@ -1,10 +1,11 @@
 {
-  # On Linux this flake builds the whole compositor; on macOS the default is
-  # `scootctl`, the remote-control client -- so the top level names both, and
+  # On Linux this flake builds the whole compositor; on macOS the same
+  # `scoot` package is client-only (the compositor is cfg'd out, `scoot msg`
+  # is the remote-control client) -- so the top level names both, and
   # each package's `meta.description` below comes from its own crate. (The
   # flake-level `description` here has to stay a string literal: the flake
   # loader rejects anything else.)
-  description = "scoot: a scrolling-tiling Wayland compositor that runs without a GPU (on macOS, the scootctl remote-control client only)";
+  description = "scoot: a scrolling-tiling Wayland compositor that runs without a GPU (on macOS, client-only: the scoot msg remote-control client)";
 
   # Prebuilt binaries of this flake's own packages, pushed by CI
   # (.github/workflows/nix-build.yml) on every merge to main. A flake's
@@ -61,8 +62,6 @@
       # stay a hand-written literal (see its comment).
       crateDescription =
         (builtins.fromTOML (builtins.readFile ./crates/scoot/Cargo.toml)).package.description;
-      scootctlDescription =
-        (builtins.fromTOML (builtins.readFile ./crates/scootctl/Cargo.toml)).package.description;
       scootbgDescription =
         (builtins.fromTOML (builtins.readFile ./crates/scootbg/Cargo.toml)).package.description;
       scootbarDescription =
@@ -70,20 +69,20 @@
     in
     {
       # `nix build` / `nix run`, for getting the binaries without a dev shell.
-      # `scoot` is the whole compositor (plus the `scoot msg` client alias),
-      # built `-p scoot` so `$out/bin` carries only the `scoot` binary;
+      # `scoot` is the whole compositor (plus the `scoot msg` client, the
+      # only client), built `-p scoot` so `$out/bin` carries only the `scoot`
+      # binary;
       # `scoot-gpu` is the same binary with the `gpu-scanout` build feature
       # (`--tty --renderer gles` scans out from the GPU instead of reading
       # back; needs OS EGL drivers -- see site/src/content/docs/start/install.md#which-build-do-i-need);
       # `scoot-xwayland` (and `scoot-gpu-xwayland`) add the `xwayland`
       # build feature and nixpkgs' Xwayland on `PATH` (Linux only; X11 apps
       # under `--xwayland` -- see below and site/src/content/docs/scoot/xwayland.md);
-      # `scootctl` is the standalone remote-control client that drives a
-      # compositor running elsewhere (a VM) over its socket. On Linux the
-      # default is the compositor; on Darwin the compositor is cfg'd out of
-      # the crate, so the default is the client -- and `scoot --headless`
-      # there exits with a message saying exactly that, so the same package
-      # is honest on both (see README's Install section).
+      # On Darwin the compositor is cfg'd out of the crate, so `scoot`
+      # there is the client (`scoot msg` drives a compositor running
+      # elsewhere, e.g. in a VM) -- and `scoot --headless` there exits with
+      # a message saying exactly that, so the same package is honest on
+      # both (see README's Install section).
       packages = forEach (
         pkgs:
         let
@@ -95,7 +94,7 @@
           # target/ (~1GB in-store) and .git along -- no longer bust the
           # derivation's cache and force a full rebuild. Everything else
           # this flake reads at eval time (./Cargo.toml for `version`,
-          # ./crates/{scoot,scootctl,scootbg,scootbar}/Cargo.toml for
+          # ./crates/{scoot,scootbg,scootbar}/Cargo.toml for
           # the descriptions, ./Cargo.lock for crane's vendor step,
           # ./vm/compositor-deps.nix for buildInputs) resolves against
           # the flake tree, not `src`, so it stays out of the filter.
@@ -212,8 +211,8 @@
           # the flags above, which is why the compositor's set is separate
           # from the base set: `scoot` (and the three variants) link libEGL,
           # while the client, the wallpaper and the bar link nothing beyond
-          # what std links. The base set is shared by `scootctl`, `scootbg`
-          # and `scootbar` alike: scootbar's feature flags gate only its own
+          # what std links. The base set is shared by `scootbg` and
+          # `scootbar` alike: scootbar's feature flags gate only its own
           # modules' code, and its one dependency-bearing flag (`icon-image`
           # → `png`) names a crate the base set already compiles for scootbg,
           # so every `.override` feature set reuses this same artifact --
@@ -221,8 +220,8 @@
           # the workspace-wide selection here and a `-p` selection in the
           # package build (measured: 9--12 crates, seconds, in the serde and
           # wayland-client graphs; Smithay is recompiled in no package).
-          # On Darwin the base set below is scoped to the two crates that
-          # build there: the wallpaper and the bar refuse non-Linux
+          # On Darwin the base set below is scoped to the crate that
+          # builds there: the wallpaper and the bar refuse non-Linux
           # (`compile_error!` in `scootbg-mem`), so a workspace-wide check
           # would fail where today nothing compositor-shaped is ever
           # compiled.
@@ -258,7 +257,7 @@
           # build there; see the comment above).
           depsBase = mkDeps {
             pname = "scoot-base";
-            scope = if pkgs.stdenv.hostPlatform.isDarwin then "--locked -p scoot -p scootctl" else "--locked";
+            scope = if pkgs.stdenv.hostPlatform.isDarwin then "--locked -p scoot" else "--locked";
           };
           # The compositor's own set: `-p scoot` (byte-identical to the
           # package build's selection via `scootArgs`) with the link flags.
@@ -305,14 +304,9 @@
               cargoArtifacts = depsScoot;
 
               # Just this crate, not the whole workspace: `$out/bin` carries
-              # only `scoot` (the `scoot msg` alias is part of that binary,
-              # not a second one) -- the mirror of the `scootctl` package's
-              # flag below. Without this, the build compiles the whole
-              # workspace and ships a redundant `scootctl` (gh #172).
-              # Behavior-preserving for the shipped binary: the `scootctl`
-              # binary unit enables no features on any shared crate (it
-              # depends on bare `scoot-ipc` plus `serde_json`), so the
-              # `scoot` unit graph is identical either way.
+              # only `scoot` (`scoot msg` is part of that binary, not a
+              # second one). Without this, the build compiles the whole
+              # workspace and ships binaries nothing installs (gh #172).
               # Byte-identical to the `depsScoot` selection via `scootArgs`
               # (see above): any drift recompiles the dependency graph.
               cargoExtraArgs = scootArgs [ ];
@@ -422,46 +416,14 @@
             }
           );
 
-          scootctl = craneLib.buildPackage (
-            cranePackage
-            // {
-              pname = "scootctl";
-              cargoArtifacts = depsBase;
-
-              # Just this crate, not the whole workspace: `$out/bin` carries
-              # only `scootctl`, and on Darwin nothing compositor-shaped (and
-              # no Smithay tree) is compiled at all.
-              cargoExtraArgs = "--locked -p scootctl";
-
-              passthru.cargoBuildFeatures = [ ];
-
-              # Nothing to probe or link: the client is pure Rust
-              # (`scoot-ipc` plus `serde_json` plus std), so neither of the
-              # lists the compositor package above needs applies here -- which
-              # is also why this package builds anywhere with zero cfg gating.
-
-              # Same strip backstop as the compositor package above.
-              stripAllList = [ "bin" ];
-
-              meta = {
-                # The crate's own description, no per-system conditional: this
-                # package is the client on every system.
-                description = scootctlDescription;
-                homepage = "https://github.com/scoot-sh/scoot";
-                license = pkgs.lib.licenses.mit;
-                mainProgram = "scootctl";
-                platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
-              };
-            }
-          );
-
-          # The wallpaper daemon, its own package like `scootctl` (the
+          # The wallpaper daemon, its own package (the
           # `scoot` package stays `scoot` only): `-p scootbg` puts just the
           # one binary in `$out/bin`. Pure Rust on the `linux_raw` rustix
-          # backend, so, like the client, nothing to probe or link beyond
-          # what std links (docs/scootbg/backlog/resolved/dependencies-done.md
-          # §9). Linux only: it is a Wayland client that never runs on a
-          # Mac, and does not build there, so no Darwin package is offered.
+          # backend, so, like the client inside `scoot`, nothing to probe or
+          # link beyond what std links
+          # (docs/scootbg/backlog/resolved/dependencies-done.md §9).
+          # Linux only: it is a Wayland client that never runs on a Mac,
+          # and does not build there, so no Darwin package is offered.
           scootbg = craneLib.buildPackage (
             cranePackage
             // {
@@ -593,9 +555,10 @@
           };
         in
         {
-          # Linux gets the compositor, Darwin gets the client.
-          default = if pkgs.stdenv.hostPlatform.isDarwin then scootctl else scoot;
-          inherit scoot scootctl;
+          # `scoot` everywhere: on Linux the compositor, on Darwin the
+          # client-only build (`scoot msg` drives a compositor elsewhere).
+          default = scoot;
+          inherit scoot;
           # The docs site (site/, nix/docs-site.nix): Astro Starlight over
           # pnpm, built offline with hash-pinned dependencies. On every
           # system Node runs on (Linux and Darwin alike): it is a static
@@ -692,8 +655,7 @@
       );
 
       # So `nix run . -- --headless -- foot` and `nix run . -- msg windows`
-      # work, `nix run .#scootctl -- windows` runs the standalone client
-      # anywhere, `nix run .#scoot-gpu -- --tty -- ...` runs the scanout
+      # work, `nix run .#scoot-gpu -- --tty -- ...` runs the scanout
       # build and `nix run .#scoot-xwayland -- --headless --xwayland -- xterm`
       # the XWayland one (Linux only), `nix run .#scootbar -- daemon --font
       # F` the bar and `nix run .#scootbar-demo` the bar with a font (Linux
@@ -705,10 +667,6 @@
           default = {
             type = "app";
             program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-          };
-          scootctl = {
-            type = "app";
-            program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scootctl;
           };
           scoot-gpu = {
             type = "app";
@@ -753,7 +711,7 @@
               # should stay a subset of that closure -- nothing new to fetch.
               ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isDarwin pkgs.rust-analyzer;
             # The compositor's C dependencies exist only on Linux; the core, the
-            # IPC crate and the `scootctl` client build anywhere.
+            # IPC crate and the `scoot msg` client build anywhere.
             buildInputs = dev.compositorDeps;
 
             # `nix develop`'s setup hooks already add -L for every buildInput, so
@@ -809,7 +767,7 @@
         }
       );
 
-      # `pkgs.scoot`, `pkgs.scootctl` and (Linux only, where they build)
+      # `pkgs.scoot` and (Linux only, where they build)
       # `pkgs.scootbg` and `pkgs.scootbar`: this flake's own builds, the
       # same derivations as `packages`, so an overlay user runs exactly
       # what the flake ships -- scoot and scootbg from one revision, the
@@ -827,7 +785,6 @@
         in
         nixpkgs.lib.getAttrs (builtins.filter (name: built ? ${name}) [
           "scoot"
-          "scootctl"
           "scootbg"
           # Not `scootbar-demo`: a demo to run, not a package to build on
           # (it is scootbar plus a font a system's own font setup provides).
@@ -854,16 +811,14 @@
             in
             {
               imports = [ ./nix/modules/home.nix ];
-              # On Darwin the per-system default would be `scootctl`, a
-              # binary not named `scoot` -- while the option reads "The
-              # scoot package to install" and site/src/content/docs/start/install.md frames the
-              # macOS use as config management (the config edited here
-              # deploys to a Linux box). So the Darwin default is null:
-              # files-only, which the module explicitly supports. Darwin
-              # users who want the client set `package` explicitly.
-              programs.scoot.package = nixpkgs.lib.mkDefault (
-                if pkgs.stdenv.hostPlatform.isDarwin then null else built.default or null
-              );
+              # The flake's own `scoot` build: on Darwin that package is
+              # client-only (`scoot msg` drives a remote session), so the
+              # default is honest there too. The macOS use in
+              # site/src/content/docs/start/install.md is config management
+              # (the config edited here deploys to a Linux box), which a
+              # files-only setup also serves -- but the default now installs
+              # the client rather than nothing.
+              programs.scoot.package = nixpkgs.lib.mkDefault (built.default or null);
               # scootbg is Linux-only: null elsewhere (and on Darwin a
               # `[wallpaper]` renders as written, for the Linux box).
               programs.scoot.wallpaper.package = nixpkgs.lib.mkDefault (built.scootbg or null);

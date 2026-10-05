@@ -24,7 +24,7 @@ rec {
   ];
 
   # The compositor's C dependencies exist only on Linux; the core, the IPC
-  # crate and the `scootctl` client build anywhere.
+  # crate and the `scoot msg` client build anywhere.
   compositorDeps = lib.optionals isLinux (import ../vm/compositor-deps.nix pkgs);
 
   # What scripts/smoke-test.sh drives: `foot` as the client (without it the

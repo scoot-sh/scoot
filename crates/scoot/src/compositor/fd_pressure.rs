@@ -145,7 +145,7 @@
 //!   attaches to fd-less requests are never taken. Released wayland-backend
 //!   0.3.17 kept them for the connection's life; review of PR #236 measured
 //!   one idle client taking scoot from 18 to 999 fds that way, newcomers and
-//!   `scootctl` shed, the client never killed. scoot now builds against a
+//!   `scoot msg` shed, the client never killed. scoot now builds against a
 //!   scoot-sh fork (`docs/forks.md`) that disconnects a client leaving more
 //!   than its cap unclaimed at a point where every complete request has been
 //!   parsed, with `wl_display.error` `invalid_method` ("too many file
@@ -200,7 +200,7 @@
 //! [`IPC_RESERVE_FDS`] is 16: refuse IPC newcomers only once fewer than 16
 //! fds stand free ([`Table::ipc_pressured`], read only by `ipc::accept`).
 //! The agent's channel stays reachable through all the pressure that sheds
-//! Wayland newcomers, which is the point: `scootctl` is the control channel
+//! Wayland newcomers, which is the point: `scoot msg` is the control channel
 //! computer use drives through, and the connection-count residual
 //! (`docs/backlog/core/pressure-many-light-connections.md`) sheds it along
 //! with every other newcomer otherwise. Sized so the lower line cannot
@@ -209,12 +209,12 @@
 //! (`ipc::slots::MAX_CONNECTIONS`) bounds what IPC holds at 64, so even
 //! filling every slot from the Wayland line leaves 128 - 64 = 64 free, and
 //! IPC admissions alone stop at 16 free, never at zero. The 16 is headroom
-//! for what a served `scootctl` request may transiently open past its
+//! for what a served `scoot msg` request may transiently open past its
 //! socket: a selection pipe (2), a screenshot, a spawn's pipes.
 //!
 //! What the lower line does *not* cover, honestly: a literally full table.
 //! There `accept` itself fails and the listener's `EMFILE` shed consumes the
-//! pending connection before `ipc::accept` ever runs, so a `scootctl` dial
+//! pending connection before `ipc::accept` ever runs, so a `scoot msg` dial
 //! sees EOF, not the refusal. The line moves the shed window from "all of
 //! pressure" to "only full", which on a 1024-fd table is 7 parked
 //! connections served instead of refused, and on the raised table everything
@@ -259,14 +259,14 @@
 //!
 //! - **Raised table**: 1025 per connection. 8 such connections held 8218
 //!   fds and 63 held 64593, everyone served both times; 64 filled the 65536
-//!   table (newcomers dropped, `scootctl` reset). Nobody is disconnected.
+//!   table (newcomers dropped, `scoot msg` reset). Nobody is disconnected.
 //! - **1024-fd table** (the fixed-128 build, which is what a 1024 hard limit
 //!   gives): 129 per connection. Six held 792 with everyone served, seven 921,
-//!   past the line (newcomers shed, `scootctl` refused), and eight filled the
+//!   past the line (newcomers shed, `scoot msg` refused), and eight filled the
 //!   table.
 //!
 //! Before the cap, one connection could do either. That residual, and what
-//! it costs `scootctl`, is
+//! it costs `scoot msg`, is
 //! `docs/backlog/core/pressure-many-light-connections.md`.
 //!
 //! ## Observation cost and disciplines
@@ -363,7 +363,7 @@ impl Table {
     /// Whether the table is pressured for IPC accepts: fewer than
     /// [`IPC_RESERVE_FDS`] free. Same fail-open shape as [`pressured`]
     /// (small tables read calm), a deeper line: read only by `ipc::accept`,
-    /// so `scootctl` stays servable while Wayland newcomers shed. Total on
+    /// so `scoot msg` stays servable while Wayland newcomers shed. Total on
     /// any input for the same reason.
     pub(crate) fn ipc_pressured(&self) -> bool {
         self.soft >= MIN_TABLE_FDS && self.free() < IPC_RESERVE_FDS

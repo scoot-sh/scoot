@@ -24,7 +24,7 @@
 # afterwards, off this machine's critical path, so nothing here needs jq,
 # python or ImageMagick -- bash, coreutils, the two scoot builds and foot.
 #
-# Overrides: SCOOT_DUMB, SCOOT_GPU, SCOOTCTL (binaries), OUT (output dir),
+# Overrides: SCOOT_DUMB, SCOOT_GPU (binaries), OUT (output dir),
 # ROUNDS, IDLE_SECS, MOVE_SECS/MOVE_GAP, WIDTH_SECS/WIDTH_GAP, BACKEND,
 # OVERWRITE=1 (replace a run already in OUT -- destroys its numbers).
 set -uo pipefail
@@ -36,19 +36,13 @@ set -uo pipefail
 # whether they did.
 SCOOT_DUMB=${SCOOT_DUMB:-result-scoot/bin/scoot}
 SCOOT_GPU=${SCOOT_GPU:-result-scoot-gpu/bin/scoot}
-# The client is a separate package and the compositor packages deliberately do
-# not ship it (`packages.scoot` builds `-p scoot` only -- see
-# docs/backlog/resolved/scoot-package-ships-scootctl-done.md), so it cannot be
-# assumed to sit next to the binary under test. Resolved and checked *before*
-# any seat is taken: discovering it missing mid-round would waste a VT trip.
-SCOOTCTL=${SCOOTCTL:-}
 OUT=${OUT:-/tmp/scoot-tier-bench}
 ROUNDS=${ROUNDS:-4}
 IDLE_SECS=${IDLE_SECS:-10}
 # Damage is driven for a fixed wall-clock window at a fixed rate, not for a
 # fixed event count -- see scene 2. These gaps target 60/s of cursor damage
 # and 20/s of full-output relayout; the *achieved* rates are lower (~46/s and
-# ~15.5/s measured on an M2) because each iteration also pays a `scootctl`
+# ~15.5/s measured on an M2) because each iteration also pays a `scoot msg`
 # round trip and two `date` forks. That is fine and does not need correcting:
 # what matters is staying under the panel's refresh so each event gets its
 # own frame rather than being coalesced away, and everything is normalised
@@ -74,18 +68,6 @@ for b in "$SCOOT_DUMB" "$SCOOT_GPU"; do
         exit 1
     fi
 done
-if [ -z "$SCOOTCTL" ]; then
-    for c in result-scootctl/bin/scootctl \
-             "$(dirname "$SCOOT_DUMB")/scootctl" \
-             "$(dirname "$SCOOT_GPU")/scootctl" \
-             "$(command -v scootctl 2>/dev/null)"; do
-        if [ -n "$c" ] && [ -x "$c" ]; then SCOOTCTL=$c; break; fi
-    done
-fi
-if [ -z "$SCOOTCTL" ] || ! "$SCOOTCTL" --version >/dev/null 2>&1; then
-    echo "no usable scootctl -- nix build .#scootctl -o result-scootctl, or set SCOOTCTL" >&2
-    exit 1
-fi
 command -v foot >/dev/null || { echo "foot is not on PATH -- it is the test client" >&2; exit 1; }
 [ -n "${XDG_RUNTIME_DIR:-}" ] || { echo "no XDG_RUNTIME_DIR -- log in on a VT, do not su" >&2; exit 1; }
 
@@ -127,7 +109,6 @@ fi
     # printed below are it. The two differ whenever the harness is edited
     # without rebuilding, which is the normal case.
     echo "harness tree: $(git -C "$(dirname "$0")/.." rev-parse HEAD 2>/dev/null) $(git -C "$(dirname "$0")/.." status --porcelain 2>/dev/null | head -5)"
-    echo "ctl:  $SCOOTCTL ($("$SCOOTCTL" --version 2>&1))"
     echo "dumb: $SCOOT_DUMB -> $(readlink -f "$SCOOT_DUMB") ($("$SCOOT_DUMB" --version 2>&1))"
     echo "gpu:  $SCOOT_GPU -> $(readlink -f "$SCOOT_GPU") ($("$SCOOT_GPU" --version 2>&1))"
     echo "gbm linkage: dumb=$(ldd "$SCOOT_DUMB" 2>/dev/null | grep -c gbm) gpu=$(ldd "$SCOOT_GPU" 2>/dev/null | grep -c gbm)"
@@ -188,7 +169,8 @@ run_round() {
     # the socket lives in the runtime dir under a short name while every
     # artefact stays in $OUT. Rehearsing this harness is what found it.
     local sock="$XDG_RUNTIME_DIR/stb-$$-$tag.sock"
-    local ctl=$SCOOTCTL
+    # The tier binary drives itself: `scoot msg` is the only client.
+    local ctl=( "$bin" msg )
 
     rm -f "$sock"
     echo "=== round $round tier $tier: $bin ${extra[*]}"
@@ -202,7 +184,7 @@ run_round() {
 
     local up=no
     for _ in $(seq 100); do
-        if [ -S "$sock" ] && SCOOT_SOCKET="$sock" "$ctl" version >/dev/null 2>&1; then up=yes; break; fi
+        if [ -S "$sock" ] && SCOOT_SOCKET="$sock" "${ctl[@]}" version >/dev/null 2>&1; then up=yes; break; fi
         kill -0 "$PID" 2>/dev/null || break
         sleep 0.2
     done
@@ -256,13 +238,13 @@ run_round() {
     connector=$(printf '%s\n' "$plain" | grep -oE 'connector=[^ ]+' | head -1 | cut -d= -f2)
     scanout=$(printf '%s\n' "$plain" | grep -oE 'scanout="[a-z]+"' | head -1 | cut -d'"' -f2)
     echo "  up: connector=${connector:-?} scanout=${scanout:-none}"
-    "$ctl" outputs > "$OUT/$tag.outputs" 2>&1
+    "${ctl[@]}" outputs > "$OUT/$tag.outputs" 2>&1
 
     # Second window, so the layout scene has something to rearrange.
-    "$ctl" action spawn foot >/dev/null 2>&1
+    "${ctl[@]}" action spawn foot >/dev/null 2>&1
     sleep 1.5
-    "$ctl" wait-idle --quiet-ms 500 --timeout-ms 8000 >/dev/null 2>&1
-    "$ctl" windows > "$OUT/$tag.windows" 2>&1
+    "${ctl[@]}" wait-idle --quiet-ms 500 --timeout-ms 8000 >/dev/null 2>&1
+    "${ctl[@]}" windows > "$OUT/$tag.windows" 2>&1
 
     # Correctness capture, taken HERE and not at the end of the round: two
     # windows freshly mapped at their default widths with the pointer parked
@@ -280,9 +262,9 @@ run_round() {
     # (all three color channels, measured) if every pixel differed by one
     # least-significant bit. The end-of-round capture is kept too, as a record
     # of where each round finished; it is `-end` and is not the comparison.
-    "$ctl" pointer move 1280 800 >/dev/null 2>&1
-    "$ctl" wait-idle --quiet-ms 500 --timeout-ms 8000 >/dev/null 2>&1
-    "$ctl" screenshot --out "$OUT/$tag-pinned.png" >/dev/null 2>&1
+    "${ctl[@]}" pointer move 1280 800 >/dev/null 2>&1
+    "${ctl[@]}" wait-idle --quiet-ms 500 --timeout-ms 8000 >/dev/null 2>&1
+    "${ctl[@]}" screenshot --out "$OUT/$tag-pinned.png" >/dev/null 2>&1
 
     # --- scene 1: idle. Nothing moving; sample power across the same window.
     local j0 j1 idle_j
@@ -322,7 +304,7 @@ run_round() {
     while [ "$(( $(now_ms) - t0 ))" -lt $(( MOVE_SECS * 1000 )) ]; do
         n=$(( n + 1 ))
         x=$(( 200 + (n * 7) % 900 )); y=$(( 150 + (n * 11) % 600 ))
-        "$ctl" pointer move "$x" "$y" >/dev/null 2>&1
+        "${ctl[@]}" pointer move "$x" "$y" >/dev/null 2>&1
         [ $(( n % 60 )) -eq 0 ] || [ "$n" = 1 ] &&
             cat /sys/class/power_supply/macsmc-battery/power_now 2>/dev/null >> "$OUT/$tag.power-move"
         sleep "$MOVE_GAP"
@@ -341,7 +323,7 @@ run_round() {
     j0=$(cpu_jiffies "$PID"); t0=$(now_ms); n=0
     while [ "$(( $(now_ms) - t0 ))" -lt $(( WIDTH_SECS * 1000 )) ]; do
         n=$(( n + 1 ))
-        "$ctl" action cycle-column-width >/dev/null 2>&1
+        "${ctl[@]}" action cycle-column-width >/dev/null 2>&1
         [ $(( n % 20 )) -eq 0 ] || [ "$n" = 1 ] &&
             cat /sys/class/power_supply/macsmc-battery/power_now 2>/dev/null >> "$OUT/$tag.power-width"
         sleep "$WIDTH_GAP"
@@ -384,8 +366,8 @@ run_round() {
 
     # Correctness evidence: the frame the tier actually presented, read back
     # through the capture path the tier owns.
-    "$ctl" wait-idle --quiet-ms 500 --timeout-ms 8000 >/dev/null 2>&1
-    "$ctl" screenshot --out "$OUT/$tag-end.png" >/dev/null 2>&1
+    "${ctl[@]}" wait-idle --quiet-ms 500 --timeout-ms 8000 >/dev/null 2>&1
+    "${ctl[@]}" screenshot --out "$OUT/$tag-end.png" >/dev/null 2>&1
 
     local uw_move uw_width
     uw_move=$(power_mean "$OUT/$tag.power-move")
@@ -400,7 +382,7 @@ run_round() {
          "moves=${move_j}j/${MOVES_DONE}ev/${move_ms}ms/${uw_move}uW" \
          "widths=${width_j}j/${WIDTHS_DONE}ev/${width_ms}ms/${uw_width}uW rss=${rss}kB"
 
-    "$ctl" action quit >/dev/null 2>&1
+    "${ctl[@]}" action quit >/dev/null 2>&1
     for _ in $(seq 50); do kill -0 "$PID" 2>/dev/null || break; sleep 0.1; done
     cleanup; PID=
     unset SCOOT_SOCKET

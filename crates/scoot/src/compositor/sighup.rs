@@ -40,7 +40,7 @@
 //! signalfd mask to inherit). Pinned by
 //! `tests::a_spawned_child_sees_default_sighup_and_an_empty_mask`.
 //!
-//! Only the compositor installs this handler. `scootctl` gets none: a HUP to
+//! Only the compositor installs this handler. `scoot msg` gets none: a HUP to
 //! the client keeps its default meaning (terminate), which is the only sane
 //! one for a short-lived process with no config to reload.
 //!

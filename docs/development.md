@@ -20,7 +20,7 @@ cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-m
 ```
 
 That is what the macOS CI job runs: the compositor crate with its Linux
-halves cfg'd out (a Mac version is planned), `scootctl`, `scoot-ipc` and
+halves cfg'd out (a Mac version is planned), the `scootctl` client library, `scoot-ipc` and
 `scoot-core`. The same applies to anything else that walks the whole
 workspace on a Mac: rust-analyzer's `check.overrideCommand` (or its
 `cargo.extraArgs`) takes the same `--exclude` flags, and so does
@@ -53,7 +53,7 @@ install devenv the usual way.
 |---|---|
 | `crates/scoot-core` | the platform-independent layout engine (no Wayland, no I/O) |
 | `crates/scoot-ipc` | the wire protocol and a client over it |
-| `crates/scootctl` | the `scootctl` remote-control client |
+| `crates/scootctl` | the client library behind `scoot msg` |
 | `crates/scoot` | the CLI and the Smithay-based compositor |
 | `crates/scootbg` | the wallpaper daemon |
 | `crates/scootbg-mem` | the only `unsafe` code scootbg has (scootbar's `wl_shm` buffers too) |
@@ -77,7 +77,7 @@ Every pull request runs `.github/workflows/ci.yml`. It checks:
   Linux and macOS jobs each cover their own systems' outputs, modules and
   checks);
 - a macOS `cargo check` of the workspace less scootbg, scootbg-mem and
-  scootbar (above): the `scootctl` client plus the compositor crate with
+  scootbar (above): the `scoot msg` client plus the compositor crate with
   its Linux halves cfg'd out. It runs on a change to those crates or to
   shared files, not on a scootbg- or scootbar-only one.
 
@@ -99,8 +99,7 @@ change runs scootbar's too, since its buffers are scootbar's. Shared files
 (`Cargo.*`, `flake.*`, `nix/`, `.github/`, and anything unlisted) run
 everything.
 
-**Packages build on merge, not per PR.** `nix build .#scoot .#scootctl
-.#scootbg` runs on every merge to main via
+**Packages build on merge, not per PR.** `nix build .#scoot .#scootbg` runs on every merge to main via
 `.github/workflows/nix-build.yml`: it is a full release Smithay build the
 cargo cache cannot reuse, so it would tax every push, and the every-PR
 `flake check` already evaluates every output and runs the module suite.

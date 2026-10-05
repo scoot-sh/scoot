@@ -271,7 +271,7 @@ pub struct Appearance {
     /// (`[appearance] cursor_hide_after_ms`, default 0 = never: opt-in, so
     /// no session hides its pointer unasked). What lets a fullscreen window
     /// go primary-direct on a CRTC with no cursor plane -- see
-    /// `cursor_hide.rs`. Re-applied live by `scootctl reload`.
+    /// `cursor_hide.rs`. Re-applied live by `scoot msg reload`.
     pub cursor_hide_after_ms: u64,
     /// Whether to answer a client's `zxdg_toplevel_decoration_v1` request
     /// with `ServerSide` -- see `handlers.rs`'s `XdgDecorationHandler` impl.

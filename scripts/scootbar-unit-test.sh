@@ -26,8 +26,8 @@
 #   scripts/scootbar-unit-test.sh [--nixos | --home]
 #
 # Needs: Linux with a running `systemd --user` manager and Nix (flakes enabled), a
-# built scoot and scootctl (SCOOT / SCOOTCTL, else target/release then target/debug of
-# this tree: `cargo build -p scoot -p scootctl`), python3 on PATH; --home also
+# built scoot (SCOOT, else target/release then target/debug of
+# this tree: `cargo build -p scoot`, driven via `scoot msg`, the only client), python3 on PATH; --home also
 # fetches home-manager (SCOOTBAR_HM_REV, default the revision in the script) and
 # builds sd-switch. It uses a headless scoot, so nothing is drawn on a display and
 # no VT is taken: before a compositor of ours exists the bar is pointed at a socket
@@ -103,8 +103,9 @@ if systemctl --user cat scootbar.service >/dev/null 2>&1; then
 fi
 pick() { for f in "$@"; do [ -n "$f" ] && [ -x "$f" ] && { echo "$f"; return; }; done; }
 SCOOT=$(pick "${SCOOT:-}" "$ROOT/target/release/scoot" "$ROOT/target/debug/scoot") || true
-CTL=$(pick "${SCOOTCTL:-}" "$ROOT/target/release/scootctl" "$ROOT/target/debug/scootctl") || true
-[ -n "$SCOOT" ] && [ -n "$CTL" ] || die "no scoot/scootctl binary (cargo build -p scoot -p scootctl, or set SCOOT and SCOOTCTL)"
+[ -n "${SCOOTCTL:-}" ] && die "SCOOTCTL is gone -- the standalone client was removed, `scoot msg` is the only client; unset SCOOTCTL"
+[ -n "$SCOOT" ] || die "no scoot binary (cargo build -p scoot, or set SCOOT)"
+ctl() { "$SCOOT" msg "$@"; }
 
 W=$(mktemp -d "$RT/scootbar-unit-test.XXXXXX")
 pass=0; fail=0; SCOOT_PID=; SET_ENV=0
@@ -118,7 +119,7 @@ inactive() { [ "$(prop ActiveState)" = inactive ]; }
 not_failed() { [ "$(prop ActiveState)" != failed ]; }
 restarts_ge() { [ "$(prop NRestarts)" -ge "$1" ]; }
 # 0: the bar has reserved its zone; 1: it has not; 2: scoot could not be asked
-bar_state() { SCOOT_SOCKET=$W/scoot.sock "$CTL" outputs 2>/dev/null | python3 -c '
+bar_state() { SCOOT_SOCKET=$W/scoot.sock ctl outputs 2>/dev/null | python3 -c '
 import json,sys
 try:
     o=json.load(sys.stdin)["outputs"][0]
@@ -391,7 +392,7 @@ gendir a "$GEN_A"; gendir b "$GEN_B"; gendir c "$GEN_C"
 echo "   unit A vs C: $(cmp -s "$W/gen/a/scootbar.service" "$W/gen/c/scootbar.service" && echo identical || echo DIFFERENT); A vs B: $(cmp -s "$W/gen/a/scootbar.service" "$W/gen/b/scootbar.service" && echo identical || echo different)"
 diff "$W/gen/a/scootbar.service" "$W/gen/b/scootbar.service" | sed 's/^/   | /'
 export DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=$RT/bus}
-usable_y() { SCOOT_SOCKET=$W/scoot.sock "$CTL" outputs 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["outputs"][0]["usable"]["y"])'; }
+usable_y() { SCOOT_SOCKET=$W/scoot.sock ctl outputs 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["outputs"][0]["usable"]["y"])'; }
 switch_to() { # NAME GEN OLD: link the generation as home-manager does, then sd-switch
     ln -sfn "$2/home-files/.config/scoot/bar.toml" "$W/home/.config/scoot/bar.toml"
     cp -L --no-preserve=mode "$W/gen/$1/scootbar.service" "$UNITDIR/scootbar.service" || die "could not link generation $1 unit"

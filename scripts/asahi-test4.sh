@@ -71,16 +71,15 @@ fi
 # would make that offer hollow on any machine that no longer has them.
 if [ "$ANALYSE_ONLY" != 1 ]; then
     missing=
-    for p in result-scoot/bin/scoot result-scoot-gpu/bin/scoot result-scootctl/bin/scootctl; do
+    for p in result-scoot/bin/scoot result-scoot-gpu/bin/scoot; do
         [ -x "$p" ] || missing="$missing $p"
     done
     if [ -n "$missing" ]; then
         echo "missing:$missing" >&2
         echo >&2
-        echo "build all three from the same tree first:" >&2
+        echo "build both from the same tree first:" >&2
         echo "  nix build .#scoot     -o result-scoot" >&2
         echo "  nix build .#scoot-gpu -o result-scoot-gpu" >&2
-        echo "  nix build .#scootctl  -o result-scootctl" >&2
         echo >&2
         echo "or, to re-read a run that already exists:" >&2
         echo "  ANALYSE_ONLY=1 OUT=<that run's directory> $0" >&2

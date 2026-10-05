@@ -5,7 +5,7 @@ description: "The config file, live reload, autostart, and what happens when the
 
 Make scoot yours. One TOML file holds everything — layout, appearance,
 outputs, binds, floating rules, autostart, wallpaper — and most of it
-re-applies live with `scootctl reload`. No config file yet?
+re-applies live with `scoot msg reload`. No config file yet?
 `--print-default-config` writes you a starting one (below).
 
 ## The config file
@@ -30,8 +30,8 @@ every key present and commented out with its default as the value, so
 the file as-is is exactly the defaults. `--write` places that same
 emission at the default location directly, private to you (`0o600`),
 and refuses loudly rather than overwriting anything already there.
-(On a machine with no `scoot` binary — macOS, where only the `scootctl`
-client builds — copy the [example below](#example-configtoml) instead.)
+(On a machine with no `scoot` binary — an older install without it —
+copy the [example below](#example-configtoml) instead.)
 
 ### Failure semantics
 
@@ -65,7 +65,7 @@ something usable and says what's wrong in the log instead.
 Two triggers re-read the same file startup used and re-apply what can
 be re-applied live:
 
-- `scootctl reload` (and `scoot msg reload`), which answers with an
+- `scoot msg reload` (and `scoot msg reload`), which answers with an
   applied-vs-refused report;
 - `kill -HUP <compositor pid>`, which drives the same path with no
   reply channel (the summary goes to the compositor log instead).
@@ -159,7 +159,7 @@ commands = [
 
 Lock after ten minutes, panels off after fifteen, back on at the first
 input. The same state is drivable over IPC for agents and scripts
-(`scootctl output-power 1 off`, `scootctl outputs` reporting it).
+(`scoot msg output-power 1 off`, `scoot msg outputs` reporting it).
 
 ## Example config.toml
 
@@ -188,7 +188,7 @@ prefer_no_csd = true
 scale = 1.0
 
 # A HiDPI laptop panel beside an ordinary monitor: each its own scale, by
-# the connector name `scootctl outputs` lists.
+# the connector name `scoot msg outputs` lists.
 # [[outputs]]
 # name = "eDP-1"
 # scale = 2.0
@@ -231,7 +231,7 @@ auto = true
 # Alt+drag moves and resizes floating windows (Super is the default).
 modifier = "alt"
 
-# pavucontrol's app id is org.pulseaudio.pavucontrol (`scootctl windows`
+# pavucontrol's app id is org.pulseaudio.pavucontrol (`scoot msg windows`
 # shows any window's).
 [[window_rule]]
 match_app_id = "*pavucontrol"

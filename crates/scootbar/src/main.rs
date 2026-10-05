@@ -205,7 +205,8 @@ fn run_msg(msg: cli::Msg) -> ExitCode {
 }
 
 /// `subscribe`: prints the daemon's lines as they come, until it closes the
-/// connection between two lines (exit status 0, as scootctl's) or stdout
+/// connection between two lines (exit status 0, the same quiet-EPIPE contract
+/// `scoot msg` keeps) or stdout
 /// does. A `dropped` line, or a connection that ends inside a line (the
 /// daemon dropped the subscriber mid-write, which discards that line), is
 /// exit status 1. Status 0 is not "the daemon exited": a subscriber dropped

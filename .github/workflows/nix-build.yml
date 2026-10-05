@@ -83,7 +83,7 @@
 # unchanged as the default package), `scoot-gpu` and `scoot-xwayland` (the
 # in-between variants: the `gpu-scanout` and `xwayland` Cargo features),
 # `scoot-gpu-xwayland` (the full build: both features plus Xwayland on
-# `PATH`), `scootctl`, `scootbg`, `scootbar` and `scootbar-demo` -- built,
+# `PATH`), `scootbg`, `scootbar` and `scootbar-demo` -- built,
 # checked (`--version` each, so the artifact runs) and pushed on both
 # architectures. The in-between variants used to be deliberately left out:
 # without crane (docs/backlog/resolved/nix-crane-done.md) each extra package
@@ -168,19 +168,18 @@ jobs:
         with:
           name: scoot-sh
 
-      - name: nix build the compositor variants, scootctl, scootbg, and run the packaged binaries
+      - name: nix build the compositor variants, scootbg, and run the packaged binaries
         run: |
           nix build .#scoot --out-link result-scoot --print-out-paths
           nix build .#scoot-gpu --out-link result-scoot-gpu --print-out-paths
           nix build .#scoot-xwayland --out-link result-scoot-xwayland --print-out-paths
           nix build .#scoot-gpu-xwayland --out-link result-scoot-gpu-xwayland --print-out-paths
-          nix build .#scootctl --out-link result-scootctl --print-out-paths
           nix build .#scootbg --out-link result-scootbg --print-out-paths
           ./result-scoot/bin/scoot --version
           ./result-scoot-gpu/bin/scoot --version
           ./result-scoot-xwayland/bin/scoot --version
           ./result-scoot-gpu-xwayland/bin/scoot --version
-          ./result-scootctl/bin/scootctl --version
+          ./result-scoot/bin/scoot msg --help
           ./result-scootbg/bin/scootbg --version
 
       - name: nix build .#scootbar .#scootbar-demo, what it links, its closure, a feature override

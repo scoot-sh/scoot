@@ -15,9 +15,9 @@ everything).
 | [Windows](../scoot/windows.md) | floating fields, rule matchers |
 | [Backends](../scoot/backends.md) | backend and renderer flags, `[tty] gpu` |
 | [Protocols](../scoot/protocols.md) | every Wayland protocol, versions, edges |
-| [Requests and replies](../scootctl/requests.md) | every request, `type` vs `key`, every reply field |
-| [Actions](../scootctl/actions.md) | the full action grammar |
-| [Events](../scootctl/events.md) | every event tag and field |
+| [Requests and replies](../msg/requests.md) | every request, `type` vs `key`, every reply field |
+| [Actions](../msg/actions.md) | the full action grammar |
+| [Events](../msg/events.md) | every event tag and field |
 | [scootbar configure](../scootbar/configure.md) | layout, fonts, colors, layers, outputs, shape |
 | [scootbar modules](../scootbar/modules.md) | every module's keys |
 | [scootbar CLI](./../scootbar/cli.md) | flags, `msg`, agent interface, exit statuses |

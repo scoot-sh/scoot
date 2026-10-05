@@ -9,7 +9,7 @@
 //! # Decisions, and why
 //!
 //! - **An entry matches by output name only**: the `wl_output.name` a client
-//!   sees and `scootctl outputs` lists (`eDP-1`, `DP-1`, `HDMI-A-1` under
+//!   sees and `scoot msg outputs` lists (`eDP-1`, `DP-1`, `HDMI-A-1` under
 //!   `--tty`; `headless`, `headless-2`, ... under `--headless`). There is no
 //!   positional fallback. Output ids are never reused, so a monitor that is
 //!   unplugged and plugged back in comes back under a new id and a new

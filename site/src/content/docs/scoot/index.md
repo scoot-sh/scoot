@@ -48,7 +48,7 @@ The backend flag chooses how scoot *presents* what it drew (the
 |---|---|---|
 | `--nested` | scoot runs as a window inside your current desktop | try everything safely; the host owns size and scale |
 | `--tty` | scoot drives real DRM/KMS hardware on a console | daily-drive on hardware |
-| `--headless` | no display at all; `scootctl screenshot` reads the framebuffer | agents, tests, screenshots |
+| `--headless` | no display at all; `scoot msg screenshot` reads the framebuffer | agents, tests, screenshots |
 
 ```sh
 scoot --nested -- foot        # a window with a terminal in it
@@ -74,9 +74,8 @@ default shown); `--write` places it directly, refusing to overwrite.
 | `--version` | switch | — | print `scoot <version> (ipc protocol <N>)` and exit; needs no compositor. |
 | `--help` | switch | — | usage, every request and every action. |
 
-`scoot msg REQUEST` is the `scootctl` client kept on the compositor
-binary as a permanent alias — everything under `REQUEST` is documented
-in [scootctl](../scootctl/index.md), not duplicated here.
+`scoot msg REQUEST` is the remote-control client — everything under
+`REQUEST` is documented in [scoot msg](../msg/index.md), not duplicated here.
 
 ### Starting a session
 
@@ -171,7 +170,7 @@ Each output is real: its own `wl_output` global, its own workspaces
 and scrolling strip (a window is on exactly one output; nothing
 scrolls across a boundary), its own exclusive zones (a bar on one
 output shrinks only that output's tiling area), its own scale, its own
-render target (so `scootctl screenshot --output 2` answers with the
+render target (so `scoot msg screenshot --output 2` answers with the
 second output's own pixels). Under `--tty` every connected monitor is
 an output like these, named after its connector, placed left to right,
 added and removed as monitors plug and unplug.
