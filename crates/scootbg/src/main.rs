@@ -18,6 +18,7 @@ mod daemon;
 mod density;
 mod fetch;
 mod framing;
+mod help;
 mod image;
 mod jobs;
 mod outputs;
@@ -53,7 +54,7 @@ fn main() -> ExitCode {
         }
     };
     let printed = match command {
-        cli::Command::Help(topic) => print::print(topic.text()),
+        cli::Command::Help(topic) => print::print(&topic.text()),
         cli::Command::Version => print::print(&format!("{}\n", cli::version_string())),
         cli::Command::Daemon(options) => {
             return match daemon::run(options, None) {

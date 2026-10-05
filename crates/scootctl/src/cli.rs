@@ -2,16 +2,19 @@
 //!
 //! This module owns the whole client surface -- the request grammar, the
 //! `Error` display strings (several are byte-pinned by tests, e.g. the
-//! `OutOfRange` echo, so they must not drift), and the help text. Both
-//! front-ends (`scootctl` directly, `scoot msg` as its alias) parse through
-//! here.
+//! `OutOfRange` echo, so they must not drift), and the help text's prose
+//! blocks. Both front-ends (`scootctl` directly, `scoot msg` as its alias)
+//! parse through here, and both render their full help through
+//! [`crate::help::usage`] -- one table, two renderings (text and JSON) --
+//! rather than a second copy of the grammar.
 //!
 //! The help text is single-sourced by construction: [`REQUESTS_HELP`] and
-//! [`ACTIONS_HELP`] are the one copy of the request/action grammar, and both
-//! this crate's [`USAGE`] and the compositor binary's `scoot --help` print
-//! those same blocks (a containment test here and one in `scoot`'s `cli`
-//! tests pin that -- `concat!` takes literals only, so the full help strings
-//! can't be composed from the fragments at compile time).
+//! [`ACTIONS_HELP`] are the one copy of the request/action grammar prose,
+//! and both this crate's [`usage`] and the compositor binary's `scoot --help`
+//! print those same blocks (a containment test here and one in `scoot`'s
+//! `cli` tests pin that). The tables in [`crate::help`] are the other half
+//! of the source: the examples, exit codes, environment and JSON render
+//! from them, and drift tests pin that every row appears in both forms.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -52,55 +55,44 @@ pub const ACTIONS_HELP: &str = "\
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N [--output ID] | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N [--output ID]
+    move-window-to-workspace-index N | focus-output ID
+    move-window-to-output ID | focus-output-index N
+    move-window-to-output-index N | focus-output-left | focus-output-right
+    move-window-to-output-left | move-window-to-output-right
+    cycle-column-width | set-column-width N | toggle-fullscreen
+    set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off
+    close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
 
-pub const USAGE: &str = "\
-scootctl -- remote-control client for the scoot Wayland compositor
-
-USAGE:
-    scootctl REQUEST
-    scootctl --version
-    scootctl --help
-
-REQUESTS:
-    version | outputs | windows
-    action ACTION [ARGUMENT...]
-    reload                          re-read the config file and re-apply
-                                    what can be re-applied live
-    keyboard                        the active keyboard layout's name and
-                                    index -- what a layout indicator shows
-    output-power ID|all on|off        switch an output's panel off or on --
-                                     what an idle daemon drives at idle and
-                                     resume (`outputs` reports the state)
-    screenshot [--output ID] [--out FILE] [--no-cursor]
-                                    the pointer is drawn in unless
-                                    --no-cursor
-    pointer move X Y | pointer click X Y [left|right|middle]
-    pointer button left|right|middle press|release | pointer scroll DX DY
-    key COMBO                       e.g. Return, ctrl+shift+t -- name the key
-                                    as it is unmodified plus the modifiers to
-                                    hold (shift+1, not exclam)
-    type TEXT                       types text, working out each character's
-                                    own modifiers from the active layout
-    wait-idle [--quiet-ms N] [--timeout-ms N]
-    subscribe [EVENT...]          stream events until killed (default: output;
-                                    known events: output, keyboard, workspace)
-
-ACTIONS:
-    focus-column|move-column|consume-or-expel   left|right
-    focus-window|move-window                    up|down
-    focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N [--output ID] | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
-    toggle-floating | set-floating ID on|off | toggle-floating-focus
-    move-floating ID X Y | resize-floating ID WIDTH HEIGHT
-";
+/// The full `--help` text, rendered from the single source in [`crate::help`]:
+/// the prose grammar blocks below plus the examples, exit codes, environment
+/// and see-also sections the tables generate. A function rather than a
+/// `const` so the two forms cannot drift -- the tests pin that every table
+/// row appears here and in the JSON.
+pub fn usage() -> String {
+    crate::help::usage("scootctl", REQUESTS_HELP, ACTIONS_HELP, true)
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Help,
+    /// `help [TOPIC]`: one topic's page (`help requests`, `help actions`,
+    /// `help exit-codes`, `help environment`).
+    Topic(crate::help::Topic),
+    /// `help <verb>`: one request verb's own row -- its syntax, one example
+    /// and its reply shape. The per-verb spelling (rather than
+    /// `<verb> --help`) keeps `type --help` and `action spawn --help`
+    /// meaning what they say: `--help` there is text to type or a command
+    /// to run, not a plea for help.
+    Verb {
+        verb: String,
+    },
+    /// `--help --json` (or `help --json`): the same content as JSON,
+    /// versioned (see [`crate::help::SCHEMA_VERSION`]).
+    Json,
     /// `scootctl --version`: identify this build without touching the
     /// socket. A first-arg flag like `--help`, answered locally -- never a
     /// request, so it needs no running compositor.
@@ -129,6 +121,19 @@ pub struct Msg {
 #[derive(Debug, PartialEq)]
 pub enum Error {
     Unknown(String),
+    /// An unknown word with a guess attached: what kind of word it was
+    /// expected to be, the closest valid choice, and the help topic that
+    /// lists them all. Used at CLI parse sites only -- shared parsers that
+    /// also serve the config file (notably [`action`]) keep returning the
+    /// bare [`Error::Unknown`] there is no topic for... except the action
+    /// name itself, whose topic (`help actions`) is the same grammar in
+    /// both places.
+    Hinted {
+        kind: &'static str,
+        what: String,
+        suggestion: String,
+        topic: &'static str,
+    },
     Missing(&'static str),
     Invalid {
         what: &'static str,
@@ -146,6 +151,15 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unknown(what) => write!(f, "unknown argument `{what}` (try --help)"),
+            Self::Hinted {
+                kind,
+                what,
+                suggestion,
+                topic,
+            } => write!(
+                f,
+                "unknown {kind} `{what}` (did you mean `{suggestion}`? see `{topic}`)"
+            ),
             Self::Missing(what) => write!(f, "missing {what} (try --help)"),
             Self::Invalid { what, value } => write!(f, "invalid {what}: `{value}`"),
             Self::OutOfRange {
@@ -159,6 +173,40 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+/// An unknown word with a guess attached: [`Error::Hinted`] naming the
+/// closest candidate from `candidates`, or the bare [`Error::Unknown`] when
+/// nothing is close enough to be a typo rather than a guess (so garbage
+/// keeps the old shape). Topics name the `help` page that lists the
+/// candidates (`help requests`, `help actions`, ...), without a binary
+/// prefix: both front-ends (`scootctl`, `scoot msg`) spell them the same.
+fn hinted(kind: &'static str, what: String, candidates: &[&str], topic: &'static str) -> Error {
+    match crate::help::suggest(&what, candidates.iter().copied()) {
+        Some(suggestion) => Error::Hinted {
+            kind,
+            what,
+            suggestion: suggestion.to_owned(),
+            topic,
+        },
+        None => Error::Unknown(what),
+    }
+}
+
+/// Every request verb, for `did you mean` over verbs.
+fn request_verbs() -> Vec<&'static str> {
+    crate::help::REQUESTS
+        .iter()
+        .map(|request| request.verb)
+        .collect()
+}
+
+/// Every action name, for `did you mean` over actions.
+fn action_names() -> Vec<&'static str> {
+    crate::help::ACTIONS
+        .iter()
+        .map(|action| action.name)
+        .collect()
+}
 
 /// The `scoot --version` / `scootctl --version` line: the suite's own
 /// version plus the IPC protocol number, so a client can check
@@ -184,8 +232,9 @@ pub fn version_string() -> String {
 }
 
 /// Parses a full client argv (without the program name): `--help` (or
-/// nothing) is help, `--version` is the local version line, anything else
-/// is a request verb.
+/// nothing) is help, `help [TOPIC|VERB]` is one page of it, `--help --json`
+/// (or `help --json`) is the machine-readable form, `--version` is the local
+/// version line, anything else is a request verb.
 ///
 /// Collects into one `Vec` first so the verb stays at the head for
 /// [`parse_msg`]'s contract -- a cold path (one process per invocation), so
@@ -193,12 +242,40 @@ pub fn version_string() -> String {
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> {
     let args: Vec<String> = args.into_iter().collect();
     match args.first().map(String::as_str) {
-        None | Some("--help" | "-h" | "help") => Ok(Command::Help),
+        None => Ok(Command::Help),
+        Some("--help" | "-h" | "help") => help_page(&args[1..]),
         Some("--version") => Ok(Command::Version),
         Some(_) => {
             let Msg { request, out } = message(args.into_iter())?;
             Ok(Command::Msg { request, out })
         }
+    }
+}
+
+/// `help` / `--help`, optionally followed by one topic name, verb, or
+/// `--json`. Anything else is refused with a guess, the way an unknown verb
+/// is -- `help` is where a lost agent lands, so it teaches too.
+fn help_page(args: &[String]) -> Result<Command, Error> {
+    match args {
+        [] => Ok(Command::Help),
+        [only] if only == "--json" => Ok(Command::Json),
+        [only] if only == "help" => Ok(Command::Help),
+        [only] => {
+            if let Some(topic) = crate::help::Topic::parse(only) {
+                return Ok(Command::Topic(topic));
+            }
+            if crate::help::REQUESTS
+                .iter()
+                .any(|request| request.verb == only)
+            {
+                return Ok(Command::Verb { verb: only.clone() });
+            }
+            let mut candidates: Vec<&str> = crate::help::Topic::names().collect();
+            candidates.extend(request_verbs());
+            candidates.push("--json");
+            Err(hinted("help topic", only.clone(), &candidates, "help"))
+        }
+        [_, extra, ..] => Err(Error::Unknown(extra.clone())),
     }
 }
 
@@ -253,7 +330,14 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                             args.next().ok_or(Error::Missing("a path after --out"))?,
                         ))
                     }
-                    other => return Err(Error::Unknown(other.to_owned())),
+                    other => {
+                        return Err(hinted(
+                            "flag",
+                            other.to_owned(),
+                            &["--output", "--out", "--no-cursor"],
+                            "help screenshot",
+                        ));
+                    }
                 }
             }
             Request::Screenshot { output, cursor }
@@ -278,7 +362,14 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                 match flag.as_str() {
                     "--quiet-ms" => quiet_ms = number("--quiet-ms", args.next())?,
                     "--timeout-ms" => timeout_ms = number("--timeout-ms", args.next())?,
-                    other => return Err(Error::Unknown(other.to_owned())),
+                    other => {
+                        return Err(hinted(
+                            "flag",
+                            other.to_owned(),
+                            &["--quiet-ms", "--timeout-ms"],
+                            "help wait-idle",
+                        ));
+                    }
                 }
             }
             Request::WaitIdle {
@@ -294,9 +385,19 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                     "keyboard" => events.push(EventKind::Keyboard),
                     "workspace" => events.push(EventKind::Workspace),
                     other => {
-                        return Err(Error::Unknown(format!(
-                            "event {other} (known events: output, keyboard, workspace)"
-                        )));
+                        return Err(
+                            match crate::help::suggest(other, ["output", "keyboard", "workspace"]) {
+                                Some(suggestion) => Error::Hinted {
+                                    kind: "event",
+                                    what: other.to_owned(),
+                                    suggestion: suggestion.to_owned(),
+                                    topic: "help subscribe",
+                                },
+                                None => Error::Unknown(format!(
+                                    "event {other} (known events: output, keyboard, workspace)"
+                                )),
+                            },
+                        );
                     }
                 }
             }
@@ -305,7 +406,14 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
             }
             Request::Subscribe { events }
         }
-        other => return Err(Error::Unknown(other.to_owned())),
+        other => {
+            return Err(hinted(
+                "request",
+                other.to_owned(),
+                &request_verbs(),
+                "help requests",
+            ));
+        }
     };
     Ok(Msg { request, out })
 }
@@ -355,7 +463,14 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
             while let Some(flag) = rest.next() {
                 match flag.as_str() {
                     "--output" => output = Some(number("an output id", rest.next())?),
-                    other => return Err(Error::Unknown(other.to_owned())),
+                    other => {
+                        return Err(hinted(
+                            "flag",
+                            other.to_owned(),
+                            &["--output"],
+                            "help actions",
+                        ));
+                    }
                 }
             }
             match output {
@@ -460,7 +575,14 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
             Action::Spawn { command }
         }
         "quit" => Action::Quit,
-        other => return Err(Error::Unknown(other.to_owned())),
+        other => {
+            return Err(hinted(
+                "action",
+                other.to_owned(),
+                &action_names(),
+                "help actions",
+            ));
+        }
     };
     Ok(action)
 }
@@ -502,7 +624,14 @@ fn pointer(args: &mut impl Iterator<Item = String>) -> Result<Request, Error> {
             dx: number("dx", args.next())?,
             dy: number("dy", args.next())?,
         },
-        other => return Err(Error::Unknown(other.to_owned())),
+        other => {
+            return Err(hinted(
+                "pointer request",
+                other.to_owned(),
+                &["move", "click", "button", "scroll"],
+                "help pointer",
+            ));
+        }
     };
     Ok(request)
 }
@@ -574,8 +703,104 @@ mod tests {
         // The single-ownership pin: the full help text embeds the same two
         // blocks `scoot --help` embeds (pinned from that side in scoot's
         // `cli` tests), so editing one copy without the other fails here.
-        assert!(USAGE.contains(REQUESTS_HELP), "USAGE lost REQUESTS_HELP");
-        assert!(USAGE.contains(ACTIONS_HELP), "USAGE lost ACTIONS_HELP");
+        let text = usage();
+        assert!(text.contains(REQUESTS_HELP), "usage lost REQUESTS_HELP");
+        assert!(text.contains(ACTIONS_HELP), "usage lost ACTIONS_HELP");
+    }
+
+    #[test]
+    fn help_pages_route_to_their_topic_verb_or_json() {
+        assert_eq!(parse_args(&[]), Ok(Command::Help));
+        assert_eq!(
+            parse_args(&["help", "requests"]),
+            Ok(Command::Topic(crate::help::Topic::Requests))
+        );
+        assert_eq!(
+            parse_args(&["help", "actions"]),
+            Ok(Command::Topic(crate::help::Topic::Actions))
+        );
+        assert_eq!(
+            parse_args(&["help", "exit-codes"]),
+            Ok(Command::Topic(crate::help::Topic::ExitCodes))
+        );
+        assert_eq!(
+            parse_args(&["help", "environment"]),
+            Ok(Command::Topic(crate::help::Topic::Environment))
+        );
+        assert_eq!(
+            parse_args(&["help", "screenshot"]),
+            Ok(Command::Verb {
+                verb: "screenshot".into()
+            })
+        );
+        assert_eq!(parse_args(&["help", "--json"]), Ok(Command::Json));
+        assert_eq!(parse_args(&["--help", "--json"]), Ok(Command::Json));
+        assert_eq!(parse_args(&["help", "help"]), Ok(Command::Help));
+        assert_eq!(
+            parse_args(&["--help", "actions"]),
+            Ok(Command::Topic(crate::help::Topic::Actions))
+        );
+    }
+
+    #[test]
+    fn an_unknown_help_topic_teaches() {
+        // Close enough to guess: the nearest topic, named with where to
+        // read. Garbage stays a bare refusal.
+        assert_eq!(
+            parse_args(&["help", "request"]),
+            Err(Error::Hinted {
+                kind: "help topic",
+                what: "request".into(),
+                suggestion: "requests".into(),
+                topic: "help",
+            })
+        );
+        assert!(matches!(
+            parse_args(&["help", "xyzzy"]),
+            Err(Error::Unknown(_))
+        ));
+        assert!(matches!(
+            parse_args(&["help", "requests", "extra"]),
+            Err(Error::Unknown(_))
+        ));
+    }
+
+    #[test]
+    fn usage_errors_name_the_nearest_valid_choice() {
+        // The agent test: a typo'd verb is answered with the verb it meant
+        // and the topic that lists them, not just "unknown argument".
+        assert_eq!(
+            parse_args(&["windwos"]),
+            Err(Error::Hinted {
+                kind: "request",
+                what: "windwos".into(),
+                suggestion: "windows".into(),
+                topic: "help requests",
+            })
+        );
+        assert_eq!(
+            parse_args(&["action", "togle-fullscreen"]),
+            Err(Error::Hinted {
+                kind: "action",
+                what: "togle-fullscreen".into(),
+                suggestion: "toggle-fullscreen".into(),
+                topic: "help actions",
+            })
+        );
+        assert_eq!(
+            parse_args(&["screenshot", "--ouput", "1"]),
+            Err(Error::Hinted {
+                kind: "flag",
+                what: "--ouput".into(),
+                suggestion: "--output".into(),
+                topic: "help screenshot",
+            })
+        );
+        let error = parse_args(&["windwos"]).expect_err("a typo is refused");
+        assert_eq!(
+            error.to_string(),
+            "unknown request `windwos` (did you mean `windows`? see `help requests`)"
+        );
     }
 
     #[test]
@@ -642,7 +867,7 @@ mod tests {
         // The `--help` surface for the new flag: its own usage line, so a
         // user reading `--help` can discover it without knowing the ticket.
         assert!(
-            USAGE
+            usage()
                 .lines()
                 .any(|line| line.trim() == "scootctl --version"),
             "--help hides the version flag"
@@ -714,7 +939,7 @@ mod tests {
     #[test]
     fn usage_names_output_power_on_its_own_line() {
         assert!(
-            USAGE
+            usage()
                 .lines()
                 .any(|line| line.trim().starts_with("output-power ID|all")),
             "--help hides the output-power verb"
@@ -724,7 +949,7 @@ mod tests {
     #[test]
     fn usage_names_keyboard_on_its_own_line() {
         assert!(
-            USAGE
+            usage()
                 .lines()
                 .any(|line| line.trim().starts_with("keyboard")),
             "--help hides the keyboard verb"
@@ -799,7 +1024,7 @@ mod tests {
     #[test]
     fn usage_names_subscribe_on_its_own_line() {
         assert!(
-            USAGE
+            usage()
                 .lines()
                 .any(|line| line.trim().starts_with("subscribe [EVENT...]")),
             "--help hides the subscribe verb"

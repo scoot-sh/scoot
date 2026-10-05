@@ -28,7 +28,13 @@ scootbg kill                          # stop it; returns once a new daemon can s
 scootbg apply-config --profile scoot '{"color":"#1e1e2e"}'
                                       # what scoot runs with its [wallpaper] section
 scootbg --help                        # and `scootbg COMMAND --help`
+scootbg --help --json                 # the same content as JSON (see below)
 ```
+
+The binary documents itself for agents: `scootbg help COMMAND` prints each
+command's page, and `scootbg --help --json` emits commands, `set`'s modes
+and filters, exit codes and environment -- see
+[cli-help.md](../cli-help.md) for the contract.
 
 ## Colors and images
 

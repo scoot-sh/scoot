@@ -148,10 +148,11 @@ fn modules_section() -> String {
         section.push_str(WITH_CLOCK);
         if has_window_title {
             section.push_str("\n                           Modules: ");
+            push_wrapped_ids(&mut section, &ids, 36);
         } else {
             section.push_str(" Modules: ");
+            push_wrapped_ids(&mut section, &ids, 9);
         }
-        section.push_str(&ids.join(", "));
         section.push('\n');
         section.push_str(padding);
         section.push_str(CLOCK_FORMAT);
@@ -162,11 +163,39 @@ fn modules_section() -> String {
     } else {
         section.push_str(WITHOUT_CLOCK);
         section.push_str(" Modules: ");
-        section.push_str(&ids.join(", "));
+        push_wrapped_ids(&mut section, &ids, 9);
         section.push('\n');
         section.push_str(padding);
     }
     section
+}
+
+/// Appends `ids` comma-separated, wrapping past 99 columns: the separator
+/// at a wrap is `",\n"` plus a 12-space hang, so the daemon page stays
+/// plain and narrow in every build no matter how many modules the registry
+/// holds. `used` is the visible width already on the line (the `Modules: `
+/// prefix the caller just pushed).
+fn push_wrapped_ids(section: &mut String, ids: &[&str], mut used: usize) {
+    const LIMIT: usize = 99;
+    const HANG: &str = ",\n            ";
+    let mut first = true;
+    for id in ids {
+        if first {
+            section.push_str(id);
+            used += id.len();
+            first = false;
+            continue;
+        }
+        if used + ", ".len() + id.len() > LIMIT {
+            section.push_str(HANG);
+            section.push_str(id);
+            used = HANG.len() - ",\n".len() + id.len();
+        } else {
+            section.push_str(", ");
+            section.push_str(id);
+            used += ", ".len() + id.len();
+        }
+    }
 }
 
 #[cfg(feature = "workspaces")]
@@ -189,7 +218,7 @@ macro_rules! workspaces_help {
 #[cfg(feature = "workspaces")]
 macro_rules! workspace_wakes {
     () => {
-        " A workspace change redraws the workspaces module once."
+        "\nA workspace change redraws the workspaces module once."
     };
 }
 #[cfg(not(feature = "workspaces"))]
@@ -439,6 +468,38 @@ macro_rules! power_help {
     };
 }
 
+// One daemon example line for the main help page: the trio when this
+// build places all three, a bare flag otherwise. Static text naming
+// a module the build lacks would fail `the_help_matches_the_build`, so
+// the line follows the same per-build rule as the rest of the page.
+#[cfg(all(feature = "clock", feature = "workspaces", feature = "window-title"))]
+macro_rules! daemon_example {
+    () => {
+        "    scootbar daemon --left workspaces --center clock --right window-title\n"
+    };
+}
+#[cfg(not(all(feature = "clock", feature = "workspaces", feature = "window-title")))]
+macro_rules! daemon_example {
+    () => {
+        "    scootbar daemon --height 32\n"
+    };
+}
+
+// One invoke example line for the msg page, only where the volume module
+// is in the build (same rule as above: no naming what is not there).
+#[cfg(feature = "volume")]
+macro_rules! invoke_example {
+    () => {
+        "    scootbar msg invoke volume scroll-up --output DP-1\n"
+    };
+}
+#[cfg(not(feature = "volume"))]
+macro_rules! invoke_example {
+    () => {
+        ""
+    };
+}
+
 pub const USAGE: &str = concat!(
     "\
 scootbar -- status bar for Wayland
@@ -454,11 +515,35 @@ USAGE:
     scootbar msg COMMAND
     scootbar msg --help
     scootbar --version
-    scootbar --help
+    scootbar --help [--json]
+    scootbar help [daemon|msg|--json]
 
 COMMANDS:
     daemon     run the bar on this Wayland display's outputs (every one, by default)
     msg        ask the running daemon: query, reload, hide, show, toggle, version, kill, set
+
+EXAMPLES:
+",
+    daemon_example!(),
+    "\
+    scootbar daemon --check
+    scootbar msg query
+    scootbar msg set build-state '{\"text\": \"ok\"}'
+
+EXIT CODES:
+    0  success: the reply is on stdout (help and --version count)
+    1  the run failed: a bad file, no daemon, a refused value
+    2  usage error: an unknown command, flag or value (the error names it)
+
+ENVIRONMENT:
+    WAYLAND_DISPLAY  the compositor to show the bar on
+    XDG_RUNTIME_DIR  where the control socket lives (scootbar-DISPLAY.sock)
+    XDG_CONFIG_HOME  where bar.toml lives (~/.config/scoot/bar.toml by default)
+
+SEE ALSO:
+    `scootbar help daemon`, `scootbar help msg`, `scootbar --help --json`
+    docs: https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/cli.md
+    (published with /llms.txt once the docs site lands)
 "
 );
 
@@ -474,10 +559,11 @@ USAGE:
     scootbar daemon --check [OPTIONS]
 
 Connects to the compositor named by $WAYLAND_DISPLAY, which must support
-wlr-layer-shell, and gives every output (or the ones --outputs names) a bar: a layer surface (top, by
-default) along one edge (namespace \"scootbar\") that reserves its height,
-so windows are arranged beside it, unless told to float over them. Outputs plugged in later get one too, and an output
-unplugged takes its bar with it; with no outputs at all it waits for one.
+wlr-layer-shell, and gives every output (or the ones --outputs names) a bar:
+a layer surface (top, by default) along one edge (namespace \"scootbar\") that
+reserves its height, so windows are arranged beside it, unless told to float
+over them. Outputs plugged in later get one too, and an output unplugged
+takes its bar with it; with no outputs at all it waits for one.
 It draws at each output's real device pixels, fractional scales included,
 ",
     idle!(),
@@ -558,6 +644,15 @@ flags over it, starts the placed modules and loads the font, exactly as a
 start does, then exits 0 (printing `ok`) or 1 with the error a start would
 give. It never connects to a compositor or claims a control socket, so it
 runs anywhere: in a build, in CI, over a file about to be installed.
+
+EXIT CODES:
+    0  success (`--check` prints `ok`; help and `--version` count)
+    1  a bad config file, a failed `--check`, or the compositor going away
+    2  usage error: an unknown flag or value (the error names it)
+
+SEE ALSO:
+    docs: https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/cli.md
+    (published with /llms.txt once the docs site lands)
 "
 );
 
@@ -571,7 +666,8 @@ pub fn daemon_help() -> String {
     help
 }
 
-pub const MSG_HELP: &str = "\
+pub const MSG_HELP: &str = concat!(
+    "\
 scootbar msg -- ask the running daemon
 
 USAGE:
@@ -626,14 +722,38 @@ start-up and removes when it stops:
     set        a JSON value for the `push` module ID, which the config
                 defines (`[push.ID]`): a string (the text), an object
                 `{\"text\": ..., \"class\": ..., \"tooltip\": ..., \"icon\": ...}` or null
-                (clears it). Any other module, an id that is not placed and a
+                (clears it). The module needs a table and a place in a list:
+                left = [\"status\"]
+                [push.status]
+                placeholder = \"\"
+                Any other module, an id that is not placed and a
                 value the module refuses are loud errors, never a silent ok
 
 `query`, `layout`, `version`, `reload`, `hide`, `show` and `toggle` print the
 reply (the last three say `{\"type\":\"bar\",\"visible\":false}`, what is now the
 case); `kill`, `set` and `invoke` print nothing on success. Without a daemon,
 every command fails saying so.
-";
+
+EXAMPLES:
+    scootbar msg query
+    scootbar msg layout
+",
+    invoke_example!(),
+    "\
+    scootbar msg set build-state '{\"text\": \"ok\"}'
+    scootbar msg subscribe module
+
+EXIT CODES:
+    0  success: the reply is on stdout (help counts)
+    1  the run failed: no daemon, a refused id or value
+    2  usage error: an unknown command or value (the error names it)
+
+SEE ALSO:
+    `scootbar help msg` prints this page; `scootbar --help --json` is the
+    machine-readable form
+    docs: https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/cli.md
+"
+);
 
 /// A help page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -641,17 +761,21 @@ pub enum Topic {
     Main,
     Daemon,
     Msg,
+    /// `--help --json` (or `help --json`): the same content as JSON,
+    /// versioned (see [`crate::help::SCHEMA_VERSION`]).
+    Json,
 }
 
 impl Topic {
-    /// The help page: the main and msg pages are static text, while the
-    /// daemon page is built for this build's modules (see
-    /// [`modules_section`]).
+    /// The help page: the main and msg pages are static text, the daemon
+    /// page is built for this build's modules (see [`modules_section`]),
+    /// and the JSON page renders [`crate::help::json`].
     pub fn text(self) -> Cow<'static, str> {
         match self {
             Self::Main => Cow::Borrowed(USAGE),
             Self::Daemon => Cow::Owned(daemon_help()),
             Self::Msg => Cow::Borrowed(MSG_HELP),
+            Self::Json => Cow::Owned(crate::help::json()),
         }
     }
 }
@@ -734,7 +858,7 @@ const CHECK: &str = "--check";
 #[cfg(feature = "clock")]
 const CLOCK_FORMAT: &str = "--clock-format";
 
-const FLAGS: &[&str] = &[
+pub(crate) const FLAGS: &[&str] = &[
     OUTPUTS,
     EDGE,
     LAYER,
@@ -814,6 +938,16 @@ impl fmt::Display for OutputsError {
 pub enum Error {
     Missing,
     Unknown(String),
+    /// An unknown word with a guess attached: what kind of word it was
+    /// expected to be, the closest valid choice, and the help topic that
+    /// lists them all. Used at parse sites only; garbage keeps the bare
+    /// [`Error::Unknown`] shape.
+    Hint {
+        command: &'static str,
+        what: String,
+        suggestion: String,
+        topic: &'static str,
+    },
     Unexpected {
         command: &'static str,
         argument: String,
@@ -861,6 +995,15 @@ impl fmt::Display for Error {
         match self {
             Self::Missing => write!(f, "missing command (try --help)"),
             Self::Unknown(what) => write!(f, "unknown command `{what}` (try --help)"),
+            Self::Hint {
+                command,
+                what,
+                suggestion,
+                topic,
+            } => write!(
+                f,
+                "unexpected `{what}` for `{command}` (did you mean `{suggestion}`? see `{topic}`)"
+            ),
             Self::Unexpected { command, argument } => write!(
                 f,
                 "unexpected argument `{argument}` for `{command}` (try `scootbar {command} --help`)"
@@ -988,7 +1131,31 @@ pub fn version_string() -> String {
 }
 
 fn is_help(arg: &str) -> bool {
-    matches!(arg, "--help" | "-h")
+    // Bare `help` asks like `--help` does, wherever a help flag is taken:
+    // `scootbar msg help`, `scootbar daemon help`. No command or flag is
+    // named `help`, so nothing else can mean it there.
+    matches!(arg, "--help" | "-h" | "help")
+}
+
+/// An unknown word with a guess attached: [`Error::Hint`] naming the
+/// closest candidate, or the bare error the site used before (`or`) when
+/// nothing is close enough to be a typo rather than a guess.
+fn hinted(
+    command: &'static str,
+    what: String,
+    candidates: &[&str],
+    topic: &'static str,
+    or: impl FnOnce(String) -> Error,
+) -> Error {
+    match crate::help::suggest(&what, candidates.iter().copied()) {
+        Some(suggestion) => Error::Hint {
+            command,
+            what,
+            suggestion: suggestion.to_owned(),
+            topic,
+        },
+        None => or(what),
+    }
 }
 
 /// An argument as UTF-8, or its lossy form for an error message.
@@ -1017,17 +1184,33 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
         },
         "daemon" => daemon(args),
         "msg" => msg(args),
-        _ => Err(Error::Unknown(first)),
+        _ => Err(hinted(
+            "scootbar",
+            first,
+            &["daemon", "msg", "--help", "-h", "help", "--version", "-V"],
+            "scootbar --help",
+            Error::Unknown,
+        )),
     }
 }
 
-/// `help` / `--help`, optionally followed by one command name.
+/// `help` / `--help`, optionally followed by one command name or `--json`.
 fn help(mut args: impl Iterator<Item = Result<String, String>>) -> Result<Command, Error> {
     let topic = match args.next() {
         None => Topic::Main,
         Some(Ok(name)) if name == "daemon" => Topic::Daemon,
         Some(Ok(name)) if name == "msg" => Topic::Msg,
-        Some(other) => return Err(Error::Unknown(other.unwrap_or_else(|lossy| lossy))),
+        Some(Ok(name)) if name == "--json" => Topic::Json,
+        Some(Ok(name)) if name == "help" => Topic::Main,
+        Some(other) => {
+            return Err(hinted(
+                "help",
+                other.unwrap_or_else(|lossy| lossy),
+                &["daemon", "msg", "--json"],
+                "scootbar help",
+                Error::Unknown,
+            ));
+        }
     };
     match args.next() {
         None => Ok(Command::Help(topic)),
@@ -1102,10 +1285,16 @@ fn daemon(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
             continue;
         }
         let Some(&flag) = FLAGS.iter().find(|&&flag| flag == name) else {
-            return Err(Error::Unexpected {
-                command: "daemon",
-                argument: arg,
-            });
+            return Err(hinted(
+                "daemon",
+                arg,
+                FLAGS,
+                "scootbar help daemon",
+                |what| Error::Unexpected {
+                    command: "daemon",
+                    argument: what,
+                },
+            ));
         };
         let Some(raw) = inline.or_else(|| args.next()) else {
             return Err(Error::MissingValue(flag));
@@ -1202,7 +1391,13 @@ fn msg(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
             while let Some(kind) = next_arg(&mut args, "msg") {
                 let kind = kind?;
                 let Some(parsed) = crate::control::protocol::EventKind::parse(&kind) else {
-                    return Err(Error::Msg(MsgError::UnknownEvent(kind)));
+                    return Err(hinted(
+                        "msg",
+                        kind,
+                        &["module", "output"],
+                        "scootbar msg --help",
+                        |what| Error::Msg(MsgError::UnknownEvent(what)),
+                    ));
                 };
                 if !events.contains(&parsed) {
                     events.push(parsed);
@@ -1243,7 +1438,27 @@ fn msg(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
                 "toggle" => Msg::Toggle,
                 "version" => Msg::Version,
                 "kill" => Msg::Kill,
-                _ => return Err(Error::Msg(MsgError::Unknown(command))),
+                _ => {
+                    return Err(hinted(
+                        "msg",
+                        other.to_owned(),
+                        &[
+                            "query",
+                            "layout",
+                            "invoke",
+                            "subscribe",
+                            "reload",
+                            "hide",
+                            "show",
+                            "toggle",
+                            "version",
+                            "kill",
+                            "set",
+                        ],
+                        "scootbar msg --help",
+                        |what| Error::Msg(MsgError::Unknown(what)),
+                    ));
+                }
             };
             match args.next() {
                 None => Ok(Command::Msg(request)),

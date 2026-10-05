@@ -8,6 +8,11 @@ The client is `scootctl`; `scoot msg ...` is the same client kept as a
 permanent alias on the compositor binary. Every `scootctl` example below
 works with `scoot msg` in its place, byte for byte.
 
+The binaries document themselves for agents: `scootctl --help` (topics
+`requests`, `actions`, `exit-codes`, `environment`; `help <verb>` for one
+verb's row) and `scootctl --help --json` for the machine-readable form --
+see [cli-help.md](cli-help.md) for the contract.
+
 - [The socket](#the-socket)
 - [Requests](#requests)
 - [Actions](#actions)
