@@ -27,6 +27,8 @@
 #     launcher nor costs it a poll, and logout ends the wait at once;
 #   - without `busctl` the wait falls back to the 1 s poll, loudly, and
 #     the session still works;
+#   - a transient resolve failure falls back for a second and re-engages
+#     the wait the moment the resolve succeeds;
 #   - without `timeout(1)` the wait runs bare (no 5-minute stall bound)
 #     and the session still works;
 #   - the healed login over an already-active graphical target does not
@@ -271,6 +273,10 @@ set -- $args
 op="${1:-}"
 if [ "$op" = "call" ]; then
     [ -f "$S/manager-down" ] && exit 1
+    # T13's transient resolve failure: GetUnit unanswerable while the
+    # flag is present, the way a concurrent heal or a mid-re-exec
+    # manager looks to a single resolve round.
+    [ -f "$S/bus-call-fail" ] && exit 1
     # ... Manager GetUnit s <unit>: last word is the unit name.
     unit=""
     for a in "$@"; do
@@ -385,7 +391,7 @@ new_test() {
     rm -f "$HARNESS_STATE/calls-seq" "$HARNESS_STATE/version-calls" \
         "$HARNESS_STATE/fake-now" "$HARNESS_STATE/socket-made" \
         "$HARNESS_STATE/env-at-graphical" "$HARNESS_STATE/manager-down" \
-        "$HARNESS_STATE/wait-ready"
+        "$HARNESS_STATE/bus-call-fail" "$HARNESS_STATE/wait-ready"
     export ANSWER_AFTER=3 DBUS_FAIL=0
     mksock wayland-99
     export SCOOT_BIN="$SCOOT_FAKE"
@@ -430,6 +436,18 @@ wait_log() {
     i=0
     while [ "$i" -lt 100 ]; do
         grep -q -F "$1" "$HARNESS_STATE/calls.log" 2>/dev/null && return 0
+        "$REAL_SLEEP" 0.1
+        i=$((i + 1))
+    done
+    return 1
+}
+wait_stderr() {
+    # wait_stderr <fixed-string> : the launcher's stderr says it, up to
+    # ~10 s. Notes land after the call that triggers them, so asserting
+    # them straight after a wait_log races; wait instead.
+    i=0
+    while [ "$i" -lt 100 ]; do
+        grep -q -F "$1" "$T/stderr.log" 2>/dev/null && return 0
         "$REAL_SLEEP" 0.1
         i=$((i + 1))
     done
@@ -703,6 +721,26 @@ ok "T12: without timeout the session still blocks in the wait"
 RC="$(end_session)"
 [ "$RC" = "0" ] || bad "T12: launcher exit $RC"
 ok "T12: timeout-less session quits cleanly"
+
+# --- T13: a transient resolve failure costs a second, not the session --
+new_test 13
+: >"$HARNESS_STATE/bus-call-fail"
+start_launcher
+wait_log "start scoot-session.target" || bad "T13: launcher never reached the session target"
+wait_stderr "1 s poll" || bad "T13: resolve failure did not fall back loudly"
+ok "T13: an unresolvable unit wait falls back to the poll, saying so"
+rm -f "$HARNESS_STATE/bus-call-fail"
+wait_blocked "T13"
+wait_stderr "available after all" || bad "T13: recovered resolve did not re-engage loudly"
+ok "T13: the wait re-engages the moment the resolve succeeds"
+c1="$(show_count)"
+"$REAL_SLEEP" 0.6
+c2="$(show_count)"
+[ "$c1" = "$c2" ] || bad "T13: re-engaged session polled $((c2 - c1)) times in 0.6 s (shows $c1 -> $c2)"
+ok "T13: re-engaged session asks nothing while blocked (shows steady at $c1)"
+RC="$(end_session)"
+[ "$RC" = "0" ] || bad "T13: launcher exit $RC"
+ok "T13: recovered session quits cleanly"
 
 echo "---"
 echo "$PASS/$TOTAL asserts passed"

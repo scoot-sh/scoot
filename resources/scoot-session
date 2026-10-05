@@ -547,7 +547,9 @@ systemctl --user start "$SESSION" \
 # liveness lock (which would refuse the next login) forever. If the
 # blocking wait is unavailable (no `busctl`, a systemd older than the
 # `wait` verb, a repeatedly failing bus) the loop falls back to the 1 s
-# poll it replaces, loudly. Cleanup below still runs first -- if the
+# poll it replaces, loudly -- and keeps re-resolving every round, so a
+# transient failure costs a second of polling, not the session.
+# Cleanup below still runs first -- if the
 # manager answers again its retry stops the compositor; if it never
 # does, the units died with their manager and logind reaps the rest.
 # (`cleanup` and the traps are defined up top, right after the
@@ -568,6 +570,7 @@ MANAGER_SILENCE_LIMIT=30
 silence=0
 wait_fails=0
 unit_path=""
+noted_poll=0
 _scoot_waiter=""
 have_timeout=0
 if command -v timeout >/dev/null 2>&1; then
@@ -584,13 +587,23 @@ reap_waiter() {
         _scoot_waiter=""
     fi
 }
-if command -v busctl >/dev/null 2>&1; then
-    unit_path=$(service_object_path "$SERVICE") || unit_path=""
-fi
-if [ -z "$unit_path" ]; then
-    note "no blocking unit wait (no bus or $SERVICE not loaded); watching $SERVICE with a 1 s poll"
-fi
 while :; do
+    # (Re)resolve the blocking wait every round it is missing: a
+    # transient failure -- a concurrent heal stopping the unit, a
+    # mid-re-exec manager answering nothing -- must cost a second of
+    # polling, not the whole session. While unresolved the loop polls,
+    # loudly the first time and silently after; the moment the resolve
+    # succeeds the wait engages and the polling stops.
+    if [ -z "$unit_path" ] && command -v busctl >/dev/null 2>&1; then
+        unit_path=$(service_object_path "$SERVICE") || unit_path=""
+        if [ -n "$unit_path" ] && [ "$noted_poll" -eq 1 ]; then
+            note "blocking unit wait available after all; watching $SERVICE without polling"
+        fi
+    fi
+    if [ -z "$unit_path" ] && [ "$noted_poll" -eq 0 ]; then
+        note "no blocking unit wait (no bus or $SERVICE not loaded); watching $SERVICE with a 1 s poll"
+        noted_poll=1
+    fi
     if [ -n "$unit_path" ]; then
         # `--quiet` keeps the signal payload off the greeter log.
         if [ "$have_timeout" -eq 1 ]; then
@@ -622,10 +635,12 @@ while :; do
         # failure: re-ask and wait again. Any other nonzero exit is a
         # bus failure, not a state answer: back off one second per
         # failure, and past the bound stop hammering the bus and poll
-        # instead (the next `service_up` still ends the wait on a
-        # definite down state, so this degrades volume, never
-        # correctness -- and a dead manager still exits through the
-        # silence bound, a few seconds later than the poll would have).
+        # instead (the resolve at the top of the loop re-engages the
+        # wait the moment the bus answers again, and the next
+        # `service_up` still ends the wait on a definite down state, so
+        # this degrades volume, never correctness -- and a dead manager
+        # still exits through the silence bound, a few seconds later
+        # than the poll would have).
         wait "$_scoot_waiter"
         waiter_rc=$?
         _scoot_waiter=""
