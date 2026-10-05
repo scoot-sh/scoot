@@ -81,6 +81,11 @@ scootbar` (default, `--all-features`, `--no-default-features`)
 `scripts/smoke-test.sh` exit 0 (36 oks). Release sizes vs `origin/main`
 (file / `.text`): scoot +1.0%/+0.6%, scootctl +0/+4.2%, scootbar
 +0/+0.8%, scootbg +0/+1.5% -- growth rows for the maintainer to waive.
+
+**Maintainer's ruling (2026-10-05, given in chat): the four `.text` growth
+rows are waived** (scoot +0.6%, scootctl +4.2%, scootbar +0.8%, scootbg +1.5%,
+release builds). They cover this PR's help text and JSON tables only; nothing
+else is waived.
 The agent task list completes from help output after (before: exit 1 with
 no guess, unreachable `scoot msg --help`, and set-a-bar-value
 uncompletable -- `[push.status]` with no list placed nothing).
