@@ -153,6 +153,7 @@ in
     ./idle-home.nix
     ./notifications-home.nix
     ./clipboard-home.nix
+    ./launcher-home.nix
     ./keys-home.nix
   ];
 
@@ -204,7 +205,7 @@ in
         layout.gap = 8;
         binds = {
           "super+t" = "spawn foot";
-          "ctrl+alt+space" = "spawn wofi --show drun";
+          "ctrl+alt+space" = "spawn fuzzel";
         };
         autostart.commands = [ "spawn waybar" ];
       };

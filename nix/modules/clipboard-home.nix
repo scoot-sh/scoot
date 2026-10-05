@@ -140,9 +140,9 @@ in
       defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel else null";
       description = ''
         The dmenu-style menu the history picker runs
-        (`fuzzel --dmenu`, themed by the look -- the reserved launcher
-        choice, which the launcher child reuses when it lands). Null
-        installs nothing. Linux-only: null off Linux.
+        (`fuzzel --dmenu`, themed by the look -- the launcher, which
+        reuses this same package). Null installs nothing. Linux-only:
+        null off Linux.
       '';
     };
   };

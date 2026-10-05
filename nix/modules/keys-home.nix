@@ -61,10 +61,12 @@ let
   # string with the space inside, so the call sites read plainly).
   clipboardDbFlags = lib.optionalString (clip.dbPath != null) "-db-path '${clip.dbPath}' ";
 
-  # The picker's theme: the look's roles as fuzzel CLI colors (opaque:
-  # fuzzel takes `rrggbbaa`), the same roles the bar and the locker are
-  # themed from. Nothing without a look (or opted out): fuzzel's own
-  # style stands, and the future launcher child reuses these flags.
+  # The picker's and the launcher's theme: the look's roles as
+  # fuzzel CLI colors (opaque: fuzzel takes `rrggbbaa`), the same roles
+  # the bar and the locker are themed from, shared through
+  # `fuzzel-theme.nix` so the two menus read as one. Nothing without a
+  # look (or opted out): fuzzel's own style stands.
+  fuzzelTheme = import ./fuzzel-theme.nix { inherit lib; };
   clipboardThemed =
     let
       look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
@@ -73,22 +75,23 @@ let
   clipboardThemeFlags =
     let
       look = desktop.looks.${cfg.desktop.look};
-      hexA = color: "${lib.removePrefix "#" color}ff";
     in
-    lib.optionalString clipboardThemed (
-      " --background-color=${hexA look.barColors.background}"
-      + " --text-color=${hexA look.barColors.foreground}"
-      + " --border-color=${hexA look.appearance.focus_ring_active_color}"
-      + " --selection-color=${hexA look.barColors.accent}"
-      + " --selection-text-color=${hexA look.barColors.background}"
-      + " --match-color=${hexA (look.barColors.hover or look.barColors.accent)}"
-      + " --prompt-color=${hexA look.barColors.foreground}"
-    );
+    lib.optionalString clipboardThemed (fuzzelTheme look);
+  launcherThemed =
+    let
+      look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
+    in
+    look != null && (cfg.desktop.theme.targets.launcher.enable or true);
+  launcherThemeFlags =
+    let
+      look = desktop.looks.${cfg.desktop.look};
+    in
+    lib.optionalString launcherThemed (fuzzelTheme look);
 
   # Clipboard picker: `cliphist` history through the launcher menu
   # back into the clipboard -- lines on stdin, selection on stdout (the
-  # launcher slot's dmenu contract, which that child reuses when it
-  # lands). A script because `[binds]` has no shell (whitespace-split,
+  # launcher slot's dmenu contract, which the launcher reuses). A
+  # script because `[binds]` has no shell (whitespace-split,
   # no quoting): a pipeline is not expressible inline. Absolute tool
   # paths when the clipboard child names packages, bare names from PATH
   # otherwise (off Linux, or without the overlay): a missing tool then
@@ -122,6 +125,29 @@ let
     printf '%s\n' "$sel" | ${cliphistBin} ${clipboardDbFlags}decode >"$tmp" || exit 0
     [ -s "$tmp" ] || exit 0
     ${wlCopyBin} <"$tmp"
+  '';
+
+  # The launcher: fuzzel as the keymap's drun/run binds (XDG apps,
+  # most-launched first, PATH executables on the run bind -- see
+  # docs/nix.md "Launcher"). A script because the theme travels as CLI
+  # flags (seven colors from the look, the same ones the picker above
+  # carries -- one menu, one palette), and a `[binds]` action gets no
+  # shell to hold them beside the binary. Absolute fuzzel path when the
+  # launcher child names a package (the one fuzzel the picker already
+  # themes: same derivation, no second copy), bare name from PATH
+  # otherwise, with the same fail-quiet contract as the picker above.
+  # Extra args pass through (`"$@"`), which is what carries the run
+  # bind's `--list-executables-in-path`.
+  #
+  # `--layer=overlay`: fuzzel's own default is `top`, which the
+  # compositor hides under a fullscreen window (the mako lesson -- see
+  # `notifications-home.nix`); `overlay` stays above it. Exclusive
+  # keyboard is fuzzel's default and stays: nothing else takes keys
+  # while the launcher is open. No lock probe here (unlike the picker):
+  # while locked no `[binds]` action fires at all, so these binds never
+  # run behind the lock screen -- and a manual run only lists apps.
+  launcherScript = pkgs.writeShellScriptBin "scoot-launcher" ''
+    exec ${fuzzel} --layer=overlay${launcherThemeFlags} "$@"
   '';
 
   # Screenshot scripts: dated files into `~/Pictures` (`$HOME`
@@ -178,7 +204,8 @@ let
         mediaNext = hwBind "spawn ${playerctl} next";
         mediaPrev = hwBind "spawn ${playerctl} previous";
         lock = "spawn ${cfg.desktop.idle.lock.command}";
-        launcher = "spawn ${fuzzel}";
+        launcher = "spawn ${launcherScript}/bin/scoot-launcher";
+        launcherRun = "spawn ${launcherScript}/bin/scoot-launcher --list-executables-in-path";
         clipboard = "spawn ${clipboardPick}/bin/scoot-clipboard-pick";
         notifDismiss = "spawn ${makoctl} dismiss";
         notifDnd = "spawn ${makoctl} mode -t do-not-disturb";
@@ -211,7 +238,8 @@ let
   # where the binds render as written for the Linux box they deploy
   # to and install nothing).
   slotScripts =
-    lib.optional (slotOn "clipboard") clipboardPick
+    lib.optional (slotOn "launcher") launcherScript
+    ++ lib.optional (slotOn "clipboard") clipboardPick
     ++ lib.optional (slotOn "capture") captureOutput
     ++ lib.optional (slotOn "capture") captureRegion;
 in
