@@ -281,7 +281,7 @@ quantifies the ticket this benchmark was built to check.
    `kunifiedpush-distributor` at ~15 MB in every session for push
    notifications nothing uses — bigger than mako, the bar and the idle
    daemon combined.
-5. **Wake the bar only when its text changes** ([second-wakeups](scootbar/backlog/second-wakeups.md)):
+5. **Wake the bar only when its text changes** ([second-wakeups](scootbar/backlog/resolved/second-wakeups-done.md), resolved 2026-10-05 in #458):
    ~40 wakes/min, almost certainly the clock ticking every second for
    a minute-resolution clock. After lead 1 lands, the bar is the
    second-biggest waker left.
