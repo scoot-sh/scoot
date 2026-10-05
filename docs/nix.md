@@ -1503,7 +1503,7 @@ reload (`scootctl reload`) or re-login:
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `desktop.keys.enable` | bool | `true` with the profile | render the keymap into `[binds]` |
-| `desktop.keys.binds.<name>.enable` | bool | `true` | bind that key (`brightnessUp`, `volumeUp`, `volumeMute`, `micMute`, `mediaPlay`, `mediaPause`, `mediaStop`, `mediaNext`, `mediaPrev`, `lock`, `launcher`, `clipboard`, `notifDismiss`, `notifDnd`, `notifHistory`, `captureOutput`, `captureRegion`); `false` leaves its combo unbound |
+| `desktop.keys.binds.<name>.enable` | bool | `true` | bind that key (`brightnessUp`, `brightnessDown`, `volumeUp`, `volumeDown`, `volumeMute`, `micMute`, `mediaPlay`, `mediaPause`, `mediaStop`, `mediaNext`, `mediaPrev`, `lock`, `launcher`, `clipboard`, `notifDismiss`, `notifDnd`, `notifHistory`, `captureOutput`, `captureRegion`); `false` leaves its combo unbound |
 | `desktop.keys.brightnessPackage` | package or null | brightnessctl (Linux-only: null off Linux) | the backlight tool the brightness binds run |
 | `desktop.keys.volumePackage` | package or null | wireplumber (Linux-only: null off Linux) | the audio tool the volume and mute binds run (`wpctl`) |
 | `desktop.keys.mediaPackage` | package or null | playerctl (Linux-only: null off Linux) | the MPRIS tool the media binds run |
