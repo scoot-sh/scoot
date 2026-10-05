@@ -563,19 +563,16 @@ in
         '';
       };
 
-      binds = lib.mapAttrs (
-        name: spec:
-        {
-          enable = lib.mkOption {
-            type = lib.types.bool;
-            default = true;
-            description = ''
-              Bind ``${spec.combo}`` (${spec.blurb}). Set to `false`
-              to leave that combo unbound.
-            '';
-          };
-        }
-      ) keymap;
+      binds = lib.mapAttrs (name: spec: {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Bind ``${spec.combo}`` (${spec.blurb}). Set to `false`
+            to leave that combo unbound.
+          '';
+        };
+      }) keymap;
     };
     # Output policy (scale, placement) from the connected set.
     displays = configSlot {

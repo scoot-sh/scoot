@@ -746,7 +746,9 @@ let
   slotScriptBin =
     eval: name:
     let
-      found = lib.findFirst (p: (p.name or "") == name) (throw "no ${name} in home.packages") eval.config.home.packages;
+      found = lib.findFirst (
+        p: (p.name or "") == name
+      ) (throw "no ${name} in home.packages") eval.config.home.packages;
     in
     "${found}/bin/${name}";
 
@@ -3937,10 +3939,14 @@ let
         hmKeys.config.programs.scoot.settings.binds == {
           "XF86MonBrightnessUp" = "spawn ${lib.getExe pkgs.brightnessctl} -e set +5%";
           "XF86MonBrightnessDown" = "spawn ${lib.getExe pkgs.brightnessctl} -e set 5%-";
-          "XF86AudioRaiseVolume" = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
-          "XF86AudioLowerVolume" = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
-          "XF86AudioMute" = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SINK@ toggle";
-          "XF86AudioMicMute" = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+          "XF86AudioRaiseVolume" =
+            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
+          "XF86AudioLowerVolume" =
+            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
+          "XF86AudioMute" =
+            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SINK@ toggle";
+          "XF86AudioMicMute" =
+            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
           "XF86AudioPlay" = "spawn ${lib.getExe pkgs.playerctl} play-pause";
           "XF86AudioPause" = "spawn ${lib.getExe pkgs.playerctl} pause";
           "XF86AudioStop" = "spawn ${lib.getExe pkgs.playerctl} stop";
@@ -3984,7 +3990,9 @@ let
       true
     )
     (
-      assert hmKeysSlots.config.programs.scoot.settings.binds."super+v" == "spawn ${slotScriptBin hmKeysSlots "scoot-clipboard-pick"}";
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."super+v"
+        == "spawn ${slotScriptBin hmKeysSlots "scoot-clipboard-pick"}";
       true
     )
     (
@@ -4002,12 +4010,15 @@ let
       true
     )
     (
-      assert hmKeysSlots.config.programs.scoot.settings.binds."print" == "spawn ${slotScriptBin hmKeysSlots "scoot-capture-output"}";
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."print"
+        == "spawn ${slotScriptBin hmKeysSlots "scoot-capture-output"}";
       true
     )
     (
       assert
-        hmKeysSlots.config.programs.scoot.settings.binds."shift+print" == "spawn ${slotScriptBin hmKeysSlots "scoot-capture-region"}";
+        hmKeysSlots.config.programs.scoot.settings.binds."shift+print"
+        == "spawn ${slotScriptBin hmKeysSlots "scoot-capture-region"}";
       true
     )
     # ...the three slot scripts installed beside the keymap's tools...
@@ -4043,7 +4054,8 @@ let
     )
     # ...one bind overridden: the user's own `[binds]` entry wins...
     (
-      assert hmKeysOverride.config.programs.scoot.settings.binds."XF86AudioRaiseVolume" == "spawn sh -c true";
+      assert
+        hmKeysOverride.config.programs.scoot.settings.binds."XF86AudioRaiseVolume" == "spawn sh -c true";
       true
     )
     (
@@ -4209,8 +4221,7 @@ let
     )
     (
       assert
-        hmKeys.config.programs.scoot.settings.binds
-        == {
+        hmKeys.config.programs.scoot.settings.binds == {
           "XF86MonBrightnessUp" = "spawn brightnessctl -e set +5%";
           "XF86MonBrightnessDown" = "spawn brightnessctl -e set 5%-";
           "XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+";

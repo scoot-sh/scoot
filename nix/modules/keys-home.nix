@@ -23,17 +23,13 @@ let
   # the overlay): a missing tool then fails quietly at runtime --
   # `State::spawn` warns and reports `false`, never wedging input --
   # so the binds are always safe to render.
-  binOr =
-    name: pkg: if pkg != null then "${lib.getExe' pkg name}" else name;
+  binOr = name: pkg: if pkg != null then "${lib.getExe' pkg name}" else name;
 
   brightnessCtl = binOr "brightnessctl" keys.brightnessPackage;
   wpctl = binOr "wpctl" keys.volumePackage;
   playerctl = binOr "playerctl" keys.mediaPackage;
   fuzzel =
-    if cfg.desktop.launcher.package != null then
-      lib.getExe cfg.desktop.launcher.package
-    else
-      "fuzzel";
+    if cfg.desktop.launcher.package != null then lib.getExe cfg.desktop.launcher.package else "fuzzel";
   makoctl =
     if cfg.desktop.notifications.package != null then
       lib.getExe' cfg.desktop.notifications.package "makoctl"
@@ -105,9 +101,7 @@ let
         && (desktop.keymap.${name}.slot == null || slotOn desktop.keymap.${name}.slot)
       ) all;
     in
-    lib.mapAttrs' (
-      name: action: lib.nameValuePair desktop.keymap.${name}.combo action
-    ) wanted;
+    lib.mapAttrs' (name: action: lib.nameValuePair desktop.keymap.${name}.combo action) wanted;
 
   isLinux = pkgs.stdenv.hostPlatform.isLinux;
 
