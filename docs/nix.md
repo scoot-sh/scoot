@@ -1386,7 +1386,7 @@ Why mako, measured at the pinned rev (`8ce4ef6`, `aarch64-linux`,
 357.4 MiB (210.4 MiB marginal), dunst 174.7 MiB (43.8 MiB; 172.9/41.9
 MiB built Wayland-only), SwayNotificationCenter 1.3 GiB. Stock mako's
 weight is almost all one hook: `wrapGAppsHook3` in its
-`nativeBuildInputs` references gtk+3 directly (340.6 MiB cumulative
+`nativeBuildInputs` references gtk+3 directly (324.8 MiB cumulative
 with its tinysparql/cups/at-spi2/avahi train) -- not
 `systemdMinimal`, which is already in every NixOS closure, and not
 pango/cairo, which the lock child already pays for. The profile does
