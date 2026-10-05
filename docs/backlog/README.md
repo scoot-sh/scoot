@@ -495,6 +495,8 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [`smoke-test.sh` background check samples the cursor under `--tty`](./resolved/tty-background-not-painted-done.md)
   — RESOLVED 2026-09-16, together with the `--tty` entry above that had
   independently (and wrongly) filed the same failure as a compositor bug.
+- [virtual-input protocol-error tests race EPIPE after the server closes](./resolved/virtual-input-protocol-error-epipe-done.md)
+  — RESOLVED 2026-10-05 (test-only): poison rides the round trip's own flush and `expect_error` drains read-side-only on I/O errors before deciding
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
 - [scootbg-mem fd-close test races on fd reuse](./resolved/scootbg-mem-fd-close-test-race-done.md)
   — RESOLVED 2026-10-03 (already landed in #331): the dev+ino identity check was in the tree 4 minutes before the ticket was filed; verified with 46 green suite runs plus mutation checks.
