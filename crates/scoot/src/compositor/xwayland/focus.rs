@@ -139,7 +139,7 @@
 //! `XSetInputFocus` another X client's window, read its keystrokes while one
 //! of them is focused, and synthesize input into it. That is X11 by design,
 //! and why running XWayland extends full trust to every X client (see
-//! `docs/protocols.md`). What the gate stops is an X client taking focus
+//! `site/src/content/docs/scoot/protocols.md`). What the gate stops is an X client taking focus
 //! from a Wayland window, or from a different X application, by asking --
 //! except with a Wayland launcher's token, or the token of a spawn that
 //! exited before its app redeemed it, which it can race the launched app to

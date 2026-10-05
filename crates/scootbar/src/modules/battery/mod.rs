@@ -12,7 +12,7 @@
 //! silent too). So a uevent is how a running module learns it has started
 //! discharging, and a slow timer (once a minute) is how it sees the steps:
 //! it re-reads while discharging and stops when charging or full, with the
-//! rate published ([`DISCHARGE_POLL`], `docs/scootbar/cli.md`). Other
+//! rate published ([`DISCHARGE_POLL`], `site/src/content/docs/scootbar/cli.md`). Other
 //! drivers may differ; the measurement is in
 //! `docs/scootbar/backlog/resolved/battery-unplug-uevent-measure-done.md`.
 //!

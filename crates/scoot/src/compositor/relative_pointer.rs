@@ -133,7 +133,7 @@
 //!
 //! No client filter, the same deliberate consistency as every other
 //! advertisement here: scoot has no security-context support, so an
-//! allow-list would be theatre (see `docs/protocols.md`'s trust note). A lock
+//! allow-list would be theatre (see `site/src/content/docs/scoot/protocols.md`'s trust note). A lock
 //! only ever pins the locking client's own focused surface, and relative
 //! deltas only ever reach the focused client.
 //!

@@ -650,7 +650,7 @@ impl Screencopy {
     ///
     /// No client filter, for the same reason the session-lock, data-control
     /// and input-method globals have none: scoot has no security-context
-    /// support, so an allow-list would be theatre (see `docs/protocols.md`'s
+    /// support, so an allow-list would be theatre (see `site/src/content/docs/scoot/protocols.md`'s
     /// trust note). Worth naming here because screen capture is the most
     /// obviously sensitive of those -- a client that can reach this socket can
     /// read the screen -- so this is a deliberate consistency with the trust

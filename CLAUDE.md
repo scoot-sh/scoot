@@ -147,11 +147,8 @@ Beyond "does it work": actively look for bugs, not just the happy path;
 measure performance with real before/after numbers. **Update the docs in the same PR a feature lands, not later**: every
 new/changed config option, default keybinding, CLI flag, or IPC
 request/action a user or integrating agent would need to know. **README
-sections say what and why; flags and edge cases live in `docs/`**
-(user, 2026-09-28): the reference entry goes in the matching `docs/` file
-(`configuration.md`, `ipc.md`, `protocols.md`, `tty.md`,
-`scootbg/cli.md`, …), and `README.md` changes only when what scoot is or
-does changes (a new row in What works, a Not-yet item gone). This project
+sections say what and why; flags and edge cases live on the site**
+(user, 2026-09-28; moved 2026-10-05 from `docs/` to `site/`): the reference entry goes in the matching site section (`site/src/content/docs/scoot/` for compositor config and keybindings, `scootctl/` for IPC, `scootbar/` and `scootbg/` for those apps — the per-section map is in `site/OUTLINE.md`), written to the docs-bar standard (task-first, type/default/example/reload per option, `> **Symptom:**` boxes, snippet gates green), and `README.md` changes only when what scoot is or does changes (a new row in What works, a Not-yet item gone). This project
 let the config file and keybinding reference go stale across several
 merged PRs before anyone noticed; `scoot-implementer` and `scoot-reviewer`
 both call this out explicitly so it doesn't recur.

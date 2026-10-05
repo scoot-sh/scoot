@@ -229,7 +229,7 @@ impl Default for Keybindings {
             // monitor comes back under a fresh one; stepping from the focused
             // output is what keeps these binds reaching it -- see
             // `reconnect.rs` and
-            // `docs/configuration.md#moving-across-outputs`). The `-index`
+            // `site/src/content/docs/scoot/outputs.md#moving-across-outputs`). The `-index`
             // actions stay for fixed screens, bound manually. Bare Super
             // focuses, Shift carries the focused window and follows it
             // there: the same split the workspace digits keep.

@@ -849,7 +849,7 @@ pub(crate) fn locker(
 /// whitespace-split action strings, so no `sh -c` probe survives them --
 /// `spawn touch <path>` is the whole probe vocabulary, and the path must be
 /// whitespace-free to be expressible at all (the same limitation
-/// `docs/configuration.md` documents for every spawn entry). Requires a real
+/// `site/src/content/docs/scoot/configure.md#autostart` documents for every spawn entry). Requires a real
 /// `touch`, like the suites that already spawn require a real `sh`.
 ///
 /// A fresh `spawn touch` target: `temp_dir` joined with a space-free name

@@ -25,7 +25,7 @@
 //!   font bet on a box-drawing run);
 //! - a disabled row is plain text (non-interactive, as it is);
 //! - icons in menu items are not drawn in this version (said in
-//!   `docs/scootbar/cli.md`).
+//!   `site/src/content/docs/scootbar/cli.md`).
 
 use std::borrow::Cow;
 use std::time::Instant;

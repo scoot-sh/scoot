@@ -15,7 +15,7 @@
 //! scoot has no security-context support to distinguish a privileged
 //! night-light daemon from any other client, so an allow-list would be
 //! theatre -- the same rationale as the session-lock global, documented in
-//! `docs/protocols.md`'s trust note.
+//! `site/src/content/docs/scoot/protocols.md`'s trust note.
 //!
 //! ## What `set_gamma` carries
 //!
@@ -42,7 +42,7 @@
 //! `--headless`/`--nested` there is no hardware LUT: the request succeeds
 //! but nothing on screen changes -- and an IPC
 //! screenshot reads the framebuffer, which is pre-LUT, so it shows the
-//! unmodified frame either way. `docs/protocols.md` says this where a user
+//! unmodified frame either way. `site/src/content/docs/scoot/protocols.md` says this where a user
 //! will find it.
 //!
 //! Any DRM failure while applying (no master after a VT switch, a driver

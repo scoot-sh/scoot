@@ -127,7 +127,7 @@ pub(super) const MAX_SCALE: f64 = 4.0;
 /// The range half of [`clamp_scale`], on its own so the config layer can
 /// tell an out-of-range value (worth a warning) from one that only needs
 /// 1/120 resolution (silent: a sub-percent adjustment the user did not
-/// misconfigure, documented in `docs/configuration.md`'s `[output]` entry).
+/// misconfigure, documented in `site/src/content/docs/scoot/outputs.md`'s `[output]` entry).
 /// `scale` is finite wherever this runs -- `clamp_scale` and `into_scale`
 /// both reject the non-finite spellings first.
 pub(super) fn clamp_scale_range(scale: f64) -> f64 {

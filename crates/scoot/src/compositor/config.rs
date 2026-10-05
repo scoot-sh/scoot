@@ -257,7 +257,7 @@ struct TtyConfig {
 /// frame -- `"pixman"` (the default, and the only one that needs no graphics
 /// device) or `"gles"`. Named `backend` for the renderer *behind* the
 /// compositor, which is a different axis from `--headless`/`--nested`/`--tty`
-/// (how the compositor presents what it drew); `docs/tty.md` says so in as
+/// (how the compositor presents what it drew); `site/src/content/docs/scoot/backends.md` says so in as
 /// many words.
 ///
 /// A `String` rather than a `RendererKind` so that an unrecognised name
@@ -766,7 +766,7 @@ pub fn enforce_vt_binds(table: &mut Keybindings) {
 ///
 /// Three appearance colors are the nearest `"#rrggbb"` to built-ins none of
 /// whose floats is exactly representable in 8 bits (see
-/// `docs/configuration.md`) -- and "nearest" is renderer-dependent by 1 LSB
+/// `site/src/content/docs/scoot/appearance.md`) -- and "nearest" is renderer-dependent by 1 LSB
 /// (pixman truncates where the emitter rounds; GLES agrees with the
 /// emitter), so no emitted hex is pixel-exact everywhere. Leave one
 /// commented for the real default. The conversion is [`hex`]'s, and the
@@ -794,7 +794,7 @@ pub fn default_config_toml() -> String {
          #\n\
          # The ring/background colors are the nearest \"#rrggbb\" to built-ins\n\
          # none of whose floats is exactly representable in 8 bits -- leave one\n\
-         # commented for the real default (see docs/configuration.md, which these\n\
+         # commented for the real default (see site/src/content/docs/scoot/configure.md#the-config-file, which these\n\
          # comments summarize, not replace).\n\
          #\n\
          # Gap, column widths, the output scale, the ring/background/cursor\n\
@@ -3943,7 +3943,7 @@ mod tests {
             );
             binds += 1;
         }
-        // "All 44 of them" (see docs/configuration.md): a dropped default
+        // "All 44 of them" (see site/src/content/docs/scoot/keybindings.md): a dropped default
         // bind must fail loudly here, not just shrink the file.
         assert_eq!(binds, 44, "a default bind was added or lost");
     }

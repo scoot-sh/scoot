@@ -577,7 +577,7 @@ Outputs:
                          leaves loses its bar. The config file also sets a
                          bar's edge, layer, exclusive, height, margin and
                          module lists per output, in [output.\"NAME\"] tables
-                         (see docs/scootbar/cli.md); those win over the
+                         (see site/src/content/docs/scootbar/cli.md); those win over the
                          flags below for that output
 
 The bar:
@@ -610,7 +610,7 @@ Text:
     Fallback fonts (`bar.fallback-fonts`) and a clock icon (`clock.icon`, a
     glyph; `clock.icon-path`, SVG path data; `clock.icon-image`, a PNG, in a
     build with the icon-image feature) are config-file only; see
-    docs/scootbar/cli.md.
+    site/src/content/docs/scootbar/cli.md.
 
 Modules:
 ",

@@ -105,18 +105,22 @@ jobs:
   #                                        -> scootbar=true (scootbar job, which
   #                                           also builds the Nix module check)
   #   site/*, EXCEPT site content that is also matched above (nothing is:
-  #   `*.md | docs/*` does not match `site/`, whose pages live outside
-  #   `docs/` until they move)               -> docs-site=true (docs-site job:
+  #   `*.md | docs/*` does not match `site/`, whose pages live in the tree
+  #   since the move)                         -> docs-site=true (docs-site job:
   #                                           `nix build .#docs-site`, which
   #                                           also runs the llms and snippet
   #                                           gates). `nix/docs-site.nix` and
   #                                           `flake.nix`/`flake.lock` fall to
   #                                           the catch-all below and run
   #                                           everything, site included.
-  #                                           `docs/**` does NOT set it yet:
-  #                                           no docs/ page feeds the site in
-  #                                           phase 1 (they are adapted, not
-  #                                           moved); the move PR wires it in.
+  #                                           `docs/**` does NOT set it: since
+  #                                           the move the site builds only
+  #                                           from `site/` (user pages were
+  #                                           carried into the tree, not
+  #                                           symlinked), so a docs-only change
+  #                                           cannot alter the built site; the
+  #                                           Pages deploy workflow tracks
+  #                                           `docs/**` separately.
   #     except its Cargo.toml               -> scoot too, for the flake's
   #     read of its description, as scootbg's
   #   crates/scootbg-mem/                  -> scootbar too: its shm buffer

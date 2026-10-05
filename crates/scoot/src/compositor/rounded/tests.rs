@@ -7,7 +7,7 @@
 //! red/green client buffers), except the ring and background, which are
 //! sampled from the frame itself: pixman truncates where GLES rounds, so the
 //! two renderers disagree by 1 LSB on colors derived from floats (see
-//! `docs/configuration.md`), and hard-coding those bytes would fail one of
+//! `site/src/content/docs/scoot/appearance.md`), and hard-coding those bytes would fail one of
 //! the two `SCOOT_TEST_RENDERER` runs.
 //!
 //! Window placement is read from the live arrangement, never hard-coded, so

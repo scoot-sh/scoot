@@ -35,7 +35,7 @@ pub const MAX_HEIGHT: u32 = 1024;
 pub const MAX_MARGIN: u32 = 1024;
 
 /// The output edge the bar is anchored to. Vertical bars are not in the
-/// first version, on purpose (`docs/scootbar/cli.md`, Edge cases).
+/// first version, on purpose (`site/src/content/docs/scootbar/cli.md`, Edge cases).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Edge {
     #[default]
@@ -55,7 +55,7 @@ impl Edge {
 
 /// The layer-shell layer the bar sits in. `background` is left out: it
 /// is the wallpaper's layer, not a bar's. A fullscreen window hides `top` in scoot
-/// (`docs/protocols.md`), and never `overlay`.
+/// (`site/src/content/docs/scoot/protocols.md`), and never `overlay`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Layer {
     /// Behind windows: they cover the bar wherever they overlap it.

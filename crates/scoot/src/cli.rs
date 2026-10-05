@@ -563,7 +563,7 @@ pub struct CompositorOptions {
     /// costs a whole extra process (~55 MB RSS idle, ~87 MB with three X
     /// clients mapped, measured) plus a hard `PATH`
     /// dependency on the `Xwayland` binary, and any X client can
-    /// keylog/snoop by design (see `docs/protocols.md`'s trust note), so it
+    /// keylog/snoop by design (see `site/src/content/docs/scoot/protocols.md`'s trust note), so it
     /// is an explicit choice, never a default. The config-file form is
     /// `[xwayland] enabled`; either one turns it on (a flag can only say
     /// yes, so the two are OR-ed in `compositor::run`). X windows map into
@@ -1331,7 +1331,7 @@ mod tests {
         // accepts `--renderer` everywhere, so the backends table and the
         // text must both name it everywhere. Found 2026-09-20 with the
         // `--tty` line missing it while `README.md`,
-        // `docs/configuration.md` and `docs/tty.md` all showed
+        // `site/src/content/docs/scoot/configure.md` and `site/src/content/docs/scoot/backends.md` all showed
         // `scoot --tty --renderer gles`.
         let text = usage();
         for backend in BACKENDS {

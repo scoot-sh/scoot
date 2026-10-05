@@ -960,7 +960,7 @@ panel was not photographed.
 
 Why: under `--renderer gles` the `zwp_linux_dmabuf_v1` feedback is now the
 GPU driver's whole import set — every format at every explicit modifier it
-names (`docs/protocols.md`, "GPU-rendering clients"), where it used to be
+names (`https://scoot-sh.github.io/scoot/scoot/protocols.md`, "GPU-rendering clients"), where it used to be
 `Xrgb8888`/`Argb8888` at `LINEAR` only. On the dev VM's llvmpipe that is 57
 formats, every one at `LINEAR`, because Mesa lists no other layout there;
 only this machine can say what AGX offers (tiled and compressed modifiers
@@ -1058,7 +1058,7 @@ layout the display takes, and then go direct?** On the GPU tier the window
 covering the output is sent per-surface dma-buf feedback whose first
 tranche is flagged `scanout`, names the display device (`apple,dcp`'s card,
 not AGX's render node), and lists the layouts the primary plane accepts
-(`docs/protocols.md`, "Per-surface feedback: the scanout tranche"). On the
+(`https://scoot-sh.github.io/scoot/scoot/protocols.md`, "Per-surface feedback: the scanout tranche"). On the
 dev VM that tranche is `XR24`/`AR24` at `LINEAR` and the test client went
 direct with it; no GL client there can allocate a dma-buf, so whether Mesa
 acts on it is only answerable here. Same VT session and flags as Test 5:
@@ -1212,7 +1212,7 @@ device number comes from scoot's log line rather than the client trace.
 
 Why: on the GPU tier scoot now offers explicit sync where a DRM device can
 import timeline syncobjs and wait on them with an eventfd
-(`docs/protocols.md`, "Explicit sync"). It tries the display device first
+(`https://scoot-sh.github.io/scoot/scoot/protocols.md`, "Explicit sync"). It tries the display device first
 and the render nodes (`/dev/dri/renderD*`) second, because on this machine the display controller
 (`apple,dcp`) and the GPU (AGX) are separate DRM devices and only the GPU's
 driver is expected to support syncobjs. On the dev VM (virtio-gpu, one
@@ -1712,7 +1712,7 @@ GLES renderer can hold one more per dma-buf plane it imports. On the dev
 VM's software renderer (llvmpipe) it does: a three-plane `YU12` buffer costs
 scoot six fds, not three. scoot measures this once per session, around the
 first import, logs the answer, and counts the copies against the client
-(`docs/protocols.md`, "Per-client limits on what scoot keeps"). A hardware
+(`https://scoot-sh.github.io/scoot/scoot/protocols.md`, "Per-client limits on what scoot keeps"). A hardware
 driver is expected to import into a GEM handle and keep no fd, which would
 log `copies_per_plane_per_output=0`. That expectation is reasoned from
 Mesa's source, not measured; this machine is the check.
@@ -1815,7 +1815,7 @@ unexplained.**
 
 So: charging each client for its planes' copies is correct on this
 hardware, and the "hardware drivers are expected not to" line in
-`docs/protocols.md` was wrong for AGX; it is corrected in the same change
+`https://scoot-sh.github.io/scoot/scoot/protocols.md` was wrong for AGX; it is corrected in the same change
 as this section. Release after quit is prompt when scoot keeps drawing,
 but it is not guaranteed within any fixed time: one fd of the last frame's
 buffer can wait for the next frame. The raw counts are kept with the runs

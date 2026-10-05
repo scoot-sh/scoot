@@ -95,6 +95,23 @@ green, `github-pages` artifact uploaded; the deploy step itself waits for
 move) after A merges; resolve this ticket only when the site is live on
 `scoot.sh` (not yet).
 
+## Phase 2 PR B: the move (2026-10-05 — ticket stays open)
+
+Branch `docs/site-move`: user-facing material moved into the site's
+per-app sections (Start / the scoot desktop / scoot / scootctl & IPC /
+scootbar / scootbg / agents & webtop / troubleshooting / reference),
+task-first, option tables with type/default/example/reload, symptom
+troubleshooting, the desktop as the primary path with the three front
+doors, the "Which build do I need?" GPU chooser (one-command check,
+verified against code), copy-paste-complete flake/NixOS/Home Manager
+setup, keybinding cheat sheet, per-app llms.txt sets for every section.
+Snippet gates extended to the whole tree (`test-snippets` recurses,
+new `check-nix` parses every nix block in the derivation, and
+`nix/tests.nix` evaluates the documented minimal NixOS + standalone
+HM desktop configs). Backlogs, `docs/roadmap/` and `ROADMAP.md` stay
+(the `.claude/` edits for their move are listed in the PR). Resolve
+this ticket only when the site is live on `scoot.sh` (not yet).
+
 ## Not in this ticket
 
 API docs for the internal crates (rustdoc stays local), translations.

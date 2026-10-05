@@ -53,7 +53,7 @@ cargo build --release -p scoot -p scootctl -p scootbar    # binaries land in tar
 
 The examples below open [foot](https://codeberg.org/dnkl/foot), scoot's
 default terminal, so install that too (or name another one). NixOS and
-home-manager modules are in [docs/nix.md](docs/nix.md).
+home-manager modules are in [the desktop docs](https://scoot-sh.github.io/scoot/desktop/).
 
 ### Try it
 
@@ -66,7 +66,7 @@ scoot --nested -- foot
 
 That opens scoot with a terminal in it. Close the window to quit. If your
 desktop keeps some `Super` shortcuts for itself, you can
-[rebind scoot's](docs/configuration.md#binds).
+[rebind scoot's](https://scoot-sh.github.io/scoot/scoot/keybindings.md#change-one-binding).
 
 When you want it as your whole session, switch to a text console
 (`Ctrl+Alt+F3`), log in, and run:
@@ -77,7 +77,7 @@ scoot --tty -- foot
 
 `Super+Shift+e` quits, and `Ctrl+Alt+F1`..`F12` switches back to your
 usual desktop at any time. Hardware setup, multiple monitors and the GPU
-tier are in [docs/tty.md](docs/tty.md).
+tier are in [backends](https://scoot-sh.github.io/scoot/scoot/backends.md).
 
 ### Drive it from a script
 
@@ -91,7 +91,7 @@ scootctl screenshot --out shot.png
 ```
 
 For agents and tests, `scoot --headless -- foot` runs with no screen at
-all. Everything the socket can do is in [docs/ipc.md](docs/ipc.md).
+all. Everything the socket can do is in [scootctl / IPC](https://scoot-sh.github.io/scoot/scootctl/).
 
 ### Keys
 
@@ -114,7 +114,7 @@ all. Everything the socket can do is in [docs/ipc.md](docs/ipc.md).
 | `Super+Shift+e` | Quit scoot |
 
 All the default keys, and how to change them, are in
-[docs/configuration.md](docs/configuration.md#default-keybindings).
+[keybindings](https://scoot-sh.github.io/scoot/scoot/keybindings.md).
 
 ### Configure
 
@@ -146,7 +146,7 @@ image = "~/Pictures/hills.jpg"
 
 `scootctl reload` applies changes without restarting. A mistake never
 stops scoot from starting: it logs the problem and uses the default. Every
-option is in [docs/configuration.md](docs/configuration.md).
+option is in [configure](https://scoot-sh.github.io/scoot/scoot/configure.md).
 
 ## What works
 
@@ -154,25 +154,25 @@ scoot speaks the standard Wayland protocols, so the usual tools work.
 
 | You want to… | |
 | --- | --- |
-| Run a bar, dock, launcher or notification daemon | [yes](docs/protocols.md#layer-shell-bars-wallpapers-launchers) |
-| Switch workspaces or windows from a bar or taskbar | [yes](docs/protocols.md#workspaces-ext-workspace-v1) |
-| Have dialogs and pop-ups float | [yes, automatically](docs/configuration.md#floating) |
-| Watch video or play games fullscreen | [yes](docs/protocols.md#fullscreen) |
-| Lock the screen, or lock and dim when idle | [yes](docs/protocols.md#screen-locking-ext-session-lock-v1) |
-| Turn screens off when idle | [yes](docs/protocols.md#screen-power) |
-| Take screenshots or share the screen | [yes](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
-| Run GPU apps, even with no GPU on the compositor | [yes](docs/protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1) |
-| Use a clipboard manager or middle-click paste | [yes](docs/protocols.md#clipboard-and-primary-selection) |
-| Use a night light | [yes](docs/protocols.md#night-light-wlr-gamma-control-v1) |
-| Use a HiDPI screen, fractional scaling included | [yes](docs/protocols.md#output-scaling) |
-| Give each monitor its own scale and resolution | [yes, in the config file](docs/configuration.md#outputs) |
-| Use an input method or on-screen keyboard | [yes](docs/protocols.md#input-methods-text-input-v3-input-method-v2) |
-| Use a drawing tablet | [pens, not pads](docs/protocols.md#drawing-tablets-tablet-v2) |
-| Change display modes from `wlr-randr` or Settings | [not yet: read-only](docs/protocols.md#display-information-wlr-output-management-v1) |
-| Run X11 apps | [yes, with `--xwayland`](docs/protocols.md#xwayland-opt-in) in an XWayland build ([`nix build .#scoot-xwayland`](docs/nix.md#xwayland-from-the-flake)) |
-| Drive it from a script or an agent | [yes](docs/ipc.md) |
+| Run a bar, dock, launcher or notification daemon | [yes](https://scoot-sh.github.io/scoot/scoot/protocols.md#layer-shell-bars-wallpapers-launchers) |
+| Switch workspaces or windows from a bar or taskbar | [yes](https://scoot-sh.github.io/scoot/scoot/protocols.md#workspaces-ext-workspace-v1) |
+| Have dialogs and pop-ups float | [yes, automatically](https://scoot-sh.github.io/scoot/scoot/windows.md) |
+| Watch video or play games fullscreen | [yes](https://scoot-sh.github.io/scoot/scoot/protocols.md#fullscreen) |
+| Lock the screen, or lock and dim when idle | [yes](https://scoot-sh.github.io/scoot/scoot/protocols.md#screen-locking-ext-session-lock-v1) |
+| Turn screens off when idle | [yes](https://scoot-sh.github.io/scoot/scoot/protocols.md#screen-power) |
+| Take screenshots or share the screen | [yes](https://scoot-sh.github.io/scoot/scoot/protocols.md#screen-capture-ext-image-copy-capture-v1) |
+| Run GPU apps, even with no GPU on the compositor | [yes](https://scoot-sh.github.io/scoot/scoot/protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1) |
+| Use a clipboard manager or middle-click paste | [yes](https://scoot-sh.github.io/scoot/scoot/protocols.md#clipboard-and-primary-selection) |
+| Use a night light | [yes](https://scoot-sh.github.io/scoot/scoot/protocols.md#night-light-wlr-gamma-control-v1) |
+| Use a HiDPI screen, fractional scaling included | [yes](https://scoot-sh.github.io/scoot/scoot/protocols.md#output-scaling) |
+| Give each monitor its own scale and resolution | [yes, in the config file](https://scoot-sh.github.io/scoot/scoot/outputs.md) |
+| Use an input method or on-screen keyboard | [yes](https://scoot-sh.github.io/scoot/scoot/protocols.md#input-methods-text-input-v3-input-method-v2) |
+| Use a drawing tablet | [pens, not pads](https://scoot-sh.github.io/scoot/scoot/protocols.md#drawing-tablets-tablet-v2) |
+| Change display modes from `wlr-randr` or Settings | [not yet: read-only](https://scoot-sh.github.io/scoot/scoot/protocols.md#display-information-wlr-output-management-v1) |
+| Run X11 apps | [yes, with `--xwayland`](https://scoot-sh.github.io/scoot/scoot/protocols.md#xwayland-opt-in) in an XWayland build ([`nix build .#scoot-xwayland`](https://scoot-sh.github.io/scoot/scoot/xwayland.md)) |
+| Drive it from a script or an agent | [yes](https://scoot-sh.github.io/scoot/scootctl/) |
 
-Every protocol and version is listed in [docs/protocols.md](docs/protocols.md).
+Every protocol and version is listed in [protocols](https://scoot-sh.github.io/scoot/scoot/protocols.md).
 
 ## Not yet
 
@@ -188,7 +188,7 @@ scoot does light, dark, warm and chill. Every color is
 a setting — the bar tokens, scoot's ring and background colors, foot's
 palette — so each look is just a config file. Prefer automatic? The Nix
 modules theme scoot and scootbar from a wallpaper with Stylix
-([docs/nix.md](docs/nix.md#stylix)).
+([Stylix](https://scoot-sh.github.io/scoot/scoot/theming.md#stylix)).
 
 <table>
 <tr>
@@ -224,9 +224,9 @@ scootbar daemon &
 ```
 
 It reads `~/.config/scoot/bar.toml`. Every module, option and popup is in
-[docs/scootbar/cli.md](docs/scootbar/cli.md), and the NixOS and
+[scootbar](https://scoot-sh.github.io/scoot/scootbar/cli.md), and the NixOS and
 home-manager modules (with Stylix colors) in
-[docs/nix.md](docs/nix.md#the-modules-programsscootbar).
+[the bar docs](https://scoot-sh.github.io/scoot/scootbar/).
 
 ## scootbg
 
@@ -246,14 +246,14 @@ It's early. More in [docs/scootbg/README.md](docs/scootbg/README.md).
 
 | Doc | For |
 | --- | --- |
-| [configuration.md](docs/configuration.md) | every flag, config option and key |
-| [ipc.md](docs/ipc.md) | driving scoot from a script or an agent |
-| [protocols.md](docs/protocols.md) | writing a bar, launcher or other tool for scoot |
-| [tty.md](docs/tty.md) | real hardware: devices, monitors, the GPU tier |
-| [nix.md](docs/nix.md) | the flake and the NixOS and home-manager modules |
+| [the site](https://scoot-sh.github.io/scoot/) | every flag, config option and key ([scoot](https://scoot-sh.github.io/scoot/scoot/configure.md), [keybindings](https://scoot-sh.github.io/scoot/scoot/keybindings.md)) |
+| [scootctl / IPC](https://scoot-sh.github.io/scoot/scootctl/) | driving scoot from a script or an agent |
+| [protocols](https://scoot-sh.github.io/scoot/scoot/protocols.md) | writing a bar, launcher or other tool for scoot |
+| [backends](https://scoot-sh.github.io/scoot/scoot/backends.md) | real hardware: devices, monitors, the GPU tier |
+| [the scoot desktop](https://scoot-sh.github.io/scoot/desktop/) | the flake and the NixOS and home-manager modules |
 | [benchmarks.md](docs/benchmarks.md) | measured CPU and memory, next to niri |
 | [scootbg/](docs/scootbg/README.md) | the wallpaper daemon |
-| [scootbar/cli.md](docs/scootbar/cli.md) | the status bar: every module, option and popup |
+| [scootbar](https://scoot-sh.github.io/scoot/scootbar/) | the status bar: every module, option and popup |
 | [development.md](docs/development.md) | building, testing and contributing |
 
 What changed is in [CHANGELOG.md](CHANGELOG.md), and what's next in

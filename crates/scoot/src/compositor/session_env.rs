@@ -41,7 +41,7 @@
 //! - No D-Bus activation-environment propagation. The portal is D-Bus
 //!   activated and inherits the bus's environment, not scoot's children's,
 //!   so a session script runs `dbus-update-activation-environment --systemd
-//!   WAYLAND_DISPLAY XDG_CURRENT_DESKTOP ...` (see `docs/configuration.md`).
+//!   WAYLAND_DISPLAY XDG_CURRENT_DESKTOP ...` (see `site/src/content/docs/scoot/index.md#starting-a-session`).
 //!   That is the script's job -- "config is state, the script is behavior" --
 //!   not the compositor's: scoot has no `--session` concept and ships no
 //!   session script, and spawning bus tools from the compositor buys a hang

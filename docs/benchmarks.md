@@ -9,7 +9,7 @@ they aren't is marked.
 - [scoot vs niri on a real GPU, nested and `--tty` (2026-09-25)](#scoot-vs-niri-on-a-real-gpu-nested-and---tty-2026-09-25)
 - scoot's own tiers on real hardware (dumb buffers + pixman vs GPU scanout
   on an Apple M2) are in [`Asahi.md`](../Asahi.md) Test 4, summarised in
-  [tty.md](tty.md#which-renderer-draws-the-frames).
+  [backends](https://scoot-sh.github.io/scoot/scoot/backends.md#which-renderer-draws-the-frames).
 
 ## scoot vs niri on a real GPU, nested and `--tty` (2026-09-25)
 

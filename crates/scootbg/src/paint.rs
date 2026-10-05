@@ -14,7 +14,7 @@
 //!    a 1×1 buffer from four `u32` channels, and `wp_viewporter` scales it
 //!    to the surface. No shared memory at all, and the compositor knows it
 //!    is one color (scoot can then scan a fullscreen window out over a
-//!    black one, `docs/tty.md`).
+//!    black one, `site/src/content/docs/scoot/backends.md`).
 //! 2. **[`Path::ViewportShm`]**: no single-pixel buffers, but a viewporter:
 //!    a 1×1 `wl_shm` buffer, scaled the same way. 4 bytes of pixels.
 //! 3. **[`Path::FullShm`]**: neither: a full-size `wl_shm` buffer, filled

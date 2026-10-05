@@ -120,7 +120,7 @@
 //!
 //! The list stays live -- handles stay, titles keep updating, new windows are
 //! still announced -- for the same reason the `ext-` list does (see
-//! `docs/protocols.md`'s lock section: a process that can reach this socket is
+//! `site/src/content/docs/scoot/protocols.md`'s lock section: a process that can reach this socket is
 //! a same-uid process inside the trust boundary already, and `closed` for a
 //! window that did not close is a lie a taskbar cannot recover from).
 //!
@@ -206,7 +206,7 @@ impl ForeignToplevelManagement {
     ///
     /// No client filter, for the same reason the session-lock, gamma-control
     /// and data-control globals have none: scoot has no security-context
-    /// support, so an allow-list would be theatre (see `docs/protocols.md`'s
+    /// support, so an allow-list would be theatre (see `site/src/content/docs/scoot/protocols.md`'s
     /// trust note). Worth saying plainly that this one has a write half,
     /// unlike `output_management.rs`: any client that can reach this socket
     /// can focus and close windows through it -- which is the same boundary

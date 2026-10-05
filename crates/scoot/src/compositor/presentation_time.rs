@@ -118,7 +118,7 @@
 //!
 //! No client filter, the same deliberate consistency as every other
 //! advertisement here: scoot has no security-context support, so an
-//! allow-list would be theatre (see `docs/protocols.md`'s trust note).
+//! allow-list would be theatre (see `site/src/content/docs/scoot/protocols.md`'s trust note).
 //! Feedback only ever describes when the requesting client's own committed
 //! content was shown -- it discloses no other client's pixels, input, or
 //! timing.
