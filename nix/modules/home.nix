@@ -146,9 +146,13 @@ in
   # config, the bar feed): options under `programs.scoot.desktop.idle`
   # and `...notifications`, declared there. Imported here (not by
   # consumers) so the profile's user side is one import.
+  #
+  # The shared keymap's user half (`programs.scoot.desktop.keys`):
+  # the `[binds]`, its tools and its slot scripts. Same pattern.
   imports = [
     ./idle-home.nix
     ./notifications-home.nix
+    ./keys-home.nix
   ];
 
   options.programs.scoot = {

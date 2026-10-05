@@ -46,7 +46,9 @@ let
     };
 
   # A slot that installs nothing, only config when its child lands
-  # (a keymap, output wiring, an input-method setup): a boolean alone.
+  # (output wiring, an input-method setup): a boolean alone.
+  # (`keys` used to be one of these; it now owns the shared keymap
+  # below, so it declares its own subtree instead.)
   configSlot =
     { child, does }:
     {
@@ -59,8 +61,118 @@ let
         '';
       };
     };
+
+  # The shared keymap's static half: per bind the `[binds]` combo,
+  # which slot's `enable` gates it beside `keys.enable` (`null`
+  # gates on nothing: the bind belongs to the keymap itself), and
+  # the one-line blurb the option descriptions reuse. Actions live
+  # in `keys-home.nix` (they need `pkgs` for store paths); the
+  # combos live here so both sides and the tests read the one table.
+  # Reserved-but-unbound combos (keyboard backlight, window capture,
+  # power menu) are docs-only: see docs/nix.md.
+  keymap = {
+    brightnessUp = {
+      combo = "XF86MonBrightnessUp";
+      slot = null;
+      blurb = "panel brighter (`brightnessctl -e set +5%`)";
+    };
+    brightnessDown = {
+      combo = "XF86MonBrightnessDown";
+      slot = null;
+      blurb = "panel dimmer (`brightnessctl -e set 5%-`)";
+    };
+    volumeUp = {
+      combo = "XF86AudioRaiseVolume";
+      slot = null;
+      blurb = "default sink louder (`wpctl set-volume ... 5%+`)";
+    };
+    volumeDown = {
+      combo = "XF86AudioLowerVolume";
+      slot = null;
+      blurb = "default sink quieter (`wpctl set-volume ... 5%-`)";
+    };
+    volumeMute = {
+      combo = "XF86AudioMute";
+      slot = null;
+      blurb = "default sink mute toggle (`wpctl set-mute ... toggle`)";
+    };
+    micMute = {
+      combo = "XF86AudioMicMute";
+      slot = null;
+      blurb = "default source mute toggle";
+    };
+    mediaPlay = {
+      combo = "XF86AudioPlay";
+      slot = null;
+      blurb = "play/pause (`playerctl play-pause`)";
+    };
+    mediaPause = {
+      combo = "XF86AudioPause";
+      slot = null;
+      blurb = "pause (`playerctl pause`)";
+    };
+    mediaStop = {
+      combo = "XF86AudioStop";
+      slot = null;
+      blurb = "stop (`playerctl stop`)";
+    };
+    mediaNext = {
+      combo = "XF86AudioNext";
+      slot = null;
+      blurb = "next track (`playerctl next`)";
+    };
+    mediaPrev = {
+      combo = "XF86AudioPrev";
+      slot = null;
+      blurb = "previous track (`playerctl previous`)";
+    };
+    lock = {
+      combo = "super+escape";
+      slot = null;
+      blurb = "lock through `idle.lock.command`";
+    };
+    launcher = {
+      combo = "super+d";
+      slot = "launcher";
+      blurb = "launcher (`fuzzel`)";
+    };
+    clipboard = {
+      combo = "super+v";
+      slot = "clipboard";
+      blurb = "clipboard picker (`cliphist` through `fuzzel`)";
+    };
+    notifDismiss = {
+      combo = "super+n";
+      slot = "notifications";
+      blurb = "dismiss visible notifications (`makoctl dismiss`)";
+    };
+    notifDnd = {
+      combo = "super+shift+n";
+      slot = "notifications";
+      blurb = "do-not-disturb toggle (`makoctl mode -t do-not-disturb`)";
+    };
+    notifHistory = {
+      combo = "super+ctrl+n";
+      slot = "notifications";
+      blurb = "show hidden notifications (`makoctl restore`)";
+    };
+    captureOutput = {
+      combo = "print";
+      slot = "capture";
+      blurb = "screenshot every output to `~/Pictures` (`grim`)";
+    };
+    captureRegion = {
+      combo = "shift+print";
+      slot = "capture";
+      blurb = "screenshot a picked region to `~/Pictures` (`grim` plus `slurp`)";
+    };
+  };
 in
 {
+  # The shared keymap table above, beside the option subtree and the
+  # look palettes: `keys-home.nix` reads it to render `[binds]`, so
+  # the combos live in exactly one place.
+  inherit keymap;
   # The option subtree, assigned to `options.programs.scoot.desktop` by
   # both modules.
   options = {
@@ -431,10 +543,36 @@ in
       };
     };
     # One keymap every other child registers into, each bind a `mkDefault`
-    # so a user value wins.
-    keys = configSlot {
-      child = "desktop-keys";
-      does = "the shared keymap: hardware keys and desktop actions";
+    # so a user value wins. `enable` is the master switch (on with the
+    # profile); `binds.<name>.enable` removes one bind at a time (a
+    # user's own `[binds]` entry overrides one at a time -- plain
+    # priority beats the keymap's `mkDefault`). The combos come from
+    # `keymap` above, so this subtree cannot disagree with what
+    # `keys-home.nix` renders.
+    keys = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Render the shared keymap into `[binds]` (each bind a
+          `mkDefault` a value you set in `settings.binds` wins
+          over, one at a time). On with the profile. Binds gated on
+          a future slot (launcher, clipboard, notifications,
+          capture) appear only while that slot is enabled too;
+          their keys stay reserved either way (see docs/nix.md).
+        '';
+      };
+
+      binds = lib.mapAttrs (name: spec: {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Bind ``${spec.combo}`` (${spec.blurb}). Set to `false`
+            to leave that combo unbound.
+          '';
+        };
+      }) keymap;
     };
     # Output policy (scale, placement) from the connected set.
     displays = configSlot {
