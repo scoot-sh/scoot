@@ -58,10 +58,14 @@ let
   # (`pkgs.fetchurl`, hash verified by Nix), so scootbg and the rendered
   # TOML only ever see a file. Anything else shaped as a set is a loud
   # eval error, not a TOML table scoot would refuse at startup.
-  resolveWallpaperImage = image:
+  resolveWallpaperImage =
+    image:
     if builtins.isAttrs image then
       if image ? url && image ? hash && builtins.isString image.url && builtins.isString image.hash then
-        pkgs.fetchurl { url = image.url; sha256 = image.hash; }
+        pkgs.fetchurl {
+          url = image.url;
+          sha256 = image.hash;
+        }
       else
         throw "programs.scoot wallpaper `image` as a set needs string `url` and `hash` (hash in `sha256-...` form)"
     else
@@ -85,9 +89,10 @@ let
       # its output path. Anything else under `wallpaper`
       # (a color, a plain string image, a non-table) renders as written.
       fetched =
-        if commanded ? wallpaper
-        && builtins.isAttrs commanded.wallpaper
-        && builtins.isAttrs (commanded.wallpaper.image or null)
+        if
+          commanded ? wallpaper
+          && builtins.isAttrs commanded.wallpaper
+          && builtins.isAttrs (commanded.wallpaper.image or null)
         then
           commanded
           // {
@@ -427,7 +432,9 @@ in
         appearance = lib.mapAttrs (name: value: lib.mkOptionDefault value) look.appearance;
       }
       // lib.optionalAttrs (look.wallpaper != null) {
-        wallpaper = lib.mapAttrs (name: value: lib.mkOptionDefault (toString (resolveWallpaperImage value))) look.wallpaper;
+        wallpaper = lib.mapAttrs (
+          name: value: lib.mkOptionDefault (toString (resolveWallpaperImage value))
+        ) look.wallpaper;
       };
     })
 
