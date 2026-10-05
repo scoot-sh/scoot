@@ -559,9 +559,16 @@ in
     # never unlocks. Kept in its own element (not under `idle.enable`):
     # with `enable` off and `lock.enable` on, the refusal below must
     # still fire rather than going quiet.
-    (lib.mkIf (cfg.desktop.idle.enable && cfg.desktop.idle.lock.enable && cfg.desktop.idle.lock.daemon == "swaylock") {
-      security.pam.services.swaylock = { };
-    })
+    (lib.mkIf
+      (
+        cfg.desktop.idle.enable
+        && cfg.desktop.idle.lock.enable
+        && cfg.desktop.idle.lock.daemon == "swaylock"
+      )
+      {
+        security.pam.services.swaylock = { };
+      }
+    )
     # Refusals that must fire whatever else is on (kept outside
     # `idle.enable` so they still fire then).
     (lib.mkIf cfg.desktop.idle.lock.enable {

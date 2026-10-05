@@ -1141,15 +1141,19 @@ let
   # profile's docked-lock default (a separate module, the way the
   # greeter's overrides ride along -- the evaluation above can only
   # set `programs.scoot`).
-  osIdleLidOverride = evalNixosWith [
-    ./modules/nixos.nix
-    { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
-    { services.logind.settings.Login.HandleLidSwitchDocked = "ignore"; }
-  ] pkgs {
-    enable = true;
-    package = fakePkg;
-    desktop.enable = true;
-  };
+  osIdleLidOverride =
+    evalNixosWith
+      [
+        ./modules/nixos.nix
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        { services.logind.settings.Login.HandleLidSwitchDocked = "ignore"; }
+      ]
+      pkgs
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+      };
   # Refusals: the lock without the policy (pinned by message), and the
   # policy with no swayidle to install.
   osLockNoIdle = evalNixos {
@@ -2754,7 +2758,8 @@ let
     # ...bound to the graphical session (which the launcher reaches
     # past the display import), retried rather than conditioned...
     (
-      assert hmIdle.config.systemd.user.services.scoot-idle.Install.WantedBy == [ "graphical-session.target" ];
+      assert
+        hmIdle.config.systemd.user.services.scoot-idle.Install.WantedBy == [ "graphical-session.target" ];
       true
     )
     (
@@ -2768,8 +2773,8 @@ let
     # ...waiting for each command (the before-sleep lock lands before
     # logind sleeps) from the generated config...
     (
-      assert
-        lib.hasInfix "/bin/swayidle -w -C " hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
+      assert lib.hasInfix "/bin/swayidle -w -C "
+        hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
       true
     )
     # ...exactly the five tools installed (swayidle, dim, off, locker,
@@ -2780,8 +2785,7 @@ let
     )
     (
       assert
-        sorted hmIdle.config.home.packages
-        == sorted [
+        sorted hmIdle.config.home.packages == sorted [
           pkgs.swayidle
           pkgs.brightnessctl
           pkgs.wlopm
@@ -2946,8 +2950,7 @@ let
     )
     (
       assert
-        sorted osIdle.config.environment.systemPackages
-        == sorted [
+        sorted osIdle.config.environment.systemPackages == sorted [
           fakePkg
           fakeBg
           pkgs.swayidle
@@ -3005,8 +3008,7 @@ let
     )
     (
       assert
-        sorted osLockOff.config.environment.systemPackages
-        == sorted [
+        sorted osLockOff.config.environment.systemPackages == sorted [
           fakePkg
           fakeBg
           pkgs.swayidle
