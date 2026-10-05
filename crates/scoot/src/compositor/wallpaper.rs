@@ -249,7 +249,7 @@ impl State {
                         command = %Lossy(&command),
                         %error,
                         "cannot run scootbg for the [wallpaper] section: the command was not \
-                         found. Install scootbg (its own package, like scootctl: the NixOS and \
+                         found. Install scootbg (its own package: the NixOS and \
                          home-manager modules install it for you; from source, `cargo install \
                          --path crates/scootbg`), or set `command` in [wallpaper] to its path. \
                          The session carries on with its background color; the next reload \

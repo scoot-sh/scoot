@@ -11,7 +11,7 @@
 //! capture of a screen that is not redrawing reaches none of those drains,
 //! so each one used to keep a whole frame of memory until the next frame
 //! was drawn, and on a static screen there is no next frame. That was
-//! 6.25 MB per `scootctl screenshot` at 1600x1000 on the dev VM
+//! 6.25 MB per `scoot msg screenshot` at 1600x1000 on the dev VM
 //! (`docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md`).
 //!
 //! Measured as live GL object names ([`LiveGlObjects`]) rather than as

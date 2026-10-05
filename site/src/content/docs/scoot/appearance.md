@@ -7,7 +7,7 @@ scoot draws no titlebars by design — a focused window gets a colored
 ring drawn *around* it (in the layout's own gap), and there's a solid
 background behind everything. This table controls the ring, the
 background, and the built-in pointer cursor. Everything here re-applies
-live by `scootctl reload`.
+live by `scoot msg reload`.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|

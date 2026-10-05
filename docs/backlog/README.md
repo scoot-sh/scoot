@@ -431,6 +431,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [Desktop profile user units start in every graphical session](./resolved/desktop-profile-units-leak-done.md) (high) — RESOLVED 2026-10-05 in #454: idle, mako, clipboard watchers and the profile-managed bar were `WantedBy` `graphical-session.target`, so they started in GNOME/KDE/niri/Hyprland too; bound to `scoot-session.target`, which the home-manager side installs itself
 - [Fourth example look: moonrise (chill)](./resolved/look-moonrise-done.md) (medium) — RESOLVED 2026-10-05 in #437: the night-sky Unsplash illustration as a registered `desktop.look` with the full example set
 - [kunifiedpush-distributor runs in minimal sessions at 15 MB PSS](./packaging/kunifiedpush-sessions.md) (low, filed 2026-10-05): the five-desktop idle benchmark; mask the Push portal out of the session portal config if no backend hard-requires it
+- [Remove the standalone scootctl client](./packaging/remove-scootctl.md) (medium, filed 2026-10-05): `scoot msg` is the only client; no compatibility link
 
 ### Security
 - [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev). **But see the entry below: the fd/mapping bound it documents is not the bound it has.**

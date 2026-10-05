@@ -5,7 +5,7 @@ description: "Scales, per-output modes, moving across monitors, and hotplug."
 
 One scale for everywhere, or one per monitor. `[output]` holds the
 default; `[[outputs]]` entries override per connector (matched by the
-name `scootctl outputs` lists: `eDP-1`, `DP-1` under `--tty`;
+name `scoot msg outputs` lists: `eDP-1`, `DP-1` under `--tty`;
 `headless`, `headless-2` under `--headless`).
 
 ```toml
@@ -52,7 +52,7 @@ binds:
 Each steps to the neighbouring output in geometry order, wrapping
 around — with two monitors either key names the other. Positions
 (`focus-output-index N`, 0-based in creation order) and ids
-(`focus-output ID`, from `scootctl outputs`) name fixed screens
+(`focus-output ID`, from `scoot msg outputs`) name fixed screens
 instead. The stability rule: output ids are never reused, so a monitor
 that is unplugged and plugged back in comes back under a *new* id —
 the default stepping binds keep reaching every monitor across a
@@ -66,5 +66,5 @@ workspaces announce themselves to bars with their monitor's name
 (`"2 DP-1"`, back to `"2"` on restore).
 
 > **Symptom:** after a replug, a bind reaches the wrong (or no) screen.
-> `scootctl outputs` lists the fresh ids — rebind the new one, or stick
+> `scoot msg outputs` lists the fresh ids — rebind the new one, or stick
 > to the stepping binds, which never name an id at all.

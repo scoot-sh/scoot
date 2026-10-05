@@ -53,7 +53,7 @@ socket, and the other shortens a wait rather than refusing it.
   own reply still has to go out before any later reply on that same
   connection, or a client reading replies in request order sees them swap.
   Any other request arriving on a connection with a capture in flight is
-  refused with a retry rather than answered out of order. `scootctl` sends
+  refused with a retry rather than answered out of order. `scoot msg` sends
   one request per connection and never meets this; nor does a capture refuse
   one on *another* connection. A capture whose earlier replies are still
   going out is refused the same way — retry once the queue has drained.

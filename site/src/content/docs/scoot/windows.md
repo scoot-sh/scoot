@@ -27,12 +27,12 @@ can go fullscreen and comes back floating.
 Each rule is its own `[[window_rule]]` table; rules apply in file order
 (a later matching rule overrides an earlier one per field it sets),
 checked when a window first maps, after `[floating] auto` — so a rule
-always has the last word. Re-applied live by `scootctl reload`, for
+always has the last word. Re-applied live by `scoot msg reload`, for
 windows that map after it.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `match_app_id` | string (glob) | Matches the window's app id — for an X11 window, its `WM_CLASS` class (`scootctl windows` shows both). |
+| `match_app_id` | string (glob) | Matches the window's app id — for an X11 window, its `WM_CLASS` class (`scoot msg windows` shows both). |
 | `match_title` | string (glob) | Matches the window's title. |
 | `float` | bool | `true` floats a matching window when it maps; `false` keeps it in the strip even if `auto` would float it. |
 | `size` | `[width, height]` (logical px) | The size to ask a floating window for when it maps (`1..=65535` per axis, clamped to the usable area). No effect on a tiled window. |

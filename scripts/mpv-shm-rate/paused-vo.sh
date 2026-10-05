@@ -4,7 +4,6 @@
 set -u
 RENDERER=$1; VO=$2; D=$3
 SCOOT=/var/cargo-target/debug/scoot
-SCOOTCTL=/var/cargo-target/debug/scootctl
 MPV=/nix/store/dddlcx6mfwrjxlscbf1rhxswj17987vs-mpv-0.41.0/bin/mpv
 CLIP=/home/dev/evidence/gdf/testsrc-nv12.mkv
 mkdir -p "$D"
@@ -15,10 +14,10 @@ RUST_LOG=scoot=warn "$SCOOT" --headless --renderer "$RENDERER" --socket "$D/scoo
 CPID=$!
 for t in $(seq 1 50); do [ -S "$D/scoot.sock" ] && break; sleep 0.1; done
 sleep 5
-SCOOT_SOCKET="$D/scoot.sock" "$SCOOTCTL" windows > "$D/windows.json" 2>&1
-SCOOT_SOCKET="$D/scoot.sock" "$SCOOTCTL" screenshot --out "$D/shot-1.png" > /dev/null 2>&1
+SCOOT_SOCKET="$D/scoot.sock" "$SCOOT" msg windows > "$D/windows.json" 2>&1
+SCOOT_SOCKET="$D/scoot.sock" "$SCOOT" msg screenshot --out "$D/shot-1.png" > /dev/null 2>&1
 sleep 2
-SCOOT_SOCKET="$D/scoot.sock" "$SCOOTCTL" screenshot --out "$D/shot-2.png" > /dev/null 2>&1
+SCOOT_SOCKET="$D/scoot.sock" "$SCOOT" msg screenshot --out "$D/shot-2.png" > /dev/null 2>&1
 for s in 1 2; do
   echo -n "$RENDERER/$VO shot-$s: "
   magick "$D/shot-$s.png" -crop 766x960+20+20 +repage \

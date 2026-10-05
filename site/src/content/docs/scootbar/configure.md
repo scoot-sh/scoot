@@ -223,8 +223,7 @@ no keyboard, so it has no hotkey of its own):
 By default every output gets a bar, all alike. The top-level `outputs` key
 (or `--outputs`) picks which, and `[output."NAME"]` tables change one
 output's bar. `NAME` is the compositor's own name for the output
-(`wl_output.name`: the connector, `DP-1`, `eDP-1`, `HDMI-A-1`; `scootctl
-outputs` on scoot, `swaymsg -t get_outputs` on sway).
+(`wl_output.name`: the connector, `DP-1`, `eDP-1`, `HDMI-A-1`; `scoot msg outputs` on scoot, `swaymsg -t get_outputs` on sway).
 
 ```toml
 outputs = ["eDP-1", "DP-1"]     # before any [table]: TOML puts later keys in it

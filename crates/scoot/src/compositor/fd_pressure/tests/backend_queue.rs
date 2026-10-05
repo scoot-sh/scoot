@@ -7,7 +7,7 @@
 //! has an fd argument. Released 0.3.17 never bounded that queue, so a client
 //! attaching fds to fd-less requests could park any number of them in this
 //! process: review of PR #236 measured one idle client taking scoot from 18
-//! to 999 fds, every newcomer and `scootctl` shed, and the client never
+//! to 999 fds, every newcomer and `scoot msg` shed, and the client never
 //! killed. The fork disconnects a client that leaves more than a cap
 //! unclaimed: one eighth of the soft `RLIMIT_NOFILE` read when the client
 //! is created, clamped to 128..=1024 (`fd_pressure::backend_queued_fds`

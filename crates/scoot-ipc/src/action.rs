@@ -64,7 +64,7 @@ pub enum Action {
         index: usize,
     },
     /// One specific workspace of one specific output, by the output id
-    /// `scootctl outputs` reports and the workspace's 0-based position in
+    /// `scoot msg outputs` reports and the workspace's 0-based position in
     /// that output's list -- the wire half of
     /// `scoot_core::Action::FocusOutputWorkspaceIndex`. What
     /// `focus-workspace-index N --output ID` sends; without the flag it
@@ -100,7 +100,7 @@ pub enum Action {
         index: usize,
     },
     /// Carry the focused window to the *active* workspace of another output,
-    /// by the output id `scootctl outputs` reports (not a position: output
+    /// by the output id `scoot msg outputs` reports (not a position: output
     /// ids are stable for the session, unlike workspace indices) -- the
     /// wire half of `scoot_core::Action::MoveFocusedWindowToOutput`. An
     /// unknown id leaves the window where it is, like an out-of-range
@@ -109,7 +109,7 @@ pub enum Action {
     MoveFocusedWindowToOutput {
         output: u64,
     },
-    /// Move keyboard focus to another output, by the output id `scootctl
+    /// Move keyboard focus to another output, by the output id `scoot msg
     /// outputs` reports -- the wire half of
     /// `scoot_core::Action::FocusOutput`. An unknown id does nothing.
     /// Additive like the move above: no `PROTOCOL_VERSION` bump.
@@ -170,7 +170,7 @@ pub enum Action {
     /// `PROTOCOL_VERSION` bump.
     ToggleFullscreen,
     /// Put one specific window into fullscreen (`fullscreen: true`) or take
-    /// it out, by the id `scootctl windows` reports -- the absolute half of
+    /// it out, by the id `scoot msg windows` reports -- the absolute half of
     /// `ToggleFullscreen`, and the wire half of
     /// `scoot_core::Action::SetFullscreen`. Idempotent where the toggle is
     /// not: an agent that wants a window fullscreen need not read its state
@@ -190,7 +190,7 @@ pub enum Action {
     /// this tag decodes exactly as before, so no `PROTOCOL_VERSION` bump.
     ToggleMaximize,
     /// Put one specific window into maximized (`maximized: true`) or take
-    /// it out, by the id `scootctl windows` reports -- the absolute half of
+    /// it out, by the id `scoot msg windows` reports -- the absolute half of
     /// `ToggleMaximize`, and the wire half of
     /// `scoot_core::Action::SetMaximized`. Idempotent where the toggle is
     /// not: an agent that wants a window maximized need not read its state
@@ -213,7 +213,7 @@ pub enum Action {
     /// exactly as before, so no `PROTOCOL_VERSION` bump.
     ToggleFloating,
     /// Float one specific window (`floating: true`) or put it back in the
-    /// strip, by the id `scootctl windows` reports -- the absolute half of
+    /// strip, by the id `scoot msg windows` reports -- the absolute half of
     /// `ToggleFloating`, and the wire half of
     /// `scoot_core::Action::SetFloating`. Idempotent where the toggle is not,
     /// and it does not move focus. An unknown id does nothing. Additive like
@@ -228,7 +228,7 @@ pub enum Action {
     /// side is empty. Additive: no `PROTOCOL_VERSION` bump.
     ToggleFloatingFocus,
     /// Move a floating window so its top-left corner is at `x`, `y`, in the
-    /// same global logical coordinates `scootctl windows` reports `rect` in
+    /// same global logical coordinates `scoot msg windows` reports `rect` in
     /// -- the wire half of `scoot_core::Action::MoveFloating`. Clamped
     /// inside the usable area of the output it lands on (`windows` then
     /// reports where it went); a position over another output moves it to

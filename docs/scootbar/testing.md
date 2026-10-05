@@ -402,7 +402,7 @@ CI runs it; **the maintainer runs it on hardware, and the numbers go into
 the [resource ratchet](backlog/lightest.md#appearance-looks-flush-against-floating)**.
 
 ```sh
-cargo build --release -p scoot -p scootctl -p scootbar
+cargo build --release -p scoot -p scootbar
 # On the machine: Ctrl+Alt+F3, log in, cd to the checkout, and stay on that VT
 SCOOTBAR_HW_MODE=--tty SCOOTBAR_HW_OUT=/tmp/sb-appearance-tty scripts/scootbar-appearance-hw-test.sh
 ```
@@ -420,7 +420,7 @@ binary, a busy seat, the compositor never came up), which is not a result.
 
 Per look it does, in order:
 
-- **Pixels**, on a `scootctl screenshot` of the output (no pointer): the four
+- **Pixels**, on a `scoot msg screenshot` of the output (no pointer): the four
   corners of a rounded bar show the desktop and a flush square one shows the
   bar's color there; the top edge just past a corner, the left edge's middle
   and the body are the bar's; a translucent bar's body is the blend of the
@@ -544,9 +544,9 @@ Size row, the noise rule) and adds the bars, the stage and the rows.
 
 ```sh
 devenv shell -- cargo build --release -p scootbar
-devenv shell -- cargo build -p scoot -p scootctl     # any profile
+devenv shell -- cargo build -p scoot     # any profile
 devenv shell -- python3 scripts/scootbar-bench/bench.py run --out /tmp/sbar \
-  --scoot target/debug/scoot --scootctl target/debug/scootctl
+  --scoot target/debug/scoot
 # --scope clock (the default, M1's) or clock-workspaces (M3's);
 # --bars scootbar,yambar,waybar,ironbar,ashell adds the informational pair
 # (the default is the first three); --scootbar PATH
@@ -714,7 +714,7 @@ only something unrelated in the generation does. It loads the unit into the mana
 *runtime* directory only (nothing persistent), refuses to run if a `scootbar.service`
 exists, if `graphical-session.target` is active or has anything wired to it, or if the
 manager already has a `WAYLAND_DISPLAY`, and removes everything on exit. Needs Linux
-with a user manager, Nix, a built scoot and scootctl, and python3; it prints `RESULT:
+with a user manager, Nix, a built scoot, and python3; it prints `RESULT:
 PASS n FAIL m` and exits 1 on a FAIL. It is not run in CI (CI has no user manager); the
 CI `scootbar` job builds the Nix module check on x86_64-linux instead.
 

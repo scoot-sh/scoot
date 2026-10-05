@@ -760,8 +760,9 @@ let
     enable = true;
     settings.wallpaper.color = "#1e1e2e";
   };
-  # The same home configuration on a Mac: evaluates, installs nothing,
-  # renders the table as written for the Linux box it deploys to.
+  # The same home configuration on a Mac: evaluates, installs the
+  # client-only scoot, renders the table as written for the Linux box it
+  # deploys to.
   hmDarwin = evalHomeWith flake.homeModule darwinPkgs {
     enable = true;
     settings.wallpaper.image = "~/Pictures/hills.jpg";
@@ -2863,8 +2864,10 @@ let
         assert overlaid.scoot.drvPath == built.scoot.drvPath;
         true
       )
+      # No `scootctl` anywhere in the overlay: the standalone client is
+      # gone, `scoot msg` is the only client.
       (
-        assert overlaid.scootctl.drvPath == built.scootctl.drvPath;
+        assert !(overlaid ? scootctl);
         true
       )
       (
@@ -2940,19 +2943,21 @@ let
       )
     ]
     ++ lib.optionals (withFlake && !isLinux) [
-      # This check run on Darwin itself: no scootbg, nothing installed.
+      # This check run on Darwin itself: no scootbg, and the client-only
+      # scoot installed.
       (
         assert hmFlake.config.programs.scoot.wallpaper.package == null;
         true
       )
       (
-        assert hmFlake.config.home.packages == [ ];
+        assert drvs hmFlake.config.home.packages == drvs [ built.default ];
         true
       )
     ]
     ++ lib.optionals (withFlake && darwinPkgs != null) [
       # A macOS home configuration with a `[wallpaper]` table evaluates,
-      # with no scootbg (Linux-only) and no binary: files only.
+      # with no scootbg (Linux-only), installing the client-only scoot and
+      # rendering the table as written for the Linux box it deploys to.
       (
         assert allAssertionsHold hmDarwin.config;
         true
@@ -2962,14 +2967,15 @@ let
         true
       )
       (
-        assert hmDarwin.config.home.packages == [ ];
+        assert drvs hmDarwin.config.home.packages == drvs [ flake.packages.aarch64-darwin.default ];
         true
       )
       (
         assert builtins.isString hmDarwin.config.xdg.configFile."scoot/config.toml".source.drvPath;
         true
       )
-      # The overlay gives Darwin the client, and no scootbg or scootbar.
+      # The overlay gives Darwin the client-only scoot, and no scootbg or
+      # scootbar (nor any standalone scootctl).
       (
         assert !(darwinOverlaid ? scootbg);
         true
@@ -2983,7 +2989,11 @@ let
         true
       )
       (
-        assert darwinOverlaid.scootctl.drvPath == flake.packages.aarch64-darwin.scootctl.drvPath;
+        assert darwinOverlaid.scoot.drvPath == flake.packages.aarch64-darwin.scoot.drvPath;
+        true
+      )
+      (
+        assert !(darwinOverlaid ? scootctl);
         true
       )
     ];

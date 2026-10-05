@@ -35,7 +35,7 @@
 # compositor's log. Ctrl+Alt+F<n> (the VT of your session) is the way back. The
 # script takes no input.
 #
-# Prerequisites: built binaries (`cargo build --release -p scoot -p scootctl -p
+# Prerequisites: built binaries (`cargo build --release -p scoot -p
 # scootbar`; release is what the ratchet's numbers must come from, a debug
 # build runs but is marked INFO: not for the ratchet), python3 (stdlib only:
 # the PNG decoding and the pixel checks), `foot` on PATH (the client for the
@@ -45,9 +45,9 @@
 #
 # Overrides (all optional). Every knob is namespaced SCOOTBAR_HW_*: generic
 # names collide with the environment (devenv's stdenv exports SIZE=size).
-# SCOOT and SCOOTCTL (binaries) are the smoke test's own names; the default is
-# the release build then the debug build of the tree this script is in, or of
-# $CARGO_TARGET_DIR.
+# SCOOT (the binary; driven via `scoot msg`, the only client) is the smoke
+# test's own name; the default is the release build then the debug build of
+# the tree this script is in, or of $CARGO_TARGET_DIR.
 #   SCOOTBAR_HW_MODE          --headless (default), --nested or --tty
 #   SCOOTBAR_HW_OUT           output directory (required; a directory that already
 #                             holds a run is refused, SCOOTBAR_HW_OVERWRITE=1 replaces it)
@@ -171,21 +171,15 @@ pick() {
     done
 }
 SCOOT=${SCOOT:-$(pick scoot)}
-SCOOTCTL=${SCOOTCTL:-$(pick scootctl)}
+if [ -n "${SCOOTCTL:-}" ]; then
+    die "SCOOTCTL is gone -- the standalone client was removed, `scoot msg` (from SCOOT) is the only client; unset SCOOTCTL"
+fi
 SCOOTBAR=${SCOOTBAR_HW_SCOOTBAR:-$(pick scootbar)}
 [ -n "$SCOOT" ] && [ -x "$SCOOT" ] || die "no scoot binary (cargo build --release -p scoot, or set SCOOT)"
 [ -n "$SCOOTBAR" ] && [ -x "$SCOOTBAR" ] || die "no scootbar binary (cargo build --release -p scootbar, or set SCOOTBAR)"
-if [ -z "$SCOOTCTL" ] || [ ! -x "$SCOOTCTL" ]; then
-    SCOOTCTL=
-fi
-
-# `scootctl`, or `scoot msg` (the same client) where no scootctl was built.
+# The only client: `scoot msg` from the binary under test.
 ctl() {
-    if [ -n "$SCOOTCTL" ]; then
-        "$SCOOTCTL" "$@"
-    else
-        "$SCOOT" msg "$@"
-    fi
+    "$SCOOT" msg "$@"
 }
 
 if [ -e "$OUT/summary.tsv" ] && [ "${SCOOTBAR_HW_OVERWRITE:-0}" != 1 ]; then
@@ -358,7 +352,7 @@ ENVLOG="$OUT/environment.txt"
     for b in "$SCOOT" "$SCOOTBAR"; do
         echo "binary: $b -> $(readlink -f "$b") ($(stat -c '%y' "$b" 2>/dev/null | cut -d. -f1)) $("$b" --version 2>&1 | head -1)"
     done
-    echo "ctl: ${SCOOTCTL:-$SCOOT msg}"
+    echo "ctl: $SCOOT msg"
     echo "settings: GAP=$GAP RADIUS=$RADIUS BAR_HEIGHT=$BAR_HEIGHT BAR=$BAR OPACITY=$OPACITY IDLE_SECS=$IDLE_SECS REDRAWS=$REDRAWS SIZE=$SIZE"
     echo "cpus: $(nproc)  clk_tck: $(getconf CLK_TCK)"
     echo "vt: $(fgconsole 2>/dev/null || echo '?')  session: ${XDG_SESSION_ID:-?}"
@@ -603,7 +597,7 @@ measure_look() {
     shoot "$name"
     local geo
     geo=$(geometry) || {
-        row FAIL "$name: geometry" "scootctl outputs failed or had no output"
+        row FAIL "$name: geometry" "scoot msg outputs failed or had no output"
         stop_bar
         return
     }
@@ -886,11 +880,7 @@ detail = f"flat part -> focus {flat} (was {focused['id']}), corner ({x + 1},{y +
 print(("reached (" if corner == left["id"] else "swallowed (") + detail + ")")
 PY
 }
-if [ -n "$SCOOTCTL" ]; then
-    export CTL_CMD="$SCOOTCTL"
-else
-    export CTL_CMD="$SCOOT msg"
-fi
+export CTL_CMD="$SCOOT msg"
 
 # --- run ---------------------------------------------------------------------------
 echo "--- starting scoot ($MODE) ---"

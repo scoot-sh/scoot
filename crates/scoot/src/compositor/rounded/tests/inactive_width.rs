@@ -250,7 +250,7 @@ fn an_unset_inactive_width_follows_the_active_width() {
     }
 }
 
-/// A live width change (what `scootctl reload` does) repaints the ring at the
+/// A live width change (what `scoot msg reload` does) repaints the ring at the
 /// new thickness, including the painted rounded ring whose cache key holds
 /// the thickness.
 #[test]

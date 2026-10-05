@@ -13,7 +13,7 @@ description: "Compositor symptoms and their fixes — picture, keys, config, out
   quitting — re-run and use `Super+Shift+e` only to leave. See
   [First session](../start/first-session.md#start-scoot-in-a-window).
 - *A monitor stays dark after plug.* The output gets an id per plug —
-  `scootctl outputs` shows whether scoot sees it. Only what the kernel
+  `scoot msg outputs` shows whether scoot sees it. Only what the kernel
   reports is followed: a disconnect the kernel never reports leaves
   scoot driving a screen that is no longer there.
 

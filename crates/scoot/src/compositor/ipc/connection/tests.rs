@@ -1964,7 +1964,7 @@ fn a_calm_fd_table_admits() {
 #[test]
 fn an_ipc_connection_in_the_wayland_shed_window_is_served() {
     // The ticket's window: fewer than `RESERVE_FDS` free sheds Wayland
-    // newcomers, but IPC admits down to `IPC_RESERVE_FDS`. A `scootctl`
+    // newcomers, but IPC admits down to `IPC_RESERVE_FDS`. A `scoot msg`
     // dial arriving mid-pressure is served, not refused.
     let mut harness = Harness::new();
     let free = RESERVE_FDS - 1;

@@ -1,6 +1,6 @@
 //! Argument parsing. Deliberately small: scoot's surface is one compositor to
-//! start, plus the `msg` alias for the client (parsed and run through
-//! `scootctl`, which owns that surface -- see that crate's docs).
+//! start, plus the `msg` client (parsed and run through the `scootctl`
+//! library crate, which owns that surface -- see that crate's docs).
 
 use std::fmt;
 use std::path::PathBuf;
@@ -94,8 +94,8 @@ impl HelpPage {
 }
 
 /// The full `--help` text: the compositor's own surface plus the client
-/// surface single-sourced from `scootctl` (its prose blocks and its
-/// table-rendered sections), so `scoot --help` and `scootctl --help` cannot
+/// surface single-sourced from the client library (its prose blocks and its
+/// table-rendered sections), so `scoot --help` and `scoot msg --help` cannot
 /// drift. A function rather than a `const` so the two forms share code.
 pub fn usage() -> String {
     let mut text = String::from("scoot -- a scrolling-tiling Wayland compositor\n\nUSAGE:\n    ");
@@ -124,7 +124,7 @@ pub fn usage() -> String {
     text.push_str(
         "\nSEE ALSO:\n\
         \x20   `scoot help config`, `scoot msg help requests`, `scoot msg help actions`\n\
-        \x20   docs: https://www.scoot.sh/scoot/configure.md, https://www.scoot.sh/scootctl/\n",
+        \x20   docs: https://www.scoot.sh/scoot/configure.md, https://www.scoot.sh/msg/\n",
     );
     text
 }
@@ -278,7 +278,7 @@ pub const BACKENDS: &[BackendDoc] = &[
 ];
 
 /// The `--help --json` document: the compositor surface plus the client
-/// surface embedded from `scootctl`, from the same tables as the text.
+/// surface embedded from the client library, from the same tables as the text.
 pub fn json() -> String {
     serde_json::to_string_pretty(&json_value()).unwrap_or_else(|_| "{}".into())
 }
@@ -394,9 +394,9 @@ pub const MAX_OUTPUTS: i32 = 8;
 ///
 /// Lives here rather than beside the renderers themselves because
 /// [`CompositorOptions`] has to exist on every platform -- the client
-/// (`scoot msg`, and `scootctl`) builds anywhere, while `compositor::render`
+/// The client (`scoot msg`) builds anywhere, while `compositor::render`
 /// is Linux-only -- and because the config file parses the same two names
-/// (`[renderer] backend`). One name list, one parser, the way `scootctl`'s
+/// (`[renderer] backend`). One name list, one parser, the way the client library's
 /// [`scootctl::action`] is shared with `[binds]`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RendererKind {
@@ -448,12 +448,12 @@ impl fmt::Display for RendererKind {
 pub enum Command {
     Help(HelpPage),
     /// `scoot --version`: identify this build without starting anything.
-    /// Prints [`scootctl::version_string`] -- the same line `scootctl
-    /// --version` prints, byte for byte -- and exits. A first-arg flag like
+    /// Prints [`scootctl::version_string`] and exits. A first-arg flag like
     /// `--help` and `--print-default-config`, not a backend and not `msg`:
     /// it needs no running compositor, and the bare `version` word stays
-    /// the IPC request's (see `scootctl`'s `Command::Version` doc for why
-    /// the two spellings must not share a word).
+    /// the IPC request's (answered by the compositor over the socket --
+    /// giving one spelling two transports would make its failure mode
+    /// depend on whether a session happens to be up).
     Version,
     /// `scoot --print-default-config [--write]`: emit a starting config file,
     /// generated from the compositor's own live defaults (see
@@ -654,7 +654,7 @@ fn help_args(args: Vec<String>) -> Result<Command, Error> {
 
 /// `scoot msg ...`: the client alias. `--help` (or `help [TOPIC|VERB]`)
 /// right after `msg` asks for the client help instead of a request -- every
-/// other word parses through `scootctl`, so the alias cannot drift.
+/// other word parses through the client library, so `msg` cannot drift.
 fn msg_alias(args: Vec<String>) -> Result<Command, Error> {
     match args.as_slice() {
         [] => Err(Error::Missing("a request")),
@@ -697,7 +697,7 @@ fn client_help_page(args: &[String]) -> Result<Command, Error> {
     }
 }
 
-/// An unknown word with a guess attached (see `scootctl`'s `hinted`): the
+/// An unknown word with a guess attached (see the client library's `hinted`): the
 /// closest candidate, or the bare [`Error::Unknown`] when nothing is close
 /// enough to be a typo.
 fn hinted(kind: &'static str, what: String, candidates: &[&str], topic: &'static str) -> Error {
@@ -1543,10 +1543,10 @@ mod tests {
 
     #[test]
     fn help_prints_the_shared_client_grammar() {
-        // The alias pin from this side: `scoot --help` embeds the same two
-        // blocks `scootctl --help` prints (pinned from that side in
-        // scootctl's `cli` tests), so the alias's documented grammar cannot
-        // drift from the client's.
+        // The single-source pin from this side: `scoot --help` embeds the
+        // same two blocks `scoot msg --help` renders (the prose lives in the
+        // client library), so the documented grammar cannot drift from the
+        // client's.
         assert!(
             usage().contains(scootctl::cli::REQUESTS_HELP),
             "scoot --help lost the shared REQUESTS block"
@@ -1558,10 +1558,11 @@ mod tests {
     }
 
     #[test]
-    fn the_msg_alias_parses_identically_to_scootctl() {
-        // The structural pin behind "the alias cannot drift": every one of
+    fn the_msg_request_parses_through_the_client_library() {
+        // The structural pin behind "msg cannot drift": every one of
         // these arg vectors must parse to the same request (or the same
-        // error) through `scoot msg ...` as through `scootctl ...` directly.
+        // error) through `scoot msg ...` as through the client library's
+        // own parser directly.
         // Success cases pin the request *and* the `--out` split; error cases
         // pin byte-identical failures.
         let cases: &[&[&str]] = &[
@@ -1614,7 +1615,7 @@ mod tests {
                     assert_eq!(out, msg.out, "{case:?}");
                 }
                 (Err(left), Err(right)) => assert_eq!(left, right, "{case:?}"),
-                (left, right) => panic!("alias/direct diverged on {case:?}: {left:?} vs {right:?}"),
+                (left, right) => panic!("msg/library diverged on {case:?}: {left:?} vs {right:?}"),
             }
         }
     }

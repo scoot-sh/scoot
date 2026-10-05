@@ -188,7 +188,7 @@ fn an_unlisted_character_has_no_sequence() {
 /// instead: the refused characters there are exactly the dead keys
 /// (`dead_circumflex`/`dead_grave` for `^`/`` ` ``, `dead_tilde` for `~`),
 /// and dead-plus-space is in every session table. Pinned here so
-/// `site/src/content/docs/scootctl/requests.md#type-vs-key` can claim all of printable ASCII on all fourteen, with the
+/// `site/src/content/docs/msg/requests.md#type-vs-key` can claim all of printable ASCII on all fourteen, with the
 /// table above standing in for the session's.
 ///
 /// The table pairing is load-bearing: each refused character needs its

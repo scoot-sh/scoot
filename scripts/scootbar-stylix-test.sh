@@ -18,8 +18,8 @@
 #   scripts/scootbar-stylix-test.sh
 #
 # Needs Linux, Nix (flakes enabled, network for the two flakes and Stylix's own inputs),
-# python3, and a built scoot and scootctl (SCOOT / SCOOTCTL, else target/release then
-# target/debug of this tree). Overrides: SCOOTBAR_HM_REV, SCOOTBAR_STYLIX_REV. It touches
+# python3, and a built scoot (SCOOT, else target/release then
+# target/debug of this tree; driven via `scoot msg`, the only client). Overrides: SCOOTBAR_HM_REV, SCOOTBAR_STYLIX_REV. It touches
 # no systemd, writes only a scratch directory (removed on exit, with its scoot) and the
 # Nix store, and reads this checkout's flake through `git+file` (tracked files, including
 # uncommitted edits; a NEW file needs `git add`). Not run in CI: it builds Stylix's
@@ -36,8 +36,9 @@ HM_REV=${SCOOTBAR_HM_REV:-efa3ccb4c3cc90d832eab232976379058fa75aa3}
 STYLIX_REV=${SCOOTBAR_STYLIX_REV:-fb28acd59e2ac1984ec84fa496599d6b4bf3e690}
 pick() { for f in "$@"; do [ -n "$f" ] && [ -x "$f" ] && { echo "$f"; return; }; done; }
 SCOOT=$(pick "${SCOOT:-}" "$ROOT/target/release/scoot" "$ROOT/target/debug/scoot") || true
-CTL=$(pick "${SCOOTCTL:-}" "$ROOT/target/release/scootctl" "$ROOT/target/debug/scootctl") || true
-[ -n "$SCOOT" ] && [ -n "$CTL" ] || die "no scoot/scootctl binary (cargo build -p scoot -p scootctl, or set SCOOT and SCOOTCTL)"
+[ -n "${SCOOTCTL:-}" ] && die "SCOOTCTL is gone -- the standalone client was removed, `scoot msg` is the only client; unset SCOOTCTL"
+[ -n "$SCOOT" ] || die "no scoot binary (cargo build -p scoot, or set SCOOT)"
+ctl() { "$SCOOT" msg "$@"; }
 
 W=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/scootbar-stylix.XXXXXX") || die "no scratch directory"
 chmod 700 "$W"
@@ -190,7 +191,7 @@ SCOOT_PID=$!
 WL=
 for _ in $(seq 40); do WL=$(sed -e 's/\x1b\[[0-9;]*m//g' "$W/scoot.log" | grep 'scoot is up' | grep -o 'wayland-[0-9]*' | head -1); [ -n "$WL" ] && break; sleep 0.25; done
 [ -n "$WL" ] || { cat "$W/scoot.log" >&2; die "scoot did not come up"; }
-zone_reserved() { SCOOT_SOCKET=$W/scoot.sock "$CTL" outputs 2>/dev/null | python3 -c '
+zone_reserved() { SCOOT_SOCKET=$W/scoot.sock ctl outputs 2>/dev/null | python3 -c '
 import json,sys
 try: o=json.load(sys.stdin)["outputs"][0]
 except Exception: sys.exit(2)
@@ -200,7 +201,7 @@ shoot_pixel() { # TOML EXPECTED_HEX: the bar's background pixel, from a screensh
     local bp=$! n ok=1
     for n in $(seq 40); do zone_reserved && { ok=0; break; }; sleep 0.25; done
     if [ $ok -eq 0 ]; then
-        SCOOT_SOCKET=$W/scoot.sock "$CTL" screenshot --out "$W/shot.png" --no-cursor >/dev/null 2>&1 || ok=1
+        SCOOT_SOCKET=$W/scoot.sock ctl screenshot --out "$W/shot.png" --no-cursor >/dev/null 2>&1 || ok=1
     fi
     kill $bp 2>/dev/null; wait $bp 2>/dev/null
     [ $ok -eq 0 ] || { cat "$W/bar.log" >&2; return 1; }

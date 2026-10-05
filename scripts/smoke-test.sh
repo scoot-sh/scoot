@@ -33,16 +33,17 @@
 # nonexistent parent dir is created (mkdir -p), and every expansion is
 # quoted so a prefix containing spaces works.
 #
-# SCOOT and SCOOTCTL pick which binaries this run tests: explicit values
-# always win; otherwise SCOOT defaults to the invoking tree
+# SCOOT picks which binary this run tests: an explicit value always wins;
+# otherwise SCOOT defaults to the invoking tree
 # ($CARGO_TARGET_DIR/debug/scoot when set, else
 # <this repo>/target/debug/scoot resolved from this script's own location,
-# so the script runs from any cwd) and SCOOTCTL to the scootctl next to
-# it -- the same build, never a split-brain pair. Either default missing
-# (or a bare name not on PATH) fails loudly before anything launches, and
-# the run's first lines print each binary's path, source and mtime -- read
-# them and confirm the binary is your build, especially where
-# CARGO_TARGET_DIR is shared between checkouts.
+# so the script runs from any cwd). The client under test is that same
+# binary's `msg` (`scoot msg ...` is the only client): a compositor from
+# one tree driven by a client from another is the wrong-verdict class this
+# default exists to prevent. A bare name not on PATH fails loudly before
+# anything launches, and the run's first lines print the binary's path,
+# source and mtime -- read them and confirm the binary is your build,
+# especially where CARGO_TARGET_DIR is shared between checkouts.
 #
 # SCOOTBG is the wallpaper daemon the [wallpaper] section runs (default: the
 # scootbg next to SCOOT, the same build; `cargo build -p scootbg`). Without
@@ -52,8 +53,8 @@
 set -euo pipefail
 
 MODE=${MODE:---headless}
-# Which binaries this run tests. An explicit SCOOT/SCOOTCTL always wins, so
-# existing callers and CI (which set both) see no change.
+# Which binary this run tests. An explicit SCOOT always wins, so
+# existing callers and CI (which set it) see no change.
 #
 # The SCOOT default is the invoking tree, never a machine-specific absolute
 # path: $CARGO_TARGET_DIR/debug/scoot when that is set (the builder's real
@@ -65,16 +66,12 @@ MODE=${MODE:---headless}
 # then shows exactly which file that is, so read it and confirm it is your
 # build before trusting a green run.
 #
-# SCOOTCTL defaults to the scootctl next to SCOOT -- the same build. A
-# compositor from one tree driven by a client from another is the same
-# wrong-verdict class this default exists to prevent, so the pairing is
-# kept, not split: there is no SCOOTCTL default independent of SCOOT. A bare
-# SCOOT (found on PATH rather than naming a file) is pinned to its full
-# path first, so the pairing, the checks and the header all see one file --
+# A bare SCOOT (found on PATH rather than naming a file) is pinned to its
+# full path first, so the checks and the header all see one file --
 # dirname of a bare name would be ".", i.e. the cwd, which is the wrong tree
 # by construction.
 #
-# Either binary missing, not a regular file, or not executable fails loudly
+# A missing binary, not a regular file, or not executable fails loudly
 # here, before anything launches, instead of testing someone else's binary
 # -- or nothing at all -- and calling it green.
 if [ -n "${SCOOT:-}" ]; then
@@ -106,20 +103,12 @@ if [ ! -f "$SCOOT" ] || [ ! -x "$SCOOT" ]; then
     exit 1
 fi
 if [ -n "${SCOOTCTL:-}" ]; then
-    SCOOTCTL_SRC="environment"
-else
-    SCOOTCTL="$(dirname "$SCOOT")/scootctl"
-    SCOOTCTL_SRC="default next to SCOOT (same build)"
-fi
-if [ ! -f "$SCOOTCTL" ] || [ ! -x "$SCOOTCTL" ]; then
-    echo "error: no client binary at SCOOTCTL=$SCOOTCTL ($SCOOTCTL_SRC) -- the split must ship both binaries; set SCOOTCTL explicitly or build first (cargo build -p scootctl)"
+    echo "error: SCOOTCTL is gone -- the standalone client was removed, \`scoot msg\` (from SCOOT above) is the only client; unset SCOOTCTL"
     exit 1
 fi
-echo "--- binaries ---"
+echo "--- binary ---"
 echo "SCOOT=$SCOOT ($SCOOT_SRC)"
 ls -l "$SCOOT"
-echo "SCOOTCTL=$SCOOTCTL ($SCOOTCTL_SRC)"
-ls -l "$SCOOTCTL"
 if [ -n "${SCOOTBG:-}" ]; then
     SCOOTBG_SRC="environment"
 else
@@ -333,64 +322,48 @@ if [ "$mapped" -ne 1 ]; then
 fi
 "$SCOOT" msg windows
 
-echo "--- scoot msg vs scootctl: same request, identical answer ---"
-# The alias is the same client (it parses and runs through the scootctl
-# crate), so a request answered from either binary must be byte-identical on
-# stdout -- and a bad one must fail identically (same exit code, same message
-# past the `scoot: ` / `scootctl: ` prefix). `windows` is compared here, with
-# two terminals mapped, rather than above, so the reply is non-empty. (Both
-# binaries were checked present and executable up front in the resolution
-# block, so a failure here is a real divergence, not a missing file.)
-# One request answered by both clients: same stdout bytes AND same exit code.
-# `cmp <(...)` alone would pass vacuously if both sides failed identically, so
-# the codes are captured alongside the bytes (the `|| code=$?` guard, not a
-# bare capture: a failing client trips `set -e`, as above).
-same_answer() {
+echo "--- client requests and errors over a live session ---"
+# One client only (`scoot msg`): these pin that a request answered live is
+# well-formed on stdout with exit 0, and that malformed arguments fail
+# loudly (non-zero exit, the error on stderr) rather than reaching the
+# compositor. `windows` runs here, with two terminals mapped, so the reply
+# is non-empty.
+request_ok() {
     desc=$1; shift
     prefix=${SMOKE_PREFIX:-/tmp/scoot-smoke}
-    alias_out="$prefix-equiv-alias.out"
-    ctl_out="$prefix-equiv-ctl.out"
-    alias_code=0
-    "$SCOOT" msg "$@" >"$alias_out" || alias_code=$?
-    ctl_code=0
-    "$SCOOTCTL" "$@" >"$ctl_out" || ctl_code=$?
-    cmp "$alias_out" "$ctl_out" \
-        || { echo "BUG: $desc differs between scoot msg and scootctl"; exit 1; }
-    if [ "$alias_code" != "$ctl_code" ]; then
-        echo "BUG: $desc exits $alias_code via scoot msg but $ctl_code via scootctl"
+    out="$prefix-client.out"
+    code=0
+    "$SCOOT" msg "$@" >"$out" || code=$?
+    if [ "$code" != "0" ]; then
+        echo "BUG: $desc failed live with exit $code"
         exit 1
     fi
 }
-same_answer "version" version
-same_answer "windows" windows
-same_answer "outputs" outputs
-# Screenshots of the same settled screen must be the same PNG, byte for byte.
+request_ok "version" version
+request_ok "windows" windows
+request_ok "outputs" outputs
+# Screenshots of the same settled screen must be well-formed PNG bytes.
 "$SCOOT" msg wait-idle --quiet-ms 500 --timeout-ms 10000
-same_answer "screenshot bytes" screenshot
+request_ok "screenshot bytes" screenshot
 # `action` replies and malformed-arg errors, same treatment.
-same_answer "an action reply" action focus-column left
+request_ok "an action reply" action focus-column left
 for bad in "frobnicate" "pointer move x 1" "action focus-column sideways"; do
     # `|| code=$?` (not a bare capture): a failing client inside `$(...)`
     # trips `set -e` on the assignment itself, so the exit code is taken in
     # the guard. `$bad` splits on purpose -- each entry is a word list.
-    alias_code=0
+    code=0
     # shellcheck disable=SC2086
-    alias_err=$("$SCOOT" msg $bad 2>&1) || alias_code=$?
-    ctl_code=0
-    # shellcheck disable=SC2086
-    ctl_err=$("$SCOOTCTL" $bad 2>&1) || ctl_code=$?
-    if [ "$alias_code" = "0" ] || [ "$ctl_code" = "0" ]; then
-        echo "BUG: '$bad' unexpectedly succeeded from one client ($alias_code vs $ctl_code)"
+    err=$("$SCOOT" msg $bad 2>&1) || code=$?
+    if [ "$code" = "0" ]; then
+        echo "BUG: '$bad' unexpectedly succeeded with exit 0"
         exit 1
     fi
-    if [ "$alias_code" != "$ctl_code" ] || [ "${alias_err#scoot: }" != "${ctl_err#scootctl: }" ]; then
-        echo "BUG: '$bad' fails differently between scoot msg and scootctl"
-        echo "  scoot msg: exit $alias_code: $alias_err"
-        echo "  scootctl:  exit $ctl_code: $ctl_err"
+    if [ -z "$err" ]; then
+        echo "BUG: '$bad' failed silently with exit $code and empty stderr"
         exit 1
     fi
 done
-echo "ok: scoot msg and scootctl answer identically"
+echo "ok: the client answers requests and refuses bad arguments"
 
 echo "--- checking the spawned terminal got an activation token ---"
 # State::spawn mints an xdg-activation token per child
@@ -541,7 +514,7 @@ read -r unfocused_x unfocused_y unfocused_w < <(
 
 echo "--- parking the pointer clear of everything sampled below ---"
 # A screenshot draws the pointer on every backend (the IPC default -- see
-# site/src/content/docs/scootctl/index.md), wherever it is; it was once only --tty's frames that did, and
+# site/src/content/docs/msg/index.md), wherever it is; it was once only --tty's frames that did, and
 # with the pointer at the output's origin the built-in arrow's opaque black
 # outline ran diagonally straight through the background sample at (3,3)
 # below (rgb(0,0,0) under --tty alone). Parking the pointer is what makes

@@ -109,7 +109,7 @@ fn free_is_soft_minus_used() {
 #[test]
 fn the_ipc_line_trips_exactly() {
     // The IPC line sits well below the Wayland one: 16 free is calm for
-    // `scootctl` (the boundary is `<`, matching `pressured`), 15 is not.
+    // `scoot msg` (the boundary is `<`, matching `pressured`), 15 is not.
     assert!(!table_with_free(IPC_RESERVE_FDS).ipc_pressured());
     assert!(table_with_free(IPC_RESERVE_FDS - 1).ipc_pressured());
     assert!(table_with_free(0).ipc_pressured());

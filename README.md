@@ -35,7 +35,7 @@ project.
 scoot runs on Linux. With [Nix](https://nixos.org):
 
 ```sh
-nix profile add github:scoot-sh/scoot#scoot github:scoot-sh/scoot#scootctl \
+nix profile add github:scoot-sh/scoot#scoot \
   github:scoot-sh/scoot#scootbar
 ```
 
@@ -48,7 +48,7 @@ sudo apt install pkg-config libwayland-dev libxkbcommon-dev libinput-dev \
   libdrm-dev libdisplay-info-dev libseat-dev libudev-dev libpixman-1-dev \
   libgbm-dev libegl-dev libdbus-1-dev
 git clone https://github.com/scoot-sh/scoot && cd scoot
-cargo build --release -p scoot -p scootctl -p scootbar    # binaries land in target/release/
+cargo build --release -p scoot -p scootbar    # binaries land in target/release/
 ```
 
 The examples below open [foot](https://codeberg.org/dnkl/foot), scoot's
@@ -84,14 +84,14 @@ tier are in [backends](https://www.scoot.sh/scoot/backends.md).
 While scoot is running, from any terminal:
 
 ```sh
-scootctl windows                          # list windows, as JSON
-scootctl action focus-column left
-scootctl type "hello"
-scootctl screenshot --out shot.png
+scoot msg windows                         # list windows, as JSON
+scoot msg action focus-column left
+scoot msg type "hello"
+scoot msg screenshot --out shot.png
 ```
 
 For agents and tests, `scoot --headless -- foot` runs with no screen at
-all. Everything the socket can do is in [scootctl / IPC](https://www.scoot.sh/scootctl/).
+all. Everything the socket can do is in [scoot msg / IPC](https://www.scoot.sh/msg/).
 
 ### Keys
 
@@ -144,7 +144,7 @@ commands = ["spawn scootbar daemon"]
 image = "~/Pictures/hills.jpg"
 ```
 
-`scootctl reload` applies changes without restarting. A mistake never
+`scoot msg reload` applies changes without restarting. A mistake never
 stops scoot from starting: it logs the problem and uses the default. Every
 option is in [configure](https://www.scoot.sh/scoot/configure.md).
 
@@ -171,7 +171,7 @@ scoot speaks the standard Wayland protocols, so the usual tools work.
 | Use a drawing tablet | [pens, not pads](https://www.scoot.sh/scoot/protocols.md#drawing-tablets-tablet-v2) |
 | Change display modes from `wlr-randr` or Settings | [not yet: read-only](https://www.scoot.sh/scoot/protocols.md#display-information-wlr-output-management-v1) |
 | Run X11 apps | [yes, with `--xwayland`](https://www.scoot.sh/scoot/protocols.md#xwayland-opt-in) in an XWayland build ([`nix build .#scoot-xwayland`](https://www.scoot.sh/scoot/xwayland.md)) |
-| Drive it from a script or an agent | [yes](https://www.scoot.sh/scootctl/) |
+| Drive it from a script or an agent | [yes](https://www.scoot.sh/msg/) |
 
 Every protocol and version is listed in [protocols](https://www.scoot.sh/scoot/protocols.md).
 
@@ -180,8 +180,8 @@ Every protocol and version is listed in [protocols](https://www.scoot.sh/scoot/p
 - **Monitor placement.** Each monitor has its own scale and resolution,
   but they line up left to right, and there is no position setting yet.
 - **Some X11 extras.** X input methods (XIM) and X window icons.
-- **A macOS version.** On a Mac you can build `scootctl`, to drive scoot
-  in a Linux VM.
+- **A macOS version.** On a Mac you can build `scoot` (client-only
+  there), to drive scoot in a Linux VM with `scoot msg`.
 
 ## Looks
 
@@ -248,7 +248,7 @@ It's early. More in [docs/scootbg/README.md](docs/scootbg/README.md).
 | Doc | For |
 | --- | --- |
 | [the site](https://www.scoot.sh/) | every flag, config option and key ([scoot](https://www.scoot.sh/scoot/configure.md), [keybindings](https://www.scoot.sh/scoot/keybindings.md)) |
-| [scootctl / IPC](https://www.scoot.sh/scootctl/) | driving scoot from a script or an agent |
+| [scoot msg / IPC](https://www.scoot.sh/msg/) | driving scoot from a script or an agent |
 | [protocols](https://www.scoot.sh/scoot/protocols.md) | writing a bar, launcher or other tool for scoot |
 | [backends](https://www.scoot.sh/scoot/backends.md) | real hardware: devices, monitors, the GPU tier |
 | [the scoot desktop](https://www.scoot.sh/desktop/) | the flake and the NixOS and home-manager modules |

@@ -4,10 +4,10 @@ description: "The IPC socket, the rules agents need, and the map to requests, ac
 ---
 
 Drive scoot from a script or an agent: the socket, the rules that keep automation honest, and where the rest lives. The binaries document themselves
-for agents: `scootctl --help` (topics `requests`, `actions`,
+for agents: `scoot msg --help` (topics `requests`, `actions`,
 `exit-codes`, `environment`; `help <verb>` for one verb's row) and
-`scootctl --help --json` for the machine-readable form — see
-[Generated CLI pages](../reference/cli.md) for the contract every binary meets. The client is `scootctl`; `scoot msg ...` is the same client kept as a permanent alias on the compositor binary — every example works with either, byte for byte.
+`scoot msg --help --json` for the machine-readable form — see
+[Generated CLI pages](../reference/cli.md) for the contract every binary meets. The client is `scoot msg`, documented here.
 
 # Driving scoot over IPC
 
@@ -15,9 +15,9 @@ Everything a keybinding can do, and everything a user can type or click, is
 also a request on a Unix socket. This page is the reference for scripts and
 for agents doing computer-use tasks.
 
-The client is `scootctl`; `scoot msg ...` is the same client kept as a
-permanent alias on the compositor binary. Every `scootctl` example below
-works with `scoot msg` in its place, byte for byte.
+The client is `scoot msg`, part of the compositor binary itself — there is
+no separate client to install. Every example below is a `scoot msg`
+invocation.
 
 ## The socket
 
@@ -27,23 +27,23 @@ connections from the same user as the compositor. A missing
 `$XDG_RUNTIME_DIR` is a one-line startup error.
 
 Override the path with `$SCOOT_SOCKET` (read by the compositor and
-`scootctl`) or with `--socket PATH` on the compositor. Running two
+`scoot msg`) or with `--socket PATH` on the compositor. Running two
 compositors at once means giving each its own socket.
 
-`scootctl` opens one connection per invocation and closes it as soon as it
+`scoot msg` opens one connection per invocation and closes it as soon as it
 has its answer. A client that wants many requests should pipeline them on
 *one* connection rather than open a connection per request — the
 per-connection bounds below are what keep the socket fair, and reconnecting
 resets them.
 
-`scootctl` prints an `error` reply and exits non-zero. The client builds on
-every platform -- `scootctl` is the macOS package -- so a Mac can drive a
-compositor running in a VM.
+`scoot msg` prints an `error` reply and exits non-zero. The client builds on
+every platform -- on a Mac `scoot` is client-only (the compositor is
+compiled out) -- so a Mac can drive a compositor running in a VM.
 
 ## Rules an agent needs
 
-**Window focus and keyboard focus are separate.** `scootctl windows`'
-`focused` flag, the focus ring and `scootctl action focus-*` all mean the
+**Window focus and keyboard focus are separate.** `scoot msg windows`'
+`focused` flag, the focus ring and `scoot msg action focus-*` all mean the
 *window*. A layer surface holding the keyboard (a launcher like `fuzzel` or
 `wofi`, a bar's search field) never appears there — what `windows` reports is
 where focus returns to once that surface goes away. So if a launcher is up,

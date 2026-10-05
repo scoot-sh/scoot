@@ -108,7 +108,7 @@ install it too, or name another one. More in [First session](./first-session.md)
 scoot runs on Linux. With [Nix](https://nixos.org):
 
 ```sh
-nix profile add github:scoot-sh/scoot#scoot github:scoot-sh/scoot#scootctl \
+nix profile add github:scoot-sh/scoot#scoot \
   github:scoot-sh/scoot#scootbar
 ```
 
@@ -119,7 +119,7 @@ nix profile add github:scoot-sh/scoot#scoot github:scoot-sh/scoot#scootctl \
 
 Every merge to `main` pushes built binaries for `x86_64-linux` and
 `aarch64-linux` to the public Cachix cache `scoot-sh` — all four `scoot`
-variants above, plus `scootctl`, `scootbar` and `scootbg`. Without it, Nix
+variants above, plus `scootbar` and `scootbg`. Without it, Nix
 compiles Smithay and scoot's crates on your machine (minutes); with it, you
 download. Opt in explicitly in your Nix configuration — NixOS
 (`configuration.nix`):
@@ -152,27 +152,28 @@ through the overlay, `nix run` apps, and per-system defaults:
 
 | Name | Gives you | Pick it when |
 |---|---|---|
-| `scoot` | the compositor alone (`$out/bin` carries only `scoot`) | the Linux default; VM, webtop, nested-only |
+| `scoot` | the compositor plus the `scoot msg` client (`$out/bin` carries only `scoot`) | the default everywhere; VM, webtop, nested-only |
 | `scoot-gpu` | the same binary with the `gpu-scanout` feature | real hardware with a GPU (still named `scoot`) |
 | `scoot-xwayland` / `scoot-gpu-xwayland` | those two with the `xwayland` feature and Xwayland on `PATH` (Linux only) | you run X11 apps |
-| `scootctl` | the standalone remote-control client (every system) | driving a compositor running in a VM |
 | `scootbg` | the wallpaper daemon (Linux only) | `[wallpaper]` without the desktop profile |
 | `scootbar` | the status bar, no font in its closure (Linux only) | the bar with your own fonts |
 | `scootbar-demo` | the bar with a nixpkgs font as its default | trying the bar on a box with no fonts |
-| `default` | `scoot` on Linux, `scootctl` on macOS — whichever is honest there | `nix run` without choosing |
+| `default` | `scoot` on every system (client-only on macOS) | `nix run` without choosing |
 
-`nix run` mirrors six of them — `default`, `scootctl`, `scoot-gpu`,
+`nix run` mirrors five of them — `default`, `scoot-gpu`,
 `scoot-xwayland`, `scootbar` and `scootbar-demo` (no `scootbg`,
-`scoot-gpu-xwayland` or docs-site app):
+`scoot-gpu-xwayland` or docs-site app). On macOS, `nix run` gives you the
+client (`scoot msg` drives a compositor running elsewhere):
 
 ```sh
 nix run github:scoot-sh/scoot -- --nested -- foot
+nix run github:scoot-sh/scoot -- msg windows
 nix run github:scoot-sh/scoot#scootbar-demo -- daemon --right clock
 ```
 
 ### The overlay
 
-`overlays.default` adds `pkgs.scoot`, `pkgs.scootctl` and, on Linux,
+`overlays.default` adds `pkgs.scoot` and, on Linux,
 `pkgs.scootbg` and `pkgs.scootbar`:
 
 ```nix
@@ -184,13 +185,13 @@ They are the flake's own builds, the same derivations as
 built twice. With the overlay applied, the modules' `package` and
 `wallpaper.package` default to these, which is what makes the pure
 modules usable without the flake's wrappers. On macOS the overlay adds
-`scoot` and `scootctl` (the client) and no `scootbg` or `scootbar`. It
+the client-only `scoot` and no `scootbg` or `scootbar`. It
 never adds `scootbar-demo`: a demo to run, not a package to build on.
 
 Per-side macOS split, same rule everywhere: the home-manager module
-manages the config file on any system (on macOS files-only, with
-`package` defaulting to null — the config you edit here deploys to a
-Linux box), while the NixOS module's session entry only means anything
+manages the config file on any system (on macOS it also installs the
+client-only `scoot` — the config you edit here deploys to a Linux box),
+while the NixOS module's session entry only means anything
 on NixOS. `scootbg` and `scootbar` are Linux-only: no macOS package,
 and on macOS a `[wallpaper]` section renders as written and installs
 nothing.
@@ -228,7 +229,7 @@ sudo apt install pkg-config libwayland-dev libxkbcommon-dev libinput-dev \
   libdrm-dev libdisplay-info-dev libseat-dev libudev-dev libpixman-1-dev \
   libgbm-dev libegl-dev libdbus-1-dev
 git clone https://github.com/scoot-sh/scoot && cd scoot
-cargo build --release -p scoot -p scootctl -p scootbar
+cargo build --release -p scoot -p scootbar
 ```
 
 The binaries land in `target/release/`. For the GPU build, add the
@@ -243,7 +244,7 @@ scoot --help
 
 This prints the usage text and exits — no display needed. If it complains
 about a missing library, re-check the `apt` line above; if it says
-something about `--headless` on macOS, that is expected: on a Mac only the
-`scootctl` remote-control client builds.
+something about `--headless` on macOS, that is expected: on a Mac `scoot`
+is client-only, so only `scoot msg` runs there.
 
 Next: [First session](./first-session.md) — run scoot, open a terminal, learn five keys. Or skip the piece-by-piece path: [the scoot desktop](./../desktop/index.md) is one switch plus a look.

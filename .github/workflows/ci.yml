@@ -446,14 +446,13 @@ jobs:
       - name: Build the default compositor, and assert it links no GPU stack
         shell: nix develop --command bash -euo pipefail {0}
         run: |
-          cargo build -p scoot -p scootctl -p scootbg
+          cargo build -p scoot -p scootbg
           # Kept aside: the smoke test below must run this default build, and
           # `linux-features` builds its own feature binaries from the same
           # restored cache rather than overwriting these. scootbg too: the
           # smoke test's [wallpaper] section runs it (it links no GPU stack
           # either way; its own job checks that).
           cp target/debug/scoot "$RUNNER_TEMP/scoot-default"
-          cp target/debug/scootctl "$RUNNER_TEMP/scootctl-default"
           cp target/debug/scootbg "$RUNNER_TEMP/scootbg-default"
 
           echo "--- ldd target/debug/scoot ---"
@@ -469,18 +468,6 @@ jobs:
             exit 1
           fi
           echo "ok: the default build links no libgbm and no libEGL"
-
-          # The client half of the same requirement: `scootctl` is pure Rust
-          # (the macOS package), so the same refusal applies -- a GPU library
-          # here would mean a client-side dependency leaked into it.
-          echo "--- ldd target/debug/scootctl ---"
-          ldd target/debug/scootctl
-          leaked=$(ldd target/debug/scootctl | awk '{ print $1 }' | grep -Ei '^lib(gbm|drm|EGL|GLESv2)' || true)
-          if [ -n "$leaked" ]; then
-            echo "::error title=The client build links a GPU library::$(echo "$leaked" | tr '\n' ' ')-- scootctl must stay dependency-free enough to build anywhere (see the scootctl split record). A GPU dependency does not belong in the client."
-            exit 1
-          fi
-          echo "ok: the client build links no GPU stack either"
 
       # `render/tests.rs` states, as a deliberate decision, that its GLES
       # tests fail rather than skip where EGL is missing, on the reasoning
@@ -563,7 +550,6 @@ jobs:
         timeout-minutes: 15
         env:
           SCOOT: ${{ runner.temp }}/scoot-default
-          SCOOTCTL: ${{ runner.temp }}/scootctl-default
           # The [wallpaper] section's end-to-end check runs this scootbg, and
           # REQUIRE turns "no scootbg, skipped" into a failure, so this step
           # cannot go green by skipping it.
@@ -761,9 +747,8 @@ jobs:
           # The binary for the smoke run below. Only the `scoot` crate itself
           # compiles here: the tests above built every dependency with the
           # same features and profile.
-          cargo build -p scoot -p scootctl --features scoot/xwayland
+          cargo build -p scoot --features scoot/xwayland
           cp target/debug/scoot "$RUNNER_TEMP/scoot-xwayland"
-          cp target/debug/scootctl "$RUNNER_TEMP/scootctl-xwayland"
           # scootbg separately, without features: the daemon has no xwayland
           # feature and talks to scoot only over Wayland, so the smoke run's
           # [wallpaper] section uses this rather than skipping. Built here --
@@ -787,7 +772,6 @@ jobs:
         timeout-minutes: 15
         env:
           SCOOT: ${{ runner.temp }}/scoot-xwayland
-          SCOOTCTL: ${{ runner.temp }}/scootctl-xwayland
           # The scootbg built above, without features: the daemon has no
           # xwayland feature and talks to scoot only over Wayland, so the
           # [wallpaper] section runs here too rather than skipping.
@@ -869,13 +853,14 @@ jobs:
         run: cargo clippy -p scoot --all-targets --features gpu-scanout,xwayland -- -D warnings
 
   macos:
-    # The compositor is Linux-only and the macOS package is `scootctl`, the
-    # client that drives a compositor running elsewhere. Nobody builds
-    # that half on a Mac between releases, and it has broken before without
-    # anyone noticing -- this job is the cheap insurance against that.
+    # The compositor is Linux-only; on macOS the same `scoot` package is
+    # client-only (`scoot msg` drives a compositor running elsewhere).
+    # Nobody builds that half on a Mac between releases, and it has broken
+    # before without anyone noticing -- this job is the cheap insurance
+    # against that.
     # `macos-latest` is arm64, which is the only Darwin system `flake.nix`
     # provides (it drops x86_64-darwin; see the comment there).
-    name: macOS (scootctl client)
+    name: macOS (scoot client)
     needs: changes
     # Fail open: only an explicit `false` skips, so a failed `changes` job
     # (empty output) still runs this one instead of skipping it green.
@@ -910,12 +895,18 @@ jobs:
       # daemon and the bar never run on a Mac, and do not build there
       # (scootbg-mem's `compile_error!` says so), so they are left out, with
       # scootbg-mem: this checks
-      # scoot (its Linux halves cfg'd out: a Mac compositor is planned),
-      # scootctl, scoot-ipc and scoot-core. The same command on a Mac is in
-      # docs/development.md.
+      # scoot (its Linux halves cfg'd out: a Mac `scoot` is the `scoot msg`
+      # client), the client library, scoot-ipc and scoot-core. The same
+      # command on a Mac is in docs/development.md.
       - name: cargo check
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --all-targets
+
+      # The client half has to run, not just compile, on a Mac: `scoot msg
+      # --help` needs no display and no compositor.
+      - name: scoot msg --help runs on macOS
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo run -q -p scoot -- msg --help
 
       # The Darwin half of gh #173: `nix flake check` on Linux omits the
       # Darwin systems (and vice versa), so the Linux job above never

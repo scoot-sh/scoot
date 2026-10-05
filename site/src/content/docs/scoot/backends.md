@@ -14,7 +14,7 @@ this page is what happens underneath.)
 
 | Backend | Presents via | Outputs | Scale |
 |---|---|---|---|
-| `--headless` | nowhere; `scootctl screenshot` reads the framebuffer | N virtual outputs (`--outputs`, 1–8) | from the config |
+| `--headless` | nowhere; `scoot msg screenshot` reads the framebuffer | N virtual outputs (`--outputs`, 1–8) | from the config |
 | `--nested` | a window in the host compositor | one window; follows the host's size live | the host owns it (a set scale is ignored with a warning) |
 | `--tty` | real DRM/KMS hardware on a console | every connected monitor, by connector name | from the config, per output |
 
@@ -134,9 +134,9 @@ them.
 ### Captures and the pointer
 
 Screenshots and screen capture read the
-same composited frame the outputs show — which is why `scootctl
+same composited frame the outputs show — which is why `scoot msg
 screenshot` works on every backend, including `--headless` with no
-display at all. See [Screenshots](../scootctl/screenshots.md). A VNC
+display at all. See [Screenshots](../msg/screenshots.md). A VNC
 server like wayvnc reads the same frame over the capture protocol and
 drives input through the virtual-input globals — see [Remote
 desktop](./remote-desktop.md).

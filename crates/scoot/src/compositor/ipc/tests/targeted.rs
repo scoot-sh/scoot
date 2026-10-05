@@ -69,7 +69,7 @@ impl Fixture {
         self.state.apply();
     }
 
-    /// Sends one targeted switch the way `scootctl` does.
+    /// Sends one targeted switch the way `scoot msg` does.
     fn switch(&mut self, output: u64, index: usize) -> Response {
         self.state.handle_request(Request::Action(
             scoot_ipc::Action::FocusOutputWorkspaceIndex { output, index },

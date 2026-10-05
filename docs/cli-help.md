@@ -33,15 +33,15 @@ help meets one contract, pinned by tests. People read it too.
 
 | Binary | `help` topics | JSON |
 | --- | --- | --- |
-| `scootctl` | `requests`, `actions`, `exit-codes`, `environment`; `help <verb>` prints one verb's row | requests (syntax, description, example, reply shape), actions (name, args, description), exit codes, environment |
-| `scoot` | `config` plus the client's topics via `scoot msg help ...` | backends (flags with what each takes and its default), the client document embedded, config sections |
+| `scoot msg` | `requests`, `actions`, `exit-codes`, `environment`; `help <verb>` prints one verb's row | requests (syntax, description, example, reply shape), actions (name, args, description), exit codes, environment |
+| `scoot` | `config` plus the client's topics via `scoot msg help ...` (`scoot msg` is the only client) | backends (flags with what each takes and its default), the client document embedded, config sections |
 | `scootbar` | `daemon`, `msg` | commands, daemon flags (types and defaults), msg commands, the modules in this build with their actions, exit codes, environment |
 | `scootbg` | one per command (`daemon`, `set`, `clear`, `query`, `version`, `kill`, `apply-config`) | commands, `set`'s modes and filters, exit codes, environment |
 
-One spelling note: a client verb's own row is `scootctl help <verb>` (and
-`scoot msg help <verb>`), not `scootctl <verb> --help` -- `--help` after a
-verb would be ambiguous with what the verb itself takes (`scootctl type
---help` types the text `--help`; `action spawn --help` runs the command
+One spelling note: a client verb's own row is `scoot msg help <verb>`,
+not `scoot msg <verb> --help` -- `--help` after a verb would be ambiguous
+with what the verb itself takes (`scoot msg type --help` types the text
+`--help`; `action spawn --help` runs the command
 `--help`). Bare `help` works wherever `--help` does (`scootbar msg help`,
 `scootbg set help`).
 
@@ -54,7 +54,7 @@ flag or value).
 
 ## Environment
 
-`scoot`/`scootctl` read `SCOOT_SOCKET` (else `$XDG_RUNTIME_DIR/scoot.sock`)
+`scoot msg` reads `SCOOT_SOCKET` (like `scoot` itself) (else `$XDG_RUNTIME_DIR/scoot.sock`)
 and need `XDG_RUNTIME_DIR` to exist; `scoot` also reads `XDG_CONFIG_HOME`
 for its config file and the caller's `WAYLAND_DISPLAY` for `--nested`.
 `scootbar` reads `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`

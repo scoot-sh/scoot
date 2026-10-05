@@ -29,17 +29,16 @@ binary's help meets one contract, pinned by tests — and `--help
   the module registry each have one owner; help renders them, never a
   second copy.
 
-One spelling note: a client verb's own row is `scootctl help <verb>`
-(and `scoot msg help <verb>`), not `scootctl <verb> --help` —
-`--help` after a verb would be ambiguous with what the verb itself
-takes (`scootctl type --help` types the text `--help`).
+One spelling note: a client verb's own row is `scoot msg help <verb>`,
+not `scoot msg <verb> --help` — `--help` after a verb would be ambiguous
+with what the verb itself takes (`scoot msg type --help` types the text `--help`).
 
 ## Topics and JSON per binary
 
 | Binary | `help` topics | JSON carries |
 |---|---|---|
-| `scootctl` | `requests`, `actions`, `exit-codes`, `environment`; `help <verb>` prints one verb's row | requests (syntax, description, example, reply shape), actions (name, args, description), exit codes, environment |
-| `scoot` | `config` plus the client's topics via `scoot msg help ...` | backends (flags with what each takes and its default), the client document embedded, config sections |
+| `scoot msg` | `requests`, `actions`, `exit-codes`, `environment`; `help <verb>` prints one verb's row | requests (syntax, description, example, reply shape), actions (name, args, description), exit codes, environment |
+| `scoot` | `config` plus the client's topics via `scoot msg help ...` (`scoot msg` is the only client) | backends (flags with what each takes and its default), the client document embedded, config sections |
 | `scootbar` | `daemon`, `msg` | commands, daemon flags (types and defaults), msg commands, the modules in this build with their actions, exit codes, environment |
 | `scootbg` | one per command (`daemon`, `set`, `clear`, `query`, `version`, `kill`, `apply-config`) | commands, `set`'s modes and filters, exit codes, environment |
 
@@ -49,7 +48,7 @@ takes (`scootctl type --help` types the text `--help`).
 pipe), `1` when the request ran and failed (no daemon, a refused
 request, the compositor going away), `2` for a usage error.
 
-`scoot`/`scootctl` read `SCOOT_SOCKET` (else
+`scoot` and `scoot msg` read `SCOOT_SOCKET` (else
 `$XDG_RUNTIME_DIR/scoot.sock`) and need `XDG_RUNTIME_DIR` to exist;
 `scoot` also reads `XDG_CONFIG_HOME` and the caller's
 `WAYLAND_DISPLAY` for `--nested`. `scootbar` reads `WAYLAND_DISPLAY`
