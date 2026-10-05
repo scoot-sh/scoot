@@ -155,8 +155,10 @@ service_state() {
 }
 # service_object_path <unit>: print the unit's D-Bus object path (for the
 # blocking wait below); exit 1 when the manager could not be asked or the
-# unit is not loaded. The path is the escaped unit name and never moves,
-# so it is resolved once per session, not per wake.
+# unit is not loaded. The path is the escaped unit name and never moves
+# while the unit stays loaded, so it is kept across wakes and only
+# re-resolved while unset (a transient failure costs rounds of polling,
+# not the session -- see the loop top).
 service_object_path() {
     _scoot_call=$(busctl --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager GetUnit s "$1" 2>/dev/null) || return 1
     _scoot_path=$(printf '%s' "$_scoot_call" | sed -n 's/^o "\(.*\)"$/\1/p')
@@ -625,6 +627,16 @@ while :; do
             reap_waiter
             break
         fi
+        # Poll through the outage as the old 1 s loop did: the re-ask
+        # above went unanswered, so this round's freshly spawned waiter
+        # may already have missed its wake (a stop that woke the
+        # previous waiter lands here as silence, and nothing will wake
+        # the new one). Never block on it -- reap it and re-ask next
+        # round. The idle path still costs zero: answered rounds block
+        # below exactly as before.
+        reap_waiter
+        sleep 1
+        continue
     else
         reap_waiter
         break

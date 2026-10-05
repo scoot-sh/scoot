@@ -29,6 +29,12 @@
 #     the session still works;
 #   - a transient resolve failure falls back for a second and re-engages
 #     the wait the moment the resolve succeeds;
+#   - an unanswered re-ask (manager mid-re-exec) never blocks on a
+#     fresh waiter whose wake may already be consumed: it reaps the
+#     waiter and polls through the outage, ending the session the
+#     moment the manager answers down (T14 pins the stall: a stop that
+#     wakes the waiter followed by unanswered re-asks must still exit
+#     within ~2 s);
 #   - without `timeout(1)` the wait runs bare (no 5-minute stall bound)
 #     and the session still works;
 #   - the healed login over an already-active graphical target does not
@@ -741,6 +747,55 @@ ok "T13: re-engaged session asks nothing while blocked (shows steady at $c1)"
 RC="$(end_session)"
 [ "$RC" = "0" ] || bad "T13: launcher exit $RC"
 ok "T13: recovered session quits cleanly"
+
+# --- T14: a wake consumed by an outage still ends the session -------
+# The N1 shape: the terminal stop wakes the waiter (its signal
+# consumed), the next re-asks land in a manager-down window (rc 2),
+# then the manager answers "down". Polling through the outage ends the
+# session at once; blocking on the fresh waiter -- whose baseline
+# already includes the stop, so nothing will ever wake it -- stalls to
+# the wait's timeout. Driver order (down flag first, then the stop)
+# guarantees the wake's re-ask lands in the window whatever the
+# scheduler does: pre-flip the launcher is blocked in its waiter with
+# no round in flight, so on the unfixed code exactly one more `show`
+# ever lands (the wake's re-ask) and the gate below never passes.
+new_test 14
+start_launcher
+wait_blocked "T14"
+c0="$(show_count)"
+: >"$HARNESS_STATE/manager-down"
+set_state scoot.service inactive
+# The launcher must keep re-asking through the outage (each unanswered
+# re-ask is one more `show`): two more within 5 s. The fixed loop
+# lands them in milliseconds (its `sleep 1` is instant under the fake);
+# the unfixed loop blocks on the fresh waiter after the first and the
+# count sticks at c0+1.
+i=0
+while [ "$i" -lt 50 ]; do
+    [ "$(show_count)" -ge "$((c0 + 2))" ] && break
+    "$REAL_SLEEP" 0.1
+    i=$((i + 1))
+done
+[ "$(show_count)" -ge "$((c0 + 2))" ] \
+    || bad "T14: launcher stopped asking while the manager was down (shows stuck at $(show_count), was $c0)"
+ok "T14: unanswered re-asks poll through the outage instead of blocking on a fresh waiter"
+# The outage over and the service down, the session must end at once:
+# gone within ~2 s, not at the wait's timeout.
+t0="$("$REAL_DATE" +%s)"
+rm -f "$HARNESS_STATE/manager-down"
+i=0
+while [ "$i" -lt 20 ]; do
+    [ -f "$T/exit-code" ] && break
+    "$REAL_SLEEP" 0.1
+    i=$((i + 1))
+done
+[ -f "$T/exit-code" ] || bad "T14: session still hanging past the outage (the N1 stall: fresh waiter, consumed wake)"
+RC="$(cat "$T/exit-code")"
+t1="$("$REAL_DATE" +%s)"
+[ "$RC" = "0" ] || bad "T14: launcher exit $RC, expected 0"
+dt=$((t1 - t0))
+[ "$dt" -le 2 ] || bad "T14: session took ${dt}s to end past the outage"
+ok "T14: session ends in ${dt}s once the manager answers down (exit $RC)"
 
 echo "---"
 echo "$PASS/$TOTAL asserts passed"
