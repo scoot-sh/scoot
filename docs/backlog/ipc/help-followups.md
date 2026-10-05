@@ -22,7 +22,7 @@ Filed 2026-10-05 from PR #436's review (non-blocking N1-N3). Serves
   same file gates examples per build.
 - `crates/scootctl/src/help.rs` and `docs/cli-help.md` say `/llms.txt` is
   published "once the docs site lands". It is live now at
-  `https://scoot-sh.github.io/scoot/llms.txt` (later `scoot.sh`): point the
+  `https://www.scoot.sh/llms.txt`: point the
   SEE ALSO lines at the real URL, from one constant so the domain move is one
   edit.
 

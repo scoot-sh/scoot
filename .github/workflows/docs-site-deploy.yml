@@ -2,7 +2,7 @@
 #
 # Builds `nix build .#docs-site` and publishes the static tree to GitHub
 # Pages (Pages source: GitHub Actions; live at
-# https://scoot-sh.github.io/scoot/ while `DEPLOY_TARGET` stays `'pages'`
+# https://www.scoot.sh/ with `DEPLOY_TARGET = 'www'`
 # in site/astro.config.mjs). The `scoot.sh` move is a one-line change to
 # that same value plus the DNS/API steps in site/README.md ("Moving to
 # scoot.sh"). Not a docs move: `docs/**` is in `push.paths` so the deploy
