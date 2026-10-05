@@ -25,7 +25,7 @@ Fix the test harness, not the product: in `expect_error`, make the poison ride t
 
 Product changes to virtual-input error posting; touching `test_support.rs` (the harness already reports the client's own error correctly — the client just handed it the wrong one).
 
-## Resolution (PR #TBD)
+## Resolution (PR #460)
 
 Landed as a test-only change to `crates/scoot/src/compositor/virtual_input/tests.rs`: `Step::KeyExpectingError`/`Step::ModifiersExpectingError` no longer flush separately (the poison rides `expect_error`'s own round trip), `expect_error` takes the `Connection` and on an I/O error drains read-side-only (`dispatch_pending`, one `prepare_read`/`read`, `dispatch_pending`, the `client_fds`/`drm_syncobj` shape) and decides from `conn.protocol_error()`, and `Step::ExpectError` delegates to `expect_error`.
 
