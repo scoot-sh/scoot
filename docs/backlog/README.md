@@ -274,7 +274,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [Research: native remote desktop that streams the scene, not pixels](./protocols/native-remote-scene-streaming.md) (research, filed 2026-10-04): per-surface content plus arrangement deltas, so a scroll costs bytes not frames; frame mode for video and thin viewers; network code in a separate helper
 
 ### IPC / computer use
-- [Make every --help agent-friendly](./ipc/agent-friendly-help.md) (high, filed 2026-10-04): complete from the binary alone, example-led, `--help --json` from the same source, errors that teach
+- [Make every --help agent-friendly](./resolved/agent-friendly-help-done.md) — RESOLVED in #436: one help contract (docs/cli-help.md) with topics, examples, `--help --json` from the same source, errors that teach (exit 2)
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
 - [A coalesced `workspace` event on `subscribe`](./resolved/workspace-snapshot-event-done.md)
   — RESOLVED 2026-10-03 in #406: per-output `{active, counts[]}` snapshot (protocol 7)

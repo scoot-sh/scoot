@@ -1,9 +1,10 @@
 ---
 title: "Make every --help agent-friendly: complete, structured, example-led, machine-readable"
-status: "open"
-area: "ipc"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-04"
 ---
 
 # Make every --help agent-friendly: complete, structured, example-led, machine-readable
@@ -55,3 +56,31 @@ down in `docs/` and pinned by tests:
 
 The docs site itself (`docs-site`); shell completions (a later ticket can
 generate them from the JSON).
+
+## What landed (PR #436)
+
+The contract lives in `docs/cli-help.md`, pinned by tests in each crate.
+`scootctl` grew `help [TOPIC|VERB|--json]` topics (`requests`, `actions`,
+`exit-codes`, `environment`, one row per verb) and `--help --json`
+(`schema_version: 1`); `scoot` renders the same client surface for
+`scoot msg` (including `scoot msg --help`, previously an
+`unknown argument` refusal) plus `help config`, backends/options tables and
+an embedded client JSON; `scootbar` documents each page with examples, exit
+codes and see-also, JSON with daemon flags and the build's modules from
+`REGISTRY`, and a push-config snippet under `msg set`; `scootbg` documents
+every page the same way with JSON carrying the set modes/filters. Usage
+errors everywhere name the nearest choice (`did you mean`) with the topic
+to read, on stderr with exit 2 -- which moves `scoot`/`scootctl` usage
+errors from 1 to 2 (the PR's breaking change). No new dependencies.
+
+Evidence (dev VM, exact head): `cargo nextest run --workspace
+--no-fail-fast` 4276 passed / 34 skipped; `cargo test -p scootbar` green;
+`cargo clippy -p scoot -p scootctl`, `-p scootbg -p scootbg-mem`, `-p
+scootbar` (default, `--all-features`, `--no-default-features`)
+`--all-targets -- -D warnings` clean; `cargo fmt --check` clean;
+`scripts/smoke-test.sh` exit 0 (36 oks). Release sizes vs `origin/main`
+(file / `.text`): scoot +1.0%/+0.6%, scootctl +0/+4.2%, scootbar
++0/+0.8%, scootbg +0/+1.5% -- growth rows for the maintainer to waive.
+The agent task list completes from help output after (before: exit 1 with
+no guess, unreachable `scoot msg --help`, and set-a-bar-value
+uncompletable -- `[push.status]` with no list placed nothing).
