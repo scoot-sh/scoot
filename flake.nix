@@ -935,7 +935,13 @@
             # evaluates (the Linux-only idle tools stay null there, refused
             # loudly if the policy is enabled).
             flake = {
-              inherit (self) overlays packages homeModules homeManagerModules nixosModules;
+              inherit (self)
+                overlays
+                packages
+                homeModules
+                homeManagerModules
+                nixosModules
+                ;
               homeModule = self.homeModules.scoot;
               nixosModule = self.nixosModules.scoot;
             };
