@@ -77,6 +77,12 @@ Quit is deliberately <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>e</kbd>, not
 <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>q</kbd>: one slipped Shift away from
 "close window", and a slip shouldn't end the whole session.
 
+The desktop profile adds two binds on top of these defaults:
+<kbd>Super</kbd>+<kbd>d</kbd> opens the app launcher and
+<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> its run mode (PATH
+executables beside the apps) — see
+[the desktop profile](../desktop/index.md#launcher).
+
 Under `--tty`, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F1</kbd>…<kbd>F12</kbd>
 additionally switch VTs — always winning over config binds, so the recovery
 path survives a bad config.

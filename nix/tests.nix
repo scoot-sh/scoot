@@ -93,7 +93,7 @@
 #   on, each fail eval; the shared keymap (`desktop-keys` child) runs
 #   with the profile -- the twelve hardware and lock binds, each a
 #   `mkDefault` a user `[binds]` entry wins over and each removable
-#   through `binds.<name>.enable`, the seven slot-gated binds only
+#   through `binds.<name>.enable`, the eight slot-gated binds only
 #   while their slot is on;
 #   the notification daemon (`desktop-notifications` child) runs with
 #   the profile -- mako owning `org.freedesktop.Notifications` as a
@@ -112,6 +112,13 @@
 #   `theme.targets.clipboard.enable` opts out) and the history wiped
 #   on the idle policy's lock lines; a null tool, a zero `maxItems`
 #   and a non-absolute or shell-special `dbPath` each fail eval;
+#   the launcher (`desktop-launcher` child) runs with the profile --
+#   fuzzel on the keymap's `Super+d` (drun: XDG apps) and
+#   `Ctrl+Alt+Space` (run: PATH executables beside apps) through one
+#   wrapper script, on the `overlay` layer (above fullscreen) with
+#   exclusive keyboard, themed by the look unless
+#   `theme.targets.launcher.enable` opts out, holding nothing when
+#   closed; a null package and an unknown `daemon` each fail eval;
 #   every remaining future slot
 #   defaults off and inert; `enable` without scoot, a look without the
 #   profile, and an unknown look each fail eval;
@@ -1106,13 +1113,15 @@ let
     desktop.xwayland.enable = true;
   };
   # A future slot enabled today: accepted and inert (assertions hold,
-  # nothing installed beyond the profile's own).
+  # nothing installed beyond the profile's own -- nightlight, whose
+  # child wires nothing yet, not even a keymap script the way the
+  # capture and clipboard slots already do).
   hmDeskSlotOn = evalHome {
     enable = true;
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.launcher.enable = true;
+    desktop.nightlight.enable = true;
   };
 
   # --- shared keymap (`programs.scoot.desktop.keys`) evaluations ---
@@ -1685,6 +1694,96 @@ let
     desktop.clipboard.menuPackage = null;
   };
 
+  # --- launcher (`programs.scoot.desktop.launcher`) evaluations ---
+  #
+  # The profile with a look: the whole slot on (the package on PATH,
+  # the wrapper script beside the keymap's binds), the launcher themed
+  # by the look.
+  hmLaunch = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...without a look: the slot runs unthemed (fuzzel's own colors --
+  # pinned by content below).
+  hmLaunchNoLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...the slot off (the profile turns it on, like the idle policy;
+  # the switch back off disables just its half).
+  hmLaunchOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.launcher.enable = false;
+  };
+  # ...standalone (no profile): the binary on PATH, unthemed, no binds
+  # (those need the keymap, which the profile turns on).
+  hmLaunchStandalone = evalHome {
+    enable = true;
+    desktop.launcher.enable = true;
+  };
+  # ...opted out of launcher theming (the look leaves fuzzel alone).
+  hmLaunchTargetOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.launcher.enable = false;
+  };
+  # ...one per remaining look: the themed flags pinned by content
+  # below (music-desk rides on `hmLaunch`).
+  hmLaunchLookVinyl = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "vinyl-sunset";
+  };
+  hmLaunchLookBurst = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "radial-burst";
+  };
+  hmLaunchLookMoon = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+  };
+  # Refusals: the slot with no launcher to run it (pinned by message
+  # in `_launchPins`)...
+  hmLaunchNoPkg = evalHome {
+    enable = true;
+    desktop.launcher.enable = true;
+    desktop.launcher.package = null;
+  };
+  # ...and an unknown daemon, which is an option type error (the
+  # `enum`'s own message names the valid value), caught here by
+  # `tryEval`.
+  hmLaunchDaemonBogus =
+    builtins.tryEval
+      (evalHome {
+        enable = true;
+        desktop.launcher.enable = true;
+        desktop.launcher.daemon = "bogus-daemon";
+      }).config.programs.scoot.desktop.launcher.daemon;
+
+  # --- launcher system evaluations ---
+  osLaunch = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  osLaunchOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.launcher.enable = false;
+  };
+  osLaunchNoPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.launcher.package = null;
+  };
+
   # Refusals: the profile without scoot, and a look without the profile
   # (both pinned by message in `_desktopPins`)...
   hmDeskNoEnable = evalHome { desktop.enable = true; };
@@ -1711,7 +1810,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.launcher.enable = true;
+    desktop.nightlight.enable = true;
   };
   # The knob is accepted here (its effect is home-manager wiring; the
   # package choice stays `programs.scoot.package`).
@@ -2872,6 +2971,16 @@ let
   clipPickerNoLook = slotScriptBin hmClipNoLook "scoot-clipboard-pick";
   clipPickerTargetOff = slotScriptBin hmClipTargetOff "scoot-clipboard-pick";
   clipPickerBurst = slotScriptBin hmClipLookBurst "scoot-clipboard-pick";
+  # The launcher slot's generated file: the wrapper script as the
+  # keymap runs it -- themed (music-desk), lookless, opt-out and one
+  # per remaining look (vinyl-sunset, radial-burst, moonrise) the
+  # content checks read.
+  launchThemed = slotScriptBin hmLaunch "scoot-launcher";
+  launchNoLook = slotScriptBin hmLaunchNoLook "scoot-launcher";
+  launchTargetOff = slotScriptBin hmLaunchTargetOff "scoot-launcher";
+  launchVinyl = slotScriptBin hmLaunchLookVinyl "scoot-launcher";
+  launchBurst = slotScriptBin hmLaunchLookBurst "scoot-launcher";
+  launchMoon = slotScriptBin hmLaunchLookMoon "scoot-launcher";
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
   #
@@ -3115,14 +3224,25 @@ let
       assert hmDesk.config.programs.scoot.desktop.theme.targets.clipboard.enable;
       true
     )
+    # ...the launcher on with the profile (fuzzel behind the keymap's
+    # binds, themed unless opted out)...
+    (
+      assert hmDesk.config.programs.scoot.desktop.launcher.enable;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.launcher.daemon == "fuzzel";
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.theme.targets.launcher.enable;
+      true
+    )
     # ...and every remaining future slot off and empty (spot-check
     # across the tree; `notifications` left this list when the
     # `desktop-notifications` child filled it, `clipboard` when the
-    # `desktop-clipboard` child did).
-    (
-      assert !hmDesk.config.programs.scoot.desktop.launcher.enable;
-      true
-    )
+    # `desktop-clipboard` child did, `launcher` when the
+    # `desktop-launcher` child did).
     (
       assert !hmDesk.config.programs.scoot.desktop.capture.enable;
       true
@@ -3202,9 +3322,9 @@ let
       true
     )
     # ...which is what installs scootbg for it (beside the idle
-    # policy's five tools, the notification daemon, the clipboard
-    # slot's three, its picker script and the keymap's three, all on
-    # with the profile).
+    # policy's five tools, the notification daemon, the launcher
+    # package and its script, the clipboard slot's three, its picker
+    # script and the keymap's three, all on with the profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
       true
@@ -3212,7 +3332,9 @@ let
     (
       # `brightnessctl` twice is one package, not two tools: the
       # idle policy's dim tool and the keymap's brightness tool are
-      # the same derivation, each declared beside its own binds.
+      # the same derivation, each declared beside its own binds (and
+      # `fuzzel` twice the same way: the clipboard picker's menu and
+      # the launcher package).
       assert
         sorted hmDeskLookMusic.config.home.packages == sorted [
           fakePkg
@@ -3227,6 +3349,8 @@ let
           pkgs.wl-clipboard
           pkgs.fuzzel
           (slotScriptDrv hmDeskLookMusic "scoot-clipboard-pick")
+          pkgs.fuzzel
+          (slotScriptDrv hmDeskLookMusic "scoot-launcher")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -3612,13 +3736,14 @@ let
         hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
       true
     )
-    # ...exactly the thirteen tools installed (swayidle, dim, off,
+    # ...exactly the fifteen tools installed (swayidle, dim, off,
     # locker, inhibitor, mako, the clipboard slot's three, its picker
-    # script -- no scoot package set here, so nothing else -- plus the
-    # keymap's brightness, volume and media tools; `brightnessctl` is
-    # one package serving two features, so it appears twice).
+    # script, the launcher package and its script -- no scoot package
+    # set here, so nothing else -- plus the keymap's brightness,
+    # volume and media tools; `brightnessctl` and `fuzzel` each serve
+    # two features, so each appears twice).
     (
-      assert builtins.length hmIdle.config.home.packages == 13;
+      assert builtins.length hmIdle.config.home.packages == 15;
       true
     )
     (
@@ -3634,6 +3759,8 @@ let
           pkgs.wl-clipboard
           pkgs.fuzzel
           (slotScriptDrv hmIdle "scoot-clipboard-pick")
+          pkgs.fuzzel
+          (slotScriptDrv hmIdle "scoot-launcher")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -3695,6 +3822,8 @@ let
           pkgs.wl-clipboard
           pkgs.fuzzel
           (slotScriptDrv hmIdleOff "scoot-clipboard-pick")
+          pkgs.fuzzel
+          (slotScriptDrv hmIdleOff "scoot-launcher")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -3703,8 +3832,8 @@ let
     )
     # The lock off: the policy stays (dim and screens-off), the locker
     # leaves (no config, no package, four policy tools plus mako, the
-    # clipboard slot's three, its picker script and the keymap's three
-    # left).
+    # clipboard slot's three, its picker script, the launcher package
+    # and its script, and the keymap's three left).
     (
       assert allAssertionsHold hmLockOff.config;
       true
@@ -3718,12 +3847,13 @@ let
       true
     )
     (
-      assert builtins.length hmLockOff.config.home.packages == 12;
+      assert builtins.length hmLockOff.config.home.packages == 14;
       true
     )
     # The inhibitor off: the policy without the audio hold (four
     # policy tools plus mako, the clipboard slot's three, its picker
-    # script and the keymap's three).
+    # script, the launcher package and its script, and the keymap's
+    # three).
     (
       assert allAssertionsHold hmInhibitOff.config;
       true
@@ -3733,7 +3863,7 @@ let
       true
     )
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 12;
+      assert builtins.length hmInhibitOff.config.home.packages == 14;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -3840,9 +3970,10 @@ let
     )
 
     # NixOS: the profile installs the five policy tools, mako, the
-    # clipboard slot's three and the keymap's three beside scoot and
-    # scootbg, locks docked lids, and names the locker's PAM service --
-    # staying additive (no default session, ever)...
+    # launcher, the clipboard slot's three and the keymap's three
+    # beside scoot and scootbg, locks docked lids, and names the
+    # locker's PAM service -- staying additive (no default session,
+    # ever)...
     (
       assert allAssertionsHold osIdle.config;
       true
@@ -3858,6 +3989,7 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          pkgs.fuzzel
           leanClip
           pkgs.wl-clipboard
           pkgs.fuzzel
@@ -3882,8 +4014,9 @@ let
     # ...the policy off: the rule untouched (logind's own default
     # applies), no PAM -- but the daemon stays (its switch is its
     # own), the clipboard slot stays too (its switch is its own as
-    # well) and the keymap stays too (the other child), so mako, the
-    # clipboard tools and the keymap's three stay...
+    # well), the launcher stays too and the keymap stays too (the
+    # other child), so mako, the launcher, the clipboard tools and the
+    # keymap's three stay...
     (
       assert allAssertionsHold osIdleOff.config;
       true
@@ -3902,6 +4035,7 @@ let
           fakePkg
           fakeBg
           leanMako
+          pkgs.fuzzel
           leanClip
           pkgs.wl-clipboard
           pkgs.fuzzel
@@ -3913,7 +4047,8 @@ let
     )
     # ...the lock off: no PAM and no locker, the lid rule still
     # locking (dim and screens-off still run from the home-manager
-    # side, the clipboard tools and the keymap's tools beside them)...
+    # side, the launcher, the clipboard tools and the keymap's tools
+    # beside them)...
     (
       assert allAssertionsHold osLockOff.config;
       true
@@ -3932,6 +4067,7 @@ let
           pkgs.wlopm
           pkgs.sway-audio-idle-inhibit
           leanMako
+          pkgs.fuzzel
           leanClip
           pkgs.wl-clipboard
           pkgs.fuzzel
@@ -4461,8 +4597,10 @@ let
       assert !(lib.any (p: (p.pname or "") == "wl-clipboard") hmClipOff.config.home.packages);
       true
     )
+    # ...fuzzel stays: the launcher slot (on with the profile) runs
+    # the same derivation.
     (
-      assert !(lib.any (p: (p.pname or "") == "fuzzel") hmClipOff.config.home.packages);
+      assert lib.any (p: (p.pname or "") == "fuzzel") hmClipOff.config.home.packages;
       true
     )
     (
@@ -4646,8 +4784,10 @@ let
         !(lib.any (p: (p.pname or "") == "wl-clipboard") osClipOff.config.environment.systemPackages);
       true
     )
+    # ...fuzzel stays: the launcher slot (on with the profile) runs
+    # the same derivation.
     (
-      assert !(lib.any (p: (p.pname or "") == "fuzzel") osClipOff.config.environment.systemPackages);
+      assert lib.any (p: (p.pname or "") == "fuzzel") osClipOff.config.environment.systemPackages;
       true
     )
     # ...and each refusal naming its tool on this side as well.
@@ -4681,6 +4821,216 @@ let
     )
   ];
 
+  # --- launcher structural pins (fail `nix flake check` at eval) ---
+  # Linux only, like the slots above: the package refuses evaluation
+  # on Darwin (the null degradation itself is pinned in
+  # `_darwinLaunchPins`).
+  _launchPins = lib.optionals isLinux [
+    # Home-manager: the whole slot on (the package beside the
+    # profile's own, the wrapper script beside the keymap's binds)...
+    (
+      assert allAssertionsHold hmLaunch.config;
+      true
+    )
+    (
+      assert hmLaunch.config.programs.scoot.desktop.launcher.enable;
+      true
+    )
+    (
+      assert hmLaunch.config.programs.scoot.desktop.launcher.daemon == "fuzzel";
+      true
+    )
+    # ...running stock nixpkgs fuzzel (the same derivation the
+    # clipboard picker themes: one fuzzel, no second copy -- the same
+    # `drvPath` on both sides, so a divergent package fails here)...
+    (
+      assert hmLaunch.config.programs.scoot.desktop.launcher.package.drvPath == pkgs.fuzzel.drvPath;
+      true
+    )
+    (
+      assert
+        hmLaunch.config.programs.scoot.desktop.launcher.package.drvPath
+        == hmLaunch.config.programs.scoot.desktop.clipboard.menuPackage.drvPath;
+      true
+    )
+    (
+      assert osLaunch.config.programs.scoot.desktop.launcher.package.drvPath == pkgs.fuzzel.drvPath;
+      true
+    )
+    # ...installed beside the profile's own (NixOS: system-wide)...
+    (
+      assert lib.any (p: (p.pname or "") == "fuzzel") hmLaunch.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-launcher") hmLaunch.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "fuzzel") osLaunch.config.environment.systemPackages;
+      true
+    )
+    # ...both binds through the wrapper script (drun by default, PATH
+    # executables on the run bind)...
+    (
+      assert
+        hmLaunch.config.programs.scoot.settings.binds."super+d"
+        == "spawn ${slotScriptBin hmLaunch "scoot-launcher"}";
+      true
+    )
+    (
+      assert
+        hmLaunch.config.programs.scoot.settings.binds."ctrl+alt+space"
+        == "spawn ${slotScriptBin hmLaunch "scoot-launcher"} --list-executables-in-path";
+      true
+    )
+    # Without a look the slot runs unthemed (the binary and the binds
+    # are still there; the launcher keeps fuzzel's own colors --
+    # pinned by content below).
+    (
+      assert allAssertionsHold hmLaunchNoLook.config;
+      true
+    )
+    (
+      assert hmLaunchNoLook.config.programs.scoot.settings.binds ? "super+d";
+      true
+    )
+    (
+      assert hmLaunchNoLook.config.programs.scoot.settings.binds ? "ctrl+alt+space";
+      true
+    )
+    # The slot off: no package, no binds, no script beyond the
+    # profile's own (the idle policy stays: this switch is its own).
+    (
+      assert allAssertionsHold hmLaunchOff.config;
+      true
+    )
+    (
+      assert !(hmLaunchOff.config.programs.scoot.settings.binds ? "super+d");
+      true
+    )
+    (
+      assert !(hmLaunchOff.config.programs.scoot.settings.binds ? "ctrl+alt+space");
+      true
+    )
+    # ...fuzzel stays: the clipboard picker (on with the profile) runs
+    # the same derivation -- but the launcher script leaves with the
+    # slot.
+    (
+      assert lib.any (p: (p.pname or "") == "fuzzel") hmLaunchOff.config.home.packages;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.name or "") == "scoot-launcher") hmLaunchOff.config.home.packages);
+      true
+    )
+    (
+      assert hmLaunchOff.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    (
+      assert allAssertionsHold osLaunchOff.config;
+      true
+    )
+    # ...fuzzel stays system-wide too: the clipboard slot (on with the
+    # profile) installs the same derivation.
+    (
+      assert lib.any (p: (p.pname or "") == "fuzzel") osLaunchOff.config.environment.systemPackages;
+      true
+    )
+    # Standalone (no profile): the binary on PATH, unthemed, no binds
+    # (those need the keymap).
+    (
+      assert allAssertionsHold hmLaunchStandalone.config;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "fuzzel") hmLaunchStandalone.config.home.packages;
+      true
+    )
+    (
+      assert !(hmLaunchStandalone.config.programs.scoot.settings ? binds);
+      true
+    )
+    # Re-looked and opted out: every assertion still holds (the
+    # content checks below prove the flags land in the script).
+    (
+      assert allAssertionsHold hmLaunchTargetOff.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmLaunchLookVinyl.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmLaunchLookBurst.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmLaunchLookMoon.config;
+      true
+    )
+    # Refusals: the slot with no launcher to run it...
+    (
+      assert builtins.length (failing hmLaunchNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "launcher.package is null" (builtins.head (failing hmLaunchNoPkg.config));
+      true
+    )
+    (
+      assert builtins.length (failing osLaunchNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "launcher.package is null" (builtins.head (failing osLaunchNoPkg.config));
+      true
+    )
+    # ...and an unknown daemon, which is an option type error (the
+    # `enum`'s own message names the valid value), caught here by
+    # `tryEval`.
+    (
+      assert !hmLaunchDaemonBogus.success;
+      true
+    )
+  ];
+
+  # --- launcher off Linux (fail `nix flake check` at eval) ---
+  #
+  # fuzzel is Linux-only: off Linux its package defaults to null,
+  # which the slot's own assertion refuses loudly instead of
+  # installing nothing silently. Empty off Linux (the Linux check
+  # above is where the slot is pinned).
+  _darwinLaunchPins = lib.optionals (!isLinux) [
+    # Home-manager: null, and the slot's assertion refusing loudly
+    # (the idle policy's five plus the daemon's one plus the
+    # launcher's one plus the clipboard slot's three: the profile is
+    # on in this evaluation, so its slot is open).
+    (
+      assert hmLaunch.config.programs.scoot.desktop.launcher.package == null;
+      true
+    )
+    (
+      assert builtins.length (failing hmLaunch.config) == 10;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "launcher.package is null" m) (failing hmLaunch.config);
+      true
+    )
+    # NixOS: the same null (no launcher installed)...
+    (
+      assert osLaunch.config.programs.scoot.desktop.launcher.package == null;
+      true
+    )
+    # ...refused loudly there too.
+    (
+      assert builtins.length (failing osLaunch.config) == 10;
+      true
+    )
+  ];
+
   # --- clipboard slot off Linux (fail `nix flake check` at eval) ---
   #
   # The tools above are Linux-only: off Linux each package defaults to
@@ -4703,9 +5053,10 @@ let
     )
     # ...and the slot's own assertions refusing loudly, naming each
     # switch (the idle policy's five plus the daemon's one plus the
-    # slot's three: the profile is on in this evaluation).
+    # launcher's one plus the slot's three: the profile is on in this
+    # evaluation).
     (
-      assert builtins.length (failing hmClip.config) == 9;
+      assert builtins.length (failing hmClip.config) == 10;
       true
     )
     (
@@ -4730,9 +5081,10 @@ let
       assert osClip.config.programs.scoot.desktop.clipboard.managerPackage == null;
       true
     )
-    # ...refused loudly there too.
+    # ...refused loudly there too (one more than before: the
+    # launcher's null joins the count on this side as well).
     (
-      assert builtins.length (failing osClip.config) == 9;
+      assert builtins.length (failing osClip.config) == 10;
       true
     )
   ];
@@ -4745,15 +5097,15 @@ let
   # the daemon is pinned).
   _darwinNotifPins = lib.optionals (!isLinux) [
     # Home-manager: null, and the daemon's assertion refusing loudly
-    # (the idle policy's five plus the daemon's one plus the clipboard
-    # slot's three: the profile is on in this evaluation, so its slot
-    # is open).
+    # (the idle policy's five plus the daemon's one plus the launcher's
+    # one plus the clipboard slot's three: the profile is on in this
+    # evaluation, so its slot is open).
     (
       assert hmNotif.config.programs.scoot.desktop.notifications.package == null;
       true
     )
     (
-      assert builtins.length (failing hmNotif.config) == 9;
+      assert builtins.length (failing hmNotif.config) == 10;
       true
     )
     (
@@ -4766,10 +5118,11 @@ let
       true
     )
     # ...refused loudly there too (the idle policy's five plus the
-    # daemon's one plus the clipboard slot's three: the profile is on
-    # in this evaluation, so its slot is open).
+    # daemon's one plus the launcher's one plus the clipboard slot's
+    # three: the profile is on in this evaluation, so its slot is
+    # open).
     (
-      assert builtins.length (failing osNotif.config) == 9;
+      assert builtins.length (failing osNotif.config) == 10;
       true
     )
     (
@@ -4799,11 +5152,12 @@ let
       assert hmKeys.config.programs.scoot.desktop.keys.enable;
       true
     )
-    # ...rendering exactly the sixteen binds beside the profile (the
-    # twelve keymap-owned binds plus the three notification binds and
-    # the clipboard picker -- the daemon and the clipboard slot are on
-    # with the profile, so their slots are open; every other future
-    # slot is off: its binds stay out)...
+    # ...rendering exactly the eighteen binds beside the profile (the
+    # twelve keymap-owned binds plus the three notification binds, the
+    # clipboard picker and the two launcher binds -- the daemon, the
+    # clipboard slot and the launcher slot are on with the profile, so
+    # their slots are open; every other future slot is off: its binds
+    # stay out)...
     (
       assert
         hmKeys.config.programs.scoot.settings.binds == {
@@ -4863,6 +5217,8 @@ let
             allow_when_locked = true;
           };
           "super+escape" = "spawn ${lib.getExe' pkgs.systemd "loginctl"} lock-session";
+          "super+d" = "spawn ${slotScriptBin hmKeys "scoot-launcher"}";
+          "ctrl+alt+space" = "spawn ${slotScriptBin hmKeys "scoot-launcher"} --list-executables-in-path";
           "super+v" = "spawn ${slotScriptBin hmKeys "scoot-clipboard-pick"}";
           "super+n" = "spawn ${leanMako}/bin/makoctl dismiss";
           "super+shift+n" = "spawn ${leanMako}/bin/makoctl mode -t do-not-disturb";
@@ -4871,8 +5227,8 @@ let
       true
     )
     # ...beside the profile's and the policy's packages (scoot, the
-    # five idle tools, mako, the clipboard slot's three, its picker
-    # script and the keymap's three)...
+    # five idle tools, mako, the clipboard slot's three, the launcher
+    # package, the two slot scripts and the keymap's three)...
     (
       assert
         sorted hmKeys.config.home.packages == sorted [
@@ -4886,27 +5242,36 @@ let
           leanClip
           pkgs.wl-clipboard
           pkgs.fuzzel
+          pkgs.fuzzel
           (slotScriptDrv hmKeys "scoot-clipboard-pick")
+          (slotScriptDrv hmKeys "scoot-launcher")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
         ];
       true
     )
-    # ...every other future slot on: all nineteen binds (the
-    # launcher bind by bare tool name -- its slot installs nothing
-    # yet -- the notification binds through mako's absolute path, the
-    # clipboard and capture binds through the keymap's own scripts)...
+    # ...every other future slot on: all twenty binds (the launcher,
+    # clipboard and capture binds through the keymap's own scripts,
+    # the notification binds through mako's absolute path)...
     (
       assert allAssertionsHold hmKeysSlots.config;
       true
     )
     (
-      assert builtins.length (builtins.attrNames hmKeysSlots.config.programs.scoot.settings.binds) == 19;
+      assert builtins.length (builtins.attrNames hmKeysSlots.config.programs.scoot.settings.binds) == 20;
       true
     )
     (
-      assert hmKeysSlots.config.programs.scoot.settings.binds."super+d" == "spawn fuzzel";
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."super+d"
+        == "spawn ${slotScriptBin hmKeysSlots "scoot-launcher"}";
+      true
+    )
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."ctrl+alt+space"
+        == "spawn ${slotScriptBin hmKeysSlots "scoot-launcher"} --list-executables-in-path";
       true
     )
     (
@@ -4967,9 +5332,9 @@ let
       assert lib.any (p: (p.name or "") == "scoot-capture-region") hmKeysSlots.config.home.packages;
       true
     )
-    # ...one bind removed: its combo unbound, the other fourteen
-    # still there (sixteen with the daemon and the clipboard slot on,
-    # minus two)...
+    # ...one bind removed: its combo unbound, the other sixteen
+    # still there (eighteen with the daemon, the clipboard slot and
+    # the launcher slot on, minus two)...
     (
       assert allAssertionsHold hmKeysOmit.config;
       true
@@ -4983,7 +5348,7 @@ let
       true
     )
     (
-      assert builtins.length (builtins.attrNames hmKeysOmit.config.programs.scoot.settings.binds) == 14;
+      assert builtins.length (builtins.attrNames hmKeysOmit.config.programs.scoot.settings.binds) == 16;
       true
     )
     # ...one bind overridden: the user's own `[binds]` entry wins...
@@ -4994,7 +5359,7 @@ let
     )
     (
       assert
-        builtins.length (builtins.attrNames hmKeysOverride.config.programs.scoot.settings.binds) == 16;
+        builtins.length (builtins.attrNames hmKeysOverride.config.programs.scoot.settings.binds) == 18;
       true
     )
     # ...a slot bind overridden the same way (the slot's command
@@ -5016,8 +5381,8 @@ let
     # ...the whole keymap off: no `[binds]` from it (no other eval
     # sets binds here, so the table is absent entirely) and no slot
     # scripts either (the keymap installs those beside the binds), so
-    # the idle policy's five, mako and the clipboard slot's three
-    # beside scoot only...
+    # the idle policy's five, mako, the launcher and the clipboard
+    # slot's tools beside scoot only...
     (
       assert allAssertionsHold hmKeysOff.config;
       true
@@ -5036,6 +5401,7 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          pkgs.fuzzel
           leanClip
           pkgs.wl-clipboard
           pkgs.fuzzel
@@ -5043,8 +5409,8 @@ let
       true
     )
     # NixOS: the keymap off leaves the profile's other packages
-    # only (the five idle tools, mako and the clipboard slot's three
-    # beside scoot and scootbg).
+    # only (the five idle tools, mako, the launcher and the clipboard
+    # slot's tools beside scoot and scootbg).
     (
       assert allAssertionsHold osKeysOff.config;
       true
@@ -5060,6 +5426,7 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          pkgs.fuzzel
           leanClip
           pkgs.wl-clipboard
           pkgs.fuzzel
@@ -5107,11 +5474,11 @@ let
     # ...and the policy's own assertions refusing loudly, naming the
     # switch (one per null tool: the policy, the dim and screens-off
     # steps, the inhibitor, the locker -- plus the notification
-    # daemon's one and the clipboard slot's three, on with the
-    # profile; order-insensitive: the daemon's module contributes its
-    # refusal first).
+    # daemon's one, the launcher's one and the clipboard slot's three,
+    # on with the profile; order-insensitive: the daemon's module
+    # contributes its refusal first).
     (
-      assert builtins.length (failing hmIdle.config) == 9;
+      assert builtins.length (failing hmIdle.config) == 10;
       true
     )
     (
@@ -5136,10 +5503,11 @@ let
       true
     )
     # ...refused loudly there too (the idle policy's five plus the
-    # daemon's one plus the clipboard slot's three), while the
-    # docked-lid rule (plain values, no tools) still lands.
+    # daemon's one plus the launcher's one plus the clipboard slot's
+    # three), while the docked-lid rule (plain values, no tools) still
+    # lands.
     (
-      assert builtins.length (failing osIdle.config) == 9;
+      assert builtins.length (failing osIdle.config) == 10;
       true
     )
     (
@@ -5178,19 +5546,24 @@ let
     # ...the keymap still on with the profile, its binds in bare
     # form (the lock action bare too: logind is Linux-only -- and the
     # notification binds bare as well: mako is Linux-only, while its
-    # slot is open with the profile -- and the clipboard picker through
-    # its own script, whose tools are bare there too while the slot is
-    # open with the profile)...
+    # slot is open with the profile -- and the clipboard picker and
+    # the launcher binds through their own scripts, whose tools are
+    # bare there too while their slots are open with the profile)...
     (
       assert hmKeys.config.programs.scoot.desktop.keys.enable;
       true
     )
-    # Sixteen binds: the fifteen above plus the picker, whose store
-    # path is unknowable in the pin (so it is matched by suffix, and
-    # the rest byte-equal without it).
+    # Eighteen binds: the fifteen above plus the picker and the two
+    # launcher binds, whose store paths are unknowable in the pin (so
+    # each is matched by suffix, and the rest byte-equal without
+    # them).
     (
       assert
-        builtins.removeAttrs hmKeys.config.programs.scoot.settings.binds [ "super+v" ] == {
+        builtins.removeAttrs hmKeys.config.programs.scoot.settings.binds [
+          "super+v"
+          "super+d"
+          "ctrl+alt+space"
+        ] == {
           "XF86MonBrightnessUp" = {
             action = "spawn brightnessctl -e set +5%";
             repeat = true;
@@ -5258,24 +5631,43 @@ let
         hmKeys.config.programs.scoot.settings.binds."super+v";
       true
     )
-    # ...and the picker stays a plain string: never repeat, never
-    # allowed while locked (unlike the eleven hardware tables above).
+    (
+      assert lib.hasSuffix "/bin/scoot-launcher" hmKeys.config.programs.scoot.settings.binds."super+d";
+      true
+    )
+    (
+      assert lib.hasSuffix "/bin/scoot-launcher --list-executables-in-path"
+        hmKeys.config.programs.scoot.settings.binds."ctrl+alt+space";
+      true
+    )
+    # ...and the picker and both launcher binds stay plain strings:
+    # never repeat, never allowed while locked (unlike the eleven
+    # hardware tables above).
     (
       assert lib.isString hmKeys.config.programs.scoot.settings.binds."super+v";
       true
     )
     (
-      assert builtins.length (builtins.attrNames hmKeys.config.programs.scoot.settings.binds) == 16;
+      assert lib.isString hmKeys.config.programs.scoot.settings.binds."super+d";
+      true
+    )
+    (
+      assert lib.isString hmKeys.config.programs.scoot.settings.binds."ctrl+alt+space";
+      true
+    )
+    (
+      assert builtins.length (builtins.attrNames hmKeys.config.programs.scoot.settings.binds) == 18;
       true
     )
     # ...and the keymap refuses nothing itself: the only failing
     # assertions are the idle policy's five plus the daemon's one plus
-    # the clipboard slot's three (their packages are null off Linux --
-    # the daemon's pinned in `_darwinNotifPins`, the slot's in
-    # `_darwinClipPins`), so bare tool names stay valid config, just
-    # quiet at runtime.
+    # the launcher's one plus the clipboard slot's three (their
+    # packages are null off Linux -- the daemon's pinned in
+    # `_darwinNotifPins`, the launcher's in `_darwinLaunchPins`, the
+    # slot's in `_darwinClipPins`), so bare tool names stay valid
+    # config, just quiet at runtime.
     (
-      assert builtins.length (failing hmKeys.config) == 9;
+      assert builtins.length (failing hmKeys.config) == 10;
       true
     )
     (
@@ -5303,10 +5695,12 @@ assert lib.all (x: x) _desktopPins;
 assert lib.all (x: x) _idlePins;
 assert lib.all (x: x) _notifPins;
 assert lib.all (x: x) _clipPins;
+assert lib.all (x: x) _launchPins;
 assert lib.all (x: x) _keysPins;
 assert lib.all (x: x) _darwinIdlePins;
 assert lib.all (x: x) _darwinNotifPins;
 assert lib.all (x: x) _darwinClipPins;
+assert lib.all (x: x) _darwinLaunchPins;
 assert lib.all (x: x) _darwinKeysPins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
@@ -5766,17 +6160,21 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     echo "ok: garbage monitor line is skipped"
 
     # 15. Keymap content: the rendered `[binds]` carries the
-    #     sixteen profile binds with absolute tool paths (the sigils --
+    #     eighteen profile binds with absolute tool paths (the sigils --
     #     `@...@`, `%`, `+` -- intact through TOML; the notification
-    #     binds through mako's absolute path, the daemon and the
-    #     clipboard slot being on with the profile -- and the picker
-    #     through its own script), and with every slot on all nineteen
-    #     (slot scripts as store paths, the launcher bind by bare tool
-    #     name).
+    #     binds through mako's absolute path, the daemon, the clipboard
+    #     slot and the launcher slot being on with the profile -- the
+    #     picker and both launcher binds through their own scripts),
+    #     and with every slot on all twenty (slot scripts as store
+    #     paths). No `wofi` anywhere: the launcher child reconciled the
+    #     old default. The launcher binds stay plain strings (never
+    #     repeat, never allowed while locked -- unlike the hardware
+    #     tables above).
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
-    assert len(got) == 16, got.keys()
+    assert len(got) == 18, got.keys()
+    assert "wofi" not in open(sys.argv[1]).read(), "wofi default left in [binds]"
     vol = got["XF86AudioRaiseVolume"]
     assert vol["action"].startswith("spawn ") and vol["action"].endswith(" set-volume @DEFAULT_AUDIO_SINK@ 5%+"), vol
     assert vol["repeat"] is True and vol["allow_when_locked"] is True, vol
@@ -5786,6 +6184,11 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     assert got["super+escape"].endswith(" lock-session"), got["super+escape"]
     assert isinstance(got["super+v"], str), got["super+v"]
     assert "/bin/scoot-clipboard-pick" in got["super+v"], got["super+v"]
+    assert isinstance(got["super+d"], str), got["super+d"]
+    assert "/bin/scoot-launcher" in got["super+d"], got["super+d"]
+    assert "--list-executables-in-path" not in got["super+d"], got["super+d"]
+    assert isinstance(got["ctrl+alt+space"], str), got["ctrl+alt+space"]
+    assert got["ctrl+alt+space"].endswith("/bin/scoot-launcher --list-executables-in-path"), got["ctrl+alt+space"]
     assert got["super+n"].startswith("spawn ") and got["super+n"].endswith("/bin/makoctl dismiss"), got["super+n"]
     assert got["super+shift+n"].endswith("/bin/makoctl mode -t do-not-disturb"), got["super+shift+n"]
     assert got["super+ctrl+n"].endswith("/bin/makoctl restore"), got["super+ctrl+n"]
@@ -5793,14 +6196,21 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
-    assert len(got) == 19, got.keys()
-    assert got["super+d"] == "spawn fuzzel", got["super+d"]
+    assert len(got) == 20, got.keys()
+    assert "wofi" not in open(sys.argv[1]).read(), "wofi default left in [binds]"
+    assert "/bin/scoot-launcher" in got["super+d"] and "--list-executables-in-path" not in got["super+d"], got["super+d"]
+    assert got["ctrl+alt+space"].endswith("/bin/scoot-launcher --list-executables-in-path"), got["ctrl+alt+space"]
     assert got["super+n"].endswith("/bin/makoctl dismiss"), got["super+n"]
     assert "/bin/scoot-clipboard-pick" in got["super+v"], got["super+v"]
     assert "/bin/scoot-capture-output" in got["print"], got["print"]
     assert "/bin/scoot-capture-region" in got["shift+print"], got["shift+print"]
     ' ${keysSlotsToml}
-    echo "ok: rendered [binds] carries the keymap (sixteen with the daemon and the slot, nineteen with slots)"
+    # No `wofi` default left in the modules either (a dangling default
+    # that spawns nothing): `clipboard-cliphist.nix` still names it
+    # once, as the rejected picker fat the lean package drops -- that
+    # comment is documentation, not a default, so it is excluded here.
+    if grep -rn "wofi" ${./modules} | grep -v "clipboard-cliphist.nix"; then echo "wofi default left in nix/modules" >&2; exit 1; fi
+    echo "ok: rendered [binds] carries the keymap (eighteen with the daemon and the slots, twenty with slots)"
 
     # 16. Clipboard slot content: the idle policy's lock lines carry
     #     the wipe (absolute cliphist path, before the locker, on both
@@ -5999,6 +6409,48 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     assert got["wallpaper"]["image"].endswith("moonrise.png"), got["wallpaper"]
     ' ${hmDocsDesktopToml}
     echo "ok: documented home-manager desktop renders moonrise"
+
+    # 19. Launcher slot content: the wrapper script runs this
+    #     profile's fuzzel by absolute store path (the one fuzzel the
+    #     picker themes: same derivation, no second copy), on the
+    #     `overlay` layer (above fullscreen -- fuzzel's own default is
+    #     `top`, which the compositor hides under a fullscreen window),
+    #     themed by the look (music-desk roles as fuzzel colors, opaque
+    #     -- the same seven leaves the picker carries, one menu one
+    #     palette), passing extra args through (which is what carries
+    #     the run bind's `--list-executables-in-path`).
+    grep -F -q -- "${pkgs.fuzzel}/bin/fuzzel --layer=overlay" ${launchThemed}
+    grep -F -q -- "--background-color=FCFBFBff" ${launchThemed}
+    grep -F -q -- "--text-color=1A2032ff" ${launchThemed}
+    grep -F -q -- "--border-color=3D579Aff" ${launchThemed}
+    grep -F -q -- "--selection-color=3D579Aff" ${launchThemed}
+    grep -F -q -- "--selection-text-color=FCFBFBff" ${launchThemed}
+    grep -F -q -- "--match-color=5D7AB0ff" ${launchThemed}
+    grep -F -q -- "--prompt-color=1A2032ff" ${launchThemed}
+    grep -F -q -- '"$@"' ${launchThemed}
+    if grep -q -- "--dmenu" ${launchThemed}; then echo "dmenu flag in the launcher script" >&2; exit 1; fi
+    if grep -q "clipboard_unlocked" ${launchThemed}; then echo "lock probe in the launcher script" >&2; exit 1; fi
+    echo "ok: the launcher runs fuzzel on overlay, themed, passing args through"
+
+    # 19b. Every look themes it (music-desk above; the other three
+    #      here: each background role as its opaque flag).
+    grep -F -q -- "--background-color=271A1Fff" ${launchVinyl}
+    grep -F -q -- "--text-color=F1E3C6ff" ${launchVinyl}
+    grep -F -q -- "--background-color=241721ff" ${launchBurst}
+    grep -F -q -- "--match-color=31a9e5ff" ${launchBurst}
+    grep -F -q -- "--background-color=2B3648ff" ${launchMoon}
+    grep -F -q -- "--text-color=F6EEDCff" ${launchMoon}
+    echo "ok: all four looks theme the launcher"
+
+    # 19c. Lookless (or opted out): no themed flag at all -- the
+    #      layer and the passthrough stay (behavior, not theme), and
+    #      fuzzel's own colors stand.
+    if grep -q -- "--background-color=" ${launchNoLook}; then echo "themed flag present with no look" >&2; exit 1; fi
+    grep -F -q -- "${pkgs.fuzzel}/bin/fuzzel --layer=overlay" ${launchNoLook}
+    grep -F -q -- '"$@"' ${launchNoLook}
+    if grep -q -- "--background-color=" ${launchTargetOff}; then echo "themed flag present with theming off" >&2; exit 1; fi
+    grep -F -q -- "${pkgs.fuzzel}/bin/fuzzel --layer=overlay" ${launchTargetOff}
+    echo "ok: opting out (or no look) leaves fuzzel unthemed but layered"
   ''}
 
   touch $out

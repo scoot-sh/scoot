@@ -280,6 +280,25 @@ in
         };
       };
 
+      # The launcher's package: the shape is in `desktop.nix`
+      # (shared with the home-manager side) and the wrapper script that
+      # runs it is that side's (`keys-home.nix`); this side installs it
+      # system-wide. The same package as there, so either side alone
+      # names the same launcher. Merged here for the same
+      # one-declaration reason as above. Linux-only: off Linux it
+      # defaults to null, which the assertion below refuses loudly.
+      launcher = desktop.options.launcher // {
+        package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null";
+          description = ''
+            The launcher package to install system-wide (fuzzel).
+            Null installs nothing. Linux-only: null off Linux.
+          '';
+        };
+      };
+
       # The clipboard's packages: the shapes are in `desktop.nix`
       # (shared with the home-manager side) and the watcher units that
       # run them are that side's (`clipboard-home.nix`); this side
@@ -635,6 +654,11 @@ in
       # home-manager side.
       programs.scoot.desktop.notifications.enable = lib.mkDefault true;
 
+      # The launcher slot on with the profile (still individually
+      # disable-able at plain priority): the package below installs,
+      # and the binds come from the home-manager side.
+      programs.scoot.desktop.launcher.enable = lib.mkDefault true;
+
       # The clipboard slot on with the profile (still individually
       # disable-able at plain priority): the packages below install,
       # and the watcher units come from the home-manager side.
@@ -660,6 +684,27 @@ in
       environment.systemPackages = lib.optional (
         cfg.desktop.notifications.package != null
       ) cfg.desktop.notifications.package;
+    })
+    # The launcher's system half: its package on PATH. The wrapper
+    # script and the binds are the home-manager side's
+    # (`keys-home.nix`): without it the binary sits ready for a
+    # hand-written setup, the way a `[wallpaper]` finds scootbg on PATH
+    # without the home-manager side.
+    (lib.mkIf cfg.desktop.launcher.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.launcher.package != null;
+          message = ''
+            programs.scoot.desktop.launcher.enable is set but
+            programs.scoot.desktop.launcher.package is null: set it
+            explicitly (apply the overlay, or point at a fuzzel).
+          '';
+        }
+      ];
+
+      environment.systemPackages = lib.optional (
+        cfg.desktop.launcher.package != null
+      ) cfg.desktop.launcher.package;
     })
     # The clipboard's system half: its tools on PATH. The watcher units
     # and the picker are the home-manager side's (`clipboard-home.nix`

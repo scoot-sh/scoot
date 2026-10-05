@@ -215,7 +215,7 @@ scale = 1.0
 "super+shift+n" = "move-column right"
 "super+t" = "spawn foot"
 "super+shift+t" = "spawn foot -e htop"
-"ctrl+alt+space" = "spawn wofi --show drun"
+"ctrl+alt+space" = "spawn fuzzel"
 
 [autostart]
 commands = [

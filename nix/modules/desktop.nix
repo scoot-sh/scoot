@@ -134,7 +134,12 @@ let
     launcher = {
       combo = "super+d";
       slot = "launcher";
-      blurb = "launcher (`fuzzel`)";
+      blurb = "launcher (`fuzzel` drun: XDG apps)";
+    };
+    launcherRun = {
+      combo = "ctrl+alt+space";
+      slot = "launcher";
+      blurb = "run mode (`fuzzel --list-executables-in-path`: PATH executables beside apps)";
     };
     clipboard = {
       combo = "super+v";
@@ -454,11 +459,46 @@ in
         '';
       };
     };
-    # fuzzel (layer-shell `overlay` native, no toolkit). Note: the
-    # default binds name `wofi` today; the launcher child reconciles that.
-    launcher = slot {
-      child = "desktop-launcher";
-      tool = "`fuzzel`";
+    # fuzzel now, scootlaunch later without changing option names: the
+    # daemon behind `daemon` is the only visible change when
+    # scootlaunch replaces it (same `enable`, same binds, same
+    # `--dmenu` contract the clipboard picker and the bar's future
+    # pickers call -- see `docs/scootbar/backlog/launcher.md`). Filled
+    # by the `desktop-launcher` child: fuzzel on the keymap's `Super+d`
+    # (drun: XDG apps from the user's and the system's `XDG_DATA_DIRS`)
+    # and `Ctrl+Alt+Space` (run: PATH executables beside apps), on the
+    # `overlay` layer (so it opens above fullscreen windows) with
+    # exclusive keyboard, themed by the look.
+    #
+    # On with the profile (still individually disable-able); without
+    # it, `enable` works standalone (unthemed: a look needs the
+    # profile, and the themed flags need the home-manager side, the way
+    # the clipboard picker does).
+    launcher = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Open the launcher: fuzzel (its package beside this) listing
+          XDG apps, most-launched first, with PATH executables on the
+          run bind. The launcher holds nothing when closed (no daemon,
+          no unit). Without it nothing answers the keymap's launcher
+          binds, and they stay unbound.
+        '';
+      };
+
+      daemon = lib.mkOption {
+        type = lib.types.enum [ "fuzzel" ];
+        default = "fuzzel";
+        description = ''
+          The program behind `enable`. Only fuzzel today (layer-shell
+          `overlay` native, no toolkit, fastest cold start of the
+          maintained set -- see site/src/content/docs/desktop/index.md#launcher
+          for the measured pick); a
+          future scootlaunch widens this enum, the option and the binds
+          staying as they are.
+        '';
+      };
     };
     # Screenshots bound to keys.
     capture = slot {
@@ -593,6 +633,16 @@ in
             Theme the history picker from the look (menu background
             and text, selection and border from its palette). Set to
             `false` to keep fuzzel's own style.
+          '';
+        };
+        targets.launcher.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Theme the launcher from the look (menu background and
+            text, selection and border from its palette -- the same
+            roles the history picker is themed from). Set to `false`
+            to keep fuzzel's own style.
           '';
         };
       };
