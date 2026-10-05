@@ -493,7 +493,8 @@ in
         description = ''
           The program behind `enable`. Only fuzzel today (layer-shell
           `overlay` native, no toolkit, fastest cold start of the
-          maintained set -- see docs/nix.md for the measured pick); a
+          maintained set -- see site/src/content/docs/desktop/index.md#launcher
+          for the measured pick); a
           future scootlaunch widens this enum, the option and the binds
           staying as they are.
         '';

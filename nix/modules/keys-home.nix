@@ -129,7 +129,7 @@ let
 
   # The launcher: fuzzel as the keymap's drun/run binds (XDG apps,
   # most-launched first, PATH executables on the run bind -- see
-  # docs/nix.md "Launcher"). A script because the theme travels as CLI
+  # site/src/content/docs/desktop/index.md#launcher). A script because the theme travels as CLI
   # flags (seven colors from the look, the same ones the picker above
   # carries -- one menu, one palette), and a `[binds]` action gets no
   # shell to hold them beside the binary. Absolute fuzzel path when the
