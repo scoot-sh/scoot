@@ -168,15 +168,14 @@ fn a_failed_download_keeps_the_background_and_says_why() {
     // made before the attempt, so they may exist, empty: the daemon
     // caches under `$XDG_CACHE_HOME/scootbg/`).
     let store = cache.join("scootbg");
-    let entries: Vec<String> = store
-        .exists()
-        .then(|| {
-            std::fs::read_dir(&store)
-                .unwrap()
-                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-                .collect()
-        })
-        .unwrap_or_default();
+    let entries: Vec<String> = if store.exists() {
+        std::fs::read_dir(&store)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect()
+    } else {
+        Vec::new()
+    };
     assert!(entries.is_empty(), "a failed download caches: {entries:?}");
     assert!(session.run(&["kill"]).status.success());
     let _ = daemon.wait();
