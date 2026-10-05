@@ -9,6 +9,33 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 #[test]
+fn the_tail_never_splits_a_char() {
+    // 499 ASCII bytes, then a two-byte `é` straddling the 500-byte cut:
+    // slicing there by bytes panics, and the release profile aborts the
+    // daemon on panic.
+    let mut line = "a".repeat(499);
+    line.push('é');
+    line.push_str(&"b".repeat(100));
+    let stderr = format!("curl: (6) noise\n{line}\n");
+    let detail = tail(stderr.as_bytes());
+    assert!(detail.ends_with("..."), "{detail:?}");
+    assert!(detail.len() <= 500 + 3, "{detail:?}");
+    // A four-byte char straddling the same cut.
+    let mut line = "a".repeat(499);
+    line.push('🦀');
+    line.push_str(&"b".repeat(100));
+    let detail = tail(line.as_bytes());
+    assert!(detail.ends_with("..."), "{detail:?}");
+    assert!(detail.len() <= 500 + 3, "{detail:?}");
+    // Short lines still pass through whole, without the ellipsis.
+    assert_eq!(
+        tail(b"curl: (6) nothing resolves that host"),
+        "curl: (6) nothing resolves that host"
+    );
+    assert_eq!(tail(b""), "");
+}
+
+#[test]
 fn urls_are_http_and_https() {
     for url in [
         "http://example.com/a.png",

@@ -13,10 +13,11 @@
 //! error naming the URL, and nothing is cached.
 //!
 //! **No retries, no polling.** A download runs once per worker job, and a
-//! job runs only on demand: a `set` or a changed section's trial, or a
-//! render for an output that is (re)configured or re-targeted while the
-//! choice is live. Offline at startup, the background shows and one line
-//! says why; the next start, `set` or changed section tries again.
+//! job runs only on demand: a `set`, any `apply-config` (even an unchanged
+//! reload), or a render for an output that is (re)configured or
+//! re-targeted while the choice is live. Offline at startup, the
+//! background shows and one line says why; the next start, `set` or
+//! `apply-config` tries again.
 //!
 //! **Two instances racing** on one cache entry both download to their own
 //! temporary file; the atomic rename settles it (last wins, both valid:
@@ -413,7 +414,14 @@ fn tail(stderr: &[u8]) -> String {
     if line.len() <= MAX_DETAIL {
         line.to_owned()
     } else {
-        format!("{}...", line[..MAX_DETAIL].trim_end())
+        // Byte 500 may sit inside a multibyte char; slicing there panics,
+        // and the release profile aborts the daemon on panic. Back off to
+        // the boundary (at most three bytes back: UTF-8's longest char).
+        let mut end = MAX_DETAIL;
+        while !line.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", line[..end].trim_end())
     }
 }
 
