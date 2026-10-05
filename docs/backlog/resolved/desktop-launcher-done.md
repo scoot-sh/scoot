@@ -1,9 +1,10 @@
 ---
 title: "Desktop launcher: fuzzel now, scootlaunch later"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-05"
 ---
 
 # Desktop launcher: fuzzel now, scootlaunch later
@@ -45,3 +46,32 @@ launch; dmenu round-trip from a pipe); docs in `docs/nix.md`.
 
 Building `scootlaunch` itself; file-picker dialogs (portal child);
 emoji pickers.
+
+## Resolution (2026-10-05)
+
+Landed as the `desktop.launcher` slot filled with fuzzel: `enable` +
+`daemon` (`"fuzzel"`, widened later without renaming anything) in
+`nix/modules/desktop.nix`, the package default in
+`nix/modules/launcher-home.nix` (new) and `nix/modules/nixos.nix`,
+one wrapper script (`scoot-launcher`: fuzzel by absolute store path,
+`--layer=overlay`, the look's seven color flags shared with the
+clipboard picker through `nix/modules/fuzzel-theme.nix` (new), extra
+args passed through) beside the keymap's two binds in
+`nix/modules/keys-home.nix` (`Super+d` drun, `Ctrl+Alt+Space` run via
+`--list-executables-in-path`), on with the profile, per-target opt-out
+`theme.targets.launcher.enable`. `wofi` reconciled everywhere
+(`docs/nix.md`, `home.nix`, `docs/configuration.md`); `nix/tests.nix`
+pins the binds at the installed script, the all-four-looks theming,
+the refusals, and no `wofi` default in the modules or the rendered
+binds.
+
+Measured at the pinned rev (`8ce4ef6`, `aarch64-linux`): fuzzel
+152.4 MiB full / 41.7 MiB over the profile (4 paths; 0 with the
+clipboard, same derivation), wofi 342.3/67.4, tofi 113.0/0.2, bemenu
+117.4/0.6; cold first frame 57/50/52 ms fuzzel (sub-60), 135/80/73
+wofi, 62/41/46 tofi, 57/33/36 bemenu; RSS ~22 MB open, nothing when
+closed. Proven live in a `scoot-test` login on the Asahi M2: both
+binds' scripts open themed (screenshots in `docs/nix.md`), `foot`
+typed and launched maps focused, dmenu pipe round-trips, locked
+frames stay byte-identical with the spawn refused, empty app list
+draws an empty menu. Full evidence in the implementer report.
