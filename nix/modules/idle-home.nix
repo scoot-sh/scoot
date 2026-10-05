@@ -59,6 +59,15 @@ let
     + "\n"
   );
 
+  # The lock action is also the keymap's `super+escape` bind (see
+  # `keys-home.nix`): with the keymap on and that bind kept, an
+  # empty/quote-carrying command renders there even while the idle
+  # policy is off -- so the refusal below fires then too, not just
+  # beside the swayidle timeout line.
+  lockCommandConsumed =
+    (idle.enable && idle.lock.enable)
+    || ((cfg.desktop.keys.enable or false) && (cfg.desktop.keys.binds.lock.enable or true));
+
   # Every tool present (a null beside `enable` is the loud assertion
   # below, not a throw inside `getExe`: the same guard the bar's unit
   # uses, since standalone evals collect assertions without enforcing
@@ -318,15 +327,21 @@ in
             speaks the daemon's flags).
           '';
         }
+      ];
+
+      xdg.configFile."swaylock/config".source = swaylockConfig;
+    })
+
+    # The lock action's shape, wherever it renders (the swayidle
+    # timeout line above, the keymap's `super+escape` bind): an
+    # explicitly empty or whitespace-only value would run a no-op,
+    # and a single quote would break out of the timeout line's
+    # quoting and corrupt the config line. (`builtins.match`
+    # returns null on no match, so each disjunct is false exactly
+    # for empty/blank and quote-carrying strings.)
+    (lib.mkIf lockCommandConsumed {
+      assertions = [
         {
-          # Loud at eval, like `session.command`'s: the action renders
-          # inside single quotes on the swayidle timeout line, so an
-          # explicitly empty or whitespace-only value would run a no-op
-          # (the session never locking while `lock.enable` says it
-          # does), and a single quote would break out of the quoting
-          # and corrupt the config line. (`builtins.match` returns null
-          # on no match, so each disjunct is false exactly for
-          # empty/blank and quote-carrying strings.)
           assertion =
             builtins.match "^[[:space:]]*$" idle.lock.command == null
             && builtins.match ".*'.*" idle.lock.command == null;
@@ -337,8 +352,6 @@ in
           '';
         }
       ];
-
-      xdg.configFile."swaylock/config".source = swaylockConfig;
     })
 
     # The profile turns the policy on (each still individually

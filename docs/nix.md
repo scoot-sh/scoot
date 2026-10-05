@@ -1200,7 +1200,7 @@ into the new config; no re-login):
 | `desktop.idle.offTimeout` | int (seconds) | `300` | inactivity before outputs power off; `0` disables the step |
 | `desktop.idle.mediaInhibit.enable` | bool | `true` with the profile | hold idle while audio plays (needs PipeWire or PulseAudio running) |
 | `desktop.idle.lock.enable` | bool | `true` with the profile | lock through the locker below |
-| `desktop.idle.lock.command` | string | `<systemd>/bin/loginctl lock-session` (bare `loginctl lock-session` off Linux) | the stable lock action: what the timeout runs, and what the keymap's `Super+Escape` bind runs ([Hardware keys](#hardware-keys-and-desktop-actions)) -- lid-close and manual locks share this path through logind |
+| `desktop.idle.lock.command` | string | `<systemd>/bin/loginctl lock-session` (bare `loginctl lock-session` off Linux) | the stable lock action: what the timeout runs, and what the keymap's `Super+Escape` bind runs ([Hardware keys](#hardware-keys-and-desktop-actions)) -- lid-close and manual locks share this path through logind; empty, blank or quote-carrying values fail evaluation (the bind reads it too, so the check holds with the policy off) |
 | `desktop.idle.lock.daemon` | enum (`"swaylock"`) | `"swaylock"` | the locker behind the action (smallest working closure, plain-text config, CPU-only; a future scootlock widens this without renaming anything) |
 | `desktop.idle.lock.settings` | attrset of string | `{ }` | extra swaylock lines over the themed ones (a value here wins per key; `""` renders a bare flag, e.g. `{ show-failed-attempts = ""; }`) |
 | `desktop.theme.targets.lock.enable` | bool | `true` | theme the locker from the look (screen and indicator from its palette); `false` keeps swaylock's own style while the rest follows the look |
@@ -1467,6 +1467,14 @@ profile that installs those tools, not to every scoot session.
 | `Super+Ctrl+n` | show hidden notifications | `notifications.enable` (mako) |
 | `Print` | screenshot every output into `~/Pictures` | `capture.enable` (grim) |
 | `Shift+Print` | screenshot a picked region into `~/Pictures` | `capture.enable` (grim plus slurp) |
+
+The do-not-disturb bind and the bar's notification toggle agree by
+construction: both run mako's `mode -t do-not-disturb` from
+`notifications.package` by absolute path (pinned in `nix/tests.nix`),
+so the key and a bar click never diverge -- overriding the package
+moves both. The other two notification binds run mako's `dismiss`
+and `restore` the same way, and only while `notifications.enable`
+is on beside the keymap.
 
 On an Apple keyboard these are the Fn row: `F1`/`F2` brightness,
 `F7`/`F8`/`F9` previous/play/next, `F10` mute, `F11`/`F12` volume
