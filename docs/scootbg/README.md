@@ -987,7 +987,7 @@ gated rows weigh the floor by allocated pages.
   The home-manager module installs it and points `command` at it whenever
   its settings have a `wallpaper` table; the NixOS module installs it
   system-wide whenever `programs.scoot.enable` is on
-  (`programs.scoot.wallpaper.enable`). See [docs/nix.md](../nix.md).
+  (`programs.scoot.wallpaper.enable`). See [the scoot desktop](https://www.scoot.sh/desktop/).
 - scoot's `[appearance] background_color` stays: it is the frame clear
   color, what shows with no wallpaper client at all. scootbg draws over it
   on the background layer.

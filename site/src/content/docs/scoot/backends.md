@@ -44,8 +44,11 @@ requirement, not a fallback tier. `gles` is opt-in:
   `gpu-scanout` build. The frame is scanned out directly instead of
   being read back and memcpy'd into a dumb buffer. Without that
   feature `--tty` warns and keeps pixman, because the read-back shape
-  would be strictly worse than the CPU. `--headless` is read-back in
-  every build.
+  would be strictly worse than the CPU. With the feature, a device
+  that cannot drive the scanout tier warns and falls back the same
+  way — CPU renderer and dumb buffers — instead of refusing to start:
+  on `--tty` scoot *is* the session, so a refusal would be a lockout.
+  `--headless` is read-back in every build.
 - **Under `--nested`, a `gpu-scanout` build hands each frame to the
   host as a dma-buf** — no CPU copy on scoot's side, nothing for the
   host to upload — but only when it is safe (the host offers dma-buf
@@ -58,10 +61,12 @@ requirement, not a fallback tier. `gles` is opt-in:
   renderer is up device=/dev/dri/renderD128 software=false`) — trust
   that line over the flag name.
 - **A wrong `--renderer gles` is a startup error, not a silent
-  downgrade.** If no EGL device can drive it scoot says so and names
-  each failure rather than quietly compositing with the other
-  renderer. There is no automatic fallback: drop the flag (stay on
-  pixman) or fix the cause.
+  downgrade — when EGL itself is missing or broken.** If no EGL device
+  can drive it scoot says so and names each failure rather than quietly
+  compositing with the other renderer. There is no automatic fallback
+  on that path: drop the flag (stay on pixman) or fix the cause. (The
+  deliberate exception is `--tty` GPU scanout above: there scoot warns
+  and keeps the CPU renderer instead of refusing to start.)
 
 Measured where it pays (Apple M2 under Asahi Linux): 4–5x less
 compositor CPU under damage than the default tier, ~0.2 W less power,
@@ -114,7 +119,10 @@ whenever the display moves: a plugged monitor gets an output of its
 own, placed right of the others, without moving the session off
 already-lit screens; pulling one adopts its workspaces elsewhere (and
 a matching monitor's return moves them back). With nothing connected
-at all scoot holds the last frame and keeps running.
+at all scoot holds the last frame and keeps running. One tier for the
+whole session: the first monitor decides it — if the first falls back
+to dumb buffers, every monitor uses dumb buffers, and a later monitor
+that cannot join the GPU tier stays dark rather than mixing tiers.
 
 **VT switching.** `--tty` binds `Ctrl+Alt+F1`…`F12`, layered on *after*
 the config loads and always winning over a colliding file bind (with a

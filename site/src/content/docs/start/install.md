@@ -61,12 +61,17 @@ system (NixOS: `hardware.graphics` enabled), and `--tty` scanout needs
 the real seat.
 
 > **Symptom:** `--renderer gles` exits at startup naming EGL devices.
-> That is the intended behavior, not a bug to work around: a wrong
-> `--renderer gles` is a **startup error, never a silent downgrade** —
-> scoot names each failure and points back at `--renderer pixman`, which
-> needs no GPU at all. There is **no automatic fallback** to the
-> CPU tier. Either drop the flag (stay on pixman) or fix the cause: the
-> GPU build installed, drivers present, render node visible.
+> That is the intended behavior, not a bug to work around: when EGL
+> itself is missing or broken, a wrong `--renderer gles` is a
+> **startup error, never a silent downgrade** — scoot names each
+> failure and points back at `--renderer pixman`, which needs no GPU
+> at all. There is **no automatic fallback** to the CPU tier on that
+> path. Either drop the flag (stay on pixman) or fix the cause: the
+> GPU build installed, drivers present, render node visible. (The one
+> deliberate fallback is the other direction: under `--tty`, a `gles`
+> session whose device cannot drive GPU scanout warns and keeps the
+> CPU renderer with dumb buffers instead of refusing to start — see
+> [Backends and rendering](../scoot/backends.md#which-renderer-draws-the-frames).)
 
 ### Say it in the config
 
@@ -138,6 +143,81 @@ extra-trusted-public-keys = scoot-sh.cachix.org-1:QMj7CMw8uqZxrvqqm6SggdxTHz6Q4p
 What this trusts: binaries built by CI from reviewed merges to `main`. A
 substituter can serve any store path your Nix asks for, so this trusts CI's
 builds the way installing the flake already trusts its source.
+
+## Packaging notes
+
+The names in the chooser above are flake outputs
+(`packages.<system>.*`); the same derivations are also `pkgs.*`
+through the overlay, `nix run` apps, and per-system defaults:
+
+| Name | Gives you | Pick it when |
+|---|---|---|
+| `scoot` | the compositor alone (`$out/bin` carries only `scoot`) | the Linux default; VM, webtop, nested-only |
+| `scoot-gpu` | the same binary with the `gpu-scanout` feature | real hardware with a GPU (still named `scoot`) |
+| `scoot-xwayland` / `scoot-gpu-xwayland` | those two with the `xwayland` feature and Xwayland on `PATH` (Linux only) | you run X11 apps |
+| `scootctl` | the standalone remote-control client (every system) | driving a compositor running in a VM |
+| `scootbg` | the wallpaper daemon (Linux only) | `[wallpaper]` without the desktop profile |
+| `scootbar` | the status bar, no font in its closure (Linux only) | the bar with your own fonts |
+| `scootbar-demo` | the bar with a nixpkgs font as its default | trying the bar on a box with no fonts |
+| `default` | `scoot` on Linux, `scootctl` on macOS — whichever is honest there | `nix run` without choosing |
+
+`nix run` mirrors six of them — `default`, `scootctl`, `scoot-gpu`,
+`scoot-xwayland`, `scootbar` and `scootbar-demo` (no `scootbg`,
+`scoot-gpu-xwayland` or docs-site app):
+
+```sh
+nix run github:scoot-sh/scoot -- --nested -- foot
+nix run github:scoot-sh/scoot#scootbar-demo -- daemon --right clock
+```
+
+### The overlay
+
+`overlays.default` adds `pkgs.scoot`, `pkgs.scootctl` and, on Linux,
+`pkgs.scootbg` and `pkgs.scootbar`:
+
+```nix
+nixpkgs.overlays = [ inputs.scoot.overlays.default ];
+```
+
+They are the flake's own builds, the same derivations as
+`packages.<system>.*`, not rebuilt against your nixpkgs — nothing is
+built twice. With the overlay applied, the modules' `package` and
+`wallpaper.package` default to these, which is what makes the pure
+modules usable without the flake's wrappers. On macOS the overlay adds
+`scoot` and `scootctl` (the client) and no `scootbg` or `scootbar`. It
+never adds `scootbar-demo`: a demo to run, not a package to build on.
+
+Per-side macOS split, same rule everywhere: the home-manager module
+manages the config file on any system (on macOS files-only, with
+`package` defaulting to null — the config you edit here deploys to a
+Linux box), while the NixOS module's session entry only means anything
+on NixOS. `scootbg` and `scootbar` are Linux-only: no macOS package,
+and on macOS a `[wallpaper]` section renders as written and installs
+nothing.
+
+> **Symptom:** converting an old `flexwm` setup builds fine but the
+> session boots on built-in defaults — scale and binds silently gone —
+> or the login entry fails. Three renames, all silent at build time
+> (Nix interpolates store paths without checking the binary exists):
+> `${pkg}/bin/flexwm` → `${pkg}/bin/scoot` in wrappers and `Exec=`
+> lines; `xdg.configFile."flexwm/config.toml"` → `programs.scoot.settings`
+> (or `"scoot/config.toml"`) — this is the dangerous one, so move the
+> content and delete the old entry, otherwise your real config sits
+> orphaned at a path nothing reads; and the module split
+> (`homeModules.scoot`, with the legacy `homeManagerModules.scoot`
+> spelling still resolving, owns the config file, `nixosModules.scoot`
+> owns the binaries and the login entry — a hand-rolled `xdg.configFile`
+> next to the module manages a file scoot never reads, so keep the
+> module's and delete the hand-rolled one).
+
+> **Symptom:** rebuild fails with `not of type 'TOML value'` naming
+> `programs.scoot.settings`. A value with no TOML representation (a Nix
+> function in `settings`) fails the option type-check at evaluation
+> time — loud and early, before anything builds, let alone starts a
+> session. A value that renders but has the wrong scoot type (a string
+> for `layout.gap`) builds fine and is refused at session start instead,
+> where the loader fails safe — see [Failure
+> semantics](../scoot/configure.md#failure-semantics).
 
 ## Build from source
 

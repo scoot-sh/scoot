@@ -3,7 +3,7 @@
 # run, and `wl-copy`/`wl-paste` plus the picker menu on PATH. The option
 # shapes live in `./desktop.nix` (shared with the NixOS side); the
 # `package` defaults live here because only this side has `pkgs`. See
-# docs/nix.md ("Clipboard").
+# site/src/content/docs/desktop/index.md#clipboard.
 {
   config,
   lib,

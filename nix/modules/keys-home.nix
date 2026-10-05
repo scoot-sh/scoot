@@ -144,7 +144,8 @@ let
   slotOn = name: (cfg.desktop.${name}.enable or false);
 
   # A hardware bind: repeats while held and fires while locked (the
-  # compositor's `[binds]` table form -- see docs/configuration.md).
+  # compositor's `[binds]` table form -- see
+  # site/src/content/docs/scoot/keybindings.md#the-bind-grammar).
   # Exactly the volume, brightness and media binds opt into both: a held
   # key keeps stepping at the seat keyboard's own delay and rate, and the
   # keys keep working on the lock screen. Every other bind stays a plain
