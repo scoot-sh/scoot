@@ -345,6 +345,33 @@ fn reload_refuses_an_xwayland_flip_with_restart_named() {
 }
 
 #[test]
+fn reload_refuses_a_virtual_input_flip_with_restart_named() {
+    // The globals are advertised once at startup (or never): flipping the
+    // knob in the file can neither advertise nor un-advertise them, so the
+    // reload refuses -- while an agreeing file stays silent in both lists.
+    // The fixture never asked (its snapshot is off), so `enabled = true`
+    // is the flip and the bare file is the agreement.
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite("[virtual_input]\nenabled = true\n");
+    let response = fixture.reload();
+    let virtual_input = refused(&response)
+        .iter()
+        .find(|entry| entry.starts_with(field::VIRTUAL_INPUT))
+        .expect("the virtual-input refusal");
+    assert!(
+        virtual_input.contains("takes effect on restart"),
+        "the virtual-input refusal should name restart: {virtual_input}"
+    );
+
+    fixture.rewrite("");
+    let response = fixture.reload();
+    assert!(
+        !refused_names(&response).contains(&field::VIRTUAL_INPUT),
+        "an agreeing virtual-input knob should stay silent: {response:?}"
+    );
+}
+
+#[test]
 fn reload_applies_output_scale_and_halves_the_logical_geometry() {
     // The Phase 3 pin: `scale = 2.0` moves from the file into the live
     // session under its own applied name, the precomputed integer follows,

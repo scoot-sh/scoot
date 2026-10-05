@@ -94,7 +94,7 @@ pub const REQUESTS: &[RequestDoc] = &[
     },
     RequestDoc {
         verb: "pointer",
-        syntax: "pointer move X Y | pointer click X Y [left|right|middle]",
+        syntax: "pointer move X Y | pointer click X Y [left|right|middle|back|forward]",
         description: "move, click, press/release, or scroll (also: pointer button, pointer scroll)",
         example: "scootctl pointer click 800 500",
         reply: "`{\"type\":\"ok\",...}`",

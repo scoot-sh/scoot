@@ -475,6 +475,8 @@ fn linux_button(code: u32) -> Option<PointerButton> {
         0x110 => Some(PointerButton::Left),
         0x111 => Some(PointerButton::Right),
         0x112 => Some(PointerButton::Middle),
+        0x115 => Some(PointerButton::Back),
+        0x116 => Some(PointerButton::Forward),
         _ => None,
     }
 }

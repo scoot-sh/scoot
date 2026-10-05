@@ -1548,6 +1548,10 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
     if paused {
         state.end_floating_grab();
         state.settle_floating_grab();
+        // A virtual device's held keys and buttons would otherwise survive
+        // the switch away: the release lands in whatever session is active
+        // then, never here. Same shape as the floating drag above.
+        state.release_virtual_input();
         // Frozen screens show no motion: forget any armed hide, and show
         // the pointer again for the switch back. A held key's releases go
         // to whatever session is active then, never here, so an in-flight
@@ -1819,6 +1823,8 @@ fn linux_button(code: u32) -> Option<PointerButton> {
         0x110 => Some(PointerButton::Left),
         0x111 => Some(PointerButton::Right),
         0x112 => Some(PointerButton::Middle),
+        0x115 => Some(PointerButton::Back),
+        0x116 => Some(PointerButton::Forward),
         _ => None,
     }
 }
