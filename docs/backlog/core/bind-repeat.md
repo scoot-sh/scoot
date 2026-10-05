@@ -8,7 +8,7 @@ blocked: null
 
 # Binds do not repeat while held; no key repeat at all
 
-Filed 2026-10-05 from the `desktop-keys` verification (docs/backlog/packaging/desktop-keys.md:
+Filed 2026-10-05 from the `desktop-keys` verification (docs/backlog/resolved/desktop-keys-done.md:
 "whether a held key repeats a bind (holding volume up must step, not fire
 once)"). Serves **daily-drive**: holding volume-up stepping once per
 press is not daily-drivable, and neither is a terminal with no key

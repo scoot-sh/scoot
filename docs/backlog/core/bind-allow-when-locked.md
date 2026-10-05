@@ -9,7 +9,7 @@ blocked: null
 # No per-bind allow-when-locked: volume and brightness die at the lock screen
 
 Filed 2026-10-05 from the `desktop-keys` verification
-(docs/backlog/packaging/desktop-keys.md: "whether `[binds]` fire
+(docs/backlog/resolved/desktop-keys-done.md: "whether `[binds]` fire
 while the session is locked (volume/brightness should,
 launcher/clipboard must not)"). Serves **daily-drive**: volume and
 brightness keys going dead the moment the session locks is the kind

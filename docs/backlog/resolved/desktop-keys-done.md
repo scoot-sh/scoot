@@ -1,9 +1,10 @@
 ---
 title: "Desktop: one default keymap for hardware keys and desktop actions"
-status: "open"
-area: "packaging"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-05"
 ---
 
 # Desktop: one default keymap for hardware keys and desktop actions
@@ -12,6 +13,33 @@ Filed 2026-10-04, child of `desktop-paved-path`. The maintainer: "We should
 ship default key shortcuts that do screen brightness, volume, all of that
 too. Maximize and all the other main ones." Serves **daily-drive**: a laptop
 whose brightness and volume keys do nothing is not daily-drivable.
+
+## Resolution (PR #TBD, 2026-10-05)
+
+Landed as `programs.scoot.desktop.keys` (`nix/modules/keys-home.nix`,
+shapes in `desktop.nix`, system tools in `nixos.nix`, pins in
+`nix/tests.nix`, docs in `docs/nix.md` "Hardware keys and desktop
+actions"). Nineteen binds: brightness/volume/mute/mic/media/lock
+with the profile; launcher (`Super+d`), clipboard (`Super+v`),
+notification dismiss/DND/history, `Print`/`Shift+Print` only with
+their slots. Kept existing defaults (`Super+m` maximize,
+`Super+f` fullscreen, cross-monitor focus/move) and listed them in
+the one keymap table. `Super+d` over `Super+Space` for the launcher
+(the latter moves floating focus today; renaming it would break
+users). Compositor defaults gain no hardware keys: they would spawn
+tools scoot does not ship, so they stay a profile concern.
+
+Verified in source, not assumed: missing tools fail quietly
+(`State::spawn` warns, returns false); no `[binds]` action fires
+while locked except VT switch (filed: `core/bind-allow-when-locked`);
+a held key fires once, no repeat timer exists (filed:
+`core/bind-repeat`). Keyboard backlight unbound (no stable device;
+the M2 exposes none). OSD is a hook for `desktop-audio-osd`.
+Notifications (#441 unmerged) got slot-gated `makoctl` binds, not
+stubs. Eval pins for all 19 binds, an override, a removal, and
+slot gating; live `--tty` proof on the M2 in the PR (before/after
+`brightnessctl`/`wpctl` readings, uinput Fn-key injection, lock
+behavior shown, volume/brightness restored).
 
 ## The gap
 
