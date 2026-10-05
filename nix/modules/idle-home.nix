@@ -291,6 +291,9 @@ in
           After = [ "scoot-session.target" ];
           # New timeouts restart the daemon (it starts in milliseconds).
           X-Restart-Triggers = [ "${swayidleConfig}" ];
+          # Unending retries, like the bar's unit (`StartLimitIntervalSec`
+          # lives in `[Unit]`: systemd ignores it in `[Service]`).
+          StartLimitIntervalSec = 0;
         };
         Service = {
           # `-w` waits for each command: the before-sleep lock is up
@@ -298,11 +301,10 @@ in
           ExecStart = "${lib.getExe idle.package} -w -C ${swayidleConfig}";
           Restart = "on-failure";
           RestartSec = 2;
-          # Unending retries, like the bar's unit: a start before the
+          # A start before the
           # compositor is up must retry, not die at the burst limit (a
           # broken config then logs every 2 s until fixed -- loud beats
           # silent).
-          StartLimitIntervalSec = 0;
         };
         Install.WantedBy = [ "scoot-session.target" ];
       };
@@ -327,12 +329,14 @@ in
           Description = "scoot idle inhibitor while audio plays";
           PartOf = [ "scoot-session.target" ];
           After = [ "scoot-session.target" ];
+          # Unending retries (`StartLimitIntervalSec` lives in `[Unit]`:
+          # systemd ignores it in `[Service]`).
+          StartLimitIntervalSec = 0;
         };
         Service = {
           ExecStart = lib.getExe idle.mediaInhibit.package;
           Restart = "on-failure";
           RestartSec = 2;
-          StartLimitIntervalSec = 0;
         };
         Install.WantedBy = [ "scoot-session.target" ];
       };
