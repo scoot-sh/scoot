@@ -49,7 +49,7 @@ with `btop/themes/vinyl.theme` as `~/.config/btop/themes/vinyl.theme`,
 `~/.config/lazygit/config.yml`) and point `[wallpaper] image` at
 a copy of the illustration — or at its Pixabay link directly, which scootbg
 downloads once into `~/.cache/scootbg/` (see
-[wallpaper from a link](https://scoot-sh.github.io/scoot/scootbg/from-url.md#a-wallpaper-from-a-link);
+[wallpaper from a link](https://www.scoot.sh/scootbg/from-url.md#a-wallpaper-from-a-link);
 `sha256` pins it). The prompt in the preview runs under
 `STARSHIP_CONFIG` pointing at `starship.toml`, e.g.
 `env STARSHIP_CONFIG=~/.config/starship.toml bash -i`.
@@ -108,7 +108,7 @@ opt-in and you can drop any of them:
   [scootbg](../../scootbg/README.md)). Drop `[wallpaper]` for a solid
   `background_color` and the cost is gone.
 - **`corner_radius`** costs a little per frame when non-zero (measured at about +9% on a
-  three-window session under pixman; see [appearance](https://scoot-sh.github.io/scoot/scoot/appearance.md)).
+  three-window session under pixman; see [appearance](https://www.scoot.sh/scoot/appearance.md)).
   `0` is free.
 - **The translucent bar** (`opacity`) needs an ARGB buffer and no opaque region. On the
   Asahi M2 the shaped and translucent looks cost no more than a flush one that the
@@ -117,7 +117,7 @@ opt-in and you can drop any of them:
 - **The translucent terminals** (foot's `alpha=0.80`) make each terminal window non-opaque,
   so scoot blends it over the wallpaper whenever that region is redrawn. In the optional
   `gpu-scanout` `--tty` tier, a fullscreen translucent window also cannot be handed to the
-  display directly ([backends](https://scoot-sh.github.io/scoot/scoot/backends.md)). That extra work was not measured here. Set
+  display directly ([backends](https://www.scoot.sh/scoot/backends.md)). That extra work was not measured here. Set
   `alpha=1.0` in [`foot.ini`](foot.ini) for opaque terminals.
 - **The `load` and `cpu` modules** each hold one shell that sleeps (10 s and 5 s) and
   prints a line: no polling by the bar, one process each, woken by their own timers.

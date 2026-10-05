@@ -20,7 +20,7 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 > **In scoot, a `[wallpaper]` section is all it takes**: scoot runs
 > `scootbg apply-config` with it at start-up and on every reload
 > ([below](#apply-config-scoots-wallpaper-section); the section itself is
-> in [the `[wallpaper]` section](https://scoot-sh.github.io/scoot/scootbg/#the-wallpaper-section)),
+> in [the `[wallpaper]` section](https://www.scoot.sh/scootbg/#the-wallpaper-section)),
 > and the Nix modules install scootbg for it.
 
 ## What it is for
@@ -68,7 +68,7 @@ per-frame budget.
 
 In scoot, the whole setup is one config section (every key, and what
 happens when scootbg is missing, in
-[the `[wallpaper]` section](https://scoot-sh.github.io/scoot/scootbg/#the-wallpaper-section)). scoot
+[the `[wallpaper]` section](https://www.scoot.sh/scootbg/#the-wallpaper-section)). scoot
 runs `scootbg apply-config` with it
 ([below](#apply-config-scoots-wallpaper-section)): no autostart entry, no
 session script.
@@ -265,7 +265,7 @@ output HDMI-A-1 clear
 `scootbg apply-config [--profile NAME] JSON` is the one command scoot runs
 (at start-up and on every reload while its config has a `[wallpaper]`
 section, and with `{}` on the reload that removes it; see
-[scoot's side](https://scoot-sh.github.io/scoot/scootbg/#the-wallpaper-section)).
+[scoot's side](https://www.scoot.sh/scootbg/#the-wallpaper-section)).
 You rarely run it yourself, but anything that owns a config can: it is
 how a config, rather than a person, sets the wallpaper.
 
@@ -975,7 +975,7 @@ gated rows weigh the floor by allocated pages.
   exit status logged, when it ends. scoot depends only on scootbg's CLI,
   not its crate, and scootbg knows nothing about scoot's config, so each
   stays usable without the other. See
-  [the `[wallpaper]` section](https://scoot-sh.github.io/scoot/scootbg/#the-wallpaper-section) and
+  [the `[wallpaper]` section](https://www.scoot.sh/scootbg/#the-wallpaper-section) and
   [the item's record](backlog/resolved/scoot-integration-done.md).
 - **Config versus `scootbg set`: whichever you changed last wins.** Edit
   `[wallpaper]` and the config's wallpaper shows. Run `scootbg set` after

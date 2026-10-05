@@ -90,7 +90,7 @@ to report, because locking dismisses any open one and refuses new ones.
 logical * scale`, rounded down where a rectangle's edge lands mid-pixel (the
 logical size is `ceil(physical / scale)`, so a full-output `logical * scale`
 can overshoot by under one pixel). `outputs` reports each output's `scale`
-for exactly this -- and it is per output: with [`[[outputs]]`](../scoot/outputs.md
+for exactly this -- and it is per output: with [`[[outputs]]`](../scoot/outputs.md)
 entries two screens can run at different scales, so convert a window's
 rectangle with the scale of the output the window is on (its `output`),
 never with the first output's. X windows (`--xwayland`) follow the same rule: their

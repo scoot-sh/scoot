@@ -1942,14 +1942,26 @@ a layer surface asking politely. The global is
   protocol's own rule, and "straight away" means without waiting for anything
   else to change on screen, including when the client destroys only the
   `ext_session_lock_surface_v1` and keeps the `wl_surface` under it alive.
-- **Keybindings that run an action don't fire.** `Super+Q`, a `spawn` bind,
-  every layout motion: suppressed, and forwarded to the lock client as
-  ordinary keystrokes instead. The one exception is the `--tty`
-  `Ctrl+Alt+F1`..`F12` VT switches. That is a session-level escape hatch, not
-  a way in — the VT it switches to has its own login, and this session stays
-  locked behind it.
-- **`scoot msg action ...` is refused**, with an error saying why. So is an
-  `ext-workspace-v1` client's `activate`.
+- **Keybindings that run an action don't fire — except the ones the config
+  explicitly allows.** `Super+Q`, an unflagged `spawn` bind, every layout
+  motion: suppressed, and forwarded to the lock client as ordinary
+  keystrokes instead. Two exceptions, both deliberate. The `--tty`
+  `Ctrl+Alt+F1`..`F12` VT switches are a session-level escape hatch, not a
+  way in — the VT it switches to has its own login, and this session stays
+  locked behind it. And a `spawn` bind flagged `allow_when_locked`
+  ([binds](./keybindings.md#the-bind-grammar)) fires: volume, brightness and media keys
+  from the lock screen, which a daily-driven laptop needs. The rule is
+  narrow on purpose — only `spawn`, only when flagged, only its
+  config-pinned command, and only through a keypress, real
+  or IPC-injected.
+- **`scoot msg action ...` is refused**, with an error saying why — even a
+  `spawn` naming a command some bind allows. An IPC request carries an
+  arbitrary command from whoever sent it, while a bind can only run its
+  config-pinned command, so allowing IPC spawns while locked would turn
+  "volume keys work on the lock screen" into "anything with socket access
+  runs anything while locked". Injected keyboard and pointer input still
+  works, and reaches only the lock screen. So is an `ext-workspace-v1`
+  client's `activate` refused.
 - **Ordinary clients stop drawing.** They get no frame callbacks while
   locked, which is what the protocol asks for and also what keeps them from
   burning CPU behind a lock screen.

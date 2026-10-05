@@ -10,11 +10,11 @@ import { defineConfig } from 'astro/config';
 // emits bundle links at the domain root (verified against the pinned
 // plugin source, llms.txt.ts: `new URL(base, site)`).
 //
-// Deployment target — the one-line switch for the scoot.sh move (steps in
-// site/README.md, "Moving to scoot.sh"). `'pages'` serves the repo's
-// project-pages address today; `'apex'` serves the root domain. `site`
-// and `base` both derive from this single value so the switch cannot
-// leave them mismatched.
+// Deployment target — the one-line switch for the domain (steps in
+// site/README.md). `'www'` serves `https://www.scoot.sh/` today;
+// `'apex'` serves the bare root domain; anything else serves the repo's
+// project-pages address. `site` and `base` both derive from this single
+// value so the switch cannot leave them mismatched.
 const DEPLOY_TARGET = 'www';
 const { site, base } =
   DEPLOY_TARGET === 'www'

@@ -131,6 +131,37 @@ is no "unbind" action: a user bind on a combo with a default simply
 replaces it, and removing a bind from the file falls back to its
 default (or to unbound).
 
+A bind can also be a table with the action under `action` plus two
+opt-ins — one entry carrying everything about one combo, rather than
+a second list of combos elsewhere that could disagree with the action:
+
+```toml
+[binds]
+"XF86AudioRaiseVolume" = { action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+", repeat = true, allow_when_locked = true }
+```
+
+To hold volume-up and have it keep stepping, that is the whole recipe:
+`repeat = true`. To have the key work on the lock screen too,
+`allow_when_locked = true` beside it.
+
+- **`repeat` re-fires the bind while its key is held** — after a 200 ms
+  delay, then 25 times a second (the seat keyboard's own rate, so
+  binds step exactly the way a held key repeats in a terminal). The
+  timer exists only while such a key is held. `quit` and `close`
+  never repeat, even when flagged — holding quit must never end the
+  session. Flagging either warns and runs the bind once.
+- **`allow_when_locked` lets a `spawn` bind fire while the session is
+  locked** — volume, brightness and media keys from the lock screen.
+  Anything else keeps today's refusal even when flagged, and `scoot
+  msg action ...` stays refused while locked too: an IPC request
+  carries an arbitrary command from whoever sent it, while a bind can
+  only run its config-pinned command.
+
+Both default off, so a plain `"combo" = "action"` string behaves exactly
+as before: fire once, never locked. A table entry missing its `action`,
+or a non-boolean flag, warns and falls back; an unknown field warns
+and is ignored, while the rest of the entry applies.
+
 Fullscreen and maximize, spelled out: `Super+f` covers the whole output
 while its column is focused — gaps, ring and a bar's reserved strip
 included — keeping its place in the strip (focus away and the view

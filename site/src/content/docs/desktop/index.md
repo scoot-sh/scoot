@@ -572,6 +572,18 @@ programs.scoot.desktop.keys.binds.volumeUp.enable = false;
 programs.scoot.settings.binds."XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 3%+";
 ```
 
+Overriding with a plain string like that drops the bind's repeat and
+lock-screen behavior (a string carries no flags). To keep both,
+override with the table form:
+
+```nix
+programs.scoot.settings.binds."XF86AudioRaiseVolume" = {
+  action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 3%+";
+  repeat = true;
+  allow_when_locked = true;
+};
+```
+
 A bind whose tool is missing fails quietly — scoot logs a warning and
 carries on, input never wedges — so a partial setup degrades to dead
 keys, never to a broken session.
@@ -584,12 +596,20 @@ Troubleshooting, by symptom:
   in `~/.config/scoot/config.toml`, after a reload). Then check scoot
   saw the key: `scoot msg key XF86AudioRaiseVolume` should do what the
   key does — if it does, the compositor never received the keystroke.
-- *Volume or brightness keys die at the lock screen.* Known
-  limitation: while locked, no `[binds]` action fires except VT
-  switching, so the hardware keys reach the locker as ordinary
-  keystrokes. Step before you lock.
-- *Holding volume up steps once.* Known compositor gap: a held key
-  fires its bind once (no repeat timer yet). Press per step.
+- *Volume or brightness keys die at the lock screen.* They should not:
+  those binds fire while locked by default. If yours do not, the bind
+  lost its flags — overriding one with a plain string drops
+  `allow_when_locked`, and removing it through
+  `binds.<name>.enable = false` leaves the combo unbound entirely.
+  Check the rendered `[binds]` in `~/.config/scoot/config.toml`: a
+  working volume bind is a table with `allow_when_locked = true`.
+- *Holding volume up steps once.* It should keep stepping at 25 Hz
+  after a 200 ms delay. A bind that fires once per press lost its
+  `repeat` flag the same way: a plain-string override, which the
+  rendered `[binds]` shows as a bare string instead of a table with
+  `repeat = true`. (Overriding with a plain string drops both flags;
+  to keep them, override with the table form — action plus flags.
+  See [the bind grammar](../scoot/keybindings.md#the-bind-grammar).)
 - *`Super+d` opens nothing.* The launcher slot is still a stub, and so
   is capture — while `Super+v` works today (the clipboard picker,
   [above](#clipboard)) and so does the `Super+n` family (mako's own
