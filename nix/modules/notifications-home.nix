@@ -32,12 +32,18 @@ let
   # (`makoctl list`, urgent when any is critical) into the bar's
   # `push` module -- the half the `scootnotify` pointer entry promises,
   # so swapping the daemon later changes nothing the user configured.
-  # `--watch` does an initial sync, then re-syncs on every mako
-  # `PropertiesChanged` signal (arrivals, dismissals, timeouts and
-  # mode changes all emit one: `Notifications` and `Modes` carry
-  # `EMITS_INVALIDATION` in mako v1.11.0's `dbus/mako.c`). No polling,
-  # and no `on-notify` hook, so every mako key stays overridable in
-  # `settings` without breaking the feed.
+  # `--watch` does an initial sync, then re-syncs on mako's own bus
+  # signals, one JSON object per line (`busctl monitor --json=short`;
+  # the two `--match` rules are OR'd, verified against systemd 261):
+  # `PropertiesChanged` on mako's path (arrivals, dismissals,
+  # timeouts and mode changes all emit one: `Notifications` and
+  # `Modes` carry `EMITS_INVALIDATION` in mako v1.11.0's
+  # `dbus/mako.c`) and `NameOwnerChanged` for the Notifications name
+  # (a mako restart emits no `PropertiesChanged`, so without the
+  # second match the feed would show stale DND/count until the next
+  # event; losing the name clears the bar instead of leaving the
+  # stale state). No polling, and no `on-notify` hook, so every mako
+  # key stays overridable in `settings` without breaking the feed.
   bridge = pkgs.writeShellApplication {
     name = "scoot-notify-sync";
     runtimeInputs = [
@@ -48,9 +54,48 @@ let
     ]
     ++ lib.optional (barBin != null) barBin;
     text = ''
+      # Pushes $1 into the bar, saying nothing either way. Returns 0
+      # on success, 1 with the daemon's refusal in `_push_err`.
+      # Capturing the refusal (instead of letting the CLI print it)
+      # is what keeps each failed sync to exactly one stderr line.
+      _push_err=""
+      push_payload() {
+          _push_err="$(${scootbarBin} msg set notifications "$1" 2>&1)" && return 0
+          return 1
+      }
+
+      # The one stderr line for a failed push, naming the real cause:
+      # a module that is not placed (the user never added the
+      # one-liner -- the bar is running, it just shows no such
+      # module) vs a bar that is not running at all. Distinguishing
+      # the two is the point: the old message blamed the bar for a
+      # module the user had not placed yet.
+      report_push_failure() {
+          case "$_push_err" in
+              *"is not placed"*)
+                  echo "scoot-notify-sync: the bar shows no notifications module (add \"notifications\" to a bar list in programs.scootbar.settings -- see docs/nix.md \"Notifications\"); leaving it" >&2
+                  ;;
+              *)
+                  echo "scoot-notify-sync: cannot reach the bar (''${_push_err:-the bar is not running}); leaving it" >&2
+                  ;;
+          esac
+      }
+
+      # mako is gone (its modes unreadable, or the bus name lost its
+      # owner): clear the bar rather than leaving the stale DND/count
+      # up. Exactly one stderr line either way -- a cleared bar says
+      # so, a failed clear reports why the push failed, never both.
+      mako_gone() {
+          if push_payload '{"text":""}'; then
+              echo "scoot-notify-sync: mako is not running, cleared the bar" >&2
+          else
+              report_push_failure
+          fi
+      }
+
       sync_now() {
           modes="$(makoctl mode 2>/dev/null)" || {
-              echo "scoot-notify-sync: mako is not running, leaving the bar as it is" >&2
+              mako_gone
               return 0
           }
           # One mode per line (or space-separated): normalize so the
@@ -61,9 +106,27 @@ let
               *" do-not-disturb "*) dnd=1 ;;
           esac
           list="$(makoctl list -j 2>/dev/null || printf '%s' '[]')"
-          n="$(printf '%s' "$list" | jq 'length')"
-          crit="$(printf '%s' "$list" | jq '[.[] | select(.urgency == 2)] | length')"
-          payload="$(jq -n --argjson n "$n" --argjson dnd "$dnd" --argjson crit "$crit" \
+          # A malformed list (never seen from mako itself) counts as
+          # empty, never as a crash: under `errexit` an unguarded
+          # `jq` here would exit the script, and
+          # `Restart=on-failure` would respawn it into the same
+          # failure every 2 s. One warning line, then the empty
+          # state.
+          bad_list=0
+          n="$(printf '%s' "$list" | jq 'length' 2>/dev/null)" || { n=""; bad_list=1; }
+          case "$n" in
+              '''|*[!0-9]*) n=0; bad_list=1 ;;
+          esac
+          crit="$(printf '%s' "$list" | jq '[.[] | select(.urgency == 2)] | length' 2>/dev/null)" || { crit=""; bad_list=1; }
+          case "$crit" in
+              '''|*[!0-9]*) crit=0; bad_list=1 ;;
+          esac
+          if [ "$bad_list" = 1 ]; then
+              echo "scoot-notify-sync: makoctl list printed malformed JSON; showing empty" >&2
+          fi
+          # Compact (`-c`): the payload travels as one `msg set`
+          # argument, and stays one line wherever it is logged.
+          payload="$(jq -c -n --argjson n "$n" --argjson dnd "$dnd" --argjson crit "$crit" \
               'if $dnd == 1 then
                   {text: (if $n > 0 then "DND \($n)" else "DND" end),
                    class: "muted",
@@ -72,21 +135,42 @@ let
                   {text: "\($n)",
                    class: (if $crit > 0 then "urgent" else "normal" end),
                    tooltip: "\($n) notifications -- click to hold them with do-not-disturb"}
-               else {text: ""} end')"
-          [ -n "$payload" ] || return 0
-          ${scootbarBin} msg set notifications "$payload" 2>/dev/null || {
-              echo "scoot-notify-sync: the bar is not running, leaving it" >&2
+               else {text: ""} end')" || {
+              echo "scoot-notify-sync: cannot build the bar payload; leaving the bar as it is" >&2
+              return 0
           }
+          [ -n "$payload" ] || return 0
+          push_payload "$payload" || report_push_failure
       }
 
       if [ "''${1-}" = "--watch" ]; then
           sync_now
-          # The match filters server-side: only mako's own path wakes
-          # this up. A re-sync is idempotent, so a stray signal costs
-          # one cheap query, not correctness.
-          stdbuf -o0 -e0 busctl --user monitor --match "type='signal',interface='org.freedesktop.DBus.Properties',path='/fr/emersion/Mako'" 2>/dev/null | while IFS= read -r line; do
-              case "$line" in
-                  *PropertiesChanged*) sync_now ;;
+          # The matches filter server-side: only mako's own path and
+          # the Notifications name wake this up. A re-sync is
+          # idempotent, so a stray signal costs one cheap query, not
+          # correctness. A monitor line that is not JSON (or names no
+          # member) is skipped, never fatal. The `|| [ -n ... ]`
+          # keeps a final line without its trailing newline (a
+          # monitor cut mid-write, never the daemon itself, which
+          # always terminates its lines).
+          stdbuf -o0 -e0 busctl --user monitor --json=short --match "type='signal',interface='org.freedesktop.DBus.Properties',path='/fr/emersion/Mako'" --match "type='signal',interface='org.freedesktop.DBus',member='NameOwnerChanged'" 2>/dev/null | while IFS= read -r line || [ -n "$line" ]; do
+              member="$(printf '%s' "$line" | jq -r '.member // empty' 2>/dev/null)" || continue
+              [ -n "$member" ] || continue
+              case "$member" in
+                  PropertiesChanged)
+                      path="$(printf '%s' "$line" | jq -r '.path // empty' 2>/dev/null)" || continue
+                      [ "$path" = "/fr/emersion/Mako" ] && sync_now
+                      ;;
+                  NameOwnerChanged)
+                      name="$(printf '%s' "$line" | jq -r '.payload.data[0] // empty' 2>/dev/null)" || continue
+                      [ "$name" = "org.freedesktop.Notifications" ] || continue
+                      new="$(printf '%s' "$line" | jq -r '.payload.data[2] // empty' 2>/dev/null)" || continue
+                      if [ -n "$new" ]; then
+                          sync_now
+                      else
+                          mako_gone
+                      fi
+                      ;;
               esac
           done
           echo "scoot-notify-sync: bus monitor ended" >&2
@@ -136,6 +220,11 @@ let
   # inside `getExe`: the same guard the idle policy uses, since
   # standalone evals collect assertions without enforcing them.
   toolsReady = notif.package != null;
+  # The lean mako (no GTK stack -- see `notifications-mako.nix`),
+  # shared with the NixOS side's default so either side alone names
+  # the same daemon. Guarded off Linux like the stock attribute it
+  # wraps: `pkgs.mako` refuses evaluation there.
+  leanMako = import ./notifications-mako.nix { inherit pkgs; };
 in
 {
   options.programs.scoot.desktop.notifications = {
@@ -146,12 +235,14 @@ in
     # refuses loudly instead of installing nothing silently.
     package = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.mako or null else null;
-      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.mako or null else null";
+      default =
+        if pkgs.stdenv.hostPlatform.isLinux then (if pkgs ? mako then leanMako else null) else null;
+      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then leanMako else null";
       description = ''
         The mako package to run the notification daemon from (must
-        speak the daemon's flags and `makoctl`). Null installs
-        nothing. Linux-only: null off Linux.
+        speak the daemon's flags and `makoctl`). Defaults to a lean
+        mako without the GTK stack (see `notifications-mako.nix`).
+        Null installs nothing. Linux-only: null off Linux.
       '';
     };
   };

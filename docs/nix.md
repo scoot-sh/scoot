@@ -1311,6 +1311,13 @@ scoot's own IPC screenshot path):
 
 Overriding `layer` back to `top` re-hides popups under fullscreen.
 
+Icons come from the pixbuf loaders the lean daemon wraps
+explicitly (see why mako, below): a png and an svg from absolute
+image paths draw as expected -- captured live from the profile's own
+build through the same IPC screenshot path:
+
+![A notification with an svg icon: the image draws beside the text](assets/notifications-icon.png)
+
 DND state and the unread count reach the bar through its `push`
 module, and a click toggles DND -- the half the future `scootnotify`
 keeps unchanged (the daemon name is the only visible change when it
@@ -1327,14 +1334,19 @@ quiet desktop keeps a clickable bell, not a hole -- the glyph is in
 DejaVu Sans, the bar's own default font; set
 `settings.push.notifications.icon` to your own). The feed is a
 small watcher, not a poll: it syncs once at start, then re-syncs on
-every mako bus signal (arrivals, dismissals, timeouts and mode changes
-all emit one), so overriding any mako key in `settings` never breaks
-it. Do-not-disturb itself is mako's mode (`[mode=do-not-disturb]
+mako's bus signals (arrivals, dismissals, timeouts and mode changes
+emit `PropertiesChanged`; a daemon restart emits none, so the feed
+also watches the bus name itself -- a restart re-syncs, and a daemon
+going away clears the bar instead of leaving the stale state up), so
+overriding any mako key in `settings` never breaks it. A push the bar
+refuses is one line naming why: a module that is not placed yet (the
+one-liner above) says the module is missing, instead of blaming a bar
+that is running. Do-not-disturb itself is mako's mode (`[mode=do-not-disturb]
 invisible=1`, toggled by `makoctl mode -t do-not-disturb` -- the same
 command the bar's click runs, by absolute path). Held popups wait in
 the daemon; the bar reads `DND 2` (muted) while two are held:
 
-![The bar with do-not-disturb on and two notifications held](assets/notifications-dnd.png)
+![The bar with do-not-disturb on and two notifications held (cropped to the bar from the same IPC shot, doubled for legibility)](assets/notifications-dnd.png)
 
 Over the session lock, nothing of a notification's content ever shows:
 while locked the compositor draws nothing but the lock client's own
@@ -1346,9 +1358,12 @@ wait in its visible list (no timeout by default) and appear on unlock;
 dismissed ones sit in its history buffer (`max-history`, default 5).
 A notification arriving mid-lock draws nothing -- the frame stays the
 lock screen alone (same IPC screenshot path, password prompt never
-disturbed):
+disturbed). The shot below is intentionally blank: it is byte-identical
+to the frame just before the notification arrived, which is the whole
+proof -- no popup content reaches the locked frame, and mako holds the
+popup queued until unlock:
 
-![The session lock with a notification queued: only the lock screen shows](assets/notifications-locked.png)
+![The session lock with a notification queued: only the lock screen shows -- the blank frame is the proof](assets/notifications-locked.png)
 Sandboxed apps fall out for free: the portal's Notification interface
 forwards to whoever owns `org.freedesktop.Notifications`, which is
 this daemon (once a portal backend runs -- that wiring is the
@@ -1363,19 +1378,39 @@ into the new config; no re-login):
 | `desktop.notifications.daemon` | enum (`"mako"`) | `"mako"` | the daemon behind `enable` (a future scootnotify widens this without renaming anything) |
 | `desktop.notifications.settings` | attrset of string | `{ }` | extra mako lines over the generated ones (a value here wins per key, rendered verbatim, e.g. `{ anchor = "bottom-right"; }`) |
 | `desktop.theme.targets.notifications.enable` | bool | `true` | theme mako from the look (popup background and text, ring, urgent critical ring); `false` keeps mako's own style while the rest follows the look |
-| `desktop.notifications.package` | package or null | mako (Linux-only: null off Linux) | point at your own mako build; null with the switch on fails evaluation naming it |
+| `desktop.notifications.package` | package or null | lean mako without the GTK stack (Linux-only: null off Linux) | point at your own mako build; null with the switch on fails evaluation naming it |
 
 Why mako, measured at the pinned rev (`8ce4ef6`, `aarch64-linux`,
-`nix path-info --closure-size`): mako 357.4 MiB, dunst 174.7 MiB,
-SwayNotificationCenter 1.3 GiB. dunst's closure is the smaller one (X
-libraries are small; mako's weight is `systemdMinimal`, already in
-every NixOS closure, plus pango/cairo) -- the pick is fit, not bytes:
-mako is Wayland-only (no X stack at all: its inputs name no xorg
-library, where dunst carries both backends), speaks the `overlay`
-layer natively, its mode-based DND is exactly the bar-toggle contract
-above, and its `makoctl list -j` is the feed's count. SwayNotificationCenter
-is a GTK control center indifferent to the slot. Upstream is active
-(1.11.0, MIT, same license as scoot).
+`nix path-info --closure-size`, marginals against swaylock's closure
+-- the idle/lock child the profile already ships): stock mako
+357.4 MiB (210.4 MiB marginal), dunst 174.7 MiB (43.8 MiB; 172.9/41.9
+MiB built Wayland-only), SwayNotificationCenter 1.3 GiB. Stock mako's
+weight is almost all one hook: `wrapGAppsHook3` in its
+`nativeBuildInputs` references gtk+3 directly (340.6 MiB cumulative
+with its tinysparql/cups/at-spi2/avahi train) -- not
+`systemdMinimal`, which is already in every NixOS closure, and not
+pango/cairo, which the lock child already pays for. The profile does
+not ship stock mako: `nix/modules/notifications-mako.nix` drops the
+hook and wraps only what the daemon uses (the pixbuf icon loaders
+through an explicit loaders cache, an icon theme dir, `PATH` for its
+helpers -- the same wrapping dunst's own package does), for a
+183.4 MiB closure, 53.3 MiB marginal, and zero references to the GTK
+stack (pinned in `nix/tests.nix`: the closure check fails if any of
+those names reappears). The true backend distinction is not the
+closure (X client libraries ride along in both daemons through
+cairo/pango) but that mako has no X11 backend at all and cannot run
+on X11, where dunst compiles both (`withX11`/`withWayland` in its
+package). dunst draws on pure Wayland too -- re-tested with no
+config and with a minimal `layer = overlay` config, it owned the bus
+name and drew on the second output while reporting the notification
+displayed (the earlier "drew nothing" was captured on the wrong
+output). The pick stays mako for the feed contract: mode-based DND
+is exactly the bar-toggle contract above, and `makoctl list -j`
+gives the feed per-notification urgency for the `urgent` class --
+dunst's counts (`dunstctl count`) carry no urgency without parsing
+its history JSON. SwayNotificationCenter is a GTK control center
+indifferent to the slot. Upstream is active (1.11.0, MIT, same
+license as scoot).
 
 Troubleshooting, by symptom:
 

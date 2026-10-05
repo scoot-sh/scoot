@@ -64,16 +64,36 @@ activation through mako's own service file), its config on
 leaves (plus a critical-urgency ring), a `theme.targets.notifications`
 opt-out, `settings` winning per key, and the bar feed
 (`scoot-notify-sync`: DND state and unread count into the bar's `push`
-module from mako's `PropertiesChanged` signals -- no polling -- with a
+module from mako's bus signals -- `PropertiesChanged` for arrivals and
+mode changes, the bus name itself for restarts (re-sync on a new owner,
+clear the bar when mako is gone) -- no polling -- with a
 click toggling DND through `makoctl`, which needs the `push` feature).
-On with the profile, each switch disable-able.
+On with the profile, each switch disable-able. The feed distinguishes
+a module that is not placed yet (guidance naming it, once per event)
+from a bar that is not running, and malformed `makoctl list` output
+counts as empty rather than crash-looping the unit (all pinned with
+stub-tool behavior tests in `nix/tests.nix`).
 
-Decisions: mako over dunst (smaller closure, but X11-first: with no
-config it drew nothing on the pure-Wayland session, while mako drew
-immediately) and swaync (1.3 GiB GTK closure); RSS with one
-notification up is a wash (mako 16.5 MB, dunst 17.1 MB), so the pick
-is fit -- Wayland-only, overlay-native, mode DND, `list -j` feed --
-not bytes. No `on-notify` hook (the bus watcher covers arrivals, so
+Decisions: mako over dunst, for fit at an acceptable weight (the
+ticket prescribed mako; re-tested in the fix round, PR #441): dunst
+draws on pure Wayland too -- with no config and with a minimal
+`layer = overlay` config it owned the bus name and drew on the
+second output while reporting the notification displayed (the earlier
+"drew nothing" was captured on the wrong output) -- and dunst is
+lighter (174.7 MiB closure, 43.8 MiB marginal; 172.9/41.9 Wayland-only).
+What keeps mako is the feed contract: mode-based DND is exactly the
+bar-toggle contract, and `makoctl list -j` gives per-notification
+urgency for the bar's `urgent` class, where dunst's counts carry none
+without parsing its history JSON. Stock mako's 357.4 MiB closure
+(210.4 MiB marginal, almost all `wrapGAppsHook3` pulling gtk+3) does
+not ship: the profile defaults to a lean mako without the GTK stack
+(183.4 MiB closure, 53.3 MiB marginal, no gtk/tinysparql/cups/at-spi2/avahi
+reference -- pinned in `nix/tests.nix`), with png/svg file icons proven
+identical to stock on screen; themed icon names behave identically to
+stock (neither resolves one in this session's theme setup). RSS with one
+notification up is a wash (mako 16.5 MB, dunst 17.1 MB; lean mako 9.3 MB
+empty with an 11.4 MB feed tree, 0 wakeups over 60 s idle for both).
+No `on-notify` hook (the bus watcher covers arrivals, so
 every mako key stays overridable). No bus queue across restarts
 (mako's history is in-memory); activation covers the gap while the
 unit restarts. Portal forwarding falls out for free (forwards to the

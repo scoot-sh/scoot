@@ -310,8 +310,10 @@ in
         type = lib.types.enum [ "mako" ];
         default = "mako";
         description = ''
-          The daemon behind `enable`. Only mako today (lightest
-          well-maintained layer-shell daemon: no toolkit, no X11, a
+          The daemon behind `enable`. Only mako today (a lean build
+          without the GTK stack -- see `notifications-mako.nix`;
+          X client libraries still ride along through cairo/pango,
+          but mako has no X11 backend and cannot run on X11 -- a
           plain-text config the look themes per key); a future
           scootnotify widens this enum, the option and the bar module
           staying as they are.

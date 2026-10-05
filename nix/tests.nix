@@ -489,6 +489,17 @@ let
   isLinux = pkgs.stdenv.hostPlatform.isLinux;
   failing = cfg: map (a: a.message) (lib.filter (a: !a.assertion) cfg.assertions);
 
+  # The notification daemon's package as the modules default it: the
+  # lean mako (no GTK stack -- `nix/modules/notifications-mako.nix`).
+  # The same expression the two `package` defaults import, so the pins
+  # below test what ships. Null off Linux, where `pkgs.mako` refuses
+  # evaluation when forced.
+  leanMako = if isLinux then import ./modules/notifications-mako.nix { inherit pkgs; } else null;
+  # The lean daemon's runtime closure, as store paths (for the
+  # no-GTK-stack content check). Building it needs no network; off
+  # Linux it is never referenced.
+  leanMakoClosure = if isLinux then pkgs.closureInfo { rootPaths = [ leanMako ]; } else null;
+
   # --- scootbg ([wallpaper]) evaluations under test ---
   # NixOS: on by default with `enable`, installing the package.
   osWallOn = evalNixos {
@@ -1215,6 +1226,52 @@ let
         desktop.notifications.enable = true;
         desktop.notifications.daemon = "bogus-daemon";
       }).config.programs.scoot.desktop.notifications.daemon;
+
+  # A fake notification toolchain for the feed's behavior tests: stub
+  # `makoctl`, `busctl` and `scootbar`, scripted at RUN time through
+  # files under `$SCOOT_FEED_TEST_DIR`, so one HM evaluation covers
+  # every scenario. `makoctl mode` prints `mode` (exit `mode-code`),
+  # `makoctl list` prints `list` (exit `list-code`); `busctl` prints
+  # `bus` and exits 0 (the monitor ending); `scootbar` appends its
+  # argv to `calls`, prints `bar-err` to stderr and exits `bar-code`.
+  # The bridge under test resolves all three by bare name through its
+  # wrapper PATH, where this package's `bin` sorts first (no bar
+  # module is imported beside it, so `scootbar` stays a bare name
+  # too); `jq` stays the real one from the bridge's own inputs.
+  feedStubs = pkgs.runCommand "feed-stubs" { } ''
+    mkdir -p $out/bin
+    cat > $out/bin/makoctl <<'EOF'
+    #!${pkgs.runtimeShell}
+    case "$1" in
+      mode) cat "$SCOOT_FEED_TEST_DIR/mode"; exit "$(cat "$SCOOT_FEED_TEST_DIR/mode-code")" ;;
+      list) cat "$SCOOT_FEED_TEST_DIR/list"; exit "$(cat "$SCOOT_FEED_TEST_DIR/list-code")" ;;
+      *) echo "unexpected makoctl args: $*" >&2; exit 99 ;;
+    esac
+    EOF
+    cat > $out/bin/busctl <<'EOF'
+    #!${pkgs.runtimeShell}
+    cat "$SCOOT_FEED_TEST_DIR/bus"
+    exit 0
+    EOF
+    cat > $out/bin/scootbar <<'EOF'
+    #!${pkgs.runtimeShell}
+    printf '%s\n' "$*" >> "$SCOOT_FEED_TEST_DIR/calls"
+    cat "$SCOOT_FEED_TEST_DIR/bar-err" >&2
+    exit "$(cat "$SCOOT_FEED_TEST_DIR/bar-code")"
+    EOF
+    chmod +x $out/bin/makoctl $out/bin/busctl $out/bin/scootbar
+  '';
+  # The daemon on, running the stubs: the bridge below is the real
+  # `scoot-notify-sync` from the module, with its wrapper PATH aimed
+  # at the stubs.
+  hmNotifFeedTest = evalHome {
+    enable = true;
+    desktop.notifications.enable = true;
+    desktop.notifications.package = feedStubs;
+  };
+  # The real bridge script under test (the feed unit runs it with
+  # `--watch`; the behavior tests run it bare for one sync).
+  feedBridge = lib.removeSuffix " --watch" hmNotifFeedTest.config.systemd.user.services.scoot-notify-sync.Service.ExecStart;
 
   # Refusals: the profile without scoot, and a look without the profile
   # (both pinned by message in `_desktopPins`)...
@@ -2678,7 +2735,7 @@ let
           pkgs.wlopm
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
-          pkgs.mako
+          leanMako
         ];
       true
     )
@@ -3070,7 +3127,7 @@ let
           pkgs.wlopm
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
-          pkgs.mako
+          leanMako
         ];
       true
     )
@@ -3117,7 +3174,7 @@ let
       true
     )
     (
-      assert drvs hmIdleOff.config.home.packages == drvs [ pkgs.mako ];
+      assert drvs hmIdleOff.config.home.packages == drvs [ leanMako ];
       true
     )
     # The lock off: the policy stays (dim and screens-off), the locker
@@ -3271,7 +3328,7 @@ let
           pkgs.wlopm
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
-          pkgs.mako
+          leanMako
         ];
       true
     )
@@ -3306,7 +3363,7 @@ let
         sorted osIdleOff.config.environment.systemPackages == sorted [
           fakePkg
           fakeBg
-          pkgs.mako
+          leanMako
         ];
       true
     )
@@ -3330,7 +3387,7 @@ let
           pkgs.brightnessctl
           pkgs.wlopm
           pkgs.sway-audio-idle-inhibit
-          pkgs.mako
+          leanMako
         ];
       true
     )
@@ -3401,6 +3458,24 @@ let
     )
     (
       assert hmNotif.config.programs.scoot.desktop.notifications.daemon == "mako";
+      true
+    )
+    # ...running the lean mako (no GTK stack), not stock nixpkgs mako:
+    # the default is the very derivation `leanMako` names (same `drvPath`,
+    # so a revert to `pkgs.mako` fails here), hence a different store
+    # path than stock...
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.package.drvPath == leanMako.drvPath;
+      true
+    )
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.package.outPath != pkgs.mako.outPath;
+      true
+    )
+    # ...and the NixOS side defaults to the same derivation (either
+    # side alone names the same daemon)...
+    (
+      assert osNotif.config.programs.scoot.desktop.notifications.package.drvPath == leanMako.drvPath;
       true
     )
     (
@@ -3605,7 +3680,7 @@ let
     (
       assert
         hmDeskBarNotif.config.programs.scootbar.settings.push.notifications.on-click.exec == [
-          "${pkgs.mako}/bin/makoctl"
+          "${leanMako}/bin/makoctl"
           "mode"
           "-t"
           "do-not-disturb"
@@ -3640,7 +3715,7 @@ let
     (
       assert
         osDeskBar.config.programs.scootbar.settings.push.notifications.on-click.exec == [
-          "${pkgs.mako}/bin/makoctl"
+          "${leanMako}/bin/makoctl"
           "mode"
           "-t"
           "do-not-disturb"
@@ -4147,8 +4222,112 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     got = tomllib.load(open(sys.argv[1],"rb"))
     assert got["push"]["notifications"]["icon"] == "✉", got["push"]
     assert got["push"]["notifications"]["on-click"]["exec"] == [sys.argv[2], "mode", "-t", "do-not-disturb"], got["push"]
-    ' ${notifBarToml} '${pkgs.mako}/bin/makoctl'
+    ' ${notifBarToml} '${leanMako}/bin/makoctl'
     echo "ok: bar push module toggles do-not-disturb"
+
+    # 13e. The lean daemon: its runtime closure names no GTK stack
+    #      (the `wrapGAppsHook3` weight the profile refuses to ship:
+    #      gtk+3, tinysparql, cups, at-spi2-core, avahi). Any of those
+    #      names reappearing -- a rebase silently restoring the hook,
+    #      say -- fails loudly here.
+    if grep -E "gtk\+3|tinysparql|cups|at-spi2|avahi" ${leanMakoClosure}/store-paths; then echo "GTK-stack path in lean mako closure" >&2; exit 1; fi
+    echo "ok: lean mako closure carries no GTK stack"
+
+    # 13f. ...while its wrapper still sets what icons need: the pixbuf
+    #      loaders cache and an icon theme dir (both gtk-free: the
+    #      cache names only gdk-pixbuf and librsvg).
+    grep -q "GDK_PIXBUF_MODULE_FILE=" ${leanMako}/bin/mako
+    grep -q "hicolor-icon-theme" ${leanMako}/bin/mako
+    if grep -E "gtk\+3|tinysparql" ${leanMako}/bin/mako ${leanMako}/bin/makoctl; then echo "GTK-stack reference in lean mako wrapper" >&2; exit 1; fi
+    echo "ok: lean mako wrapper sets the pixbuf loaders and the icon theme"
+
+    # 14. The bar feed, against stub tools (the REAL bridge script from
+    #     the module, scenario files below -- `mode`/`list` are what
+    #     `makoctl` prints, `bus` what `busctl monitor` prints,
+    #     `bar-err`/`bar-code` how `scootbar` answers, `calls` what it
+    #     was asked). Every scenario asserts the exit status (bare:
+    #     any other status fails the check) and the exact stderr lines.
+    export SCOOT_FEED_TEST_DIR="$PWD/feed-test"
+    mkdir -p "$SCOOT_FEED_TEST_DIR"
+    feed_setup() {
+      # $1 mode, $2 mode-code, $3 list, $4 list-code, $5 bar-err, $6 bar-code
+      printf '%s' "$1" > "$SCOOT_FEED_TEST_DIR/mode"
+      printf '%s' "$2" > "$SCOOT_FEED_TEST_DIR/mode-code"
+      printf '%s' "$3" > "$SCOOT_FEED_TEST_DIR/list"
+      printf '%s' "$4" > "$SCOOT_FEED_TEST_DIR/list-code"
+      printf '%s' "$5" > "$SCOOT_FEED_TEST_DIR/bar-err"
+      printf '%s' "$6" > "$SCOOT_FEED_TEST_DIR/bar-code"
+      : > "$SCOOT_FEED_TEST_DIR/calls"
+      : > "$SCOOT_FEED_TEST_DIR/stderr"
+    }
+
+    # 14a. The module not placed: the guidance names the missing
+    #      module (not a dead bar), exactly one stderr line, exit 0.
+    feed_setup 'default' 0 '[]' 0 'daemon: `notifications` is not placed in this bar (it shows: clock)' 1
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14a)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "no notifications module" "$SCOOT_FEED_TEST_DIR/stderr"
+    if grep -q "not running" "$SCOOT_FEED_TEST_DIR/stderr"; then echo "blamed the bar for an unplaced module (14a)" >&2; exit 1; fi
+    grep -q '^msg set notifications' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: feed names the unplaced module, once"
+
+    # 14b. The bar not running: that is what the line says, once.
+    feed_setup 'default' 0 '[]' 0 'scootbar: no scootbar daemon is running for eDP-1 (nothing listens on /run/user/1000/scootbar-eDP-1.sock); start one with `scootbar daemon`' 1
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14b)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "cannot reach the bar" "$SCOOT_FEED_TEST_DIR/stderr"
+    echo "ok: feed names the dead bar, once"
+
+    # 14c. Malformed `makoctl list`: counts as empty, never as a
+    #      crash -- exit 0, so `Restart=on-failure` does not respawn
+    #      into a 2 s crash loop. One warning line; the push shows
+    #      the empty bell.
+    feed_setup 'default' 0 'this is not json' 0 "" 0
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14c)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "malformed JSON" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -qF '{"text":""}' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: malformed list shows empty, no crash loop"
+
+    # 14d. mako gone: the bar is cleared instead of left stale, one
+    #      line saying so, exit 0.
+    feed_setup "" 1 '[]' 0 "" 0
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14d)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "cleared the bar" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -qF '{"text":""}' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: mako gone clears the bar"
+
+    # 14e. `--watch`: losing the bus name clears the bar (the initial
+    #      sync pushes the urgent count first). The monitor ending is
+    #      exit 1, which is what restarts the feed.
+    feed_setup 'default' 0 '[{"urgency": 2}]' 0 "" 0
+    printf '%s\n' '{"type":"signal","sender":"org.freedesktop.DBus","path":"/org/freedesktop/DBus","interface":"org.freedesktop.DBus","member":"NameOwnerChanged","payload":{"type":"sss","data":["org.freedesktop.Notifications",":1.5",""]}}' > "$SCOOT_FEED_TEST_DIR/bus"
+    if ${feedBridge} --watch 2>"$SCOOT_FEED_TEST_DIR/stderr"; then echo "monitor end should exit 1 (14e)" >&2; exit 1; fi
+    grep -qF '"urgent"' "$SCOOT_FEED_TEST_DIR/calls"
+    grep -qF '{"text":""}' "$SCOOT_FEED_TEST_DIR/calls"
+    grep -q "cleared the bar" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -q "bus monitor ended" "$SCOOT_FEED_TEST_DIR/stderr"
+    echo "ok: bus-name loss clears the bar on watch"
+
+    # 14f. `--watch`: a new owner re-syncs (no clear, the state is
+    #      fresh from the restarted daemon).
+    feed_setup 'default' 0 '[{"urgency": 1}]' 0 "" 0
+    printf '%s\n' '{"type":"signal","sender":"org.freedesktop.DBus","path":"/org/freedesktop/DBus","interface":"org.freedesktop.DBus","member":"NameOwnerChanged","payload":{"type":"sss","data":["org.freedesktop.Notifications","",":1.9"]}}' > "$SCOOT_FEED_TEST_DIR/bus"
+    if ${feedBridge} --watch 2>"$SCOOT_FEED_TEST_DIR/stderr"; then echo "monitor end should exit 1 (14f)" >&2; exit 1; fi
+    [ "$(grep -c '^msg set notifications' "$SCOOT_FEED_TEST_DIR/calls")" = 2 ] || { echo "want initial sync plus re-sync (14f)"; cat "$SCOOT_FEED_TEST_DIR/calls"; exit 1; }
+    if grep -q "cleared the bar" "$SCOOT_FEED_TEST_DIR/stderr"; then echo "re-sync cleared instead (14f)" >&2; exit 1; fi
+    echo "ok: bus-name gain re-syncs on watch"
+
+    # 14g. `--watch`: a monitor line that is not JSON is skipped,
+    #      never fatal (the initial sync still lands).
+    feed_setup 'default' 0 '[]' 0 "" 0
+    printf '%s\n' 'this is not a bus message' > "$SCOOT_FEED_TEST_DIR/bus"
+    if ${feedBridge} --watch 2>"$SCOOT_FEED_TEST_DIR/stderr"; then echo "monitor end should exit 1 (14g)" >&2; exit 1; fi
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly the monitor-ended line (14g)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "bus monitor ended" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -q '^msg set notifications' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: garbage monitor line is skipped"
   ''}
 
   touch $out

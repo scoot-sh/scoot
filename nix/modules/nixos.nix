@@ -221,12 +221,18 @@ in
       notifications = desktop.options.notifications // {
         package = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
-          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.mako or null else null;
-          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.mako or null else null";
+          default =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              (if pkgs ? mako then import ./notifications-mako.nix { inherit pkgs; } else null)
+            else
+              null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then leanMako else null";
           description = ''
             The mako package to install system-wide for the
-            notification daemon. Null installs nothing. Linux-only:
-            null off Linux.
+            notification daemon (a lean mako without the GTK stack,
+            the same default as the home-manager side -- see
+            `notifications-mako.nix`). Null installs nothing.
+            Linux-only: null off Linux.
           '';
         };
       };
