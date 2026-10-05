@@ -658,7 +658,11 @@ start-up and removes when it stops:
     set        a JSON value for the `push` module ID, which the config
                 defines (`[push.ID]`): a string (the text), an object
                 `{\"text\": ..., \"class\": ..., \"tooltip\": ..., \"icon\": ...}` or null
-                (clears it). Any other module, an id that is not placed and a
+                (clears it). The module needs a table and a place in a list:
+                left = [\"status\"]
+                [push.status]
+                placeholder = \"\"
+                Any other module, an id that is not placed and a
                 value the module refuses are loud errors, never a silent ok
 
 `query`, `layout`, `version`, `reload`, `hide`, `show` and `toggle` print the
@@ -1060,7 +1064,10 @@ pub fn version_string() -> String {
 }
 
 fn is_help(arg: &str) -> bool {
-    matches!(arg, "--help" | "-h")
+    // Bare `help` asks like `--help` does, wherever a help flag is taken:
+    // `scootbar msg help`, `scootbar daemon help`. No command or flag is
+    // named `help`, so nothing else can mean it there.
+    matches!(arg, "--help" | "-h" | "help")
 }
 
 /// An unknown word with a guess attached: [`Error::Hint`] naming the
@@ -1127,6 +1134,7 @@ fn help(mut args: impl Iterator<Item = Result<String, String>>) -> Result<Comman
         Some(Ok(name)) if name == "daemon" => Topic::Daemon,
         Some(Ok(name)) if name == "msg" => Topic::Msg,
         Some(Ok(name)) if name == "--json" => Topic::Json,
+        Some(Ok(name)) if name == "help" => Topic::Main,
         Some(other) => {
             return Err(hinted(
                 "help",

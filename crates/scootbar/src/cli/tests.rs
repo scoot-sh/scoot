@@ -77,6 +77,9 @@ fn help_and_version() {
 fn help_json_routes_and_typos_teach() {
     assert_eq!(run(&["--help", "--json"]), Ok(Command::Help(Topic::Json)));
     assert_eq!(run(&["help", "--json"]), Ok(Command::Help(Topic::Json)));
+    assert_eq!(run(&["help", "help"]), Ok(Command::Help(Topic::Main)));
+    assert_eq!(run(&["msg", "help"]), Ok(Command::Help(Topic::Msg)));
+    assert_eq!(run(&["daemon", "help"]), Ok(Command::Help(Topic::Daemon)));
     assert!(Topic::Json.text().as_ref().contains("\"schema_version\""));
     // A typo'd daemon flag names the flag it meant and where to read.
     assert!(matches!(

@@ -553,7 +553,11 @@ pub fn version_string() -> String {
 }
 
 fn is_help(arg: &str) -> bool {
-    matches!(arg, "--help" | "-h")
+    // Bare `help` asks like `--help` does, wherever a help flag is taken:
+    // `scootbg set help`, `scootbg daemon help`. No flag is named `help`,
+    // so nothing else can mean it there; a file literally named `help` is
+    // given as `./help`.
+    matches!(arg, "--help" | "-h" | "help")
 }
 
 /// An unknown word with a guess attached: [`Error::Hint`] naming the
@@ -679,6 +683,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
 fn help<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Command, Error> {
     let topic = match args.next() {
         None => return Ok(Command::Help(Topic::Main)),
+        Some(Ok(name)) if name == "help" => return Ok(Command::Help(Topic::Main)),
         Some(Ok(name)) if name == "--json" => return help_or_json("help", Topic::Main, args),
         Some(Ok(name)) => match name.as_str() {
             "daemon" => Topic::Daemon,

@@ -463,8 +463,9 @@ pub fn usage(binary: &str, requests_help: &str, actions_help: &str, version: boo
     text
 }
 
-/// One topic's page: the rows it names, rendered plain.
-pub fn topic_text(topic: Topic) -> String {
+/// One topic's page: the rows it names, rendered plain. `binary` names the
+/// front-end, so the examples read `scoot msg ...` under the alias.
+pub fn topic_text(topic: Topic, binary: &str) -> String {
     let mut text = String::new();
     match topic {
         Topic::Requests => {
@@ -472,7 +473,9 @@ pub fn topic_text(topic: Topic) -> String {
             for request in REQUESTS {
                 text.push_str(&format!(
                     "    {}\n        {}\n        e.g. `{}`\n",
-                    request.syntax, request.description, request.example
+                    request.syntax,
+                    request.description,
+                    request.example.replace("scootctl", binary)
                 ));
             }
         }
@@ -734,7 +737,10 @@ mod tests {
     fn every_topic_parses_and_has_a_page() {
         for (name, _) in TOPICS {
             let topic = Topic::parse(name).unwrap_or_else(|| panic!("`{name}` does not parse"));
-            assert!(!topic_text(topic).is_empty(), "`{name}` has no page");
+            assert!(
+                !topic_text(topic, "scootctl").is_empty(),
+                "`{name}` has no page"
+            );
         }
         assert_eq!(Topic::parse("frobnicate"), None);
     }

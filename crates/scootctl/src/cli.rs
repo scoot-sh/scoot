@@ -735,6 +735,7 @@ mod tests {
         );
         assert_eq!(parse_args(&["help", "--json"]), Ok(Command::Json));
         assert_eq!(parse_args(&["--help", "--json"]), Ok(Command::Json));
+        assert_eq!(parse_args(&["help", "help"]), Ok(Command::Help));
         assert_eq!(
             parse_args(&["--help", "actions"]),
             Ok(Command::Topic(crate::help::Topic::Actions))

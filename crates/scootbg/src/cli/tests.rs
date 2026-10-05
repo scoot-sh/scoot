@@ -112,6 +112,10 @@ fn help_json_routes_and_typos_teach() {
         args(&["daemon", "--help", "--json"]),
         Ok(Command::Help(Topic::Json))
     );
+    assert_eq!(args(&["help", "help"]), Ok(Command::Help(Topic::Main)));
+    assert_eq!(args(&["set", "help"]), Ok(Command::Help(Topic::Set)));
+    assert_eq!(args(&["query", "help"]), Ok(Command::Help(Topic::Query)));
+    assert_eq!(args(&["daemon", "help"]), Ok(Command::Help(Topic::Daemon)));
     assert!(Topic::Json.text().contains("\"schema_version\""));
     // A typo'd flag names the flag it meant and where to read.
     let error = args(&["daemon", "--profiel", "x"]).unwrap_err();

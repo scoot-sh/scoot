@@ -84,7 +84,7 @@ impl HelpPage {
                 scootctl::cli::ACTIONS_HELP,
                 false,
             ),
-            Self::ClientTopic(topic) => scootctl::help::topic_text(*topic),
+            Self::ClientTopic(topic) => scootctl::help::topic_text(*topic, "scoot msg"),
             Self::ClientVerb { verb } => {
                 scootctl::help::verb_text(verb, "scoot msg").unwrap_or_else(usage)
             }
@@ -1456,7 +1456,9 @@ mod tests {
         // so neither the alias help nor its JSON may list it.
         let text = HelpPage::Client.text();
         assert!(
-            !text.lines().any(|line| line.trim() == "scoot msg --version"),
+            !text
+                .lines()
+                .any(|line| line.trim() == "scoot msg --version"),
             "alias help lists a flag the alias refuses"
         );
         let document: serde_json::Value = serde_json::from_str(&json()).unwrap();

@@ -42,7 +42,8 @@ One spelling note: a client verb's own row is `scootctl help <verb>` (and
 `scoot msg help <verb>`), not `scootctl <verb> --help` -- `--help` after a
 verb would be ambiguous with what the verb itself takes (`scootctl type
 --help` types the text `--help`; `action spawn --help` runs the command
-`--help`).
+`--help`). Bare `help` works wherever `--help` does (`scootbar msg help`,
+`scootbg set help`).
 
 ## Exit codes
 

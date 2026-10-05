@@ -61,7 +61,7 @@ fn run() -> Result<(), Failure> {
             Ok(())
         }
         scootctl::Command::Topic(topic) => {
-            scootctl::output::write_str(&scootctl::help::topic_text(topic))
+            scootctl::output::write_str(&scootctl::help::topic_text(topic, "scootctl"))
                 .map_err(|error| Failure::Runtime(error.to_string()))?;
             Ok(())
         }
