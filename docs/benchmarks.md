@@ -25,6 +25,12 @@ it is scoot's own session plumbing: the launcher's 1-second poll plus
 the user-manager round trips it causes (35 of 36 ticks). Fixing that
 one ticket takes the session to ~0.03% — lightest of all. The ranked
 leads are at the end; each is filed in the backlog and linked here.
+*Correction (2026-10-05): the lean scoot cohort below showed no
+wallpaper — its image file was unreadable to the test user
+(`Permission denied`), so the compositor's background showed. With the
+wallpaper up the session is ~12 MB higher (~209 MB; compositor
+~75.6 MB) — still the lightest (leads 2–3). No number below is
+rewritten; each is labeled with its cohort.*
 
 ### What ran
 
@@ -124,7 +130,10 @@ What broke, and what was done about it:
   `$14+$15`, and the whole CPU series re-measured (the `*-c*`
   rounds); memory uses both campaigns. The per-role tables give the median of the three
   `*-c*` rounds; where the six scoot sessions split into a lean and a fat cohort (lead 2), the
-  compositor row says so.
+  compositor row says so. *Correction (2026-10-05): lean turned out to
+   be no wallpaper at all (the image file was unreadable to the test
+   user); fat is the wallpaper up, ~12 MB higher — session ~209 MB,
+   compositor ~75.6 MB.*
 - `loginctl terminate-session` does not reap everything: sudo-launched
   foots always linger, and KDE's kwin+plasmashell survived two
   logouts, so KDE rounds 2–3 ran on round 1's compositor (discarded,
@@ -155,7 +164,7 @@ a core); wakeups are voluntary context switches per 60 s.
 
 | desktop | CPU ticks | % of a core | wakeups | PSS | RSS |
 |---|---|---|---|---|---|
-| scoot | 36 [35–37] | 0.60 | 470 [458–477] | 197 MB [197–203] | 331 MB [331–359] |
+| scoot | 36 [35–37] | 0.60 | 470 [458–477] | 197 MB [197–203] (lean: no wallpaper; ~209 with it up, leads 2–3) | 331 MB [331–359] |
 | niri | 3 [3–6] | 0.05 | 184 [179–185] | 443 MB (range not recorded) | 938 MB [937–938] |
 | Hyprland | 24 [21–25] | 0.40 | 1173 [1170–1205] | 385 MB [384–385] | 693 MB [692–693] |
 | GNOME | 32 [23–33] | 0.53 | 295 [190–320] | 657 MB [656–662] | 1563 MB [1562–1569] |
@@ -165,9 +174,9 @@ Per-role medians (ticks / wakeups per 60 s / PSS; one idle foot everywhere):
 
 | role | scoot | niri | Hyprland | GNOME | KDE |
 |---|---|---|---|---|---|
-| compositor | 1 / 18 / 63.6 MB (lean cohort; 75.6–75.9 in the fat one, lead 2) | 2 / 85 / 83 MB | 1 / 235 / 128.5 MB | 27 / 58–97 / ~160 MB | 1 / 18–60 / 126–132 MB |
+| compositor | 1 / 18 / 63.6 MB (lean cohort = no wallpaper; 75.6–75.9 in the fat one with it up, lead 2) | 2 / 85 / 83 MB | 1 / 235 / 128.5 MB | 27 / 58–97 / ~160 MB | 1 / 18–60 / 126–132 MB |
 | bar / shell | 0 / 39 / 4.6 MB (scootbar) | 1–2 / 66 / 34.4 MB (waybar) | 1 / 66 / 42 MB (waybar) | in-shell | 6–7 / 93–135 / 266–271 MB (plasmashell) |
-| wallpaper | 0 / 0 / 2.1–14.7 MB (scootbg, bimodal — see leads) | 0 / 0 / 2.0 MB (swaybg) | 0–1 / 20 / 40.5 MB (hyprpaper) | in-shell | in-shell |
+| wallpaper | 0 / 0 / 2.1–14.7 MB (scootbg, bimodal: lean showed no wallpaper, fat holds the output-sized floor — see leads) | 0 / 0 / 2.0 MB (swaybg) | 0–1 / 20 / 40.5 MB (hyprpaper) | in-shell | in-shell |
 | notifications | 0 / 0 / 3.7 MB (mako) | 0 / 0 / 7.4 MB (mako) | 0 / 0 / 3.2 MB (mako) | in-shell | in-shell |
 | idle / lock | 0 / 0 / ~1 MB (swayidle) | 0 / 0 / ~1 MB | 0 / 0 / ~1 MB | 2–3 / 44–104 / 2.4 MB (gsd-power) | 1 / 2 / 19 MB (powerdevil) |
 | portals | on-demand (0 at sample) | 0 / ~5 / 52 MB (always on) | on-demand (0 at sample) | 0 / 3 / 44 MB | 1 / 7 / 44 MB |
@@ -179,7 +188,9 @@ Per-role medians (ticks / wakeups per 60 s / PSS; one idle foot everywhere):
 
 Reading it role by role:
 
-- **Compositor.** scoot is the lightest resident (63.6 MB; its `smaps`
+- **Compositor.** scoot is the lightest resident (63.6 MB lean — no
+  wallpaper, see leads — and ~75.6 MB with it up, still ahead of niri;
+  its `smaps`
   split: heap 32 kB, anon 8.2 MB, shm 12–24 MB, file `.so` 16–32 MB —
   with two rows to verify, see leads), then niri (83 MB), KWin
   (126–132 MB), Hyprland (128–129 MB) and gnome-shell (~160 MB, plus
@@ -193,7 +204,9 @@ Reading it role by role:
   the shell is the desktop). GNOME's top bar lives in the shell
   process. scootbar is 7–9x lighter than waybar and 58x lighter than
   plasmashell, with slightly fewer wakeups than waybar.
-- **Wallpaper.** scootbg-lean (2.1 MB) matches swaybg (2.0 MB);
+- **Wallpaper.** scootbg-lean (2.1 MB) showed the compositor's
+  background, not the wallpaper — it matches swaybg (2.0 MB) only in
+  the sense that nothing was drawn;
   scootbg-fat (14.7 MB) does not, and neither matches hyprpaper
   (40.5 MB — the single heaviest wallpaper daemon here). See leads.
 - **Idle policy.** swayidle costs ~1 MB and nothing anywhere. The
@@ -246,27 +259,42 @@ quantifies the ticket this benchmark was built to check.
    Nothing else in the session is within an order of magnitude. The
    fix takes scoot from the most CPU-hungry session here (0.60%) to
    the least (~0.03%, compositor 1 tick + foot 0).
-2. **scootbg's bimodal idle image** ([image-retention](../scootbg/backlog/image-retention.md)):
+2. **scootbg's bimodal idle image** ([image-retention](scootbg/backlog/resolved/image-retention-done.md)):
    14.7 vs 2.1 MB across identical sessions, and the compositor shows
-   the same ~12 MB campaign delta (75.6 vs 63.6 MB). Find the retention
-   trigger, drop the decoded image once every output has its frame.
-3. **Verify the 17 MB `[stack]`** ([compositor-stack-pss](backlog/core/compositor-stack-pss.md)):
+   the same ~12 MB campaign delta (75.6 vs 63.6 MB). *Correction
+   (2026-10-05): traced to two artifacts, not a leak — the fat cohort's
+   12 MB "anon" is the two output-sized `wl_shm` pools misfiled by the
+   mapping classifier (see below), and the lean cohort never drew the
+   wallpaper at all (its image file was unreadable: `Permission denied`,
+   so the compositor's background showed). No saving to take; the ticket
+   pins the no-retained-copy behavior with a test instead.*
+3. **Verify the 17 MB `[stack]`** ([compositor-stack-pss](backlog/resolved/compositor-stack-pss-done.md)):
    the mapping split's largest scoot-owned row after file-backed Mesa.
    If real touched stack, shrink the deep path (up to ~17 MB); if an
    artifact, fix the classifier both this page and the ticket rely on.
    (Hyprland shows the same 17 MB stack row — compare notes, not code.)
+   *Correction (2026-10-05): artifact confirmed — the same classifier
+   off-by-one credited a client shm buffer's PSS to `[stack]` (live
+   `[stack]` is 128 kB); all three fat rounds hold the same ~29.5 MB
+   shm. No compositor change.*
 4. **Mask the Push portal out** ([kunifiedpush-sessions](backlog/packaging/kunifiedpush-sessions.md)):
    `kunifiedpush-distributor` at ~15 MB in every session for push
    notifications nothing uses — bigger than mako, the bar and the idle
    daemon combined.
-5. **Wake the bar only when its text changes** ([second-wakeups](../scootbar/backlog/second-wakeups.md)):
+5. **Wake the bar only when its text changes** ([second-wakeups](scootbar/backlog/second-wakeups.md)):
    ~40 wakes/min, almost certainly the clock ticking every second for
    a minute-resolution clock. After lead 1 lands, the bar is the
    second-biggest waker left.
 
-Where scoot is already lightest, plainly: compositor PSS (63.6 MB, 75.9 in the fat cohort,
+Where scoot is already lightest, plainly: compositor PSS (63.6 MB lean with no wallpaper, 75.9 in the fat cohort with it up,
 against 83/128/126/~160), bar (4.6 MB against 34/42/270), wallpaper at
-its leanest (2.1 MB, matching swaybg), portals on demand (0 resident
+its leanest (2.1 MB, matching swaybg — *correction (2026-10-05): that
+cohort showed the compositor's background, not the wallpaper; with the
+wallpaper up scootbg holds its output-sized floor, ~12 MB PSS here,
+against swaybg's 2.0 MB, which drops client buffers after upload — a
+possible future lever, kept deliberately for now: see
+[image-retention](scootbg/backlog/resolved/image-retention-done.md)*),
+portals on demand (0 resident
 against niri's 52 and 44 each for GNOME/KDE), and no XWayland tax. The notification daemon is
 the same small mako everywhere it runs (3–4 MB; the 7.4 MB niri reading is its themed config).
 

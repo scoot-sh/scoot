@@ -303,7 +303,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [[nested] pointer clicks never reach layer-shell surfaces](./resolved/layer-shell-pointer-clicks-done.md) — CLOSED 2026-09-21 as could-not-reproduce (gh #182): the issue's exact `--nested` probes deliver every click shape on current `main` and on the reported rev alike; kept as a wire-level pinning test, no compositor change. Shared root with #183 refuted for the input path.
 - [Touchpad scrolling does not reach Chrome (axis source/v120/stop dropped)](./resolved/touchpad-scroll-chrome-done.md) — RESOLVED 2026-10-04: scrolls forward their real source, wheel `v120`, finger `stop` and relative direction (tty, nested, injected)
 - [The session launcher's 1 s poll is the desktop's biggest idle wakeup source](./core/session-launcher-idle-poll.md) (medium, filed 2026-10-05): 179+178 wakes/min from `sh` + `systemd --user` in a measured idle session
-- [scoot's `[stack]` mapping reports 17 MB PSS at idle](./core/compositor-stack-pss.md) (medium, filed 2026-10-05): the five-desktop idle benchmark's mapping split; verify what the 17 MB is before trusting the heap-vs-stack story
+- [scoot's `[stack]` mapping reports 17 MB PSS at idle](./resolved/compositor-stack-pss-done.md) — CLOSED 2026-10-05 as a classifier artifact: the benchmark's `smaps.sh` credits each block's PSS to the next block's class, so a client shm buffer read as `[stack]` (live `[stack]` is 128 kB); no compositor change
 
 ### --tty / backend
 - [Config-file key for the DRM device](./resolved/tty-gpu-config-key-done.md)
