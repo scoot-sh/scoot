@@ -281,6 +281,44 @@ impl State {
             tracing::debug!(?action, "ignoring an action: the session is locked");
             return false;
         }
+        self.run_action(action)
+    }
+
+    /// The keybinding path into [`State::act`]: runs `action`, honoring a
+    /// bind's `allow_when_locked` while the session is locked. An opted-in
+    /// `spawn` fires (volume, brightness, media keys from the lock screen);
+    /// everything else refuses exactly as `act` does. The shape check is
+    /// here rather than trusted from the flag, so a non-`spawn` action can
+    /// never reach this path's locked half no matter which table looked it
+    /// up -- and `act` itself stays the backstop that refuses everything
+    /// while locked for every other caller (IPC, ext-workspace, tests
+    /// driving actions directly).
+    ///
+    /// Safe to run a spawn under lock: spawning only forks the
+    /// config-pinned command (the key path looked the bind up in the
+    /// session's own table, so a locked session can never be made to
+    /// launch anything but the opted-in commands), and the `apply()` it
+    /// ends in re-derives keyboard and pointer focus onto the lock surface
+    /// (see `refresh_keyboard_focus` and `surface_under`), never onto a
+    /// window the user cannot see. See `bind_repeat.rs` for why IPC stays
+    /// refused while this path fires.
+    pub fn act_bind(&mut self, action: Action, allow_when_locked: bool) -> bool {
+        if self.session_lock.is_locked()
+            && !(allow_when_locked && matches!(action, Action::Spawn(_)))
+        {
+            tracing::debug!(
+                ?action,
+                "ignoring a keybinding action: the session is locked"
+            );
+            return false;
+        }
+        self.run_action(action)
+    }
+
+    /// Runs an action's effects and re-derives the arrangement: the shared
+    /// body of [`State::act`] past its lock gate and [`State::act_bind`]
+    /// past its own.
+    fn run_action(&mut self, action: Action) -> bool {
         let mut accepted = true;
         for effect in self.world.handle_action(action) {
             match effect {

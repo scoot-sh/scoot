@@ -1326,6 +1326,11 @@ impl SessionLockHandler for State {
     /// `invalid_unlock` if it did not), so this is unconditional.
     fn unlock(&mut self) {
         tracing::info!("unlocking the session");
+        // Nothing can be in flight across this transition that was armed
+        // while locked and should survive it: a locked-armed repeat was
+        // cancelled by the lock that preceded it, and anything else never
+        // armed under lock. Belt and suspenders beside `lock_transition`.
+        self.cancel_bind_repeat();
         self.session_lock.owner = None;
         // Unreachable while `pending` is set -- Smithay only routes
         // `unlock_and_destroy` here once `locked` has been sent, which is
@@ -1476,6 +1481,11 @@ impl State {
         // Before the focus refreshes, not after: `unset_grab` restores focus
         // to whatever the pointer had pending, so re-deriving afterwards is
         // what gets the final word.
+        //
+        // An in-flight bind repeat ends here too: the press that armed it
+        // belongs to the session state being locked away (a repeat armed
+        // while locked re-arms from a fresh press, which is unaffected).
+        self.cancel_bind_repeat();
         self.drop_input_grabs();
         // A floating window's drag was one of those grabs: the arrangement
         // it asked for, before focus is re-derived against it.

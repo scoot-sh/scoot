@@ -644,6 +644,52 @@ e.g. `"focus-column left"`, `"close"`, or `"spawn foot -e htop"` (split on
 whitespace, not run through a shell, so a path or argument containing a space
 can't be expressed this way).
 
+A bind can also be a table with the action under `action` plus two opt-ins
+— one entry carrying everything about one combo (niri's shape), rather than
+a second list of combos elsewhere that could disagree with the action:
+
+```toml
+[binds]
+"XF86AudioRaiseVolume" = { action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+", repeat = true, allow_when_locked = true }
+```
+
+To hold volume-up and have it keep stepping, that is the whole recipe:
+`repeat = true`. To have the key work on the lock screen too,
+`allow_when_locked = true` beside it.
+
+- **`repeat` re-fires the bind while its key is held** — after a 200 ms
+  delay, then 25 times a second. That is the seat keyboard's own
+  delay and rate (the pair scoot hands clients through
+  `wl_keyboard.repeat_info`, so binds step exactly the way a held key
+  repeats in a terminal). The timer exists only while such a key is
+  held: it is armed on the press and drops on the release, so a session
+  with no held repeatable key wakes for nothing. The repeat stops on
+  release, on a VT switch, on any session-lock change, on a session
+  pause, on output removal, and on a `[binds]` reload that swaps the
+  table (the held key itself never wedges: release routing does not
+  consult the table mid-hold). `quit` and `close` never repeat, even
+  when flagged — holding quit must never end the session, and holding
+  close must never work through every window. Flagging either warns
+  and runs the bind once.
+- **`allow_when_locked` lets a `spawn` bind fire while the session is
+  locked** — volume, brightness and media keys from the lock screen.
+  Anything else keeps today's refusal even when flagged (flagging a
+  layout, focus, close or quit action warns and stays refused), and
+  `scoot msg action ...` stays refused while locked too: an IPC request
+  carries an arbitrary command from whoever sent it, while a bind can
+  only run its config-pinned command, so allowing IPC would turn
+  "volume keys work on the lock screen" into "anything with socket
+  access runs anything while locked". See
+  [Screen locking](protocols.md#screen-locking-ext-session-lock-v1)
+  for the full rule.
+
+Both default off, so a plain `"combo" = "action"` string behaves exactly
+as before: fire once, never locked. A reload applies flag changes like
+any other bind change (and reports `binds` as applied); a table entry
+missing its `action`, or holding a value of the wrong type, is skipped
+with a warning naming just that bind, and an unknown field warns and is
+ignored while the rest of the entry applies.
+
 ### Moving across outputs
 
 With more than one output, three pairs of actions reach across screens —

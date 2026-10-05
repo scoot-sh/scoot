@@ -1650,6 +1650,16 @@ brightness step silently until the `desktop-audio-osd` child wires
 one (the bar's volume, brightness, media and microphone modules are
 the display half).
 
+Holding a brightness, volume or media key keeps stepping: those binds
+opt into the compositor's per-bind repeat (200 ms delay, then 25 steps
+a second — the seat keyboard's own rate), and they keep working on the
+lock screen while every other bind stays refused
+(`docs/configuration.md#binds`, `docs/protocols.md#screen-locking-ext-session-lock-v1`).
+The launcher, clipboard, lock and capture binds deliberately opt into
+neither: a terminal or picker from behind the lock screen would be a
+bypass, and `Super+Escape` on an already-locked session has nothing to
+do.
+
 Reserved but unbound (their child binds them; nothing else may take
 the combo): `XF86KbdBrightnessUp`/`Down` (no stable device name --
 the reference machine exposes no keyboard-backlight device, and
@@ -1693,6 +1703,19 @@ programs.scoot.desktop.keys.binds.volumeUp.enable = false;
 programs.scoot.settings.binds."XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 3%+";
 ```
 
+Overriding with a plain string like that drops the bind's repeat and
+lock-screen behavior (a string carries no flags — see
+`docs/configuration.md#binds`): hold-to-step and locked volume stop
+with it. To keep both, override with the table form:
+
+```nix
+programs.scoot.settings.binds."XF86AudioRaiseVolume" = {
+  action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 3%+";
+  repeat = true;
+  allow_when_locked = true;
+};
+```
+
 Off Linux the tools default to null and the binds render with bare
 tool names for the Linux box the config deploys to, installing
 nothing. A bind whose tool is missing fails quietly -- scoot logs a
@@ -1713,18 +1736,21 @@ Troubleshooting, by symptom:
   does -- if it does, the compositor never received the keystroke
   (wrong keyboard map on the seat, or a host compositor eating the
   key under `--nested`).
-- *Volume or brightness keys die at the lock screen.* Known
-  limitation, not a config error: while locked, no `[binds]` action
-  fires except VT switching (the bypass a `spawn` bind from behind
-  the lock would be), so the hardware keys go to the locker as
-  ordinary keystrokes. An explicit per-bind allowlist is filed as a
-  compositor follow-up; until it lands, step before you lock.
-- *Holding volume up steps once.* Also a known compositor gap:
-  Smithay absorbs a repeat press of an already-held key before the
-  bind filter (deliberately, against double-firing shortcuts), and
-  scoot runs no repeat timer of its own -- so a held key fires its
-  bind once. Repeat support is filed as a compositor follow-up;
-  until it lands, press per step.
+- *Volume or brightness keys die at the lock screen.* They should not:
+  those binds fire while locked by default. If yours do not, the bind
+  lost its flags -- overriding one with a plain string drops
+  `allow_when_locked` (see above), and removing it through
+  `binds.<name>.enable = false` leaves the combo unbound entirely.
+  Check the rendered `[binds]` in `~/.config/scoot/config.toml`: a
+  working volume bind is a table with `allow_when_locked = true`.
+- *Holding volume up steps once.* It should keep stepping at 25 Hz
+  after a 200 ms delay (Smithay absorbs a repeat press of an
+  already-held key before the bind filter, deliberately, against
+  double-firing shortcuts -- so the compositor repeats the bind on
+  its own timer instead). A bind that fires once per press lost its
+  `repeat` flag the same way: a plain-string override, which the
+  rendered `[binds]` shows as a bare string instead of a table with
+  `repeat = true`.
 - *`Super+d` opens nothing.* The launcher slot is still a stub:
   that bind renders only with `launcher.enable`, and nothing
   installs a launcher until that child lands. Same for `Print`

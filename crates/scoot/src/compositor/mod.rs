@@ -7,6 +7,7 @@
 mod activation;
 mod alpha_modifier;
 mod bind_budget;
+mod bind_repeat;
 mod child_reaper;
 mod client_fds;
 pub(crate) mod config;

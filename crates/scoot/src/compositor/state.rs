@@ -52,6 +52,7 @@ use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager;
 use crate::cli::RendererKind;
 
 use super::bind_budget::BindBudget;
+use super::bind_repeat::BindRepeat;
 use super::cursor::Cursor;
 use super::decorations::{Appearance, Decorations};
 use super::ext_workspace::ExtWorkspaceState;
@@ -1024,6 +1025,18 @@ pub struct State {
     /// [`State::suppressed_keys`] above, which applies here for the same
     /// reason.
     pub held_keys: HashSet<Keycode>,
+    /// The in-flight bind repeat, if a `repeat` bind's key is held past
+    /// the keyboard's repeat delay: what to re-fire, and when. At most one
+    /// (the latest repeatable press wins); armed only while such a key is
+    /// held, so a session with no held repeatable key holds `None` and no
+    /// timer source. See `bind_repeat.rs`.
+    pub(crate) bind_repeat: Option<BindRepeat>,
+    /// Whether the one-shot repeat timer is live. Mirrors the event source:
+    /// set on insert, cleared when it fires into nothing (whatever else it
+    /// answers re-arms) or when the insert fails -- so a failed arm retries
+    /// on the next repeatable press instead of stranding a repeat nothing
+    /// serves. The `cursor_hide_timer_live` shape, for the same reason.
+    pub(crate) bind_repeat_timer_live: bool,
 
     /// Something changed that the framebuffer doesn't show yet.
     pub needs_render: bool,
@@ -1174,8 +1187,12 @@ impl State {
 
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(&dh, "scoot");
-        seat.add_keyboard(Default::default(), 200, 25)
-            .expect("a keymap for the default layout");
+        seat.add_keyboard(
+            Default::default(),
+            super::bind_repeat::KEYBOARD_REPEAT_DELAY_MS,
+            super::bind_repeat::KEYBOARD_REPEAT_RATE_PER_SECOND,
+        )
+        .expect("a keymap for the default layout");
         seat.add_pointer();
 
         let (socket_name, listener_tokens) = Self::listen(display, event_loop)?;
@@ -1332,6 +1349,8 @@ impl State {
             wallpaper: Default::default(),
             suppressed_keys: HashSet::new(),
             held_keys: HashSet::new(),
+            bind_repeat: None,
+            bind_repeat_timer_live: false,
             // true without going through request_render(), so nothing has
             // armed the frame timer yet. That's only safe because
             // headless::init() unconditionally and synchronously calls

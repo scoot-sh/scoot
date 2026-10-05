@@ -143,6 +143,19 @@ let
   # Whether a slot-gated bind's slot is on.
   slotOn = name: (cfg.desktop.${name}.enable or false);
 
+  # A hardware bind: repeats while held and fires while locked (the
+  # compositor's `[binds]` table form -- see docs/configuration.md).
+  # Exactly the volume, brightness and media binds opt into both: a held
+  # key keeps stepping at the seat keyboard's own delay and rate, and the
+  # keys keep working on the lock screen. Every other bind stays a plain
+  # string: fire once, never locked (launcher, clipboard, lock and capture
+  # must stay refused behind the lock screen).
+  hwBind = action: {
+    inherit action;
+    repeat = true;
+    allow_when_locked = true;
+  };
+
   # One `[binds]` entry per enabled bind: the combo from the shared
   # table, the action built here. Slot-gated binds (launcher,
   # clipboard, notifications, capture) render only while their slot
@@ -152,17 +165,17 @@ let
   actions =
     let
       all = {
-        brightnessUp = "spawn ${brightnessCtl} -e set +5%";
-        brightnessDown = "spawn ${brightnessCtl} -e set 5%-";
-        volumeUp = "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
-        volumeDown = "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
-        volumeMute = "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SINK@ toggle";
-        micMute = "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
-        mediaPlay = "spawn ${playerctl} play-pause";
-        mediaPause = "spawn ${playerctl} pause";
-        mediaStop = "spawn ${playerctl} stop";
-        mediaNext = "spawn ${playerctl} next";
-        mediaPrev = "spawn ${playerctl} previous";
+        brightnessUp = hwBind "spawn ${brightnessCtl} -e set +5%";
+        brightnessDown = hwBind "spawn ${brightnessCtl} -e set 5%-";
+        volumeUp = hwBind "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
+        volumeDown = hwBind "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
+        volumeMute = hwBind "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SINK@ toggle";
+        micMute = hwBind "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+        mediaPlay = hwBind "spawn ${playerctl} play-pause";
+        mediaPause = hwBind "spawn ${playerctl} pause";
+        mediaStop = hwBind "spawn ${playerctl} stop";
+        mediaNext = hwBind "spawn ${playerctl} next";
+        mediaPrev = hwBind "spawn ${playerctl} previous";
         lock = "spawn ${cfg.desktop.idle.lock.command}";
         launcher = "spawn ${fuzzel}";
         clipboard = "spawn ${clipboardPick}/bin/scoot-clipboard-pick";

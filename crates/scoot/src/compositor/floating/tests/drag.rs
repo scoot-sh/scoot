@@ -342,6 +342,7 @@ fn a_resynced_modifier_fires_no_binding() {
             mods,
             Keysym::Super_L,
             Bound::Action(Action::ToggleFloating),
+            crate::compositor::keybindings::BindFlags::default(),
         );
     }
     // Control: a real Super press fires it.

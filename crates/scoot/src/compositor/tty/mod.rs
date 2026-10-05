@@ -1549,8 +1549,12 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
         state.end_floating_grab();
         state.settle_floating_grab();
         // Frozen screens show no motion: forget any armed hide, and show
-        // the pointer again for the switch back.
+        // the pointer again for the switch back. A held key's releases go
+        // to whatever session is active then, never here, so an in-flight
+        // bind repeat ends with the session rather than firing into the
+        // switch-back.
         state.disarm_cursor_hide();
+        state.cancel_bind_repeat();
     }
 }
 
@@ -1909,6 +1913,10 @@ impl State {
     /// a VT-switch retry -- that's the one recovery path a dead-DRM,
     /// working-keyboard state has.
     pub fn change_vt(&mut self, vt: u32) -> VtSwitchOutcome {
+        // A switch away ends any in-flight bind repeat even before the
+        // pause lands: the key is gone with the session, and its releases
+        // will never arrive here.
+        self.cancel_bind_repeat();
         let Some(tty) = &mut self.tty else {
             tracing::debug!(vt, "change_vt requested with no tty session active");
             return VtSwitchOutcome::Ignored;

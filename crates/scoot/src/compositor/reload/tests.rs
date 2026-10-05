@@ -31,7 +31,7 @@ use crate::cli::RendererKind;
 use crate::compositor::config;
 use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::headless;
-use crate::compositor::keybindings::{Bound, Keybindings, Modifiers};
+use crate::compositor::keybindings::{BindFlags, Bound, Keybindings, Modifiers};
 use crate::compositor::output_config::EntriesDiff;
 use crate::compositor::state::State;
 use crate::compositor::test_support::{
@@ -171,7 +171,10 @@ fn reload_applies_gap_appearance_and_binds_and_lists_them() {
                 ..Modifiers::default()
             }
         ),
-        Some(Bound::Action(Action::FocusColumn(Horizontal::Right))),
+        Some((
+            Bound::Action(Action::FocusColumn(Horizontal::Right)),
+            BindFlags::default(),
+        )),
         "the reloaded bind does not fire"
     );
     assert!(
@@ -1310,7 +1313,7 @@ fn keybindings_for_keeps_the_vt_recovery_path_unstrippable() {
     // `--tty` session), and wins when it is not (headless/nested never had
     // VT binds to keep).
     let mut binds = std::collections::HashMap::new();
-    binds.insert("ctrl+alt+f1".to_owned(), "close".to_owned());
+    binds.insert("ctrl+alt+f1".to_owned(), "close".into());
     let tty = config::keybindings_for(&binds, true);
     assert_eq!(
         tty.match_key(
@@ -1321,7 +1324,7 @@ fn keybindings_for_keeps_the_vt_recovery_path_unstrippable() {
                 ..Modifiers::default()
             }
         ),
-        Some(Bound::ChangeVt(1)),
+        Some((Bound::ChangeVt(1), BindFlags::default())),
         "a reload must not strip --tty's VT-switch recovery binding"
     );
     let bare = config::keybindings_for(&binds, false);
@@ -1334,9 +1337,58 @@ fn keybindings_for_keeps_the_vt_recovery_path_unstrippable() {
                 ..Modifiers::default()
             }
         ),
-        Some(Bound::Action(Action::CloseFocused)),
+        Some((Bound::Action(Action::CloseFocused), BindFlags::default(),)),
         "off --tty the user's bind stands (there is no VT path to keep)"
     );
+}
+
+// -- Bind repeat ------------------------------------------------------------
+
+/// A `[binds]` reload that swaps the table cancels an in-flight repeat:
+/// the repeat's action and flags came from the old table, so it ends
+/// rather than re-firing something the file no longer binds. (The held key
+/// itself neither wedges nor drops -- release routing never consults the
+/// table mid-hold.)
+#[test]
+fn a_binds_reload_that_swaps_the_table_cancels_an_in_flight_repeat() {
+    let mut fixture = Fixture::with_config("[binds]\n\"super+n\" = \"close\"\n");
+    fixture.state.keybindings.insert(
+        Modifiers::default(),
+        crate::compositor::input::keysym_named("XF86AudioRaiseVolume").expect("a named key"),
+        Bound::Action(Action::Spawn(vec!["true".into()])),
+        BindFlags {
+            repeat: true,
+            allow_when_locked: false,
+        },
+    );
+    let code = fixture
+        .state
+        .keycode_for_combo(&scoot_ipc::KeyCombo {
+            modifiers: vec![],
+            key: "XF86AudioRaiseVolume".into(),
+        })
+        .expect("the volume key resolves on the test keymap");
+    fixture
+        .state
+        .key(code, smithay::backend::input::KeyState::Pressed);
+    assert!(
+        fixture.state.bind_repeat.is_some(),
+        "the press armed a repeat"
+    );
+
+    fixture.rewrite("[binds]\n\"super+m\" = \"close\"\n");
+    let response = fixture.reload();
+    assert!(
+        applied(&response).contains(&field::BINDS.to_owned()),
+        "the reload swapped the table: {response:?}"
+    );
+    assert!(
+        fixture.state.bind_repeat.is_none(),
+        "the swap cancelled the in-flight repeat"
+    );
+    fixture
+        .state
+        .key(code, smithay::backend::input::KeyState::Released);
 }
 
 // -- Phase 4: autostart spawn-delta ------------------------------------------

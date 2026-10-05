@@ -1454,6 +1454,10 @@ impl State {
         let Some(output) = self.outputs.get(id).cloned() else {
             return false;
         };
+        // The focus and arrangement this removal re-derives may retire the
+        // context the press happened in: an in-flight repeat ends here, and
+        // re-arms from a fresh press.
+        self.cancel_bind_repeat();
         let layers: Vec<smithay::desktop::LayerSurface> =
             layer_map_for_output(&output).layers().cloned().collect();
         {

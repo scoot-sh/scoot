@@ -92,13 +92,31 @@ const DIGITS: [Keysym; 9] = [
     Keysym::_9,
 ];
 
+/// Per-bind opt-ins beyond the action itself: what a `[binds]` entry's
+/// table form (`{ action = "...", repeat = true, allow_when_locked = true }`
+/// -- see `config.rs`) asks for. Both default off, so a plain string bind
+/// and every built-in default behaves exactly as before: fire once, and
+/// never while the session is locked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BindFlags {
+    /// Re-fire this bind while its key is held, at the seat keyboard's own
+    /// repeat delay and rate (see `bind_repeat.rs`). Honored only for
+    /// actions that are safe to repeat -- `quit` and `close` never repeat,
+    /// even when flagged (see `config.rs`).
+    pub repeat: bool,
+    /// Let a `spawn` bind fire while the session is locked (volume,
+    /// brightness and media keys -- see `bind_repeat.rs`). Honored only for
+    /// `spawn`: any other action keeps today's refusal, even when flagged.
+    pub allow_when_locked: bool,
+}
+
 /// The default vim-motions-plus-Super table, `Vec` rather than a `HashMap`:
 /// a couple dozen entries at most, checked once per keypress -- a linear
 /// scan is simpler and not measurably slower. `config.rs` builds on this
 /// directly (via `insert`/`extend`) to layer a config file's `[binds]` on
 /// top, using `scoot_ipc::KeyCombo` to parse the string form.
 #[derive(Clone, Debug)]
-pub struct Keybindings(Vec<(Modifiers, Keysym, Bound)>);
+pub struct Keybindings(Vec<(Modifiers, Keysym, Bound, BindFlags)>);
 
 impl Default for Keybindings {
     fn default() -> Self {
@@ -258,7 +276,16 @@ impl Default for Keybindings {
                 Bound::Action(Action::MoveWindowToWorkspaceIndex(index)),
             ));
         }
-        Self(bindings)
+        // No built-in default opts into either flag: window management
+        // stays fire-once and locked-out, and the hardware binds that do
+        // opt in live in the desktop profile's keymap (`keys-home.nix`),
+        // not in every scoot session.
+        Self(
+            bindings
+                .into_iter()
+                .map(|(mods, keysym, bound)| (mods, keysym, bound, BindFlags::default()))
+                .collect(),
+        )
     }
 }
 
@@ -272,18 +299,20 @@ impl Keybindings {
     /// from run to run -- unlike the `HashMap` the file loader reads, which
     /// is why the loader refuses to arbitrate collisions rather than pick a
     /// file-order winner it cannot truthfully name.
-    pub fn iter(&self) -> impl Iterator<Item = (Modifiers, Keysym, &Bound)> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = (Modifiers, Keysym, &Bound, BindFlags)> + '_ {
         self.0
             .iter()
-            .map(|(mods, keysym, bound)| (*mods, *keysym, bound))
+            .map(|(mods, keysym, bound, flags)| (*mods, *keysym, bound, *flags))
     }
 
-    /// What `keysym` held with exactly `mods` is bound to, if anything.
-    pub fn match_key(&self, keysym: Keysym, mods: Modifiers) -> Option<Bound> {
+    /// What `keysym` held with exactly `mods` is bound to, if anything --
+    /// the action and its per-bind flags together. One lookup, so the
+    /// per-keypress hot path pays no second scan for the flags.
+    pub fn match_key(&self, keysym: Keysym, mods: Modifiers) -> Option<(Bound, BindFlags)> {
         self.0
             .iter()
-            .find(|(m, k, _)| *m == mods && *k == keysym)
-            .map(|(_, _, bound)| bound.clone())
+            .find(|(m, k, _, _)| *m == mods && *k == keysym)
+            .map(|(_, _, bound, flags)| (bound.clone(), *flags))
     }
 
     /// Inserts a binding for this exact combo, in place of whatever (if
@@ -296,15 +325,23 @@ impl Keybindings {
     /// `insert`, called later. A linear scan, like `match_key`: this table
     /// is too small for a `HashMap` index to be worth maintaining alongside
     /// it.
-    pub fn insert(&mut self, mods: Modifiers, keysym: Keysym, bound: Bound) -> Option<Bound> {
+    pub fn insert(
+        &mut self,
+        mods: Modifiers,
+        keysym: Keysym,
+        bound: Bound,
+        flags: BindFlags,
+    ) -> Option<(Bound, BindFlags)> {
         if let Some(slot) = self
             .0
             .iter_mut()
-            .find(|(m, k, _)| *m == mods && *k == keysym)
+            .find(|(m, k, _, _)| *m == mods && *k == keysym)
         {
-            Some(std::mem::replace(&mut slot.2, bound))
+            let previous = (std::mem::replace(&mut slot.2, bound), slot.3);
+            slot.3 = flags;
+            Some(previous)
         } else {
-            self.0.push((mods, keysym, bound));
+            self.0.push((mods, keysym, bound, flags));
             None
         }
     }
@@ -322,10 +359,12 @@ impl Keybindings {
         &mut self,
         more: impl IntoIterator<Item = (Modifiers, Keysym, Bound)>,
     ) -> Vec<(Modifiers, Keysym, Bound)> {
+        // Session-managed bindings (today only `--tty`'s VT switches) never
+        // carry per-bind flags: they are layered on, not configured.
         more.into_iter()
             .filter_map(|(mods, keysym, bound)| {
-                self.insert(mods, keysym, bound)
-                    .map(|previous| (mods, keysym, previous))
+                self.insert(mods, keysym, bound, BindFlags::default())
+                    .map(|(previous, _)| (mods, keysym, previous))
             })
             .collect()
     }
@@ -347,10 +386,14 @@ impl Keybindings {
     ///
     /// Cold path (one comparison per reload request), so the per-combo
     /// `match_key` scan is not load-bearing the way it is per keypress.
+    ///
+    /// Compares the flags too: a reload that only flips `repeat` or
+    /// `allow_when_locked` must report `binds` as applied, not agree
+    /// silently.
     pub fn same_bindings_as(&self, other: &Self) -> bool {
         self.0.len() == other.0.len()
-            && self.0.iter().all(|(mods, keysym, bound)| {
-                other.match_key(*keysym, *mods).as_ref() == Some(bound)
+            && self.0.iter().all(|(mods, keysym, bound, flags)| {
+                other.match_key(*keysym, *mods) == Some((bound.clone(), *flags))
             })
     }
 
@@ -384,11 +427,17 @@ impl Keybindings {
 mod tests {
     use super::*;
 
+    /// `match_key` without the flags: the pre-existing tests pin the action
+    /// mapping, and the flags have their own tests below.
+    fn matched(table: &Keybindings, keysym: Keysym, mods: Modifiers) -> Option<Bound> {
+        table.match_key(keysym, mods).map(|(bound, _)| bound)
+    }
+
     #[test]
     fn every_default_binding_matches_itself() {
         let table = Keybindings::default();
-        for (mods, keysym, bound) in &table.0 {
-            assert_eq!(table.match_key(*keysym, *mods), Some(bound.clone()));
+        for (mods, keysym, bound, _) in &table.0 {
+            assert_eq!(matched(&table, *keysym, *mods), Some(bound.clone()));
         }
     }
 
@@ -400,25 +449,33 @@ mod tests {
         assert_eq!(table.0.len(), default_len + 12);
         assert!(displaced.is_empty(), "disjoint combos displace nothing");
         assert_eq!(
-            table.match_key(Keysym::F2, CTRL_ALT),
+            matched(&table, Keysym::F2, CTRL_ALT),
             Some(Bound::ChangeVt(2))
         );
         // Every original binding is still there, unchanged.
-        for (mods, keysym, bound) in Keybindings::default().0 {
-            assert_eq!(table.match_key(keysym, mods), Some(bound));
+        for (mods, keysym, bound, _) in Keybindings::default().0 {
+            assert_eq!(matched(&table, keysym, mods), Some(bound));
         }
     }
 
     #[test]
     fn insert_replaces_the_binding_for_the_same_combo_and_returns_the_old_one() {
         let mut table = Keybindings::default();
-        let previous = table.insert(SUPER, Keysym::h, Bound::Action(Action::CloseFocused));
-        assert_eq!(
-            previous,
-            Some(Bound::Action(Action::FocusColumn(Horizontal::Left)))
+        let previous = table.insert(
+            SUPER,
+            Keysym::h,
+            Bound::Action(Action::CloseFocused),
+            BindFlags::default(),
         );
         assert_eq!(
-            table.match_key(Keysym::h, SUPER),
+            previous,
+            Some((
+                Bound::Action(Action::FocusColumn(Horizontal::Left)),
+                BindFlags::default()
+            ))
+        );
+        assert_eq!(
+            matched(&table, Keysym::h, SUPER),
             Some(Bound::Action(Action::CloseFocused))
         );
         // Nothing was appended -- the table grew by zero entries.
@@ -429,7 +486,12 @@ mod tests {
     fn insert_on_a_fresh_combo_adds_it_and_returns_none() {
         let mut table = Keybindings::default();
         let default_len = table.0.len();
-        let previous = table.insert(CTRL_ALT, Keysym::F2, Bound::ChangeVt(2));
+        let previous = table.insert(
+            CTRL_ALT,
+            Keysym::F2,
+            Bound::ChangeVt(2),
+            BindFlags::default(),
+        );
         assert_eq!(previous, None);
         assert_eq!(table.0.len(), default_len + 1);
     }
@@ -464,7 +526,7 @@ mod tests {
         // Super+h is bound; Super+Ctrl+h is not -- a superset of modifiers
         // must not match a binding for a subset.
         assert_eq!(
-            table.match_key(Keysym::h, mods(true, false, true, false)),
+            matched(&table, Keysym::h, mods(true, false, true, false)),
             None
         );
     }
@@ -472,8 +534,8 @@ mod tests {
     #[test]
     fn an_unbound_combo_misses() {
         let table = Keybindings::default();
-        assert_eq!(table.match_key(Keysym::x, SUPER), None);
-        assert_eq!(table.match_key(Keysym::h, Modifiers::default()), None);
+        assert_eq!(matched(&table, Keysym::x, SUPER), None);
+        assert_eq!(matched(&table, Keysym::h, Modifiers::default()), None);
     }
 
     #[test]
@@ -484,13 +546,13 @@ mod tests {
         let table = Keybindings::default();
         for (i, keysym) in DIGITS.into_iter().enumerate() {
             assert_eq!(
-                table.match_key(keysym, SUPER),
+                matched(&table, keysym, SUPER),
                 Some(Bound::Action(Action::FocusWorkspaceIndex(i))),
                 "Super+{}",
                 i + 1
             );
             assert_eq!(
-                table.match_key(keysym, SUPER_SHIFT),
+                matched(&table, keysym, SUPER_SHIFT),
                 Some(Bound::Action(Action::MoveWindowToWorkspaceIndex(i))),
                 "Super+Shift+{}",
                 i + 1
@@ -506,28 +568,28 @@ mod tests {
         // keep. The `-index` halves stay for fixed screens, bound manually.
         let table = Keybindings::default();
         assert_eq!(
-            table.match_key(Keysym::comma, SUPER),
+            matched(&table, Keysym::comma, SUPER),
             Some(Bound::Action(Action::FocusOutputDirection(
                 Horizontal::Left
             ))),
             "Super+comma"
         );
         assert_eq!(
-            table.match_key(Keysym::period, SUPER),
+            matched(&table, Keysym::period, SUPER),
             Some(Bound::Action(Action::FocusOutputDirection(
                 Horizontal::Right
             ))),
             "Super+period"
         );
         assert_eq!(
-            table.match_key(Keysym::comma, SUPER_SHIFT),
+            matched(&table, Keysym::comma, SUPER_SHIFT),
             Some(Bound::Action(Action::MoveWindowToOutputDirection(
                 Horizontal::Left
             ))),
             "Super+Shift+comma"
         );
         assert_eq!(
-            table.match_key(Keysym::period, SUPER_SHIFT),
+            matched(&table, Keysym::period, SUPER_SHIFT),
             Some(Bound::Action(Action::MoveWindowToOutputDirection(
                 Horizontal::Right
             ))),
@@ -539,7 +601,7 @@ mod tests {
     fn super_f_toggles_fullscreen_by_default() {
         let table = Keybindings::default();
         assert_eq!(
-            table.match_key(Keysym::f, SUPER),
+            matched(&table, Keysym::f, SUPER),
             Some(Bound::Action(Action::ToggleFullscreen))
         );
     }
@@ -548,7 +610,7 @@ mod tests {
     fn super_m_toggles_maximize_by_default() {
         let table = Keybindings::default();
         assert_eq!(
-            table.match_key(Keysym::m, SUPER),
+            matched(&table, Keysym::m, SUPER),
             Some(Bound::Action(Action::ToggleMaximize))
         );
     }
@@ -559,20 +621,104 @@ mod tests {
         // the same file can hold the same binds in a different `Vec` order
         // -- a derived `PartialEq` would call those different, and a reload
         // would claim `binds` as applied for changing nothing.
+        let no_flags = BindFlags::default();
         let mut first = Keybindings::default();
-        first.insert(SUPER, Keysym::n, Bound::Action(Action::CloseFocused));
-        first.insert(SUPER_SHIFT, Keysym::m, Bound::Action(Action::CloseFocused));
+        first.insert(
+            SUPER,
+            Keysym::n,
+            Bound::Action(Action::CloseFocused),
+            no_flags,
+        );
+        first.insert(
+            SUPER_SHIFT,
+            Keysym::m,
+            Bound::Action(Action::CloseFocused),
+            no_flags,
+        );
         let mut second = Keybindings::default();
-        second.insert(SUPER_SHIFT, Keysym::m, Bound::Action(Action::CloseFocused));
-        second.insert(SUPER, Keysym::n, Bound::Action(Action::CloseFocused));
+        second.insert(
+            SUPER_SHIFT,
+            Keysym::m,
+            Bound::Action(Action::CloseFocused),
+            no_flags,
+        );
+        second.insert(
+            SUPER,
+            Keysym::n,
+            Bound::Action(Action::CloseFocused),
+            no_flags,
+        );
         assert!(first.same_bindings_as(&second));
         assert!(second.same_bindings_as(&first));
 
         let mut different = Keybindings::default();
-        different.insert(SUPER, Keysym::n, Bound::Action(Action::Quit));
+        different.insert(SUPER, Keysym::n, Bound::Action(Action::Quit), no_flags);
         assert!(!first.same_bindings_as(&different));
         assert!(!different.same_bindings_as(&first));
         assert!(!Keybindings::default().same_bindings_as(&first));
+    }
+
+    #[test]
+    fn no_default_binding_opts_into_either_flag() {
+        // Window management stays fire-once and locked-out out of the box;
+        // the hardware binds that opt in live in the desktop profile, not
+        // in every session.
+        let table = Keybindings::default();
+        for (mods, keysym, _, flags) in table.iter() {
+            assert_eq!(
+                flags,
+                BindFlags::default(),
+                "{mods:?}+{} carries flags it should not",
+                smithay::input::keyboard::xkb::keysym_get_name(keysym),
+            );
+        }
+    }
+
+    #[test]
+    fn insert_stores_the_flags_and_returns_the_previous_ones() {
+        let mut table = Keybindings::default();
+        let flags = BindFlags {
+            repeat: true,
+            allow_when_locked: true,
+        };
+        assert_eq!(
+            table.insert(SUPER, Keysym::h, Bound::Action(Action::CloseFocused), flags,),
+            Some((
+                Bound::Action(Action::FocusColumn(Horizontal::Left)),
+                BindFlags::default(),
+            )),
+            "replacing a default reports the default's (empty) flags"
+        );
+        assert_eq!(
+            table.match_key(Keysym::h, SUPER),
+            Some((Bound::Action(Action::CloseFocused), flags)),
+            "the stored flags come back with the binding"
+        );
+    }
+
+    #[test]
+    fn same_bindings_spots_a_flags_only_difference() {
+        // A reload that only flips `repeat` must report `binds` as applied,
+        // not agree silently -- which is what comparing the flags buys.
+        let mut first = Keybindings::default();
+        first.insert(
+            SUPER,
+            Keysym::n,
+            Bound::Action(Action::CloseFocused),
+            BindFlags {
+                repeat: true,
+                allow_when_locked: false,
+            },
+        );
+        let mut second = Keybindings::default();
+        second.insert(
+            SUPER,
+            Keysym::n,
+            Bound::Action(Action::CloseFocused),
+            BindFlags::default(),
+        );
+        assert!(!first.same_bindings_as(&second));
+        assert!(!second.same_bindings_as(&first));
     }
 
     #[test]

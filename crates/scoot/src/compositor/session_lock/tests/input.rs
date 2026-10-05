@@ -292,3 +292,288 @@ fn the_cross_output_actions_are_refused_while_locked() {
         "a refused cross-output action reached a window"
     );
 }
+
+/// A `spawn` bind flagged `allow_when_locked` fires while locked: the
+/// keystroke is intercepted (the lock client never sees it) and the
+/// config-pinned command runs. Volume, brightness and media keys -- the
+/// desktop profile opts exactly those in.
+#[test]
+fn an_allowed_spawn_bind_fires_while_locked() {
+    use smithay::backend::input::KeyState;
+
+    use crate::compositor::keybindings::{BindFlags, Bound, Modifiers};
+
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.state.keybindings.insert(
+        Modifiers::default(),
+        crate::compositor::input::keysym_named("XF86AudioRaiseVolume").unwrap(),
+        Bound::Action(scoot_core::Action::Spawn(vec!["true".into()])),
+        BindFlags {
+            repeat: false,
+            allow_when_locked: true,
+        },
+    );
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    let before = fixture.report();
+    let spawns = fixture.state.spawned_children.len();
+
+    let code = fixture
+        .state
+        .keycode_for_combo(&KeyCombo {
+            modifiers: vec![],
+            key: "XF86AudioRaiseVolume".into(),
+        })
+        .expect("the volume key resolves on the test keymap");
+    fixture.state.key(code, KeyState::Pressed);
+    assert_eq!(
+        fixture.state.spawned_children.len(),
+        spawns + 1,
+        "the allowed spawn fired while locked"
+    );
+    fixture.state.key(code, KeyState::Released);
+    fixture.settle();
+
+    let after = fixture.report();
+    assert_eq!(
+        after.keys, before.keys,
+        "the allowed bind's keystroke must be intercepted, not forwarded to the lock client"
+    );
+    assert_eq!(
+        after.keyboard_focus,
+        Some(Which::Lock(0)),
+        "focus must not have moved"
+    );
+}
+
+/// A `spawn` bind *without* the flag stays refused while locked: the
+/// keystroke goes to the lock client like any other, and nothing runs. A
+/// terminal from behind the lock screen would be a complete bypass, so the
+/// default for every bind is refusal.
+#[test]
+fn a_spawn_bind_without_the_flag_is_forwarded_while_locked() {
+    use smithay::backend::input::KeyState;
+
+    use crate::compositor::keybindings::{BindFlags, Bound, Modifiers};
+
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.state.keybindings.insert(
+        Modifiers::default(),
+        crate::compositor::input::keysym_named("XF86AudioLowerVolume").unwrap(),
+        Bound::Action(scoot_core::Action::Spawn(vec!["true".into()])),
+        BindFlags::default(),
+    );
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    let before = fixture.report();
+    let spawns = fixture.state.spawned_children.len();
+
+    let code = fixture
+        .state
+        .keycode_for_combo(&KeyCombo {
+            modifiers: vec![],
+            key: "XF86AudioLowerVolume".into(),
+        })
+        .expect("the volume key resolves on the test keymap");
+    fixture.state.key(code, KeyState::Pressed);
+    fixture.state.key(code, KeyState::Released);
+    assert_eq!(
+        fixture.state.spawned_children.len(),
+        spawns,
+        "the unflagged spawn must not run while locked"
+    );
+    fixture.settle();
+
+    let after = fixture.report();
+    assert!(
+        after.keys > before.keys,
+        "the refused bind's keystroke should have been forwarded to the lock client"
+    );
+    assert_eq!(
+        after.keyboard_focus,
+        Some(Which::Lock(0)),
+        "focus must not have moved"
+    );
+}
+
+/// The flag on anything but a `spawn` still refuses while locked: layout,
+/// focus, close and quit keep today's refusal even when a table names the
+/// flag on them (`config.rs` clears it at load with a warning; `act_bind`
+/// re-checks the shape, and this pins the key path end to end).
+#[test]
+fn an_allowed_flag_on_a_non_spawn_action_still_refuses_while_locked() {
+    use smithay::backend::input::KeyState;
+
+    use crate::compositor::keybindings::{BindFlags, Bound, Modifiers};
+
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.state.keybindings.insert(
+        Modifiers::default(),
+        crate::compositor::input::keysym_named("XF86AudioPlay").unwrap(),
+        Bound::Action(scoot_core::Action::CloseFocused),
+        BindFlags {
+            repeat: false,
+            allow_when_locked: true,
+        },
+    );
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    let before = fixture.report();
+
+    let code = fixture
+        .state
+        .keycode_for_combo(&KeyCombo {
+            modifiers: vec![],
+            key: "XF86AudioPlay".into(),
+        })
+        .expect("the media key resolves on the test keymap");
+    fixture.state.key(code, KeyState::Pressed);
+    fixture.state.key(code, KeyState::Released);
+    fixture.settle();
+
+    let after = fixture.report();
+    assert_eq!(
+        after.closes, before.closes,
+        "a non-spawn must not act from behind a lock screen, flag or not"
+    );
+    assert!(
+        after.keys > before.keys,
+        "the refused bind's keystroke should have been forwarded to the lock client"
+    );
+}
+
+/// An allowed `repeat` bind keeps stepping while locked: hold volume on
+/// the lock screen and it keeps stepping until release.
+#[test]
+fn an_allowed_repeat_bind_keeps_stepping_while_locked() {
+    use smithay::backend::input::KeyState;
+
+    use crate::compositor::bind_repeat::repeat_delay;
+    use crate::compositor::keybindings::{BindFlags, Bound, Modifiers};
+
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.state.keybindings.insert(
+        Modifiers::default(),
+        crate::compositor::input::keysym_named("XF86AudioRaiseVolume").unwrap(),
+        Bound::Action(scoot_core::Action::Spawn(vec!["true".into()])),
+        BindFlags {
+            repeat: true,
+            allow_when_locked: true,
+        },
+    );
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    let before = fixture.report();
+
+    let code = fixture
+        .state
+        .keycode_for_combo(&KeyCombo {
+            modifiers: vec![],
+            key: "XF86AudioRaiseVolume".into(),
+        })
+        .expect("the volume key resolves on the test keymap");
+    fixture.state.key(code, KeyState::Pressed);
+    let spawns = fixture.state.spawned_children.len();
+    fixture
+        .state
+        .note_bind_repeat_timeout(std::time::Instant::now() + repeat_delay() * 2);
+    assert_eq!(
+        fixture.state.spawned_children.len(),
+        spawns + 1,
+        "the allowed repeat re-fired while locked"
+    );
+    fixture.state.key(code, KeyState::Released);
+    fixture.settle();
+
+    let after = fixture.report();
+    assert_eq!(
+        after.keys, before.keys,
+        "neither the press nor the re-fires may reach the lock client"
+    );
+}
+
+/// Locking cancels an in-flight repeat: a volume key held across the lock
+/// stops stepping the moment the session locks, and the timer after that
+/// fires into nothing.
+#[test]
+fn locking_cancels_an_in_flight_repeat() {
+    use smithay::backend::input::KeyState;
+
+    use crate::compositor::bind_repeat::repeat_delay;
+    use crate::compositor::keybindings::{BindFlags, Bound, Modifiers};
+
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.state.keybindings.insert(
+        Modifiers::default(),
+        crate::compositor::input::keysym_named("XF86AudioRaiseVolume").unwrap(),
+        Bound::Action(scoot_core::Action::Spawn(vec!["true".into()])),
+        BindFlags {
+            repeat: true,
+            allow_when_locked: false,
+        },
+    );
+
+    let code = fixture
+        .state
+        .keycode_for_combo(&KeyCombo {
+            modifiers: vec![],
+            key: "XF86AudioRaiseVolume".into(),
+        })
+        .expect("the volume key resolves on the test keymap");
+    fixture.state.key(code, KeyState::Pressed);
+    assert!(
+        fixture.state.bind_repeat.is_some(),
+        "the press armed a repeat"
+    );
+
+    fixture.run(Step::Lock);
+    assert!(
+        fixture.state.bind_repeat.is_none(),
+        "the lock cancelled the in-flight repeat"
+    );
+    let spawns = fixture.state.spawned_children.len();
+    fixture
+        .state
+        .note_bind_repeat_timeout(std::time::Instant::now() + repeat_delay() * 2);
+    assert_eq!(
+        fixture.state.spawned_children.len(),
+        spawns,
+        "nothing re-fires after the lock cancelled the repeat"
+    );
+    fixture.state.key(code, KeyState::Released);
+}
+
+/// An IPC `action` naming a spawn stays refused while locked, even though
+/// the same command as a flagged bind would fire: the request carries an
+/// arbitrary command from the requester, while a bind can only run its
+/// config-pinned command. Allowing IPC spawns would turn "volume keys work
+/// on the lock screen" into "anything with socket access runs anything
+/// while locked".
+#[test]
+fn ipc_spawn_actions_are_refused_while_locked() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::Lock);
+    let spawns = fixture.state.spawned_children.len();
+
+    let response = fixture
+        .state
+        .handle_request(Request::Action(scoot_ipc::Action::Spawn {
+            command: vec!["true".into()],
+        }));
+    assert!(
+        matches!(response, Response::Error { .. }),
+        "an IPC spawn must be refused while locked, got {response:?}"
+    );
+    fixture.settle();
+    assert_eq!(
+        fixture.state.spawned_children.len(),
+        spawns,
+        "the refused spawn must not have run"
+    );
+}
