@@ -774,8 +774,7 @@ mod tests {
     fn usage_names_locked_on_its_own_line() {
         let help = crate::help::usage("scoot msg", REQUESTS_HELP, ACTIONS_HELP, false);
         assert!(
-            help.lines()
-                .any(|line| line.trim().starts_with("locked")),
+            help.lines().any(|line| line.trim().starts_with("locked")),
             "--help hides the locked verb"
         );
     }
