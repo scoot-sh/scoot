@@ -1137,7 +1137,7 @@ likewise (the bar's `network`/`bluetooth` modules are display-only today).
 Two loud refusals instead of silent no-ops: `desktop.enable` without
 `programs.scoot.enable`, and a `look` without `desktop.enable`, each fail
 evaluation naming the missing switch; an unknown `look` fails naming the
-four valid ones. All three are pinned in `nix/tests.nix`, with the
+four valid ones. All four are pinned in `nix/tests.nix`, with the
 rendered compositor and bar files checked content-equal to the examples'
 palettes.
 
