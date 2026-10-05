@@ -1460,6 +1460,23 @@ let
   # `--watch`; the behavior tests run it bare for one sync).
   feedBridge = lib.removeSuffix " --watch" hmNotifFeedTest.config.systemd.user.services.scoot-notify-sync.Service.ExecStart;
 
+  # ...with overridden state icons (all three custom, DND empty): the
+  # icon behavior tests run this bridge beside the default one.
+  hmNotifFeedIconsTest = evalHome {
+    enable = true;
+    desktop.notifications.enable = true;
+    desktop.notifications.package = feedStubs;
+    desktop.notifications.bar.icons = {
+      idle = "✉";
+      unread = "!";
+      dnd = "";
+    };
+  };
+  feedIconsBridge = lib.removeSuffix " --watch" hmNotifFeedIconsTest.config.systemd.user.services.scoot-notify-sync.Service.ExecStart;
+  # The check derivation's interpreter: python3 plus fonttools (the
+  # state-icon coverage check reads the font's cmap).
+  checkPython = python3.withPackages (ps: [ ps.fonttools ]);
+
   # --- clipboard (`programs.scoot.desktop.clipboard`) evaluations ---
   #
   # The profile with a look: the whole slot on (two watcher units, the
@@ -2121,6 +2138,20 @@ let
     desktop.enable = true;
     desktop.look = "music-desk";
     desktop.notifications.enable = false;
+  } { package = fakeBar; };
+  # ...with overridden state icons (custom idle, empty DND): the bar
+  # half follows per key, and the feed bridge carries them.
+  hmDeskBarNotifIcons = evalHomeDesktop {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.notifications.bar.icons = {
+      idle = "✉";
+      unread = "!";
+      dnd = "";
+    };
   } { package = fakeBar; };
   # ...with the daemon on but a bar built without the push module:
   # refused at eval, naming it (pinned by message in `_notifPins`).
@@ -3027,6 +3058,7 @@ let
   notifSettingsConf = hmNotifSettings.config.xdg.configFile."mako/config".source;
   notifTargetOffConf = hmNotifTargetOff.config.xdg.configFile."mako/config".source;
   notifBarToml = hmDeskBarNotif.config.programs.scootbar.configFile;
+  notifIconsBarToml = hmDeskBarNotifIcons.config.programs.scootbar.configFile;
   # The clipboard slot's generated files: the swayidle config with the
   # slot off (lock lines without the wipe), plus the store entry and
   # the picker as the units and the keymap run them -- themed (the
@@ -4783,6 +4815,77 @@ let
         ];
       true
     )
+    # The state icons default to DejaVu Sans glyphs (hollow circle for
+    # idle, solid dot for unread, crescent moon for DND)...
+    (
+      assert
+        hmNotif.config.programs.scoot.desktop.notifications.bar.icons == {
+          idle = "○";
+          unread = "●";
+          dnd = "☾";
+        };
+      true
+    )
+    # ...the bar's static icon is the idle one...
+    (
+      assert hmDeskBarNotif.config.programs.scootbar.settings.push.notifications.icon == "○";
+      true
+    )
+    # ...each key overridable (custom idle reaches the bar, empty DND
+    # reaches the option the feed reads)...
+    (
+      assert hmDeskBarNotifIcons.config.programs.scootbar.settings.push.notifications.icon == "✉";
+      true
+    )
+    (
+      assert hmDeskBarNotifIcons.config.programs.scoot.desktop.notifications.bar.icons.unread == "!";
+      true
+    )
+    (
+      assert hmDeskBarNotifIcons.config.programs.scoot.desktop.notifications.bar.icons.dnd == "";
+      true
+    )
+    # ...an empty idle sets no static icon at all (a quiet desktop shows
+    # nothing)...
+    (
+      assert
+        !(
+          (evalHomeDesktopWith [ ] {
+            enable = true;
+            package = fakePkg;
+            wallpaper.package = fakeBg;
+            desktop.enable = true;
+            desktop.look = "music-desk";
+            desktop.notifications.bar.icons.idle = "";
+          } { package = fakeBar; }).config.programs.scootbar.settings.push.notifications ? icon
+        );
+      true
+    )
+    # ...and a two-glyph icon is refused at eval, naming the option
+    # (the bar refuses it per update at runtime).
+    (
+      assert
+        builtins.length (
+          failing
+            (evalHome {
+              enable = true;
+              desktop.notifications.enable = true;
+              desktop.notifications.bar.icons.dnd = "ab";
+            }).config
+        ) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "bar.icons" m) (
+        failing
+          (evalHome {
+            enable = true;
+            desktop.notifications.enable = true;
+            desktop.notifications.bar.icons.dnd = "ab";
+          }).config
+      );
+      true
+    )
     # With the daemon off, or the bar unmanaged, the table stays
     # absent (the bar is entirely the user's then: no feed, no
     # toggle).
@@ -6091,7 +6194,7 @@ assert lib.all (x: x) _darwinClipPins;
 assert lib.all (x: x) _darwinLaunchPins;
 assert lib.all (x: x) _darwinKeysPins;
 assert lib.all (x: x) _flakePins;
-runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
+runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   set -euo pipefail
 
   # 1. Empty settings: valid TOML, parses to {} -- a minimal file the
@@ -6438,10 +6541,32 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))
-    assert got["push"]["notifications"]["icon"] == "✉", got["push"]
+    assert got["push"]["notifications"]["icon"] == "○", got["push"]
     assert got["push"]["notifications"]["on-click"]["exec"] == [sys.argv[2], "mode", "-t", "do-not-disturb"], got["push"]
     ' ${notifBarToml} '${leanMako}/bin/makoctl'
     echo "ok: bar push module toggles do-not-disturb"
+
+    # 13d2. Overridden state icons: the bar's static icon is the custom
+      #       idle one (the envelope, back where it was), while the feed
+      #       bridge carries the custom unread mark and an empty DND.
+      python3 -c '
+      import sys,tomllib
+      got = tomllib.load(open(sys.argv[1],"rb"))
+      assert got["push"]["notifications"]["icon"] == "✉", got["push"]
+      ' ${notifIconsBarToml}
+    grep -F -q -- "--arg icon_unread '!" ${feedIconsBridge}
+    # An empty icon interpolates as two bare quotes: extract the DND
+    # value and require it empty (spelling those quotes literally
+    # would end this file's own string, so match around them).
+    icon_dnd_val="$(grep -o -- "--arg icon_dnd '[^']*'" ${feedIconsBridge} | sed -e "s/^[^']*'//" -e "s/'$//")"
+    [ -z "$icon_dnd_val" ] || { echo "want an empty DND icon (13d2), got: $icon_dnd_val"; exit 1; }
+    echo "ok: overridden state icons reach the bar and the feed"
+
+      # 13d3. By default the bridge carries the solid dot for unread and
+      #       the crescent moon for DND.
+      grep -F -q -- "--arg icon_unread '●'" ${feedBridge}
+      grep -F -q -- "--arg icon_dnd '☾'" ${feedBridge}
+      echo "ok: default state icons ride the feed"
 
     # 13e. The lean daemon: its runtime closure names no GTK stack
     #      (the `wrapGAppsHook3` weight the profile refuses to ship:
@@ -6458,6 +6583,24 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     grep -q "hicolor-icon-theme" ${leanMako}/bin/mako
     if grep -E "gtk\+3|tinysparql" ${leanMako}/bin/mako ${leanMako}/bin/makoctl; then echo "GTK-stack reference in lean mako wrapper" >&2; exit 1; fi
     echo "ok: lean mako wrapper sets the pixbuf loaders and the icon theme"
+
+    # 13g. The default state icons are each at most one glyph, and all
+    #      in DejaVu Sans (the bar's default font file), so they render
+    #      with no symbol font. The icons come from the evaluated
+    #      options, not pasted here, so a default no DejaVu ships (or a
+    #      two-glyph one) fails loudly here instead of shipping a
+    #      missing glyph.
+    python3 -c '
+    import sys
+    from fontTools.ttLib import TTFont
+    cmap = TTFont(sys.argv[1]).getBestCmap()
+    icons = sys.argv[2:]
+    long = [c for c in icons if len(c) > 1]
+    assert not long, "state icons longer than one glyph: %s" % long
+    missing = ["U+%04X" % ord(c) for c in "".join(icons) if ord(c) not in cmap]
+    assert not missing, "state icons missing from DejaVu Sans: %s" % ", ".join(missing)
+    ' ${pkgs.dejavu_fonts.minimal}/share/fonts/truetype/DejaVuSans.ttf '${hmNotif.config.programs.scoot.desktop.notifications.bar.icons.idle}' '${hmNotif.config.programs.scoot.desktop.notifications.bar.icons.unread}' '${hmNotif.config.programs.scoot.desktop.notifications.bar.icons.dnd}'
+    echo "ok: default state icons are each one glyph in DejaVu Sans"
 
     # 14. The bar feed, against stub tools (the REAL bridge script from
     #     the module, scenario files below -- `mode`/`list` are what
@@ -6546,6 +6689,43 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     grep -q "bus monitor ended" "$SCOOT_FEED_TEST_DIR/stderr"
     grep -q '^msg set notifications' "$SCOOT_FEED_TEST_DIR/calls"
     echo "ok: garbage monitor line is skipped"
+
+    # 14h. Unread: the count arrives with the state's icon (a
+      #      per-update icon, so it overrides the static idle one while
+      #      set) -- exact payload, one line.
+      feed_setup 'default' 0 '[{"urgency": 1},{"urgency": 0}]' 0 "" 0
+      ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+      grep -qF '{"text":"2","class":"normal","tooltip":"2 notifications -- click to hold them with do-not-disturb","icon":"●"}' "$SCOOT_FEED_TEST_DIR/calls"
+      echo "ok: unread count carries the unread icon"
+
+      # 14i. DND: the state's icon rides along too (the crescent moon by
+      #      default), beside the held count.
+      feed_setup 'do-not-disturb' 0 '[{"urgency": 1}]' 0 "" 0
+      ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+      grep -qF '{"text":"DND 1","class":"muted","tooltip":"1 notifications held by do-not-disturb -- click to let them through","icon":"☾"}' "$SCOOT_FEED_TEST_DIR/calls"
+      echo "ok: DND carries the DND icon"
+
+      # 14j. Idle: no icon key at all (the static idle icon shows, set
+      #      beside the module -- nothing to override it with).
+      feed_setup 'default' 0 '[]' 0 "" 0
+      ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+      grep -qF '{"text":""}' "$SCOOT_FEED_TEST_DIR/calls"
+      if grep -q '"icon"' "$SCOOT_FEED_TEST_DIR/calls"; then echo "idle payload names an icon (14j)"; cat "$SCOOT_FEED_TEST_DIR/calls"; exit 1; fi
+      echo "ok: idle names no icon"
+
+      # 14k. Overridden icons: the custom unread mark rides the count...
+      feed_setup 'default' 0 '[{"urgency": 0}]' 0 "" 0
+      ${feedIconsBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+      grep -qF '{"text":"1","class":"normal","tooltip":"1 notifications -- click to hold them with do-not-disturb","icon":"!"}' "$SCOOT_FEED_TEST_DIR/calls"
+      echo "ok: overridden unread icon rides the count"
+
+      # 14l. ...and an empty DND icon stays out of the payload (the DND
+      #      text alone).
+      feed_setup 'do-not-disturb' 0 '[]' 0 "" 0
+      ${feedIconsBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+      grep -qF '{"text":"DND","class":"muted","tooltip":"do-not-disturb is on -- click to let notifications through"}' "$SCOOT_FEED_TEST_DIR/calls"
+      if grep -q '"icon"' "$SCOOT_FEED_TEST_DIR/calls"; then echo "empty DND icon leaked into the payload (14l)"; cat "$SCOOT_FEED_TEST_DIR/calls"; exit 1; fi
+      echo "ok: empty DND icon stays out of the payload"
 
     # 15. Keymap content: the rendered `[binds]` carries the
     #     eighteen profile binds with absolute tool paths (the sigils --

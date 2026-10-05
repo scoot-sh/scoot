@@ -438,6 +438,38 @@ config:
 right = ["notifications", "clock"]
 ```
 
+Each state has its own icon, so DND reads at a glance: a hollow circle
+while idle, a solid dot beside the unread count, and a crescent moon
+while do-not-disturb holds notifications (captured from a real session
+through scoot's own IPC screenshot path, DejaVu Sans at 17 px):
+
+![The notification module while idle: a hollow circle](../../../assets/notifications-bar-idle.png)
+
+![The notification module with three unread: a solid dot beside the count](../../../assets/notifications-bar-unread.png)
+
+![The notification module with do-not-disturb on: a crescent moon beside DND](../../../assets/notifications-bar-dnd.png)
+
+The defaults are all in DejaVu Sans, the bar's default font, so they
+render with no symbol font — and a default the font cannot draw fails
+the flake's own checks instead of shipping a missing glyph. The old
+envelope default is gone for exactly that reason: at bar size its fold
+lines read as the X of a missing-glyph box. Each icon is overridable —
+empty means no icon for that state — and each is empty or exactly one
+glyph (anything else fails evaluation, since the bar refuses it per
+update). A Nerd Font glyph works wherever `bar.fallback-fonts`
+provides one:
+
+```nix
+programs.scoot.desktop.notifications.bar.icons = {
+  idle = "○"; # the push module's static icon; "" shows nothing while idle
+  unread = "●"; # sent beside the count, overriding idle while set
+  dnd = "☾"; # sent while do-not-disturb is on, overriding idle while set
+};
+```
+
+A future scootnotify keeps these option names: only the daemon behind
+them changes.
+
 Every value is an option, applied on rebuild/switch (the units restart
 into the new config; no re-login):
 
@@ -446,6 +478,9 @@ into the new config; no re-login):
 | `desktop.notifications.enable` | bool | `true` with the profile | run mako plus the bar feed |
 | `desktop.notifications.daemon` | enum (`"mako"`) | `"mako"` | the daemon behind `enable` (a future scootnotify widens this without renaming anything) |
 | `desktop.notifications.settings` | attrset of string | `{ }` | extra mako lines over the generated ones (a value here wins per key, rendered verbatim) |
+| `desktop.notifications.bar.icons.idle` | string: empty or one glyph | `"○"` | the bar's static icon while idle; `""` shows nothing while idle |
+| `desktop.notifications.bar.icons.unread` | string: empty or one glyph | `"●"` | the icon the feed sends beside the unread count |
+| `desktop.notifications.bar.icons.dnd` | string: empty or one glyph | `"☾"` | the icon the feed sends while do-not-disturb is on |
 | `desktop.theme.targets.notifications.enable` | bool | `true` | theme mako from the look; `false` keeps mako's own style while the rest follows the look |
 
 Troubleshooting, by symptom:
@@ -466,6 +501,9 @@ Troubleshooting, by symptom:
   `notifications.settings.default-timeout = "10000";` (milliseconds).
 - *Two daemons fight over popups.* Another notifier owns the bus name
   instead: only one can. Turn this one off or uninstall the other.
+- *A custom state icon shows as a box.* The glyph is in neither the
+  bar's font nor its fallbacks: add the symbol font to
+  `bar.fallback-fonts` (see the scootbar Fonts section).
 
 ## Clipboard
 

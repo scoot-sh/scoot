@@ -172,12 +172,24 @@ let
       blurb = "screenshot a picked region to `~/Pictures` (`grim` plus `slurp`)";
     };
   };
+  # Whether a notification state icon is shaped like the bar takes
+  # it: empty (no icon for that state) or exactly one glyph. Nix
+  # strings are byte strings and `lib.stringToCharacters` splits bytes
+  # (a multibyte glyph reads as several "characters"), so this is a
+  # byte rule: one printable ASCII byte, or up to four bytes none of
+  # which is printable ASCII (one UTF-8 sequence -- a control byte can
+  # slip through, but nobody configures those, and the bar sanitizes
+  # them where they would draw). Shared by the feed and the bar half
+  # so both refuse the same values.
+  isStateIcon =
+    icon:
+    icon == "" || (builtins.stringLength icon <= 4 && builtins.match "^[ -~]$|^[^ -~]+$" icon != null);
 in
 {
   # The shared keymap table above, beside the option subtree and the
   # look palettes: `keys-home.nix` reads it to render `[binds]`, so
   # the combos live in exactly one place.
-  inherit keymap;
+  inherit keymap isStateIcon;
   # The option subtree, assigned to `options.programs.scoot.desktop` by
   # both modules.
   options = {
@@ -457,6 +469,56 @@ in
           without breaking it. Overriding `layer` hides popups under
           fullscreen windows again (see site/src/content/docs/desktop/index.md#notifications).
         '';
+      };
+
+      # The bar face of the daemon: one icon per state in the bar's
+      # `push` module (see `nix/modules/notifications-home.nix` for the
+      # feed that sends them, `nix/modules/scootbar.nix` for the static
+      # idle half). A future scootnotify keeps these names (the
+      # native-replacement contract: the daemon changes, the options do
+      # not). Each is empty (no icon for that state) or exactly one
+      # glyph -- anything else fails evaluation, since the bar refuses
+      # a multi-character icon per update. The defaults are all in
+      # DejaVu Sans, the bar's default font, so they render with no
+      # symbol font: a hollow circle for idle (empty), a solid dot
+      # beside the count for unread (something here), and a crescent
+      # moon for do-not-disturb (quiet hours -- DejaVu has no bell, so
+      # no bell-slash; the envelope reads as a missing glyph at bar
+      # size). A Nerd Font glyph works wherever `bar.fallback-fonts`
+      # provides one.
+      bar.icons = {
+        idle = lib.mkOption {
+          type = lib.types.str;
+          default = "○";
+          example = "✉";
+          description = ''
+            The icon the bar shows with no notifications and DND off
+            (the push module's static icon). Empty shows nothing while
+            idle.
+          '';
+        };
+
+        unread = lib.mkOption {
+          type = lib.types.str;
+          default = "●";
+          example = "✉";
+          description = ''
+            The icon the feed sends beside the unread count (a
+            per-update icon, so it overrides `idle` while set). Empty
+            shows the count alone.
+          '';
+        };
+
+        dnd = lib.mkOption {
+          type = lib.types.str;
+          default = "☾";
+          example = "Z";
+          description = ''
+            The icon the feed sends while do-not-disturb is on (a
+            per-update icon, so it overrides `idle` while set). Empty
+            shows the DND text alone.
+          '';
+        };
       };
     };
     # fuzzel now, scootlaunch later without changing option names: the

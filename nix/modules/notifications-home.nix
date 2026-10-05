@@ -32,6 +32,13 @@ let
   # (`makoctl list`, urgent when any is critical) into the bar's
   # `push` module -- the half the `scootnotify` pointer entry promises,
   # so swapping the daemon later changes nothing the user configured.
+  # The per-state icons it sends (`unread` beside the count, `dnd`
+  # while do-not-disturb is on) come from
+  # `desktop.notifications.bar.icons`; `idle` is the bar's static icon
+  # (see `./scootbar.nix`), so the idle payload names none -- it stays
+  # `{text: ""}`. An empty icon means no icon for that state (the key
+  # stays out of the payload: the bar refuses anything but exactly one
+  # glyph per update).
   # `--watch` does an initial sync, then re-syncs on mako's own bus
   # signals, one JSON object per line (`busctl monitor --json=short`;
   # the two `--match` rules are OR'd, verified against systemd 261):
@@ -44,6 +51,10 @@ let
   # event; losing the name clears the bar instead of leaving the
   # stale state). No polling, and no `on-notify` hook, so every mako
   # key stays overridable in `settings` without breaking the feed.
+  # Shell-safe (single-quoted) for the `--arg` interpolation below, so
+  # any one glyph survives the trip into `jq` whatever it quotes.
+  iconUnreadArg = lib.escapeShellArg notif.bar.icons.unread;
+  iconDndArg = lib.escapeShellArg notif.bar.icons.dnd;
   bridge = pkgs.writeShellApplication {
     name = "scoot-notify-sync";
     runtimeInputs = [
@@ -125,16 +136,21 @@ let
               echo "scoot-notify-sync: makoctl list printed malformed JSON; showing empty" >&2
           fi
           # Compact (`-c`): the payload travels as one `msg set`
-          # argument, and stays one line wherever it is logged.
+          # argument, and stays one line wherever it is logged. The
+          # state's icon rides along as a per-update `icon` (overriding
+          # the module's static idle icon while set); an empty icon
+          # leaves the key out, so that state shows no icon.
           payload="$(jq -c -n --argjson n "$n" --argjson dnd "$dnd" --argjson crit "$crit" \
-              'if $dnd == 1 then
-                  {text: (if $n > 0 then "DND \($n)" else "DND" end),
-                   class: "muted",
-                   tooltip: (if $n > 0 then "\($n) notifications held by do-not-disturb -- click to let them through" else "do-not-disturb is on -- click to let notifications through" end)}
+              --arg icon_unread ${iconUnreadArg} --arg icon_dnd ${iconDndArg} \
+              'def with_icon($i): if $i == "" then . else .icon = $i end;
+               if $dnd == 1 then
+                  ({text: (if $n > 0 then "DND \($n)" else "DND" end),
+                    class: "muted",
+                    tooltip: (if $n > 0 then "\($n) notifications held by do-not-disturb -- click to let them through" else "do-not-disturb is on -- click to let notifications through" end)} | with_icon($icon_dnd))
                elif $n > 0 then
-                  {text: "\($n)",
-                   class: (if $crit > 0 then "urgent" else "normal" end),
-                   tooltip: "\($n) notifications -- click to hold them with do-not-disturb"}
+                  ({text: "\($n)",
+                    class: (if $crit > 0 then "urgent" else "normal" end),
+                    tooltip: "\($n) notifications -- click to hold them with do-not-disturb"} | with_icon($icon_unread))
                else {text: ""} end')" || {
               echo "scoot-notify-sync: cannot build the bar payload; leaving the bar as it is" >&2
               return 0
@@ -271,6 +287,21 @@ in
             programs.scoot.desktop.notifications.enable is set but
             programs.scoot.desktop.notifications.package is null: set
             it explicitly (apply the overlay, or point at a mako).
+          '';
+        }
+        {
+          # The bar takes an update icon only as exactly one glyph (or
+          # none: empty means no icon for that state). Anything else is
+          # refused per update at runtime, so refuse it here instead.
+          assertion = lib.all (import ./desktop.nix { inherit lib; }).isStateIcon [
+            notif.bar.icons.idle
+            notif.bar.icons.unread
+            notif.bar.icons.dnd
+          ];
+          message = ''
+            programs.scoot.desktop.notifications.bar.icons values are
+            empty (no icon for that state) or exactly one glyph each:
+            got idle=${notif.bar.icons.idle} unread=${notif.bar.icons.unread} dnd=${notif.bar.icons.dnd}.
           '';
         }
       ];
