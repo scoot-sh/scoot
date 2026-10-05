@@ -58,8 +58,24 @@ VM..."). Nothing is published; a user reads raw Markdown on GitHub.
 ## Decisions for the maintainer
 
 Decided 2026-10-04: Astro Starlight, with llms.txt support from the start.
+Decided 2026-10-04: pnpm, not npm, for anything Node/TypeScript
+(`pnpm-lock.yaml`, flake-built with `fetchPnpmDeps` + `pnpmConfigHook`,
+`packageManager` pinned in `package.json`).
 Still open: the domain, and the page outline (a draft outline for review
 is the first deliverable, before any move).
+
+## Phase 1 progress (scaffold, 2026-10-05 — ticket stays open)
+
+Branch `docs/site-scaffold` (PR forthcoming): `site/OUTLINE.md` (user +
+contributor trees, the path-hard-coding audit), a building Starlight
+scaffold (`nix build .#docs-site`: 4 adapted pages, vinyl-sunset theme,
+`starlight-llms-txt` 0.12.0 pinned for the three bundles plus a first-party
+`/[page].md` route for per-page twins, `check-llms` + `test-snippets`
+gates), a path-filtered `docs-site` CI job, and a drafted-but-disabled
+Pages deploy workflow. Next: maintainer reviews the outline; then the move
+(`dev/` tree + link updates), executing `test-snippets` against headless
+scoot (parse/syntax only so far), generated CLI pages from `--help --json`,
+and reproducible IPC screenshots per the docs-bar standard.
 
 ## Not in this ticket
 

@@ -1,0 +1,23 @@
+# The "moonrise" prompt for starship, in the illustration's palette, for a dark
+# translucent terminal. Point starship at it with STARSHIP_CONFIG, e.g.:
+#
+#   env STARSHIP_CONFIG=docs/examples/moonrise/starship.toml bash -i
+#
+add_newline = false
+format = "$directory$git_branch$nix_shell$cmd_duration$character"
+[directory]
+style = "bold #FFA45C"
+truncation_length = 3
+[git_branch]
+symbol = " "
+style = "#B595AD"
+format = "[$symbol$branch]($style) "
+[nix_shell]
+symbol = " "
+style = "#7E9BB0"
+format = "[$symbol]($style)"
+[cmd_duration]
+style = "#9C8B95"
+[character]
+success_symbol = "[❯](bold #FFD54A)"
+error_symbol = "[❯](bold #E87F6A)"

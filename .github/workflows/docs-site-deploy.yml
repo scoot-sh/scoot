@@ -1,0 +1,67 @@
+# Docs site deploy (DRAFT — DISABLED).
+#
+# Deploys the `docs-site` build to GitHub Pages. Disabled on purpose: the
+# domain is still the maintainer's call (docs/backlog/packaging/docs-site.md),
+# so this workflow has NO automatic trigger. The commented `push` block below
+# is the intended trigger once the domain is decided; until then only a
+# manual `workflow_dispatch` run can publish, and there is no Pages
+# environment configured, so even that run has nowhere to go.
+#
+# Assumptions the enabled version keeps:
+# - `nix build .#docs-site` output is the static `dist/` tree, built for
+#   `base: /scoot/` (site/astro.config.mjs). Published to the branch root of
+#   the Pages source, it lands at scoot-sh.github.io/scoot/*, matching base.
+#   A root domain instead means changing `site` AND `base` together first.
+# - `docs/**` joins the `push.paths` once docs feed the site (phase 1: pages
+#   are adapted, not moved, so only `site/**` builds it).
+name: Docs site deploy (disabled)
+
+on:
+  # Automatic deploys stay off until the domain is decided. Then:
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - 'site/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer run cancels the queued older one, never a
+# live deploy mid-publish.
+concurrency:
+  group: docs-site-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - name: nix build .#docs-site
+        run: nix build -L --out-link site-out .#docs-site
+
+      - name: Upload the static tree
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site-out/
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # No `environment: github-pages` until the domain is decided: without a
+    # Pages environment this job has nowhere to deploy to, which is the
+    # second half of "disabled" (the first half is no push trigger above).
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy
+        uses: actions/deploy-pages@v4

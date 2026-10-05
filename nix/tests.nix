@@ -847,7 +847,9 @@ let
   # --- desktop profile (`programs.scoot.desktop`) evaluations under test ---
   #
   # The profile on its own (no scootbar module imported): the bar halves
-  # stay empty (the `options.programs ? scootbar` gate), which is also
+  # stay empty (the profile never sets across the module boundary --
+  # `home.nix` leaves `programs.scootbar` alone and `scootbar.nix` reads
+  # the profile through `or {}`, defaulting absent), which is also
   # what proves the profile never requires the bar module.
   hmDesk = evalHome {
     enable = true;
@@ -879,6 +881,13 @@ let
     wallpaper.package = fakeBg;
     desktop.enable = true;
     desktop.look = "radial-burst";
+  };
+  hmDeskLookMoon = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "moonrise";
   };
   # A user value beside a look wins per key; the rest stays the look's.
   hmDeskUserWins = evalHome {
@@ -1046,6 +1055,13 @@ let
     desktop.enable = true;
     desktop.look = "music-desk";
     desktop.bar.enable = false;
+  } { package = fakeBar; };
+  hmDeskBarMoon = evalHomeDesktop {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "moonrise";
   } { package = fakeBar; };
   osDeskBar = evalNixosDesktop {
     enable = true;
@@ -1835,7 +1851,9 @@ let
   hmStylixColorToml = hmStylixColor.config.xdg.configFile."scoot/config.toml".source;
   hmDeskMusicToml = hmDeskLookMusic.config.xdg.configFile."scoot/config.toml".source;
   hmDeskVinylToml = hmDeskLookVinyl.config.xdg.configFile."scoot/config.toml".source;
+  hmDeskMoonToml = hmDeskLookMoon.config.xdg.configFile."scoot/config.toml".source;
   hmDeskBarToml = hmDeskBar.config.programs.scootbar.configFile;
+  hmDeskBarMoonToml = hmDeskBarMoon.config.programs.scootbar.configFile;
   osDeskBarToml = osDeskBar.config.programs.scootbar.configFile;
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
@@ -2156,6 +2174,29 @@ let
         hmDeskLookBurst.config.programs.scoot.settings.wallpaper.image;
       true
     )
+    # moonrise: colors plus its shipped image.
+    (
+      assert
+        hmDeskLookMoon.config.programs.scoot.settings.appearance == {
+          background_color = "#2B3648";
+          focus_ring_active_color = "#FF9A49";
+          focus_ring_inactive_color = "#5E4B5B";
+        };
+      true
+    )
+    (
+      assert hmDeskLookMoon.config.programs.scoot.settings.wallpaper.mode == "fill";
+      true
+    )
+    (
+      assert lib.hasSuffix "moonrise.png" hmDeskLookMoon.config.programs.scoot.settings.wallpaper.image;
+      true
+    )
+    # ...which is what installs scootbg for it.
+    (
+      assert hmDeskLookMoon.config.programs.scoot.wallpaper.enable;
+      true
+    )
     # A user value beside a look wins per key; the rest stays the look's.
     (
       assert hmDeskUserWins.config.programs.scoot.settings.appearance.background_color == "#123456";
@@ -2212,7 +2253,7 @@ let
       true
     )
     # ...and an unknown look, an enum type error (verified by hand to name
-    # the three valid values).
+    # the four valid values).
     (
       assert !hmDeskUnknownLook.success;
       true
@@ -2302,6 +2343,19 @@ let
           hover = "#5D7AB0";
           dim = "#C9CBD0";
           urgent = "#EE6F5E";
+        };
+      true
+    )
+    # ...and the moonrise look themes the bar the same way.
+    (
+      assert
+        hmDeskBarMoon.config.programs.scootbar.settings.colors == {
+          background = "#2B3648";
+          foreground = "#F6EEDC";
+          accent = "#FFA45C";
+          hover = "#FFD54A";
+          dim = "#9C8B95";
+          urgent = "#E87F6A";
         };
       true
     )
@@ -2587,6 +2641,25 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   assert got["colors"] == {"background": "#241721", "foreground": "#fdef1d", "accent": "#31a9e5", "dim": "#99911d", "urgent": "#bf128d"}, got["colors"]
   ' ${osDeskBarToml}
   echo "ok: desktop look renders into the NixOS-side bar config"
+
+  # 10d. Desktop profile, moonrise: the example palette in the compositor
+  #      config (appearance plus the shipped wallpaper beside the injected
+  #      scootbg command), and the same palette in the bar file.
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B"}, got["appearance"]
+  assert got["wallpaper"]["mode"] == "fill", got["wallpaper"]
+  assert got["wallpaper"]["image"].endswith("moonrise.png"), got["wallpaper"]
+  assert got["wallpaper"]["command"].endswith("/bin/scootbg"), got["wallpaper"]
+  ' ${hmDeskMoonToml}
+  echo "ok: desktop look renders moonrise plus its wallpaper"
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got["colors"] == {"background": "#2B3648", "foreground": "#F6EEDC", "accent": "#FFA45C", "hover": "#FFD54A", "dim": "#9C8B95", "urgent": "#E87F6A"}, got["colors"]
+  ' ${hmDeskBarMoonToml}
+  echo "ok: desktop look renders moonrise into the bar config"
 
   touch $out
   echo "scoot-modules: all file-content checks passed"

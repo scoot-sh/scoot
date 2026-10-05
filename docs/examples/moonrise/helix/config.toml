@@ -1,0 +1,17 @@
+# The "moonrise" Helix setup: relative line numbers, a cursor line, and the
+# scoot-moonrise theme below (transparent background, for a translucent terminal).
+# Copy this file to ~/.config/helix/config.toml and themes/scoot-moonrise.toml to
+# ~/.config/helix/themes/scoot-moonrise.toml.
+theme = "scoot-moonrise"
+[editor]
+line-number = "relative"
+cursorline = true
+bufferline = "never"
+[editor.indent-guides]
+render = true
+character = "▏"
+[editor.statusline]
+left = ["mode", "file-name", "file-modification-indicator"]
+right = ["position", "file-type"]
+[editor.lsp]
+enable = false
