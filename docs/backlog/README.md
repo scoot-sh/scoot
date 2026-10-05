@@ -271,6 +271,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [Smaller/general protocol gaps (bundled)](./protocols/protocol-gaps-general.md)
 - [Niche protocol gaps (bundled)](./protocols/protocol-gaps-niche.md)
 - [Virtual pointer and keyboard protocols, so wayvnc gives full remote control](./protocols/virtual-input-remote-control.md) (medium, filed 2026-10-04): capture already works over `ext-image-copy-capture-v1`; input needs the two virtual-input managers, gated and refused under lock
+- [Research: native remote desktop that streams the scene, not pixels](./protocols/native-remote-scene-streaming.md) (research, filed 2026-10-04): per-surface content plus arrangement deltas, so a scroll costs bytes not frames; frame mode for video and thin viewers; network code in a separate helper
 
 ### IPC / computer use
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
