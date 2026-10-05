@@ -39,7 +39,7 @@ pub const COMMANDS: &[CommandDoc] = &[
     },
     CommandDoc {
         name: "set",
-        usage: "set COLOR|PATH [--output NAME] [--mode MODE] [--fill COLOR] [--filter FILTER]",
+        usage: "set COLOR|PATH|URL [--output NAME] [--mode MODE] [--fill COLOR] [--filter FILTER] [--sha256 HEX]",
         description: "show a color or an image on every output, or on one",
     },
     CommandDoc {
@@ -262,6 +262,44 @@ mod tests {
                 "`{}` is tabulated but not in the JSON",
                 command.name
             );
+        }
+    }
+
+    #[test]
+    fn every_flag_in_a_usage_block_is_in_its_json_row() {
+        // Each command's own help page opens with a USAGE block; every
+        // `--flag` it names must be in that command's tabulated usage, so
+        // the JSON cannot fall behind a flag the parser gained (`--sha256`
+        // was the one that did).
+        let pages = [
+            ("daemon", crate::cli::DAEMON_HELP),
+            ("set", crate::cli::SET_HELP),
+            ("clear", crate::cli::CLEAR_HELP),
+            ("query", crate::cli::QUERY_HELP),
+            ("version", crate::cli::VERSION_HELP),
+            ("kill", crate::cli::KILL_HELP),
+            ("apply-config", crate::cli::APPLY_CONFIG_HELP),
+        ];
+        for (name, page) in pages {
+            let row = COMMANDS
+                .iter()
+                .find(|command| command.name == name)
+                .unwrap_or_else(|| panic!("`{name}` has a page but no row"));
+            let usage = page
+                .split("USAGE:")
+                .nth(1)
+                .and_then(|rest| rest.split("\n\n").next())
+                .unwrap_or("");
+            for word in usage.split(|c: char| c.is_whitespace() || "[]|=".contains(c)) {
+                let flag = word.trim_matches(|c: char| c == ',' || c == '\'');
+                if flag.starts_with("--") && flag.len() > 2 {
+                    assert!(
+                        row.usage.contains(flag),
+                        "`{name}`'s help page names `{flag}` but its JSON usage does not: {}",
+                        row.usage
+                    );
+                }
+            }
         }
     }
 
