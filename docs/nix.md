@@ -1154,11 +1154,11 @@ into the new config; no re-login):
 | `desktop.idle.offTimeout` | int (seconds) | `300` | inactivity before outputs power off; `0` disables the step |
 | `desktop.idle.mediaInhibit.enable` | bool | `true` with the profile | hold idle while audio plays (needs PipeWire or PulseAudio running) |
 | `desktop.idle.lock.enable` | bool | `true` with the profile | lock through the locker below |
-| `desktop.idle.lock.command` | string | `<systemd>/bin/loginctl lock-session` | the stable lock action: what the timeout runs, and what the future `desktop-keys` child binds (`Super+Escape` class) -- lid-close and manual locks share this path through logind |
+| `desktop.idle.lock.command` | string | `<systemd>/bin/loginctl lock-session` (bare `loginctl lock-session` off Linux) | the stable lock action: what the timeout runs, and what the future `desktop-keys` child binds (`Super+Escape` class) -- lid-close and manual locks share this path through logind |
 | `desktop.idle.lock.daemon` | enum (`"swaylock"`) | `"swaylock"` | the locker behind the action (smallest working closure, plain-text config, CPU-only; a future scootlock widens this without renaming anything) |
 | `desktop.idle.lock.settings` | attrset of string | `{ }` | extra swaylock lines over the themed ones (a value here wins per key; `""` renders a bare flag, e.g. `{ show-failed-attempts = ""; }`) |
 | `desktop.theme.targets.lock.enable` | bool | `true` | theme the locker from the look (screen and indicator from its palette); `false` keeps swaylock's own style while the rest follows the look |
-| `desktop.idle.package` and friends | package or null | the tool named | `package` (swayidle), `dimPackage` (brightnessctl), `offPackage` (wlopm), `mediaInhibit.package`, `lock.package`: point one at your own build; null with the switch on fails evaluation naming it |
+| `desktop.idle.package` and friends | package or null | the tool named (Linux-only: null off Linux) | `package` (swayidle), `dimPackage` (brightnessctl), `offPackage` (wlopm), `mediaInhibit.package`, `lock.package`: point one at your own build; null with the switch on fails evaluation naming it |
 
 ```nix
 programs.scoot.desktop = {
@@ -1183,7 +1183,11 @@ The locker follows the look: screen and indicator from its palette
 `theme.targets.lock.enable = false` dropping the themed block while the
 rest follows the look. Stylix and `look = "auto"` slot into the usual
 precedence (user > Stylix > look, per key) when the theme-look child
-lands.
+lands. Locked, it looks like this (the music-desk palette: paper
+screen, no windows, the indicator hidden until you type -- captured
+from a real session through scoot's own IPC screenshot path):
+
+![The scoot lock screen in the music-desk look: a plain paper screen](assets/idle-lock-screen.png)
 
 Troubleshooting, by symptom:
 
@@ -1204,6 +1208,13 @@ Troubleshooting, by symptom:
   home-manager-only setup needs it set wherever PAM is configured.
   Check Caps Lock second -- the indicator shows its state while you
   type (`swaylock` names it, the profile keeps that default).
+- *The timeout passes and the session never locks.* The locker is
+  probably exiting immediately: run `swaylock -f -C
+  ~/.config/swaylock/config` by hand -- if it drops straight back to
+  the prompt, its error names the cause (a broken PAM setup on a
+  home-manager-only box, or a bad `lock.package`, are the usual ones).
+  Until the locker stays up, every lock signal spawns a locker that
+  dies and the screen stays up.
 - *`loginctl lock-session` does nothing visible.* Something must
   listen for logind's Lock: that is the policy's `lock` event, so this
   means `scoot-idle` is not running (above) or `lock.enable` is off.

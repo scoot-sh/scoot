@@ -132,46 +132,49 @@ in
       # tools system-wide. Same packages as there, so either side alone
       # names the same tools. Merged here (not declared separately
       # below) because one module cannot declare the same option path
-      # twice.
+      # twice. The tools are Linux-only: off Linux each defaults to
+      # null (their attributes exist on Darwin but refuse evaluation
+      # when forced), which the assertions below refuse loudly.
       idle = desktop.options.idle // {
         package = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
-          default = pkgs.swayidle or null;
-          defaultText = lib.literalExpression "pkgs.swayidle or null";
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.swayidle or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.swayidle or null else null";
           description = ''
             The swayidle package to install system-wide for the idle
-            policy. Null installs nothing.
+            policy. Null installs nothing. Linux-only: null off Linux.
           '';
         };
 
         dimPackage = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
-          default = pkgs.brightnessctl or null;
-          defaultText = lib.literalExpression "pkgs.brightnessctl or null";
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.brightnessctl or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.brightnessctl or null else null";
           description = ''
             The backlight tool to install system-wide for the dim step.
-            Null installs nothing.
+            Null installs nothing. Linux-only: null off Linux.
           '';
         };
 
         offPackage = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
-          default = pkgs.wlopm or null;
-          defaultText = lib.literalExpression "pkgs.wlopm or null";
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wlopm or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.wlopm or null else null";
           description = ''
             The output-power tool to install system-wide for the
-            screens-off step. Null installs nothing.
+            screens-off step. Null installs nothing. Linux-only: null
+            off Linux.
           '';
         };
 
         mediaInhibit = desktop.options.idle.mediaInhibit // {
           package = lib.mkOption {
             type = lib.types.nullOr lib.types.package;
-            default = pkgs.sway-audio-idle-inhibit or null;
-            defaultText = lib.literalExpression "pkgs.sway-audio-idle-inhibit or null";
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.sway-audio-idle-inhibit or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.sway-audio-idle-inhibit or null else null";
             description = ''
               The audio inhibitor to install system-wide. Null installs
-              nothing.
+              nothing. Linux-only: null off Linux.
             '';
           };
         };
@@ -179,18 +182,23 @@ in
         lock = desktop.options.idle.lock // {
           package = lib.mkOption {
             type = lib.types.nullOr lib.types.package;
-            default = pkgs.swaylock or null;
-            defaultText = lib.literalExpression "pkgs.swaylock or null";
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.swaylock or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.swaylock or null else null";
             description = ''
               The locker package to install system-wide (must speak the
-              daemon's flags). Null installs nothing.
+              daemon's flags). Null installs nothing. Linux-only: null
+              off Linux.
             '';
           };
 
           command = lib.mkOption {
             type = lib.types.str;
-            default = "${lib.getExe' pkgs.systemd "loginctl"} lock-session";
-            defaultText = lib.literalExpression ''"''${lib.getExe' pkgs.systemd "loginctl"} lock-session"'';
+            default =
+              if pkgs.stdenv.hostPlatform.isLinux then
+                "${lib.getExe' pkgs.systemd "loginctl"} lock-session"
+              else
+                "loginctl lock-session";
+            defaultText = lib.literalExpression ''if pkgs.stdenv.hostPlatform.isLinux then "''${lib.getExe' pkgs.systemd "loginctl"} lock-session" else "loginctl lock-session"'';
             example = "loginctl lock-session";
             description = ''
               The stable lock action: the same default and meaning as
@@ -589,6 +597,22 @@ in
             programs.scoot.desktop.idle.lock.package is null: set it
             explicitly (apply the overlay, or point at a locker that
             speaks the daemon's flags).
+          '';
+        }
+        {
+          # Loud at eval, like `session.command`'s: the action renders
+          # inside single quotes on the swayidle timeout line, so an
+          # explicitly empty or whitespace-only value would run a no-op
+          # (the session never locking while `lock.enable` says it
+          # does), and a single quote would break out of the quoting
+          # and corrupt the config line.
+          assertion =
+            builtins.match "^[[:space:]]*$" cfg.desktop.idle.lock.command == null
+            && builtins.match ".*'.*" cfg.desktop.idle.lock.command == null;
+          message = ''
+            programs.scoot.desktop.idle.lock.command is empty, blank
+            or contains a single quote: set the full lock action to run
+            (e.g. `loginctl lock-session`).
           '';
         }
       ];

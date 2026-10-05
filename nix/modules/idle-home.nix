@@ -104,63 +104,75 @@ let
 in
 {
   options.programs.scoot.desktop.idle = {
+    # The tools below are Linux-only: their attributes exist on Darwin
+    # but refuse evaluation when forced, so `or null` alone does not
+    # save them (the Darwin `nix flake check` run reads every default).
+    # Off Linux each defaults to null, which the assertions below
+    # refuse loudly instead of installing nothing silently.
     package = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = pkgs.swayidle or null;
-      defaultText = lib.literalExpression "pkgs.swayidle or null";
+      default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.swayidle or null else null;
+      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.swayidle or null else null";
       description = ''
         The swayidle package to run the idle policy from. Null installs
-        nothing (set it explicitly without the overlay).
+        nothing (set it explicitly without the overlay). Linux-only:
+        null off Linux.
       '';
     };
 
     dimPackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = pkgs.brightnessctl or null;
-      defaultText = lib.literalExpression "pkgs.brightnessctl or null";
+      default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.brightnessctl or null else null;
+      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.brightnessctl or null else null";
       description = ''
         The backlight tool the dim step runs (`-s set <level>%`, `-r`
         to restore). Needs the session's seat rights (logind grants the
         active login backlight access; over ssh, or with no seat, the
         step logs EPERM and does nothing) -- see docs/nix.md.
+        Linux-only: null off Linux.
       '';
     };
 
     offPackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = pkgs.wlopm or null;
-      defaultText = lib.literalExpression "pkgs.wlopm or null";
+      default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wlopm or null else null;
+      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.wlopm or null else null";
       description = ''
         The output-power tool the screens-off step runs (`--off "*"`
-        for every output, `--on "*"` to wake).
+        for every output, `--on "*"` to wake). Linux-only: null off
+        Linux.
       '';
     };
 
     mediaInhibit.package = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = pkgs.sway-audio-idle-inhibit or null;
-      defaultText = lib.literalExpression "pkgs.sway-audio-idle-inhibit or null";
+      default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.sway-audio-idle-inhibit or null else null;
+      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.sway-audio-idle-inhibit or null else null";
       description = ''
         The audio inhibitor to hold idle while media plays (any sink or
-        source running).
+        source running). Linux-only: null off Linux.
       '';
     };
 
     lock = {
       package = lib.mkOption {
         type = lib.types.nullOr lib.types.package;
-        default = pkgs.swaylock or null;
-        defaultText = lib.literalExpression "pkgs.swaylock or null";
+        default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.swaylock or null else null;
+        defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.swaylock or null else null";
         description = ''
           The locker package behind `daemon` (must speak its flags).
-          Null installs nothing.
+          Null installs nothing. Linux-only: null off Linux.
         '';
       };
 
       command = lib.mkOption {
         type = lib.types.str;
-        default = "${lib.getExe' pkgs.systemd "loginctl"} lock-session";
-        defaultText = lib.literalExpression ''"''${lib.getExe' pkgs.systemd "loginctl"} lock-session"'';
+        default =
+          if pkgs.stdenv.hostPlatform.isLinux then
+            "${lib.getExe' pkgs.systemd "loginctl"} lock-session"
+          else
+            "loginctl lock-session";
+        defaultText = lib.literalExpression ''if pkgs.stdenv.hostPlatform.isLinux then "''${lib.getExe' pkgs.systemd "loginctl"} lock-session" else "loginctl lock-session"'';
         example = "loginctl lock-session";
         description = ''
           The stable lock action: what the idle timeout runs, and what
@@ -169,7 +181,8 @@ in
           logind, which the locker's `lock` event listens on. An
           absolute store path by default, so user units never depend on
           PATH; a bare `loginctl lock-session` works wherever logind
-          does.
+          does. Off Linux the default is that bare form (logind itself
+          is Linux-only, so the store path would refuse evaluation).
         '';
       };
     };
@@ -215,11 +228,13 @@ in
           '';
         }
         {
-          assertion = idle.dimLevel >= 1 && idle.dimLevel <= 100;
+          assertion = idle.dimTimeout == 0 || (idle.dimLevel >= 1 && idle.dimLevel <= 100);
           message = ''
             programs.scoot.desktop.idle.dimLevel is a brightness
             percent, 1 to 100: 0 would be a black panel on an unlocked
-            session, which is what the screens-off step is for.
+            session, which is what the screens-off step is for. (Only
+            checked while the dim step is on: `dimTimeout = 0` leaves
+            the level unread.)
           '';
         }
       ];
@@ -301,6 +316,24 @@ in
             programs.scoot.desktop.idle.lock.package is null: set it
             explicitly (apply the overlay, or point at a locker that
             speaks the daemon's flags).
+          '';
+        }
+        {
+          # Loud at eval, like `session.command`'s: the action renders
+          # inside single quotes on the swayidle timeout line, so an
+          # explicitly empty or whitespace-only value would run a no-op
+          # (the session never locking while `lock.enable` says it
+          # does), and a single quote would break out of the quoting
+          # and corrupt the config line. (`builtins.match` returns null
+          # on no match, so each disjunct is false exactly for
+          # empty/blank and quote-carrying strings.)
+          assertion =
+            builtins.match "^[[:space:]]*$" idle.lock.command == null
+            && builtins.match ".*'.*" idle.lock.command == null;
+          message = ''
+            programs.scoot.desktop.idle.lock.command is empty, blank
+            or contains a single quote: set the full lock action to run
+            (e.g. `loginctl lock-session`).
           '';
         }
       ];

@@ -86,11 +86,16 @@
 #   2 min to 10%, lock at 4, screens off at 5, lock-before-sleep, audio
 #   hold -- each timeout overridable and each of the three switches
 #   individually disable-able, the locker themed by the look unless
-#   `theme.targets.lock.enable` opts out; every remaining future slot
+#   `theme.targets.lock.enable` opts out; an empty or quote-carrying
+#   `lock.command`, and an out-of-range `dimLevel` while the dim step is
+#   on, each fail eval; every remaining future slot
 #   defaults off and inert; `enable` without scoot, a look without the
 #   profile, and an unknown look each fail eval;
 #   `desktop.greeter` is the greeter (the session entry forced on beside
-#   it); and `bar.enable = false` leaves the bar entirely alone.
+#   it); and `bar.enable = false` leaves the bar entirely alone. The
+#   profile and the policy are Linux-only: off Linux each tool defaults
+#   to null, `lock.command` to its bare form, and the policy's own
+#   assertions refuse loudly -- pinned, not skipped.
 {
   lib,
   pkgs,
@@ -1014,6 +1019,27 @@ let
     desktop.enable = true;
     desktop.idle.lock.command = "loginctl lock-session";
   };
+  # ...with an empty lock action, and a quote-carrying one (each
+  # refused at eval: the action renders inside single quotes on the
+  # swayidle timeout line).
+  hmLockCmdEmpty = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.lock.command = "";
+  };
+  hmLockCmdQuote = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.lock.command = "loginctl lock-session'; reboot";
+  };
+  # ...with the dim step off and an out-of-range level (unread, so no
+  # refusal: the range applies only while the step is on).
+  hmIdleZeroBadLevel = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.dimTimeout = 0;
+    desktop.idle.dimLevel = 0;
+  };
   # ...with locker settings (a color winning per key, plus a bare
   # flag).
   hmLockSettings = evalHome {
@@ -1166,6 +1192,20 @@ let
     package = fakePkg;
     desktop.enable = true;
     desktop.idle.package = null;
+  };
+  # ...with an empty lock action, and a quote-carrying one (each
+  # refused at eval on this side as well).
+  osLockCmdEmpty = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.idle.lock.command = "";
+  };
+  osLockCmdQuote = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.idle.lock.command = "loginctl lock-session'; reboot";
   };
   # `desktop.greeter` is an alias for `programs.scoot.greeter`: through it
   # the profile lists a session in a ReGreet login.
@@ -2237,7 +2277,11 @@ let
   ];
 
   # --- desktop profile structural pins (fail `nix flake check` at eval) ---
-  _desktopPins = [
+  # The desktop profile is Linux-only (user units, logind, seat
+  # rights): off Linux its tools default to null and the policy's own
+  # assertions refuse loudly (pinned in `_darwinIdlePins` below), so
+  # these pins run only where the policy can run.
+  _desktopPins = lib.optionals isLinux [
     # The profile alone (no bar module): assertions hold, portals on, and
     # nothing themed without a look...
     (
@@ -2732,7 +2776,10 @@ let
   ];
 
   # --- idle policy structural pins (fail `nix flake check` at eval) ---
-  _idlePins = [
+  # Linux only, like the profile above: every evaluation here runs the
+  # policy, whose tools refuse evaluation on Darwin (the null
+  # degradation itself is pinned in `_darwinIdlePins`).
+  _idlePins = lib.optionals isLinux [
     # Home-manager: the whole policy on (units, files, tools beside
     # the profile's own)...
     (
@@ -2940,6 +2987,30 @@ let
       assert builtins.length (failing hmIdleNeg.config) == 1;
       true
     )
+    # ...an out-of-range dim level with the dim step off (the level is
+    # unread then, so the range does not fire)...
+    (
+      assert allAssertionsHold hmIdleZeroBadLevel.config;
+      true
+    )
+    # ...an empty lock action, and a quote-carrying one (each refused
+    # naming the command)...
+    (
+      assert builtins.length (failing hmLockCmdEmpty.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.command" (builtins.head (failing hmLockCmdEmpty.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmLockCmdQuote.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.command" (builtins.head (failing hmLockCmdQuote.config));
+      true
+    )
 
     # NixOS: the profile installs the five tools beside scoot and
     # scootbg, locks docked lids, and names the locker's PAM service --
@@ -3048,12 +3119,103 @@ let
       assert lib.hasInfix "idle.package is null" (builtins.head (failing osIdleNoPkg.config));
       true
     )
+    # ...and an empty lock action, and a quote-carrying one (each
+    # refused naming the command on this side as well).
+    (
+      assert builtins.length (failing osLockCmdEmpty.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.command" (builtins.head (failing osLockCmdEmpty.config));
+      true
+    )
+    (
+      assert builtins.length (failing osLockCmdQuote.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.command" (builtins.head (failing osLockCmdQuote.config));
+      true
+    )
+  ];
+
+  # --- idle policy off Linux (fail `nix flake check` at eval) ---
+  #
+  # The tools above are Linux-only: off Linux each package defaults to
+  # null (their attributes exist on Darwin but refuse evaluation when
+  # forced, so `or null` alone does not save them), the lock action
+  # falls back to its bare form, and the policy's own assertions refuse
+  # loudly instead of installing nothing silently. Empty off Linux (the
+  # Linux check above is where the policy is pinned).
+  _darwinIdlePins = lib.optionals (!isLinux) [
+    # Home-manager: every tool null, nothing installed for the policy...
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.package == null;
+      true
+    )
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.dimPackage == null;
+      true
+    )
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.offPackage == null;
+      true
+    )
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.mediaInhibit.package == null;
+      true
+    )
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.lock.package == null;
+      true
+    )
+    # ...the lock action in its bare form (no store path: logind is
+    # Linux-only)...
+    (
+      assert hmIdle.config.programs.scoot.desktop.idle.lock.command == "loginctl lock-session";
+      true
+    )
+    # ...and the policy's own assertions refusing loudly, naming the
+    # switch (one per null tool: the policy, the dim and screens-off
+    # steps, the inhibitor, the locker).
+    (
+      assert builtins.length (failing hmIdle.config) == 5;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.package is null" (builtins.head (failing hmIdle.config));
+      true
+    )
+    # NixOS: the same nulls (no tools installed for the policy)...
+    (
+      assert osIdle.config.programs.scoot.desktop.idle.package == null;
+      true
+    )
+    (
+      assert osIdle.config.programs.scoot.desktop.idle.lock.package == null;
+      true
+    )
+    (
+      assert osIdle.config.programs.scoot.desktop.idle.lock.command == "loginctl lock-session";
+      true
+    )
+    # ...refused loudly there too, while the docked-lid rule (plain
+    # values, no tools) still lands.
+    (
+      assert builtins.length (failing osIdle.config) == 5;
+      true
+    )
+    (
+      assert osIdle.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+      true
+    )
   ];
 in
 assert lib.all (x: x) _pins;
 assert lib.all (x: x) _greeterPins;
 assert lib.all (x: x) _desktopPins;
 assert lib.all (x: x) _idlePins;
+assert lib.all (x: x) _darwinIdlePins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   set -euo pipefail
@@ -3267,69 +3429,75 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   ' ${hmDeskBarMoonToml}
   echo "ok: desktop look renders moonrise into the bar config"
 
-  # 11. Idle policy: the generated swayidle config carries the M2's
-  #     timeouts -- dim at 2 min with save/restore, lock at 4 min
-  #     through loginctl, screens off at 5 min with the output wildcard
-  #     quoted intact -- plus the sleep lock and the lock event behind
-  #     `swaylock -f` with its config. (Fixed-string matches throughout:
-  #     the quoting is the assertion.)
-  grep -F "timeout 120 '${pkgs.brightnessctl}/bin/brightnessctl -s set 10%' resume '${pkgs.brightnessctl}/bin/brightnessctl -r'" ${idleConf}
-  grep -F "timeout 240 '${pkgs.systemd}/bin/loginctl lock-session'" ${idleConf}
-  grep -F "timeout 300 '${pkgs.wlopm}/bin/wlopm --off \"*\"' resume '${pkgs.wlopm}/bin/wlopm --on \"*\"'" ${idleConf}
-  grep -F "before-sleep '${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
-  grep -F "lock '${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
-  echo "ok: swayidle config carries the idle timeouts, the sleep lock and the lock event"
+  # 11-12c. Idle policy and locker content (Linux only: every line
+  # below names a Linux-only tool's store path, and the files
+  # themselves exist only where the policy runs -- off Linux the
+  # tools default to null and no config is written).
+  ${lib.optionalString isLinux ''
+    # 11. Idle policy: the generated swayidle config carries the M2's
+    #     timeouts -- dim at 2 min with save/restore, lock at 4 min
+    #     through loginctl, screens off at 5 min with the output wildcard
+    #     quoted intact -- plus the sleep lock and the lock event behind
+    #     `swaylock -f` with its config. (Fixed-string matches throughout:
+    #     the quoting is the assertion.)
+    grep -F "timeout 120 '${pkgs.brightnessctl}/bin/brightnessctl -s set 10%' resume '${pkgs.brightnessctl}/bin/brightnessctl -r'" ${idleConf}
+    grep -F "timeout 240 '${pkgs.systemd}/bin/loginctl lock-session'" ${idleConf}
+    grep -F "timeout 300 '${pkgs.wlopm}/bin/wlopm --off \"*\"' resume '${pkgs.wlopm}/bin/wlopm --on \"*\"'" ${idleConf}
+    grep -F "before-sleep '${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
+    grep -F "lock '${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
+    echo "ok: swayidle config carries the idle timeouts, the sleep lock and the lock event"
 
-  # 11b. The lock off: dim and screens-off stay, and no line locks
-  #      (no timeout through loginctl, no before-sleep, no lock event).
-  grep -F "timeout 120 '" ${idleNoLockConf}
-  grep -F "timeout 300 '" ${idleNoLockConf}
-  if grep -q lock ${idleNoLockConf}; then echo "lock lines present with the locker off" >&2; exit 1; fi
-  echo "ok: with the lock off, dim and screens-off stay and nothing locks"
+    # 11b. The lock off: dim and screens-off stay, and no line locks
+    #      (no timeout through loginctl, no before-sleep, no lock event).
+    grep -F "timeout 120 '" ${idleNoLockConf}
+    grep -F "timeout 300 '" ${idleNoLockConf}
+    if grep -q lock ${idleNoLockConf}; then echo "lock lines present with the locker off" >&2; exit 1; fi
+    echo "ok: with the lock off, dim and screens-off stay and nothing locks"
 
-  # 11c. Retimed: every override lands (timeouts and the dim level).
-  grep -F "timeout 60 '${pkgs.brightnessctl}/bin/brightnessctl -s set 20%'" ${idleTimeoutsConf}
-  grep -F "timeout 90 '" ${idleTimeoutsConf}
-  grep -F "timeout 120 '" ${idleTimeoutsConf}
-  echo "ok: retimed idle policy renders its overrides"
+    # 11c. Retimed: every override lands (timeouts and the dim level).
+    grep -F "timeout 60 '${pkgs.brightnessctl}/bin/brightnessctl -s set 20%'" ${idleTimeoutsConf}
+    grep -F "timeout 90 '" ${idleTimeoutsConf}
+    grep -F "timeout 120 '" ${idleTimeoutsConf}
+    echo "ok: retimed idle policy renders its overrides"
 
-  # 11d. Zeroed: a 0 timeout omits that step's line (the lock step
-  #      stays: sleep still locks while the locker is on).
-  if grep -q "timeout 120\|timeout 300" ${idleZeroConf}; then echo "disabled step still present" >&2; exit 1; fi
-  grep -F "timeout 240 '" ${idleZeroConf}
-  grep -F "before-sleep '" ${idleZeroConf}
-  echo "ok: a 0 timeout omits that step"
+    # 11d. Zeroed: a 0 timeout omits that step's line (the lock step
+    #      stays: sleep still locks while the locker is on).
+    if grep -q "timeout 120\|timeout 300" ${idleZeroConf}; then echo "disabled step still present" >&2; exit 1; fi
+    grep -F "timeout 240 '" ${idleZeroConf}
+    grep -F "before-sleep '" ${idleZeroConf}
+    echo "ok: a 0 timeout omits that step"
 
-  # 11e. Rebound: the lock action override is what the timeout runs
-  #      (the future desktop-keys bind target).
-  grep -F "timeout 240 'loginctl lock-session'" ${idleCmdConf}
-  echo "ok: the lock action override reaches the timeout"
+    # 11e. Rebound: the lock action override is what the timeout runs
+    #      (the future desktop-keys bind target).
+    grep -F "timeout 240 'loginctl lock-session'" ${idleCmdConf}
+    echo "ok: the lock action override reaches the timeout"
 
-  # 12. Locker config, music-desk: the look's roles as swaylock leaves
-  #     (screen and indicator backgrounds, active ring, accent key
-  #     highlight, ink text, urgent wrong-ring).
-  grep -F -x "color=FCFBFB" ${idleLockConf}
-  grep -F -x "inside-color=FCFBFB" ${idleLockConf}
-  grep -F -x "ring-color=3D579A" ${idleLockConf}
-  grep -F -x "key-hl-color=3D579A" ${idleLockConf}
-  grep -F -x "text-color=1A2032" ${idleLockConf}
-  grep -F -x "ring-wrong-color=EE6F5E" ${idleLockConf}
-  echo "ok: locker config carries the look's colors"
+    # 12. Locker config, music-desk: the look's roles as swaylock leaves
+    #     (screen and indicator backgrounds, active ring, accent key
+    #     highlight, ink text, urgent wrong-ring).
+    grep -F -x "color=FCFBFB" ${idleLockConf}
+    grep -F -x "inside-color=FCFBFB" ${idleLockConf}
+    grep -F -x "ring-color=3D579A" ${idleLockConf}
+    grep -F -x "key-hl-color=3D579A" ${idleLockConf}
+    grep -F -x "text-color=1A2032" ${idleLockConf}
+    grep -F -x "ring-wrong-color=EE6F5E" ${idleLockConf}
+    echo "ok: locker config carries the look's colors"
 
-  # 12b. A locker setting wins per key (verbatim, leading `#` kept --
-  #      swaylock's own parser strips it), and an empty string renders
-  #      a bare flag.
-  grep -F -x "ring-color=#123456" ${idleSettingsConf}
-  grep -F -x "show-failed-attempts" ${idleSettingsConf}
-  grep -F -x "color=FCFBFB" ${idleSettingsConf}
-  echo "ok: locker settings win per key, flags render bare"
+    # 12b. A locker setting wins per key (verbatim, leading `#` kept --
+    #      swaylock's own parser strips it), and an empty string renders
+    #      a bare flag.
+    grep -F -x "ring-color=#123456" ${idleSettingsConf}
+    grep -F -x "show-failed-attempts" ${idleSettingsConf}
+    grep -F -x "color=FCFBFB" ${idleSettingsConf}
+    echo "ok: locker settings win per key, flags render bare"
 
-  # 12c. Opted out (or lookless): no themed leaf at all -- with the
-  #      opt-out the settings still apply, so the locker is theirs.
-  if grep -q "^color=" ${idleTargetOffConf}; then echo "themed leaf present with theming off" >&2; exit 1; fi
-  grep -F -x "ring-color=#123456" ${idleTargetOffConf}
-  if grep -q "color=" ${idleNoLookConf}; then echo "themed leaf present with no look" >&2; exit 1; fi
-  echo "ok: opting out (or no look) leaves the locker unthemed"
+    # 12c. Opted out (or lookless): no themed leaf at all -- with the
+    #      opt-out the settings still apply, so the locker is theirs.
+    if grep -q "^color=" ${idleTargetOffConf}; then echo "themed leaf present with theming off" >&2; exit 1; fi
+    grep -F -x "ring-color=#123456" ${idleTargetOffConf}
+    if grep -q "color=" ${idleNoLookConf}; then echo "themed leaf present with no look" >&2; exit 1; fi
+    echo "ok: opting out (or no look) leaves the locker unthemed"
+  ''}
 
   touch $out
   echo "scoot-modules: all file-content checks passed"

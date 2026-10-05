@@ -241,6 +241,9 @@ in
             every path -- timeout, lid, manual, before-sleep -- lands on
             the same locker), themed by the look unless
             `theme.targets.lock.enable` is off. Needs `idle.enable`.
+            Home-manager-only (non-NixOS) setups must provide a PAM
+            service for the locker themselves, or no password will ever
+            unlock.
           '';
         };
 
