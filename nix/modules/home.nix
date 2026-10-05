@@ -311,8 +311,10 @@ in
         line (an absolute path -- `Exec=` lines get no shell expansion)
         so the login-screen entry runs it instead of the `scoot-session`
         launcher. That entry runs without the launcher's session wiring
-        (no `graphical-session.target`, no activation import); for wired
-        startup programs, use `[autostart]` instead. Null writes no file.
+        (no `scoot-session.target`, no `graphical-session.target`, no
+        activation import: the profile's user units never start there);
+        for wired startup programs, use `[autostart]` instead. Null
+        writes no file.
       '';
     };
 
@@ -398,6 +400,43 @@ in
         source = ../../resources/scoot-portals.conf;
       };
     })
+
+    # `scoot-session.target` for the user units the profile owns: scoot's
+    # own session scope, which every one of them starts in -- and which
+    # no other desktop starts, unlike the shared
+    # `graphical-session.target` it pulls in (`BindsTo`). The NixOS side
+    # installs the same file beside its login entry (its
+    # `systemd.user.units` carry it whenever `session.enable` is); this
+    # side installs its own copy so a home-manager-only setup -- no
+    # launcher, no login entry -- still has the target to start: import
+    # `WAYLAND_DISPLAY` (and `XDG_CURRENT_DESKTOP`) into the user
+    # manager, then `systemctl --user start scoot-session.target`
+    # (stopped the same way on the way out; see
+    # site/src/content/docs/desktop/index.md). The two files carry the
+    # same dependencies (`resources/systemd/user/scoot-session.target`
+    # is canonical) -- and a user file wins over the system one, so
+    # keeping them identical keeps both paths identical. Present
+    # whenever a unit below can want it (any slot on, with the profile
+    # or standalone); an idle file with nothing wanting it starts
+    # nothing.
+    (lib.mkIf
+      (
+        cfg.desktop.enable
+        || cfg.desktop.idle.enable
+        || cfg.desktop.notifications.enable
+        || cfg.desktop.clipboard.enable
+      )
+      {
+        systemd.user.targets."scoot-session" = {
+          Unit = {
+            Description = "scoot session (display ready)";
+            BindsTo = [ "graphical-session.target" ];
+            Wants = [ "graphical-session-pre.target" ];
+            After = [ "graphical-session-pre.target" ];
+          };
+        };
+      }
+    )
 
     # The desktop profile's user half. `enable` owns the session-adjacent
     # defaults this side has (the portal config; the session entry and the

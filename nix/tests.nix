@@ -119,6 +119,13 @@
 #   exclusive keyboard, themed by the look unless
 #   `theme.targets.launcher.enable` opts out, holding nothing when
 #   closed; a null package and an unknown `daemon` each fail eval;
+#   every profile unit (the idle pair, mako, the bar feed, both
+#   clipboard watchers, and the profile-managed bar -- never the
+#   standalone bar) starts in `scoot-session.target`, never the shared
+#   `graphical-session.target`, so no other desktop starts them; the
+#   home-manager side installs that target itself (present exactly
+#   while a unit can want it), which is what carries a launcher-less
+#   setup too;
 #   every remaining future slot
 #   defaults off and inert; `enable` without scoot, a look without the
 #   profile, and an unknown look each fail eval;
@@ -212,8 +219,15 @@ let
     # The desktop profile's bar half (`programs.scootbar` from
     # `nix/modules/scootbar-home.nix`) runs as a user service: only the
     # combined desktop evaluations below import that module, and this is
-    # what its unit is pinned against.
+    # what its unit is pinned against. The profile's own session scope
+    # (`scoot-session.target`, which the home-manager side installs
+    # itself) rides alongside: this is what the target's presence and
+    # every unit's binding are pinned against.
     options.systemd.user.services = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+    options.systemd.user.targets = lib.mkOption {
       type = lib.types.attrsOf lib.types.raw;
       default = { };
     };
@@ -3687,6 +3701,113 @@ let
     )
   ];
 
+  # --- session scope structural pins (fail `nix flake check` at eval) ---
+  # Linux only: the scope is a user-session wiring, and the units it
+  # scopes exist only there (off Linux the slots' tools are null and
+  # no unit is written -- pinned in the `_darwin*Pins`).
+  _sessionPins = lib.optionals isLinux [
+    # The home-manager side installs `scoot-session.target` itself
+    # (the NixOS side installs the same file beside its login entry):
+    # pulling in the shared graphical target, ordered after the
+    # pre-session hook -- the same three dependencies as
+    # `resources/systemd/user/scoot-session.target`.
+    (
+      assert hmIdle.config.systemd.user.targets ? "scoot-session";
+      true
+    )
+    (
+      assert
+        hmIdle.config.systemd.user.targets."scoot-session".Unit.Description
+        == "scoot session (display ready)";
+      true
+    )
+    (
+      assert
+        hmIdle.config.systemd.user.targets."scoot-session".Unit.BindsTo == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        hmIdle.config.systemd.user.targets."scoot-session".Unit.Wants == [ "graphical-session-pre.target" ];
+      true
+    )
+    (
+      assert
+        hmIdle.config.systemd.user.targets."scoot-session".Unit.After == [ "graphical-session-pre.target" ];
+      true
+    )
+    # ...present with the profile (which turns every slot on)...
+    (
+      assert hmDesk.config.systemd.user.targets ? "scoot-session";
+      true
+    )
+    # ...present for a standalone slot too (no profile: the slot still
+    # runs in the scoot session, never in another desktop's)...
+    (
+      assert hmIdleStandalone.config.systemd.user.targets ? "scoot-session";
+      true
+    )
+    (
+      assert hmNotifStandalone.config.systemd.user.targets ? "scoot-session";
+      true
+    )
+    (
+      assert hmClipStandalone.config.systemd.user.targets ? "scoot-session";
+      true
+    )
+    # ...and absent with nothing to scope (an idle target file with no
+    # unit wanting it starts nothing, so none is written).
+    (
+      assert hmOff.config.systemd.user.targets == { };
+      true
+    )
+    # No profile unit is left on the shared target: besides the three
+    # pins above (idle, mako, clipboard), the feed and the
+    # profile-managed bar ride the same scope...
+    (
+      assert
+        hmNotif.config.systemd.user.services.scoot-notify-sync.Unit.PartOf == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmDeskBar.config.systemd.user.services.scootbar.Install.WantedBy == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert hmDeskBar.config.systemd.user.services.scootbar.Unit.PartOf == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert hmDeskBar.config.systemd.user.services.scootbar.Unit.After == [ "scoot-session.target" ];
+      true
+    )
+    # ...and on the NixOS side too (the system-wide bar unit beside the
+    # session entry, in the profile's look)...
+    (
+      assert osDeskBar.config.systemd.user.services.scootbar.wantedBy == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert osDeskBar.config.systemd.user.services.scootbar.partOf == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert osDeskBar.config.systemd.user.services.scootbar.after == [ "scoot-session.target" ];
+      true
+    )
+    # ...while the bar's tray ordering survives the move on both sides
+    # (an ordering against an absent unit does nothing).
+    (
+      assert hmDeskBar.config.systemd.user.services.scootbar.Unit.Before == [ "tray.target" ];
+      true
+    )
+    (
+      assert osDeskBar.config.systemd.user.services.scootbar.before == [ "tray.target" ];
+      true
+    )
+  ];
+
   # --- idle policy structural pins (fail `nix flake check` at eval) ---
   # Linux only, like the profile above: every evaluation here runs the
   # policy, whose tools refuse evaluation on Darwin (the null
@@ -3714,19 +3835,38 @@ let
       assert hmIdle.config.xdg.configFile ? "swaylock/config";
       true
     )
-    # ...bound to the graphical session (which the launcher reaches
-    # past the display import), retried rather than conditioned...
+    # ...bound to scoot's own session scope (`scoot-session.target`,
+    # started by the launcher past the display import -- never the
+    # shared `graphical-session.target`, which every other desktop
+    # reaches too), retried rather than conditioned...
     (
       assert
-        hmIdle.config.systemd.user.services.scoot-idle.Install.WantedBy == [ "graphical-session.target" ];
+        hmIdle.config.systemd.user.services.scoot-idle.Install.WantedBy == [ "scoot-session.target" ];
       true
     )
     (
-      assert hmIdle.config.systemd.user.services.scoot-idle.Unit.PartOf == [ "graphical-session.target" ];
+      assert hmIdle.config.systemd.user.services.scoot-idle.Unit.PartOf == [ "scoot-session.target" ];
       true
     )
     (
-      assert hmIdle.config.systemd.user.services.scoot-idle.Unit.After == [ "graphical-session.target" ];
+      assert hmIdle.config.systemd.user.services.scoot-idle.Unit.After == [ "scoot-session.target" ];
+      true
+    )
+    # ...and the audio inhibitor bound to the same scope...
+    (
+      assert
+        hmIdle.config.systemd.user.services.scoot-audio-inhibit.Install.WantedBy
+        == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmIdle.config.systemd.user.services.scoot-audio-inhibit.Unit.PartOf == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmIdle.config.systemd.user.services.scoot-audio-inhibit.Unit.After == [ "scoot-session.target" ];
       true
     )
     # ...waiting for each command (the before-sleep lock lands before
@@ -4176,19 +4316,20 @@ let
       assert hmNotif.config.xdg.configFile ? "mako/config";
       true
     )
-    # ...the daemon bound to the graphical session (which the launcher
-    # reaches past the display import), retried rather than
-    # conditioned...
+    # ...the daemon bound to scoot's own session scope (started by the
+    # launcher past the display import -- never the shared
+    # `graphical-session.target`, which every other desktop reaches
+    # too), retried rather than conditioned...
     (
-      assert hmNotif.config.systemd.user.services.mako.Install.WantedBy == [ "graphical-session.target" ];
+      assert hmNotif.config.systemd.user.services.mako.Install.WantedBy == [ "scoot-session.target" ];
       true
     )
     (
-      assert hmNotif.config.systemd.user.services.mako.Unit.PartOf == [ "graphical-session.target" ];
+      assert hmNotif.config.systemd.user.services.mako.Unit.PartOf == [ "scoot-session.target" ];
       true
     )
     (
-      assert hmNotif.config.systemd.user.services.mako.Unit.After == [ "graphical-session.target" ];
+      assert hmNotif.config.systemd.user.services.mako.Unit.After == [ "scoot-session.target" ];
       true
     )
     # ...activatable over D-Bus (a `Notify` with the daemon down
@@ -4219,17 +4360,23 @@ let
         hmNotif.config.systemd.user.services.mako.Service.ExecCondition;
       true
     )
-    # ...and the feed ordered after it, wanted by the same target.
+    # ...and the feed ordered after it, wanted by (and stopped with)
+    # the same scope.
     (
       assert
         hmNotif.config.systemd.user.services.scoot-notify-sync.Install.WantedBy
-        == [ "graphical-session.target" ];
+        == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmNotif.config.systemd.user.services.scoot-notify-sync.Unit.PartOf == [ "scoot-session.target" ];
       true
     )
     (
       assert
         hmNotif.config.systemd.user.services.scoot-notify-sync.Unit.After == [
-          "graphical-session.target"
+          "scoot-session.target"
           "mako.service"
         ];
       true
@@ -4507,31 +4654,42 @@ let
       assert hmClip.config.systemd.user.services ? scoot-clipboard-primary-store;
       true
     )
-    # ...both watchers bound to the graphical session (which the
-    # launcher reaches past the display import), retried rather than
-    # conditioned...
+    # ...both watchers bound to scoot's own session scope (started by
+    # the launcher past the display import -- never the shared
+    # `graphical-session.target`, which every other desktop reaches
+    # too), retried rather than conditioned...
     (
       assert
         hmClip.config.systemd.user.services.scoot-clipboard-store.Install.WantedBy
-        == [ "graphical-session.target" ];
+        == [ "scoot-session.target" ];
       true
     )
     (
       assert
-        hmClip.config.systemd.user.services.scoot-clipboard-store.Unit.PartOf
-        == [ "graphical-session.target" ];
+        hmClip.config.systemd.user.services.scoot-clipboard-store.Unit.PartOf == [ "scoot-session.target" ];
       true
     )
     (
       assert
-        hmClip.config.systemd.user.services.scoot-clipboard-store.Unit.After
-        == [ "graphical-session.target" ];
+        hmClip.config.systemd.user.services.scoot-clipboard-store.Unit.After == [ "scoot-session.target" ];
       true
     )
     (
       assert
         hmClip.config.systemd.user.services.scoot-clipboard-primary-store.Install.WantedBy
-        == [ "graphical-session.target" ];
+        == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmClip.config.systemd.user.services.scoot-clipboard-primary-store.Unit.PartOf
+        == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmClip.config.systemd.user.services.scoot-clipboard-primary-store.Unit.After
+        == [ "scoot-session.target" ];
       true
     )
     # ...watching through `wl-paste` (this package's binary, absolute so
@@ -5692,6 +5850,7 @@ in
 assert lib.all (x: x) _pins;
 assert lib.all (x: x) _greeterPins;
 assert lib.all (x: x) _desktopPins;
+assert lib.all (x: x) _sessionPins;
 assert lib.all (x: x) _idlePins;
 assert lib.all (x: x) _notifPins;
 assert lib.all (x: x) _clipPins;

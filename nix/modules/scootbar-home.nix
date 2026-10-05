@@ -5,6 +5,20 @@
 
 let
   cfg = config.programs.scootbar;
+
+  # Which session scope starts the unit. A bar the desktop profile
+  # manages (`programs.scoot.desktop` beside this module, `bar.enable`
+  # kept) starts in scoot's own session only (`scoot-session.target`,
+  # started by the launcher past the display import) -- never the
+  # shared `graphical-session.target`, which every other desktop
+  # reaches too. A standalone bar stays a generic graphical-session
+  # unit, the way other compositors run it.
+  desktopProfile = ((config.programs.scoot or { }).desktop or { });
+  sessionTarget =
+    if (desktopProfile.enable or false) && (desktopProfile.bar.enable or true) then
+      "scoot-session.target"
+    else
+      "graphical-session.target";
 in
 {
   imports = [ ./scootbar.nix ];
@@ -20,11 +34,11 @@ in
     systemd.user.services.scootbar = lib.mkIf (cfg.systemd.enable && cfg.finalPackage != null) {
       Unit = {
         Description = "scootbar, the status bar";
-        # Up with the graphical session (which a scoot session script
+        # Up with the session scope above (which a scoot session script
         # starts after importing WAYLAND_DISPLAY: site/src/content/docs/scootbar/index.md), and before what hosts a tray (`tray.target`, where the session
         # defines one; an ordering against an absent unit does nothing).
-        PartOf = [ "graphical-session.target" ];
-        After = [ "graphical-session.target" ];
+        PartOf = [ sessionTarget ];
+        After = [ sessionTarget ];
         Before = [ "tray.target" ];
         # Retry for as long as the compositor is not there. systemd's default
         # burst limit (5 starts in 10 s) is not reached by a 2 s retry
@@ -49,7 +63,7 @@ in
         # crash) would kill them with it; `process` stops only the bar.
         KillMode = "process";
       };
-      Install.WantedBy = [ "graphical-session.target" ];
+      Install.WantedBy = [ sessionTarget ];
     };
   };
 }

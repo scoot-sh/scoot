@@ -7,6 +7,17 @@
 
 let
   cfg = config.programs.scootbar;
+
+  # Which session scope starts the unit: the profile-managed bar in
+  # scoot's own session only, a standalone bar in any graphical
+  # session (same rule as the home-manager side -- see
+  # `scootbar-home.nix`).
+  desktopProfile = ((config.programs.scoot or { }).desktop or { });
+  sessionTarget =
+    if (desktopProfile.enable or false) && (desktopProfile.bar.enable or true) then
+      "scoot-session.target"
+    else
+      "graphical-session.target";
 in
 {
   imports = [ ./scootbar.nix ];
@@ -21,9 +32,9 @@ in
 
     systemd.user.services.scootbar = lib.mkIf (cfg.systemd.enable && cfg.finalPackage != null) {
       description = "scootbar, the status bar";
-      wantedBy = [ "graphical-session.target" ];
-      partOf = [ "graphical-session.target" ];
-      after = [ "graphical-session.target" ];
+      wantedBy = [ sessionTarget ];
+      partOf = [ sessionTarget ];
+      after = [ sessionTarget ];
       # Before what hosts a tray, where the session has such a target.
       before = [ "tray.target" ];
       # Retry for as long as the compositor is not there. systemd's default

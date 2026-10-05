@@ -239,9 +239,10 @@ in
       default = true;
       description = ''
         Run the bar as a systemd user service, `scootbar.service`, wanted
-        by `graphical-session.target` and restarted when it fails
-        (scoot does not supervise its clients). Turn it off to start
-        `scootbar daemon` from your compositor's autostart instead.
+        by the session scope (`scoot-session.target` under the desktop
+        profile, `graphical-session.target` standalone) and restarted
+        when it fails (scoot does not supervise its clients). Turn it off
+        to start `scootbar daemon` from your compositor's autostart instead.
       '';
     };
   };

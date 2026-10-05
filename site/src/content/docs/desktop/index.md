@@ -134,7 +134,7 @@ Which options live on which side:
 | Side | Owns |
 |---|---|
 | NixOS (`programs.scoot` in `configuration.nix`) | the package system-wide; the login-screen session entry; system-wide scootbg (so `[wallpaper]` finds it on `PATH`); the idle/lock tools system-wide, the docked-lid rule, and the locker's PAM service; the greeter |
-| Home Manager (`programs.scoot` in the home config) | the themed config file; the portal config; the user units (idle policy, notification daemon, bar feed); the tools for the user |
+| Home Manager (`programs.scoot` in the home config) | the themed config file; the portal config; the user units (idle policy, notification daemon, clipboard watchers, bar feed) plus the `scoot-session.target` scope they start in; the tools for the user |
 
 ## Home Manager
 
@@ -198,6 +198,39 @@ A home-manager-only setup still needs two things from wherever PAM
 and the seat are configured: the locker's PAM service (else no
 password unlocks it), and backlight rights for dimming (else the dim
 step logs EPERM and does nothing).
+
+## Which sessions start the units
+
+Every profile unit — the idle pair, mako and its bar feed, both
+clipboard watchers, and the profile-managed bar — starts in
+`scoot-session.target`, scoot's own session scope, and stops when it
+ends. That scope is what the launcher starts past the display import,
+so the display is already in the user manager when the units start.
+No other desktop starts them: logging in to GNOME, KDE, niri or
+Hyprland with the same home-manager config leaves scoot's mako,
+locker policy and clipboard history stopped, instead of running
+them inside someone else's session. (A standalone bar — the bar
+module without the profile — stays a generic
+`graphical-session.target` unit, the way other compositors run it.)
+
+Without the launcher — a hand-written greetd entry or `startwm.sh`
+that runs `scoot --tty` directly instead of `scoot-session` — start
+the scope by hand once the display is known, and stop it on the way
+out:
+
+```sh
+systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+systemctl --user start scoot-session.target
+# ... on exit:
+systemctl --user stop scoot-session.target
+```
+
+The home-manager side installs the scope's target file itself, so
+this works with no NixOS login entry. Units ordered after the scope
+inherit the imported display from the user manager. A
+`sessionScript` entry (`scoot --tty -- session.sh`) never gets this
+wiring — for startup programs that want it, use `[autostart]`
+instead.
 
 ## Without flakes
 
@@ -330,8 +363,8 @@ Troubleshooting, by symptom:
 
 - *Screens never dim or power off.* Check the unit is running:
   `systemctl --user status scoot-idle` — and that it started with the
-  display (a hand-started session must reach `graphical-session.target`
-  with `WAYLAND_DISPLAY` imported). The generated config is at
+  display (a hand-started session must reach `scoot-session.target`
+  with `WAYLAND_DISPLAY` imported, [above](#which-sessions-start-the-units)). The generated config is at
   `~/.config/swayidle/config`: read it, the timeouts are literal. Dim
   specifically needs the seat: logind grants the *active* login
   backlight access, so dim works in the seat session and logs EPERM
@@ -454,7 +487,7 @@ programs.scoot.desktop = {
 ```
 
 What runs: two watcher units (regular clipboard and primary selection,
-wanted by `graphical-session.target`), each a `wl-paste --watch`
+in `scoot-session.target`, so no other desktop starts them), each a `wl-paste --watch`
 feeding one shared history, plus `wl-copy`/`wl-paste` on `PATH` for
 scripts and terminals. The history keeps 100 entries by default
 (oldest dropped first, each entry at most 5 MB), byte-for-byte:

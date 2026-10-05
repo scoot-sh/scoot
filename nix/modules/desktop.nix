@@ -243,7 +243,7 @@ in
     # Idle policy (dim, lock, screens off, lock before sleep, media
     # inhibit) plus the locker behind it (over `ext-session-lock-v1`).
     # Filled by the `desktop-idle-lock` child: swayidle as a user unit
-    # bound to `graphical-session.target`, the M2's measured timeouts as
+    # bound to `scoot-session.target`, the M2's measured timeouts as
     # defaults (dim to 10% at 2 min, lock at 4, screens off at 5, each
     # overridable, 0 disabling that step), lock-before-sleep through
     # logind, and an audio-driven idle inhibitor while media plays.
@@ -401,7 +401,7 @@ in
     # daemon behind `daemon` is the only visible change when
     # scootnotify replaces it (same `enable`, same bar module, same
     # DND toggle). Filled by the `desktop-notifications` child: mako
-    # as a user unit bound to `graphical-session.target`, its config
+    # as a user unit bound to `scoot-session.target`, its config
     # on the `overlay` layer (so popups show above fullscreen windows)
     # and themed by the look, plus the bar feed (DND state and unread
     # count into the bar's `push` module, a click toggling DND).
