@@ -4739,26 +4739,22 @@ let
             allow_when_locked = true;
           };
           "XF86AudioRaiseVolume" = {
-            action =
-              "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
+            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
             repeat = true;
             allow_when_locked = true;
           };
           "XF86AudioLowerVolume" = {
-            action =
-              "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
+            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
             repeat = true;
             allow_when_locked = true;
           };
           "XF86AudioMute" = {
-            action =
-              "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SINK@ toggle";
+            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SINK@ toggle";
             repeat = true;
             allow_when_locked = true;
           };
           "XF86AudioMicMute" = {
-            action =
-              "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
             repeat = true;
             allow_when_locked = true;
           };
