@@ -15,7 +15,7 @@ One page per module family would be thirteen pages; instead every module lives h
 | `volume` | The default sink's level and mute ([below](./modules.md##volume)) | on the sound server's sink events, and the server's own: one redraw per batch |
 | `microphone` | The default source's level and mute ([below](./modules.md##volume)) | as `volume`, for sources |
 | `battery` | The batteries' charge and state ([below](./modules.md##battery)) | on the kernel's power-supply events, and once a minute while discharging |
-| `network` | The shown interface's state: name, SSID, VPN or offline ([below](./modules.md##network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held |
+| `network` | The shown interface's state: name, SSID, VPN or offline ([below](./modules.md##network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held; plus the WiFi signal re-read every 10 s while WiFi is shown (two wakes a tick, a redraw only when the shown level moves) |
 | `brightness` | The panel backlight's level ([below](./modules.md##brightness)) | on the kernel's backlight events: one redraw per batch, however many events it held |
 | `tray` | The applications' tray icons, StatusNotifierItem ([below](./modules.md##tray)) | on the session bus's traffic: item registrations, icon changes, owners vanishing |
 | `media` | What the players on the session bus are playing, and their controls, over MPRIS ([below](./modules.md##media)) | on the bus's MPRIS traffic only: a player appearing or vanishing, its track or state changing |
@@ -311,6 +311,15 @@ no daemon and no child process: two netlink sockets on the bar's own
    [Per-state and per-level icons](./modules.md##per-state-and-per-level-icons). The
    WiFi level is four at −55 dBm and better, one at −78 and worse, as
    `query`'s `bars` counts it.
+- **At idle on WiFi the bar wakes about twice every 10 seconds**: the
+  signal has no kernel event (where the radio refuses signal-threshold
+  offload), so the module re-reads it on a 10 s timer, armed only while
+  WiFi is shown. The redraw follows only when the shown level moves —
+  an idle radio's dBm wanders constantly, and redrawing on every dBm
+  would cost a frame and the compositor's release on nearly every tick.
+  The tooltip's exact dBm is drawn live from the latest re-read, so it
+  is fresh whenever it opens, and an open tooltip refreshes with the
+  next redraw.
 - **A click opens the picker**, with no binding at all: `network.menu-command`
   is spawned with the cached scan's SSIDs on stdin (one per line), a
   dmenu-style launcher fed from the scan list. Connecting is the
