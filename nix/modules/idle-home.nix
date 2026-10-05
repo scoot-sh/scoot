@@ -80,6 +80,26 @@ let
 
   lockerCmd = "${lib.getExe idle.lock.package} -f -C ${swaylockConfig}";
 
+  # The clipboard wipe on the lock boundary (clear-on-lock): the history
+  # db emptied as the session locks, so pre-lock copies never sit on
+  # disk behind the lock screen -- while the store entry's own guard
+  # (see `clipboard-home.nix`) keeps anything copied during the lock out
+  # of the history. Runs before the locker on both lock paths (logind's
+  # Lock through the `lock` event, and suspend through `before-sleep`,
+  # which bypasses that signal); `;` keeps the locker running even if
+  # the wipe fails. Only while the clipboard slot is on with a manager
+  # to wipe with (the refusal for a null beside `enable` is the
+  # clipboard child's own assertion); without the idle policy there is
+  # no lock event to ride, so a standalone clipboard documents `wipe`
+  # as manual instead (see docs/nix.md).
+  clip = cfg.desktop.clipboard;
+  clipWipeReady = clip.enable && clip.managerPackage != null;
+  clipWipe = lib.optionalString clipWipeReady (
+    "${if clip.managerPackage != null then lib.getExe' clip.managerPackage "cliphist" else "cliphist"}"
+    + lib.optionalString (clip.dbPath != null) " -db-path '${clip.dbPath}'"
+    + " wipe; "
+  );
+
   # swayidle parses each config line with wordexp (shell quoting), and
   # each command must be ONE quoted word: `sh -c` runs it, and the `"*"`
   # stays quoted so the shell never globs it into filenames (the same
@@ -103,10 +123,10 @@ let
       # `lock.command`), so `-w` waits for the lock before logind
       # sleeps: `loginctl` returns once it signals, which would release
       # the sleep inhibitor before the locker is up.
-      ++ lib.optional idle.lock.enable "before-sleep '${lockerCmd}'"
+      ++ lib.optional idle.lock.enable "before-sleep '${clipWipe}${lockerCmd}'"
       # Every path -- timeout, lid, manual `lock.command`, before-sleep
-      # -- lands here through logind's Lock signal.
-      ++ lib.optional idle.lock.enable "lock '${lockerCmd}'"
+      # -- lands here through logind's Lock, which the locker's `lock` event listens on.
+      ++ lib.optional idle.lock.enable "lock '${clipWipe}${lockerCmd}'"
     )
     + "\n"
   );
