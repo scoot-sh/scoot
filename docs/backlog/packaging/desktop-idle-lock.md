@@ -3,7 +3,7 @@ title: "Desktop idle policy and lock screen from the flake"
 status: "open"
 area: "packaging"
 priority: "high"
-blocked: "branch fix/scoot-session-target-after-display: the session target is reached before WAYLAND_DISPLAY is imported, so idle/lock user units would start too early and skip"
+blocked: null
 ---
 
 # Desktop idle policy and lock screen from the flake
@@ -15,7 +15,7 @@ at 5 min, no lock yet) made into a default with a lock added. The M2's
 local config is the reference; the `docs/configuration.md` snippet
 (lock 10 min, off 15 min) is only an example.
 
-Blocked on branch `fix/scoot-session-target-after-display`: the session
+Was blocked on `fix/scoot-session-target-after-display`, merged as #431 (2026-10-04): the session
 target is reached before `WAYLAND_DISPLAY` is imported, so idle/lock user
 units would start too early and skip. Implement against that branch's shape
 once it lands; acceptance needs it merged.

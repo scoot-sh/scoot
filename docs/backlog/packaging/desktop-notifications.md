@@ -3,7 +3,7 @@ title: "Desktop notifications: mako now, scootnotify later"
 status: "open"
 area: "packaging"
 priority: "high"
-blocked: "branch fix/scoot-session-target-after-display: the session target is reached before WAYLAND_DISPLAY is imported, so the notification user unit would start too early and skip"
+blocked: null
 ---
 
 # Desktop notifications: mako now, scootnotify later
@@ -12,7 +12,7 @@ Filed 2026-10-04, child 3 of `desktop-paved-path`. Serves
 **daily-drive** (a desktop with no notification daemon drops password
 prompts, calendar pings, low-battery warnings on the floor).
 
-Blocked on branch `fix/scoot-session-target-after-display`: same
+Was blocked on `fix/scoot-session-target-after-display`, merged as #431 (2026-10-04): same
 `WAYLAND_DISPLAY`-before-target ordering — a notification user unit would
 start too early and skip.
 
