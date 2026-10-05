@@ -73,7 +73,7 @@ pub const ACTIONS_HELP: &str = "\
 /// `const` so the two forms cannot drift -- the tests pin that every table
 /// row appears here and in the JSON.
 pub fn usage() -> String {
-    crate::help::usage("scootctl", REQUESTS_HELP, ACTIONS_HELP)
+    crate::help::usage("scootctl", REQUESTS_HELP, ACTIONS_HELP, true)
 }
 
 #[derive(Debug, PartialEq)]

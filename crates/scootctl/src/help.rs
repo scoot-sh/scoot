@@ -414,16 +414,22 @@ fn levenshtein(a: &str, b: &str) -> usize {
 
 /// The full `--help` text: the prose grammar blocks plus the sections
 /// rendered from the tables below. `binary` is `scootctl` or `scoot msg`,
-/// so the examples name the binary being read.
-pub fn usage(binary: &str, requests_help: &str, actions_help: &str) -> String {
+/// so the examples name the binary being read; `version` says whether that
+/// front-end answers `--version` (`scootctl` does, `scoot msg` does not --
+/// there it would be a request verb, and is refused as one).
+pub fn usage(binary: &str, requests_help: &str, actions_help: &str, version: bool) -> String {
     let mut text = String::new();
     text.push_str(&format!(
         "{binary} -- remote-control client for the scoot Wayland compositor\n\
          \n\
          USAGE:\n\
-         \x20   {binary} REQUEST\n\
-         \x20   {binary} --version\n\
-         \x20   {binary} --help [--json]\n\
+         \x20   {binary} REQUEST\n"
+    ));
+    if version {
+        text.push_str(&format!("\x20   {binary} --version\n"));
+    }
+    text.push_str(&format!(
+        "\x20   {binary} --help [--json]\n\
          \x20   {binary} help [TOPIC|VERB|--json]\n\
          \n\
          REQUESTS:\n\
@@ -497,14 +503,21 @@ pub fn topic_text(topic: Topic) -> String {
 
 /// One verb's row, for `help <verb>`: its syntax, description, example and
 /// reply shape. `None` when no verb is named that.
-pub fn verb_text(verb: &str) -> Option<String> {
+/// One verb's row, for `help <verb>`: its syntax, description, one example
+/// and its reply shape. `binary` names the front-end, so the example reads
+/// `scoot msg ...` under the alias. `None` when no verb is named that.
+pub fn verb_text(verb: &str, binary: &str) -> Option<String> {
     REQUESTS
         .iter()
         .find(|request| request.verb == verb)
         .map(|request| {
             format!(
                 "{}:\n    {}\n    {} -- e.g. `{}`\n    Reply: {}\n",
-                request.verb, request.syntax, request.description, request.example, request.reply
+                request.verb,
+                request.syntax,
+                request.description,
+                request.example.replace("scootctl", binary),
+                request.reply
             )
         })
 }
@@ -512,7 +525,7 @@ pub fn verb_text(verb: &str) -> Option<String> {
 /// The `--help --json` document as a value, so other binaries (notably
 /// `scoot msg`) can embed the client surface in their own document.
 /// `binary` names the front-end being described.
-pub fn json_value(binary: &str) -> Value {
+pub fn json_value(binary: &str, version: bool) -> Value {
     let mut root = Map::new();
     root.insert("schema_version".into(), Value::from(SCHEMA_VERSION));
     root.insert("binary".into(), Value::from(binary));
@@ -522,12 +535,15 @@ pub fn json_value(binary: &str) -> Value {
     );
     root.insert(
         "usage".into(),
-        Value::from(vec![
-            Value::from(format!("{binary} REQUEST")),
-            Value::from(format!("{binary} --version")),
-            Value::from(format!("{binary} --help [--json]")),
-            Value::from(format!("{binary} help [TOPIC|VERB|--json]")),
-        ]),
+        Value::from({
+            let mut lines = vec![Value::from(format!("{binary} REQUEST"))];
+            if version {
+                lines.push(Value::from(format!("{binary} --version")));
+            }
+            lines.push(Value::from(format!("{binary} --help [--json]")));
+            lines.push(Value::from(format!("{binary} help [TOPIC|VERB|--json]")));
+            lines
+        }),
     );
     root.insert(
         "requests".into(),
@@ -603,8 +619,8 @@ pub fn json_value(binary: &str) -> Value {
 }
 
 /// The `--help --json` document, pretty-printed.
-pub fn json(binary: &str) -> String {
-    serde_json::to_string_pretty(&json_value(binary)).unwrap_or_else(|_| "{}".into())
+pub fn json(binary: &str, version: bool) -> String {
+    serde_json::to_string_pretty(&json_value(binary, version)).unwrap_or_else(|_| "{}".into())
 }
 
 #[cfg(test)]
@@ -616,7 +632,7 @@ mod tests {
         // The drift pin, both directions: a verb added to one form without
         // the other fails here.
         let prose = format!("{}{}", crate::cli::REQUESTS_HELP, crate::cli::ACTIONS_HELP);
-        let document = json_value("scootctl");
+        let document = json_value("scootctl", true);
         let names: Vec<&str> = document["requests"]
             .as_array()
             .unwrap()
@@ -661,6 +677,7 @@ mod tests {
             "scootctl",
             crate::cli::REQUESTS_HELP,
             crate::cli::ACTIONS_HELP,
+            true,
         );
         for request in REQUESTS {
             assert!(text.contains(request.syntax), "`{}` missing", request.verb);
@@ -698,12 +715,13 @@ mod tests {
             "scootctl",
             crate::cli::REQUESTS_HELP,
             crate::cli::ACTIONS_HELP,
+            true,
         );
         assert!(!text.contains('\x1b'), "help must not carry color escapes");
         for line in text.lines() {
             assert!(line.chars().count() < 100, "line over 99 columns: `{line}`");
         }
-        let document: Value = serde_json::from_str(&json("scootctl")).unwrap();
+        let document: Value = serde_json::from_str(&json("scootctl", true)).unwrap();
         assert_eq!(document["schema_version"], Value::from(SCHEMA_VERSION));
         assert_eq!(
             document["requests"].as_array().unwrap().len(),
@@ -724,12 +742,12 @@ mod tests {
     #[test]
     fn every_verb_has_its_own_row() {
         for request in REQUESTS {
-            let row =
-                verb_text(request.verb).unwrap_or_else(|| panic!("`{}` has no row", request.verb));
+            let row = verb_text(request.verb, "scootctl")
+                .unwrap_or_else(|| panic!("`{}` has no row", request.verb));
             assert!(row.contains(request.syntax));
             assert!(row.contains(request.example));
         }
-        assert_eq!(verb_text("frobnicate"), None);
+        assert_eq!(verb_text("frobnicate", "scootctl"), None);
     }
 
     #[test]

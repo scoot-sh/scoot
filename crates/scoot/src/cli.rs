@@ -82,10 +82,13 @@ impl HelpPage {
                 "scoot msg",
                 scootctl::cli::REQUESTS_HELP,
                 scootctl::cli::ACTIONS_HELP,
+                false,
             ),
             Self::ClientTopic(topic) => scootctl::help::topic_text(*topic),
-            Self::ClientVerb { verb } => scootctl::help::verb_text(verb).unwrap_or_else(usage),
-            Self::ClientJson => scootctl::help::json("scoot msg"),
+            Self::ClientVerb { verb } => {
+                scootctl::help::verb_text(verb, "scoot msg").unwrap_or_else(usage)
+            }
+            Self::ClientJson => scootctl::help::json("scoot msg", false),
         }
     }
 }
@@ -95,11 +98,11 @@ impl HelpPage {
 /// table-rendered sections), so `scoot --help` and `scootctl --help` cannot
 /// drift. A function rather than a `const` so the two forms share code.
 pub fn usage() -> String {
-    let mut text = String::from("scoot -- a scrolling-tiling Wayland compositor\n\nUSAGE:\n");
+    let mut text = String::from("scoot -- a scrolling-tiling Wayland compositor\n\nUSAGE:\n    ");
     text.push_str(BACKEND_USAGE);
-    text.push_str("\nREQUESTS:\n");
+    text.push_str("\nREQUESTS:\n    ");
     text.push_str(scootctl::cli::REQUESTS_HELP);
-    text.push_str("\nACTIONS:\n");
+    text.push_str("\nACTIONS:\n    ");
     text.push_str(scootctl::cli::ACTIONS_HELP);
     text.push_str(
         "\nEXAMPLES:\n\
@@ -327,7 +330,10 @@ fn json_value() -> serde_json::Value {
                 .collect::<Vec<_>>(),
         ),
     );
-    root.insert("client".into(), scootctl::help::json_value("scoot msg"));
+    root.insert(
+        "client".into(),
+        scootctl::help::json_value("scoot msg", false),
+    );
     root.insert(
         "config_sections".into(),
         serde_json::Value::from(vec![
@@ -630,7 +636,7 @@ fn help_args(args: Vec<String>) -> Result<Command, Error> {
             if let Some(topic) = scootctl::help::Topic::parse(only) {
                 return Ok(Command::Help(HelpPage::ClientTopic(topic)));
             }
-            if scootctl::help::verb_text(only).is_some() {
+            if scootctl::help::verb_text(only, "scoot msg").is_some() {
                 return Ok(Command::Help(HelpPage::ClientVerb { verb: only.clone() }));
             }
             let mut candidates: Vec<&str> = vec!["config", "--json"];
@@ -675,7 +681,7 @@ fn client_help_page(args: &[String]) -> Result<Command, Error> {
             if let Some(topic) = scootctl::help::Topic::parse(only) {
                 return Ok(Command::Help(HelpPage::ClientTopic(topic)));
             }
-            if scootctl::help::verb_text(only).is_some() {
+            if scootctl::help::verb_text(only, "scoot msg").is_some() {
                 return Ok(Command::Help(HelpPage::ClientVerb { verb: only.clone() }));
             }
             let mut candidates: Vec<&str> = scootctl::help::Topic::names().collect();
@@ -1441,6 +1447,28 @@ mod tests {
                 suggestion: "--headless".into(),
                 topic: "scoot --help",
             })
+        );
+    }
+
+    #[test]
+    fn the_msg_alias_help_names_no_version_flag() {
+        // `scoot msg --version` would be a request verb, refused as one --
+        // so neither the alias help nor its JSON may list it.
+        let text = HelpPage::Client.text();
+        assert!(
+            !text.lines().any(|line| line.trim() == "scoot msg --version"),
+            "alias help lists a flag the alias refuses"
+        );
+        let document: serde_json::Value = serde_json::from_str(&json()).unwrap();
+        let usages: Vec<&str> = document["client"]["usage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|line| line.as_str().unwrap())
+            .collect();
+        assert!(
+            !usages.iter().any(|line| line.contains("--version")),
+            "alias JSON lists a flag the alias refuses: {usages:?}"
         );
     }
 
