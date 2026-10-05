@@ -194,16 +194,15 @@ in
           # (swayidle wordexp-parses that line, then `sh -c` runs it --
           # an unquoted `~` there would expand to `$HOME` while the
           # scripts keep a literal `~`, wiping a different db than the
-          # history lives in; a space would field-split the wipe). So
-          # only an absolute path without shell specials passes: no
-          # `~` (unexpanded in single quotes), no whitespace, quotes,
-          # `$`, backticks, `;` or backslashes (`builtins.match` needs
-          # the whole value, so one anchored class decides it).
-          assertion = clip.dbPath == null || builtins.match "^/[^'\"`$;\\\\[:space:]]*$" clip.dbPath != null;
+          # history lives in; a space would field-split the wipe, and a
+          # glob, pipe, redirect or paren would be read by swayidle's
+          # wordexp/`sh -c` too). So an allowlist, not a blocklist: an
+          # absolute path of letters, digits and `._/+@-` only
+          # (`builtins.match` needs the whole value).
+          assertion = clip.dbPath == null || builtins.match "^/[A-Za-z0-9._/+@-]*$" clip.dbPath != null;
           message = ''
             programs.scoot.desktop.clipboard.dbPath must be an absolute
-            path without shell-special characters (no `~`, spaces,
-            quotes, `$`, backticks, `;` or backslashes -- e.g.
+            path made only of letters, digits and `._/+@-` (e.g.
             `/home/you/.cache/cliphist/db`), or null for cliphist's
             default. A `~` or relative path would name a different file
             on the lock line than in the store entry and the picker.

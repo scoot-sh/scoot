@@ -1561,7 +1561,7 @@ into the new config; no re-login):
 |---|---|---|---|
 | `desktop.clipboard.enable` | bool | `true` with the profile | keep history (two watcher units), `wl-copy`/`wl-paste` on PATH, the picker bind |
 | `desktop.clipboard.maxItems` | int (at least 1) | `100` | history entries kept, oldest dropped first |
-| `desktop.clipboard.dbPath` | string or null | `null` (cliphist's default) | history db path (absolute, no shell specials: no `~`, spaces, quotes, `$`, backticks, `;` or backslashes); anything else fails evaluation |
+| `desktop.clipboard.dbPath` | string or null | `null` (cliphist's default) | history db path: absolute, letters, digits and `._/+@-` only (no `~`, spaces, quotes or other shell characters); anything else fails evaluation |
 | `desktop.theme.targets.clipboard.enable` | bool | `true` | theme the picker from the look (menu background and text, selection and border); `false` keeps fuzzel's own style |
 | `desktop.clipboard.managerPackage`, `.wlClipboardPackage`, `.menuPackage` | package or null | lean cliphist, wl-clipboard, fuzzel (Linux-only: null off Linux) | point one at your own build; null with the switch on fails evaluation naming it |
 

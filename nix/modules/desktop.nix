@@ -536,7 +536,7 @@ in
         default = null;
         example = "/home/you/.cache/cliphist/db";
         description = ''
-          History db path (absolute, no shell specials). Null keeps
+          History db path (absolute; letters, digits and `._/+@-` only). Null keeps
           cliphist's default. Anything but an absolute path free of
           `~`, whitespace, quotes, `$`, backticks, `;` and backslashes
           fails evaluation.

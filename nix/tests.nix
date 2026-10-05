@@ -1500,6 +1500,16 @@ let
     desktop.clipboard.enable = true;
     desktop.clipboard.dbPath = "/home/scoot-test/cliphist;wipe/db";
   };
+  hmClipBadDbGlob = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/*/db";
+  };
+  hmClipBadDbPipe = evalHome {
+    enable = true;
+    desktop.clipboard.enable = true;
+    desktop.clipboard.dbPath = "/home/scoot-test/a|b/db";
+  };
   hmClipBadDbEmpty = evalHome {
     enable = true;
     desktop.clipboard.enable = true;
@@ -4498,6 +4508,14 @@ let
     )
     (
       assert builtins.length (failing hmClipBadDbSemi.config) == 1;
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbGlob.config) == 1;
+      true
+    )
+    (
+      assert builtins.length (failing hmClipBadDbPipe.config) == 1;
       true
     )
     (
