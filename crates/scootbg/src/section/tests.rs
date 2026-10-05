@@ -280,7 +280,10 @@ fn sizes_are_bounded() {
         json.push_str(&format!("\"o{index}\":{{}}"));
     }
     let fits = format!("{json}}}}}");
-    assert_eq!(parse(&fits).unwrap().record(cache()).named.len(), MAX_OUTPUTS);
+    assert_eq!(
+        parse(&fits).unwrap().record(cache()).named.len(),
+        MAX_OUTPUTS
+    );
     let over = format!("{json},\"one-more\":{{}}}}}}");
     let message = refused(&over);
     assert!(
@@ -411,9 +414,7 @@ fn a_url_is_a_download_not_a_path() {
     // No `sha256` written, none fingerprinted.
     assert_eq!(
         section.canonical(),
-        format!(
-            r#"{{"image":"{url}","mode":"fit","output":{{"DP-1":{{"image":"{url}"}}}}}}"#
-        )
+        format!(r#"{{"image":"{url}","mode":"fit","output":{{"DP-1":{{"image":"{url}"}}}}}}"#)
     );
 }
 

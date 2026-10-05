@@ -97,7 +97,10 @@ enum Chosen {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ImageSource {
     Path(String),
-    Url { url: String, sha256: Option<[u8; 32]> },
+    Url {
+        url: String,
+        sha256: Option<[u8; 32]>,
+    },
 }
 
 impl Chosen {

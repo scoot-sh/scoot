@@ -105,10 +105,7 @@ fn a_url_is_downloaded_once_and_shown() {
         return;
     };
     let cache = session.scratch.0.join("cache");
-    let mut daemon = session.daemon_logged(&[(
-        "XDG_CACHE_HOME",
-        cache.to_str().unwrap(),
-    )]);
+    let mut daemon = session.daemon_logged(&[("XDG_CACHE_HOME", cache.to_str().unwrap())]);
     let id = session.scoot_ipc(r#"{"type":"outputs"}"#)["outputs"][0]["id"]
         .as_u64()
         .unwrap();
@@ -148,10 +145,7 @@ fn a_failed_download_keeps_the_background_and_says_why() {
         return;
     };
     let cache = session.scratch.0.join("cache");
-    let mut daemon = session.daemon_logged(&[(
-        "XDG_CACHE_HOME",
-        cache.to_str().unwrap(),
-    )]);
+    let mut daemon = session.daemon_logged(&[("XDG_CACHE_HOME", cache.to_str().unwrap())]);
     let id = session.scoot_ipc(r#"{"type":"outputs"}"#)["outputs"][0]["id"]
         .as_u64()
         .unwrap();
@@ -215,10 +209,7 @@ fn a_startup_download_failure_is_said_once() {
         .unwrap();
     let stderr = std::fs::read_to_string(&err_file).unwrap();
     assert_eq!(status.code(), Some(1), "{url}: {stderr}");
-    assert!(
-        stderr.contains(&url),
-        "the reason names the URL: {stderr}"
-    );
+    assert!(stderr.contains(&url), "the reason names the URL: {stderr}");
     assert_eq!(
         stderr.matches("cannot show").count(),
         1,

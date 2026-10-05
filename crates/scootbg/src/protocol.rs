@@ -182,9 +182,9 @@ impl Request<'_> {
                             Source::Path(path) => line.image = Some(path),
                             Source::Url { url, sha256 } => {
                                 line.image = Some(url);
-                                line.sha256 = sha256.as_ref().map(|hash| {
-                                    crate::sha256::hex_bytes(hash.as_slice())
-                                });
+                                line.sha256 = sha256
+                                    .as_ref()
+                                    .map(|hash| crate::sha256::hex_bytes(hash.as_slice()));
                             }
                         }
                         line.mode = Some(image.mode);
@@ -439,13 +439,11 @@ fn show<'a>(
                 }
                 let sha256 = sha256
                     .map(|text| {
-                        crate::fetch::parse_sha256(&text).map_err(|_| RequestError::BadSha(text.into_owned()))
+                        crate::fetch::parse_sha256(&text)
+                            .map_err(|_| RequestError::BadSha(text.into_owned()))
                     })
                     .transpose()?;
-                Source::Url {
-                    url: image,
-                    sha256,
-                }
+                Source::Url { url: image, sha256 }
             } else {
                 if !image.starts_with('/') {
                     return Err(RequestError::RelativePath(image.into_owned()));

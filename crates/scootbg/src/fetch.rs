@@ -118,10 +118,9 @@ impl fmt::Display for FetchError {
                 "neither XDG_CACHE_HOME nor HOME is an absolute path, so there is nowhere \
                  to cache a downloaded wallpaper (set one to fetch a URL)"
             ),
-            Self::TooLong(len) => write!(
-                f,
-                "the URL is {len} bytes, longer than the {MAX_URL} taken"
-            ),
+            Self::TooLong(len) => {
+                write!(f, "the URL is {len} bytes, longer than the {MAX_URL} taken")
+            }
             Self::Spawn(error) => write!(f, "cannot run `curl` ({CURL}): {error}"),
             Self::Failed { url, code, detail } => {
                 let code = code.map_or("killed".to_owned(), |code| code.to_string());

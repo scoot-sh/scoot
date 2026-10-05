@@ -176,12 +176,10 @@ fn without_downloads(record: &mut Record) {
         Pick::Image { fetch, .. } => fetch.is_none(),
         _ => true,
     });
-    record
-        .named
-        .retain(|(_, pick)| match pick {
-            Pick::Image { fetch, .. } => fetch.is_none(),
-            _ => true,
-        });
+    record.named.retain(|(_, pick)| match pick {
+        Pick::Image { fetch, .. } => fetch.is_none(),
+        _ => true,
+    });
 }
 
 /// For an unchanged section: each image it chose that is saved as its own

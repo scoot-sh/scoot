@@ -573,8 +573,8 @@ fn a_url_set_parses_and_round_trips() {
         )
     );
     // Without a pin, no `sha256` goes out.
-    let plain = parse(b"{\"protocol\":1,\"type\":\"set\",\"image\":\"http://127.0.0.1:1/a.png\"}")
-        .unwrap();
+    let plain =
+        parse(b"{\"protocol\":1,\"type\":\"set\",\"image\":\"http://127.0.0.1:1/a.png\"}").unwrap();
     assert!(
         !plain.line().contains("sha256"),
         "unpinned: {}",
