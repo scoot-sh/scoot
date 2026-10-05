@@ -486,6 +486,7 @@ fn a_warm_hover_and_a_shown_tooltip_allocate_nothing() {
         content.wrap_tooltip(tips[0], max, |line| text.measure(None, line, em));
     }
     let mut pixels = Vec::new();
+    let sharp = super::Round::new(0, 1, 1, 1);
     for tip in tips {
         spare.wrap_tooltip(tip, max, |line| text.measure(None, line, em));
         std::mem::swap(&mut spare, &mut shown);
@@ -505,6 +506,7 @@ fn a_warm_hover_and_a_shown_tooltip_allocate_nothing() {
             &layout,
             &super::Interaction::default(),
             em,
+            &sharp,
         );
     }
     let ((), allocations) = scootbg_mem::count_allocations(|| {
@@ -534,6 +536,7 @@ fn a_warm_hover_and_a_shown_tooltip_allocate_nothing() {
                     &layout,
                     &super::Interaction::default(),
                     em,
+                    &sharp,
                 );
             }
         }

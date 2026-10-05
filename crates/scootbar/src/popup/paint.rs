@@ -4,17 +4,21 @@
 
 use super::interact::Interaction;
 use super::layout::{Layout, Row};
-use super::{Content, Kind, MAX_TEXT};
+use super::{Content, Kind, MAX_TEXT, Round};
 use crate::paint::{Canvas, Span};
 use crate::text::Text;
 use crate::theme::Theme;
 
 /// Draws `content` as `layout` places it. `em` is the em in device pixels
 /// (what `layout` was computed at), `interaction` says what is hovered and
-/// what a drag shows. A canvas smaller than the layout is clipped, never a
+/// what a drag shows, `round` is the frame's shape: square corners paint as
+/// before (two opaque fills), rounded ones as a border ring over a
+/// transparent buffer, with the content clipped back to the inner arc after
+/// it is drawn. A canvas smaller than the layout is clipped, never a
 /// panic; rows past it (a list taller than the output, scrolled) draw with
 /// an ellipsis where the window title's does, from a stack buffer, so the
-/// draw allocates nothing.
+/// draw allocates nothing either way.
+#[allow(clippy::too_many_arguments)] // A paint entry point, as the bar's own is.
 pub fn paint(
     canvas: &mut Canvas<'_>,
     text: &mut Text,
@@ -23,12 +27,30 @@ pub fn paint(
     layout: &Layout,
     interaction: &Interaction,
     em: f32,
+    round: &Round,
 ) {
     let (width, height) = (layout.width, layout.height);
     let whole = Span { x: 0, width };
-    // The frame is the `dim` token, the inside the bar's background.
-    canvas.fill_rect(whole, 0, height, theme.dim);
+    if round.rounded() {
+        // Transparent corners need an alpha channel: the daemon draws a
+        // rounded popup into an `ARGB8888` buffer.
+        canvas.clear();
+        canvas.fill_rounded(0, 0, width, height, theme.dim, round.outer());
+        let frame = round.frame();
+        canvas.fill_rounded(
+            frame,
+            frame,
+            width.saturating_sub(frame),
+            height.saturating_sub(frame),
+            theme.background,
+            round.inner(),
+        );
+    } else {
+        // The frame is the `dim` token, the inside the bar's background.
+        canvas.fill_rect(whole, 0, height, theme.dim);
+    }
     let frame = layout.frame;
+    debug_assert!(!round.rounded() || round.frame() == frame);
     let inside = Span {
         x: frame,
         width: width.saturating_sub(frame.saturating_mul(2)),
@@ -109,6 +131,21 @@ pub fn paint(
                 );
             }
         }
+    }
+    if round.rounded() {
+        // What the rows painted past the inner arc (a hover fill, a glyph,
+        // a slider's end) returns to the frame's own edge.
+        canvas.restore_frame_edge(
+            0,
+            0,
+            width,
+            height,
+            round.frame(),
+            theme.dim,
+            theme.background,
+            round.outer(),
+            round.inner(),
+        );
     }
 }
 

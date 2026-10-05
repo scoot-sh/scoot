@@ -1416,6 +1416,8 @@ impl Given {
             radius: defaults.radius,
             opacity: defaults.opacity,
             #[cfg(feature = "popup")]
+            popup_radius: defaults.popup_radius,
+            #[cfg(feature = "popup")]
             tooltip_delay: defaults.tooltip_delay,
             modules,
             outputs: crate::policy::Policy {

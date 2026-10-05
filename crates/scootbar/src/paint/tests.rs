@@ -313,3 +313,139 @@ fn a_pill_of_any_size_or_radius_never_panics_and_stays_in_its_rows() {
         assert_eq!(c.at(x, 3), [0, 0, 0]);
     }
 }
+
+#[test]
+fn corner_tables_at_fractional_scales_cover_the_center_and_cut_the_corner() {
+    use crate::density::Scale;
+    use crate::render::device;
+    // A 12 px popup radius at each scale the bar draws at.
+    for (scale, radius) in [
+        (Scale::Integer(1), 12),
+        (Scale::Integer(2), 24),
+        (Scale::Integer(3), 36),
+        (Scale::Fractional(144), 14),
+        (Scale::Fractional(150), 15),
+        (Scale::Fractional(180), 18),
+        (Scale::Fractional(240), 24),
+        (Scale::Fractional(300), 30),
+    ] {
+        assert_eq!(device(12, scale), radius, "radius at {scale}");
+        let corners = Corners::new(radius);
+        let r = radius as usize;
+        assert_eq!(corners.at(0, 0), 0, "the corner pixel is cut at {scale}");
+        // Coverage never drops moving inward, and the far pixel of the
+        // square is all inside.
+        for y in 0..r {
+            for x in 0..r - 1 {
+                assert!(
+                    corners.at(x, y) <= corners.at(x + 1, y),
+                    "row {y} at {x} ({scale})"
+                );
+                assert!(
+                    corners.at(y, x) <= corners.at(y, x + 1),
+                    "column {y} at {x} ({scale})"
+                );
+            }
+        }
+        assert!(
+            corners.at(r - 1, r - 1) >= 200,
+            "the square's far pixel is inside at {scale}"
+        );
+    }
+}
+
+#[test]
+fn a_rounded_fill_is_opaque_inside_and_transparent_in_the_corners() {
+    let (w, h) = (40u32, 24u32);
+    let mut pixels = vec![0u8; (w * h * 4) as usize];
+    let mut c = canvas(&mut pixels, w, h);
+    c.clear();
+    c.fill_rounded(0, 0, w, h, COLOR, &Corners::new(8));
+    for (x, y) in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)] {
+        assert_eq!(c.alpha_at(x, y), 0, "corner ({x},{y}) is cut");
+    }
+    assert_eq!(c.alpha_at(w / 2, 0), 255, "the top edge's middle is not");
+    assert_eq!(c.alpha_at(0, h / 2), 255, "the left edge's middle is not");
+    assert_eq!(c.at(w / 2, h / 2), [0x12, 0x34, 0x56]);
+    // Square corners are a plain fill.
+    let mut pixels = vec![0u8; (w * h * 4) as usize];
+    let mut c = canvas(&mut pixels, w, h);
+    c.clear();
+    c.fill_rounded(0, 0, w, h, COLOR, &Corners::NONE);
+    assert!(pixels.chunks_exact(4).all(|p| p[3] == 255));
+}
+
+#[test]
+fn a_mismatched_table_falls_back_to_square_rather_than_panicking() {
+    for (x0, y0, x1, y1) in [
+        (0, 0, 10, 10),
+        (0, 0, 0, 10),
+        (0, 0, 10, 0),
+        (3, 3, 3, 3),
+        (0, 0, u32::MAX, u32::MAX),
+    ] {
+        let mut pixels = vec![0u8; 10 * 10 * 4];
+        let mut c = canvas(&mut pixels, 10, 10);
+        c.clear();
+        c.fill_rounded(x0, y0, x1, y1, COLOR, &Corners::new(100));
+        c.restore_frame_edge(
+            x0,
+            y0,
+            x1,
+            y1,
+            1,
+            COLOR,
+            WHITE,
+            &Corners::new(100),
+            &Corners::NONE,
+        );
+    }
+    // The fallback still paints: a table that fits nowhere is square.
+    let mut pixels = vec![0u8; 10 * 10 * 4];
+    let mut c = canvas(&mut pixels, 10, 10);
+    c.clear();
+    c.fill_rounded(0, 0, 10, 10, COLOR, &Corners::new(100));
+    assert_eq!(c.alpha_at(5, 5), 255);
+}
+
+#[test]
+fn restore_clips_a_square_fill_to_the_rounded_frame() {
+    const HOVER: Color = Color {
+        r: 0xe0,
+        g: 0x70,
+        b: 0x20,
+    };
+    let (w, h, r, f) = (40u32, 24u32, 8u32, 1u32);
+    let outer = Corners::new(r);
+    let inner = Corners::new(r - f);
+    let mut pixels = vec![0u8; (w * h * 4) as usize];
+    let mut c = canvas(&mut pixels, w, h);
+    c.clear();
+    c.fill_rounded(0, 0, w, h, COLOR, &outer);
+    c.fill_rounded(f, f, w - f, h - f, WHITE, &inner);
+    // A square hover fill over the first rows, past the inner arc.
+    c.fill_rect(
+        Span {
+            x: f,
+            width: w - 2 * f,
+        },
+        f,
+        12,
+        HOVER,
+    );
+    c.restore_frame_edge(0, 0, w, h, f, COLOR, WHITE, &outer, &inner);
+    // The corners are the frame's own edge, not the hover.
+    for (x, y) in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)] {
+        assert_eq!(c.alpha_at(x, y), 0, "corner ({x},{y}) is cut");
+    }
+    // The top edge's middle is the frame, the hover below it is kept.
+    assert_eq!(c.at(w / 2, 0), [0x12, 0x34, 0x56]);
+    assert_eq!(c.at(w / 2, 6), [0xe0, 0x70, 0x20]);
+    // A pixel of the corner square the hover reached returns to the
+    // frame's own edge: the frame's color at the table's coverage.
+    let (x, y) = (2u32, 2u32);
+    let coverage = outer.at(x as usize, y as usize);
+    assert!((1..255).contains(&coverage), "an antialiased edge pixel");
+    assert_eq!(c.alpha_at(x, y), coverage);
+    assert_ne!(c.at(x, y), [0xe0, 0x70, 0x20], "the hover is clipped");
+}

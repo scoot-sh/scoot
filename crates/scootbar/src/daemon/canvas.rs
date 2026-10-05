@@ -404,7 +404,7 @@ impl Canvas {
 /// it, or a cross of two rectangles that leaves the corner squares out
 /// (their pixels are partly transparent), or none of it (`None`: the
 /// compositor blends the whole surface).
-fn set_opaque_region(
+pub(super) fn set_opaque_region(
     globals: &Globals,
     qh: &QueueHandle<State>,
     surface: &WlSurface,
@@ -442,7 +442,7 @@ fn set_opaque_region(
 /// `wl_surface.set_input_region` for a surface of `size` (logical) whose
 /// corners are cut by `radius` ([`region::input_rects`]): the bar's rounded
 /// shape, or (`radius` 0) the default, the whole surface.
-fn set_input_region(
+pub(super) fn set_input_region(
     globals: &Globals,
     qh: &QueueHandle<State>,
     surface: &WlSurface,

@@ -103,6 +103,7 @@ impl Bar {
                 spacing: 0,
                 separator: 0,
                 radius: 0,
+                popup_radius: 0,
                 opacity: u8::MAX,
             },
         }

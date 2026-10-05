@@ -83,7 +83,7 @@ use crate::bar::Edge;
 use crate::density::Scale;
 use crate::modules::OutputView;
 use crate::outputs::{OutputId, Size};
-use crate::popup::{self, Activate, Content, Interaction, Layout, Wheel};
+use crate::popup::{self, Activate, Content, Interaction, Layout, Round, Wheel};
 use crate::print::warn;
 use crate::render;
 
@@ -141,6 +141,9 @@ struct Open {
     em: f32,
     content: Content,
     layout: Layout,
+    /// The frame's shape at this size and scale, built once: the paint
+    /// reads its corner tables every frame and allocates nothing.
+    round: Round,
     interaction: Interaction,
     /// The wheel movement of the frame being read, grouped into rows.
     wheel: Wheel,
@@ -412,6 +415,15 @@ impl State {
         // what the layout needed: the frame is drawn at the buffer's edge.
         layout.width = dims.0;
         layout.height = dims.1;
+        // The frame's shape at this size and scale: the radius cut back to
+        // what the buffer holds, the corner tables built once and read
+        // every frame it is drawn.
+        let round = Round::new(
+            render::device(style.popup_radius, scale),
+            frame,
+            dims.0,
+            dims.1,
+        );
 
         self.popup.next = self.popup.next.wrapping_add(1);
         let id = PopupId(self.popup.next);
@@ -461,6 +473,31 @@ impl State {
                 region.destroy();
             }
         }
+        if round.rounded() {
+            // The corners are transparent: the compositor blends only
+            // them and skips blending under the rest (all but the corner
+            // squares), in logical pixels like the bar's own region. The
+            // default (the whole surface opaque) would show the cleared
+            // corners as black, so a rounded tooltip needs this too.
+            let radius = crate::region::effective_radius(
+                style.popup_radius,
+                requested.width,
+                requested.height,
+            );
+            super::canvas::set_opaque_region(
+                &self.globals,
+                qh,
+                &surface,
+                (requested, Some(radius.saturating_add(1))),
+            );
+            // A click popup's input shape is the rounded one, as the bar's
+            // own is, so a click in a cut corner reaches what is behind. A
+            // tooltip keeps its empty input region instead (it never takes
+            // a click).
+            if matches!(flavor, Flavor::Popup { .. }) {
+                super::canvas::set_input_region(&self.globals, qh, &surface, (requested, radius));
+            }
+        }
         positioner.destroy();
         // No buffer yet: the compositor answers with the configure.
         surface.commit();
@@ -494,6 +531,7 @@ impl State {
             em,
             content,
             layout,
+            round,
             interaction: Interaction::default(),
             wheel: Wheel::default(),
             framed,
@@ -659,7 +697,8 @@ fn draw_open(
     if !open.dirty || !open.mapped {
         return true;
     }
-    let slot = match open.pool.take(globals, qh, open.id, open.dims) {
+    let rounded = open.round.rounded();
+    let slot = match open.pool.take(globals, qh, open.id, open.dims, rounded) {
         // Every buffer is held: the release wakes the loop.
         Ok(None) => return true,
         Ok(Some(slot)) => slot,
@@ -683,6 +722,7 @@ fn draw_open(
         &open.layout,
         &open.interaction,
         open.em,
+        &open.round,
     );
     let surface = &open.surface;
     surface.attach(Some(&slot.buffer), 0, 0);

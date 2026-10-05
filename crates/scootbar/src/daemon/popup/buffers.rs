@@ -22,6 +22,9 @@ pub struct Slot {
     /// Attached and not released since: the compositor may be reading.
     pub held: bool,
     pub dims: (u32, u32),
+    /// Whether the buffer has an alpha channel (a rounded popup's corners
+    /// are transparent): part of what makes a slot reusable.
+    rounded: bool,
 }
 
 impl Slot {
@@ -30,6 +33,7 @@ impl Slot {
         qh: &QueueHandle<State>,
         id: PopupId,
         dims: (u32, u32),
+        rounded: bool,
     ) -> Result<Self, ShmError> {
         let mut shm = ShmBuffer::new(dims.0, dims.1)?;
         let geometry = shm.geometry();
@@ -40,12 +44,19 @@ impl Slot {
         };
         let pool = globals.shm.create_pool(fd, geometry.len, qh, ());
         shm.close_fd();
+        // An `ARGB8888` buffer only for a rounded popup; a square one
+        // stays `XRGB8888`, exactly as before either option existed.
+        let format = if rounded {
+            wl_shm::Format::Argb8888
+        } else {
+            wl_shm::Format::Xrgb8888
+        };
         let buffer = pool.create_buffer(
             0,
             geometry.width,
             geometry.height,
             geometry.stride,
-            wl_shm::Format::Xrgb8888,
+            format,
             qh,
             id,
         );
@@ -55,6 +66,7 @@ impl Slot {
             buffer,
             held: false,
             dims,
+            rounded,
         })
     }
 
@@ -75,21 +87,23 @@ pub struct Pool {
 }
 
 impl Pool {
-    /// A slot to draw `dims` in: a free one of that size, else a new one in
-    /// an empty place, else a free one of another size replaced; `None`
-    /// while the compositor holds every one (the release wakes the loop,
-    /// which draws then).
+    /// A slot to draw `dims` in: a free one of that size and shape, else a
+    /// new one in an empty place, else a free one of another size or shape
+    /// replaced; `None` while the compositor holds every one (the release
+    /// wakes the loop, which draws then).
     pub fn take(
         &mut self,
         globals: &Globals,
         qh: &QueueHandle<State>,
         id: PopupId,
         dims: (u32, u32),
+        rounded: bool,
     ) -> Result<Option<&mut Slot>, ShmError> {
+        let same = |s: &Slot| !s.held && s.dims == dims && s.rounded == rounded;
         let index = self
             .slots
             .iter()
-            .position(|s| s.as_ref().is_some_and(|s| !s.held && s.dims == dims))
+            .position(|s| s.as_ref().is_some_and(same))
             .or_else(|| self.slots.iter().position(Option::is_none))
             .or_else(|| {
                 self.slots
@@ -102,13 +116,16 @@ impl Pool {
         let Some(entry) = self.slots.get_mut(index) else {
             return Ok(None);
         };
-        if entry.as_ref().is_some_and(|s| s.dims != dims) {
+        if entry
+            .as_ref()
+            .is_some_and(|s| s.dims != dims || s.rounded != rounded)
+        {
             if let Some(stale) = entry.take() {
                 stale.destroy();
             }
         }
         if entry.is_none() {
-            *entry = Some(Slot::new(globals, qh, id, dims)?);
+            *entry = Some(Slot::new(globals, qh, id, dims, rounded)?);
         }
         Ok(entry.as_mut())
     }

@@ -50,6 +50,11 @@ pub struct Style {
     pub separator: u32,
     /// The bar's corner radius, in logical pixels; 0 is square.
     pub radius: u32,
+    /// The popup's corner radius, in logical pixels; 0 is square. Unset it
+    /// follows the bar's radius (the config defaults it there). Read only
+    /// by the popup's paint, which the build without the `popup` feature
+    /// has none of.
+    pub popup_radius: u32,
     /// The background's alpha, 255 (opaque) down to 0.
     pub opacity: u8,
 }
