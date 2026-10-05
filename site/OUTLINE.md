@@ -12,25 +12,85 @@ leaves `docs/` for the unpublished contributor tree.
 
 ## User-facing page tree (`/`)
 
-Top-level order is the order a new user reads in: install → first session →
-daily use → customize → automate → fix → look up.
+Top-level order is the order a new user reads in: start → one app at a
+time → fix → look up. Each app is its own sidebar section with its own
+subsections, everywhere in the same shape — overview → configure →
+reference → troubleshooting — so a reader learns it once. Page slugs
+nest under their app (`/scoot/keybindings/`) once the move PR lands;
+in phase 1 slugs stay flat (`/keybindings/`, twin `/keybindings.md`)
+and the sidebar grouping carries the structure, so the 4 sample pages
+keep working unchanged.
 
-| Page (slug) | One-line purpose | Fed by (current sections) |
+### Start (cross-cutting: everyone reads this first)
+
+| Page (slug now → slug at move) | One-line purpose | Fed by (current sections) |
 |---|---|---|
 | `/` (home) | What scoot is, one screenshot, install hint, links into the tree | `README.md` Why/Get started (shortened); hero art `docs/assets/vinyl-sunset-preview.png` |
 | `/install` | Get a working scoot on your machine, Nix first | `docs/nix.md` Consuming the flake, Prebuilt binaries/Cachix, FlakeHub, Platform notes; `README.md` Get started |
-| `/first-session` | Boot to a desktop in 10 minutes: greeter login, first terminal, first keybindings | `docs/nix.md` What a greeter login starts, The greeter (opt-in); `docs/configuration.md` Starting a session, Default keybindings (first half); `docs/tty.md` intro (which backend am I on) |
-| `/configure` | The config file: where it lives, reload, full section tour | `docs/configuration.md` The config file, Failure semantics, Reloading, `[layout]`, `[appearance]`, `[output]`/`[[outputs]]`, `[renderer]`, `[tty]`, `[xwayland]`, `[binds]`, `[autostart]`, `[floating]`, `[[window_rule]]`, Example config |
-| `/keybindings` | Every default binding plus how to rebind | `docs/configuration.md` `[binds]`, Moving across outputs, Default keybindings; `nix/modules` live defaults referenced by `docs/nix.md` Reference: live defaults |
-| `/theming` | Looks: pick one of the three examples, what each file does, what it costs | `docs/examples/{vinyl-sunset,music-desk,radial-burst}/README.md` + `scoot.toml`/`regreet.css` comments; `docs/nix.md` Stylix; `docs/configuration.md#appearance` cost notes |
-| `/bar` | scootbar: enable it, pick modules, one annotated config | `docs/nix.md` The status bar; `docs/scootbar/cli.md` The config file, Layout, per-module sections (condensed to the daily-use subset); `docs/scootbar/icons.md` |
-| `/wallpaper` | scootbg: solid color vs image, per-output, restore | `docs/nix.md` The wallpaper; `docs/scootbg/cli.md` Colors and images, Scale, One output or every output, Restore, What it costs |
+| `/first-session` | Run scoot nested, then full-screen on a console: first terminal, first keybindings (greeter login joins this page in phase 2) | `docs/nix.md` What a greeter login starts, The greeter (opt-in); `docs/configuration.md` Starting a session, Default keybindings (first half); `docs/tty.md` intro (which backend am I on) |
 | `/desktop` | The one-enable full desktop profile (`programs.scoot.desktop`, `look`) | `docs/backlog/packaging/desktop-paved-path.md` (the design, rewritten user-first) + each `desktop-*` child entry as its slot lands; `docs/nix.md` Home-manager/NixOS modules |
-| `/agents` | Drive scoot from an agent: IPC socket, requests/actions, screenshots | `docs/ipc.md` (most of it: socket, Requests, Actions, Replies, Events, Rules an agent needs, Resource bounds); later generated CLI pages from `--help --json` (`agent-friendly-help.md` — slot reserved, see below) |
-| `/troubleshooting` | "Black screen / no output / key not working" fixes in symptom order | `docs/tty.md` When nothing works, Hotplug, VT switching; `docs/configuration.md` Failure semantics; `docs/nix.md` Settings failure modes; `docs/scootbar/cli.md` `--check` |
-| `/reference/` (section) | Complete, uncondensed reference tables the task pages summarize | Full `docs/configuration.md`, `docs/scootbar/cli.md`, `docs/scootbg/cli.md`, `docs/protocols.md` What is implemented (table), `docs/tty.md` Which renderer draws |
-| `/reference/cli` (reserved slot) | **Not built in phase 1.** Generated from `--help --json` per `agent-friendly-help.md` | Future: `crates/{scoot,scootctl,scootbar,scootbg}/src/cli.rs` |
-| `/reference/protocols` | Which Wayland protocols work and what each means for your apps | `docs/protocols.md` per-protocol sections (user half; measurement prose moves to `dev/`) |
+
+### scoot (the compositor)
+
+| Page (slug at move) | One-line purpose | Fed by (current sections) |
+|---|---|---|
+| `/scoot/` (overview) | What the compositor does and how scrolling columns work | `README.md` Why (shortened); `docs/configuration.md` Starting a session |
+| `/scoot/configure/*` (one subpage per config section) | The config file: where it lives, reload, then one page each for `layout`, `appearance`, `output`/`outputs`, `binds`, `floating`, `window_rule`, `autostart`, `xwayland`, `renderer`, `tty` | `docs/configuration.md` The config file, Failure semantics, Reloading, per-section headings, Example config |
+| `/scoot/keybindings` | Every default binding plus how to rebind — **sample, working now** | `docs/configuration.md` `[binds]`, Moving across outputs, Default keybindings; `nix/modules` live defaults referenced by `docs/nix.md` Reference: live defaults |
+| `/scoot/multi-monitor` | Outputs, focus/output movement, hotplug | `docs/configuration.md` Moving across outputs, `[output]`/`[[outputs]]`; `docs/tty.md` Hotplug |
+| `/scoot/theming` | Looks: pick one of the three examples, what each file does, what it costs | `docs/examples/{vinyl-sunset,music-desk,radial-burst}/README.md` + `scoot.toml`/`regreet.css` comments; `docs/nix.md` Stylix; `docs/configuration.md#appearance` cost notes |
+| `/scoot/protocols` (reference) | Which Wayland protocols work and what each means for your apps | `docs/protocols.md` per-protocol sections (user half; measurement prose moves to `dev/`) |
+| `/scoot/troubleshooting` | Compositor symptoms ("black screen", "key not working", "no output") | `docs/tty.md` When nothing works, VT switching; `docs/configuration.md` Failure semantics |
+
+### scootctl / IPC (agents and scripts)
+
+| Page (slug at move) | One-line purpose | Fed by (current sections) |
+|---|---|---|
+| `/scootctl/` (overview) | Drive scoot from an agent or script: socket, rules, resource bounds | `docs/ipc.md` socket, Rules an agent needs, Resource bounds |
+| `/scootctl/requests` | The request grammar and replies | `docs/ipc.md` Requests, Replies |
+| `/scootctl/actions` | Every action, with arguments | `docs/ipc.md` Actions |
+| `/scootctl/events` | Subscribing to compositor events | `docs/ipc.md` Events |
+| `/scootctl/screenshots` | Capturing outputs reproducibly (the same path the docs' own screenshots use) | `docs/ipc.md` screenshots (plus the site screenshot script) |
+| `/scootctl/cli` (reference) | **Not built in phase 1.** Generated from `--help --json` per `agent-friendly-help.md` | Future: `crates/scootctl/src/cli.rs` (other CLIs gain their own generated pages the same way) |
+| `/scootctl/troubleshooting` | Agent symptoms ("socket not there", "action refused", "screenshot blank") | `docs/ipc.md` failure modes |
+
+### scootbar (phase 2)
+
+| Page (slug at move) | One-line purpose | Fed by (current sections) |
+|---|---|---|
+| `/scootbar/` (overview) | What the bar does, enable it, one annotated config | `docs/nix.md` The status bar; `docs/scootbar/cli.md` The config file, Layout |
+| `/scootbar/configure` | Layout, popups, fonts, colors, layers, outputs, hiding, margins | `docs/scootbar/cli.md` Layout, Popups, Tooltips, Fonts, Colors, Layers and the zone, Outputs, Hiding the bar, Margins, Spacing, Shape and opacity; `docs/scootbar/icons.md` |
+| `/scootbar/modules/*` (one subpage per module) | clock, workspaces, window title, volume, microphone, brightness, battery, network, bluetooth, media, tray, power, button/push/exec | `docs/scootbar/cli.md` Modules + per-module sections (condensed to the daily-use subset each) |
+| `/scootbar/theming` | Theme the bar from a look | Look pipeline + `docs/scootbar/cli.md` Colors, Fonts |
+| `/scootbar/cli` (reference) | Complete flags, `scootbar msg`, agent interface, `--check` | `docs/scootbar/cli.md` Commands, `daemon` flags, `scootbar msg`, The agent interface, `--check` |
+| `/scootbar/troubleshooting` | Bar symptoms ("bar missing on second monitor") with diagnosing commands | `docs/scootbar/cli.md` `--check`; `docs/nix.md` Settings failure modes |
+
+### scootbg (phase 2)
+
+| Page (slug at move) | One-line purpose | Fed by (current sections) |
+|---|---|---|
+| `/scootbg/` (overview) | Solid color vs image, daemon and socket, what it costs | `docs/nix.md` The wallpaper; `docs/scootbg/cli.md` Commands, The daemon and its socket, What it costs |
+| `/scootbg/images` | Images and colors, scaling | `docs/scootbg/cli.md` Colors and images, Scale |
+| `/scootbg/outputs` | One output or every output | `docs/scootbg/cli.md` One output or every output |
+| `/scootbg/from-url` | From a link and the cache — in flight on branch `feat/wallpaper-from-url` (another worktree; describe the shipped behavior, not the branch) | That work's docs when it merges |
+| `/scootbg/restore` | Restore on login, apply-config, query | `docs/scootbg/cli.md` Restore, `apply-config`, `query`, When a command returns |
+| `/scootbg/cli` (reference) | Complete flags and exit statuses | `docs/scootbg/cli.md` Commands, When a command returns |
+| `/scootbg/troubleshooting` | Wallpaper symptoms ("image not filling", "restore lost it") | `docs/scootbg/cli.md` failure modes |
+
+### Troubleshooting (cross-cutting: symptom order, links both ways)
+
+`/troubleshooting` stays one page: "black screen / no output / key not
+working" fixes in symptom order, each linking into its app's
+troubleshooting page and back. Fed by `docs/tty.md` When nothing works,
+Hotplug, VT switching; `docs/configuration.md` Failure semantics;
+`docs/nix.md` Settings failure modes; `docs/scootbar/cli.md` `--check`.
+
+### Coming apps (sections only once they ship; named here so the structure never changes shape)
+
+- `scootnotify` (notification daemon; pointer ticket `docs/scootbar/backlog/scootnotify.md`) → `/scootnotify/` section: overview, configure, CLI reference.
+- `scootlaunch` (launcher; `docs/scootbar/backlog/launcher.md`, `docs/backlog/packaging/desktop-launcher.md`) → `/scootlaunch/` section: overview, configure, CLI reference.
+- `scootlock` (future; `docs/backlog/packaging/desktop-idle-lock.md:47` names the swap) → `/scootlock/` section when the design lands.
+- Remote desktop (`scootremote` / `scootview`; research `docs/backlog/protocols/native-remote-scene-streaming.md`, `docs/backlog/testing/moonlight-sunshine-on-m2.md`, `docs/backlog/protocols/virtual-input-remote-control.md`) → a remote section only once the research becomes an app; until then it lives in `dev/`.
 
 Deliberately **not** pages: `docs/benchmarks.md` (dated measurements →
 `dev/benches`), `docs/forks.md` (→ `dev/`, linked from the site footer
@@ -86,9 +146,10 @@ edit `.claude/*`, so those two are flagged for the maintainer):
 
 ## Phase-1 scaffold (what `site/` holds today)
 
-- `astro.config.mjs` — Starlight + `starlight-llms-txt` (pinned; see `site/README.md` "Why starlight-llms-txt"), sidebar matching the user tree above.
-- `src/content/docs/` — 4 adapted (not moved) pages proving the shape: `index.md` (home), `install.md`, `first-session.md`, `keybindings.md`. Originals untouched in `docs/`.
+- `astro.config.mjs` — Starlight + `starlight-llms-txt` (pinned; see `site/README.md` "Why starlight-llms-txt"), sidebar in the per-app shape above (`Start` + `scoot` live now; `scootctl / IPC`, `scootbar`, `scootbg`, `Troubleshooting` land commented as their pages do). Slugs stay flat in phase 1 — the sidebar carries the structure — and nest under their app in the move PR.
+- `src/content/docs/` — 4 adapted (not moved) pages proving the shape: `index.md` (home), `install.md`, `first-session.md` (both `Start`), `keybindings.md` (under `scoot` in the sidebar). Originals untouched in `docs/`.
 - `src/styles/custom.css` — scoot theme from the vinyl-sunset palette (espresso `#271A1F`, cream `#F1E3C6`, sunset orange `#E59560`); system font stack (see below).
 - `src/pages/[...page].md.ts` — per-page Markdown twins at stable `/<slug>.md` URLs (the plugin covers the aggregates; this covers the per-page requirement).
-- `scripts/check-llms.mjs` — build gate: fails if `llms.txt` misses a page, a `.md` twin, or a linked bundle 404s.
+- Per-app `customSets` in the plugin config (`Start`, `scoot` today): one llms set per sidebar section that has pages, served at `/_llms-txt/<set>.txt` and linked from `llms.txt`. Paths match Starlight's extensionless page ids, so sets widen to `<app>/**` when slugs nest in the move PR.
+- `scripts/check-llms.mjs` — build gate: fails if `llms.txt` misses a page, a `.md` twin, or a linked bundle 404s (bundles and `_llms-txt/` sets alike).
 - Fonts: **no font file is bundled.** The bar's look needs Droid Sans Mono Nerd Font Propo / FiraCode Nerd Font (glyphs + OFL licensing per face — vendoring binaries into the site is bloat and a license-attribution surface), so the site uses the system stack. Noted here so "the bar font if licensing allows" is answered: it allows (OFL), it just isn't worth it.

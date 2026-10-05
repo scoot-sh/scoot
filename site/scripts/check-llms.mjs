@@ -13,10 +13,12 @@
 //      `llms-full.txt` AND `llms-small.txt`, by its frontmatter title.
 //   3. Every page's `.md` twin exists in `dist/` and is non-empty.
 //   4. Every root-relative (`/…`) and page-relative (`./…`) `.md` /
-//      `.txt` link inside every bundle resolves to a file in `dist/`
-//      (no dangling bundle links). The index `llms.txt` carries absolute
-//      bundle URLs while the full/small bundles preserve the prose's
-//      source-relative `./x.md` links — so all three are scanned.
+//      `.txt` link inside every bundle and per-app set resolves to a
+//      file in `dist/` (no dangling bundle links), and every per-app
+//      set matches at least one page (no silent empty sets). The index
+//      `llms.txt` carries absolute bundle URLs while the full/small
+//      bundles (and the `_llms-txt/` sets) preserve the prose's
+//      source-relative `./x.md` links — so all of them are scanned.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -79,13 +81,10 @@ for (const page of pages) {
 // `llms-small.txt` preserve the sources' root-relative (`/x.md`) and
 // page-relative (`./x.md`) links — so every bundle's `.md` / `.txt`
 // links must resolve to a file in `dist/`. Every page is top-level, so
-// `./x.md` must be the twin `dist/x.md`.
-for (const [name, body] of [
-  ['llms.txt', llms],
-  ['llms-full.txt', full],
-  ['llms-small.txt', small],
-]) {
-  if (!body) continue;
+// `./x.md` must be the twin `dist/x.md`. The per-app sets
+// (`customSets`, served under `_llms-txt/`) carry the same prose, so
+// they get the same rules.
+const checkLinks = (name, body) => {
   for (const match of body.matchAll(/\]\((\/[^)]+)\)/g)) {
     const target = match[1].split('#')[0];
     if (target.endsWith('.md') || target.endsWith('.txt')) {
@@ -101,6 +100,27 @@ for (const [name, body] of [
       if (!existsSync(join(dist, resolved))) {
         fail(`${name} links ${match[1]}, which has no file in dist/`);
       }
+    }
+  }
+};
+
+for (const [name, body] of [
+  ['llms.txt', llms],
+  ['llms-full.txt', full],
+  ['llms-small.txt', small],
+]) {
+  if (body) checkLinks(name, body);
+}
+
+if (existsSync(join(dist, '_llms-txt'))) {
+  for (const file of readdirSync(join(dist, '_llms-txt'))) {
+    if (!file.endsWith('.txt')) continue;
+    const setBody = readFileSync(join(dist, '_llms-txt', file), 'utf8');
+    checkLinks(`_llms-txt/${file}`, setBody);
+    // A set that matches no pages is a silent lie (wrong `paths`):
+    // every set file must carry at least one page heading.
+    if (!setBody.match(/^# .+/m)) {
+      fail(`_llms-txt/${file} matches no pages (check customSets paths)`);
     }
   }
 }

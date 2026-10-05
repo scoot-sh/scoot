@@ -21,6 +21,10 @@ export default defineConfig({
         'A scrolling-tiling Wayland compositor that runs without a GPU: install it, learn it, configure it, drive it from an agent.',
       social: [{ label: 'GitHub', href: 'https://github.com/scoot-sh/scoot', icon: 'github' }],
       customCss: ['./src/styles/custom.css'],
+      // One group per app (see site/OUTLINE.md): cross-cutting Start
+      // first, then each app overview → configure → reference. Groups
+      // gain their phase-2 pages as those land; slugs stay flat until
+      // the move PR nests them under their app.
       sidebar: [
         {
           label: 'Start',
@@ -28,12 +32,21 @@ export default defineConfig({
             { label: 'What is scoot', slug: 'index' },
             { label: 'Install', slug: 'install' },
             { label: 'First session', slug: 'first-session' },
-            { label: 'Keybindings', slug: 'keybindings' },
           ],
         },
-        // Phase 2 groups land here as their pages do (see site/OUTLINE.md):
-        // { label: 'Configure', items: [...], collapsed: true },
-        // { label: 'Reference', items: [...], collapsed: true },
+        {
+          label: 'scoot',
+          items: [
+            { label: 'Keybindings', slug: 'keybindings' },
+            // Phase-2 scoot pages land here: overview, configure/*,
+            // multi-monitor, theming, protocols.
+          ],
+        },
+        // Phase-2 sections land here as their pages do:
+        // { label: 'scootctl / IPC', items: [...] },
+        // { label: 'scootbar', items: [...] },
+        // { label: 'scootbg', items: [...] },
+        // { label: 'Troubleshooting', items: [...] },
       ],
       plugins: [
         starlightLlmsTxt({
@@ -43,6 +56,26 @@ export default defineConfig({
           details:
             'Task-first guides (install, first session, keybindings) plus the full reference. Commands in fenced blocks, nothing meaningful only in an image.',
           promote: ['index*', 'install*', 'first-session*', 'keybindings*'],
+          // Per-app documentation sets (see site/OUTLINE.md): one set per
+          // sidebar section that has pages, served at
+          // `/<base>/_llms-txt/<slug>.txt` and linked from llms.txt's
+          // "Documentation Sets". Paths match Starlight's extensionless
+          // page ids, so they widen to `<app>/**` when page slugs nest
+          // under their app in the move PR.
+          customSets: [
+            {
+              label: 'Start',
+              paths: ['index', 'install', 'first-session'],
+              description:
+                'What scoot is, installing it, and your first session.',
+            },
+            {
+              label: 'scoot',
+              paths: ['keybindings'],
+              description:
+                'The scoot compositor: every default keybinding and how to rebind it.',
+            },
+          ],
         }),
       ],
     }),

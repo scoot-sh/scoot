@@ -13,7 +13,7 @@ machine-readable surface — evaluated 2026-10-05 against:
 
 | Candidate | Verdict |
 |---|---|
-| `starlight-llms-txt` | **Chosen.** Generates exactly the ticket's three files — `/llms.txt` (index), `/llms-full.txt` (everything), `/llms-small.txt` (small variant) — prerendered at build time, with promote/demote/exclude/customSets for later. Small, Starlight-aware (sidebar order), maintained. |
+| `starlight-llms-txt` | **Chosen.** Generates exactly the ticket's three files — `/llms.txt` (index), `/llms-full.txt` (everything), `/llms-small.txt` (small variant) — prerendered at build time, with promote/demote/exclude plus per-app `customSets` (one set per sidebar section with pages, served at `/_llms-txt/<set>.txt`). Small, Starlight-aware (sidebar order), maintained. |
 | `@wave-rf/starlight-llm-tools` | Rejected. Does per-page `.md` + indexes, but tiny adoption, and drags in UI chrome (copy-markdown buttons, AI dropdowns) nobody asked for. |
 | `starlight-llm-actions` | Rejected. Same reason: page-action dropdowns and renderers we don't need. |
 | `astro-slop`, `astro-markdown-for-agents` | Rejected. Generic Astro integrations, not Starlight-aware; more hand-rolling for less. |
@@ -28,8 +28,10 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
 1. Write `src/content/docs/<slug>.md` — plain Markdown only, no MDX
    components (the `.md` twin serves the raw body; MDX imports would leak
    into it).
-2. Add it to `sidebar` in `astro.config.mjs` and to `promote` if it should
-   sort near the top of the bundles.
+2. Add it to its app's `sidebar` group in `astro.config.mjs` (new app, new
+   group per `OUTLINE.md`), to `promote` if it should sort near the top
+   of the bundles, and to that app's `customSets` entry (new app, new
+   set).
 3. Page contract (the docs-bar standard, phase-1 slice): task-first lead,
    option tables with type/default/live-reload/example, copy-paste-correct
    snippets (`toml` must parse, `sh` must pass `bash -n` — enforced by
