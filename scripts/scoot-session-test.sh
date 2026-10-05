@@ -1,10 +1,10 @@
 #!/bin/sh
 # scoot-session-test.sh: a stub harness for `resources/scoot-session`.
 #
-# Runs the launcher against fake `systemctl --user`, `flock`,
-# `dbus-update-activation-environment`, `timeout`, `date`, `sleep` and
-# `scoot` binaries on PATH, with unit state in files, and asserts the
-# session ordering the Asahi bug was about:
+# Runs the launcher against fake `systemctl --user`, `busctl --user`,
+# `flock`, `dbus-update-activation-environment`, `timeout`, `date`,
+# `sleep` and `scoot` binaries on PATH, with unit state in files, and
+# asserts the session ordering the Asahi bug was about:
 #
 #   - `scoot-session.target` is started only AFTER the scoped display
 #     import, and starting it is what reaches `graphical-session.target`
@@ -19,7 +19,23 @@
 #   - a lock held by another launcher, or another desktop's graphical
 #     target with IPC silent, refuses without touching any unit;
 #   - without the dbus tool the display still reaches the user manager
-#     through `import-environment`.
+#     through `import-environment`;
+#   - the session wait blocks in `busctl wait` on the unit's
+#     `PropertiesChanged` instead of polling: an idle session asks the
+#     manager nothing, a 50-re-exec storm (every `show` failing, the bus
+#     staying up, as a real `daemon-reexec` behaves) neither exits the
+#     launcher nor costs it a poll, and logout ends the wait at once;
+#   - without `busctl` the wait falls back to the 1 s poll, loudly, and
+#     the session still works;
+#   - without `timeout(1)` the wait runs bare (no 5-minute stall bound)
+#     and the session still works;
+#   - the healed login over an already-active graphical target does not
+#     re-run its bound units (systemd fires Wants only on the
+#     inactive-to-active transition), so they keep the old session's
+#     display until logout -- the carried limitation, pinned here rather
+#     than fixed: restarting "the session's own" graphical-bound units
+#     cannot tell them from another desktop's in the shared-target case
+#     (T5's shape), and stopping them all would tear down that session.
 #
 # Usage: scripts/scoot-session-test.sh [--launcher PATH] [--keep DIR]
 # Defaults to the tree's `resources/scoot-session`. Exit nonzero on the
@@ -52,6 +68,7 @@ BASE_PATH="$PATH"
 mkdir -p "$FAKES"
 REAL_SLEEP="$(command -v sleep)"
 REAL_DATE="$(command -v date)"
+export REAL_SLEEP
 
 # --- fake binaries -------------------------------------------------
 # Every fake records `index: name argv...` to $HARNESS_STATE/calls.log
@@ -77,6 +94,16 @@ log() {
 }
 [ "${1:-}" = "--user" ] && shift
 log "$@"
+# A manager mid-re-exec answers nothing: while $HARNESS_STATE/manager-down
+# exists every manager call fails, the way `systemctl --user` exits 1 when
+# the manager's socket is gone. The bus (fake busctl below) stays up
+# through it, as the real user bus does through a daemon-reexec.
+if [ -f "$S/manager-down" ]; then
+    case "${1:-}" in
+        list-units|show|show-environment|set-environment|unset-environment|import-environment|start|stop|reset-failed)
+            exit 1 ;;
+    esac
+fi
 state_of() { f="$S/active/$1"; [ -f "$f" ] && cat "$f" || printf 'inactive'; }
 set_state() { printf '%s' "$2" >"$S/active/$1"; }
 env_upsert() {
@@ -142,14 +169,22 @@ ALLENV
             scoot-session.target)
                 if [ "$op" = start ]; then
                     set_state "$unit" active
-                    set_state graphical-session.target active
-                    # The swayidle shape: WantedBy the graphical target,
-                    # gated on the display being in the manager already.
-                    if env_has WAYLAND_DISPLAY; then
-                        printf 'active' >"$S/swayidle"
-                        printf '%s' "$(cat "$S/env-manager")" >"$S/env-at-graphical"
-                    else
-                        printf 'skipped' >"$S/swayidle"
+                    # systemd activation semantics: Wants fire only on the
+                    # inactive-to-active transition. An already-active
+                    # graphical target does not re-run its bound units --
+                    # which is the carried limitation T10 pins: a heal over
+                    # a live foreign graphical target leaves its units on
+                    # the old session's display.
+                    if [ "$(state_of graphical-session.target)" != "active" ]; then
+                        set_state graphical-session.target active
+                        # The swayidle shape: WantedBy the graphical target,
+                        # gated on the display being in the manager already.
+                        if env_has WAYLAND_DISPLAY; then
+                            printf 'active' >"$S/swayidle"
+                            printf '%s' "$(cat "$S/env-manager")" >"$S/env-at-graphical"
+                        else
+                            printf 'skipped' >"$S/swayidle"
+                        fi
                     fi
                 else
                     set_state "$unit" inactive
@@ -204,6 +239,72 @@ for var in "$@"; do
     mv "$S/env-manager.tmp" "$S/env-manager"
 done
 exit 0
+EOF
+
+# Fake busctl --user: only the two calls scoot-session makes. `call ...
+# GetUnit` prints the escaped object path; `wait ... PropertiesChanged`
+# blocks until the watched unit's ActiveState file changes, then exits 0
+# (like the real wait waking on the signal), or exits 1 after ~15 s so a
+# broken launcher fails the suite instead of hanging it. The wait ignores
+# $HARNESS_STATE/manager-down: the real user bus survives a manager
+# re-exec (measured on systemd 261), so a re-exec must not wake it.
+cat >"$FAKES/busctl" <<'EOF'
+#!/bin/sh
+set -u
+S="$HARNESS_STATE"
+n=0
+if [ -f "$S/calls-seq" ]; then n=$(cat "$S/calls-seq"); fi
+n=$((n + 1)); printf '%s' "$n" >"$S/calls-seq"
+printf '%s: busctl' "$n" >>"$S/calls.log"
+for a in "$@"; do printf ' %s' "$a" >>"$S/calls.log"; done
+printf '\n' >>"$S/calls.log"
+args=""
+for a in "$@"; do
+    case "$a" in
+        --user|-q|--quiet) continue ;;
+        --timeout=*|--destination=*) continue ;;
+        *) args="$args $a" ;;
+    esac
+done
+# shellcheck disable=SC2086
+set -- $args
+op="${1:-}"
+if [ "$op" = "call" ]; then
+    [ -f "$S/manager-down" ] && exit 1
+    # ... Manager GetUnit s <unit>: last word is the unit name.
+    unit=""
+    for a in "$@"; do
+        case "$a" in -*) continue ;; esac
+        unit="$a"
+    done
+    esc=$(printf '%s' "$unit" | sed 's/-/_2d/g; s/\./_2e/g')
+    printf 'o "/org/freedesktop/systemd1/unit/%s"\n' "$esc"
+    exit 0
+fi
+if [ "$op" = "wait" ]; then
+    # wait <service> <object-path> <interface> <signal>
+    path="${3:-}"
+    name="${path##*/unit/}"
+    unit=$(printf '%s' "$name" | sed 's/_2d/-/g; s/_2e/./g')
+    before=""
+    [ -f "$S/active/$unit" ] && before=$(cat "$S/active/$unit")
+    # Baseline captured: stamping wait-ready AFTER it orders the
+    # driver's flip strictly past the capture (the driver waits for
+    # this file), so no flip can slip between capture and blocking.
+    # The calls.log line alone cannot order that: it is written before
+    # the capture, in a sibling process the scheduler may stall.
+    printf 'ready' >"$S/wait-ready"
+    i=0
+    while [ "$i" -lt 300 ]; do
+        after=""
+        [ -f "$S/active/$unit" ] && after=$(cat "$S/active/$unit")
+        [ "$after" != "$before" ] && exit 0
+        "${REAL_SLEEP:-sleep}" 0.05
+        i=$((i + 1))
+    done
+    exit 1
+fi
+exit 1
 EOF
 
 # The compositor: `scoot msg version` answers once $ANSWER_AFTER calls
@@ -283,7 +384,8 @@ new_test() {
     : >"$HARNESS_STATE/env-manager"
     rm -f "$HARNESS_STATE/calls-seq" "$HARNESS_STATE/version-calls" \
         "$HARNESS_STATE/fake-now" "$HARNESS_STATE/socket-made" \
-        "$HARNESS_STATE/env-at-graphical"
+        "$HARNESS_STATE/env-at-graphical" "$HARNESS_STATE/manager-down" \
+        "$HARNESS_STATE/wait-ready"
     export ANSWER_AFTER=3 DBUS_FAIL=0
     mksock wayland-99
     export SCOOT_BIN="$SCOOT_FAKE"
@@ -293,6 +395,7 @@ state_of() { f="$HARNESS_STATE/active/$1"; [ -f "$f" ] && cat "$f" || printf 'in
 set_state() { printf '%s' "$2" >"$HARNESS_STATE/active/$1"; }
 env_has() { grep -q "^$1=" "$HARNESS_STATE/env-manager" 2>/dev/null; }
 call_index() { grep -n -F "$1" "$HARNESS_STATE/calls.log" | head -1 | cut -d: -f1; }
+show_count() { grep -c -F "show -p ActiveState" "$HARNESS_STATE/calls.log" 2>/dev/null || printf '0'; }
 
 # Run the launcher in the background; the caller drives the session
 # (flips service state to end it) and waits. The exit status lands in
@@ -337,6 +440,23 @@ end_session() {
     set_state scoot.service inactive
     wait_exit
 }
+wait_blocked() {
+    # wait_blocked <tag>: the launcher has subscribed its blocking unit
+    # wait AND captured its baseline (the fake stamps $HARNESS_STATE/
+    # wait-ready after the capture, in the same process). Flipping the
+    # service only past this point orders every flip strictly after the
+    # capture, so the wait cannot miss it. Waiting on the calls.log line
+    # alone is not enough: it is written before the capture, in a
+    # sibling process the scheduler may stall. The poll fallback (T11)
+    # needs no gate: a poll cannot miss a flip, it only delays it.
+    i=0
+    while [ "$i" -lt 100 ]; do
+        [ -f "$HARNESS_STATE/wait-ready" ] && return 0
+        "$REAL_SLEEP" 0.1
+        i=$((i + 1))
+    done
+    bad "$1: launcher never entered the blocking unit wait"
+}
 kill_launcher() {
     kill "$1" 2>/dev/null
     i=0
@@ -362,6 +482,7 @@ if grep -q -F "start graphical-session.target" "$HARNESS_STATE/calls.log"; then
     bad "T1: launcher starts graphical-session.target directly (RefuseManualStart)"
 fi
 ok "T1: graphical target reached by dependency only, never started directly"
+wait_blocked "T1"
 RC="$(end_session)"
 [ "$RC" = "0" ] || bad "T1: launcher exit $RC, expected 0"
 [ "$(state_of scoot.service)" = "inactive" ] && [ "$(state_of scoot-session.target)" = "inactive" ] \
@@ -400,6 +521,7 @@ i_restart="$(call_index 'start scoot.service')"
 ok "T3: stale units cleared (session target stopped) and the login proceeds"
 [ "$(cat "$HARNESS_STATE/swayidle")" = "active" ] || bad "T3: healed login has no display-gated units"
 ok "T3: healed login reaches the graphical target with the display"
+wait_blocked "T3"
 RC="$(end_session)"
 [ "$RC" = "0" ] || bad "T3: healed launcher exit $RC"
 ok "T3: healed session quits cleanly"
@@ -449,9 +571,138 @@ grep -q -F "import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP" "$HARNESS_ST
     || bad "T6: no manager-half import without the dbus tool"
 env_has WAYLAND_DISPLAY || bad "T6: display missing from the manager without the dbus tool"
 ok "T6: without the dbus tool the display still reaches the manager"
+wait_blocked "T6"
 RC="$(end_session)"
 [ "$RC" = "0" ] || bad "T6: launcher exit $RC"
 ok "T6: dbus-less session quits cleanly"
+
+# --- T7: the session wait blocks instead of polling ------------------
+new_test 7
+start_launcher
+wait_blocked "T7"
+grep -q -F "scoot_2eservice" "$HARNESS_STATE/calls.log" \
+    || bad "T7: blocking wait watches the wrong object (no scoot_2eservice path)"
+ok "T7: session wait blocks in busctl wait on scoot.service's PropertiesChanged"
+# (No structural assert on subscribe-before-check is possible here: the
+# waiter runs in the background, so its log line races the foreground
+# re-ask by design. The ordering lives in the launcher -- spawn first,
+# ask after, `timeout 300` bounding the residual sliver -- and T9
+# proves the wait still ends at once.)
+c1="$(show_count)"
+"$REAL_SLEEP" 0.6
+c2="$(show_count)"
+[ "$c1" = "$c2" ] || bad "T7: idle session polled the manager $((c2 - c1)) times in 0.6 s (shows $c1 -> $c2)"
+ok "T7: idle session asks the manager nothing while blocked (shows steady at $c1)"
+RC="$(end_session)"
+[ "$RC" = "0" ] || bad "T7: launcher exit $RC"
+ok "T7: blocked session quits cleanly"
+
+# --- T8: a re-exec storm neither exits nor costs a poll --------------
+new_test 8
+start_launcher
+wait_blocked "T8"
+c1="$(show_count)"
+i=0
+while [ "$i" -lt 50 ]; do
+    : >"$HARNESS_STATE/manager-down"
+    "$REAL_SLEEP" 0.02
+    rm -f "$HARNESS_STATE/manager-down"
+    "$REAL_SLEEP" 0.02
+    i=$((i + 1))
+done
+[ -f "$T/exit-code" ] && bad "T8: launcher exited during the 50-re-exec storm (the #425 shape)"
+ok "T8: launcher survives 50 re-execs without reading one as the session ending"
+c2="$(show_count)"
+[ "$c1" = "$c2" ] || bad "T8: storm cost $((c2 - c1)) manager polls (shows $c1 -> $c2)"
+ok "T8: the storm costs zero polls (shows steady at $c1)"
+RC="$(end_session)"
+[ "$RC" = "0" ] || bad "T8: launcher exit $RC after the storm"
+ok "T8: post-storm session quits cleanly"
+
+# --- T9: logout ends the blocked wait at once ------------------------
+new_test 9
+start_launcher
+wait_blocked "T9"
+t0="$("$REAL_DATE" +%s)"
+set_state scoot.service inactive
+RC="$(wait_exit)" || bad "T9: launcher never exited after logout"
+t1="$("$REAL_DATE" +%s)"
+[ "$RC" = "0" ] || bad "T9: launcher exit $RC, expected 0"
+dt=$((t1 - t0))
+[ "$dt" -le 5 ] || bad "T9: logout took ${dt}s to end the session"
+ok "T9: logout ends the session in ${dt}s (exit $RC)"
+
+# --- T10: the carried limitation: a live foreign graphical target ----
+# keeps its units' old display past a heal
+new_test 10
+printf 'WAYLAND_DISPLAY=wayland-99\n' >"$HARNESS_STATE/env-manager"
+printf 'WAYLAND_DISPLAY=wayland-99\n' >"$HARNESS_STATE/env-at-graphical"
+printf 'active' >"$HARNESS_STATE/swayidle"
+set_state graphical-session.target active
+set_state scoot.service active
+set_state scoot-session.target active
+start_launcher
+wait_log "start scoot-session.target" || bad "T10: healed login never reached the session target"
+[ "$(state_of graphical-session.target)" = "active" ] \
+    || bad "T10: heal stopped another session's graphical target"
+ok "T10: heal leaves the shared graphical target alone"
+grep -q '^WAYLAND_DISPLAY=wayland-100$' "$HARNESS_STATE/env-manager" \
+    || bad "T10: healed login did not import its own display"
+[ "$(cat "$HARNESS_STATE/swayidle")" = "active" ] \
+    || bad "T10: healed login re-ran the graphical-bound probe (got $(cat "$HARNESS_STATE/swayidle"))"
+grep -q '^WAYLAND_DISPLAY=wayland-99$' "$HARNESS_STATE/env-at-graphical" \
+    || bad "T10: graphical-bound units unexpectedly re-ran with the new display"
+ok "T10: graphical-bound units keep the old display until logout (carried limitation, pinned)"
+wait_blocked "T10"
+RC="$(end_session)"
+[ "$RC" = "0" ] || bad "T10: launcher exit $RC"
+ok "T10: session over a foreign target quits cleanly"
+
+# --- T11: no busctl: the 1 s poll fallback, loudly -------------------
+new_test 11
+mkdir -p "$T/nobusctl"
+for f in "$FAKES"/*; do
+    [ "${f##*/}" = "busctl" ] || ln -s "$f" "$T/nobusctl/${f##*/}"
+done
+for t in cat cp cut date dirname env grep head mkdir mv python3 rm sed sleep stat; do
+    [ -e "$T/nobusctl/$t" ] || {
+        p="$(PATH="$BASE_PATH" command -v "$t")" && ln -s "$p" "$T/nobusctl/$t"
+    }
+done
+export PATH="$T/nobusctl"
+start_launcher
+wait_log "start scoot-session.target" || bad "T11: launcher without busctl never reached the session target"
+ok "T11: without busctl the session still reaches its target"
+RC="$(end_session)"
+[ "$RC" = "0" ] || bad "T11: launcher exit $RC"
+ok "T11: bus-less session quits cleanly"
+# After exit the logs are complete: the fallback note must be there, and
+# no bus call anywhere in the run.
+grep -q -F "1 s poll" "$T/stderr.log" \
+    || bad "T11: poll fallback ran silently (no '1 s poll' note on stderr)"
+ok "T11: without busctl the session still works, saying it polls"
+if grep -q -F "busctl" "$HARNESS_STATE/calls.log"; then bad "T11: launcher called busctl with none on PATH"; fi
+ok "T11: fallback calls no bus at all"
+
+# --- T12: no timeout(1): the bare blocking wait still works -----------
+new_test 12
+mkdir -p "$T/notimeout"
+for f in "$FAKES"/*; do
+    [ "${f##*/}" = "timeout" ] || ln -s "$f" "$T/notimeout/${f##*/}"
+done
+for t in cat cp cut date dirname env grep head mkdir mv python3 rm sed sleep stat; do
+    [ -e "$T/notimeout/$t" ] || {
+        p="$(PATH="$BASE_PATH" command -v "$t")" && ln -s "$p" "$T/notimeout/$t"
+    }
+done
+export PATH="$T/notimeout"
+start_launcher
+wait_log "start scoot-session.target" || bad "T12: launcher without timeout never reached the session target"
+wait_blocked "T12"
+ok "T12: without timeout the session still blocks in the wait"
+RC="$(end_session)"
+[ "$RC" = "0" ] || bad "T12: launcher exit $RC"
+ok "T12: timeout-less session quits cleanly"
 
 echo "---"
 echo "$PASS/$TOTAL asserts passed"

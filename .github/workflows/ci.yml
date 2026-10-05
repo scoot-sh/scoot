@@ -90,7 +90,8 @@ jobs:
   # leaves them out of its `cargo check`, and the Darwin outputs of the
   # flake have none of them, so no change to them alone sets `macos`.
   #   anything else that is not docs (Cargo.toml, Cargo.lock, flake.*,
-  #   nix/, .github/, .config/, resources/, devenv.*, other scripts/ and
+  #   nix/, .github/, .config/, resources/ outside the session paths
+  #   above, devenv.*, other scripts/ and
   #   vm/ files, LICENSE)                  -> all
   #   either side                          -> the scootbg-on-scoot
   #                                           integration job
@@ -104,6 +105,13 @@ jobs:
   #   crates/scootbar/, scripts/scootbar-bench/, scripts/scootbar-appearance-hw-test.sh
   #                                        -> scootbar=true (scootbar job, which
   #                                           also builds the Nix module check)
+  #   resources/scoot-session, resources/systemd/*,
+  #   scripts/scoot-session-test.sh        -> session=true (session-harness
+  #                                           job: the launcher harness, no
+  #                                           nix needed). nix/tests.nix stays
+  #                                           on the catch-all (it tests far
+  #                                           more than the session), which
+  #                                           runs this job too.
   #   site/*, EXCEPT site content that is also matched above (nothing is:
   #   `*.md | docs/*` does not match `site/`, whose pages live in the tree
   #   since the move)                         -> docs-site=true (docs-site job:
@@ -153,6 +161,7 @@ jobs:
       scootbar: ${{ steps.classify.outputs.scootbar }}
       backlog: ${{ steps.classify.outputs.backlog }}
       docs-site: ${{ steps.classify.outputs.docs-site }}
+      session: ${{ steps.classify.outputs.session }}
     steps:
       # Depth 2: a pull_request run checks out the merge commit, whose first
       # parent is the base branch tip, so `HEAD^1..HEAD` is exactly the PR.
@@ -170,6 +179,7 @@ jobs:
           scootbar=true
           backlog=true
           docs_site=true
+          session=true
           if [ "$EVENT" = pull_request ] && changed=$(git diff --name-only --no-renames HEAD^1 HEAD) && [ -n "$changed" ]; then
             printf 'Changed:\n%s\n' "$changed"
             scoot=false
@@ -178,6 +188,7 @@ jobs:
             scootbar=false
             backlog=false
             docs_site=false
+            session=false
             while IFS= read -r path; do
               case "$path" in
                 # Before `*.md`: the site's own pages are Markdown, and a
@@ -193,6 +204,11 @@ jobs:
                 # The backlog tool and its tests: only their own job.
                 scripts/backlog | scripts/test_backlog.py)
                   backlog=true ;;
+                # The session launcher and its harness: only their own job.
+                # The harness fakes `systemctl`/`busctl`, so it needs just
+                # sh and python3 -- no seat, no user manager, no nix.
+                resources/scoot-session | resources/systemd/* | scripts/scoot-session-test.sh)
+                  session=true ;;
                 crates/scoot/* | crates/scoot-core/* | crates/scootctl/* | scripts/smoke-test.sh | vm/compositor-deps.nix)
                   scoot=true
                   macos=true ;;
@@ -235,11 +251,12 @@ jobs:
                   scootbg=true
                   scootbar=true
                   backlog=true
-                  docs_site=true ;;
+                  docs_site=true
+                  session=true ;;
               esac
             done <<<"$changed"
           fi
-          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar backlog=$backlog docs_site=$docs_site"
+          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar backlog=$backlog docs_site=$docs_site session=$session"
           {
             echo "scoot=$scoot"
             echo "macos=$macos"
@@ -247,6 +264,7 @@ jobs:
             echo "scootbar=$scootbar"
             echo "backlog=$backlog"
             echo "docs_site=$docs_site"
+            echo "session=$session"
           } >>"$GITHUB_OUTPUT"
 
   # scripts/backlog is the swarm's claim tool and pushes to main, so its tests
@@ -263,6 +281,28 @@ jobs:
       - uses: actions/checkout@v7
       - name: scripts/backlog tests
         run: python3 scripts/test_backlog.py
+
+  # The session launcher harness (scripts/scoot-session-test.sh): the proof
+  # that the greeter-started session orders the display import before
+  # `scoot-session.target`, heals stale sessions, refuses live ones, blocks
+  # in `busctl wait` instead of polling, and survives a manager re-exec.
+  # Its `systemctl`/`busctl` are faked, so it needs just sh and python3 --
+  # no seat, no user manager, no nix -- and runs on ubuntu-latest as well
+  # as macOS. Runs when the launcher, its units or the harness change, on
+  # the catch-all, and on every push to main; fail open like the other
+  # jobs (only an explicit `false` skips). What it cannot see stays a
+  # manual run: a real `systemd --user` (activation edge cases the fake
+  # may not match) and the Asahi idle-CPU measurement.
+  session-harness:
+    name: Session launcher harness
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.session != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: scripts/scoot-session-test.sh
+        run: sh scripts/scoot-session-test.sh
 
   # The docs site (site/, nix/docs-site.nix): its own build, without any
   # Rust job gaining Node in its inputs (and without this job gaining

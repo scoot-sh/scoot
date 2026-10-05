@@ -153,6 +153,16 @@ service_state() {
     [ -n "$_scoot_state" ] || return 1
     printf '%s' "$_scoot_state"
 }
+# service_object_path <unit>: print the unit's D-Bus object path (for the
+# blocking wait below); exit 1 when the manager could not be asked or the
+# unit is not loaded. The path is the escaped unit name and never moves,
+# so it is resolved once per session, not per wake.
+service_object_path() {
+    _scoot_call=$(busctl --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager GetUnit s "$1" 2>/dev/null) || return 1
+    _scoot_path=$(printf '%s' "$_scoot_call" | sed -n 's/^o "\(.*\)"$/\1/p')
+    [ -n "$_scoot_path" ] || return 1
+    printf '%s' "$_scoot_path"
+}
 # unit_up <state>: exit 0 when an ActiveState string means the unit is
 # here or on its way up. `activating` counts: measured on 261,
 # `is-active` reports 3 all through `ExecStartPre` while the start job
@@ -227,6 +237,11 @@ fi
 # live (the pre-healing behaviour), never cleared blind.
 have_lock=0
 have_flock=0
+# The background bus waiter of the session wait below (empty: none live).
+# Initialised here -- before the traps -- so `cleanup`'s `reap_waiter`
+# never reads an unset variable under `set -u`, whatever point of the
+# login a signal lands at.
+_scoot_waiter=""
 if command -v flock >/dev/null 2>&1; then
     have_flock=1
     exec 9>"$XDG_RUNTIME_DIR/scoot-session.lock" \
@@ -352,6 +367,11 @@ captured=1
 # service active and refuse every later login. An early `start
 # "$SHUTDOWN"` with no service yet is a harmless no-op (`|| true`).
 cleanup() {
+    # A signal mid-wait must not orphan the background bus waiter (its
+    # connection would linger until the next property change): reap it
+    # first. Past the session wait `_scoot_waiter` is already empty (and
+    # `reap_waiter` is a no-op there), so calling it here is always safe.
+    reap_waiter 2>/dev/null || true
     # The manager may be mid-re-exec at this very moment (a re-exec
     # landing on the session wait kills the wait AND this call
     # together): retry until it answers, bounded, so one unanswered
@@ -512,19 +532,74 @@ systemctl --user start "$SESSION" \
 
 # The session is up. Wait for it to end: scoot exiting (a `quit` action,
 # a crash) inactivates the service, which ends this wait -- but only a
-# definite down state ends it. A poll the manager never answers
-# (mid-re-exec) is not "scoot exited". Unanswered polls are counted, and
-# a re-exec is sub-second, so tens of seconds of silence means the
-# manager went away with the session (logout, shutdown): then exit
-# instead of holding the liveness lock (which would refuse the next
-# login) forever. Cleanup below still runs first -- if the manager
-# answers again its retry stops the compositor; if it never does, the
-# units died with their manager and logind reaps the rest.
+# definite down state ends it. The wait blocks in the bus on the unit's
+# `PropertiesChanged` instead of polling: an idle session costs zero
+# wakeups (no fork/exec, no manager round trip per second), and logout
+# ends the wait the moment the state changes rather than on the next
+# poll tick. Every wake re-asks the manager through `service_up`, so a
+# spurious property change is one answered question, never an exit.
+# A wake the manager never answers (mid-re-exec) is not "scoot exited":
+# the bus connection itself survives a re-exec (measured on 261: a
+# `daemon-reexec` neither wakes nor kills the wait), so a re-exec window
+# usually passes with no wake at all. Unanswered re-asks are still
+# counted, and tens of seconds of silence means the manager went away
+# with the session (logout, shutdown): then exit instead of holding the
+# liveness lock (which would refuse the next login) forever. If the
+# blocking wait is unavailable (no `busctl`, a systemd older than the
+# `wait` verb, a repeatedly failing bus) the loop falls back to the 1 s
+# poll it replaces, loudly. Cleanup below still runs first -- if the
+# manager answers again its retry stops the compositor; if it never
+# does, the units died with their manager and logind reaps the rest.
 # (`cleanup` and the traps are defined up top, right after the
 # environment capture, so the readiness wait above is covered too.)
+#
+# Subscribe-before-check, never the reverse: the waiter is spawned first
+# and the state is asked after, so a stop landing between the two still
+# wakes the waiter (its signal is already queued) and the re-ask ends
+# the wait. Check-then-wait would miss exactly that signal and block
+# until the next property change -- which may never come. The residual
+# sliver -- the stop's signal emitted after the spawn but before the
+# waiter's match is installed, while the re-ask still reads
+# pre-transition state -- is bounded by `timeout 300` around the waiter
+# (the same optional `timeout(1)` the readiness probe uses; without it
+# the wait is unbounded): at most a five-minute stall, at most twelve
+# idle re-asks an hour, and logout still ends the wait at once.
 MANAGER_SILENCE_LIMIT=30
 silence=0
+wait_fails=0
+unit_path=""
+_scoot_waiter=""
+have_timeout=0
+if command -v timeout >/dev/null 2>&1; then
+    have_timeout=1
+fi
+# reap_waiter: stop and reap the background unit waiter, if one is live.
+# Every break path below calls it; `cleanup` calls it too, so a signal
+# mid-wait leaves no orphaned bus connection. The pid is cleared once
+# reaped, so a later kill can never touch a reused pid.
+reap_waiter() {
+    if [ -n "${_scoot_waiter:-}" ]; then
+        kill "$_scoot_waiter" 2>/dev/null || true
+        wait "$_scoot_waiter" 2>/dev/null || true
+        _scoot_waiter=""
+    fi
+}
+if command -v busctl >/dev/null 2>&1; then
+    unit_path=$(service_object_path "$SERVICE") || unit_path=""
+fi
+if [ -z "$unit_path" ]; then
+    note "no blocking unit wait (no bus or $SERVICE not loaded); watching $SERVICE with a 1 s poll"
+fi
 while :; do
+    if [ -n "$unit_path" ]; then
+        # `--quiet` keeps the signal payload off the greeter log.
+        if [ "$have_timeout" -eq 1 ]; then
+            timeout 300 busctl --user --quiet wait org.freedesktop.systemd1 "$unit_path" org.freedesktop.DBus.Properties PropertiesChanged 2>/dev/null &
+        else
+            busctl --user --quiet wait org.freedesktop.systemd1 "$unit_path" org.freedesktop.DBus.Properties PropertiesChanged 2>/dev/null &
+        fi
+        _scoot_waiter=$!
+    fi
     service_up "$SERVICE"
     svc_rc=$?
     if [ "$svc_rc" -eq 0 ]; then
@@ -534,12 +609,39 @@ while :; do
         note "user manager not answering while watching $SERVICE (${silence}s of ${MANAGER_SILENCE_LIMIT}s; re-exec?); still watching"
         if [ "$silence" -ge "$MANAGER_SILENCE_LIMIT" ]; then
             note "$SERVICE state unknown for ${MANAGER_SILENCE_LIMIT}s; assuming the session is gone"
+            reap_waiter
             break
         fi
     else
+        reap_waiter
         break
     fi
-    sleep 1
+    if [ -n "$unit_path" ]; then
+        # Block until any property of the service changes, then re-ask
+        # above. Exit 124 is the `timeout 300` bound firing, not a bus
+        # failure: re-ask and wait again. Any other nonzero exit is a
+        # bus failure, not a state answer: back off one second per
+        # failure, and past the bound stop hammering the bus and poll
+        # instead (the next `service_up` still ends the wait on a
+        # definite down state, so this degrades volume, never
+        # correctness -- and a dead manager still exits through the
+        # silence bound, a few seconds later than the poll would have).
+        wait "$_scoot_waiter"
+        waiter_rc=$?
+        _scoot_waiter=""
+        if [ "$waiter_rc" -eq 0 ] || [ "$waiter_rc" -eq 124 ]; then
+            wait_fails=0
+        else
+            wait_fails=$((wait_fails + 1))
+            if [ "$wait_fails" -ge 5 ]; then
+                note "blocking unit wait failed ${wait_fails} times; watching $SERVICE with a 1 s poll"
+                unit_path=""
+            fi
+            sleep 1
+        fi
+    else
+        sleep 1
+    fi
 done
 
 trap - HUP INT TERM
