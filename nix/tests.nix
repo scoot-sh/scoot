@@ -3971,21 +3971,53 @@ let
       ];
     in
     # The key sits in `[Unit]` on every retrying unit...
-    (map (name: (assert hmUnits.${name}.Unit.StartLimitIntervalSec == 0; true)) retryUnits)
+    (map (
+      name:
+      (
+        assert hmUnits.${name}.Unit.StartLimitIntervalSec == 0;
+        true
+      )
+    ) retryUnits)
     # ...and in `[Service]` on none of them, nor `StartLimitBurst`
     # in either section...
-    ++ (map (name: (assert !(hmUnits.${name}.Service ? StartLimitIntervalSec); true)) retryUnits)
-    ++ (map (name: (assert !(hmUnits.${name}.Service ? StartLimitBurst); true)) retryUnits)
-    ++ (map (name: (assert !(hmUnits.${name}.Unit ? StartLimitBurst); true)) retryUnits)
+    ++ (map (
+      name:
+      (
+        assert !(hmUnits.${name}.Service ? StartLimitIntervalSec);
+        true
+      )
+    ) retryUnits)
+    ++ (map (
+      name:
+      (
+        assert !(hmUnits.${name}.Service ? StartLimitBurst);
+        true
+      )
+    ) retryUnits)
+    ++ (map (
+      name:
+      (
+        assert !(hmUnits.${name}.Unit ? StartLimitBurst);
+        true
+      )
+    ) retryUnits)
     # ...and no other profile unit smuggles either key into its
     # service section either (the sweep: every unit the profile can
     # install, not just the retrying seven)...
-    ++ (map (name: (assert !((hmUnits.${name}.Service or { }) ? StartLimitIntervalSec); true)) (
-      builtins.attrNames hmUnits
-    ))
-    ++ (map (name: (assert !((hmUnits.${name}.Service or { }) ? StartLimitBurst); true)) (
-      builtins.attrNames hmUnits
-    ))
+    ++ (map (
+      name:
+      (
+        assert !((hmUnits.${name}.Service or { }) ? StartLimitIntervalSec);
+        true
+      )
+    ) (builtins.attrNames hmUnits))
+    ++ (map (
+      name:
+      (
+        assert !((hmUnits.${name}.Service or { }) ? StartLimitBurst);
+        true
+      )
+    ) (builtins.attrNames hmUnits))
     # ...and the NixOS bar unit keeps the same placement through
     # `unitConfig` (the NixOS side installs no other profile unit).
     ++ [
