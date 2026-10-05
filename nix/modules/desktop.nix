@@ -171,6 +171,11 @@ let
       slot = "capture";
       blurb = "screenshot a picked region to `~/Pictures` (`grim` plus `slurp`)";
     };
+    captureClipboard = {
+      combo = "ctrl+print";
+      slot = "capture";
+      blurb = "screenshot a picked region into the clipboard (`grim` plus `slurp` plus `wl-copy`)";
+    };
   };
   # Whether a notification state icon is shaped like the bar takes
   # it: empty (no icon for that state) or exactly one glyph. Nix
@@ -568,10 +573,78 @@ in
         '';
       };
     };
-    # Screenshots bound to keys.
-    capture = slot {
-      child = "desktop-capture";
-      tool = "`grim` plus `slurp` (`grim` 1.5.0 or later, which speaks ext-image-copy-capture)";
+    # Screenshots bound to keys, and screen sharing through portals.
+    # Filled by the `desktop-capture` child: the portal backends
+    # (`xdg-desktop-portal-wlr` for ScreenCast/Screenshot, `-gtk` for
+    # the rest) behind `xdg.portal`, PipeWire running for the cast,
+    # `grim` plus `slurp` for the keymap's three screenshot binds, and
+    # the output chooser xdpw asks before each cast (a dmenu list
+    # through fuzzel by default, themed by the look).
+    #
+    # On with the profile (still individually disable-able); without
+    # it, `enable` works standalone (unthemed: a look needs the
+    # profile, and the system backends need the NixOS side, the way
+    # the themed config file does).
+    capture = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Share the screen in calls and take screenshots: the portal
+          backends (their packages beside this), PipeWire for the
+          cast, and the keymap's three screenshot binds. Without it
+          nothing answers ScreenCast/Screenshot and the capture binds
+          stay unbound.
+        '';
+      };
+
+      # Which output picker xdpw asks before each cast (its
+      # `chooser_type`): `fuzzel` lists every output as a dmenu menu
+      # through the profile's fuzzel (the same `--dmenu` contract the
+      # clipboard picker and the launcher speak, themed by the look),
+      # `slurp` picks by clicking a screen (xdpw's own `simple`
+      # shape), `none` casts `outputName` (or any output) with no
+      # picker at all. See site/src/content/docs/desktop/index.md#screenshots-and-screen-sharing.
+      chooser = lib.mkOption {
+        type = lib.types.enum [
+          "fuzzel"
+          "slurp"
+          "none"
+        ];
+        default = "fuzzel";
+        example = "slurp";
+        description = ''
+          The output chooser before each screencast. `fuzzel` (a dmenu
+          list of outputs), `slurp` (click a screen), or `none` (no
+          picker: cast `outputName`, or any output when that is null).
+        '';
+      };
+
+      # The output `chooser = "none"` casts without asking (xdpw's
+      # `output_name`, a connector name as `wayland-info` lists it,
+      # e.g. `"eDP-1"`). Null casts any output. Read only with
+      # `chooser = "none"`.
+      outputName = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "eDP-1";
+        description = ''
+          The output cast with no picker (`chooser = "none"`). Null
+          casts any output. Read only with `chooser = "none"`.
+        '';
+      };
+
+      # Frames per second at most on a cast (xdpw's `max_fps`): 30 is
+      # plenty for a call and bounds the compositor's copy cost; 0
+      # means no limit. At least 0.
+      maxFps = lib.mkOption {
+        type = lib.types.int;
+        default = 30;
+        example = 60;
+        description = ''
+          Most frames per second on a screencast. 0 means no limit.
+        '';
+      };
     };
     # The privilege prompt.
     auth = slot {
@@ -711,6 +784,17 @@ in
             text, selection and border from its palette -- the same
             roles the history picker is themed from). Set to `false`
             to keep fuzzel's own style.
+          '';
+        };
+        targets.capture.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Theme the screencast chooser from the look (the dmenu
+            list's background and text, selection and border, and the
+            slurp picker's dim, border and selection -- the same
+            roles the launcher and the history picker are themed
+            from). Set to `false` to keep their own style.
           '';
         };
       };

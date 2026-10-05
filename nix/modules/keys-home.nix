@@ -152,18 +152,47 @@ let
 
   # Screenshot scripts: dated files into `~/Pictures` (`$HOME`
   # expands here, inside the script -- a `[binds]` action gets no
-  # shell and no tilde). Bare `grim`/`slurp` for the same reason as
-  # the picker above: they arrive with the `desktop-capture` child,
-  # which replaces these scripts keeping the binds.
+  # shell and no tilde). Absolute tool paths from the
+  # `desktop-capture` child (bare names off Linux, or without the
+  # overlay): a missing tool then fails quietly at runtime --
+  # `State::spawn` warns and reports `false`, never wedging input --
+  # so the binds are always safe to render. The region picker's dim,
+  # border and selection follow the look (the same roles the chooser
+  # carries), slurp's own style standing without one.
+  capture = cfg.desktop.capture;
+  grimBin = if capture.grimPackage != null then lib.getExe' capture.grimPackage "grim" else "grim";
+  slurpBin =
+    if capture.slurpPackage != null then lib.getExe' capture.slurpPackage "slurp" else "slurp";
+  clipCopyBin =
+    if capture.wlClipboardPackage != null then
+      lib.getExe' capture.wlClipboardPackage "wl-copy"
+    else
+      "wl-copy";
+  captureThemed =
+    let
+      look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
+    in
+    look != null && (cfg.desktop.theme.targets.capture.enable or true);
+  slurpRegionFlags =
+    let
+      look = desktop.looks.${cfg.desktop.look};
+      # Quoted: a bare `#rrggbb` would start a shell comment inside
+      # the `"$(...)"` below and eat the closing paren.
+      hashA = color: "'#${lib.removePrefix "#" color}ff'";
+    in
+    lib.optionalString captureThemed " -c ${hashA look.appearance.focus_ring_active_color} -s ${hashA look.barColors.accent}";
   captureOutput = pkgs.writeShellScriptBin "scoot-capture-output" ''
     d="$HOME/Pictures"
     mkdir -p "$d"
-    grim "$d/scoot-$(date +%Y%m%d-%H%M%S).png"
+    ${grimBin} "$d/scoot-$(date +%Y%m%d-%H%M%S).png"
   '';
   captureRegion = pkgs.writeShellScriptBin "scoot-capture-region" ''
     d="$HOME/Pictures"
     mkdir -p "$d"
-    grim -g "$(slurp)" "$d/scoot-$(date +%Y%m%d-%H%M%S).png"
+    ${grimBin} -g "$(${slurpBin}${slurpRegionFlags})" "$d/scoot-$(date +%Y%m%d-%H%M%S).png"
+  '';
+  captureClipboard = pkgs.writeShellScriptBin "scoot-capture-clipboard" ''
+    ${grimBin} -g "$(${slurpBin}${slurpRegionFlags})" - | ${clipCopyBin}
   '';
 
   # Whether a slot-gated bind's slot is on.
@@ -212,6 +241,7 @@ let
         notifHistory = "spawn ${makoctl} restore";
         captureOutput = "spawn ${captureOutput}/bin/scoot-capture-output";
         captureRegion = "spawn ${captureRegion}/bin/scoot-capture-region";
+        captureClipboard = "spawn ${captureClipboard}/bin/scoot-capture-clipboard";
       };
       wanted = lib.filterAttrs (
         name: _:
@@ -225,9 +255,10 @@ let
 
   # The tools the keymap's own binds run (brightness, volume,
   # media): installed beside the binds, each overridable through its
-  # `package` beside this. Slot tools (fuzzel, mako, grim, cliphist)
-  # arrive with their children; the binds above call them by bare
-  # name until then.
+  # `package` beside this. Slot tools (fuzzel, mako, grim, slurp,
+  # cliphist) arrive with their children; the scripts above name the
+  # capture child's packages by absolute store path (bare names only
+  # off Linux or without the overlay).
   ownTools =
     lib.optional (keys.brightnessPackage != null) keys.brightnessPackage
     ++ lib.optional (keys.volumePackage != null) keys.volumePackage
@@ -241,7 +272,8 @@ let
     lib.optional (slotOn "launcher") launcherScript
     ++ lib.optional (slotOn "clipboard") clipboardPick
     ++ lib.optional (slotOn "capture") captureOutput
-    ++ lib.optional (slotOn "capture") captureRegion;
+    ++ lib.optional (slotOn "capture") captureRegion
+    ++ lib.optional (slotOn "capture") captureClipboard;
 in
 {
   options.programs.scoot.desktop.keys = {

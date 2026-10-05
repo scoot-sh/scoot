@@ -154,6 +154,7 @@ in
     ./notifications-home.nix
     ./clipboard-home.nix
     ./launcher-home.nix
+    ./capture-home.nix
     ./keys-home.nix
   ];
 

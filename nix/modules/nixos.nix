@@ -346,6 +346,74 @@ in
           '';
         };
       };
+
+      # The capture slot's packages: the value shapes are in
+      # `desktop.nix` (shared with the home-manager side) and the
+      # chooser config that names them is that side's
+      # (`capture-home.nix`); this side installs the portal backends
+      # and the screenshot tools system-wide, so the D-Bus-activated
+      # backends find them. The same screenshot packages as there, so
+      # either side alone names the same tools. Merged here for the
+      # same one-declaration reason as above. Linux-only: off Linux
+      # each defaults to null, which the assertions below refuse
+      # loudly.
+      capture = desktop.options.capture // {
+        portalWlrPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.xdg-desktop-portal-wlr or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.xdg-desktop-portal-wlr or null else null";
+          description = ''
+            The ScreenCast/Screenshot portal backend (0.8.4 or later:
+            older releases need the wlr screencopy protocol scoot
+            omits on purpose, and 0.8.3 stalls recordings). Null
+            installs nothing. Linux-only: null off Linux.
+          '';
+        };
+
+        portalGtkPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.xdg-desktop-portal-gtk or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.xdg-desktop-portal-gtk or null else null";
+          description = ''
+            The fallback portal backend (file chooser and the rest).
+            Null installs nothing. Linux-only: null off Linux.
+          '';
+        };
+
+        grimPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.grim or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.grim or null else null";
+          description = ''
+            The screenshot tool to install system-wide (1.5.0 or
+            later, which speaks ext-image-copy-capture): the portal's
+            Screenshot backend shells out to it. Null installs
+            nothing. Linux-only: null off Linux.
+          '';
+        };
+
+        slurpPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.slurp or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.slurp or null else null";
+          description = ''
+            The region picker to install system-wide. Null installs
+            nothing. Linux-only: null off Linux.
+          '';
+        };
+
+        menuPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null";
+          description = ''
+            The dmenu-style menu to install system-wide for the
+            output chooser (`fuzzel`, unthemed on this side: the
+            themed flags are the home-manager side's). Null installs
+            nothing. Linux-only: null off Linux.
+          '';
+        };
+      };
     };
 
     # `pkgs.scoot` when the flake's overlay (`overlays.default`) is
@@ -663,6 +731,12 @@ in
       # disable-able at plain priority): the packages below install,
       # and the watcher units come from the home-manager side.
       programs.scoot.desktop.clipboard.enable = lib.mkDefault true;
+
+      # The capture slot on with the profile (still individually
+      # disable-able at plain priority): the backends and the tools
+      # below install, PipeWire runs, and the chooser config comes
+      # from the home-manager side.
+      programs.scoot.desktop.capture.enable = lib.mkDefault true;
     })
     # The notification daemon's system half: its package on PATH. The
     # unit and the config are the home-manager side's
@@ -746,6 +820,165 @@ in
           cfg.desktop.clipboard.wlClipboardPackage != null
         ) cfg.desktop.clipboard.wlClipboardPackage
         ++ lib.optional (cfg.desktop.clipboard.menuPackage != null) cfg.desktop.clipboard.menuPackage;
+    })
+    # The capture slot's system half: the portal backends on their
+    # bus names, PipeWire running for the cast, and the screenshot
+    # tools on PATH. The chooser config and the screenshot binds are
+    # the home-manager side's (`capture-home.nix` and the keymap):
+    # without it the backends sit ready for a hand-written setup, the
+    # way a `[wallpaper]` finds scootbg on PATH without the
+    # home-manager side. The portals start on demand over D-Bus and
+    # hold nothing until a cast asks.
+    (lib.mkIf cfg.desktop.capture.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.capture.portalWlrPackage != null;
+          message = ''
+            programs.scoot.desktop.capture.enable is set but
+            programs.scoot.desktop.capture.portalWlrPackage is null:
+            set it explicitly (apply the overlay, or point at an
+            xdg-desktop-portal-wlr 0.8.4 or later).
+          '';
+        }
+        {
+          # Loud at eval, not a cast that binds nothing: older
+          # releases need the wlr screencopy protocol scoot omits on
+          # purpose (and 0.8.3 stalls recordings), so ScreenCast
+          # would fail every time.
+          assertion =
+            cfg.desktop.capture.portalWlrPackage == null
+            || lib.versionAtLeast (cfg.desktop.capture.portalWlrPackage.version or "0") "0.8.4";
+          message = ''
+            programs.scoot.desktop.capture.portalWlrPackage is too old
+            (need 0.8.4 or later): ScreenCast needs
+            ext-image-copy-capture (0.8.0 or later), and 0.8.3 stalls
+            recordings -- take 0.8.4 or later.
+          '';
+        }
+        {
+          assertion = cfg.desktop.capture.portalGtkPackage != null;
+          message = ''
+            programs.scoot.desktop.capture.enable is set but
+            programs.scoot.desktop.capture.portalGtkPackage is null:
+            set it explicitly (apply the overlay, or point at an
+            xdg-desktop-portal-gtk).
+          '';
+        }
+        {
+          assertion = cfg.desktop.capture.grimPackage != null;
+          message = ''
+            programs.scoot.desktop.capture.enable is set but
+            programs.scoot.desktop.capture.grimPackage is null: set it
+            explicitly (apply the overlay, or point at a grim 1.5.0 or
+            later).
+          '';
+        }
+        {
+          assertion =
+            cfg.desktop.capture.grimPackage == null
+            || lib.versionAtLeast (cfg.desktop.capture.grimPackage.version or "0") "1.5.0";
+          message = ''
+            programs.scoot.desktop.capture.grimPackage is too old
+            (need 1.5.0 or later): only grim 1.5.0 or later speaks
+            ext-image-copy-capture, which is what scoot serves.
+          '';
+        }
+        {
+          assertion = cfg.desktop.capture.slurpPackage != null;
+          message = ''
+            programs.scoot.desktop.capture.enable is set but
+            programs.scoot.desktop.capture.slurpPackage is null: set
+            it explicitly (apply the overlay, or point at a slurp).
+          '';
+        }
+        {
+          assertion = cfg.desktop.capture.chooser != "fuzzel" || cfg.desktop.capture.menuPackage != null;
+          message = ''
+            programs.scoot.desktop.capture.chooser is "fuzzel" but
+            programs.scoot.desktop.capture.menuPackage is null: set it
+            explicitly (apply the overlay, or point at a fuzzel).
+          '';
+        }
+      ];
+
+      # The portal service with both backends. The `scoot` backend
+      # selection mirrors `resources/scoot-portals.conf` (ScreenCast
+      # and Screenshot to `wlr`, everything else to `gtk`): this
+      # system file covers sessions without home-manager, and the
+      # home-manager side's per-user file wins where both exist (it
+      # is the higher-precedence lookup slot).
+      xdg.portal.enable = lib.mkDefault true;
+      # The `!= null` guards keep a null out of the list, so a
+      # missing backend fails with the slot's own assertion message
+      # above rather than a type error (the same guard the
+      # `systemPackages` lists below use).
+      xdg.portal.extraPortals =
+        lib.optional (cfg.desktop.capture.portalWlrPackage != null) cfg.desktop.capture.portalWlrPackage
+        ++ lib.optional (cfg.desktop.capture.portalGtkPackage != null) cfg.desktop.capture.portalGtkPackage;
+      xdg.portal.config.scoot = {
+        default = [ "gtk" ];
+        "org.freedesktop.impl.portal.Screenshot" = [ "wlr" ];
+        "org.freedesktop.impl.portal.ScreenCast" = [ "wlr" ];
+      };
+
+      # PipeWire running for the cast (the session manager rides
+      # along: `wireplumber.enable` defaults to this). Plain
+      # `mkDefault`, so an explicit value still wins -- and the future
+      # audio child defaults the same switch, which merges rather
+      # than conflicts.
+      services.pipewire.enable = lib.mkDefault true;
+
+      environment.systemPackages =
+        lib.optional (cfg.desktop.capture.portalWlrPackage != null) cfg.desktop.capture.portalWlrPackage
+        ++ lib.optional (cfg.desktop.capture.portalGtkPackage != null) cfg.desktop.capture.portalGtkPackage
+        ++ lib.optional (cfg.desktop.capture.grimPackage != null) cfg.desktop.capture.grimPackage
+        ++ lib.optional (cfg.desktop.capture.slurpPackage != null) cfg.desktop.capture.slurpPackage
+        ++ lib.optional (cfg.desktop.capture.menuPackage != null) cfg.desktop.capture.menuPackage;
+    })
+    # xdpw's own config, system-wide: the same chooser the
+    # home-manager side writes per desktop (unthemed here -- the look
+    # is per-user, so the themed flags live only in that file, which
+    # wins where both exist). Without home-manager this is what a
+    # cast asks through; with it, the fallback nobody reads.
+    (lib.mkIf cfg.desktop.capture.enable {
+      environment.etc."xdg/xdg-desktop-portal-wlr/config".text =
+        let
+          cap = cfg.desktop.capture;
+          binOr = name: pkg: if pkg != null then "${lib.getExe' pkg name}" else name;
+          menuBin = binOr "fuzzel" cap.menuPackage;
+          slurpBin = binOr "slurp" cap.slurpPackage;
+          # A wrapper script beside the keymap's launcher script, for
+          # the same reason as the home-manager side's: xdpw reads
+          # its config through inih (200-character lines), which
+          # would cut a fully-flagged `chooser_cmd` mid-flag. (This
+          # side carries no theme -- the look is per-user, so the
+          # themed flags live only in the per-desktop file, which
+          # wins where both exist.)
+          chooserScript = pkgs.writeShellScriptBin "scoot-screencast-chooser" ''
+            exec ${menuBin} --dmenu --prompt='Share: '
+          '';
+          chooserCmd =
+            if cap.chooser == "fuzzel" then
+              "${chooserScript}/bin/scoot-screencast-chooser"
+            else if cap.chooser == "slurp" then
+              "${slurpBin} -f 'Monitor: %o' -or"
+            else
+              null;
+        in
+        lib.concatStringsSep "\n" (
+          [
+            "# Generated by programs.scoot.desktop.capture (system fallback: the per-user xdg-desktop-portal-wlr/scoot wins)."
+          ]
+          ++ [ "[screencast]" ]
+          ++
+            lib.optional (cap.chooser != "none")
+              "chooser_type=${if cap.chooser == "fuzzel" then "dmenu" else "simple"}"
+          ++ lib.optional (chooserCmd != null) "chooser_cmd=${chooserCmd}"
+          ++ lib.optional (cap.chooser == "none") "chooser_type=none"
+          ++ lib.optional (cap.chooser == "none" && cap.outputName != null) "output_name=${cap.outputName}"
+          ++ [ "max_fps=${toString cap.maxFps}" ]
+        )
+        + "\n";
     })
     # The idle policy's system half: its tools on PATH, the docked-lid
     # rule, and the locker's PAM service. The timers and the locker
