@@ -77,6 +77,24 @@ Pages deploy workflow. Next: maintainer reviews the outline; then the move
 scoot (parse/syntax only so far), generated CLI pages from `--help --json`,
 and reproducible IPC screenshots per the docs-bar standard.
 
+## Phase 2 PR A: deploy (2026-10-05 — ticket stays open)
+
+Maintainer 2026-10-05: approved the outline with the scoot desktop as the
+primary path and three front doors (the scoot desktop / just the
+compositor / agents-headless-webtop); hosting GitHub Pages now,
+Cloudflare later (`scoot.sh` owned on Cloudflare). Branch
+`ci/docs-site-deploy`: the deploy workflow is on (push to `main` on
+`site/**`, `docs/**`, `nix/docs-site.nix`; `nix build .#docs-site`,
+upload artifact, `actions/deploy-pages` SHA-pinned, `environment:
+github-pages`, least-privilege permissions), base stays `/scoot/` so it
+serves at `scoot-sh.github.io/scoot/`; `site`+`base` derive from one
+`DEPLOY_TARGET` value and `site/README.md` records the `scoot.sh` switch
+steps. Proven with a `workflow_dispatch` dry run on the branch: build
+green, `github-pages` artifact uploaded; the deploy step itself waits for
+`main` (the `github-pages` environment's branch policy). Next: PR B (the
+move) after A merges; resolve this ticket only when the site is live on
+`scoot.sh` (not yet).
+
 ## Not in this ticket
 
 API docs for the internal crates (rustdoc stays local), translations.
