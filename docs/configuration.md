@@ -817,8 +817,15 @@ Three behaviors worth knowing, plus the reload rule:
 
 ### Idle: locking and screen power
 
-scoot provides the protocols; the policy is a daemon's config, the swayidle
-way. `spawn` splits on whitespace with no shell and no quoting, so a
+scoot provides the protocols (`ext-idle-notify-v1`,
+`ext-session-lock-v1`, `wlr-output-power-management-v1` -- see
+[protocols.md](protocols.md)); the policy ships with the desktop profile,
+which runs it with the maintainer's measured timeouts (dim 2 min to 10%,
+lock at 4, screens off at 5, lock before sleep -- see
+[nix.md](nix.md#idle-and-lock)). What follows is the manual recipe for
+sessions outside the flake.
+
+`spawn` splits on whitespace with no shell and no quoting, so a
 swayidle line (whose quoted subcommands carry spaces) lives in a small
 script the session starts:
 

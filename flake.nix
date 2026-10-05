@@ -917,7 +917,8 @@
             # cover what a flake consumer imports, not just the pure modules;
             # and aarch64-darwin's package set, evaluated (never built) to
             # prove a macOS home-manager config with a `[wallpaper]` table
-            # evaluates.
+            # evaluates (the Linux-only idle tools stay null there, refused
+            # loudly if the policy is enabled).
             flake = {
               inherit (self) overlays packages;
               homeModule = self.homeModules.scoot;
