@@ -81,9 +81,14 @@
 #   with its unit; `look` renders the example palette into the compositor
 #   and bar configs (each leaf yielding to a user value, and to Stylix
 #   where present); a look without an in-repo wallpaper (`vinyl-sunset`)
-#   sets no `[wallpaper]` table; the `[xwayland]` knob defaults on; every
-#   future slot defaults off and inert; `enable` without scoot, a look
-#   without the profile, and an unknown look each fail eval;
+#   sets no `[wallpaper]` table; the `[xwayland]` knob defaults on; the
+#   idle policy (`desktop-idle-lock` child) runs with the profile -- dim
+#   2 min to 10%, lock at 4, screens off at 5, lock-before-sleep, audio
+#   hold -- each timeout overridable and each of the three switches
+#   individually disable-able, the locker themed by the look unless
+#   `theme.targets.lock.enable` opts out; every remaining future slot
+#   defaults off and inert; `enable` without scoot, a look without the
+#   profile, and an unknown look each fail eval;
 #   `desktop.greeter` is the greeter (the session entry forced on beside
 #   it); and `bar.enable = false` leaves the bar entirely alone.
 {
@@ -218,6 +223,22 @@ let
     # `nix/modules/scootbar-nixos.nix`): only the combined desktop
     # evaluations below import that module.
     options.systemd.user.services = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+    # The idle policy's docked-lid rule (the canonical
+    # `settings.Login.HandleLidSwitchDocked` path, as far as the stub
+    # goes: the real option is a freeform submodule, this proves the
+    # value lands, and the real-NixOS pin below checks it against
+    # nixpkgs' own module). Unset here, as there (logind's own
+    # default, "ignore", then applies).
+    options.services.logind.settings.Login = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+    };
+    # The locker's PAM service (any key goes: the real option is an
+    # attrs-of-submodule, this proves presence, not its schema).
+    options.security.pam.services = lib.mkOption {
       type = lib.types.attrsOf lib.types.raw;
       default = { };
     };
@@ -609,6 +630,14 @@ let
     enable = true;
     greeter.enable = true;
   };
+  # The desktop profile in a real NixOS evaluation: the idle policy's
+  # system half against nixpkgs' own logind and PAM modules (not the
+  # stubs above) -- in particular the canonical `settings.Login`
+  # path, not the renamed alias.
+  osRealIdle = evalRealNixos {
+    enable = true;
+    desktop.enable = true;
+  };
   hmFlake = evalHomeWith flake.homeModule pkgs {
     enable = true;
     settings.wallpaper.color = "#1e1e2e";
@@ -924,6 +953,121 @@ let
     desktop.enable = true;
     desktop.notifications.enable = true;
   };
+
+  # --- idle policy (`programs.scoot.desktop.idle`) evaluations ---
+  #
+  # The profile with a look: the whole policy on (swayidle unit, audio
+  # inhibitor, locker config), themed by the look.
+  hmIdle = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...without a look: the policy runs unthemed (swaylock's own colors).
+  hmIdleNoLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...the policy off (each of the three switches back off: the
+  # profile turns the set on, and the lock and inhibitor refuse to run
+  # without it).
+  hmIdleOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.enable = false;
+    desktop.idle.lock.enable = false;
+    desktop.idle.mediaInhibit.enable = false;
+  };
+  # ...the lock off: dim and screens-off stay, nothing locks.
+  hmLockOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.lock.enable = false;
+  };
+  # ...the inhibitor off: the policy without audio hold.
+  hmInhibitOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.mediaInhibit.enable = false;
+  };
+  # ...retimed (each timeout and the dim level overridable, per the M2
+  # reference they default from).
+  hmIdleTimeouts = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.dimTimeout = 60;
+    desktop.idle.dimLevel = 20;
+    desktop.idle.lockTimeout = 90;
+    desktop.idle.offTimeout = 120;
+  };
+  # ...with steps disabled (0 omits that timeout's line).
+  hmIdleZero = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.dimTimeout = 0;
+    desktop.idle.offTimeout = 0;
+  };
+  # ...with the lock action overridden (what a future `desktop-keys`
+  # bind runs).
+  hmLockCmd = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.idle.lock.command = "loginctl lock-session";
+  };
+  # ...with locker settings (a color winning per key, plus a bare
+  # flag).
+  hmLockSettings = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.idle.lock.settings = {
+      ring-color = "#123456";
+      show-failed-attempts = "";
+    };
+  };
+  # ...opted out of locker theming (the look leaves the locker alone,
+  # the settings still apply).
+  hmThemeTargetOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.lock.enable = false;
+    desktop.idle.lock.settings = {
+      ring-color = "#123456";
+    };
+  };
+  # ...standalone (no profile): the policy runs, unthemed.
+  hmIdleStandalone = evalHome {
+    enable = true;
+    desktop.idle.enable = true;
+  };
+  # Refusals: the lock without the policy, and the inhibitor without it
+  # (each pinned by message in `_idlePins`).
+  hmLockNoIdle = evalHome {
+    enable = true;
+    desktop.idle.lock.enable = true;
+  };
+  hmInhibitNoIdle = evalHome {
+    enable = true;
+    desktop.idle.mediaInhibit.enable = true;
+  };
+  # ...the policy with no swayidle to run it.
+  hmIdleNoPkg = evalHome {
+    enable = true;
+    desktop.idle.enable = true;
+    desktop.idle.package = null;
+  };
+  # ...a dim level outside 1..100, and a negative timeout.
+  hmIdleBadLevel = evalHome {
+    enable = true;
+    desktop.idle.enable = true;
+    desktop.idle.dimLevel = 0;
+  };
+  hmIdleNeg = evalHome {
+    enable = true;
+    desktop.idle.enable = true;
+    desktop.idle.lockTimeout = -1;
+  };
   # Refusals: the profile without scoot, and a look without the profile
   # (both pinned by message in `_desktopPins`)...
   hmDeskNoEnable = evalHome { desktop.enable = true; };
@@ -950,7 +1094,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.idle.lock.enable = true;
+    desktop.notifications.enable = true;
   };
   # The knob is accepted here (its effect is home-manager wiring; the
   # package choice stays `programs.scoot.package`).
@@ -965,6 +1109,59 @@ let
     enable = true;
     package = fakePkg;
     desktop.look = "radial-burst";
+  };
+  # --- idle policy (`programs.scoot.desktop.idle`) system evaluations ---
+  #
+  # The profile: the tools installed, the docked-lid rule locking, the
+  # locker's PAM service present, still additive (no default session).
+  osIdle = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  # ...the policy off: the rule untouched, no PAM, the profile's own
+  # packages only.
+  osIdleOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.idle.enable = false;
+    desktop.idle.lock.enable = false;
+    desktop.idle.mediaInhibit.enable = false;
+  };
+  # ...the lock off: no PAM and no locker, the lid rule still locking
+  # (dim and screens-off still run from the home-manager side).
+  osLockOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.idle.lock.enable = false;
+  };
+  # ...with an explicit lid rule: the user's value wins over the
+  # profile's docked-lock default (a separate module, the way the
+  # greeter's overrides ride along -- the evaluation above can only
+  # set `programs.scoot`).
+  osIdleLidOverride = evalNixosWith [
+    ./modules/nixos.nix
+    { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+    { services.logind.settings.Login.HandleLidSwitchDocked = "ignore"; }
+  ] pkgs {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  # Refusals: the lock without the policy (pinned by message), and the
+  # policy with no swayidle to install.
+  osLockNoIdle = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.idle.lock.enable = true;
+  };
+  osIdleNoPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.idle.package = null;
   };
   # `desktop.greeter` is an alias for `programs.scoot.greeter`: through it
   # the profile lists a session in a ReGreet login.
@@ -1666,6 +1863,21 @@ let
           ];
         true
       )
+      # The profile's idle half in a real NixOS evaluation too: the
+      # docked-lid rule on the canonical logind path, the locker's PAM
+      # service, the tools installed -- and still no default session.
+      # (No `allAssertionsHold`: a bare `eval-config.nix` always carries
+      # the generic no-filesystem/no-bootloader failures, the way
+      # `osRealGreeter` shows; the stubs above are where every
+      # assertion is held.)
+      (
+        assert osRealIdle.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+        assert osRealIdle.config.security.pam.services ? swaylock;
+        assert osRealIdle.config.services.displayManager.defaultSession == null;
+        assert lib.any (p: (p.pname or "") == "swayidle") osRealIdle.config.environment.systemPackages;
+        assert lib.any (p: (p.pname or "") == "swaylock") osRealIdle.config.environment.systemPackages;
+        true
+      )
       (
         assert allAssertionsHold osFlake.config;
         true
@@ -1855,6 +2067,19 @@ let
   hmDeskBarToml = hmDeskBar.config.programs.scootbar.configFile;
   hmDeskBarMoonToml = hmDeskBarMoon.config.programs.scootbar.configFile;
   osDeskBarToml = osDeskBar.config.programs.scootbar.configFile;
+  # The idle policy's generated files: the swayidle config (timeouts,
+  # sleep lock, lock event) and the swaylock config (themed leaves),
+  # plus the lock-off, zeroed, retimed, rebound, recolored, unthemed
+  # and opt-out variants the content checks read.
+  idleConf = hmIdle.config.xdg.configFile."swayidle/config".source;
+  idleLockConf = hmIdle.config.xdg.configFile."swaylock/config".source;
+  idleNoLockConf = hmLockOff.config.xdg.configFile."swayidle/config".source;
+  idleTimeoutsConf = hmIdleTimeouts.config.xdg.configFile."swayidle/config".source;
+  idleZeroConf = hmIdleZero.config.xdg.configFile."swayidle/config".source;
+  idleCmdConf = hmLockCmd.config.xdg.configFile."swayidle/config".source;
+  idleSettingsConf = hmLockSettings.config.xdg.configFile."swaylock/config".source;
+  idleTargetOffConf = hmThemeTargetOff.config.xdg.configFile."swaylock/config".source;
+  idleNoLookConf = hmIdleNoLook.config.xdg.configFile."swaylock/config".source;
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
   #
@@ -2027,15 +2252,55 @@ let
       assert !(hmDesk.config.programs.scoot.settings ? wallpaper);
       true
     )
-    # ...and every future slot off and empty (spot-check across the tree).
+    # ...and the idle policy on with the profile (the
+    # `desktop-idle-lock` child): swayidle, the dim and screens-off
+    # tools, the locker and the audio inhibitor.
     (
-      assert !hmDesk.config.programs.scoot.desktop.idle.enable;
+      assert hmDesk.config.programs.scoot.desktop.idle.enable;
       true
     )
     (
-      assert !hmDesk.config.programs.scoot.desktop.idle.lock.enable;
+      assert hmDesk.config.programs.scoot.desktop.idle.lock.enable;
       true
     )
+    (
+      assert hmDesk.config.programs.scoot.desktop.idle.mediaInhibit.enable;
+      true
+    )
+    # ...the M2's timeouts as defaults (dim 2 min to 10%, lock at 4,
+    # screens off at 5)...
+    (
+      assert hmDesk.config.programs.scoot.desktop.idle.dimTimeout == 120;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.idle.dimLevel == 10;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.idle.lockTimeout == 240;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.idle.offTimeout == 300;
+      true
+    )
+    # ...the swaylock daemon behind the lock, and the locker theme
+    # opt-out on (without forcing the half-built `theme` slot on)...
+    (
+      assert hmDesk.config.programs.scoot.desktop.idle.lock.daemon == "swaylock";
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.theme.targets.lock.enable;
+      true
+    )
+    (
+      assert !hmDesk.config.programs.scoot.desktop.theme.enable;
+      true
+    )
+    # ...and every remaining future slot off and empty (spot-check
+    # across the tree).
     (
       assert !hmDesk.config.programs.scoot.desktop.notifications.enable;
       true
@@ -2127,16 +2392,22 @@ let
         hmDeskLookMusic.config.programs.scoot.settings.wallpaper.image;
       true
     )
-    # ...which is what installs scootbg for it.
+    # ...which is what installs scootbg for it (beside the idle
+    # policy's five tools, on with the profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
       true
     )
     (
       assert
-        drvs hmDeskLookMusic.config.home.packages == drvs [
+        sorted hmDeskLookMusic.config.home.packages == sorted [
           fakePkg
           fakeBg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
         ];
       true
     )
@@ -2393,13 +2664,20 @@ let
       assert hmDeskBarStylix.config.programs.scoot.settings == hmStylix.config.programs.scoot.settings;
       true
     )
-    # ...and `bar.enable = false` leaves the bar entirely alone.
+    # ...and `bar.enable = false` leaves the bar entirely alone (no
+    # bar service beside the profile's idle ones).
     (
       assert !hmDeskBarOff.config.programs.scootbar.enable;
       true
     )
     (
-      assert hmDeskBarOff.config.systemd.user.services == { };
+      assert !(hmDeskBarOff.config.systemd.user.services ? scootbar);
+      true
+    )
+    # ...including unthemed: no look color reaches a bar the profile
+    # does not manage.
+    (
+      assert (hmDeskBarOff.config.programs.scootbar.settings.colors or { }) == { };
       true
     )
     # NixOS with the bar module: the unit and the /etc file beside the
@@ -2443,11 +2721,337 @@ let
       assert osDeskBarOff.config.systemd.user.services == { };
       true
     )
+    (
+      assert (osDeskBarOff.config.programs.scootbar.settings.colors or { }) == { };
+      true
+    )
+  ];
+
+  # --- idle policy structural pins (fail `nix flake check` at eval) ---
+  _idlePins = [
+    # Home-manager: the whole policy on (units, files, tools beside
+    # the profile's own)...
+    (
+      assert allAssertionsHold hmIdle.config;
+      true
+    )
+    (
+      assert hmIdle.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    (
+      assert hmIdle.config.systemd.user.services ? scoot-audio-inhibit;
+      true
+    )
+    (
+      assert hmIdle.config.xdg.configFile ? "swayidle/config";
+      true
+    )
+    (
+      assert hmIdle.config.xdg.configFile ? "swaylock/config";
+      true
+    )
+    # ...bound to the graphical session (which the launcher reaches
+    # past the display import), retried rather than conditioned...
+    (
+      assert hmIdle.config.systemd.user.services.scoot-idle.Install.WantedBy == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert hmIdle.config.systemd.user.services.scoot-idle.Unit.PartOf == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert hmIdle.config.systemd.user.services.scoot-idle.Unit.After == [ "graphical-session.target" ];
+      true
+    )
+    # ...waiting for each command (the before-sleep lock lands before
+    # logind sleeps) from the generated config...
+    (
+      assert
+        lib.hasInfix "/bin/swayidle -w -C " hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
+      true
+    )
+    # ...exactly the five tools installed (swayidle, dim, off, locker,
+    # inhibitor -- no scoot package set here, so nothing else).
+    (
+      assert builtins.length hmIdle.config.home.packages == 5;
+      true
+    )
+    (
+      assert
+        sorted hmIdle.config.home.packages
+        == sorted [
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
+        ];
+      true
+    )
+    # Without a look the policy runs unthemed (the files and units are
+    # still there; the locker keeps swaylock's own colors -- pinned by
+    # content below).
+    (
+      assert allAssertionsHold hmIdleNoLook.config;
+      true
+    )
+    (
+      assert hmIdleNoLook.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    (
+      assert hmIdleNoLook.config.xdg.configFile ? "swaylock/config";
+      true
+    )
+    # The policy off: no units, no files beyond the profile's own, no
+    # tools.
+    (
+      assert allAssertionsHold hmIdleOff.config;
+      true
+    )
+    (
+      assert hmIdleOff.config.systemd.user.services == { };
+      true
+    )
+    (
+      assert !(hmIdleOff.config.xdg.configFile ? "swayidle/config");
+      true
+    )
+    (
+      assert !(hmIdleOff.config.xdg.configFile ? "swaylock/config");
+      true
+    )
+    (
+      assert hmIdleOff.config.home.packages == [ ];
+      true
+    )
+    # The lock off: the policy stays (dim and screens-off), the locker
+    # leaves (no config, no package, four tools left).
+    (
+      assert allAssertionsHold hmLockOff.config;
+      true
+    )
+    (
+      assert hmLockOff.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    (
+      assert !(hmLockOff.config.xdg.configFile ? "swaylock/config");
+      true
+    )
+    (
+      assert builtins.length hmLockOff.config.home.packages == 4;
+      true
+    )
+    # The inhibitor off: the policy without the audio hold.
+    (
+      assert allAssertionsHold hmInhibitOff.config;
+      true
+    )
+    (
+      assert !(hmInhibitOff.config.systemd.user.services ? scoot-audio-inhibit);
+      true
+    )
+    (
+      assert builtins.length hmInhibitOff.config.home.packages == 4;
+      true
+    )
+    # Retimed, zeroed, rebound and recolored: every assertion still
+    # holds (the content checks below prove the values land).
+    (
+      assert allAssertionsHold hmIdleTimeouts.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmIdleZero.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmLockCmd.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmLockSettings.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmThemeTargetOff.config;
+      true
+    )
+    # Standalone (no profile): the policy runs, unthemed and unlocked
+    # (the locker's opt-in stays off with it).
+    (
+      assert allAssertionsHold hmIdleStandalone.config;
+      true
+    )
+    (
+      assert hmIdleStandalone.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    (
+      assert !(hmIdleStandalone.config.xdg.configFile ? "swaylock/config");
+      true
+    )
+    # Refusals: the lock without the policy...
+    (
+      assert builtins.length (failing hmLockNoIdle.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.enable needs" (builtins.head (failing hmLockNoIdle.config));
+      true
+    )
+    # ...the inhibitor without it...
+    (
+      assert builtins.length (failing hmInhibitNoIdle.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.mediaInhibit.enable needs" (
+        builtins.head (failing hmInhibitNoIdle.config)
+      );
+      true
+    )
+    # ...the policy with no swayidle to run it...
+    (
+      assert builtins.length (failing hmIdleNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.package is null" (builtins.head (failing hmIdleNoPkg.config));
+      true
+    )
+    # ...a dim level outside 1..100, and a negative timeout.
+    (
+      assert builtins.length (failing hmIdleBadLevel.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "dimLevel" (builtins.head (failing hmIdleBadLevel.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmIdleNeg.config) == 1;
+      true
+    )
+
+    # NixOS: the profile installs the five tools beside scoot and
+    # scootbg, locks docked lids, and names the locker's PAM service --
+    # staying additive (no default session, ever)...
+    (
+      assert allAssertionsHold osIdle.config;
+      true
+    )
+    (
+      assert
+        sorted osIdle.config.environment.systemPackages
+        == sorted [
+          fakePkg
+          fakeBg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
+        ];
+      true
+    )
+    (
+      assert osIdle.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+      true
+    )
+    (
+      assert osIdle.config.security.pam.services ? swaylock;
+      true
+    )
+    (
+      assert osIdle.config.services.displayManager.defaultSession == null;
+      true
+    )
+    # ...the policy off: the rule untouched (logind's own default
+    # applies), no PAM, the profile's own packages only...
+    (
+      assert allAssertionsHold osIdleOff.config;
+      true
+    )
+    (
+      assert osIdleOff.config.services.logind.settings.Login == { };
+      true
+    )
+    (
+      assert !(osIdleOff.config.security.pam.services ? swaylock);
+      true
+    )
+    (
+      assert
+        sorted osIdleOff.config.environment.systemPackages == sorted [
+          fakePkg
+          fakeBg
+        ];
+      true
+    )
+    # ...the lock off: no PAM and no locker, the lid rule still
+    # locking (dim and screens-off still run from the home-manager
+    # side)...
+    (
+      assert allAssertionsHold osLockOff.config;
+      true
+    )
+    (
+      assert !(osLockOff.config.security.pam.services ? swaylock);
+      true
+    )
+    (
+      assert
+        sorted osLockOff.config.environment.systemPackages
+        == sorted [
+          fakePkg
+          fakeBg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.sway-audio-idle-inhibit
+        ];
+      true
+    )
+    (
+      assert osLockOff.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+      true
+    )
+    # ...an explicit lid rule winning over the profile's default...
+    (
+      assert allAssertionsHold osIdleLidOverride.config;
+      true
+    )
+    (
+      assert osIdleLidOverride.config.services.logind.settings.Login.HandleLidSwitchDocked == "ignore";
+      true
+    )
+    # ...and the refusals naming the policy on this side as well.
+    (
+      assert builtins.length (failing osLockNoIdle.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.lock.enable needs" (builtins.head (failing osLockNoIdle.config));
+      true
+    )
+    (
+      assert builtins.length (failing osIdleNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "idle.package is null" (builtins.head (failing osIdleNoPkg.config));
+      true
+    )
   ];
 in
 assert lib.all (x: x) _pins;
 assert lib.all (x: x) _greeterPins;
 assert lib.all (x: x) _desktopPins;
+assert lib.all (x: x) _idlePins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   set -euo pipefail
@@ -2660,6 +3264,70 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   assert got["colors"] == {"background": "#2B3648", "foreground": "#F6EEDC", "accent": "#FFA45C", "hover": "#FFD54A", "dim": "#9C8B95", "urgent": "#E87F6A"}, got["colors"]
   ' ${hmDeskBarMoonToml}
   echo "ok: desktop look renders moonrise into the bar config"
+
+  # 11. Idle policy: the generated swayidle config carries the M2's
+  #     timeouts -- dim at 2 min with save/restore, lock at 4 min
+  #     through loginctl, screens off at 5 min with the output wildcard
+  #     quoted intact -- plus the sleep lock and the lock event behind
+  #     `swaylock -f` with its config. (Fixed-string matches throughout:
+  #     the quoting is the assertion.)
+  grep -F "timeout 120 '${pkgs.brightnessctl}/bin/brightnessctl -s set 10%' resume '${pkgs.brightnessctl}/bin/brightnessctl -r'" ${idleConf}
+  grep -F "timeout 240 '${pkgs.systemd}/bin/loginctl lock-session'" ${idleConf}
+  grep -F "timeout 300 '${pkgs.wlopm}/bin/wlopm --off \"*\"' resume '${pkgs.wlopm}/bin/wlopm --on \"*\"'" ${idleConf}
+  grep -F "before-sleep '${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
+  grep -F "lock '${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
+  echo "ok: swayidle config carries the idle timeouts, the sleep lock and the lock event"
+
+  # 11b. The lock off: dim and screens-off stay, and no line locks
+  #      (no timeout through loginctl, no before-sleep, no lock event).
+  grep -F "timeout 120 '" ${idleNoLockConf}
+  grep -F "timeout 300 '" ${idleNoLockConf}
+  if grep -q lock ${idleNoLockConf}; then echo "lock lines present with the locker off" >&2; exit 1; fi
+  echo "ok: with the lock off, dim and screens-off stay and nothing locks"
+
+  # 11c. Retimed: every override lands (timeouts and the dim level).
+  grep -F "timeout 60 '${pkgs.brightnessctl}/bin/brightnessctl -s set 20%'" ${idleTimeoutsConf}
+  grep -F "timeout 90 '" ${idleTimeoutsConf}
+  grep -F "timeout 120 '" ${idleTimeoutsConf}
+  echo "ok: retimed idle policy renders its overrides"
+
+  # 11d. Zeroed: a 0 timeout omits that step's line (the lock step
+  #      stays: sleep still locks while the locker is on).
+  if grep -q "timeout 120\|timeout 300" ${idleZeroConf}; then echo "disabled step still present" >&2; exit 1; fi
+  grep -F "timeout 240 '" ${idleZeroConf}
+  grep -F "before-sleep '" ${idleZeroConf}
+  echo "ok: a 0 timeout omits that step"
+
+  # 11e. Rebound: the lock action override is what the timeout runs
+  #      (the future desktop-keys bind target).
+  grep -F "timeout 240 'loginctl lock-session'" ${idleCmdConf}
+  echo "ok: the lock action override reaches the timeout"
+
+  # 12. Locker config, music-desk: the look's roles as swaylock leaves
+  #     (screen and indicator backgrounds, active ring, accent key
+  #     highlight, ink text, urgent wrong-ring).
+  grep -F -x "color=FCFBFB" ${idleLockConf}
+  grep -F -x "inside-color=FCFBFB" ${idleLockConf}
+  grep -F -x "ring-color=3D579A" ${idleLockConf}
+  grep -F -x "key-hl-color=3D579A" ${idleLockConf}
+  grep -F -x "text-color=1A2032" ${idleLockConf}
+  grep -F -x "ring-wrong-color=EE6F5E" ${idleLockConf}
+  echo "ok: locker config carries the look's colors"
+
+  # 12b. A locker setting wins per key (verbatim, leading `#` kept --
+  #      swaylock's own parser strips it), and an empty string renders
+  #      a bare flag.
+  grep -F -x "ring-color=#123456" ${idleSettingsConf}
+  grep -F -x "show-failed-attempts" ${idleSettingsConf}
+  grep -F -x "color=FCFBFB" ${idleSettingsConf}
+  echo "ok: locker settings win per key, flags render bare"
+
+  # 12c. Opted out (or lookless): no themed leaf at all -- with the
+  #      opt-out the settings still apply, so the locker is theirs.
+  if grep -q "^color=" ${idleTargetOffConf}; then echo "themed leaf present with theming off" >&2; exit 1; fi
+  grep -F -x "ring-color=#123456" ${idleTargetOffConf}
+  if grep -q "color=" ${idleNoLookConf}; then echo "themed leaf present with no look" >&2; exit 1; fi
+  echo "ok: opting out (or no look) leaves the locker unthemed"
 
   touch $out
   echo "scoot-modules: all file-content checks passed"

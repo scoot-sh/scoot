@@ -1106,28 +1106,144 @@ point `programs.scoot.package` at the XWayland build as in
 [XWayland](#xwayland-from-the-flake). With the default package the knob
 warns and the session runs Wayland-only.
 
+**Idle and lock** come on with the profile: a laptop that never dims,
+locks, or sleeps its panels is not daily-drivable, so this is a default,
+not a slot you wire yourself. After this many seconds without input:
+
+| At | What | Why this step |
+|---|---|---|
+| 2 min | the panel dims to 10% (`brightnessctl -s set 10%`, restored on activity) | the backlight is most of idle draw (measured on the M2: 4.55 W screens on, 1.52 W both off) |
+| 4 min | the session locks (`loginctl lock-session`, locker over `ext-session-lock-v1`) | after dim, **before** screens off, so the lock is already up when the panel goes dark and no unlocked frame is ever visible on wake |
+| 5 min | every output powers off (`wlopm --off '*'`, back on at the first input, locked or not) | the measured 3 W saving |
+| sleep | locks first, then sleeps (swayidle's `before-sleep`, waited on) | suspend must never land on an unlocked session |
+| docked lid close | locks, does not suspend | a closed lid on a multi-output box means the user walked away, not that the session should die |
+
+Audio holds the whole sequence off while anything plays
+(`sway-audio-idle-inhibit`: any sink or source running), so music or a
+call never dims the panel. Any input restarts every timer from zero
+(resume commands fire on activity, locked or not), so there is nothing
+to reset after unlock. There is one timeout set for AC and battery
+alike -- dim and screens-off already capture the measured saving, and
+dual sets would need a supervisor swayidle does not have; per-machine
+tuning is an override away, and power profiles arrive with
+`desktop.power`.
+
+The pieces, and which side owns them: the home-manager side runs swayidle
+as a user unit (`scoot-idle.service`, wanted by `graphical-session.target`
+-- which the launcher reaches past the display import, so the display is
+there when it starts) plus the inhibitor unit, writes the swayidle and
+swaylock config files, and installs the tools for the user; the NixOS side
+installs the tools system-wide, sets the docked-lid rule
+(`HandleLidSwitchDocked = "lock"`: docked or multi-output only -- an
+undocked laptop keeps suspending on lid close, whose policy is the
+`desktop-power` child's), and names the locker's PAM service (without it
+swaylock cannot validate a password). Either side alone degrades to what
+it can do: without home-manager the tools sit ready for a hand-written
+setup; without NixOS the units run but dim needs the backlight rights and
+unlock needs a PAM service (below).
+
+Every value is an option, applied on rebuild/switch (the units restart
+into the new config; no re-login):
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `desktop.idle.enable` | bool | `true` with the profile | run the policy (dim, screens off, sleep lock, audio hold) |
+| `desktop.idle.dimTimeout` | int (seconds) | `120` | inactivity before dimming; `0` disables the step |
+| `desktop.idle.dimLevel` | int (percent, 1-100) | `10` | brightness the dim step sets |
+| `desktop.idle.lockTimeout` | int (seconds) | `240` | inactivity before locking; `0` disables the step (sleep still locks) |
+| `desktop.idle.offTimeout` | int (seconds) | `300` | inactivity before outputs power off; `0` disables the step |
+| `desktop.idle.mediaInhibit.enable` | bool | `true` with the profile | hold idle while audio plays (needs PipeWire or PulseAudio running) |
+| `desktop.idle.lock.enable` | bool | `true` with the profile | lock through the locker below |
+| `desktop.idle.lock.command` | string | `<systemd>/bin/loginctl lock-session` | the stable lock action: what the timeout runs, and what the future `desktop-keys` child binds (`Super+Escape` class) -- lid-close and manual locks share this path through logind |
+| `desktop.idle.lock.daemon` | enum (`"swaylock"`) | `"swaylock"` | the locker behind the action (smallest working closure, plain-text config, CPU-only; a future scootlock widens this without renaming anything) |
+| `desktop.idle.lock.settings` | attrset of string | `{ }` | extra swaylock lines over the themed ones (a value here wins per key; `""` renders a bare flag, e.g. `{ show-failed-attempts = ""; }`) |
+| `desktop.theme.targets.lock.enable` | bool | `true` | theme the locker from the look (screen and indicator from its palette); `false` keeps swaylock's own style while the rest follows the look |
+| `desktop.idle.package` and friends | package or null | the tool named | `package` (swayidle), `dimPackage` (brightnessctl), `offPackage` (wlopm), `mediaInhibit.package`, `lock.package`: point one at your own build; null with the switch on fails evaluation naming it |
+
+```nix
+programs.scoot.desktop = {
+  enable = true;
+  # Later to bed: lock at 10 min, screens off at 15.
+  idle.lockTimeout = 600;
+  idle.offTimeout = 900;
+  # No audio hold on this box:
+  # idle.mediaInhibit.enable = false;
+  # No idle policy at all (each of the three switches back off: the
+  # profile turns the set on, and the lock and inhibitor refuse to run
+  # without it):
+  # idle.enable = false;
+  # idle.lock.enable = false;
+  # idle.mediaInhibit.enable = false;
+};
+```
+
+The locker follows the look: screen and indicator from its palette
+(background, ring, accent, urgent -- the exact leaves are pinned in
+`nix/tests.nix`), a value in `lock.settings` winning per key today, and
+`theme.targets.lock.enable = false` dropping the themed block while the
+rest follows the look. Stylix and `look = "auto"` slot into the usual
+precedence (user > Stylix > look, per key) when the theme-look child
+lands.
+
+Troubleshooting, by symptom:
+
+- *Screens never dim or power off.* Check the unit is running:
+  `systemctl --user status scoot-idle` -- and that it started with the
+  display: units wanted by `graphical-session.target` need the launcher
+  (a hand-started session must reach that target with `WAYLAND_DISPLAY`
+  imported, or the unit retries until the burst limit). The generated
+  config is at `~/.config/swayidle/config`: read it, the timeouts are
+  literal. Dim specifically needs the seat: logind grants the *active*
+  login backlight access, so dim works in the seat session and logs
+  EPERM anywhere else (over ssh, from a timer with no session) -- the
+  step then does nothing. If dim fails inside your own seat session,
+  the device node stays root-owned outside logind's reach; that is a
+  machine quirk to note, not a config error.
+- *The locker appears but no password works.* Unlock needs PAM: the
+  NixOS side names `security.pam.services.swaylock` itself, but a
+  home-manager-only setup needs it set wherever PAM is configured.
+  Check Caps Lock second -- the indicator shows its state while you
+  type (`swaylock` names it, the profile keeps that default).
+- *`loginctl lock-session` does nothing visible.* Something must
+  listen for logind's Lock: that is the policy's `lock` event, so this
+  means `scoot-idle` is not running (above) or `lock.enable` is off.
+- *Music dims the panel.* The hold needs the inhibitor unit *and* an
+  audio server: `systemctl --user status scoot-audio-inhibit` plus
+  something actually playing through PipeWire (a paused player holds
+  nothing). Without a server the unit backs off and stays stopped --
+  that is the `desktop-audio-osd` child's half to wire, not an error.
+- *Closing the docked lid suspends.* Something beat the profile's
+  `HandleLidSwitchDocked = "lock"`: your own logind setting wins over
+  it (plain priority beats the profile's default), and the
+  `desktop-power` child will own suspend policy when it lands.
+
+Without the flake, the same policy is a hand-written swayidle setup --
+see [Idle: locking and screen
+power](configuration.md#idle-locking-and-screen-power), which keeps the
+manual recipe.
+
 **Every later piece has its slot already**, off and inert: one boolean
 (plus a package override where a package is involved) per paved-path child,
 so those children fill bodies without renaming options. Enabling one today
 is accepted and does nothing yet:
 
-| Slot | Child | Default tool |
-|---|---|---|
-| `desktop.idle.enable` / `desktop.idle.lock.enable` | idle policy + locker | swayidle; swaylock/waylock/gtklock/hyprlock |
-| `desktop.notifications.enable` | notifications (mako now, scootnotify later) | mako |
-| `desktop.launcher.enable` | launcher | fuzzel (the default binds still name wofi until that child reconciles them) |
-| `desktop.capture.enable` | screenshots bound to keys | grim + slurp |
-| `desktop.auth.enable` / `desktop.secrets.enable` | polkit agent + keyring | — |
-| `desktop.audio.enable` | audio, brightness and media keys + OSD | pipewire + wireplumber |
-| `desktop.clipboard.enable` | clipboard persistence + history | cliphist + wl-clipboard |
-| `desktop.nightlight.enable` | night light | wlsunset or gammastep |
-| `desktop.power.enable` | power profiles, suspend, charge limit | power-profiles-daemon |
-| `desktop.theme.enable` | GTK/Qt theme, dark mode (non-Stylix fallback) | — |
-| `desktop.apps.terminal.enable` / `desktop.apps.fileManager.enable` | terminal + (optional) file manager | foot; — |
-| `desktop.keys.enable` | the shared keymap every other child registers into | — |
-| `desktop.displays.enable` | output policy | — |
-| `desktop.inputMethod.enable` | input-method wiring | — |
-| `desktop.automount.enable` | removable-media automount (no child filed yet) | udiskie |
+| Slot | Type | Default (with `desktop.enable`) | Child | Tool |
+|---|---|---|---|---|
+| `desktop.idle.enable` / `desktop.idle.lock.enable` (+ timeouts, `lock.command`, `lock.settings`) | bool (+ timeout ints, action string, package per tool) | `true` ([Idle and lock](#idle-and-lock): dim 2 min / 10%, lock 4 min, off 5 min) | idle policy + locker | swayidle + swaylock |
+| `desktop.notifications.enable` | bool + package | `false` | notifications (mako now, scootnotify later) | mako |
+| `desktop.launcher.enable` | bool + package | `false` | launcher | fuzzel (the default binds still name wofi until that child reconciles them) |
+| `desktop.capture.enable` | bool + package | `false` | screenshots bound to keys | grim + slurp |
+| `desktop.auth.enable` / `desktop.secrets.enable` | bool + package | `false` | polkit agent + keyring | — |
+| `desktop.audio.enable` | bool + package | `false` | audio, brightness and media keys + OSD | pipewire + wireplumber |
+| `desktop.clipboard.enable` | bool + package | `false` | clipboard persistence + history | cliphist + wl-clipboard |
+| `desktop.nightlight.enable` | bool + package | `false` | night light | wlsunset or gammastep |
+| `desktop.power.enable` | bool + package | `false` | power profiles, suspend, charge limit | power-profiles-daemon |
+| `desktop.theme.enable` | bool + package | `false` | GTK/Qt theme, dark mode (non-Stylix fallback) | — |
+| `desktop.apps.terminal.enable` / `desktop.apps.fileManager.enable` | bool + package | `false` | terminal + (optional) file manager | foot; — |
+| `desktop.keys.enable` | bool | `false` | the shared keymap every other child registers into | — |
+| `desktop.displays.enable` | bool | `false` | output policy | — |
+| `desktop.inputMethod.enable` | bool | `false` | input-method wiring | — |
+| `desktop.automount.enable` | bool + package | `false` | removable-media automount (no child filed yet) | udiskie |
 
 Portal backend packages (`xdg-desktop-portal`, `-wlr`, `-gtk`) have no slot
 yet: the profile owns the portal *config* half today, and the capture child

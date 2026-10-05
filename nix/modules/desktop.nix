@@ -123,19 +123,160 @@ in
       '';
     };
 
-    # Idle policy (dim, screens off, lock before sleep, media inhibit),
-    # plus the locker behind it (over `ext-session-lock-v1`).
-    idle =
-      (slot {
-        child = "desktop-idle-lock";
-        tool = "swayidle, the policy the docs already standardize on";
-      })
-      // {
-        lock = slot {
-          child = "desktop-idle-lock";
-          tool = "one of swaylock, waylock, gtklock or hyprlock (all work per docs/protocols.md)";
+    # Idle policy (dim, lock, screens off, lock before sleep, media
+    # inhibit) plus the locker behind it (over `ext-session-lock-v1`).
+    # Filled by the `desktop-idle-lock` child: swayidle as a user unit
+    # bound to `graphical-session.target`, the M2's measured timeouts as
+    # defaults (dim to 10% at 2 min, lock at 4, screens off at 5, each
+    # overridable, 0 disabling that step), lock-before-sleep through
+    # logind, and an audio-driven idle inhibitor while media plays.
+    # Each `package` and the lock `command` beside them are declared in
+    # the side modules (`home.nix` installs for the user, `nixos.nix`
+    # system-wide), which is also where their defaults live; everything
+    # here is plain values, so this file stays `lib`-only.
+    #
+    # On with the profile (each still individually disable-able); without
+    # it, `idle.enable` works standalone (unthemed: a look needs the
+    # profile, and the user units need the home-manager side, the way the
+    # themed config file does).
+    idle = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Run the idle policy: dim, screens off and lock-before-sleep
+          through swayidle (its package beside this), plus the audio
+          inhibitor while media plays. The lock step inside it needs
+          `lock.enable` below; without it the session still dims and
+          sleeps unlocked, and sleep does not lock.
+        '';
+      };
+
+      # Seconds of inactivity before the panel dims to `dimLevel`. 0
+      # disables the step (swayidle never fires it).
+      dimTimeout = lib.mkOption {
+        type = lib.types.int;
+        default = 120;
+        example = 60;
+        description = ''
+          Seconds of inactivity before the panel dims to `dimLevel`
+          percent (the M2's measured default: 2 min). 0 disables the
+          step.
+        '';
+      };
+
+      # Percent of full brightness the dim step sets (`brightnessctl -s
+      # set <n>%`, restored with `-r` on activity). 1..100: 0 would be a
+      # black panel with the session still unlocked, which is what the
+      # screens-off step is for.
+      dimLevel = lib.mkOption {
+        type = lib.types.int;
+        default = 10;
+        example = 20;
+        description = ''
+          Brightness percent the dim step sets (the M2's measured
+          default: 10%). 1 to 100.
+        '';
+      };
+
+      # Seconds of inactivity before the session locks through
+      # `lock.command` (so lid-close and manual locks share the path).
+      # Before the screens-off step, so the lock is up before the panel
+      # goes dark and no unlocked frame is ever visible on wake. 0
+      # disables the step (sleep still locks through `before-sleep`
+      # while `lock.enable` is on). Needs `lock.enable`.
+      lockTimeout = lib.mkOption {
+        type = lib.types.int;
+        default = 240;
+        example = 300;
+        description = ''
+          Seconds of inactivity before the session locks (default 4
+          min: after dim, before screens off, so the lock is already up
+          when the panel goes dark). 0 disables the step. Needs
+          `lock.enable`.
+        '';
+      };
+
+      # Seconds of inactivity before every output powers off (`wlopm`,
+      # back on at the first input, locked or not). 0 disables it.
+      offTimeout = lib.mkOption {
+        type = lib.types.int;
+        default = 300;
+        example = 600;
+        description = ''
+          Seconds of inactivity before every output powers off (the
+          M2's measured default: 5 min; back on at the first input,
+          locked or not). 0 disables the step.
+        '';
+      };
+
+      # Hold idle while audio plays, so music or a call never dims the
+      # panel: `sway-audio-idle-inhibit` (any sink or source running)
+      # holding a Wayland idle inhibitor. Needs PipeWire (or PulseAudio)
+      # running; without an audio server the unit backs off and stays
+      # stopped (see docs/nix.md).
+      mediaInhibit = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Hold idle while audio plays (`sway-audio-idle-inhibit`,
+            its package beside this). Needs `idle.enable`.
+          '';
         };
       };
+
+      # The locker. `command` is the stable lock action the future
+      # `desktop-keys` child binds (the `Super+Escape` class) without
+      # renaming anything here; `daemon` names the locker behind it, so
+      # a future scootlock widens that enum without changing the option
+      # or the binds (the native-replacement contract).
+      lock = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Lock the session: the locker behind `command` over
+            `ext-session-lock-v1`, run from swayidle's `lock` event (so
+            every path -- timeout, lid, manual, before-sleep -- lands on
+            the same locker), themed by the look unless
+            `theme.targets.lock.enable` is off. Needs `idle.enable`.
+          '';
+        };
+
+        daemon = lib.mkOption {
+          type = lib.types.enum [ "swaylock" ];
+          default = "swaylock";
+          description = ''
+            The locker behind `command`. Only swaylock today (smallest
+            working closure at the pinned rev, plain-text config the
+            look themes per leaf, CPU-only like the compositor); a
+            future scootlock widens this enum, the option and the binds
+            staying as they are.
+          '';
+        };
+
+        # Free-form `key = value` lines merged over the look-themed
+        # config (a value you set wins per key). An empty string renders
+        # a bare flag (`{ show-failed-attempts = ""; }`). The look's
+        # leaves stay when Stylix/the theme-look child arrives (user >
+        # Stylix > look, per key); `theme.targets.lock.enable = false`
+        # drops the themed block but keeps these.
+        settings = lib.mkOption {
+          type = lib.types.attrsOf lib.types.str;
+          default = { };
+          example = {
+            font-size = "24";
+            indicator-radius = "100";
+          };
+          description = ''
+            Extra swaylock config lines, merged over the look-themed
+            ones (a value here wins per key). Empty string renders a
+            bare flag.
+          '';
+        };
+      };
+    };
     # mako now, scootnotify later without changing option names.
     notifications = slot {
       child = "desktop-notifications";
@@ -184,10 +325,28 @@ in
     };
     # GTK/Qt settings, dark-mode signal and a non-Stylix fallback.
     # Stylix stays the override path where present (as for `look`).
-    theme = slot {
-      child = "desktop-theme-look";
-      tool = "the non-Stylix GTK/Qt theme derivation";
-    };
+    # `targets` is the one per-target theme opt-out namespace
+    # (Stylix-style): every themed piece gets
+    # `theme.targets.<name>.enable` here (default on), so a user can
+    # keep one piece's own style while the rest follows the look. The
+    # theme-look child adds the rest; the locker's is first because it
+    # lands here.
+    theme =
+      (slot {
+        child = "desktop-theme-look";
+        tool = "the non-Stylix GTK/Qt theme derivation";
+      })
+      // {
+        targets.lock.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Theme the locker from the look (screen and indicator colors
+            from its palette). Set to `false` to keep swaylock's own
+            style (`lock.settings` still applies).
+          '';
+        };
+      };
     # The terminal the default binds spawn, and a file manager.
     # The manager is explicitly optional: nothing references one anywhere
     # today.

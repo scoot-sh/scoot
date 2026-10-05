@@ -80,6 +80,12 @@ let
     if d == "." || d == "" then "session.sh" else "${d}/session.sh";
 in
 {
+  # The idle policy's user half (swayidle unit, inhibitor, locker
+  # config): options under `programs.scoot.desktop.idle`, declared
+  # there. Imported here (not by consumers) so the profile's user side
+  # is one import.
+  imports = [ ./idle-home.nix ];
+
   options.programs.scoot = {
     enable = lib.mkEnableOption "scoot, the scrolling-tiling Wayland compositor";
 
