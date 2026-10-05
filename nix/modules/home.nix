@@ -142,10 +142,14 @@ let
 in
 {
   # The idle policy's user half (swayidle unit, inhibitor, locker
-  # config): options under `programs.scoot.desktop.idle`, declared
-  # there. Imported here (not by consumers) so the profile's user side
-  # is one import.
-  imports = [ ./idle-home.nix ];
+  # config) and the notification daemon's user half (mako unit, its
+  # config, the bar feed): options under `programs.scoot.desktop.idle`
+  # and `...notifications`, declared there. Imported here (not by
+  # consumers) so the profile's user side is one import.
+  imports = [
+    ./idle-home.nix
+    ./notifications-home.nix
+  ];
 
   options.programs.scoot = {
     enable = lib.mkEnableOption "scoot, the scrolling-tiling Wayland compositor";

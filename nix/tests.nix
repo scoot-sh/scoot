@@ -90,7 +90,17 @@
 #   individually disable-able, the locker themed by the look unless
 #   `theme.targets.lock.enable` opts out; an empty or quote-carrying
 #   `lock.command`, and an out-of-range `dimLevel` while the dim step is
-#   on, each fail eval; every remaining future slot
+#   on, each fail eval;
+#   the notification daemon (`desktop-notifications` child) runs with
+#   the profile -- mako owning `org.freedesktop.Notifications` as a
+#   `Type=dbus` user unit (activatable, retried like the bar's unit),
+#   its config on the `overlay` layer (popups above fullscreen) and
+#   themed by the look unless `theme.targets.notifications.enable`
+#   opts out, plus the bar feed (DND state and the unread count into
+#   the bar's `push` module, a click toggling DND through `makoctl`,
+#   which needs the `push` feature built in); a null package, and a
+#   `features` list without `push` beside the feed, each fail eval;
+#   every remaining future slot
 #   defaults off and inert; `enable` without scoot, a look without the
 #   profile, and an unknown look each fail eval;
 #   `desktop.greeter` is the greeter (the session entry forced on beside
@@ -478,6 +488,17 @@ let
   system = pkgs.stdenv.hostPlatform.system;
   isLinux = pkgs.stdenv.hostPlatform.isLinux;
   failing = cfg: map (a: a.message) (lib.filter (a: !a.assertion) cfg.assertions);
+
+  # The notification daemon's package as the modules default it: the
+  # lean mako (no GTK stack -- `nix/modules/notifications-mako.nix`).
+  # The same expression the two `package` defaults import, so the pins
+  # below test what ships. Null off Linux, where `pkgs.mako` refuses
+  # evaluation when forced.
+  leanMako = if isLinux then import ./modules/notifications-mako.nix { inherit pkgs; } else null;
+  # The lean daemon's runtime closure, as store paths (for the
+  # no-GTK-stack content check). Building it needs no network; off
+  # Linux it is never referenced.
+  leanMakoClosure = if isLinux then pkgs.closureInfo { rootPaths = [ leanMako ]; } else null;
 
   # --- scootbg ([wallpaper]) evaluations under test ---
   # NixOS: on by default with `enable`, installing the package.
@@ -999,7 +1020,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.notifications.enable = true;
+    desktop.launcher.enable = true;
   };
 
   # --- idle policy (`programs.scoot.desktop.idle`) evaluations ---
@@ -1137,6 +1158,121 @@ let
     desktop.idle.enable = true;
     desktop.idle.lockTimeout = -1;
   };
+
+  # --- notification daemon (`programs.scoot.desktop.notifications`) evaluations ---
+  #
+  # The profile with a look: the whole slot on (mako unit, feed unit,
+  # mako config), themed by the look.
+  hmNotif = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...without a look: the daemon runs unthemed (mako's own colors,
+  # the DND behavior still on -- pinned by content below).
+  hmNotifNoLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...the daemon off (the profile turns it on, like the idle policy;
+  # each switch back off disables just its half).
+  hmNotifOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.notifications.enable = false;
+  };
+  # ...standalone (no profile): the daemon runs, unthemed.
+  hmNotifStandalone = evalHome {
+    enable = true;
+    desktop.notifications.enable = true;
+  };
+  # ...with settings (a global winning per key -- including the layer
+  # default -- plus a new key, verbatim).
+  hmNotifSettings = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.notifications.settings = {
+      anchor = "bottom-right";
+      layer = "top";
+      background-color = "#123456";
+    };
+  };
+  # ...opted out of daemon theming (the look leaves mako alone, the
+  # settings still apply).
+  hmNotifTargetOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.notifications.enable = false;
+    desktop.notifications.settings = {
+      border-color = "#123456";
+    };
+  };
+  # Refusals: the daemon with no mako to run it (pinned by message in
+  # `_notifPins`)...
+  hmNotifNoPkg = evalHome {
+    enable = true;
+    desktop.notifications.enable = true;
+    desktop.notifications.package = null;
+  };
+  # ...and an unknown daemon, which is an option type error (the
+  # `enum`'s own message names the valid value), caught here by
+  # `tryEval`.
+  hmNotifDaemonBogus =
+    builtins.tryEval
+      (evalHome {
+        enable = true;
+        desktop.notifications.enable = true;
+        desktop.notifications.daemon = "bogus-daemon";
+      }).config.programs.scoot.desktop.notifications.daemon;
+
+  # A fake notification toolchain for the feed's behavior tests: stub
+  # `makoctl`, `busctl` and `scootbar`, scripted at RUN time through
+  # files under `$SCOOT_FEED_TEST_DIR`, so one HM evaluation covers
+  # every scenario. `makoctl mode` prints `mode` (exit `mode-code`),
+  # `makoctl list` prints `list` (exit `list-code`); `busctl` prints
+  # `bus` and exits 0 (the monitor ending); `scootbar` appends its
+  # argv to `calls`, prints `bar-err` to stderr and exits `bar-code`.
+  # The bridge under test resolves all three by bare name through its
+  # wrapper PATH, where this package's `bin` sorts first (no bar
+  # module is imported beside it, so `scootbar` stays a bare name
+  # too); `jq` stays the real one from the bridge's own inputs.
+  feedStubs = pkgs.runCommand "feed-stubs" { } ''
+    mkdir -p $out/bin
+    cat > $out/bin/makoctl <<'EOF'
+    #!${pkgs.runtimeShell}
+    case "$1" in
+      mode) cat "$SCOOT_FEED_TEST_DIR/mode"; exit "$(cat "$SCOOT_FEED_TEST_DIR/mode-code")" ;;
+      list) cat "$SCOOT_FEED_TEST_DIR/list"; exit "$(cat "$SCOOT_FEED_TEST_DIR/list-code")" ;;
+      *) echo "unexpected makoctl args: $*" >&2; exit 99 ;;
+    esac
+    EOF
+    cat > $out/bin/busctl <<'EOF'
+    #!${pkgs.runtimeShell}
+    cat "$SCOOT_FEED_TEST_DIR/bus"
+    exit 0
+    EOF
+    cat > $out/bin/scootbar <<'EOF'
+    #!${pkgs.runtimeShell}
+    printf '%s\n' "$*" >> "$SCOOT_FEED_TEST_DIR/calls"
+    cat "$SCOOT_FEED_TEST_DIR/bar-err" >&2
+    exit "$(cat "$SCOOT_FEED_TEST_DIR/bar-code")"
+    EOF
+    chmod +x $out/bin/makoctl $out/bin/busctl $out/bin/scootbar
+  '';
+  # The daemon on, running the stubs: the bridge below is the real
+  # `scoot-notify-sync` from the module, with its wrapper PATH aimed
+  # at the stubs.
+  hmNotifFeedTest = evalHome {
+    enable = true;
+    desktop.notifications.enable = true;
+    desktop.notifications.package = feedStubs;
+  };
+  # The real bridge script under test (the feed unit runs it with
+  # `--watch`; the behavior tests run it bare for one sync).
+  feedBridge = lib.removeSuffix " --watch" hmNotifFeedTest.config.systemd.user.services.scoot-notify-sync.Service.ExecStart;
+
   # Refusals: the profile without scoot, and a look without the profile
   # (both pinned by message in `_desktopPins`)...
   hmDeskNoEnable = evalHome { desktop.enable = true; };
@@ -1163,7 +1299,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.notifications.enable = true;
+    desktop.launcher.enable = true;
   };
   # The knob is accepted here (its effect is home-manager wiring; the
   # package choice stays `programs.scoot.package`).
@@ -1235,6 +1371,30 @@ let
     package = fakePkg;
     desktop.enable = true;
     desktop.idle.package = null;
+  };
+  # --- notification daemon system evaluations ---
+  #
+  # The profile: mako installed beside scoot and scootbg, still
+  # additive (no default session).
+  osNotif = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  # ...the daemon off: the profile's own packages only.
+  osNotifOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.notifications.enable = false;
+  };
+  # Refusal: the daemon with no mako to install (pinned by message in
+  # `_notifPins`).
+  osNotifNoPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.notifications.package = null;
   };
   # ...with an empty lock action, and a quote-carrying one (each
   # refused at eval on this side as well).
@@ -1360,6 +1520,50 @@ let
     desktop.look = "radial-burst";
     desktop.bar.enable = false;
   } { package = fakeBar; };
+  # The notification feed's bar half: the profile beside the bar
+  # module (music-desk, so the daemon runs themed).
+  hmDeskBarNotif = evalHomeDesktop {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  } { package = fakeBar; };
+  # ...with the daemon off: no feed module (the bar is entirely the
+  # user's, the push table absent).
+  hmDeskBarNoNotif = evalHomeDesktop {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.notifications.enable = false;
+  } { package = fakeBar; };
+  # ...with the daemon on but a bar built without the push module:
+  # refused at eval, naming it (pinned by message in `_notifPins`).
+  # The stand-in bar is a plain derivation, so it gains the `.override`
+  # the features option asks of a real package (returning itself: only
+  # the option plumbing is under test here, not a rebuild).
+  hmDeskBarNoPush =
+    evalHomeDesktopWith [ ]
+      {
+        enable = true;
+        package = fakePkg;
+        wallpaper.package = fakeBg;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+      }
+      {
+        package = fakeBar // {
+          override =
+            {
+              buildNoDefaultFeatures ? false,
+              buildFeatures ? [ ],
+            }:
+            fakeBar;
+        };
+        features = [ "clock" ];
+      };
 
   # --- eval-time structural pins (fail `nix flake check` at eval) ---
   #
@@ -2196,6 +2400,15 @@ let
   idleSettingsConf = hmLockSettings.config.xdg.configFile."swaylock/config".source;
   idleTargetOffConf = hmThemeTargetOff.config.xdg.configFile."swaylock/config".source;
   idleNoLookConf = hmIdleNoLook.config.xdg.configFile."swaylock/config".source;
+  # The notification daemon's generated files: the mako config
+  # (overlay layer, DND section, themed leaves, critical ring), plus
+  # the lookless, recolored and opt-out variants the content checks
+  # read, and the bar file carrying the feed's push module.
+  notifConf = hmNotif.config.xdg.configFile."mako/config".source;
+  notifNoLookConf = hmNotifNoLook.config.xdg.configFile."mako/config".source;
+  notifSettingsConf = hmNotifSettings.config.xdg.configFile."mako/config".source;
+  notifTargetOffConf = hmNotifTargetOff.config.xdg.configFile."mako/config".source;
+  notifBarToml = hmDeskBarNotif.config.programs.scootbar.configFile;
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
   #
@@ -2420,15 +2633,8 @@ let
       true
     )
     # ...and every remaining future slot off and empty (spot-check
-    # across the tree).
-    (
-      assert !hmDesk.config.programs.scoot.desktop.notifications.enable;
-      true
-    )
-    (
-      assert hmDesk.config.programs.scoot.desktop.notifications.package == null;
-      true
-    )
+    # across the tree; `notifications` left this list when the
+    # `desktop-notifications` child filled it).
     (
       assert !hmDesk.config.programs.scoot.desktop.launcher.enable;
       true
@@ -2513,7 +2719,8 @@ let
       true
     )
     # ...which is what installs scootbg for it (beside the idle
-    # policy's five tools, on with the profile).
+    # policy's five tools and the notification daemon, on with the
+    # profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
       true
@@ -2528,6 +2735,7 @@ let
           pkgs.wlopm
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
+          leanMako
         ];
       true
     )
@@ -2905,10 +3113,10 @@ let
         hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
       true
     )
-    # ...exactly the five tools installed (swayidle, dim, off, locker,
-    # inhibitor -- no scoot package set here, so nothing else).
+    # ...exactly the six tools installed (swayidle, dim, off, locker,
+    # inhibitor, mako -- no scoot package set here, so nothing else).
     (
-      assert builtins.length hmIdle.config.home.packages == 5;
+      assert builtins.length hmIdle.config.home.packages == 6;
       true
     )
     (
@@ -2919,6 +3127,7 @@ let
           pkgs.wlopm
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
+          leanMako
         ];
       true
     )
@@ -2938,13 +3147,18 @@ let
       true
     )
     # The policy off: no units, no files beyond the profile's own, no
-    # tools.
+    # tools -- but the notification daemon stays (its switch is its
+    # own, on with the profile).
     (
       assert allAssertionsHold hmIdleOff.config;
       true
     )
     (
-      assert hmIdleOff.config.systemd.user.services == { };
+      assert
+        builtins.attrNames hmIdleOff.config.systemd.user.services == [
+          "mako"
+          "scoot-notify-sync"
+        ];
       true
     )
     (
@@ -2956,11 +3170,15 @@ let
       true
     )
     (
-      assert hmIdleOff.config.home.packages == [ ];
+      assert hmIdleOff.config.xdg.configFile ? "mako/config";
+      true
+    )
+    (
+      assert drvs hmIdleOff.config.home.packages == drvs [ leanMako ];
       true
     )
     # The lock off: the policy stays (dim and screens-off), the locker
-    # leaves (no config, no package, four tools left).
+    # leaves (no config, no package, four idle tools plus mako left).
     (
       assert allAssertionsHold hmLockOff.config;
       true
@@ -2974,7 +3192,7 @@ let
       true
     )
     (
-      assert builtins.length hmLockOff.config.home.packages == 4;
+      assert builtins.length hmLockOff.config.home.packages == 5;
       true
     )
     # The inhibitor off: the policy without the audio hold.
@@ -2987,7 +3205,7 @@ let
       true
     )
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 4;
+      assert builtins.length hmInhibitOff.config.home.packages == 5;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -3110,6 +3328,7 @@ let
           pkgs.wlopm
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
+          leanMako
         ];
       true
     )
@@ -3126,7 +3345,7 @@ let
       true
     )
     # ...the policy off: the rule untouched (logind's own default
-    # applies), no PAM, the profile's own packages only...
+    # applies), no PAM, the profile's own packages plus the daemon's...
     (
       assert allAssertionsHold osIdleOff.config;
       true
@@ -3144,6 +3363,7 @@ let
         sorted osIdleOff.config.environment.systemPackages == sorted [
           fakePkg
           fakeBg
+          leanMako
         ];
       true
     )
@@ -3167,6 +3387,7 @@ let
           pkgs.brightnessctl
           pkgs.wlopm
           pkgs.sway-audio-idle-inhibit
+          leanMako
         ];
       true
     )
@@ -3220,6 +3441,357 @@ let
     )
   ];
 
+  # --- notification daemon structural pins (fail `nix flake check` at eval) ---
+  # Linux only, like the policy above: every evaluation here runs the
+  # daemon, whose package refuses evaluation on Darwin (the null
+  # degradation itself is pinned in `_darwinNotifPins`).
+  _notifPins = lib.optionals isLinux [
+    # Home-manager: the whole slot on (units, file, tool beside the
+    # profile's own)...
+    (
+      assert allAssertionsHold hmNotif.config;
+      true
+    )
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.enable;
+      true
+    )
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.daemon == "mako";
+      true
+    )
+    # ...running the lean mako (no GTK stack), not stock nixpkgs mako:
+    # the default is the very derivation `leanMako` names (same `drvPath`,
+    # so a revert to `pkgs.mako` fails here), hence a different store
+    # path than stock...
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.package.drvPath == leanMako.drvPath;
+      true
+    )
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.package.outPath != pkgs.mako.outPath;
+      true
+    )
+    # ...and the NixOS side defaults to the same derivation (either
+    # side alone names the same daemon)...
+    (
+      assert osNotif.config.programs.scoot.desktop.notifications.package.drvPath == leanMako.drvPath;
+      true
+    )
+    (
+      assert hmNotif.config.systemd.user.services ? mako;
+      true
+    )
+    (
+      assert hmNotif.config.systemd.user.services ? scoot-notify-sync;
+      true
+    )
+    (
+      assert hmNotif.config.xdg.configFile ? "mako/config";
+      true
+    )
+    # ...the daemon bound to the graphical session (which the launcher
+    # reaches past the display import), retried rather than
+    # conditioned...
+    (
+      assert hmNotif.config.systemd.user.services.mako.Install.WantedBy == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert hmNotif.config.systemd.user.services.mako.Unit.PartOf == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert hmNotif.config.systemd.user.services.mako.Unit.After == [ "graphical-session.target" ];
+      true
+    )
+    # ...activatable over D-Bus (a `Notify` with the daemon down
+    # starts the unit through mako's activation file), running this
+    # package's binary, reloaded through its `makoctl`...
+    (
+      assert hmNotif.config.systemd.user.services.mako.Service.Type == "dbus";
+      true
+    )
+    (
+      assert hmNotif.config.systemd.user.services.mako.Service.BusName == "org.freedesktop.Notifications";
+      true
+    )
+    (
+      assert lib.hasInfix "/bin/mako" hmNotif.config.systemd.user.services.mako.Service.ExecStart;
+      true
+    )
+    (
+      assert lib.hasInfix "/bin/makoctl reload"
+        hmNotif.config.systemd.user.services.mako.Service.ExecReload;
+      true
+    )
+    # ...gated on the display (an activation before the session
+    # reaches the graphical target skips cleanly instead of spinning
+    # restarts)...
+    (
+      assert lib.hasInfix "WAYLAND_DISPLAY"
+        hmNotif.config.systemd.user.services.mako.Service.ExecCondition;
+      true
+    )
+    # ...and the feed ordered after it, wanted by the same target.
+    (
+      assert
+        hmNotif.config.systemd.user.services.scoot-notify-sync.Install.WantedBy
+        == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        hmNotif.config.systemd.user.services.scoot-notify-sync.Unit.After == [
+          "graphical-session.target"
+          "mako.service"
+        ];
+      true
+    )
+    (
+      assert lib.hasInfix "scoot-notify-sync --watch"
+        hmNotif.config.systemd.user.services.scoot-notify-sync.Service.ExecStart;
+      true
+    )
+    # Without a look the daemon runs unthemed (the units and the file
+    # are still there; mako keeps its own colors -- pinned by content
+    # below).
+    (
+      assert allAssertionsHold hmNotifNoLook.config;
+      true
+    )
+    (
+      assert hmNotifNoLook.config.systemd.user.services ? mako;
+      true
+    )
+    (
+      assert hmNotifNoLook.config.systemd.user.services ? scoot-notify-sync;
+      true
+    )
+    (
+      assert hmNotifNoLook.config.xdg.configFile ? "mako/config";
+      true
+    )
+    # The daemon off: no units, no file beyond the profile's own, no
+    # tool (the idle policy stays: this switch is its own).
+    (
+      assert allAssertionsHold hmNotifOff.config;
+      true
+    )
+    (
+      assert !(hmNotifOff.config.systemd.user.services ? mako);
+      true
+    )
+    (
+      assert !(hmNotifOff.config.systemd.user.services ? scoot-notify-sync);
+      true
+    )
+    (
+      assert !(hmNotifOff.config.xdg.configFile ? "mako/config");
+      true
+    )
+    (
+      assert hmNotifOff.config.systemd.user.services ? scoot-idle;
+      true
+    )
+    # Standalone (no profile): the daemon runs, unthemed.
+    (
+      assert allAssertionsHold hmNotifStandalone.config;
+      true
+    )
+    (
+      assert hmNotifStandalone.config.systemd.user.services ? mako;
+      true
+    )
+    (
+      assert hmNotifStandalone.config.systemd.user.services ? scoot-notify-sync;
+      true
+    )
+    (
+      assert hmNotifStandalone.config.xdg.configFile ? "mako/config";
+      true
+    )
+    # Rethemed, rebound and recolored: every assertion still holds
+    # (the content checks below prove the values land).
+    (
+      assert allAssertionsHold hmNotifSettings.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmNotifTargetOff.config;
+      true
+    )
+    # Refusals: the daemon with no mako to run it...
+    (
+      assert builtins.length (failing hmNotifNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "notifications.package is null" (builtins.head (failing hmNotifNoPkg.config));
+      true
+    )
+    # ...and an unknown daemon, an enum type error (verified by hand
+    # to name the one valid value).
+    (
+      assert !hmNotifDaemonBogus.success;
+      true
+    )
+
+    # NixOS: the profile installs mako beside scoot and scootbg --
+    # staying additive (no default session, ever)...
+    (
+      assert allAssertionsHold osNotif.config;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "mako") osNotif.config.environment.systemPackages;
+      true
+    )
+    (
+      assert osNotif.config.services.displayManager.defaultSession == null;
+      true
+    )
+    # ...the daemon off: the profile's own packages only...
+    (
+      assert allAssertionsHold osNotifOff.config;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "mako") osNotifOff.config.environment.systemPackages);
+      true
+    )
+    # ...and the refusal naming the daemon on this side as well.
+    (
+      assert builtins.length (failing osNotifNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "notifications.package is null" (builtins.head (failing osNotifNoPkg.config));
+      true
+    )
+
+    # With the bar module: the feed's `push` module is defined, with
+    # the DND toggle as its click (the daemon's own command, by
+    # absolute path)...
+    (
+      assert allAssertionsHold hmDeskBarNotif.config;
+      true
+    )
+    (
+      assert
+        hmDeskBarNotif.config.programs.scootbar.settings.push.notifications.on-click.exec == [
+          "${leanMako}/bin/makoctl"
+          "mode"
+          "-t"
+          "do-not-disturb"
+        ];
+      true
+    )
+    # ...a user's own click winning per leaf (pinned structurally:
+    # the whole table is defined leaf by leaf, the way the colors
+    # are)...
+    (
+      assert
+        (evalHomeDesktopWith [ ]
+          {
+            enable = true;
+            package = fakePkg;
+            wallpaper.package = fakeBg;
+            desktop.enable = true;
+            desktop.look = "music-desk";
+          }
+          {
+            package = fakeBar;
+            settings.push.notifications.on-click.exec = [ "true" ];
+          }
+        ).config.programs.scootbar.settings.push.notifications.on-click.exec == [ "true" ];
+      true
+    )
+    # ...and on NixOS too, in that side's look.
+    (
+      assert allAssertionsHold osDeskBar.config;
+      true
+    )
+    (
+      assert
+        osDeskBar.config.programs.scootbar.settings.push.notifications.on-click.exec == [
+          "${leanMako}/bin/makoctl"
+          "mode"
+          "-t"
+          "do-not-disturb"
+        ];
+      true
+    )
+    # With the daemon off, or the bar unmanaged, the table stays
+    # absent (the bar is entirely the user's then: no feed, no
+    # toggle).
+    (
+      assert (hmDeskBarNoNotif.config.programs.scootbar.settings.push or { }) == { };
+      true
+    )
+    (
+      assert (hmDeskBarOff.config.programs.scootbar.settings.push or { }) == { };
+      true
+    )
+    (
+      assert (osDeskBarOff.config.programs.scootbar.settings.push or { }) == { };
+      true
+    )
+    # With a bar built without the push module: exactly one failing
+    # assertion, naming it (the bar itself would refuse the table at
+    # startup).
+    (
+      assert builtins.length (failing hmDeskBarNoPush.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "needs the push" (builtins.head (failing hmDeskBarNoPush.config));
+      true
+    )
+  ];
+
+  # --- notification daemon off Linux (fail `nix flake check` at eval) ---
+  #
+  # mako is Linux-only: off Linux its package defaults to null, which
+  # the daemon's own assertion refuses loudly instead of installing
+  # nothing silently. Empty off Linux (the Linux check above is where
+  # the daemon is pinned).
+  _darwinNotifPins = lib.optionals (!isLinux) [
+    # Home-manager: null, and the daemon's assertion refusing loudly.
+    (
+      assert hmNotif.config.programs.scoot.desktop.notifications.package == null;
+      true
+    )
+    (
+      assert builtins.length (failing hmNotif.config) == 6;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "notifications.package is null" m) (failing hmNotif.config);
+      true
+    )
+    # NixOS: the same null (no daemon installed)...
+    (
+      assert osNotif.config.programs.scoot.desktop.notifications.package == null;
+      true
+    )
+    # ...refused loudly there too (the idle policy's five plus the
+    # daemon's one).
+    (
+      assert builtins.length (failing osNotif.config) == 6;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "notifications.package is null" m) (failing osNotif.config);
+      true
+    )
+    # ...while the bar feed stays unwritten (no daemon, no toggle).
+    (
+      assert (hmDeskBarNotif.config.programs.scootbar.settings.push or { }) == { };
+      true
+    )
+  ];
+
   # --- idle policy off Linux (fail `nix flake check` at eval) ---
   #
   # The tools above are Linux-only: off Linux each package defaults to
@@ -3258,13 +3830,15 @@ let
     )
     # ...and the policy's own assertions refusing loudly, naming the
     # switch (one per null tool: the policy, the dim and screens-off
-    # steps, the inhibitor, the locker).
+    # steps, the inhibitor, the locker -- plus the notification
+    # daemon's one, on with the profile; order-insensitive: the
+    # daemon's module contributes its refusal first).
     (
-      assert builtins.length (failing hmIdle.config) == 5;
+      assert builtins.length (failing hmIdle.config) == 6;
       true
     )
     (
-      assert lib.hasInfix "idle.package is null" (builtins.head (failing hmIdle.config));
+      assert lib.any (m: lib.hasInfix "idle.package is null" m) (failing hmIdle.config);
       true
     )
     # NixOS: the same nulls (no tools installed for the policy)...
@@ -3283,7 +3857,7 @@ let
     # ...refused loudly there too, while the docked-lid rule (plain
     # values, no tools) still lands.
     (
-      assert builtins.length (failing osIdle.config) == 5;
+      assert builtins.length (failing osIdle.config) == 6;
       true
     )
     (
@@ -3296,7 +3870,9 @@ assert lib.all (x: x) _pins;
 assert lib.all (x: x) _greeterPins;
 assert lib.all (x: x) _desktopPins;
 assert lib.all (x: x) _idlePins;
+assert lib.all (x: x) _notifPins;
 assert lib.all (x: x) _darwinIdlePins;
+assert lib.all (x: x) _darwinNotifPins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   set -euo pipefail
@@ -3599,6 +4175,159 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     grep -F -x "ring-color=#123456" ${idleTargetOffConf}
     if grep -q "color=" ${idleNoLookConf}; then echo "themed leaf present with no look" >&2; exit 1; fi
     echo "ok: opting out (or no look) leaves the locker unthemed"
+
+    # 13. Notification daemon, music-desk: the overlay layer (popups
+    #     above fullscreen -- mako's own default is `top`, which the
+    #     compositor hides), the DND section hiding, the look's roles
+    #     as mako leaves (its `#rrggbb` colors kept verbatim), and the
+    #     critical ring in urgent.
+    grep -F -x "layer=overlay" ${notifConf}
+    grep -F -x "[mode=do-not-disturb]" ${notifConf}
+    grep -F -x "invisible=1" ${notifConf}
+    grep -F -x "background-color=#FCFBFB" ${notifConf}
+    grep -F -x "text-color=#1A2032" ${notifConf}
+    grep -F -x "border-color=#3D579A" ${notifConf}
+    grep -F -x "progress-color=over #3D579A" ${notifConf}
+    grep -F -x "[urgency=critical]" ${notifConf}
+    grep -F -x "border-color=#EE6F5E" ${notifConf}
+    echo "ok: mako config carries the overlay layer, DND and the look"
+
+    # 13b. A daemon setting wins per key (verbatim, leading `#` kept),
+    #      a new key lands, and the generated sections stay.
+    grep -F -x "layer=top" ${notifSettingsConf}
+    if grep -q "^layer=overlay$" ${notifSettingsConf}; then echo "overridden default still present" >&2; exit 1; fi
+    grep -F -x "anchor=bottom-right" ${notifSettingsConf}
+    grep -F -x "background-color=#123456" ${notifSettingsConf}
+    grep -F -x "[mode=do-not-disturb]" ${notifSettingsConf}
+    grep -F -x "[urgency=critical]" ${notifSettingsConf}
+    echo "ok: daemon settings win per key, generated sections stay"
+
+    # 13c. Opted out (or lookless): no themed leaf at all -- with the
+    #      opt-out the settings still apply, so the daemon is theirs.
+    #      The DND section stays in both (it is behavior, not theme).
+    if grep -q "^background-color=" ${notifTargetOffConf}; then echo "themed leaf present with theming off" >&2; exit 1; fi
+    grep -F -x "border-color=#123456" ${notifTargetOffConf}
+    grep -F -x "[mode=do-not-disturb]" ${notifTargetOffConf}
+    if grep -q "background-color=" ${notifNoLookConf}; then echo "themed leaf present with no look" >&2; exit 1; fi
+    if grep -q "urgency=critical" ${notifNoLookConf}; then echo "critical section present with no look" >&2; exit 1; fi
+    grep -F -x "layer=overlay" ${notifNoLookConf}
+    grep -F -x "[mode=do-not-disturb]" ${notifNoLookConf}
+    echo "ok: opting out (or no look) leaves mako unthemed but hiding"
+
+    # 13d. The bar feed: the push table carries the envelope icon and
+    #      the DND toggle (the daemon's own command, absolute, so it
+    #      works off PATH).
+    python3 -c '
+    import sys,tomllib
+    got = tomllib.load(open(sys.argv[1],"rb"))
+    assert got["push"]["notifications"]["icon"] == "✉", got["push"]
+    assert got["push"]["notifications"]["on-click"]["exec"] == [sys.argv[2], "mode", "-t", "do-not-disturb"], got["push"]
+    ' ${notifBarToml} '${leanMako}/bin/makoctl'
+    echo "ok: bar push module toggles do-not-disturb"
+
+    # 13e. The lean daemon: its runtime closure names no GTK stack
+    #      (the `wrapGAppsHook3` weight the profile refuses to ship:
+    #      gtk+3, tinysparql, cups, at-spi2-core, avahi). Any of those
+    #      names reappearing -- a rebase silently restoring the hook,
+    #      say -- fails loudly here.
+    if grep -E "gtk\+3|tinysparql|cups|at-spi2|avahi" ${leanMakoClosure}/store-paths; then echo "GTK-stack path in lean mako closure" >&2; exit 1; fi
+    echo "ok: lean mako closure carries no GTK stack"
+
+    # 13f. ...while its wrapper still sets what icons need: the pixbuf
+    #      loaders cache and an icon theme dir (both gtk-free: the
+    #      cache names only gdk-pixbuf and librsvg).
+    grep -q "GDK_PIXBUF_MODULE_FILE=" ${leanMako}/bin/mako
+    grep -q "hicolor-icon-theme" ${leanMako}/bin/mako
+    if grep -E "gtk\+3|tinysparql" ${leanMako}/bin/mako ${leanMako}/bin/makoctl; then echo "GTK-stack reference in lean mako wrapper" >&2; exit 1; fi
+    echo "ok: lean mako wrapper sets the pixbuf loaders and the icon theme"
+
+    # 14. The bar feed, against stub tools (the REAL bridge script from
+    #     the module, scenario files below -- `mode`/`list` are what
+    #     `makoctl` prints, `bus` what `busctl monitor` prints,
+    #     `bar-err`/`bar-code` how `scootbar` answers, `calls` what it
+    #     was asked). Every scenario asserts the exit status (bare:
+    #     any other status fails the check) and the exact stderr lines.
+    export SCOOT_FEED_TEST_DIR="$PWD/feed-test"
+    mkdir -p "$SCOOT_FEED_TEST_DIR"
+    feed_setup() {
+      # $1 mode, $2 mode-code, $3 list, $4 list-code, $5 bar-err, $6 bar-code
+      printf '%s' "$1" > "$SCOOT_FEED_TEST_DIR/mode"
+      printf '%s' "$2" > "$SCOOT_FEED_TEST_DIR/mode-code"
+      printf '%s' "$3" > "$SCOOT_FEED_TEST_DIR/list"
+      printf '%s' "$4" > "$SCOOT_FEED_TEST_DIR/list-code"
+      printf '%s' "$5" > "$SCOOT_FEED_TEST_DIR/bar-err"
+      printf '%s' "$6" > "$SCOOT_FEED_TEST_DIR/bar-code"
+      : > "$SCOOT_FEED_TEST_DIR/calls"
+      : > "$SCOOT_FEED_TEST_DIR/stderr"
+    }
+
+    # 14a. The module not placed: the guidance names the missing
+    #      module (not a dead bar), exactly one stderr line, exit 0.
+    feed_setup 'default' 0 '[]' 0 'daemon: `notifications` is not placed in this bar (it shows: clock)' 1
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14a)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "no notifications module" "$SCOOT_FEED_TEST_DIR/stderr"
+    if grep -q "not running" "$SCOOT_FEED_TEST_DIR/stderr"; then echo "blamed the bar for an unplaced module (14a)" >&2; exit 1; fi
+    grep -q '^msg set notifications' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: feed names the unplaced module, once"
+
+    # 14b. The bar not running: that is what the line says, once.
+    feed_setup 'default' 0 '[]' 0 'scootbar: no scootbar daemon is running for eDP-1 (nothing listens on /run/user/1000/scootbar-eDP-1.sock); start one with `scootbar daemon`' 1
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14b)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "cannot reach the bar" "$SCOOT_FEED_TEST_DIR/stderr"
+    echo "ok: feed names the dead bar, once"
+
+    # 14c. Malformed `makoctl list`: counts as empty, never as a
+    #      crash -- exit 0, so `Restart=on-failure` does not respawn
+    #      into a 2 s crash loop. One warning line; the push shows
+    #      the empty bell.
+    feed_setup 'default' 0 'this is not json' 0 "" 0
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14c)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "malformed JSON" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -qF '{"text":""}' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: malformed list shows empty, no crash loop"
+
+    # 14d. mako gone: the bar is cleared instead of left stale, one
+    #      line saying so, exit 0.
+    feed_setup "" 1 '[]' 0 "" 0
+    ${feedBridge} 2>"$SCOOT_FEED_TEST_DIR/stderr"
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly one stderr line (14d)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "cleared the bar" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -qF '{"text":""}' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: mako gone clears the bar"
+
+    # 14e. `--watch`: losing the bus name clears the bar (the initial
+    #      sync pushes the urgent count first). The monitor ending is
+    #      exit 1, which is what restarts the feed.
+    feed_setup 'default' 0 '[{"urgency": 2}]' 0 "" 0
+    printf '%s\n' '{"type":"signal","sender":"org.freedesktop.DBus","path":"/org/freedesktop/DBus","interface":"org.freedesktop.DBus","member":"NameOwnerChanged","payload":{"type":"sss","data":["org.freedesktop.Notifications",":1.5",""]}}' > "$SCOOT_FEED_TEST_DIR/bus"
+    if ${feedBridge} --watch 2>"$SCOOT_FEED_TEST_DIR/stderr"; then echo "monitor end should exit 1 (14e)" >&2; exit 1; fi
+    grep -qF '"urgent"' "$SCOOT_FEED_TEST_DIR/calls"
+    grep -qF '{"text":""}' "$SCOOT_FEED_TEST_DIR/calls"
+    grep -q "cleared the bar" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -q "bus monitor ended" "$SCOOT_FEED_TEST_DIR/stderr"
+    echo "ok: bus-name loss clears the bar on watch"
+
+    # 14f. `--watch`: a new owner re-syncs (no clear, the state is
+    #      fresh from the restarted daemon).
+    feed_setup 'default' 0 '[{"urgency": 1}]' 0 "" 0
+    printf '%s\n' '{"type":"signal","sender":"org.freedesktop.DBus","path":"/org/freedesktop/DBus","interface":"org.freedesktop.DBus","member":"NameOwnerChanged","payload":{"type":"sss","data":["org.freedesktop.Notifications","",":1.9"]}}' > "$SCOOT_FEED_TEST_DIR/bus"
+    if ${feedBridge} --watch 2>"$SCOOT_FEED_TEST_DIR/stderr"; then echo "monitor end should exit 1 (14f)" >&2; exit 1; fi
+    [ "$(grep -c '^msg set notifications' "$SCOOT_FEED_TEST_DIR/calls")" = 2 ] || { echo "want initial sync plus re-sync (14f)"; cat "$SCOOT_FEED_TEST_DIR/calls"; exit 1; }
+    if grep -q "cleared the bar" "$SCOOT_FEED_TEST_DIR/stderr"; then echo "re-sync cleared instead (14f)" >&2; exit 1; fi
+    echo "ok: bus-name gain re-syncs on watch"
+
+    # 14g. `--watch`: a monitor line that is not JSON is skipped,
+    #      never fatal (the initial sync still lands).
+    feed_setup 'default' 0 '[]' 0 "" 0
+    printf '%s\n' 'this is not a bus message' > "$SCOOT_FEED_TEST_DIR/bus"
+    if ${feedBridge} --watch 2>"$SCOOT_FEED_TEST_DIR/stderr"; then echo "monitor end should exit 1 (14g)" >&2; exit 1; fi
+    [ "$(wc -l < "$SCOOT_FEED_TEST_DIR/stderr")" -eq 1 ] || { echo "want exactly the monitor-ended line (14g)"; cat "$SCOOT_FEED_TEST_DIR/stderr"; exit 1; }
+    grep -q "bus monitor ended" "$SCOOT_FEED_TEST_DIR/stderr"
+    grep -q '^msg set notifications' "$SCOOT_FEED_TEST_DIR/calls"
+    echo "ok: garbage monitor line is skipped"
   ''}
 
   touch $out

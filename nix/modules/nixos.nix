@@ -209,6 +209,33 @@ in
           };
         };
       };
+
+      # The notification daemon's package: the shape is in
+      # `desktop.nix` (shared with the home-manager side) and the user
+      # unit that runs it is that side's (`notifications-home.nix`);
+      # this side installs it system-wide. The same package as there,
+      # so either side alone names the same daemon. Merged here for
+      # the same one-declaration reason as above. Linux-only: off
+      # Linux it defaults to null, which the assertion below refuses
+      # loudly.
+      notifications = desktop.options.notifications // {
+        package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              (if pkgs ? mako then import ./notifications-mako.nix { inherit pkgs; } else null)
+            else
+              null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then leanMako else null";
+          description = ''
+            The mako package to install system-wide for the
+            notification daemon (a lean mako without the GTK stack,
+            the same default as the home-manager side -- see
+            `notifications-mako.nix`). Null installs nothing.
+            Linux-only: null off Linux.
+          '';
+        };
+      };
     };
 
     # `pkgs.scoot` when the flake's overlay (`overlays.default`) is
@@ -504,6 +531,33 @@ in
       programs.scoot.desktop.idle.enable = lib.mkDefault true;
       programs.scoot.desktop.idle.lock.enable = lib.mkDefault true;
       programs.scoot.desktop.idle.mediaInhibit.enable = lib.mkDefault true;
+
+      # The notification daemon on with the profile (still
+      # individually disable-able at plain priority): the package
+      # below installs, and the user unit comes from the
+      # home-manager side.
+      programs.scoot.desktop.notifications.enable = lib.mkDefault true;
+    })
+    # The notification daemon's system half: its package on PATH. The
+    # unit and the config are the home-manager side's
+    # (`notifications-home.nix`): without it the daemon sits ready for
+    # a hand-written setup, the way a `[wallpaper]` finds scootbg on
+    # PATH without the home-manager side.
+    (lib.mkIf cfg.desktop.notifications.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.notifications.package != null;
+          message = ''
+            programs.scoot.desktop.notifications.enable is set but
+            programs.scoot.desktop.notifications.package is null: set
+            it explicitly (apply the overlay, or point at a mako).
+          '';
+        }
+      ];
+
+      environment.systemPackages = lib.optional (
+        cfg.desktop.notifications.package != null
+      ) cfg.desktop.notifications.package;
     })
     # The idle policy's system half: its tools on PATH, the docked-lid
     # rule, and the locker's PAM service. The timers and the locker
