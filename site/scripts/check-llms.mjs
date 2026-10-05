@@ -12,8 +12,11 @@
 //   2. Every content page (src/content/docs/*.md, top-level) appears in
 //      `llms-full.txt` AND `llms-small.txt`, by its frontmatter title.
 //   3. Every page's `.md` twin exists in `dist/` and is non-empty.
-//   4. Every root-relative `.md` / `.txt` link inside `llms.txt` resolves
-//      to a file in `dist/` (no dangling bundle links).
+//   4. Every root-relative (`/…`) and page-relative (`./…`) `.md` /
+//      `.txt` link inside every bundle resolves to a file in `dist/`
+//      (no dangling bundle links). The index `llms.txt` carries absolute
+//      bundle URLs while the full/small bundles preserve the prose's
+//      source-relative `./x.md` links — so all three are scanned.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -71,11 +74,33 @@ for (const page of pages) {
   }
 }
 
-for (const match of llms.matchAll(/\]\((\/[^)]+)\)/g)) {
-  const target = match[1].split('#')[0];
-  if (target.endsWith('.md') || target.endsWith('.txt')) {
-    if (!existsSync(join(dist, target))) {
-      fail(`llms.txt links ${target}, which has no file in dist/`);
+// Page prose links land in the bundles verbatim: the index `llms.txt`
+// carries only absolute bundle URLs, while `llms-full.txt` /
+// `llms-small.txt` preserve the sources' root-relative (`/x.md`) and
+// page-relative (`./x.md`) links — so every bundle's `.md` / `.txt`
+// links must resolve to a file in `dist/`. Every page is top-level, so
+// `./x.md` must be the twin `dist/x.md`.
+for (const [name, body] of [
+  ['llms.txt', llms],
+  ['llms-full.txt', full],
+  ['llms-small.txt', small],
+]) {
+  if (!body) continue;
+  for (const match of body.matchAll(/\]\((\/[^)]+)\)/g)) {
+    const target = match[1].split('#')[0];
+    if (target.endsWith('.md') || target.endsWith('.txt')) {
+      if (!existsSync(join(dist, target))) {
+        fail(`${name} links ${target}, which has no file in dist/`);
+      }
+    }
+  }
+  for (const match of body.matchAll(/\]\((\.[^)]+)\)/g)) {
+    const target = match[1].split('#')[0];
+    if (target.endsWith('.md') || target.endsWith('.txt')) {
+      const resolved = target.replace(/^\.\//, '');
+      if (!existsSync(join(dist, resolved))) {
+        fail(`${name} links ${match[1]}, which has no file in dist/`);
+      }
     }
   }
 }

@@ -82,12 +82,12 @@ edit `.claude/*`, so those two are flagged for the maintainer):
 7. `docs/backlog/README.md`, `docs/scootbar/backlog/README.md`, `docs/scootbg/backlog/README.md` — index links per entry (move with the entries; re-verify with `scripts/backlog check` + the `git diff origin/main...HEAD` line-count check from the brief).
 8. In-prose links: `docs/nix.md` ↔ `docs/scootbar/cli.md#fonts`, `docs/configuration.md` ↔ `docs/scootbg/README.md`, example READMEs (`../../nix.md`, `../../configuration.md`, `../../tty.md`, `../../scootbg/README.md`, `../../scootbar/backlog/lightest.md`), `NOTICE` (names `docs/assets/` previews), `README.md` Documentation section, `ROADMAP.md` (links backlog entries throughout).
 9. `flake.nix` comments naming `docs/` (nix.md, `docs/backlog/resolved/nix-crane-done.md`, `docs/scootbg/backlog/resolved/dependencies-done.md`) — comments only, but fix them in the move PR so they don't rot.
-10. `vm/configuration.nix:150` (`docs/backlog/packaging/nix-publishing.md`) and `nix/tests.nix:50` (`docs/scootbar/backlog/resolved/nix-package-done.md`) — comment-only references, fixed in the move PR. (`nix/scootbar-tests.nix` has none; verified 2026-10-05.)
+10. `vm/configuration.nix:150` (`docs/backlog/packaging/nix-publishing.md`) and `nix/tests.nix:53` (`docs/scootbar/backlog/resolved/nix-package-done.md`) — comment-only references, fixed in the move PR. (`nix/scootbar-tests.nix` has none; verified 2026-10-05.)
 
 ## Phase-1 scaffold (what `site/` holds today)
 
 - `astro.config.mjs` — Starlight + `starlight-llms-txt` (pinned; see `site/README.md` "Why starlight-llms-txt"), sidebar matching the user tree above.
-- `src/content/docs/` — 4 adapted (not moved) pages proving the shape: `index.mdx` (home), `install.mdx`, `first-session.mdx`, `keybindings.mdx`. Originals untouched in `docs/`.
+- `src/content/docs/` — 4 adapted (not moved) pages proving the shape: `index.md` (home), `install.md`, `first-session.md`, `keybindings.md`. Originals untouched in `docs/`.
 - `src/styles/custom.css` — scoot theme from the vinyl-sunset palette (espresso `#271A1F`, cream `#F1E3C6`, sunset orange `#E59560`); system font stack (see below).
 - `src/pages/[...page].md.ts` — per-page Markdown twins at stable `/<slug>.md` URLs (the plugin covers the aggregates; this covers the per-page requirement).
 - `scripts/check-llms.mjs` — build gate: fails if `llms.txt` misses a page, a `.md` twin, or a linked bundle 404s.

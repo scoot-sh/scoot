@@ -78,8 +78,48 @@ kbd {
   font-size: 0.9em;
 }
 
-/* Hero art on the home page gets the look's rounded corners. */
-.hero-image img {
+/* Home hero: stacked and centered. The art is a wide desktop capture, so
+ * the stock splash grid (copy 7fr / art 4fr past 50rem) squeezes the
+ * headline into a sliver and clips the art off the viewport edge. Copy on
+ * top, art below at full width capped to a reading measure — the same
+ * deliberate stack at every width. (Unlayered rules beat Starlight's
+ * `@layer starlight.core` ones at any specificity.) */
+.hero {
+  grid-template-columns: 100%;
+  justify-items: center;
+}
+.hero > .hero-html {
+  order: 2;
+  width: min(100%, 60rem);
+}
+.hero .stack {
+  align-items: center;
+  text-align: center;
+}
+.hero .copy {
+  align-items: center;
+}
+.hero .actions {
+  justify-content: center;
+}
+
+/* Hero art gets the look's rounded corners and a soft shadow. The class is
+ * on the `<img>` itself (see index.md), so this is `img.hero-image`, not
+ * a descendant selector. */
+img.hero-image {
+  display: block;
+  width: 100%;
+  height: auto;
   border-radius: 12px;
   border: 1px solid var(--sl-color-gray-5);
+  box-shadow: 0 32px 64px -24px rgb(0 0 0 / 0.5);
+}
+
+/* Keybinding action strings are copy-paste tokens (`scootctl action`
+ * takes the same grammar `[binds]` uses): never break one mid-token at a
+ * hyphen or pipe. Starlight already gives tables a horizontal scroll
+ * container (`display: block; overflow: auto`), so a wide table scrolls
+ * instead of wrapping. */
+.sl-markdown-content table td code {
+  white-space: nowrap;
 }

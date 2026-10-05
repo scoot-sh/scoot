@@ -26,7 +26,13 @@ const twinBody = (raw: string, slug: string) => {
     frontmatter?.[1].match(/^title:\s*(.+)$/m)?.[1].trim() ?? slug;
   const description =
     frontmatter?.[1].match(/^description:\s*(.+)$/m)?.[1].trim() ?? '';
-  const body = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+  // Twins read as plain Markdown (the docs-bar agent-friendly rule), so
+  // `<kbd>` keycaps become backtick-quoted keys rather than literal tags:
+  // `<kbd>Super</kbd>+<kbd>Return</kbd>` reads as `` `Super`+`Return` ``.
+  const body = raw
+    .replace(/^---\n[\s\S]*?\n---\n/, '')
+    .trim()
+    .replaceAll(/<kbd>(.*?)<\/kbd>/g, '`$1`');
   return `# ${title}\n\n${description}\n\n${body}\n`;
 };
 

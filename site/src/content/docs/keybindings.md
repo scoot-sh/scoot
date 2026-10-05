@@ -13,8 +13,8 @@ takes and `[binds]` uses, so each row is also its own rebind recipe.
 | Keys | Does | Action |
 |---|---|---|
 | <kbd>Super</kbd>+<kbd>h</kbd> / <kbd>l</kbd> | Focus column left / right | `focus-column left\|right` |
-| <kbd>Super</kbd>+<kbd>j</kbd> / <kbd>k</kbd> | Focus window down / up | `focus-window up\|down` |
-| <kbd>Super</kbd>+<kbd>Ctrl</kbd>+<kbd>j</kbd> / <kbd>k</kbd> | Focus workspace down / up | `focus-workspace up\|down` |
+| <kbd>Super</kbd>+<kbd>j</kbd> / <kbd>k</kbd> | Focus window down / up | `focus-window down\|up` |
+| <kbd>Super</kbd>+<kbd>Ctrl</kbd>+<kbd>j</kbd> / <kbd>k</kbd> | Focus workspace down / up | `focus-workspace down\|up` |
 | <kbd>Super</kbd>+<kbd>1</kbd>…<kbd>9</kbd> | Focus workspace 1–9 directly | `focus-workspace-index N` |
 | <kbd>Super</kbd>+<kbd>comma</kbd> / <kbd>period</kbd> | Focus output left / right (wraps) | `focus-output-left\|right` |
 | <kbd>Super</kbd>+<kbd>Space</kbd> | Move focus between floating windows and the strip | `toggle-floating-focus` |
@@ -28,8 +28,8 @@ means something against the list it was read from.)
 | Keys | Does | Action |
 |---|---|---|
 | <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>h</kbd> / <kbd>l</kbd> | Move column left / right | `move-column left\|right` |
-| <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>j</kbd> / <kbd>k</kbd> | Move window down / up | `move-window up\|down` |
-| <kbd>Super</kbd>+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>j</kbd> / <kbd>k</kbd> | Move window to workspace down / up | `move-window-to-workspace up\|down` |
+| <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>j</kbd> / <kbd>k</kbd> | Move window down / up | `move-window down\|up` |
+| <kbd>Super</kbd>+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>j</kbd> / <kbd>k</kbd> | Move window to workspace down / up | `move-window-to-workspace down\|up` |
 | <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd>…<kbd>9</kbd> | Move window to workspace 1–9 | `move-window-to-workspace-index N` |
 | <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>comma</kbd> / <kbd>period</kbd> | Move window to output left / right (and follow it) | `move-window-to-output-left\|right` |
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>h</kbd> / <kbd>l</kbd> | Consume into / expel from a column | `consume-or-expel left\|right` |

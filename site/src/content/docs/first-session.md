@@ -1,9 +1,10 @@
 ---
 title: First session
-description: Boot into scoot, open a terminal, and learn the five keys that run everything.
+description: Run scoot in a window, open a terminal, and learn the five keys that run everything.
 ---
 
-Boot into scoot and do something useful in ten minutes. You need [a binary](./install.md) and a terminal (the examples use `foot`, scoot's default).
+Run scoot for the first time — nested in a window, then full-screen on a
+console — and do something useful in ten minutes. You need [a binary](./install.md) and a terminal (the examples use `foot`, scoot's default).
 
 ## Start scoot in a window
 
