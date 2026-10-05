@@ -13,6 +13,12 @@ devenv.local.nix
 devenv.local.yaml
 __pycache__/
 
+# The docs site's build outputs and fetched dependencies (site/pnpm-lock.yaml
+# is tracked; what it fetches is not).
+/site/node_modules/
+/site/dist/
+/site/.astro/
+
 # libFuzzer drops reproducers in its working directory when a `-fork` run
 # ignores its `-artifact_prefix` (crates/scootbg/fuzz/README.md): a crash
 # worth keeping is copied to fuzz/regressions/ by hand, never committed
