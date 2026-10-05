@@ -547,7 +547,11 @@ fn the_modules_line_is_the_registry_in_order() {
         assert!(help.contains("This build has none"));
         return;
     };
-    let line = help[at + "Modules: ".len()..].lines().next().unwrap_or("");
+    // The list wraps past 99 columns (the separator at a wrap is `,` plus
+    // a newline the test folds back), so unfold before comparing.
+    let tail = &help[at + "Modules: ".len()..];
+    let unfolded = tail.replace(",\n            ", ", ");
+    let line = unfolded.lines().next().unwrap_or("");
     let listed: Vec<&str> = line.split(", ").collect();
     assert_eq!(listed, ids, "{line:?}");
 }

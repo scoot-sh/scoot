@@ -148,10 +148,11 @@ fn modules_section() -> String {
         section.push_str(WITH_CLOCK);
         if has_window_title {
             section.push_str("\n                           Modules: ");
+            push_wrapped_ids(&mut section, &ids, 36);
         } else {
             section.push_str(" Modules: ");
+            push_wrapped_ids(&mut section, &ids, 9);
         }
-        section.push_str(&ids.join(", "));
         section.push('\n');
         section.push_str(padding);
         section.push_str(CLOCK_FORMAT);
@@ -162,11 +163,39 @@ fn modules_section() -> String {
     } else {
         section.push_str(WITHOUT_CLOCK);
         section.push_str(" Modules: ");
-        section.push_str(&ids.join(", "));
+        push_wrapped_ids(&mut section, &ids, 9);
         section.push('\n');
         section.push_str(padding);
     }
     section
+}
+
+/// Appends `ids` comma-separated, wrapping past 99 columns: the separator
+/// at a wrap is `",\n"` plus a 12-space hang, so the daemon page stays
+/// plain and narrow in every build no matter how many modules the registry
+/// holds. `used` is the visible width already on the line (the `Modules: `
+/// prefix the caller just pushed).
+fn push_wrapped_ids(section: &mut String, ids: &[&str], mut used: usize) {
+    const LIMIT: usize = 99;
+    const HANG: &str = ",\n            ";
+    let mut first = true;
+    for id in ids {
+        if first {
+            section.push_str(id);
+            used += id.len();
+            first = false;
+            continue;
+        }
+        if used + ", ".len() + id.len() > LIMIT {
+            section.push_str(HANG);
+            section.push_str(id);
+            used = HANG.len() - ",\n".len() + id.len();
+        } else {
+            section.push_str(", ");
+            section.push_str(id);
+            used += ", ".len() + id.len();
+        }
+    }
 }
 
 #[cfg(feature = "workspaces")]
@@ -189,7 +218,7 @@ macro_rules! workspaces_help {
 #[cfg(feature = "workspaces")]
 macro_rules! workspace_wakes {
     () => {
-        " A workspace change redraws the workspaces module once."
+        "\nA workspace change redraws the workspaces module once."
     };
 }
 #[cfg(not(feature = "workspaces"))]

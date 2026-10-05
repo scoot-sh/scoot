@@ -432,7 +432,13 @@ mod tests {
         for flag in crate::cli::FLAGS {
             assert!(table.contains(flag), "{flag} parses but has no help row");
         }
+        // `--check` is the one switch the parser answers before `FLAGS`
+        // (it takes no value), so it has a row without being in `FLAGS`.
+        assert!(table.contains(&"--check"), "--check lost its help row");
         for flag in &table {
+            if *flag == "--check" {
+                continue;
+            }
             assert!(
                 crate::cli::FLAGS.contains(flag),
                 "{flag} has a help row but does not parse"

@@ -581,7 +581,7 @@ fn daemon_flags_are_checked() {
             flag: "--no-restore"
         })
     );
-    for extra in ["--output", "restore", "--profiles=x", "-p"] {
+    for extra in ["--output", "restore", "-p"] {
         assert_eq!(
             args(&["daemon", extra]),
             Err(Error::Unexpected {
@@ -590,6 +590,16 @@ fn daemon_flags_are_checked() {
             })
         );
     }
+    // Close enough to guess: `--profiles=x` meant `--profile`.
+    assert_eq!(
+        args(&["daemon", "--profiles=x"]),
+        Err(Error::Hint {
+            command: "daemon",
+            what: "--profiles=x".into(),
+            suggestion: "--profile".into(),
+            topic: "scootbg daemon --help",
+        })
+    );
     let message = args(&["daemon", "--profile", "a/b"])
         .unwrap_err()
         .to_string();

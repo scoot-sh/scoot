@@ -684,7 +684,15 @@ fn help<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Comma
     let topic = match args.next() {
         None => return Ok(Command::Help(Topic::Main)),
         Some(Ok(name)) if name == "help" => return Ok(Command::Help(Topic::Main)),
-        Some(Ok(name)) if name == "--json" => return help_or_json("help", Topic::Main, args),
+        Some(Ok(name)) if name == "--json" => match args.next() {
+            None => return Ok(Command::Help(Topic::Json)),
+            Some(extra) => {
+                return Err(Error::Unexpected {
+                    command: "help",
+                    argument: extra.unwrap_or_else(|lossy| lossy),
+                });
+            }
+        },
         Some(Ok(name)) => match name.as_str() {
             "daemon" => Topic::Daemon,
             "set" => Topic::Set,
