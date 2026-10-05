@@ -76,7 +76,7 @@ machine-fetchable route, revisit.
 
 ## Resolution
 
-Landed 2026-10-05 (PR #TBD): `scootbg set` / `[wallpaper] image` take
+Landed 2026-10-05 (PR #440): `scootbg set` / `[wallpaper] image` take
 `http(s)` URLs with optional `sha256`, downloaded once by `curl` into
 `$XDG_CACHE_HOME/scootbg/` (new `fetch` module; worker-thread fetch,
 atomic rename, 32 MiB / 60 s caps, no new dependencies: `.text` +36,864 B,
