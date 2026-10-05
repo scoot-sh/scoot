@@ -282,9 +282,10 @@ quantifies the ticket this benchmark was built to check.
    notifications nothing uses — bigger than mako, the bar and the idle
    daemon combined.
 5. **Wake the bar only when its text changes** ([second-wakeups](scootbar/backlog/resolved/second-wakeups-done.md), resolved 2026-10-05 in #458):
-   ~40 wakes/min, almost certainly the clock ticking every second for
-   a minute-resolution clock. After lead 1 lands, the bar is the
-   second-biggest waker left.
+   ~40 wakes/min. The guess at the time (the clock ticking every second)
+   was wrong: the clock is minute-aligned and wakes twice a minute. The
+   cause was the network module redrawing on every dBm wobble of its 10 s
+   signal re-read; #458 redraws only when the shown level changes.
 
 Where scoot is already lightest, plainly: compositor PSS (63.6 MB lean with no wallpaper, 75.9 in the fat cohort with it up,
 against 83/128/126/~160), bar (4.6 MB against 34/42/270), wallpaper at
