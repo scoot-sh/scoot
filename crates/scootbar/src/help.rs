@@ -18,11 +18,10 @@ use crate::modules::REGISTRY;
 /// rather than misread it.
 pub const SCHEMA_VERSION: u32 = 1;
 
-/// Where the human reference lives. There is no published docs site yet (see
-/// `docs/backlog/packaging/docs-site.md`): until it exists, help points at
-/// the reference pages in the repo, which the site will later publish with
-/// `/llms.txt`.
-pub const DOCS_URL: &str = "https://github.com/scoot-sh/scoot/tree/main/docs";
+/// Where the human reference lives: the docs site, published with
+/// `/llms.txt` (one twin per page plus per-app sets; see
+/// `docs/backlog/packaging/docs-site.md` for the plan).
+pub const DOCS_URL: &str = "https://www.scoot.sh";
 
 /// One `daemon` flag: its spelling, what follows it, its default, and what
 /// it does. Mirrors `cli::FLAGS` plus the prose -- the drift tests pin both

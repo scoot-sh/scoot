@@ -35,7 +35,7 @@ OPTIONS (backends in brackets: all means --headless, --nested and --tty):
 ";
 
 /// The config-file topics `scoot help config` summarizes: every section
-/// `docs/configuration.md` documents, with the one command that emits them
+/// `site/src/content/docs/scoot/configure.md` documents, with the one command that emits them
 /// all. The file itself stays the reference; this is the map to it.
 pub const CONFIG_HELP: &str = "\
 CONFIG:
@@ -48,7 +48,7 @@ CONFIG:
     `scoot --print-default-config` prints a starting file generated from the
     compositor's own live defaults; with `--write` it places the file (never
     overwriting). `scoot msg reload` re-applies what can be re-applied live.
-    Full reference: docs/configuration.md.
+    Full reference: https://www.scoot.sh/scoot/configure.md.
 ";
 
 /// One `scoot help` page.
@@ -124,8 +124,7 @@ pub fn usage() -> String {
     text.push_str(
         "\nSEE ALSO:\n\
         \x20   `scoot help config`, `scoot msg help requests`, `scoot msg help actions`\n\
-        \x20   docs: configuration.md, ipc.md (published with /llms.txt once the site lands)\n\
-        \x20   at https://github.com/scoot-sh/scoot/tree/main/docs\n",
+        \x20   docs: https://www.scoot.sh/scoot/configure.md, https://www.scoot.sh/scootctl/\n",
     );
     text
 }

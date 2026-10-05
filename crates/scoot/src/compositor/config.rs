@@ -2185,7 +2185,7 @@ mod tests {
 
     #[test]
     fn a_table_bind_parses_its_action_and_both_flags() {
-        // The shape `docs/configuration.md` documents: one entry carries
+        // The shape `site/src/content/docs/scoot/windows.md#window-rules` documents: one entry carries
         // the action and both opt-ins together.
         let (_dir, path) = write_temp(
             r#"

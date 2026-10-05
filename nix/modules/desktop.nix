@@ -503,7 +503,7 @@ in
           Keep the clipboard after its source closes: every copy lands
           in cliphist's history (its package beside this), restorable
           with the keymap's picker, with password-manager copies and
-          anything copied while locked kept out (see docs/nix.md).
+          anything copied while locked kept out (see site/src/content/docs/desktop/index.md#clipboard).
           `wl-copy`/`wl-paste` land on PATH beside it.
         '';
       };
@@ -524,7 +524,7 @@ in
       # Where the history db lives. Null keeps cliphist's default
       # (`~/.cache/cliphist/db`, honoring `XDG_CACHE_HOME`): on disk,
       # so history survives reboots -- with secrets never landing in
-      # it by construction (see docs/nix.md for the trade-off). Set it
+      # it by construction (see site/src/content/docs/desktop/index.md#clipboard for the trade-off). Set it
       # to move the db: an absolute path without shell specials (no
       # `~`, spaces, quotes, `$`, backticks, `;` or backslashes -- the
       # store entry, the picker and the idle policy's lock wipe all

@@ -542,8 +542,7 @@ ENVIRONMENT:
 
 SEE ALSO:
     `scootbar help daemon`, `scootbar help msg`, `scootbar --help --json`
-    docs: https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/cli.md
-    (published with /llms.txt once the docs site lands)
+    docs: https://www.scoot.sh/scootbar/cli.md (with /llms.txt)
 "
 );
 
@@ -651,8 +650,7 @@ EXIT CODES:
     2  usage error: an unknown flag or value (the error names it)
 
 SEE ALSO:
-    docs: https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/cli.md
-    (published with /llms.txt once the docs site lands)
+    docs: https://www.scoot.sh/scootbar/cli.md (with /llms.txt)
 "
 );
 
@@ -751,7 +749,7 @@ EXIT CODES:
 SEE ALSO:
     `scootbar help msg` prints this page; `scootbar --help --json` is the
     machine-readable form
-    docs: https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/cli.md
+    docs: https://www.scoot.sh/scootbar/cli.md (with /llms.txt)
 "
 );
 
