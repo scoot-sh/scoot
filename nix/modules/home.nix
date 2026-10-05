@@ -412,13 +412,20 @@ in
     # `WAYLAND_DISPLAY` (and `XDG_CURRENT_DESKTOP`) into the user
     # manager, then `systemctl --user start scoot-session.target`
     # (stopped the same way on the way out; see
-    # site/src/content/docs/desktop/index.md). The two files carry the
-    # same dependencies (`resources/systemd/user/scoot-session.target`
-    # is canonical) -- and a user file wins over the system one, so
-    # keeping them identical keeps both paths identical. Present
-    # whenever a unit below can want it (any slot on, with the profile
-    # or standalone); an idle file with nothing wanting it starts
-    # nothing.
+    # site/src/content/docs/desktop/index.md). It is the same file, not
+    # a second definition: `xdg.configFile` sources
+    # `resources/systemd/user/scoot-session.target` itself -- the bytes
+    # the NixOS side installs verbatim -- so the two installs cannot
+    # drift (a new directive in the file reaches both). The typed
+    # `systemd.user.targets` option would render into that same
+    # `systemd/user/scoot-session.target` path with its own INI
+    # rendering (lists as duplicate keys, comments dropped), so a
+    # hand-written copy there could silently diverge; the raw file is
+    # byte-identical by construction. A user file wins over the system
+    # one, so both paths stay identical where both are installed.
+    # Present whenever a unit below can want it (any slot on, with the
+    # profile or standalone); an idle file with nothing wanting it
+    # starts nothing.
     (lib.mkIf
       (
         cfg.desktop.enable
@@ -427,14 +434,8 @@ in
         || cfg.desktop.clipboard.enable
       )
       {
-        systemd.user.targets."scoot-session" = {
-          Unit = {
-            Description = "scoot session (display ready)";
-            BindsTo = [ "graphical-session.target" ];
-            Wants = [ "graphical-session-pre.target" ];
-            After = [ "graphical-session-pre.target" ];
-          };
-        };
+        xdg.configFile."systemd/user/scoot-session.target".source =
+          ../../resources/systemd/user/scoot-session.target;
       }
     )
 

@@ -2052,6 +2052,57 @@ let
     desktop.look = "radial-burst";
     desktop.bar.enable = false;
   } { package = fakeBar; };
+  # A standalone bar (no profile at all): the unit stays a generic
+  # `graphical-session.target` unit, the way other compositors run it.
+  hmBarStandalone =
+    evalHomeDesktop
+      {
+        enable = true;
+        package = fakePkg;
+      }
+      {
+        enable = true;
+        package = fakeBar;
+      };
+  osBarStandalone =
+    evalNixosDesktop
+      {
+        enable = true;
+        package = fakePkg;
+      }
+      {
+        enable = true;
+        package = fakeBar;
+      };
+  # ...and beside a profile that leaves the bar alone (the
+  # `hmDeskBarOff`/`osDeskBarOff` shape with the user's own bar enabled
+  # instead of none): still the shared target, never the scoot scope.
+  hmDeskBarOffStandalone =
+    evalHomeDesktop
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+        desktop.bar.enable = false;
+      }
+      {
+        enable = true;
+        package = fakeBar;
+      };
+  osDeskBarOffStandalone =
+    evalNixosDesktop
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+        desktop.look = "radial-burst";
+        desktop.bar.enable = false;
+      }
+      {
+        enable = true;
+        package = fakeBar;
+      };
   # The notification feed's bar half: the profile beside the bar
   # module (music-desk, so the daemon runs themed).
   hmDeskBarNotif = evalHomeDesktop {
@@ -2925,6 +2976,11 @@ let
   sessionServiceText = osSession.config.systemd.user.units."scoot.service".text;
   sessionServiceLines = lib.splitString "\n" sessionServiceText;
   sessionTargetText = osSession.config.systemd.user.units."scoot-session.target".text;
+  # The single source both `scoot-session.target` installs share: the
+  # NixOS side installs these bytes verbatim, the home-manager side
+  # sources this file (see `nix/modules/home.nix`).
+  scootSessionTargetFile = ../resources/systemd/user/scoot-session.target;
+  scootSessionTargetText = builtins.readFile scootSessionTargetFile;
   sessionShutdownText = osSession.config.systemd.user.units."scoot-shutdown.target".text;
   cmdDesktopFile = "${builtins.head osSessionCmd.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
   wrapperDesktopFile = "${builtins.head osSessionWrapper.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
@@ -3708,57 +3764,69 @@ let
   _sessionPins = lib.optionals isLinux [
     # The home-manager side installs `scoot-session.target` itself
     # (the NixOS side installs the same file beside its login entry):
-    # pulling in the shared graphical target, ordered after the
-    # pre-session hook -- the same three dependencies as
-    # `resources/systemd/user/scoot-session.target`.
+    # the same bytes, not a second definition -- `xdg.configFile`
+    # sources `resources/systemd/user/scoot-session.target` directly,
+    # so the two installs cannot drift. Pinned by content: the
+    # installed file reads back identical to the canonical one...
     (
-      assert hmIdle.config.systemd.user.targets ? "scoot-session";
+      assert hmIdle.config.xdg.configFile ? "systemd/user/scoot-session.target";
       true
     )
     (
       assert
-        hmIdle.config.systemd.user.targets."scoot-session".Unit.Description
-        == "scoot session (display ready)";
+        builtins.readFile hmIdle.config.xdg.configFile."systemd/user/scoot-session.target".source
+        == scootSessionTargetText;
+      true
+    )
+    # ...and the NixOS install is those same bytes too (pinned where
+    # the module reads them, so a hand-written copy there fails as
+    # well)...
+    (
+      assert sessionTargetText == scootSessionTargetText;
+      true
+    )
+    # ...whose wiring -- pulling in the shared graphical target,
+    # ordered after the pre-session hook -- is pinned here, so the
+    # scope's contract is stated where both installs are checked...
+    (
+      assert lib.hasInfix "Description=scoot session (display ready)" scootSessionTargetText;
       true
     )
     (
-      assert
-        hmIdle.config.systemd.user.targets."scoot-session".Unit.BindsTo == [ "graphical-session.target" ];
+      assert lib.hasInfix "BindsTo=graphical-session.target" scootSessionTargetText;
       true
     )
     (
-      assert
-        hmIdle.config.systemd.user.targets."scoot-session".Unit.Wants == [ "graphical-session-pre.target" ];
+      assert lib.hasInfix "Wants=graphical-session-pre.target" scootSessionTargetText;
       true
     )
     (
-      assert
-        hmIdle.config.systemd.user.targets."scoot-session".Unit.After == [ "graphical-session-pre.target" ];
+      assert lib.hasInfix "After=graphical-session-pre.target" scootSessionTargetText;
       true
     )
     # ...present with the profile (which turns every slot on)...
     (
-      assert hmDesk.config.systemd.user.targets ? "scoot-session";
+      assert hmDesk.config.xdg.configFile ? "systemd/user/scoot-session.target";
       true
     )
     # ...present for a standalone slot too (no profile: the slot still
     # runs in the scoot session, never in another desktop's)...
     (
-      assert hmIdleStandalone.config.systemd.user.targets ? "scoot-session";
+      assert hmIdleStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target";
       true
     )
     (
-      assert hmNotifStandalone.config.systemd.user.targets ? "scoot-session";
+      assert hmNotifStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target";
       true
     )
     (
-      assert hmClipStandalone.config.systemd.user.targets ? "scoot-session";
+      assert hmClipStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target";
       true
     )
     # ...and absent with nothing to scope (an idle target file with no
     # unit wanting it starts nothing, so none is written).
     (
-      assert hmOff.config.systemd.user.targets == { };
+      assert !(hmOff.config.xdg.configFile ? "systemd/user/scoot-session.target");
       true
     )
     # No profile unit is left on the shared target: besides the three
@@ -3794,6 +3862,79 @@ let
     )
     (
       assert osDeskBar.config.systemd.user.services.scootbar.after == [ "scoot-session.target" ];
+      true
+    )
+    # A standalone bar stays a generic `graphical-session.target` unit
+    # on both sides: with no profile at all...
+    (
+      assert
+        hmBarStandalone.config.systemd.user.services.scootbar.Install.WantedBy
+        == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        hmBarStandalone.config.systemd.user.services.scootbar.Unit.PartOf == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        hmBarStandalone.config.systemd.user.services.scootbar.Unit.After == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        osBarStandalone.config.systemd.user.services.scootbar.wantedBy == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        osBarStandalone.config.systemd.user.services.scootbar.partOf == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        osBarStandalone.config.systemd.user.services.scootbar.after == [ "graphical-session.target" ];
+      true
+    )
+    # ...and beside a profile that leaves the bar alone (the
+    # `hmDeskBarOff`/`osDeskBarOff` shape with the user's own bar
+    # enabled): still the shared target, so a bar under another
+    # compositor starts even where the profile is on.
+    (
+      assert
+        hmDeskBarOffStandalone.config.systemd.user.services.scootbar.Install.WantedBy
+        == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        hmDeskBarOffStandalone.config.systemd.user.services.scootbar.Unit.PartOf
+        == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        hmDeskBarOffStandalone.config.systemd.user.services.scootbar.Unit.After
+        == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        osDeskBarOffStandalone.config.systemd.user.services.scootbar.wantedBy
+        == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        osDeskBarOffStandalone.config.systemd.user.services.scootbar.partOf
+        == [ "graphical-session.target" ];
+      true
+    )
+    (
+      assert
+        osDeskBarOffStandalone.config.systemd.user.services.scootbar.after
+        == [ "graphical-session.target" ];
       true
     )
     # ...while the bar's tray ordering survives the move on both sides

@@ -78,11 +78,15 @@ system halves (packages, logind, PAM: no units there).
 
 Landed as proposed. `nix/modules/{idle,notifications,clipboard}-home.nix`
 and `scootbar-{home,nixos}.nix` bind every profile unit to
-`scoot-session.target` (profile-managed bar only; standalone bar
-unchanged); `nix/modules/home.nix` installs `scoot-session.target`
-itself with the same deps as `resources/systemd/user/scoot-session.target`
-(verified identical semantics against the pinned home-manager source:
-`systemd.user.targets."scoot-session"` generates `scoot-session.target`).
+`scoot-session.target` (profile-managed bar only; the standalone bar
+stays on `graphical-session.target`, pinned on both sides for a
+pure-standalone bar and for a user bar beside a profile with
+`bar.enable = false`); `nix/modules/home.nix` installs
+`resources/systemd/user/scoot-session.target` itself -- the same bytes
+the NixOS side installs verbatim, via `xdg.configFile`, so the two
+installs cannot drift (checked against the pinned home-manager source:
+`systemd.user.targets` renders into that same `systemd/user` path with
+its own INI rendering, which is why the raw file wins).
 The launcher child (#451, merged mid-work) ships no units — nothing to
 retarget there. `nix/tests.nix` pins every unit's install/part-of
 target plus the HM target's presence/deps/absence; the desktop site
