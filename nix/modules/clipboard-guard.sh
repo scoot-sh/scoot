@@ -16,7 +16,7 @@
 # still hold) rather than the history.
 clipboard_unlocked() {
     probe="$("@SCOOT_BIN@" msg locked 2>/dev/null)" || return 0
-    # `scootctl` prints replies pretty (`"locked": true`) while the event
+    # `scoot msg` prints replies pretty (`"locked": true`) while the event
     # stream and any compact reader use `"locked":true`: match both.
     case "$probe" in
         *'"locked":true'*|*'"locked": true'*) return 1 ;;
