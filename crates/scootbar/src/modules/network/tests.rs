@@ -1056,6 +1056,50 @@ fn the_signal_timer_runs_only_for_shown_wifi() {
 }
 
 #[test]
+fn signal_jitter_inside_a_level_redraws_nothing() {
+    // The 10 s signal refresh re-reads the station; the bar redraws only
+    // when the shown level moves, not on every dBm of jitter (an idle
+    // radio wanders constantly, and each redraw costs the compositor's
+    // release too). The tooltip still names the exact dBm, refreshed with
+    // the next redraw.
+    let (mut harness, fake) = Fake::start(&Settings::default());
+    wifi(&fake, b"Wimbly", -54);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    // Settle the scan and station the association queued, so the timer's
+    // query below is the only dump in flight.
+    let (_, genl) = fake.sent();
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::done_seq(scan));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    let station = request_seq(&genl, super::netlink::NL80211_CMD_GET_STATION);
+    fake.genl(&fake::station(-54));
+    fake.genl(&fake::done_seq(station));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let _ = fake.sent();
+    // A tick queues the station refresh and changes nothing by itself.
+    assert_eq!(harness.deliver(2, PollFlags::IN), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    let station = request_seq(&genl, super::netlink::NL80211_CMD_GET_STATION);
+    // -54 to -50 dBm stays in the top level: no redraw, no release.
+    fake.genl(&fake::station(-50));
+    fake.genl(&fake::done_seq(station));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    // The tooltip still names the exact dBm, live.
+    assert_eq!(harness.view().tooltip(), "Wimbly · -50 dBm on wlan0");
+    let _ = fake.sent();
+    // Across a level (-50 to -70 dBm, top to second) the bar redraws.
+    assert_eq!(harness.deliver(2, PollFlags::IN), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    let station = request_seq(&genl, super::netlink::NL80211_CMD_GET_STATION);
+    fake.genl(&fake::station(-70));
+    fake.genl(&fake::done_seq(station));
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert_eq!(harness.view().tooltip(), "Wimbly · -70 dBm on wlan0");
+    let _ = fake.sent();
+}
+
+#[test]
 fn a_refused_query_is_asked_once() {
     let (mut harness, fake) = Fake::start(&Settings::default());
     plug(&fake);

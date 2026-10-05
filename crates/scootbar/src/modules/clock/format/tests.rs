@@ -153,6 +153,20 @@ fn seconds_decide_the_tick() {
     assert!(Format::parse("%T").unwrap().seconds());
     assert!(Format::parse("%-S").unwrap().seconds());
     assert!(!Format::parse("%R %%S").unwrap().seconds());
+    // Every other documented specifier is minute-or-slower: only seconds
+    // (and the one composite holding seconds, `%T`) tick every second.
+    // A specifier the bar cannot classify never reaches a tick: parsing
+    // refuses it outright (`bad_formats_are_refused_with_a_reason`), so
+    // the 1 s fallback is the refusal, not a runtime branch.
+    for spec in [
+        "%H", "%I", "%k", "%l", "%M", "%p", "%P", "%a", "%A", "%b", "%h", "%B", "%d", "%e", "%m",
+        "%j", "%y", "%Y", "%u", "%w", "%Z", "%z", "%R", "%F", "%D", "%%",
+    ] {
+        assert!(!Format::parse(spec).unwrap().seconds(), "{spec}");
+    }
+    for spec in ["%S", "%_S", "%0S", "%T", "tick %T tock"] {
+        assert!(Format::parse(spec).unwrap().seconds(), "{spec}");
+    }
 }
 
 #[test]

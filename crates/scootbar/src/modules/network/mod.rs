@@ -33,6 +33,15 @@
 //! kernel lets the socket join it, else the next signal tick), so the
 //! timer never decides them.
 //!
+//! The re-read wakes the bar twice a tick (the timer, then the reply);
+//! the redraw is owed only when the shown level moves. An idle radio's
+//! dBm wanders constantly, so comparing the raw dBm would redraw (and
+//! take the compositor's release) on nearly every tick; the fingerprint
+//! compares the icon's [`bars_for`](netlink::bars_for) level instead.
+//! The tooltip still names the exact dBm, drawn live from the latest
+//! reply — fresh whenever it opens, and refreshed with the next redraw
+//! while it stays open.
+//!
 //! ## The picker
 //!
 //! Click (the `menu` action) spawns `menu-command` with the cached scan's
@@ -294,6 +303,11 @@ enum State {
 /// What the view is drawn from: a roam changes the SSID without changing
 /// the state, and the bar must still redraw, so `on_ready` compares one
 /// of these, not the state alone. Fixed arrays, no allocation.
+///
+/// The signal is the icon's [`bars_for`](netlink::bars_for) level, not
+/// the raw dBm: the bar draws the level (or nothing signal-derived at
+/// all), so dBm jitter inside a level redraws nothing. The exact dBm
+/// stays in the tooltip and `query`, which read the live state.
 #[derive(PartialEq, Eq)]
 struct Fingerprint {
     state: State,
@@ -301,7 +315,7 @@ struct Fingerprint {
     name_len: u8,
     ssid: [u8; 32],
     ssid_len: u8,
-    signal: Option<i8>,
+    level: Option<u8>,
     vpn: bool,
     seen: bool,
 }
@@ -1245,7 +1259,7 @@ impl Network {
             name_len: 0,
             ssid: [0; 32],
             ssid_len: 0,
-            signal: None,
+            level: None,
             vpn: false,
             seen: self.nets.seen,
         };
@@ -1258,7 +1272,7 @@ impl Network {
             let take = ssid.len().min(print.ssid.len());
             print.ssid[..take].copy_from_slice(&ssid[..take]);
             print.ssid_len = take as u8;
-            print.signal = iface.signal;
+            print.level = iface.signal.map(netlink::bars_for);
             print.vpn = self.nets.other_vpn(iface.link.index);
         }
         print
