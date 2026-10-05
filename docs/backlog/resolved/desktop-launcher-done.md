@@ -47,7 +47,7 @@ launch; dmenu round-trip from a pipe); docs in `docs/nix.md`.
 Building `scootlaunch` itself; file-picker dialogs (portal child);
 emoji pickers.
 
-## Resolution (2026-10-05)
+## Resolution (2026-10-05, PR #451)
 
 Landed as the `desktop.launcher` slot filled with fuzzel: `enable` +
 `daemon` (`"fuzzel"`, widened later without renaming anything) in
