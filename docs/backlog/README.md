@@ -586,6 +586,10 @@ be revisited.
 - [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
 - [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
 - [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
+- [Pointer-button presses don't activate browser modal buttons, and virtual button hold doesn't persist across IPC calls](./core/pointer-button-popups.md)
+  — high, filed 2026-10-05 (f459 live proof): clicks reach web content
+  exactly but never fire Chrome's picker Share or Firefox's Allow, and a
+  press held across IPC calls never drags
 - [The first pointer move after a client ends a popup grab lands at the old position](./resolved/pointer-motion-after-popup-grab-end-done.md)
   — RESOLVED 2026-10-03 in #396: `settle_popup_grab` unsets the seat pointer grab (serial-guarded), mirroring the dismiss path.
 - [A real maximize](./resolved/maximize-done.md)
