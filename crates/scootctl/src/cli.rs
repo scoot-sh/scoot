@@ -713,8 +713,8 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_args(&["locked"]),
-            Ok(Command::Msg {
+            parse_msg_args(&["locked"]),
+            Ok(Msg {
                 request: Request::Locked,
                 out: None,
             })
@@ -772,9 +772,9 @@ mod tests {
 
     #[test]
     fn usage_names_locked_on_its_own_line() {
+        let help = crate::help::usage("scoot msg", REQUESTS_HELP, ACTIONS_HELP, false);
         assert!(
-            usage()
-                .lines()
+            help.lines()
                 .any(|line| line.trim().starts_with("locked")),
             "--help hides the locked verb"
         );
