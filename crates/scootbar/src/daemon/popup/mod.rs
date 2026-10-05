@@ -491,9 +491,9 @@ impl State {
                 (requested, Some(radius.saturating_add(1))),
             );
             // A click popup's input shape is the rounded one, as the bar's
-            // own is, so a click in a cut corner reaches what is behind. A
-            // tooltip keeps its empty input region instead (it never takes
-            // a click).
+            // own is, so a click in a cut corner does not land on the
+            // popup. A tooltip keeps its empty input region instead (it
+            // never takes a click).
             if matches!(flavor, Flavor::Popup { .. }) {
                 super::canvas::set_input_region(&self.globals, qh, &surface, (requested, radius));
             }

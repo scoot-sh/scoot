@@ -1490,8 +1490,8 @@ the dmenu-style launcher are still how a click connects); `on-click =
   tables are built once per open popup and read every frame it is drawn (no
   allocation while open); the buffers are `ARGB8888` only while rounded (a
   square popup stays `XRGB8888`, as before). The compositor is told the rest
-  is opaque, and a click in a cut corner reaches what is behind, as on the
-  bar. Tooltips round the same way. Measured in [the resource
+  is opaque, and the surface's input shape is the rounded one, as the bar's
+  own is. Tooltips round the same way. Measured in [the resource
   ratchet](backlog/lightest.md#m6-popup-corners).
 - **What the network list shows**: one row per named network in scan
   order (unnamed ones are not rows), each starting with its strength
