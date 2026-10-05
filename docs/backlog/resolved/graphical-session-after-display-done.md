@@ -9,7 +9,7 @@ resolved: "2026-10-04"
 
 # graphical-session.target is reached before the session has a display
 
-Filed 2026-10-05. Serves **daily-drive** first (idle dim/screen-off never
+Filed 2026-10-04. Serves **daily-drive** first (idle dim/screen-off never
 runs: the session's own Home Manager `swayidle.service` is skipped every
 login), and **computer use** second (any agent-driven unit ordered after
 the session target reads the same empty environment).

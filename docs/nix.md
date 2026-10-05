@@ -463,7 +463,8 @@ With the default entry, picking scoot at the greeter runs
    without cleanup (SIGKILL, power loss — the kernel releases the
    lock, which is the stale case) are stale, not live: when the lock
    is free and nothing answers IPC within a short probe, the launcher
-   stops `scoot.service` (and resets its failed state) and continues
+   stops `scoot-session.target` and `scoot.service` (and resets the
+   service's failed state) and continues
    the login instead of refusing every retry. It never stops the
    shared `graphical-session.target` itself — that target may belong
    to another desktop in the same user manager, and a stale-active
@@ -476,7 +477,8 @@ With the default entry, picking scoot at the greeter runs
    judging a session it cannot see; retry the login, which lands past
    the window. If a login ever still
    refuses while no scoot session is running, run `systemctl --user
-   stop scoot.service graphical-session.target` from any VT or over
+   stop scoot.service scoot-session.target graphical-session.target`
+   from any VT or over
    ssh, then log in again.
 2. It imports the login environment into the systemd user manager and
    the D-Bus activation environment together
