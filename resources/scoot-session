@@ -20,10 +20,16 @@
 #      manager AND the D-Bus activation environment, so units ordered
 #      after `graphical-session.target` (the status bar, portals) see
 #      the display;
-#   5. when scoot exits, stop `graphical-session.target` (via
-#      `scoot-shutdown.target`, which `Conflicts=` it) so session-bound
-#      user services stop instead of leaking into the next login, and
-#      restore the manager environment to its pre-session state.
+#   5. start `scoot-session.target` -- and only now: its `BindsTo`
+#      pulls in `graphical-session.target`, so the target is reached
+#      only after the display is in the manager (a unit the service
+#      start pulled in would activate at fork time, before the import,
+#      and `ConditionEnvironment=WAYLAND_DISPLAY` units would skip);
+#   6. when scoot exits, stop the session targets (via
+#      `scoot-shutdown.target`, which `Conflicts=` them) so
+#      session-bound user services stop instead of leaking into the
+#      next login, and restore the manager environment to its
+#      pre-session state.
 #
 # scoot itself never touches the bus -- that is deliberate, and it stays
 # that way: everything bus-shaped happens here, in the launcher, not in
@@ -49,6 +55,7 @@
 set -u
 
 SERVICE=scoot.service
+SESSION=scoot-session.target
 SHUTDOWN=scoot-shutdown.target
 GRAPHICAL=graphical-session.target
 # How long to wait for the compositor to answer IPC after the service
@@ -249,11 +256,12 @@ fi
 # healing blind could stop a live session and proceeding blind could
 # start a second one over it.
 svc_state=$(service_state "$SERVICE") || svc_state="unknown"
+sess_state=$(service_state "$SESSION") || sess_state="unknown"
 gfx_state=$(service_state "$GRAPHICAL") || gfx_state="unknown"
-if [ "$svc_state" = "unknown" ] || [ "$gfx_state" = "unknown" ]; then
+if [ "$svc_state" = "unknown" ] || [ "$sess_state" = "unknown" ] || [ "$gfx_state" = "unknown" ]; then
     die "cannot reach the systemd user manager; refusing this login rather than judging a session that may be live (retry the login)"
 fi
-if unit_up "$svc_state" || unit_up "$gfx_state"; then
+if unit_up "$svc_state" || unit_up "$sess_state" || unit_up "$gfx_state"; then
     # A live session refuses: two live scoot sessions for one user on
     # one seat is still wrong. A stale one -- units left active with
     # no lock holder by a launcher that died without cleanup (SIGKILL,
@@ -264,37 +272,42 @@ if unit_up "$svc_state" || unit_up "$gfx_state"; then
     # another launcher already refused above, before probing) -- so
     # refuse an active session as live, never clear blind.
     if [ "$have_lock" -eq 0 ]; then
-        die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
+        die "a scoot session is already running for this user (found $SERVICE, $SESSION or $GRAPHICAL active)"
     fi
     # `graphical-session.target` is shared with other desktops, so a
-    # stale clear stops only scoot's own service (and resets its
-    # failed state): an active target with scoot's service never run
-    # is another session's, and the refusal stands. The target itself
-    # is never stopped here -- that would tear down another desktop's
-    # bound services in the same user manager, while a stale-active
-    # target does not hurt the new login (the display variables are
-    # re-imported below). (If that ever misfires -- another desktop
-    # running in this same user manager beside a stale scoot unit --
-    # stop the units by hand: `systemctl --user stop scoot.service
+    # stale clear stops only scoot's own units -- the service (and its
+    # failed state) and the session target -- never the graphical
+    # target itself: an active graphical target with scoot's units
+    # never run is another session's, and the refusal stands, since
+    # stopping it would tear down another desktop's bound services in
+    # the same user manager, while a stale-active target does not hurt
+    # the new login (the display variables are re-imported below). (If
+    # that ever misfires -- another desktop running in this same user
+    # manager beside a stale scoot unit -- stop the units by hand:
+    # `systemctl --user stop scoot.service scoot-session.target
     # graphical-session.target`, then log in again.)
     if try_version; then
-        die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
+        die "a scoot session is already running for this user (found $SERVICE, $SESSION or $GRAPHICAL active)"
     fi
     # Re-asked (the manager may have re-execed since the check above):
-    # an unanswerable manager refuses, never heals blind. Heals when the
-    # service is up or failed; a unit stopping on its own
+    # an unanswerable manager refuses, never heals blind. Heals when
+    # the service is up or failed, or when the session target is up
+    # (a SIGKILLed launcher can leave the target active with the
+    # service already gone); a unit stopping on its own
     # (`deactivating`) is not ours to clear -- refusing one login beats
     # fighting its teardown (it settles in seconds, the retry proceeds).
     svc_state=$(service_state "$SERVICE") || svc_state="unknown"
-    if [ "$svc_state" = "unknown" ]; then
+    sess_state=$(service_state "$SESSION") || sess_state="unknown"
+    if [ "$svc_state" = "unknown" ] || [ "$sess_state" = "unknown" ]; then
         die "cannot reach the systemd user manager; refusing this login rather than judging a session that may be live (retry the login)"
     fi
-    if unit_up "$svc_state" || [ "$svc_state" = "failed" ]; then
-        note "found $SERVICE or $GRAPHICAL active but the compositor does not answer IPC; clearing the stale session"
+    if unit_up "$svc_state" || [ "$svc_state" = "failed" ] || unit_up "$sess_state"; then
+        note "found $SERVICE, $SESSION or $GRAPHICAL active but the compositor does not answer IPC; clearing the stale session"
+        systemctl --user stop "$SESSION" >/dev/null 2>&1 || true
         stop_service || note "warning: could not stop $SERVICE; it may still be active (a later login heals or refuses it)"
         systemctl --user reset-failed "$SERVICE" >/dev/null 2>&1 || true
     else
-        die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
+        die "a scoot session is already running for this user (found $SERVICE, $SESSION or $GRAPHICAL active)"
     fi
 fi
 
@@ -326,9 +339,10 @@ prev_desktop=$(systemctl --user show-environment 2>/dev/null | sed -n 's/^XDG_CU
 captured=1
 
 # Tear the session down even when this script, not scoot, dies first
-# (a HUP at logout, a TERM around it): stopping the target stops
-# everything bound to it -- the compositor through `BindsTo`, the bar
-# through `PartOf` -- so nothing leaks into the next login.
+# (a HUP at logout, a TERM around it): stopping the session targets
+# stops everything bound to them -- the compositor through `PartOf`
+# `scoot-session.target`, the bar through `PartOf`
+# `graphical-session.target` -- so nothing leaks into the next login.
 # `replace-irreversibly` so teardown wins over stray start jobs.
 # Installed here, right after the environment capture and before
 # `start`: `cleanup` (unlike `die`) restores unconditionally, so any
@@ -474,8 +488,27 @@ if command -v dbus-update-activation-environment >/dev/null 2>&1; then
     dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP \
         || note "warning: could not update the D-Bus activation environment; portals may miss this session"
 else
-    note "warning: no dbus-update-activation-environment on PATH; the user manager has the display, D-Bus-activated portals may miss this session"
+    # No dbus tool: the manager half through `import-environment`
+    # (both variables are exported by now, so the names resolve), the
+    # bus half missed with a warning.
+    systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP \
+        || note "warning: could not import the display into the user manager; units ordered after the session target may miss it"
+    note "warning: no dbus-update-activation-environment on PATH; D-Bus-activated portals may miss this session"
 fi
+
+# The session target, started only now that the display is in the
+# manager and on the bus: its `BindsTo` pulls in
+# `graphical-session.target`, so the target is reached with the
+# display already imported -- including for
+# `ConditionEnvironment=WAYLAND_DISPLAY` units, which a start before
+# the import would skip without retry. (The target carries
+# `RefuseManualStart=yes` and can only be pulled in by a dependency
+# like this one, never by `systemctl start` -- this start is that
+# dependency.) A failure here leaves the service -- and nothing else
+# -- active, so the service is stopped and nothing is imported past
+# the pre-session state `die` restores.
+systemctl --user start "$SESSION" \
+    || { stop_service || note "warning: could not stop $SERVICE; it may still be active (a later login heals or refuses it)"; die "$SESSION failed to start (see: journalctl --user)"; }
 
 # The session is up. Wait for it to end: scoot exiting (a `quit` action,
 # a crash) inactivates the service, which ends this wait -- but only a

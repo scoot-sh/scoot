@@ -463,7 +463,8 @@ With the default entry, picking scoot at the greeter runs
    without cleanup (SIGKILL, power loss — the kernel releases the
    lock, which is the stale case) are stale, not live: when the lock
    is free and nothing answers IPC within a short probe, the launcher
-   stops `scoot.service` (and resets its failed state) and continues
+   stops `scoot-session.target` and `scoot.service` (and resets the
+   service's failed state) and continues
    the login instead of refusing every retry. It never stops the
    shared `graphical-session.target` itself — that target may belong
    to another desktop in the same user manager, and a stale-active
@@ -476,7 +477,8 @@ With the default entry, picking scoot at the greeter runs
    judging a session it cannot see; retry the login, which lands past
    the window. If a login ever still
    refuses while no scoot session is running, run `systemctl --user
-   stop scoot.service graphical-session.target` from any VT or over
+   stop scoot.service scoot-session.target graphical-session.target`
+   from any VT or over
    ssh, then log in again.
 2. It imports the login environment into the systemd user manager and
    the D-Bus activation environment together
@@ -502,15 +504,23 @@ With the default entry, picking scoot at the greeter runs
    Only the service definitely stopping ends the wait early: a poll
    the manager never answers (mid-re-exec) is retried inside the
    deadline, with a log line, never read as "scoot stopped".
-4. Starting `scoot.service` pulls in `graphical-session.target` (the
-   unit is `BindsTo`/`Before` it), so units with `WantedBy=` it — the
-   status bar below — start once the session exists. The display import
-   lands as soon as the compositor answers, and a unit that starts
-   before it (the bar retries every two seconds) heals on its own.
+4. Starting `scoot.service` pulls in nothing session-shaped (the
+   unit is `PartOf=` `scoot-session.target`: stops propagate, starts
+   never do). Past the import above, the launcher starts
+   `scoot-session.target`, whose `BindsTo=` pulls in
+   `graphical-session.target` -- so the target is reached only once
+   the display is in the manager and on the bus. Units with
+   `WantedBy=` it -- the status bar below -- start once the session
+   exists, with the display already there: even
+   `ConditionEnvironment=WAYLAND_DISPLAY` units (an idle daemon, say)
+   start on the first try. The bar's two-second retry stays as
+   insurance, not as the mechanism.
 5. When scoot exits — a `quit` action, a crash — the launcher starts
-   `scoot-shutdown.target`, which `Conflicts=` the session targets away:
-   everything bound to them (the compositor through `BindsTo`, the bar
-   through `PartOf`) stops, the two display variables in the user
+   `scoot-shutdown.target`, which `Conflicts=` the session targets
+   (`scoot-session.target` beside the graphical ones) away:
+   everything bound to them (the compositor through `PartOf`
+   `scoot-session.target`, the bar through `PartOf`
+   `graphical-session.target`) stops, the two display variables in the user
    manager go back to their pre-session values (restored, or unset if
    they were unset — the D-Bus activation environment has no unset, so
    the bus keeps the last values the way it does for every session),
@@ -525,9 +535,9 @@ With the default entry, picking scoot at the greeter runs
    compositor's own status when it has one, so a crash reads as a crash.
 
 The units live in `resources/systemd/user/` (`scoot.service`,
-`scoot-shutdown.target`) and are installed by `session.enable` with the
-binary path filled in; outside NixOS, copy them to
-`~/.config/systemd/user/` with `@SCOOT_BIN@` replaced by the `scoot`
+`scoot-session.target`, `scoot-shutdown.target`) and are installed by
+`session.enable` with the binary path filled in; outside NixOS, copy
+them to `~/.config/systemd/user/` with `@SCOOT_BIN@` replaced by the `scoot`
 binary's path (and `scoot-session` anywhere on `PATH`, with `SCOOT_BIN`
 set if the binary is not beside it). Without a systemd user manager at
 all (s6, the webtop target), the launcher runs `scoot --tty` directly
@@ -889,15 +899,16 @@ of this pin, not a run.
 
 **Starting the bar: the unit, or your session script, not both.** The unit
 starts when `graphical-session.target` is reached. In a greeter-started
-session that target is reached for you: `programs.scoot.session.enable`
-installs the `scoot-session` launcher as the login entry, and the
-launcher starts `scoot.service` (which pulls the target in) and imports
-`WAYLAND_DISPLAY`/`XDG_CURRENT_DESKTOP` once the compositor answers —
-see [NixOS module](#nixos-module). (NixOS's
+session that target is reached for you past the display import:
+`programs.scoot.session.enable` installs the `scoot-session` launcher
+as the login entry, and the launcher starts `scoot.service`, imports
+`WAYLAND_DISPLAY`/`XDG_CURRENT_DESKTOP` once the compositor answers,
+and only then starts `scoot-session.target` (which pulls the graphical
+target in) — see [NixOS module](#nixos-module). (NixOS's
 `nixos-fake-graphical-session.target` exists for sessions that do not do
 this, but its only users are the X11 session wrapper and `startx`,
 never a Wayland session entry.) When scoot exits, the launcher stops
-the target again, so the bar goes down with the session instead of
+the targets again, so the bar goes down with the session instead of
 retrying a compositor that is gone every two seconds until logout.
 
 Outside a launcher-started session — a hand-rolled greeter entry, a
@@ -908,7 +919,12 @@ start `graphical-session.target` directly: that target has
 graphical-session.target` is refused ("may be requested by dependency
 only", measured, systemd 261). A session target that `BindsTo=` it is
 the way (the shape of NixOS's own fake target), and the script starts
-that:
+that. (Launcher-started sessions already ship this target as
+`scoot-session.target` in `resources/systemd/user/` — the recipe below
+is only for the unwired route, where the launcher never runs. If a box
+has both — the NixOS session entry beside this home-manager target —
+the per-user file shadows the shipped one; both `BindsTo=` the
+graphical target, so either starts the same session shape.)
 
 ```nix
 # home-manager: the target the session script starts

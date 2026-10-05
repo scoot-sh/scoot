@@ -83,9 +83,11 @@ behavior — scoot itself never touches the bus):
   the NixOS module's `programs.scoot.session.enable` default — see
   [nix.md](nix.md#what-a-greeter-login-starts)): the launcher owns this
   import. It brings the login environment into the user manager, waits
-  for the compositor to answer IPC, and then runs the equivalent of the
-  two lines below for `WAYLAND_DISPLAY` and `XDG_CURRENT_DESKTOP` — no
-  session-script line needed.
+  for the compositor to answer IPC, runs the equivalent of the two
+  lines below for `WAYLAND_DISPLAY` and `XDG_CURRENT_DESKTOP`, and
+  only then starts `scoot-session.target` (which pulls in
+  `graphical-session.target`, so the target is reached with the
+  display already imported) — no session-script line needed.
 - **Anything else** (s6, a seat with no user manager, the webtop
   target): the session script does it:
 

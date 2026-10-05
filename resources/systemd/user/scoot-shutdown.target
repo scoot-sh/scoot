@@ -2,7 +2,7 @@
 #
 # `scoot-session` starts this when the compositor exits (or when the
 # launcher itself is signalled). `Conflicts=` stops the session targets,
-# which -- through `BindsTo` on `scoot.service` and `PartOf` on
+# which -- through `PartOf` on `scoot.service` and `PartOf` on
 # session-bound units like the status bar -- stops everything the
 # session started, so nothing leaks into the next login. `After` orders
 # the stop after the targets were active; `StopWhenUnneeded` and
@@ -13,5 +13,5 @@
 Description=Shutdown for the scoot session
 DefaultDependencies=no
 StopWhenUnneeded=true
-Conflicts=graphical-session.target graphical-session-pre.target
-After=graphical-session.target graphical-session-pre.target
+Conflicts=scoot-session.target graphical-session.target graphical-session-pre.target
+After=scoot-session.target graphical-session.target graphical-session-pre.target
