@@ -122,7 +122,9 @@ What broke, and what was done about it:
   zeros). Memory, wakeups and PSS/RSS from that campaign are valid
   (separate reads). Fixed to `${12}`/`${13}`, verified against
   `$14+$15`, and the whole CPU series re-measured (the `*-c*`
-  rounds); memory uses both campaigns.
+  rounds); memory uses both campaigns. The per-role tables give the median of the three
+  `*-c*` rounds; where the six scoot sessions split into a lean and a fat cohort (lead 2), the
+  compositor row says so.
 - `loginctl terminate-session` does not reap everything: sudo-launched
   foots always linger, and KDE's kwin+plasmashell survived two
   logouts, so KDE rounds 2–3 ran on round 1's compositor (discarded,
@@ -154,7 +156,7 @@ a core); wakeups are voluntary context switches per 60 s.
 | desktop | CPU ticks | % of a core | wakeups | PSS | RSS |
 |---|---|---|---|---|---|
 | scoot | 36 [35–37] | 0.60 | 470 [458–477] | 197 MB [197–203] | 331 MB [331–359] |
-| niri | 3 [3–6] | 0.05 | 184 [179–185] | 443 MB | 938 MB [937–938] |
+| niri | 3 [3–6] | 0.05 | 184 [179–185] | 443 MB [443–443] | 938 MB [937–938] |
 | Hyprland | 24 [21–25] | 0.40 | 1173 [1170–1205] | 385 MB [384–385] | 693 MB [692–693] |
 | GNOME | 32 [23–33] | 0.53 | 295 [190–320] | 657 MB [656–662] | 1563 MB [1562–1569] |
 | KDE Plasma | 10 [9–11] | 0.17 | 213 [154–384] | 764 MB [760–772] | 1752 MB [1748–1785] |
@@ -163,7 +165,7 @@ Per-role medians (ticks / wakeups per 60 s / PSS; one idle foot everywhere):
 
 | role | scoot | niri | Hyprland | GNOME | KDE |
 |---|---|---|---|---|---|
-| compositor | 1 / 18 / 63.6 MB | 2 / 85 / 83 MB | 1 / 235 / 128.5 MB | 27 / 58–97 / ~160 MB | 1 / 18–60 / 126–132 MB |
+| compositor | 1 / 18 / 63.6 MB (lean cohort; 75.6–75.9 in the fat one, lead 2) | 2 / 85 / 83 MB | 1 / 235 / 128.5 MB | 27 / 58–97 / ~160 MB | 1 / 18–60 / 126–132 MB |
 | bar / shell | 0 / 39 / 4.6 MB (scootbar) | 1–2 / 66 / 34.4 MB (waybar) | 1 / 66 / 42 MB (waybar) | in-shell | 6–7 / 93–135 / 266–271 MB (plasmashell) |
 | wallpaper | 0 / 0 / 2.1–14.7 MB (scootbg, bimodal — see leads) | 0 / 0 / 2.0 MB (swaybg) | 0–1 / 20 / 40.5 MB (hyprpaper) | in-shell | in-shell |
 | notifications | 0 / 0 / 3.7 MB (mako) | 0 / 0 / 7.4 MB (mako) | 0 / 0 / 3.2 MB (mako) | in-shell | in-shell |
@@ -182,8 +184,8 @@ Reading it role by role:
   with two rows to verify, see leads), then niri (83 MB), KWin
   (126–132 MB), Hyprland (128–129 MB) and gnome-shell (~160 MB, plus
   its calendar server). At idle the compositor's CPU is ~0 everywhere
-  except gnome-shell (~25 ticks). scoot draws no frames at idle and
-  wakes ~15 times a minute; niri wakes ~85 (about half its session's
+  except gnome-shell (~25 ticks). scoot apparently draws no frames at idle (compositor 1 tick and ~15–18 wakes per 60 s; no frame
+  counter was sampled) and wakes ~15 times a minute; niri wakes ~85 (about half its session's
   total); Hyprland wakes ~235.
 - **Bar / shell.** scootbar (4.6 MB, ~39 wakes) against waybar (34
   MB under niri, 42 MB under Hyprland, 64–68 wakes — same ~1/s clock
@@ -229,7 +231,8 @@ limit, so the method's prescribed drop to 75 bought exactly 5 points
 of discharge (80 → 75) before the limiter held the pack again and
 `power_now` went invalid — Hyprland/GNOME/KDE power has no number for
 that reason, not for lack of trying. The two numbers say the panel and
-backlight dominate: two different desktops agree within 0.06 W. Charge
+backlight dominate: two different desktops agree within 0.06 W, i.e. no measurable difference
+between them (one 120 s average each; 0.6% apart is below what this method resolves). Charge
 state was restored exactly afterwards (threshold 80, timer restarted,
 `scoot-charge sync`).
 
@@ -261,17 +264,18 @@ quantifies the ticket this benchmark was built to check.
    a minute-resolution clock. After lead 1 lands, the bar is the
    second-biggest waker left.
 
-Where scoot is already lightest, plainly: compositor RSS (63.6 MB
+Where scoot is already lightest, plainly: compositor PSS (63.6 MB, 75.9 in the fat cohort,
 against 83/128/126/~160), bar (4.6 MB against 34/42/270), wallpaper at
 its leanest (2.1 MB, matching swaybg), portals on demand (0 resident
-against niri's 52 and 44 each for GNOME/KDE), no XWayland tax, and the
-smallest notification daemon footprint measured.
+against niri's 52 and 44 each for GNOME/KDE), and no XWayland tax. The notification daemon is
+the same small mako everywhere it runs (3–4 MB; the 7.4 MB niri reading is its themed config).
 
 ### What these numbers do not show
 
 - Foot's PSS (12–28 MB) is not comparable across desktops: window
   geometry was not controlled, so its shm buffers differ. The
-  compositor-side numbers are unaffected.
+  compositor-side numbers are largely unaffected (second-order, through the client shm buffers the
+  compositor holds: a few MB against tens-of-MB gaps).
 - The endpoint-diff sampler misses processes that live entirely inside
   the 60 s window (a crash-looping mako unit's children, one-shot
   migrators). The 30 s settle sums bound that blind spot; nothing in
