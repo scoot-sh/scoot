@@ -4728,21 +4728,61 @@ let
     (
       assert
         hmKeys.config.programs.scoot.settings.binds == {
-          "XF86MonBrightnessUp" = "spawn ${lib.getExe pkgs.brightnessctl} -e set +5%";
-          "XF86MonBrightnessDown" = "spawn ${lib.getExe pkgs.brightnessctl} -e set 5%-";
-          "XF86AudioRaiseVolume" =
-            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
-          "XF86AudioLowerVolume" =
-            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
-          "XF86AudioMute" =
-            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SINK@ toggle";
-          "XF86AudioMicMute" =
-            "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
-          "XF86AudioPlay" = "spawn ${lib.getExe pkgs.playerctl} play-pause";
-          "XF86AudioPause" = "spawn ${lib.getExe pkgs.playerctl} pause";
-          "XF86AudioStop" = "spawn ${lib.getExe pkgs.playerctl} stop";
-          "XF86AudioNext" = "spawn ${lib.getExe pkgs.playerctl} next";
-          "XF86AudioPrev" = "spawn ${lib.getExe pkgs.playerctl} previous";
+          "XF86MonBrightnessUp" = {
+            action = "spawn ${lib.getExe pkgs.brightnessctl} -e set +5%";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86MonBrightnessDown" = {
+            action = "spawn ${lib.getExe pkgs.brightnessctl} -e set 5%-";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioRaiseVolume" = {
+            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioLowerVolume" = {
+            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioMute" = {
+            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SINK@ toggle";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioMicMute" = {
+            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioPlay" = {
+            action = "spawn ${lib.getExe pkgs.playerctl} play-pause";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioPause" = {
+            action = "spawn ${lib.getExe pkgs.playerctl} pause";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioStop" = {
+            action = "spawn ${lib.getExe pkgs.playerctl} stop";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioNext" = {
+            action = "spawn ${lib.getExe pkgs.playerctl} next";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioPrev" = {
+            action = "spawn ${lib.getExe pkgs.playerctl} previous";
+            repeat = true;
+            allow_when_locked = true;
+          };
           "super+escape" = "spawn ${lib.getExe' pkgs.systemd "loginctl"} lock-session";
           "super+v" = "spawn ${slotScriptBin hmKeys "scoot-clipboard-pick"}";
           "super+n" = "spawn ${leanMako}/bin/makoctl dismiss";
@@ -5072,17 +5112,61 @@ let
     (
       assert
         builtins.removeAttrs hmKeys.config.programs.scoot.settings.binds [ "super+v" ] == {
-          "XF86MonBrightnessUp" = "spawn brightnessctl -e set +5%";
-          "XF86MonBrightnessDown" = "spawn brightnessctl -e set 5%-";
-          "XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+";
-          "XF86AudioLowerVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-";
-          "XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle";
-          "XF86AudioMicMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
-          "XF86AudioPlay" = "spawn playerctl play-pause";
-          "XF86AudioPause" = "spawn playerctl pause";
-          "XF86AudioStop" = "spawn playerctl stop";
-          "XF86AudioNext" = "spawn playerctl next";
-          "XF86AudioPrev" = "spawn playerctl previous";
+          "XF86MonBrightnessUp" = {
+            action = "spawn brightnessctl -e set +5%";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86MonBrightnessDown" = {
+            action = "spawn brightnessctl -e set 5%-";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioRaiseVolume" = {
+            action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioLowerVolume" = {
+            action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioMute" = {
+            action = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioMicMute" = {
+            action = "spawn wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioPlay" = {
+            action = "spawn playerctl play-pause";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioPause" = {
+            action = "spawn playerctl pause";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioStop" = {
+            action = "spawn playerctl stop";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioNext" = {
+            action = "spawn playerctl next";
+            repeat = true;
+            allow_when_locked = true;
+          };
+          "XF86AudioPrev" = {
+            action = "spawn playerctl previous";
+            repeat = true;
+            allow_when_locked = true;
+          };
           "super+escape" = "spawn loginctl lock-session";
           "super+n" = "spawn makoctl dismiss";
           "super+shift+n" = "spawn makoctl mode -t do-not-disturb";
@@ -5093,6 +5177,12 @@ let
     (
       assert lib.hasSuffix "/bin/scoot-clipboard-pick"
         hmKeys.config.programs.scoot.settings.binds."super+v";
+      true
+    )
+    # ...and the picker stays a plain string: never repeat, never
+    # allowed while locked (unlike the eleven hardware tables above).
+    (
+      assert lib.isString hmKeys.config.programs.scoot.settings.binds."super+v";
       true
     )
     (
@@ -5608,9 +5698,14 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
     assert len(got) == 16, got.keys()
-    assert got["XF86AudioRaiseVolume"].startswith("spawn ") and got["XF86AudioRaiseVolume"].endswith(" set-volume @DEFAULT_AUDIO_SINK@ 5%+"), got["XF86AudioRaiseVolume"]
-    assert got["XF86MonBrightnessUp"].endswith(" -e set +5%"), got["XF86MonBrightnessUp"]
+    vol = got["XF86AudioRaiseVolume"]
+    assert vol["action"].startswith("spawn ") and vol["action"].endswith(" set-volume @DEFAULT_AUDIO_SINK@ 5%+"), vol
+    assert vol["repeat"] is True and vol["allow_when_locked"] is True, vol
+    bri = got["XF86MonBrightnessUp"]
+    assert bri["action"].endswith(" -e set +5%"), bri
+    assert bri["repeat"] is True and bri["allow_when_locked"] is True, bri
     assert got["super+escape"].endswith(" lock-session"), got["super+escape"]
+    assert isinstance(got["super+v"], str), got["super+v"]
     assert "/bin/scoot-clipboard-pick" in got["super+v"], got["super+v"]
     assert got["super+n"].startswith("spawn ") and got["super+n"].endswith("/bin/makoctl dismiss"), got["super+n"]
     assert got["super+shift+n"].endswith("/bin/makoctl mode -t do-not-disturb"), got["super+shift+n"]

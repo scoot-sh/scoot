@@ -1,5 +1,7 @@
 //! Injected input: what an agent sends in place of a keyboard and mouse.
 
+use std::time::Instant;
+
 use scoot_core::Action;
 use scoot_ipc::{KeyCombo, KeyboardLayout, Modifier, PointerButton};
 use smithay::backend::input::{
@@ -14,6 +16,7 @@ use smithay::wayland::pointer_constraints::with_pointer_constraint;
 use smithay::wayland::seat::WaylandFocus;
 
 use super::State;
+use super::bind_repeat::bind_action_repeats;
 use super::keybindings::Bound;
 use super::layer_shell;
 use super::output_scale::logical_size;
@@ -790,6 +793,15 @@ impl State {
         })
     }
 
+    /// The keycode [`State::press`] would press for `combo`, without pressing
+    /// anything: what a test holds down across several `key` calls to prove
+    /// a bind repeats (or does not). Test-only -- production callers go
+    /// through `press`, which holds the modifiers around the press itself.
+    #[cfg(test)]
+    pub(crate) fn keycode_for_combo(&mut self, combo: &KeyCombo) -> Result<Keycode, String> {
+        self.resolve_combo(combo).map(|(code, _)| code)
+    }
+
     /// Types text by pressing whichever keys produce those characters, with
     /// whatever the active layout needs held down around each one -- Shift
     /// for `A` and `!`, AltGr for a German layout's `@`, nothing at all for
@@ -1012,27 +1024,43 @@ impl State {
                         let Some(&keysym) = handle.raw_syms().first() else {
                             return FilterResult::Forward;
                         };
-                        let Some(bound) = data.keybindings.match_key(keysym, mods.into()) else {
+                        let Some((bound, flags)) = data.keybindings.match_key(keysym, mods.into())
+                        else {
                             return FilterResult::Forward;
                         };
                         // While the session is locked, a keybinding that runs
-                        // an `Action` must not fire: `spawn` would put a
-                        // terminal on top of the lock screen, `close`/`quit`
-                        // would reach through it, and every layout action
-                        // would move windows the user cannot see. Forwarded
+                        // an `Action` must not fire -- with two deliberate
+                        // exceptions, both below. Anything else is forwarded
                         // rather than swallowed, so the combination is just a
                         // keystroke the lock client receives like any other
                         // -- and deliberately *before* `suppressed_keys`, so
                         // the matching release is forwarded too rather than
                         // eaten as a stale entry.
                         //
-                        // `ChangeVt` is the one exception, on purpose: it is
-                        // a session-level escape hatch, not a way into this
+                        // `ChangeVt` is the one escape hatch, on purpose: it
+                        // is a session-level switch, not a way into this
                         // session (the VT it switches to has its own login),
                         // and it is the recovery path when a lock client
                         // wedges. See `session_lock.rs`.
-                        if data.session_lock.is_locked() && !matches!(bound, Bound::ChangeVt(_)) {
-                            return FilterResult::Forward;
+                        //
+                        // A `spawn` bind flagged `allow_when_locked` is the
+                        // other: volume, brightness and media keys, which
+                        // must work from the lock screen. Only that shape --
+                        // a terminal from behind the lock screen would be a
+                        // complete bypass, and layout/focus/close/quit would
+                        // reach through it -- and only through `act_bind`,
+                        // which re-checks the shape itself. See
+                        // `bind_repeat.rs` (and why IPC stays refused there).
+                        if data.session_lock.is_locked() {
+                            let allowed = match &bound {
+                                Bound::ChangeVt(_) => true,
+                                Bound::Action(action) => {
+                                    flags.allow_when_locked && matches!(action, Action::Spawn(_))
+                                }
+                            };
+                            if !allowed {
+                                return FilterResult::Forward;
+                            }
                         }
                         // Remember this keycode was intercepted so the
                         // matching release is intercepted too, rather than
@@ -1042,7 +1070,26 @@ impl State {
                         data.suppressed_keys.insert(keycode);
                         let vt_switch = match bound {
                             Bound::Action(action) => {
-                                data.act(action);
+                                // A flagged bind re-fires while held, at the
+                                // keyboard's own delay and rate; anything
+                                // else fires exactly once. `quit` and `close`
+                                // never repeat even when flagged (see
+                                // `bind_action_repeats`). The clone is paid
+                                // only for a bind that actually repeats --
+                                // every other press moves the action exactly
+                                // as before, with no new allocation on the
+                                // per-keypress hot path.
+                                if flags.repeat && bind_action_repeats(&action) {
+                                    data.act_bind(action.clone(), flags.allow_when_locked);
+                                    data.arm_bind_repeat(
+                                        keycode,
+                                        action,
+                                        flags.allow_when_locked,
+                                        Instant::now(),
+                                    );
+                                } else {
+                                    data.act_bind(action, flags.allow_when_locked);
+                                }
                                 None
                             }
                             Bound::ChangeVt(vt) => Some(data.change_vt(vt)),
@@ -1053,6 +1100,11 @@ impl State {
                         })
                     }
                     KeyState::Released => {
+                        // The repeat's own cancel path, before anything
+                        // else: the held key this repeat belongs to just
+                        // came up. Releases of any other key leave it
+                        // alone (see `cancel_bind_repeat_for`).
+                        data.cancel_bind_repeat_for(keycode);
                         if data.suppressed_keys.remove(&keycode) {
                             FilterResult::Intercept(KeyOutcome {
                                 intercepted: true,

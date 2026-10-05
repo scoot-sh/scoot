@@ -68,7 +68,7 @@ use crate::cli::RendererKind;
 
 use super::decorations::{Appearance, Color};
 use super::input::keysym_named;
-use super::keybindings::{Bound, Keybindings, Modifiers};
+use super::keybindings::{BindFlags, Bound, Keybindings, Modifiers};
 use super::output_config::{OutputEntries, OutputEntryConfig};
 use super::output_scale::{MAX_SCALE, MIN_SCALE, clamp_scale, clamp_scale_range};
 use super::wallpaper::{WallpaperConfig, WallpaperSetting};
@@ -443,8 +443,15 @@ struct FileConfig {
     /// `wallpaper/section.rs`).
     #[serde(default)]
     wallpaper: Option<WallpaperConfig>,
+    // `toml::Value`, not `String`, so one entry's table form (see
+    // `parse_bind`) cannot fail the whole file's parse: each entry is
+    // validated on its own in `apply_binds`, and a malformed one is
+    // skipped with a warning naming just that bind -- the same isolation
+    // a malformed action string already gets. A `String` map would turn a
+    // single table-valued entry into a file-wide type error and silently
+    // run the session on defaults.
     #[serde(default)]
-    binds: HashMap<String, String>,
+    binds: HashMap<String, toml::Value>,
 }
 
 /// What loading a config file (or using defaults) produces: always a
@@ -712,7 +719,7 @@ impl std::error::Error for ReloadError {}
 /// land later, in `tty::init`); a reload builds with whether this session
 /// drives `--tty`, so a reload can neither strip the recovery path nor gain
 /// it on a backend that never had it.
-pub fn keybindings_for(binds: &HashMap<String, String>, vt: bool) -> Keybindings {
+pub fn keybindings_for(binds: &HashMap<String, toml::Value>, vt: bool) -> Keybindings {
     let mut table = Keybindings::default();
     apply_binds(&mut table, binds);
     if vt {
@@ -958,7 +965,7 @@ pub fn default_config_toml() -> String {
     out.push_str("# size = [640, 360]\n");
 
     out.push_str("\n[binds]\n");
-    for (mods, keysym, bound) in keybindings.iter() {
+    for (mods, keysym, bound, _) in keybindings.iter() {
         match bound {
             Bound::Action(action) => {
                 out.push_str(&format!(
@@ -1453,11 +1460,18 @@ fn parse_or_defaults(text: &str, path: &Path) -> LoadedConfig {
 ///   every bind in the colliding group is skipped, with one warning naming
 ///   all of them; whatever was bound to that combo before this file was
 ///   loaded (a default, or nothing) is left alone.
-fn apply_binds(keybindings: &mut Keybindings, binds: &HashMap<String, String>) {
-    let mut parsed: Vec<(String, Modifiers, Keysym, Bound)> = Vec::new();
+// One collision group in `apply_binds`: every raw bind string that
+// resolved to the same combo, with what each parsed to. Named so the map
+// below stays under clippy's `type_complexity` bound.
+type BindGroup = Vec<(String, Bound, BindFlags)>;
+
+fn apply_binds(keybindings: &mut Keybindings, binds: &HashMap<String, toml::Value>) {
+    let mut parsed: Vec<(String, Modifiers, Keysym, Bound, BindFlags)> = Vec::new();
     for (raw, value) in binds {
         match parse_bind(raw, value) {
-            Ok((mods, keysym, bound)) => parsed.push((raw.clone(), mods, keysym, bound)),
+            Ok((mods, keysym, bound, flags)) => {
+                parsed.push((raw.clone(), mods, keysym, bound, flags));
+            }
             Err(reason) => {
                 tracing::warn!(
                     bind = %raw, value = %value, %reason,
@@ -1470,17 +1484,17 @@ fn apply_binds(keybindings: &mut Keybindings, binds: &HashMap<String, String>) {
     // Group by the resolved combo (keyed on the keysym's raw code rather
     // than the `Keysym` itself, which doesn't implement `Hash`) so
     // collisions are found regardless of `HashMap`'s iteration order.
-    let mut groups: HashMap<(Modifiers, u32), Vec<(String, Bound)>> = HashMap::new();
-    for (raw, mods, keysym, bound) in parsed {
+    let mut groups: HashMap<(Modifiers, u32), BindGroup> = HashMap::new();
+    for (raw, mods, keysym, bound, flags) in parsed {
         groups
             .entry((mods, keysym.raw()))
             .or_default()
-            .push((raw, bound));
+            .push((raw, bound, flags));
     }
 
     for ((mods, keysym_raw), mut group) in groups {
         if group.len() > 1 {
-            let mut names: Vec<&str> = group.iter().map(|(raw, _)| raw.as_str()).collect();
+            let mut names: Vec<&str> = group.iter().map(|(raw, _, _)| raw.as_str()).collect();
             names.sort_unstable();
             tracing::warn!(
                 binds = ?names,
@@ -1489,25 +1503,127 @@ fn apply_binds(keybindings: &mut Keybindings, binds: &HashMap<String, String>) {
             );
             continue;
         }
-        let (_, bound) = group.pop().expect("group.len() == 1");
+        let (_, bound, flags) = group.pop().expect("group.len() == 1");
         let keysym = Keysym::from(keysym_raw);
-        keybindings.insert(mods, keysym, bound);
+        keybindings.insert(mods, keysym, bound, flags);
     }
 }
 
 /// Parses one `[binds]` entry: `key` is the TOML key (`"super+h"`), `value`
-/// is an action string in exactly the grammar `scootctl action ...` (and its
-/// `scoot msg action ...` alias) uses (`"focus-column left"`, `"close"`,
-/// `"spawn" "foot"`, ...) -- see `scootctl::action`, reused here rather than
-/// duplicated.
-fn parse_bind(key: &str, value: &str) -> Result<(Modifiers, Keysym, Bound), String> {
+/// is either an action string in exactly the grammar `scootctl action ...`
+/// (and its `scoot msg action ...` alias) uses (`"focus-column left"`,
+/// `"close"`, `"spawn" "foot"`, ...) -- see `scootctl::action`, reused here
+/// rather than duplicated -- or a table with that string under `action` plus
+/// the per-bind opt-ins:
+///
+/// ```toml
+/// [binds]
+/// "XF86AudioRaiseVolume" = { action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+", repeat = true, allow_when_locked = true }
+/// ```
+///
+/// The table form is niri's shape (`repeat`, `allow-when-locked` on the bind
+/// itself) rather than a second list of combos elsewhere in the file: one
+/// entry carries everything about one combo, so the flags cannot disagree
+/// with the action the way two parallel lists could, and a reload diffs them
+/// as one binding. `repeat` re-fires the bind while its key is held, at the
+/// seat keyboard's own delay and rate; `allow_when_locked` lets a `spawn`
+/// bind fire while the session is locked (see `bind_repeat.rs`). Both
+/// default off, so a plain string behaves exactly as before.
+fn parse_bind(
+    key: &str,
+    value: &toml::Value,
+) -> Result<(Modifiers, Keysym, Bound, BindFlags), String> {
     let (mods, keysym) = parse_combo(key)?;
-    let mut tokens = value.split_whitespace().map(str::to_owned);
+    let (action_text, mut flags) = parse_bind_value(key, value)?;
+    let mut tokens = action_text.split_whitespace().map(str::to_owned);
     let action = scootctl::action(&mut tokens).map_err(|error| error.to_string())?;
     if tokens.next().is_some() {
-        return Err(format!("trailing text after the action in `{value}`"));
+        return Err(format!("trailing text after the action in `{action_text}`"));
     }
-    Ok((mods, keysym, Bound::Action(action.into())))
+    let action: Action = action.into();
+    // Clamped beyond parsing, loudly: holding `quit` must never end the
+    // session, and holding `close` must never work through every window --
+    // and layout, focus, close and quit keep today's lock refusal, so only
+    // a `spawn` may name `allow_when_locked`. See `bind_repeat.rs`.
+    if flags.repeat && matches!(action, Action::Quit | Action::CloseFocused) {
+        tracing::warn!(
+            bind = key,
+            action = action_text,
+            "`repeat` on `quit` or `close` is ignored: those never repeat"
+        );
+        flags.repeat = false;
+    }
+    if flags.allow_when_locked && !matches!(action, Action::Spawn(_)) {
+        tracing::warn!(
+            bind = key,
+            action = action_text,
+            "`allow_when_locked` on anything but `spawn` is ignored: only spawns may fire while locked"
+        );
+        flags.allow_when_locked = false;
+    }
+    Ok((mods, keysym, Bound::Action(action), flags))
+}
+
+/// Splits one `[binds]` value into its action string and its flags (see
+/// `parse_bind`). A non-string, non-table value (a number, a list) is not a
+/// bind at all and is refused; a table's unknown keys warn and are ignored
+/// (the bind still applies with what was recognized -- losing a working bind
+/// over a flag typo would be worse than running it once-per-press); a
+/// non-string `action` is refused the same way a bad action string is, and a
+/// non-boolean flag warns and is treated as off (the rest of the entry
+/// applies).
+///
+/// Two flags are clamped beyond parsing, loudly: `repeat` on `quit` or
+/// `close` is ignored (holding quit must never end the session, and holding
+/// close must never work through every window -- see `bind_repeat.rs`), and
+/// `allow_when_locked` on anything but `spawn` is ignored (layout, focus,
+/// close and quit keep today's lock refusal -- see `bind_repeat.rs`). Both
+/// warn naming the bind, so opting in is never silently half-honored.
+fn parse_bind_value<'a>(key: &str, value: &'a toml::Value) -> Result<(&'a str, BindFlags), String> {
+    match value {
+        toml::Value::String(text) => Ok((text.as_str(), BindFlags::default())),
+        toml::Value::Table(table) => {
+            let action_text = table
+                .get("action")
+                .and_then(toml::Value::as_str)
+                .ok_or_else(|| format!("the table form of bind `{key}` needs a string `action`"))?;
+            let flag = |name: &str| match table.get(name).map(toml::Value::as_bool) {
+                Some(Some(value)) => value,
+                Some(None) => {
+                    tracing::warn!(
+                        bind = key,
+                        field = name,
+                        "a [binds] table flag must be a boolean; treating it as off"
+                    );
+                    false
+                }
+                None => false,
+            };
+            let mut unknown: Vec<&str> = table
+                .keys()
+                .filter(|name| !matches!(name.as_str(), "action" | "repeat" | "allow_when_locked"))
+                .map(String::as_str)
+                .collect();
+            if !unknown.is_empty() {
+                unknown.sort_unstable();
+                tracing::warn!(
+                    bind = key,
+                    fields = ?unknown,
+                    "unknown field(s) in this [binds] entry; ignoring them"
+                );
+            }
+            Ok((
+                action_text,
+                BindFlags {
+                    repeat: flag("repeat"),
+                    allow_when_locked: flag("allow_when_locked"),
+                },
+            ))
+        }
+        _ => Err(format!(
+            "a [binds] value must be an action string or a table with one, got {value}"
+        )),
+    }
 }
 
 /// Parses one `[autostart]` entry: `value` is an action string in exactly the
@@ -1633,6 +1749,12 @@ mod tests {
         (dir, path)
     }
 
+    /// `match_key` without the flags: most binds tests pin the action mapping,
+    /// and the flags have their own tests below.
+    fn matched(keybindings: &Keybindings, keysym: Keysym, mods: Modifiers) -> Option<Bound> {
+        keybindings.match_key(keysym, mods).map(|(bound, _)| bound)
+    }
+
     #[test]
     fn startup_path_is_the_explicit_path_or_the_xdg_default() {
         let explicit = PathBuf::from("/etc/scoot/config.toml");
@@ -1719,7 +1841,8 @@ mod tests {
         assert_eq!(loaded.config.column_widths, vec![0.25, 0.5, 0.75]);
         assert_eq!(loaded.config.default_column_width, 2);
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 keysym_named("n").unwrap(),
                 Modifiers {
                     super_: true,
@@ -1781,7 +1904,8 @@ mod tests {
         );
         let loaded = load_from(&path, true).expect("valid config");
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 Keysym::h,
                 Modifiers {
                     super_: true,
@@ -1806,7 +1930,8 @@ mod tests {
         );
         let loaded = load_from(&path, true).expect("valid config");
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 keysym_named("3").unwrap(),
                 Modifiers {
                     super_: true,
@@ -1837,7 +1962,8 @@ mod tests {
             let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
             let loaded = load_from(&path, true).expect("valid config");
             assert_eq!(
-                loaded.keybindings.match_key(
+                matched(
+                    &loaded.keybindings,
                     keysym_named("F1").unwrap(),
                     Modifiers {
                         super_: true,
@@ -1867,7 +1993,8 @@ mod tests {
         let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
         let loaded = load_from(&path, true).expect("valid config");
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 keysym_named("F1").unwrap(),
                 Modifiers {
                     super_: true,
@@ -1891,7 +2018,8 @@ mod tests {
         let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
         let loaded = load_from(&path, true).expect("valid config");
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 keysym_named("F1").unwrap(),
                 Modifiers {
                     super_: true,
@@ -1930,7 +2058,8 @@ mod tests {
             let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
             let loaded = load_from(&path, true).expect("valid config");
             assert_eq!(
-                loaded.keybindings.match_key(
+                matched(
+                    &loaded.keybindings,
                     keysym_named("F1").unwrap(),
                     Modifiers {
                         super_: true,
@@ -1969,7 +2098,8 @@ mod tests {
             let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
             let loaded = load_from(&path, true).expect("valid config");
             assert_eq!(
-                loaded.keybindings.match_key(
+                matched(
+                    &loaded.keybindings,
                     keysym_named("F1").unwrap(),
                     Modifiers {
                         super_: true,
@@ -1994,7 +2124,8 @@ mod tests {
         );
         let loaded = load_from(&path, true).expect("the file still parses as toml");
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 keysym_named("n").unwrap(),
                 Modifiers {
                     super_: true,
@@ -2016,7 +2147,8 @@ mod tests {
         );
         let loaded = load_from(&path, true).expect("the file still parses as toml");
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 keysym_named("m").unwrap(),
                 Modifiers {
                     super_: true,
@@ -2030,8 +2162,206 @@ mod tests {
     #[test]
     fn trailing_text_after_the_action_is_rejected() {
         assert_eq!(
-            parse_bind("super+n", "focus-column left extra-garbage"),
+            parse_bind(
+                "super+n",
+                &toml::Value::from("focus-column left extra-garbage")
+            ),
             Err("trailing text after the action in `focus-column left extra-garbage`".into())
+        );
+    }
+
+    /// One table-form `[binds]` value, for the direct `parse_bind` tests
+    /// below.
+    fn table_value(action: &str, repeat: bool, allow_when_locked: bool) -> toml::Value {
+        let mut table = toml::map::Map::new();
+        table.insert("action".into(), toml::Value::String(action.into()));
+        table.insert("repeat".into(), toml::Value::Boolean(repeat));
+        table.insert(
+            "allow_when_locked".into(),
+            toml::Value::Boolean(allow_when_locked),
+        );
+        toml::Value::Table(table)
+    }
+
+    #[test]
+    fn a_table_bind_parses_its_action_and_both_flags() {
+        // The shape `docs/configuration.md` documents: one entry carries
+        // the action and both opt-ins together.
+        let (_dir, path) = write_temp(
+            r#"
+            [binds]
+            "XF86AudioRaiseVolume" = { action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+", repeat = true, allow_when_locked = true }
+        "#,
+        );
+        let loaded = load_from(&path, true).expect("valid config");
+        assert_eq!(
+            loaded.keybindings.match_key(
+                keysym_named("XF86AudioRaiseVolume").unwrap(),
+                Modifiers::default()
+            ),
+            Some((
+                Bound::Action(Action::Spawn(vec![
+                    "wpctl".into(),
+                    "set-volume".into(),
+                    "@DEFAULT_AUDIO_SINK@".into(),
+                    "5%+".into(),
+                ])),
+                BindFlags {
+                    repeat: true,
+                    allow_when_locked: true,
+                },
+            )),
+        );
+    }
+
+    #[test]
+    fn a_string_bind_carries_no_flags() {
+        let (_dir, path) = write_temp(
+            r#"
+            [binds]
+            "XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+        "#,
+        );
+        let loaded = load_from(&path, true).expect("valid config");
+        assert_eq!(
+            loaded.keybindings.match_key(
+                keysym_named("XF86AudioRaiseVolume").unwrap(),
+                Modifiers::default()
+            ),
+            Some((
+                Bound::Action(Action::Spawn(vec![
+                    "wpctl".into(),
+                    "set-volume".into(),
+                    "@DEFAULT_AUDIO_SINK@".into(),
+                    "5%+".into(),
+                ])),
+                BindFlags::default(),
+            )),
+            "a plain string behaves exactly as before: fire once, never locked"
+        );
+    }
+
+    #[test]
+    fn repeat_on_quit_and_close_is_ignored() {
+        // Holding quit must never end the session, and holding close must
+        // never work through every window -- the bind still applies, firing
+        // once, with the flag cleared.
+        for action in ["quit", "close"] {
+            let (mods, keysym, bound, flags) =
+                parse_bind("super+q", &table_value(action, true, false))
+                    .expect("a valid bind with a clamped flag");
+            assert_eq!(
+                (mods, keysym),
+                parse_combo("super+q").expect("the combo parses")
+            );
+            assert!(matches!(
+                bound,
+                Bound::Action(Action::Quit) | Bound::Action(Action::CloseFocused)
+            ));
+            assert!(!flags.repeat, "`repeat` on `{action}` must be cleared");
+        }
+    }
+
+    #[test]
+    fn allow_when_locked_on_anything_but_spawn_is_ignored() {
+        // Layout, focus, close and quit keep today's lock refusal: only a
+        // `spawn` may name the flag.
+        let (_, _, _, flags) =
+            parse_bind("super+h", &table_value("focus-column left", false, true))
+                .expect("a valid bind with a clamped flag");
+        assert!(!flags.allow_when_locked);
+        let (_, _, bound, flags) = parse_bind("super+t", &table_value("spawn foot", false, true))
+            .expect("a valid spawn bind");
+        assert!(matches!(bound, Bound::Action(Action::Spawn(_))));
+        assert!(flags.allow_when_locked, "a spawn keeps the flag");
+    }
+
+    #[test]
+    fn a_non_string_non_table_bind_value_is_skipped_and_the_rest_loads() {
+        // The `toml::Value` map (see `FileConfig`) keeps one mistyped value
+        // from failing the whole file: this entry is skipped, the good one
+        // beside it loads.
+        let (_dir, path) = write_temp(
+            r#"
+            [binds]
+            "super+n" = 5
+            "super+m" = "close"
+        "#,
+        );
+        let loaded = load_from(&path, true).expect("the file still parses as toml");
+        assert_eq!(
+            matched(
+                &loaded.keybindings,
+                Keysym::m,
+                Modifiers {
+                    super_: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some(Bound::Action(Action::CloseFocused))
+        );
+    }
+
+    #[test]
+    fn a_table_bind_without_an_action_string_is_skipped() {
+        let (_dir, path) = write_temp(
+            r#"
+            [binds]
+            "super+n" = { repeat = true }
+            "super+m" = "close"
+        "#,
+        );
+        let loaded = load_from(&path, true).expect("the file still parses as toml");
+        assert_eq!(
+            matched(
+                &loaded.keybindings,
+                Keysym::m,
+                Modifiers {
+                    super_: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some(Bound::Action(Action::CloseFocused)),
+            "the action-less entry is skipped, the good one loads"
+        );
+    }
+
+    #[test]
+    fn an_unknown_table_field_applies_the_rest() {
+        // A flag typo must not cost the whole bind: the entry applies with
+        // what was recognized (here, once-per-press), and the warning names
+        // the field.
+        let mut table = toml::map::Map::new();
+        table.insert("action".into(), toml::Value::String("spawn foot".into()));
+        table.insert("repeet".into(), toml::Value::Boolean(true));
+        let mut binds = HashMap::new();
+        binds.insert("super+t".to_owned(), toml::Value::Table(table));
+        let mut keybindings = Keybindings::default();
+        apply_binds(&mut keybindings, &binds);
+        assert_eq!(
+            matched(
+                &keybindings,
+                Keysym::t,
+                Modifiers {
+                    super_: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some(Bound::Action(Action::Spawn(vec!["foot".into()]))),
+        );
+        assert_eq!(
+            keybindings.match_key(
+                Keysym::t,
+                Modifiers {
+                    super_: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some((
+                Bound::Action(Action::Spawn(vec!["foot".into()])),
+                BindFlags::default(),
+            )),
+            "the typo'd flag reads as off, not as repeat"
         );
     }
 
@@ -2074,7 +2404,8 @@ mod tests {
         );
         let loaded = load_from(&path, true).expect("valid toml");
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 Keysym::h,
                 Modifiers {
                     super_: true,
@@ -2100,9 +2431,7 @@ mod tests {
         );
         let loaded = load_from(&path, true).expect("valid toml");
         assert_eq!(
-            loaded
-                .keybindings
-                .match_key(Keysym::a, Modifiers::default()),
+            matched(&loaded.keybindings, Keysym::a, Modifiers::default()),
             Some(Bound::Action(Action::CloseFocused)),
             "`\"A\"` must bind the unshifted `a` key"
         );
@@ -2154,14 +2483,13 @@ mod tests {
         );
         let loaded = load_from(&path, true).expect("valid toml");
         assert_eq!(
-            loaded
-                .keybindings
-                .match_key(Keysym::a, Modifiers::default()),
+            matched(&loaded.keybindings, Keysym::a, Modifiers::default()),
             None,
             "an unshifted `a` must not fire a `shift+a` bind"
         );
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 Keysym::a,
                 Modifiers {
                     shift: true,
@@ -2187,14 +2515,13 @@ mod tests {
         );
         let loaded = load_from(&path, true).expect("valid toml");
         assert_eq!(
-            loaded
-                .keybindings
-                .match_key(Keysym::a, Modifiers::default()),
+            matched(&loaded.keybindings, Keysym::a, Modifiers::default()),
             None,
             "an unshifted `a` must not fire a `shift+A` bind"
         );
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 Keysym::a,
                 Modifiers {
                     shift: true,
@@ -2245,7 +2572,8 @@ mod tests {
         );
         let loaded = load_from(&path, true).expect("valid toml");
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 keysym_named("n").unwrap(),
                 Modifiers {
                     super_: true,
@@ -2324,7 +2652,8 @@ mod tests {
             "only the one valid entry survives"
         );
         assert_eq!(
-            loaded.keybindings.match_key(
+            matched(
+                &loaded.keybindings,
                 keysym_named("n").unwrap(),
                 Modifiers {
                     super_: true,
@@ -3582,7 +3911,7 @@ mod tests {
         }
 
         let mut binds = 0;
-        for (mods, keysym, bound) in Keybindings::default().iter() {
+        for (mods, keysym, bound, _) in Keybindings::default().iter() {
             let Bound::Action(action) = bound else {
                 panic!("the defaults hold no session-managed binds to emit as comments");
             };

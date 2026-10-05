@@ -130,8 +130,10 @@
 //! default at lock time), so a locked frame draws the same shape from new
 //! pixels, never new content. Gap, column widths and binds are
 //! input-side -- widths only re-derive column frames from config
-//! proportions, never from what a client drew -- and binds cannot fire actions while locked anyway
-//! (`input::key` forwards them to the lock client). A scale change only
+//! proportions, never from what a client drew -- and the only binds that fire while locked are
+//! `spawn`s flagged `allow_when_locked` (`input::key` forwards every other
+//! bind to the lock client), which draw nothing and take no focus over the
+//! lock surface. A scale change only
 //! re-derives the same geometry the lock path already publishes (lock
 //! surfaces are reconfigured to their output's new logical size, exactly as
 //! a `--tty` hotplug resize does) and re-sends config-derived scale values
@@ -696,6 +698,12 @@ impl State {
     fn apply_binds_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
         if !fresh.keybindings.same_bindings_as(&self.keybindings) {
             self.keybindings = fresh.keybindings.clone();
+            // The in-flight repeat's action and flags came from the old
+            // table: it ends here rather than re-firing something the file
+            // no longer binds. (The held key itself neither wedges nor
+            // drops -- release routing never consults the table mid-hold,
+            // see the module doc.)
+            self.cancel_bind_repeat();
             report.applied.push(field::BINDS.to_owned());
         }
     }

@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::compositor::config;
-use crate::compositor::keybindings::{Bound, Modifiers};
+use crate::compositor::keybindings::{BindFlags, Bound, Modifiers};
 use crate::compositor::wallpaper::section::{DEFAULT_COMMAND, MAX_DRAIN_DEPTH, MAX_JSON};
 use crate::compositor::wallpaper::{Section, WallpaperConfig, WallpaperSetting};
 
@@ -528,7 +528,10 @@ fn a_file_with_a_wallpaper_section_still_applies_its_binds() {
         loaded
             .keybindings
             .match_key(smithay::input::keyboard::Keysym::n, super_n),
-        Some(Bound::Action(scoot_core::Action::CloseFocused)),
+        Some((
+            Bound::Action(scoot_core::Action::CloseFocused),
+            BindFlags::default(),
+        )),
         "the bind from the same file applies"
     );
     let WallpaperSetting::Section(section) = &loaded.wallpaper else {

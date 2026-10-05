@@ -158,7 +158,8 @@
 //!   with one chord, no VT switch needed. No pixels cross either: what is
 //!   on screen is unchanged by a lock. That chord argument covers the
 //!   unlocked session only: while the session is locked every binding but
-//!   `ChangeVt` is forwarded to the locker instead of executed, which is
+//!   `ChangeVt` and a `spawn` flagged `allow_when_locked` is forwarded to the
+//!   locker instead of executed, which is
 //!   why a held lock does not survive a lock transition -- the transition
 //!   deactivates it first (see above) rather than relying on a recovery
 //!   chord that cannot run.
