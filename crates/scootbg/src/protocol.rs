@@ -93,16 +93,30 @@ pub enum Show<'a> {
 }
 
 /// An image, as a `set` asks for it. On the wire `mode`, `fill` and
-/// `filter` may be left out, for `fill`, `#000000` and `lanczos3`.
+/// `filter` may be left out, for `fill`, `#000000` and `lanczos3`; `sha256`
+/// may be left out whenever no hash is pinned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageRequest<'a> {
-    /// Absolute: the daemon refuses anything else, since its working
-    /// directory is not the client's.
-    pub path: Cow<'a, str>,
+    /// A file's path, or the URL, as a download: never confused, so a
+    /// pinned hash cannot end up verifying the wrong thing.
+    pub source: Source<'a>,
     pub mode: Mode,
     /// Behind a letterboxed or centred image, and under transparency.
     pub fill: Color,
     pub filter: Filter,
+}
+
+/// Where a requested image comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Source<'a> {
+    /// Absolute: the daemon refuses anything else, since its working
+    /// directory is not the client's.
+    Path(Cow<'a, str>),
+    /// Downloaded once and cached (`crate::fetch`).
+    Url {
+        url: Cow<'a, str>,
+        sha256: Option<[u8; 32]>,
+    },
 }
 
 /// The fill color when a request names none.
@@ -137,6 +151,8 @@ impl Request<'_> {
             #[serde(skip_serializing_if = "Option::is_none")]
             image: Option<&'r str>,
             #[serde(skip_serializing_if = "Option::is_none")]
+            sha256: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             mode: Option<Mode>,
             #[serde(skip_serializing_if = "Option::is_none")]
             fill: Option<Color>,
@@ -150,6 +166,7 @@ impl Request<'_> {
             kind: self.name(),
             color: None,
             image: None,
+            sha256: None,
             mode: None,
             fill: None,
             filter: None,
@@ -161,7 +178,15 @@ impl Request<'_> {
                 match show {
                     Show::Color(color) => line.color = Some(*color),
                     Show::Image(image) => {
-                        line.image = Some(&image.path);
+                        match &image.source {
+                            Source::Path(path) => line.image = Some(path),
+                            Source::Url { url, sha256 } => {
+                                line.image = Some(url);
+                                line.sha256 = sha256
+                                    .as_ref()
+                                    .map(|hash| crate::sha256::hex_bytes(hash.as_slice()));
+                            }
+                        }
                         line.mode = Some(image.mode);
                         line.fill = Some(image.fill);
                         line.filter = Some(image.filter);
@@ -212,6 +237,13 @@ pub enum RequestError {
     ImageOnly(&'static str),
     /// An image path that is not absolute.
     RelativePath(String),
+    /// A `sha256` that is not 64 hex digits.
+    BadSha(String),
+    /// A `sha256` with a file: it pins a download, and a file is already
+    /// here to be read.
+    ShaWithFile,
+    /// An image URL with a NUL byte.
+    UrlNul,
     /// `apply-config` whose `profile` or `config` is not one (serde's
     /// message, from `crate::section`'s strict parse).
     BadApply(serde_json::Error),
@@ -238,7 +270,8 @@ impl fmt::Display for RequestError {
             Self::Unknown(name) => write!(f, "unknown request `{name}`"),
             Self::NoTarget => write!(
                 f,
-                "`set` needs a `color` (\"#rrggbb\") or an `image` (an absolute path)"
+                "`set` needs a `color` (\"#rrggbb\") or an `image` (an absolute path, or an \
+                 `http(s)` URL)"
             ),
             Self::Both => write!(f, "`set` takes a `color` or an `image`, not both"),
             Self::BadColor { text, error } => write!(f, "bad color {text:?}: {error}"),
@@ -257,6 +290,15 @@ impl fmt::Display for RequestError {
                 "the image path {path:?} is not absolute (the daemon's working directory \
                  is not yours; `scootbg set` makes a path absolute before sending it)"
             ),
+            Self::BadSha(text) => write!(
+                f,
+                "the sha256 {text:?} is not 64 hex digits (as `sha256sum` prints)"
+            ),
+            Self::ShaWithFile => write!(
+                f,
+                "`sha256` pins a downloaded image, and this one is a file"
+            ),
+            Self::UrlNul => write!(f, "the image URL has a NUL byte"),
             Self::BadApply(error) => write!(f, "bad apply-config request: {error}"),
             Self::NoProfile => write!(f, "`apply-config` needs a `profile`"),
             Self::BadProfile(error) => write!(f, "`apply-config`: {error}"),
@@ -279,6 +321,8 @@ struct Envelope<'a> {
     color: Option<Cow<'a, str>>,
     #[serde(borrow)]
     image: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    sha256: Option<Cow<'a, str>>,
     #[serde(borrow)]
     mode: Option<Cow<'a, str>>,
     #[serde(borrow)]
@@ -322,6 +366,7 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
             let show = show(
                 envelope.color,
                 envelope.image,
+                envelope.sha256,
                 envelope.mode,
                 envelope.fill,
                 envelope.filter,
@@ -361,6 +406,7 @@ fn apply_config(line: &[u8]) -> Result<Request<'static>, RequestError> {
 fn show<'a>(
     color: Option<Cow<'a, str>>,
     image: Option<Cow<'a, str>>,
+    sha256: Option<Cow<'a, str>>,
     mode: Option<Cow<'a, str>>,
     fill: Option<Cow<'a, str>>,
     filter: Option<Cow<'a, str>>,
@@ -369,7 +415,12 @@ fn show<'a>(
         (Some(_), Some(_)) => Err(RequestError::Both),
         (None, None) => Err(RequestError::NoTarget),
         (Some(text), None) => {
-            for (field, given) in [("mode", &mode), ("fill", &fill), ("filter", &filter)] {
+            for (field, given) in [
+                ("mode", &mode),
+                ("fill", &fill),
+                ("filter", &filter),
+                ("sha256", &sha256),
+            ] {
                 if given.is_some() {
                     return Err(RequestError::ImageOnly(field));
                 }
@@ -381,10 +432,27 @@ fn show<'a>(
                     error,
                 })
         }
-        (None, Some(path)) => {
-            if !path.starts_with('/') {
-                return Err(RequestError::RelativePath(path.into_owned()));
-            }
+        (None, Some(image)) => {
+            let source = if crate::fetch::is_url(&image) {
+                if image.contains('\0') {
+                    return Err(RequestError::UrlNul);
+                }
+                let sha256 = sha256
+                    .map(|text| {
+                        crate::fetch::parse_sha256(&text)
+                            .map_err(|_| RequestError::BadSha(text.into_owned()))
+                    })
+                    .transpose()?;
+                Source::Url { url: image, sha256 }
+            } else {
+                if !image.starts_with('/') {
+                    return Err(RequestError::RelativePath(image.into_owned()));
+                }
+                if sha256.is_some() {
+                    return Err(RequestError::ShaWithFile);
+                }
+                Source::Path(image)
+            };
             let mode = match mode {
                 None => Mode::default(),
                 Some(name) => Mode::from_name(&name)
@@ -403,7 +471,7 @@ fn show<'a>(
                 })?,
             };
             Ok(Show::Image(ImageRequest {
-                path,
+                source,
                 mode,
                 fill,
                 filter,
@@ -479,8 +547,12 @@ impl Serialize for Shows<'_> {
                 map.end()
             }
             Wallpaper::Image(image) => {
-                let mut map = serializer.serialize_map(Some(4))?;
+                let mut map =
+                    serializer.serialize_map(Some(if image.fetch.is_some() { 5 } else { 4 }))?;
                 map.serialize_entry("image", &image.path)?;
+                if let Some(fetch) = &image.fetch {
+                    map.serialize_entry("url", &fetch.url)?;
+                }
                 map.serialize_entry("mode", &image.look.mode)?;
                 map.serialize_entry("fill", &image.look.fill)?;
                 map.serialize_entry("filter", &image.look.filter)?;

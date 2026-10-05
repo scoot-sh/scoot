@@ -16,6 +16,7 @@ fn image() -> Wallpaper {
             filter: Filter::Lanczos3,
         },
         serial: 1,
+        fetch: None,
     }))
 }
 use crate::outputs::Size;

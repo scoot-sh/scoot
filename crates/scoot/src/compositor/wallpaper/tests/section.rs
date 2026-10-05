@@ -125,6 +125,30 @@ fn only_the_keys_written_are_sent() {
         section("[wallpaper]\nimage = \"/a.png\"\n").json,
         r#"{"image":"/a.png"}"#
     );
+    // A link passes through untouched: no `~` expansion, no resolution
+    // against the config directory, and the pin beside it.
+    assert_eq!(
+        section("[wallpaper]\nimage = \"https://example.com/a.png\"\n").json,
+        r#"{"image":"https://example.com/a.png"}"#
+    );
+    assert_eq!(
+        section(
+            "[wallpaper]\nimage = \"http://127.0.0.1:1/a.png\"\nsha256 = \"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08\"\n"
+        )
+        .json,
+        r#"{"image":"http://127.0.0.1:1/a.png","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}"#
+    );
+    // Per output too.
+    assert_eq!(
+        section("[wallpaper.output.\"DP-2\"]\nimage = \"https://example.com/a.png\"\n").json,
+        r#"{"output":{"DP-2":{"image":"https://example.com/a.png"}}}"#
+    );
+    // A scheme scootbg does not fetch still passes through: scoot checks
+    // keys and types, and one parser (scootbg's) refuses the scheme.
+    assert_eq!(
+        section("[wallpaper]\nimage = \"ftp://example.com/a.png\"\n").json,
+        r#"{"image":"ftp://example.com/a.png"}"#
+    );
     // `output` written as an empty table is part of the section as written.
     assert_eq!(
         section("[wallpaper]\noutput = {}\n").json,

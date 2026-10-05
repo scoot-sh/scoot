@@ -2,7 +2,7 @@
 //! (dependencies-done.md §5 chose it over `toml`, 180 KB lighter).
 //!
 //! ```text
-//! scootbg-state 1
+//! scootbg-state 2
 //! profile default
 //! fingerprint 9c1e...
 //! all color #1e1e2e
@@ -24,7 +24,10 @@
 //!   `apply-config` (ticket 10) sets it, and every other write keeps it as
 //!   it was. `all` is the choice for every output, `output NAME` the choice
 //!   for the outputs with that connector name; each is `clear`, `color
-//!   #rrggbb`, or `image PATH MODE FILL FILTER`.
+//!   #rrggbb`, or `image PATH MODE FILL FILTER`, with a downloaded image's
+//!   URL (and pinned hash) after that: `image PATH MODE FILL FILTER url URL`
+//!   and `image PATH MODE FILL FILTER url URL sha256 HEX`. PATH is the
+//!   cache file; the URL is what re-downloads it.
 //! - **Fields are escaped**: `%`, space and every ASCII control byte
 //!   (newline and tab included) are written `%XX`, uppercase hex, so a
 //!   field never holds a separator and a path round-trips exactly. Any
@@ -38,7 +41,12 @@
 //!   [`encode`] itself never writes more, dropping the least recently set).
 //!   The same key twice: the later line wins, with a warning.
 //!
-//! **Within version 1**, a key may be added only if a reader that skips
+//! **Version 2** adds the `url` (and `sha256`) trailer to `image` lines, for
+//! downloaded wallpapers. A version-1 file still reads (its `image` lines
+//! have no trailer); a version-1 scootbg reading a version-2 file restores
+//! nothing, as for any newer version.
+//!
+//! **Within version 2**, a key may be added only if a reader that skips
 //! it (with its warning) loses nothing it needs; anything else bumps the
 //! version. `profile` and `fingerprint` are both read and kept from this
 //! first version on, so ticket 10 writes them with no bump.
@@ -47,6 +55,7 @@ use std::fmt::Write as _;
 
 use crate::choices::Choice;
 use crate::color::Color;
+use crate::fetch::{Fetch, MAX_URL};
 use crate::image::render::Look;
 use crate::image::{Filter, Mode};
 use crate::wallpaper::Wallpaper;
@@ -55,7 +64,11 @@ use crate::wallpaper::Wallpaper;
 mod tests;
 
 /// The format this build reads and writes.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
+
+/// The earliest format still read: version 1's `image` lines carry no
+/// trailer, and read as file choices.
+pub const OLDEST: u32 = 1;
 
 /// The first line's first word.
 pub const MAGIC: &str = "scootbg-state";
@@ -79,6 +92,8 @@ pub enum Pick {
     Image {
         path: String,
         look: Look,
+        /// A download, when the image is a URL: `path` is its cache file.
+        fetch: Option<Fetch>,
     },
 }
 
@@ -206,6 +221,14 @@ fn pick(out: &mut String, choice: &Choice) {
                 look.fill,
                 look.filter.name()
             );
+            if let Some(fetch) = &image.fetch {
+                out.push_str(" url ");
+                escape(out, &fetch.url);
+                if let Some(sha256) = fetch.sha256 {
+                    out.push_str(" sha256 ");
+                    out.push_str(&crate::sha256::hex_bytes(sha256.as_slice()));
+                }
+            }
         }
     }
 }
@@ -276,7 +299,7 @@ pub fn decode(bytes: &[u8]) -> Parsed {
     let mut lines = bytes.split(|&b| b == b'\n');
     let header = lines.next().unwrap_or_default();
     match version(header) {
-        Some(VERSION) => {}
+        Some(OLDEST) | Some(VERSION) => {}
         Some(later) if later > VERSION => {
             parsed.newer = true;
             parsed.warnings.push(format!(
@@ -287,7 +310,8 @@ pub fn decode(bytes: &[u8]) -> Parsed {
         }
         _ => {
             parsed.warnings.push(format!(
-                "its first line is not `{MAGIC} {VERSION}`; nothing was restored from it"
+                "its first line is not `{MAGIC} {OLDEST}` or `{MAGIC} {VERSION}`; nothing \
+                 was restored from it"
             ));
             return parsed;
         }
@@ -338,6 +362,10 @@ enum Skip {
     TooMany,
     /// Not skipped: taken, over an earlier line.
     Duplicate(&'static str),
+    /// A `url` that is not an `http(s)` URL, or past [`MAX_URL`].
+    Url,
+    /// A `sha256` that is not 64 hex digits, or one without a `url`.
+    Sha,
 }
 
 impl std::fmt::Display for Skip {
@@ -362,6 +390,14 @@ impl std::fmt::Display for Skip {
                 "more than {MAX_OUTPUTS} outputs: the earliest `output` line kept so far is dropped"
             ),
             Self::Duplicate(what) => write!(f, "a second {what}"),
+            Self::Url => write!(
+                f,
+                "the `url` is not an `http(s)` URL of at most {MAX_URL} bytes without a NUL byte"
+            ),
+            Self::Sha => write!(
+                f,
+                "the `sha256` is not 64 hex digits, or there is no `url` for it"
+            ),
         }
     }
 }
@@ -443,13 +479,14 @@ fn text(field: &[u8], what: &'static str) -> Result<String, Skip> {
     Ok(value)
 }
 
-const PICK: &str = "`clear`, `color #rrggbb` or `image PATH MODE FILL FILTER`";
+const PICK: &str =
+    "`clear`, `color #rrggbb` or `image PATH MODE FILL FILTER [url URL [sha256 HEX]]`";
 
 fn pick_of(fields: &[&[u8]]) -> Result<Pick, Skip> {
     match fields {
         [b"clear"] => Ok(Pick::Clear),
         [b"color", color] => color_of(color, "color").map(Pick::Color),
-        [b"image", path, mode, fill, filter] => {
+        [b"image", path, mode, fill, filter, trailer @ ..] => {
             let path = text(path, "image path")?;
             if !path.starts_with('/') {
                 return Err(Skip::Relative);
@@ -459,13 +496,45 @@ fn pick_of(fields: &[&[u8]]) -> Result<Pick, Skip> {
             let fill = color_of(fill, "fill color")?;
             let filter_name = text(filter, "filter")?;
             let filter = Filter::from_name(&filter_name).ok_or(Skip::Filter(filter_name))?;
+            let fetch = trailer_of(trailer)?;
             Ok(Pick::Image {
                 path,
                 look: Look { mode, fill, filter },
+                fetch,
             })
         }
         _ => Err(Skip::Fields(PICK)),
     }
+}
+
+/// A downloaded image's trailer: `url URL`, then `sha256 HEX` when the hash
+/// is pinned. Nothing else; a version-1 line has no trailer at all.
+fn trailer_of(trailer: &[&[u8]]) -> Result<Option<Fetch>, Skip> {
+    match trailer {
+        [] => Ok(None),
+        [b"url", url] => Ok(Some(Fetch {
+            url: url_of(url)?,
+            sha256: None,
+        })),
+        [b"url", url, b"sha256", sha] => Ok(Some(Fetch {
+            url: url_of(url)?,
+            sha256: Some(sha_of(sha)?),
+        })),
+        _ => Err(Skip::Fields(PICK)),
+    }
+}
+
+fn url_of(field: &[u8]) -> Result<String, Skip> {
+    let url = text(field, "url")?;
+    if url.contains('\0') || !crate::fetch::is_url(&url) || url.len() > MAX_URL {
+        return Err(Skip::Url);
+    }
+    Ok(url)
+}
+
+fn sha_of(field: &[u8]) -> Result<[u8; 32], Skip> {
+    let text = text(field, "sha256")?;
+    crate::fetch::parse_sha256(&text).map_err(|_| Skip::Sha)
 }
 
 fn color_of(field: &[u8], what: &'static str) -> Result<Color, Skip> {

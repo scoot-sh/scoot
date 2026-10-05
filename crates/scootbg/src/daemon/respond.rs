@@ -46,12 +46,14 @@ pub trait Changes {
 }
 
 /// Why a `set` or `clear` was refused; nothing was changed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChangeError {
     /// No output has that name now.
     UnknownOutput,
     /// Too many images already wait to be decoded (`crate::jobs`).
     Busy,
+    /// A download, with nowhere to cache it.
+    Cache(String),
 }
 
 /// The reply text for a refused change.
@@ -62,7 +64,7 @@ struct Refused<'a> {
 
 impl fmt::Display for Refused<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.error {
+        match &self.error {
             ChangeError::UnknownOutput => write!(
                 f,
                 "no output is named {:?} (`scootbg query` lists them); nothing was changed",
@@ -72,6 +74,10 @@ impl fmt::Display for Refused<'_> {
                 f,
                 "too many images are waiting to be decoded; nothing was changed (try again \
                  once they are shown)"
+            ),
+            ChangeError::Cache(error) => write!(
+                f,
+                "cannot cache the download ({error}); nothing was changed"
             ),
         }
     }

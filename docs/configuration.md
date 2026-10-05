@@ -980,14 +980,19 @@ mode = "fill"                    # fill | fit | stretch | center | tile
 color = "#101014"
 ```
 
+A link works where a path does: `image = "https://example.com/hills.jpg"`
+is downloaded once and cached by scootbg (below), so an example look can
+name an image nobody commits. `sha256` pins the download's bytes.
+
 | Field | Type | Meaning |
 |---|---|---|
-| `image` | string (path) | A PNG, JPEG or WebP image. `~` and `~/...` expand against `HOME`, and a relative path resolves against the directory the config file is in (the link's directory for a symlinked config, not its target's). |
+| `image` | string (path or URL) | A PNG, JPEG or WebP image. A path: `~` and `~/...` expand against `HOME`, and a relative path resolves against the directory the config file is in (the link's directory for a symlinked config, not its target's). A URL (`http://` or `https://`): downloaded once and cached by scootbg — see [scootbg's command reference](scootbg/cli.md#colors-and-images). |
 | `color` | string (`"#rrggbb"`) | A solid color. `image` or `color`, never both; neither is nothing (the compositor's own `background_color`). |
 | `mode` | string | With an `image` only: `fill` (cover and crop, scootbg's default), `fit` (letterbox with `fill`), `stretch`, `center` or `tile`. |
 | `fill` | string (`"#rrggbb"`) | With an `image` only: the color around a `fit` or `center` image. |
 | `filter` | string | With an `image` only: the scaling filter, `lanczos3`, `catmull-rom`, `bilinear` or `nearest`. |
-| `output."NAME"` | table | The same five keys for one output, by connector name (as `scootbg query` and `scootctl outputs` list them: `headless-2`, `DP-2`, ...). Each output table stands alone: an output's `image` does not take the top level's `mode`. An empty table is nothing on that output. |
+| `sha256` | string (64 hex digits) | With a URL `image` only: the download's expected SHA-256 (as `sha256sum` prints). Anything else fails instead of showing. Refused beside a path. |
+| `output."NAME"` | table | The same six keys for one output, by connector name (as `scootbg query` and `scootctl outputs` list them: `headless-2`, `DP-2`, ...). Each output table stands alone: an output's `image` does not take the top level's `mode`. An empty table is nothing on that output. |
 | `command` | string | The `scootbg` to run. Default `"scootbg"`, found on `PATH`; a path with a `/` in it resolves like `image`. The Nix modules set it to the installed package's store path. |
 
 A worked example with a wallpaper, ring colors, a bar and a terminal palette is in

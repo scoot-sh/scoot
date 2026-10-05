@@ -5,7 +5,8 @@ sunset. It is an **opt-in example**, not a default: nothing in scoot,
 scootbar or scootbg changes unless you use these files. The illustration
 itself is not in this repository (its license forbids passing it on
 standalone): download it from Pixabay (see "Image credit and license") and
-point `[wallpaper] image` at your copy.
+point `[wallpaper] image` at your copy — a file, or the Pixabay link
+itself, which scootbg downloads once and caches on your machine.
 
 ![scoot with the vinyl sunset look: a floating translucent bar with circled workspaces and the focused window's title over two translucent terminal columns (fastfetch over btop, Helix on scoot's source), the sunset illustration showing through on the right](../../assets/vinyl-sunset-preview.png)
 
@@ -46,7 +47,10 @@ To keep it, copy the files to your config directory (`~/.config/scoot/config.tom
 `~/.config/starship.toml`, `~/.config/helix/`, `~/.config/btop/btop.conf`
 with `btop/themes/vinyl.theme` as `~/.config/btop/themes/vinyl.theme`,
 `~/.config/lazygit/config.yml`) and point `[wallpaper] image` at
-a copy of the illustration. The prompt in the preview runs under
+a copy of the illustration — or at its Pixabay link directly, which scootbg
+downloads once into `~/.cache/scootbg/` (see
+[scootbg's command reference](../../scootbg/cli.md#a-wallpaper-from-a-link);
+`sha256` pins it). The prompt in the preview runs under
 `STARSHIP_CONFIG` pointing at `starship.toml`, e.g.
 `env STARSHIP_CONFIG=~/.config/starship.toml bash -i`.
 
@@ -129,8 +133,12 @@ The Pixabay Content License
 (<https://pixabay.com/service/license/>) lets you download, copy, modify and
 distribute it, commercially and without attribution, but not pass it on
 standalone, substantially as it is on Pixabay — so **no copy of it ships in
-this repository**, and this example's `[wallpaper] image` points at a
-`~/Pictures/wallpapers/` copy you download yourself. The preview
+this repository**, and this example's `[wallpaper] image` points at
+`~/Pictures/wallpapers/` copy you download yourself, or at the Pixabay
+link, which your own machine then downloads from Pixabay, under Pixabay's
+license (nothing here fetches it for you: automated downloading is at best
+unclear under Pixabay's terms, so no URL is wired in — the choice, and the
+license, stay yours). The preview
 `docs/assets/vinyl-sunset-preview.png` is a screenshot of this example with
 the illustration as its wallpaper (a new work, not the image standalone), and
 it shows the illustration, so the same license applies to what it shows.

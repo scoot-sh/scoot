@@ -5,6 +5,13 @@ use crate::image::{Filter, Mode};
 use crate::protocol::DEFAULT_FILL;
 use crate::state::Profile;
 use crate::state::format::{MAX_OUTPUTS, Pick};
+use std::path::Path;
+
+/// The cache directory the tests resolve downloads into: `record` is pure,
+/// so any directory does.
+fn cache() -> &'static Path {
+    Path::new("/cache")
+}
 
 fn parse(json: &str) -> Result<Section, SectionError> {
     Section::parse(json.as_bytes())
@@ -31,7 +38,7 @@ fn an_empty_section_clears_everything() {
     ] {
         let section = parse(json).unwrap();
         assert!(section.is_empty(), "{json}");
-        let record = section.record();
+        let record = section.record(cache());
         assert_eq!(record.all, Some(Pick::Clear), "{json}");
         assert!(record.named.is_empty(), "{json}");
     }
@@ -49,7 +56,7 @@ fn every_key_is_read() {
             "command":"/nix/store/abc-scootbg/bin/scootbg"}"##,
     )
     .unwrap();
-    let record = section.record();
+    let record = section.record(cache());
     assert_eq!(
         record.all,
         Some(Pick::Image {
@@ -59,6 +66,7 @@ fn every_key_is_read() {
                 fill: Color::parse("#102030").unwrap(),
                 filter: Filter::Nearest,
             },
+            fetch: None,
         })
     );
     // Sorted by name, bytewise.
@@ -76,6 +84,7 @@ fn every_key_is_read() {
                         fill: DEFAULT_FILL,
                         filter: Filter::default(),
                     },
+                    fetch: None,
                 }
             ),
         ]
@@ -87,7 +96,7 @@ fn a_table_stands_alone() {
     // The top level's mode is not an output's.
     let section =
         parse(r#"{"image":"/a.png","mode":"fit","output":{"DP-1":{"image":"/b.png"}}}"#).unwrap();
-    let Pick::Image { look, .. } = &section.record().named[0].1 else {
+    let Pick::Image { look, .. } = &section.record(cache()).named[0].1 else {
         panic!("not an image");
     };
     assert_eq!(look.mode, Mode::default());
@@ -165,7 +174,7 @@ fn strings_round_trip_through_the_canonical_encoding() {
     let again = Section::parse(canonical.as_bytes()).unwrap();
     assert_eq!(again, section);
     assert_eq!(again.canonical(), canonical);
-    let Some(Pick::Image { path, .. }) = section.record().all else {
+    let Some(Pick::Image { path, .. }) = section.record(cache()).all else {
         panic!("not an image");
     };
     assert_eq!(path, "/a \"b\"\\c/d\u{e9}\n.png");
@@ -271,7 +280,10 @@ fn sizes_are_bounded() {
         json.push_str(&format!("\"o{index}\":{{}}"));
     }
     let fits = format!("{json}}}}}");
-    assert_eq!(parse(&fits).unwrap().record().named.len(), MAX_OUTPUTS);
+    assert_eq!(
+        parse(&fits).unwrap().record(cache()).named.len(),
+        MAX_OUTPUTS
+    );
     let over = format!("{json},\"one-more\":{{}}}}}}");
     let message = refused(&over);
     assert!(
@@ -365,4 +377,140 @@ fn arbitrary_input_never_panics() {
         }
     }
     assert!(accepted > 0, "the generator never produced a valid section");
+}
+
+#[test]
+fn a_url_is_a_download_not_a_path() {
+    let url = "https://example.com/a.png";
+    let section = parse(&format!(
+        r#"{{"image":"{url}","mode":"fit","output":{{"DP-1":{{"image":"{url}"}}}}}}"#
+    ))
+    .unwrap();
+    let path = crate::fetch::cached_path(cache(), url)
+        .to_string_lossy()
+        .into_owned();
+    let record = section.record(cache());
+    assert_eq!(
+        record.all,
+        Some(Pick::Image {
+            path: path.clone(),
+            look: Look {
+                mode: Mode::Fit,
+                fill: DEFAULT_FILL,
+                filter: Filter::default(),
+            },
+            fetch: Some(crate::fetch::Fetch {
+                url: url.to_owned(),
+                sha256: None,
+            }),
+        })
+    );
+    // An output's table stands alone, as a file's does.
+    let Pick::Image { look, fetch, .. } = &record.named[0].1 else {
+        panic!("not an image");
+    };
+    assert_eq!(look.mode, Mode::default());
+    assert!(fetch.is_some());
+    // No `sha256` written, none fingerprinted.
+    assert_eq!(
+        section.canonical(),
+        format!(r#"{{"image":"{url}","mode":"fit","output":{{"DP-1":{{"image":"{url}"}}}}}}"#)
+    );
+}
+
+#[test]
+fn sha256_pins_a_download() {
+    let url = "http://127.0.0.1:1/a.png";
+    let sha = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    let section = parse(&format!(r#"{{"image":"{url}","sha256":"{sha}"}}"#)).unwrap();
+    let Some(Pick::Image { fetch, .. }) = section.record(cache()).all else {
+        panic!("not an image");
+    };
+    assert_eq!(
+        fetch,
+        Some(crate::fetch::Fetch {
+            url: url.to_owned(),
+            sha256: Some(crate::sha256::digest(b"test")),
+        })
+    );
+    // `sha256` sorts after `mode`: byte order, like every other key.
+    assert_eq!(
+        section.canonical(),
+        format!(r#"{{"image":"{url}","sha256":"{sha}"}}"#)
+    );
+    assert_ne!(
+        section.fingerprint(),
+        parse(&format!(r#"{{"image":"{url}"}}"#))
+            .unwrap()
+            .fingerprint(),
+        "pinning the hash is a different section"
+    );
+    // Uppercase hex pins the same bytes, and still fingerprints by what
+    // was written.
+    let upper = parse(&format!(
+        r#"{{"image":"{url}","sha256":"{}"}}"#,
+        sha.to_uppercase()
+    ))
+    .unwrap();
+    assert_ne!(upper.canonical(), section.canonical());
+    assert_eq!(
+        upper.record(cache()).all,
+        section.record(cache()).all,
+        "same bytes either case"
+    );
+}
+
+#[test]
+fn url_values_are_checked() {
+    let sha = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    let bad_sha = format!(r##"{{"image":"https://example.com/a.png","sha256":"{sha}zz"}}"##);
+    for (json, says) in [
+        (
+            r#"{"image":"file:///home/me/a.png"}"#,
+            "give the path itself",
+        ),
+        (
+            r#"{"image":"ftp://example.com/a.png"}"#,
+            "URL scheme \"ftp\" is not fetched",
+        ),
+        (
+            r#"{"image":"gopher://example.com/a"}"#,
+            "URL scheme \"gopher\" is not fetched",
+        ),
+        (
+            r#"{"image":"https://example.com/a.png","sha256":"9f86"}"#,
+            "not 64 hex digits",
+        ),
+        (bad_sha.as_str(), "not 64 hex digits"),
+        (
+            r##"{"image":"/a.png","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}"##,
+            "not a URL",
+        ),
+        (
+            r##"{"color":"#000000","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}"##,
+            "`sha256` applies to an `image`",
+        ),
+        (
+            r#"{"image":"https://example.com/a.png","sha256":null}"#,
+            "null",
+        ),
+        (
+            r#"{"image":"https://example.com/a.png","sha256":5}"#,
+            "integer",
+        ),
+        (
+            r##"{"image":"https://example.com/a.png","color":"#000000"}"##,
+            "`image` or `color`, not both",
+        ),
+    ] {
+        let message = refused(json);
+        assert!(message.contains(says), "{json}: {message}");
+    }
+    // Past the URL limit, refused before any fetch.
+    let long = format!("https://example.com/{}", "p".repeat(crate::fetch::MAX_URL));
+    let message = refused(&format!(r#"{{"image":"{long}"}}"#));
+    assert!(message.contains("longer than"), "{message}");
+    // A NUL byte is refused, not spawned into curl's argv.
+    let message = refused("{\"image\":\"https://example.com/a\\u0000b\"}");
+    assert!(message.contains("NUL"), "{message}");
 }

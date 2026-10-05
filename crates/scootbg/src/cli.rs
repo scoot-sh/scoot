@@ -13,7 +13,7 @@ use std::fmt;
 
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
-use crate::protocol::{DEFAULT_FILL, ImageRequest, PROTOCOL_VERSION, Request, Show};
+use crate::protocol::{DEFAULT_FILL, ImageRequest, PROTOCOL_VERSION, Request, Show, Source};
 use crate::section::{Section, SectionError};
 use crate::state::{Profile, ProfileError};
 
@@ -97,10 +97,22 @@ USAGE:
     scootbg set '#rrggbb' [--output NAME]
     scootbg set PATH [--output NAME] [--mode MODE] [--fill '#rrggbb']
                      [--filter FILTER]
+    scootbg set URL [--output NAME] [--mode MODE] [--fill '#rrggbb']
+                    [--filter FILTER] [--sha256 HEX]
 
 An argument starting with '#' is a color: '#' and six hex digits, either
 case, such as '#1e1e2e'; quote it, since the shell reads '#' as a comment.
 Wallpapers are opaque, so there is no alpha.
+
+An `http://` or `https://` URL is downloaded once and cached
+(`$XDG_CACHE_HOME/scootbg/`, else `~/.cache/scootbg/`): a file already
+there is shown, otherwise `curl` fetches it on a worker thread (off the
+event loop), the download verified against `--sha256 HEX` (64 hex digits,
+as `sha256sum` prints) when given, written atomically, then shown. Until
+then — and when the fetch fails — the compositor's background shows and
+the error says why; nothing is retried in a loop (a new `set`, a changed
+section, a reconfigured output, or a restart tries again). `file://` and
+other schemes are not fetched. Prefer `https`, and pin `--sha256`.
 
 Anything else is the path of an image: PNG, JPEG or WebP (the first frame
 of an animated one), told apart by content, not by name. It is made
@@ -123,6 +135,8 @@ PNG's eXIf chunk).
                      a transparent one (default '#000000')
     --filter FILTER  the scaling filter: lanczos3 (the default), catmull-rom,
                      bilinear or nearest (hard pixels, for pixel art)
+    --sha256 HEX     pin a URL's bytes (64 hex digits, as `sha256sum`
+                     prints): anything else fails instead of showing
 
 Without --output, every output shows it, including outputs plugged in
 later, and any choice made for a single output is replaced. With --output
@@ -367,6 +381,12 @@ pub enum Error {
     },
     /// `--mode`, `--fill` or `--filter` with a color.
     ImageOnly(&'static str),
+    /// `--sha256` that is not 64 hex digits.
+    BadSha(String),
+    /// `--sha256` with a color or a file: it pins a download.
+    ShaImageOnly,
+    /// A URL with a NUL byte.
+    UrlNul,
     /// A path that the control protocol (JSON) cannot carry.
     NotUtf8(String),
     /// The path could not be made absolute (no working directory).
@@ -426,6 +446,17 @@ impl fmt::Display for Error {
                 f,
                 "`{flag}` applies to an image, not a color (try `scootbg set --help`)"
             ),
+            Self::BadSha(value) => write!(
+                f,
+                "`--sha256` takes 64 hex digits (as `sha256sum` prints), not `{value}` \
+                 (try `scootbg set --help`)"
+            ),
+            Self::ShaImageOnly => write!(
+                f,
+                "`--sha256` pins a downloaded image, and this one is not a URL \
+                 (try `scootbg set --help`)"
+            ),
+            Self::UrlNul => write!(f, "the image URL has a NUL byte"),
             Self::NotUtf8(lossy) => write!(
                 f,
                 "`{lossy}`: the path is not valid UTF-8, which the control protocol cannot \
@@ -682,25 +713,26 @@ const OUTPUT: &str = "--output";
 const MODE: &str = "--mode";
 const FILL: &str = "--fill";
 const FILTER: &str = "--filter";
+const SHA256: &str = "--sha256";
 
-/// `set COLOR|PATH [--output NAME] [--mode M] [--fill C] [--filter F]` and
-/// `clear [--output NAME]`, flags in any order after the command, each
-/// also as `--flag=VALUE`. `--help` alone asks for help, as for every
-/// command.
+/// `set COLOR|PATH|URL [--output NAME] [--mode M] [--fill C] [--filter F]
+/// [--sha256 HEX]` and `clear [--output NAME]`, flags in any order after
+/// the command, each also as `--flag=VALUE`. `--help` alone asks for help,
+/// as for every command.
 fn change<I: Iterator<Item = Result<String, String>>>(
     command: &'static str,
     topic: Topic,
     mut args: I,
 ) -> Result<Command, Error> {
     let flags: &[&'static str] = if command == "set" {
-        &[OUTPUT, MODE, FILL, FILTER]
+        &[OUTPUT, MODE, FILL, FILTER, SHA256]
     } else {
         &[OUTPUT]
     };
     let unexpected = |argument: String| Error::Unexpected { command, argument };
     let mut target: Option<String> = None;
     // Indexed as `flags`.
-    let mut values: [Option<String>; 4] = Default::default();
+    let mut values: [Option<String>; 5] = Default::default();
     let mut first = true;
     while let Some(arg) = args.next() {
         let arg = match arg {
@@ -745,14 +777,19 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         }
         first = false;
     }
-    let [output, mode, fill, filter] = values;
+    let [output, mode, fill, filter, sha256] = values;
     let output = output.map(Cow::Owned);
     if command == "clear" {
         return Ok(Command::Client(Request::Clear { output }));
     }
     let argument = target.ok_or(Error::MissingTarget)?;
     if argument.starts_with('#') {
-        for (flag, given) in [(MODE, &mode), (FILL, &fill), (FILTER, &filter)] {
+        for (flag, given) in [
+            (MODE, &mode),
+            (FILL, &fill),
+            (FILTER, &filter),
+            (SHA256, &sha256),
+        ] {
             if given.is_some() {
                 return Err(Error::ImageOnly(flag));
             }
@@ -783,10 +820,27 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             Err(error) => return Err(Error::Color { argument, error }),
         },
     };
-    let path = absolute(&argument)?;
+    let source = if crate::fetch::is_url(&argument) {
+        if argument.contains('\0') {
+            return Err(Error::UrlNul);
+        }
+        let sha256 = sha256
+            .map(|value| crate::fetch::parse_sha256(&value).map_err(|_| Error::BadSha(value)))
+            .transpose()?;
+        Source::Url {
+            url: Cow::Owned(argument),
+            sha256,
+        }
+    } else {
+        if sha256.is_some() {
+            return Err(Error::ShaImageOnly);
+        }
+        let path = absolute(&argument)?;
+        Source::Path(Cow::Owned(path))
+    };
     Ok(Command::Client(Request::Set {
         show: Show::Image(ImageRequest {
-            path: Cow::Owned(path),
+            source,
             mode,
             fill,
             filter,

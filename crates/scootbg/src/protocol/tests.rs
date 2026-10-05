@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::{
     DEFAULT_FILL, ImageRequest, OutputEntry, PROTOCOL_VERSION, Reply, Request, RequestError, Show,
-    parse, write_reply,
+    Source, parse, write_reply,
 };
 use crate::color::Color;
 use crate::image::render::Look;
@@ -35,7 +35,7 @@ fn each_request_parses() {
         },
         Request::Set {
             show: Show::Image(ImageRequest {
-                path: "/home/me/Pictures/a b \"c\".jpg".into(),
+                source: Source::Path("/home/me/Pictures/a b \"c\".jpg".into()),
                 mode: Mode::Tile,
                 fill: red(),
                 filter: Filter::Nearest,
@@ -142,7 +142,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
         parse(br#"{"protocol":1,"type":"set","image":"/p/a.png"}"#).unwrap(),
         Request::Set {
             show: Show::Image(ImageRequest {
-                path: "/p/a.png".into(),
+                source: Source::Path("/p/a.png".into()),
                 mode: Mode::Fill,
                 fill: DEFAULT_FILL,
                 filter: Filter::Lanczos3,
@@ -155,7 +155,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
         parse(full).unwrap(),
         Request::Set {
             show: Show::Image(ImageRequest {
-                path: "/p/a.png".into(),
+                source: Source::Path("/p/a.png".into()),
                 mode: Mode::Center,
                 fill: Color::parse("#abcdef").unwrap(),
                 filter: Filter::Bilinear,
@@ -166,7 +166,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
     // The documented line.
     let line = Request::Set {
         show: Show::Image(ImageRequest {
-            path: "/abs/a.jpg".into(),
+            source: Source::Path("/abs/a.jpg".into()),
             mode: Mode::Fit,
             fill: Color::parse("#101014").unwrap(),
             filter: Filter::Lanczos3,
@@ -447,6 +447,7 @@ fn an_image_shows_its_path_mode_fill_and_filter() {
             filter: Filter::CatmullRom,
         },
         serial: 7,
+        fetch: None,
     }));
     let value = serde_json::to_value(super::Shows(&image)).unwrap();
     assert_eq!(
@@ -537,5 +538,76 @@ fn config_on_another_request_is_ignored() {
     assert_eq!(
         parse(br#"{"protocol":1,"type":"query","config":{"imgae":1},"profile":"../"}"#).unwrap(),
         Request::Query
+    );
+}
+
+#[test]
+fn a_url_set_parses_and_round_trips() {
+    let sha = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    let line = format!(
+        "{{\"protocol\":1,\"type\":\"set\",\"image\":\"https://example.com/a.png\",\
+          \"sha256\":\"{sha}\",\"mode\":\"fit\"}}"
+    );
+    let request = parse(line.as_bytes()).unwrap();
+    let Request::Set { show, output } = &request else {
+        panic!("not a set");
+    };
+    assert_eq!(output, &None);
+    let Show::Image(image) = show else {
+        panic!("not an image");
+    };
+    assert_eq!(
+        image.source,
+        Source::Url {
+            url: "https://example.com/a.png".into(),
+            sha256: Some(crate::sha256::digest(b"test")),
+        }
+    );
+    assert_eq!(image.mode, Mode::Fit);
+    // The wire carries the URL and the hash in hex.
+    assert_eq!(
+        request.line(),
+        format!(
+            "{{\"protocol\":1,\"type\":\"set\",\"image\":\"https://example.com/a.png\",\
+              \"sha256\":\"{sha}\",\"mode\":\"fit\",\"fill\":\"#000000\",\"filter\":\"lanczos3\"}}\n"
+        )
+    );
+    // Without a pin, no `sha256` goes out.
+    let plain =
+        parse(b"{\"protocol\":1,\"type\":\"set\",\"image\":\"http://127.0.0.1:1/a.png\"}").unwrap();
+    assert!(
+        !plain.line().contains("sha256"),
+        "unpinned: {}",
+        plain.line()
+    );
+}
+
+#[test]
+fn url_and_hash_misuse_is_refused() {
+    // A hash that is not one.
+    let bad = parse(
+        b"{\"protocol\":1,\"type\":\"set\",\"image\":\"https://example.com/a.png\",\"sha256\":\"zz\"}",
+    );
+    assert!(matches!(bad, Err(RequestError::BadSha(_))), "{bad:?}");
+    // A hash with a file, or with a color.
+    assert!(matches!(
+        parse(
+            b"{\"protocol\":1,\"type\":\"set\",\"image\":\"/a.png\",\"sha256\":\"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08\"}"
+        ),
+        Err(RequestError::ShaWithFile)
+    ));
+    assert!(matches!(
+        parse(
+            b"{\"protocol\":1,\"type\":\"set\",\"color\":\"#000000\",\"sha256\":\"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08\"}"
+        ),
+        Err(RequestError::ImageOnly("sha256"))
+    ));
+    // A NUL byte never reaches curl's argv (as the JSON escape: a raw
+    // NUL is not JSON at all).
+    let nul = b"{\"protocol\":1,\"type\":\"set\",\"image\":\"https://example.com/a\\u0000b\"}";
+    assert!(
+        matches!(parse(nul), Err(RequestError::UrlNul)),
+        "{:?}",
+        parse(nul)
     );
 }
