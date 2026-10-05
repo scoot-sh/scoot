@@ -54,7 +54,7 @@ flag or value).
 
 ## Environment
 
-`scoot msg` reads `SCOOT_SOCKET` (like `scoot` itself) (else `$XDG_RUNTIME_DIR/scoot.sock`)
+`scoot msg` reads `SCOOT_SOCKET`, else `$XDG_RUNTIME_DIR/scoot.sock` (as does `scoot` itself)
 and need `XDG_RUNTIME_DIR` to exist; `scoot` also reads `XDG_CONFIG_HOME`
 for its config file and the caller's `WAYLAND_DISPLAY` for `--nested`.
 `scootbar` reads `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`

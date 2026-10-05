@@ -25,17 +25,6 @@ const { site, base } =
 export default defineConfig({
   site,
   base,
-  // The `scootctl/` section was renamed to `msg/` when the standalone
-  // client went away (`scoot msg` is the only client): keep the old URLs
-  // working for anyone who bookmarked them.
-  redirects: {
-    '/scootctl': '/msg',
-    '/scootctl/requests': '/msg/requests',
-    '/scootctl/actions': '/msg/actions',
-    '/scootctl/events': '/msg/events',
-    '/scootctl/screenshots': '/msg/screenshots',
-    '/scootctl/troubleshooting': '/msg/troubleshooting',
-  },
   integrations: [
     starlight({
       title: 'scoot',

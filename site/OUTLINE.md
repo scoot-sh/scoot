@@ -53,7 +53,7 @@ keep working unchanged.
 ### scoot msg / IPC (agents and scripts)
 
 > Renamed 2026-10-05: `/scootctl/*` → `/msg/*` when the standalone client
-> went away (`scoot msg` is the only client); the old URLs redirect.
+> went away (`scoot msg` is the only client).
 
 | Page (slug at move) | One-line purpose | Fed by (current sections) |
 |---|---|---|
