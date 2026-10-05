@@ -72,6 +72,13 @@ pub const REQUESTS: &[RequestDoc] = &[
         reply: "`{\"type\":\"keyboard\",\"index\":0,\"name\":\"English (US)\"}`",
     },
     RequestDoc {
+        verb: "locked",
+        syntax: "locked",
+        description: "whether the session is locked (answered locked or not)",
+        example: "scootctl locked",
+        reply: "`{\"type\":\"locked\",\"locked\":false}`",
+    },
+    RequestDoc {
         verb: "output-power",
         syntax: "output-power ID|all on|off",
         description: "switch an output's panel off or on",
@@ -123,7 +130,7 @@ pub const REQUESTS: &[RequestDoc] = &[
     RequestDoc {
         verb: "subscribe",
         syntax: "subscribe [EVENT...]",
-        description: "stream events (output, keyboard, workspace; default: output) until killed",
+        description: "stream events (output, keyboard, workspace, lock; default: output) until killed",
         example: "scootctl subscribe workspace",
         reply: "one compact JSON object per line, e.g. `{\"type\":\"subscribed\",...}` then events",
     },

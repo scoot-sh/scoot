@@ -18,6 +18,7 @@ use super::*;
 
 mod actions;
 mod keyboard;
+mod lock;
 mod targeted;
 mod workspace;
 

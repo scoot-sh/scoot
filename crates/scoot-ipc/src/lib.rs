@@ -70,4 +70,10 @@ pub use socket::{SOCKET_ENV, socket_path};
 /// And again 6 → 7 for the workspace occupancy event (2026-10): one new
 /// tag, `Response::Workspaces`, under the same rule -- only a subscriber
 /// ever receives one.
-pub const PROTOCOL_VERSION: u32 = 7;
+///
+/// And again 7 → 8 for the side-effect-free lock query and event (2026-10):
+/// two new tags, `Response::Locked` and `Response::LockChanged`, under the
+/// same rule -- only a client new enough to ask or subscribe ever receives
+/// one. An older server meets the new `locked` request tag and the new
+/// `lock` subscribe kind with an ordinary `Error`, like any unknown tag.
+pub const PROTOCOL_VERSION: u32 = 8;

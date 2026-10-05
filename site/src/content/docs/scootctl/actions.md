@@ -24,3 +24,11 @@ move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 split on whitespace and not run through a shell, so an argument containing a
 space can't be expressed this way. Every action is refused while the session
 is locked.
+
+A `focus-window-id` naming no window is a miss: it answers `ok` and changes
+nothing -- not window focus, and not the click that gave an `on_demand`
+layer surface the keyboard. The desktop clipboard's old lock probe
+(`focus-window-id` for an id no window can hold) spent that click on every
+copy, dropping an open bar dropdown's keyboard focus; the side-effect-free
+`locked` query replaces the probe, and the miss keeps the click. See
+[Requests](requests.md) and [the focus rules](index.md#rules-an-agent-needs).

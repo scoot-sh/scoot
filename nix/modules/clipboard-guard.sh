@@ -5,21 +5,21 @@
 # (absolute when the module knows one, bare `scoot` from PATH otherwise --
 # the same substitution `nixos.nix` does for the session units).
 #
-# The probe is a `focus-window-id` for an id no window can hold
-# (`u64::MAX`: window ids are never reused, so no session ever reaches
-# it): unlocked it answers `ok` with no side effect, locked the
-# compositor refuses it naming the lock. (Each probe spends an
-# `on_demand` layer surface's keyboard focus -- a side-effect-free
-# `locked` query on the wire would remove both the round trip and that;
-# that query is compositor work in scoot, so the probe stays until the
-# wire carries it.) A `version` first: it answers
-# locked and unlocked alike, so it failing means IPC itself is down (no
-# compositor yet, a files-only setup) -- fail open then and proceed, so
-# a broken probe costs the lock guarantee (the wipe-on-lock and the
-# suppressed binds still hold) rather than the history.
+# The probe is the side-effect-free `locked` query: unlocked it answers
+# `{"type":"locked","locked":false}`, locked `..."locked":true`. (It
+# replaces the old `focus-window-id u64::MAX` probe, which spent an
+# `on_demand` layer surface's keyboard focus -- an open bar dropdown's --
+# on every copy.) A failing query means IPC itself is down (no compositor
+# yet, a files-only setup, or a server predating the query, which answers
+# it with an error) -- fail open then and proceed, so a broken probe
+# costs the lock guarantee (the wipe-on-lock and the suppressed binds
+# still hold) rather than the history.
 clipboard_unlocked() {
-    if ! "@SCOOT_BIN@" msg version >/dev/null 2>&1; then
-        return 0
-    fi
-    "@SCOOT_BIN@" msg action focus-window-id 18446744073709551615 >/dev/null 2>&1
+    probe="$("@SCOOT_BIN@" msg locked 2>/dev/null)" || return 0
+    # `scootctl` prints replies pretty (`"locked": true`) while the event
+    # stream and any compact reader use `"locked":true`: match both.
+    case "$probe" in
+        *'"locked":true'*|*'"locked": true'*) return 1 ;;
+        *) return 0 ;;
+    esac
 }

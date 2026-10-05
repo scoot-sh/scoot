@@ -1614,8 +1614,8 @@ let
   # argv plus stdin plus `CLIPBOARD_STATE` to `calls`; `list` prints
   # `list`, `decode` prints `decode-bytes` (exit `decode-code`);
   # `fuzzel` prints `pick` (exit `pick-code`); `wl-copy` copies stdin to
-  # `pasted`; `scoot msg version` exits `version-code`, `scoot msg
-  # action ...` exits `action-code`. The scripts under test resolve
+  # `pasted`; `scoot msg locked` prints `{"type":"locked",...}` (exit
+  # `locked-code`, flag `locked-value`). The scripts under test resolve
   # every tool by absolute path into this package (the evaluations
   # below point each package option at the stubs, and the lock probe at
   # the stub `scoot` through `package`).
@@ -1653,8 +1653,7 @@ let
     cat > $out/bin/scoot <<'EOF'
     #!${pkgs.runtimeShell}
     case "$*" in
-      "msg version") exit "$(cat "$SCOOT_CLIP_TEST_DIR/version-code")" ;;
-      "msg action focus-window-id 18446744073709551615") exit "$(cat "$SCOOT_CLIP_TEST_DIR/action-code")" ;;
+      "msg locked") printf '{"type":"locked","locked":%s}\n' "$(cat "$SCOOT_CLIP_TEST_DIR/locked-value")"; exit "$(cat "$SCOOT_CLIP_TEST_DIR/locked-code")" ;;
       *) echo "unexpected scoot args: $*" >&2; exit 99 ;;
     esac
     EOF
@@ -6807,7 +6806,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "--prompt-color=1A2032ff" ${clipPickerThemed}
     grep -F -q -- "--dmenu --prompt='clipboard: ' --no-run-if-empty --only-match" ${clipPickerThemed}
     grep -F -q "clipboard_unlocked" ${clipPickerThemed}
-    grep -F -q "focus-window-id 18446744073709551615" ${clipPickerThemed}
+    grep -F -q "msg locked" ${clipPickerThemed}
     grep -F -q 'wl-copy <"$tmp"' ${clipPickerThemed}
     if grep -F -q 'wl-copy <<<' ${clipPickerThemed}; then echo "here-string restore (strips newlines)" >&2; exit 1; fi
     echo "ok: the picker carries the look, the dmenu contract and the lock probe"
@@ -6832,7 +6831,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     #      the history), then the bounded store (oldest dropped first
     #      past the cap).
     grep -F -q "clipboard_unlocked" ${clipEntry}
-    grep -F -q "focus-window-id 18446744073709551615" ${clipEntry}
+    grep -F -q "msg locked" ${clipEntry}
     grep -F -q -- "-max-items 100 store" ${clipEntry}
     if grep -q -- "-db-path" ${clipEntry}; then echo "db flag present with the default db" >&2; exit 1; fi
     grep -F -q -- "-max-items 250 store" ${clipBoundsEntry}
@@ -6861,7 +6860,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     #     scripts from the modules, scenario files below -- `list` is
     #     what `cliphist list` prints, `pick`/`pick-code` how `fuzzel`
     #     answers, `decode-bytes`/`decode-code` how `cliphist decode`
-    #     answers, `version-code`/`action-code` how the lock probe's
+    #     answers, `locked-code`/`locked-value` how the lock probe's
     #     `scoot` answers, `calls` what `cliphist` was asked,
     #     `menu-input` what the menu was offered, `pasted` what
     #     `wl-copy` received). Every scenario asserts the exit status
@@ -6869,9 +6868,9 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     export SCOOT_CLIP_TEST_DIR="$PWD/clip-test"
     mkdir -p "$SCOOT_CLIP_TEST_DIR"
     clip_setup() {
-      # $1 version-code, $2 action-code
-      printf '%s' "$1" > "$SCOOT_CLIP_TEST_DIR/version-code"
-      printf '%s' "$2" > "$SCOOT_CLIP_TEST_DIR/action-code"
+      # $1 locked-code, $2 locked-value
+      printf '%s' "$1" > "$SCOOT_CLIP_TEST_DIR/locked-code"
+      printf '%s' "$2" > "$SCOOT_CLIP_TEST_DIR/locked-value"
       : > "$SCOOT_CLIP_TEST_DIR/calls"
       : > "$SCOOT_CLIP_TEST_DIR/menu-input"
       rm -f "$SCOOT_CLIP_TEST_DIR/pasted"
@@ -6879,7 +6878,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
 
     # 17a. Unlocked copy: the entry stores (argv, sensitivity and bytes
     #      all land in the call log), exit 0.
-    clip_setup 0 0
+    clip_setup 0 false
     printf 'hello' > "$SCOOT_CLIP_TEST_DIR/stdin"
     printf 'data' > "$SCOOT_CLIP_TEST_DIR/state"
     CLIPBOARD_STATE="$(cat "$SCOOT_CLIP_TEST_DIR/state")" ${clipStoreEntry} < "$SCOOT_CLIP_TEST_DIR/stdin"
@@ -6891,14 +6890,14 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     #      itself skips the store -- pinned by its upstream suite and
     #      proved live with `wl-copy --sensitive`; the wrapper must not
     #      second-guess the state).
-    clip_setup 0 0
+    clip_setup 0 false
     printf 's3cret' > "$SCOOT_CLIP_TEST_DIR/stdin"
     CLIPBOARD_STATE="sensitive" ${clipStoreEntry} < "$SCOOT_CLIP_TEST_DIR/stdin"
     grep -q "store-argv:.*store state:sensitive" "$SCOOT_CLIP_TEST_DIR/calls"
     echo "ok: sensitive copy reaches the store entry untouched"
 
     # 17c. Locked copy: nothing recorded, exit 0 (refuse-while-locked).
-    clip_setup 0 1
+    clip_setup 0 true
     printf 'while-locked' > "$SCOOT_CLIP_TEST_DIR/stdin"
     CLIPBOARD_STATE="data" ${clipStoreEntry} < "$SCOOT_CLIP_TEST_DIR/stdin"
     [ ! -s "$SCOOT_CLIP_TEST_DIR/calls" ] || { echo "locked copy recorded"; cat "$SCOOT_CLIP_TEST_DIR/calls"; exit 1; }
@@ -6906,7 +6905,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
 
     # 17d. No IPC (no compositor yet): fail open and store, exit 0 -- a
     #      broken probe costs the lock guarantee, never the history.
-    clip_setup 1 1
+    clip_setup 1 false
     printf 'no-ipc' > "$SCOOT_CLIP_TEST_DIR/stdin"
     CLIPBOARD_STATE="data" ${clipStoreEntry} < "$SCOOT_CLIP_TEST_DIR/stdin"
     grep -q "store-argv:.*store" "$SCOOT_CLIP_TEST_DIR/calls"
@@ -6921,7 +6920,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     #      list, `wl-copy` receives the decoded bytes byte-exact
     #      (trailing newlines intact -- the tempfile restore, not
     #      command substitution), exit 0.
-    clip_setup 0 0
+    clip_setup 0 false
     printf '1\tfirst\n2\tsecond\n3\tthird\n' > "$SCOOT_CLIP_TEST_DIR/list"
     printf '2\tsecond' > "$SCOOT_CLIP_TEST_DIR/pick"
     printf '0' > "$SCOOT_CLIP_TEST_DIR/pick-code"
@@ -6935,7 +6934,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     # 17g. Cancelled pick (Escape): exit 0, the clipboard untouched (no
     #      `wl-copy` call at all -- with empty stdin it would *clear*
     #      the selection).
-    clip_setup 0 0
+    clip_setup 0 false
     printf '1\tfirst\n' > "$SCOOT_CLIP_TEST_DIR/list"
     : > "$SCOOT_CLIP_TEST_DIR/pick"
     printf '1' > "$SCOOT_CLIP_TEST_DIR/pick-code"
@@ -6946,7 +6945,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
 
     # 17h. Wiped mid-pick (the lock landed between list and decode):
     #      exit 0, the clipboard untouched.
-    clip_setup 0 0
+    clip_setup 0 false
     printf '1\tfirst\n' > "$SCOOT_CLIP_TEST_DIR/list"
     printf '1\tfirst' > "$SCOOT_CLIP_TEST_DIR/pick"
     printf '0' > "$SCOOT_CLIP_TEST_DIR/pick-code"
@@ -6959,7 +6958,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     # 17i. Locked pick: refused naming the lock, exit 1, the clipboard
     #      untouched (the compositor suppresses the bind already; this
     #      covers a manual run).
-    clip_setup 0 1
+    clip_setup 0 true
     printf '1\tfirst\n' > "$SCOOT_CLIP_TEST_DIR/list"
     printf '1\tfirst' > "$SCOOT_CLIP_TEST_DIR/pick"
     printf '0' > "$SCOOT_CLIP_TEST_DIR/pick-code"

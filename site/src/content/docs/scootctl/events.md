@@ -1,15 +1,15 @@
 ---
 title: Events
-description: "Subscribe to output, keyboard and workspace events over IPC."
+description: "Subscribe to output, keyboard, workspace and lock events over IPC."
 ---
 
-Subscribe instead of polling: dedicate a connection to the event stream and learn about outputs, layouts and workspaces as they change.
+Subscribe instead of polling: dedicate a connection to the event stream and learn about outputs, layouts, workspaces and the session lock as they change.
 
 ## Events
 
 A connection that wants push notifications subscribes instead of polling.
 `subscribe` names the event kinds it wants (`output`, `keyboard`,
-`workspace` — the three
+`workspace`, `lock` — the four
 kinds; naming none is refused, and bare `scootctl subscribe` sends
 `output`); the reply echoes the subscription; and
 afterwards that connection carries events until the session ends:
@@ -26,6 +26,9 @@ $ scootctl subscribe keyboard
 $ scootctl subscribe workspace
 {"type":"subscribed","events":["workspace"]}
 {"type":"workspaces","output":1,"name":"DP-1","active":0,"counts":[2,0,1]}
+$ scootctl subscribe lock
+{"type":"subscribed","events":["lock"]}
+{"type":"lock_changed","locked":true}
 ```
 
 `scootctl subscribe` prints the answer, then one compact JSON object per
@@ -147,12 +150,31 @@ histogram of each window's `workspace` on its `output`) and apply snapshots
 after it — so subscribing never replays the unsubscribed interval as one
 change.
 
+**`lock_changed`** — the session locked or unlocked: the same `locked`
+flag the `locked` query answers with (see [What the replies carry](#what-the-replies-carry)),
+naming the state it moved to. What tells an agent "injected input now
+reaches the lock screen" without polling, and what a clipboard watcher
+leans on instead of its probe interval. No standard Wayland protocol
+reports this to an unfocused client — `ext-session-lock-v1` events go
+only to the lock client itself — so this event (and the query) is the
+channel that watches the lock.
+
+It fires once per transition, never per request: a lock that is refused
+(another client holds the session) changes nothing and sends nothing, and
+a takeover of an already-locked session is no transition either. A fresh
+subscription starts silent, like `keyboard` and `workspace` — read
+`locked` once for the baseline and apply changes after it — so
+subscribing never replays the unsubscribed interval as one change. As
+with the query, this is read-only: nothing over IPC locks or unlocks the
+session.
+
 Versioning: the subscription is IPC protocol 5 — the `subscribed`,
 `output_removed` and `output_restored` tags under the 3 → 4 bump, plus the
 `output_changed` tag under 4 → 5 — the keyboard half is protocol 6: the
-`keyboard` reply and the `keyboard_changed` tag — and the workspace
-occupancy event is protocol 7: the `workspaces` tag. A client that
-never sends `subscribe` (or `keyboard`) never receives any of them. An unknown event kind
+`keyboard` reply and the `keyboard_changed` tag — the workspace
+occupancy event is protocol 7: the `workspaces` tag — and the lock query
+and event are protocol 8: the `locked` reply and the `lock_changed` tag. A client that
+never sends `subscribe` (or `keyboard`, or `locked`) never receives any of them. An unknown event kind
 in a `subscribe` is answered with an ordinary `error` like any unknown
 request tag, so an older server meets a newer subscriber with an error,
 not a kill.

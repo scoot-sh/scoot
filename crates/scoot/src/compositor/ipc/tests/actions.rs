@@ -647,13 +647,15 @@ fn real_focus_moves_over_ipc_still_apply() {
 }
 
 #[test]
-fn unknown_window_id_is_not_a_noop() {
-    // The edge `focus_action_is_noop` is written around: an id that names no
-    // window can never equal `State::focus`, so it stays on the full path
-    // and keeps whatever handling `act` gives it today (which currently
-    // still runs an `apply`). Focus does not move, but the click -- this is
-    // still a focus-family action -- is spent, and the keyboard is
-    // re-derived onto the window that kept focus.
+fn an_unknown_window_id_leaves_focus_state_alone() {
+    // The miss half of the focus family: an id that names no window is no
+    // focus change at all, so it must not spend the click a real pointer
+    // click left on the taskbar. It used to: every `focus-window-id`,
+    // the desktop clipboard's `u64::MAX` lock probe included, cleared
+    // `clicked_layer`, dropping the keyboard focus an open bar dropdown
+    // had on every copy. Focus does not move, the click survives, and the
+    // keyboard stays on the taskbar it was clicked onto -- while the
+    // `apply` the core's handling runs still runs, as it always has.
     let mut fixture = Fixture::drive();
     let focused = fixture.state.focus.expect("a focused window");
 
@@ -674,7 +676,15 @@ fn unknown_window_id_is_not_a_noop() {
         Some(focused),
         "an unknown window id moved window focus"
     );
-    fixture.assert_keyboard_follows_focus("an unknown window id");
+    assert!(
+        fixture.state.clicked_layer.is_some(),
+        "an unknown window id spent the taskbar's click"
+    );
+    assert_eq!(
+        fixture.keyboard_surface(),
+        Some(fixture.clicked_surface()),
+        "an unknown window id ripped the keyboard out of the clicked taskbar"
+    );
     assert!(
         fixture.state.needs_render,
         "an unknown window id skipped the apply it has always run"

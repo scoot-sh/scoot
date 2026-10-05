@@ -356,6 +356,19 @@ impl State {
                 Some(layout) => Response::Keyboard(layout),
                 None => Response::error("this seat has no keyboard"),
             },
+            // Session-level like `outputs`: read live off the lock state
+            // (see `session_lock.rs`), never refused while locked -- an
+            // agent must know the lock state before acting, and the desktop
+            // clipboard probes it on every copy. The side-effect-free
+            // replacement for the old `focus-window-id u64::MAX` probe,
+            // which spent an `on_demand` layer surface's keyboard focus on
+            // every probe (a miss now leaves focus state alone -- see the
+            // `Action` arm below -- but one round trip still beats two).
+            // No allocation beyond the reply line itself: one bool read
+            // into a `Copy` payload.
+            Request::Locked => Response::Locked {
+                locked: self.session_lock.is_locked(),
+            },
             // Session-level like `outputs`: output power is hardware
             // state, not window management, so like gamma -- and unlike
             // every `Action` -- this applies while locked. The idle cycle
@@ -416,19 +429,32 @@ impl State {
                 // alone. After the lock gate above, for the same reason as
                 // there: a refused request must not spend the click, so the
                 // session comes back as the user left it.
-                if matches!(
-                    &action,
+                //
+                // A `FocusWindowId` that names no window is the one
+                // miss in this family: there is no window to take the
+                // keyboard to, so spending the click would drop an
+                // `on_demand` layer surface's keyboard focus for a focus
+                // change that never happened. The desktop clipboard's old
+                // lock probe did exactly this on every copy
+                // (`focus-window-id u64::MAX`); the `locked` query replaces
+                // the probe, and the miss keeps the click. The core ignores
+                // the id either way, so nothing else on this path changes.
+                let spends_click = match &action {
+                    scoot_ipc::Action::FocusWindowId { id } => {
+                        self.windows.contains_key(&WindowId(*id))
+                    }
                     scoot_ipc::Action::FocusColumn { .. }
-                        | scoot_ipc::Action::FocusWindow { .. }
-                        | scoot_ipc::Action::FocusWindowId { .. }
-                        | scoot_ipc::Action::FocusWorkspace { .. }
-                        | scoot_ipc::Action::FocusWorkspaceIndex { .. }
-                        | scoot_ipc::Action::FocusOutputWorkspaceIndex { .. }
-                        | scoot_ipc::Action::FocusOutput { .. }
-                        | scoot_ipc::Action::FocusOutputIndex { .. }
-                        | scoot_ipc::Action::FocusOutputDirection { .. }
-                        | scoot_ipc::Action::ToggleFloatingFocus
-                ) {
+                    | scoot_ipc::Action::FocusWindow { .. }
+                    | scoot_ipc::Action::FocusWorkspace { .. }
+                    | scoot_ipc::Action::FocusWorkspaceIndex { .. }
+                    | scoot_ipc::Action::FocusOutputWorkspaceIndex { .. }
+                    | scoot_ipc::Action::FocusOutput { .. }
+                    | scoot_ipc::Action::FocusOutputIndex { .. }
+                    | scoot_ipc::Action::FocusOutputDirection { .. }
+                    | scoot_ipc::Action::ToggleFloatingFocus => true,
+                    _ => false,
+                };
+                if spends_click {
                     self.clicked_layer = None;
                 }
                 // The already-there fast path `ext_workspace.rs`'s

@@ -5,9 +5,9 @@
 //! the reply is `Response::Subscribed`, and afterwards the connection
 //! carries [`Response::OutputRemoved`]/[`Response::OutputRestored`]/
 //! [`Response::OutputChanged`]/[`Response::KeyboardChanged`]/
-//! [`Response::Workspaces`] unasked as
-//! outputs come, go and change size, the keyboard layout changes, and
-//! workspace occupancy moves.
+//! [`Response::Workspaces`]/[`Response::LockChanged`] unasked as
+//! outputs come, go and change size, the keyboard layout changes,
+//! workspace occupancy moves, and the session locks and unlocks.
 //! This module is the server side of that: who is subscribed, getting events
 //! to them, and dropping subscribers that stop reading.
 //!
@@ -122,7 +122,7 @@ impl State {
     pub fn subscribe(&mut self, conn: u64, stream: UnixStream, events: Vec<EventKind>) -> Response {
         if events.is_empty() {
             return Response::error(
-                "subscribe names no event kinds; name at least one (\"output\", \"keyboard\", \"workspace\"), \
+                "subscribe names no event kinds; name at least one (\"output\", \"keyboard\", \"workspace\", \"lock\"), \
                  or open a connection for requests instead",
             );
         }
@@ -216,7 +216,23 @@ impl State {
         self.emit(EventKind::Keyboard, &line);
     }
 
-    /// The shared tail of all five emitters: one encoded line to every
+    /// Sends a session lock/unlock event to every `Lock` subscriber.
+    /// See the module doc for what happens to one that stops reading.
+    ///
+    /// Called from the lock transitions (`SessionLockHandler::lock` on an
+    /// accepted fresh lock, `SessionLockHandler::unlock`) -- a cold path
+    /// (a user locking their screen, never per frame), so the one small
+    /// encode plus one clone per subscriber costs nothing at runtime.
+    /// Refused locks and takeovers of an already-locked session change
+    /// nothing a subscriber does not already know and emit nothing.
+    pub fn emit_lock_changed(&mut self, locked: bool) {
+        let Ok(line) = encode(&Response::LockChanged { locked }) else {
+            return;
+        };
+        self.emit(EventKind::Lock, &line);
+    }
+
+    /// The shared tail of all six emitters: one encoded line to every
     /// subscriber of `kind`.
     ///
     /// `line` is encoded once, outside, and cloned per subscriber -- one

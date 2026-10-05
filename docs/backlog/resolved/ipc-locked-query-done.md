@@ -1,9 +1,10 @@
 ---
 title: "A side-effect-free way to ask whether the session is locked"
-status: "open"
-area: "ipc"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-05"
 ---
 
 # A side-effect-free way to ask whether the session is locked
@@ -39,3 +40,27 @@ an on-demand layer surface (an open bar dropdown) had.
 ## Not in this ticket
 
 Locking or unlocking over IPC.
+
+## Resolution
+
+Landed 2026-10-05 in PR #463 (`feat(scoot,scoot-ipc,scootctl,nix):
+side-effect-free session lock query and event`), all three parts:
+
+- Chose the small query over the `version` field (a new request tag needs
+  no bump on the request half; the two new reply tags move the protocol
+  7 → 8): `Request::Locked` answers `Response::Locked{locked}` locked or
+  not, and `EventKind::Lock` carries `Response::LockChanged{locked}` once
+  per transition. Old clients never receive the new tags; an older server
+  answers the new tag/kind with an ordinary `Error`, so a probe against
+  one fails open.
+- A `focus-window-id` miss keeps `clicked_layer` (and all focus state);
+  the old-behavior test is replaced by
+  `an_unknown_window_id_leaves_focus_state_alone`, which fails before and
+  passes after.
+- `clipboard-guard.sh` asks `msg locked` with the fail-open behavior
+  kept; the nix module checks (stub scenarios + content pins) are green.
+
+Evidence: nextest workspace 4350 passed (22 `scootbar::*` environmental
+failures, package untouched), `cargo test -p scoot` 2127 passed, clippy
+and fmt clean, smoke rc=0 (36 ok), `scoot-modules` and `docs-site` nix
+checks green, IPC benchmark on the report.
