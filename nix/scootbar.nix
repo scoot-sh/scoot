@@ -1,4 +1,4 @@
-# The status bar, `packages.<system>.scootbar` (docs/nix.md, "The status
+# The status bar, `packages.<system>.scootbar` (site/src/content/docs/scootbar/index.md, "The status
 # bar: scootbar"). Its own file, called with `callPackage` from flake.nix,
 # so that its Cargo features are arguments and a different build is an
 # `.override`:
@@ -17,7 +17,7 @@
 # what std links (no libwayland, no libEGL, no fontconfig), so there are no
 # `buildInputs` to give it. **No font is in its closure**: the binary takes
 # one from `--font` or a short list of well-known files and otherwise
-# refuses to start saying how to give one (docs/scootbar/cli.md#fonts).
+# refuses to start saying how to give one (site/src/content/docs/scootbar/cli.md#fonts).
 # `scootbar-demo` (./scootbar-demo.nix) is the build that carries one.
 #
 # A crane `buildPackage` over the workspace's shared dependency artifact

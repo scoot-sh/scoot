@@ -1,6 +1,6 @@
 # `programs.scootbar` for home-manager: the config file and the systemd
 # user service. The options and the Stylix defaults are in ./scootbar.nix;
-# the NixOS side is ./scootbar-nixos.nix. See docs/nix.md.
+# the NixOS side is ./scootbar-nixos.nix. See See site/src/content/docs/scootbar/index.md..
 { config, lib, ... }:
 
 let
@@ -21,7 +21,7 @@ in
       Unit = {
         Description = "scootbar, the status bar";
         # Up with the graphical session (which a scoot session script
-        # starts after importing WAYLAND_DISPLAY: docs/nix.md), and before what hosts a tray (`tray.target`, where the session
+        # starts after importing WAYLAND_DISPLAY: site/src/content/docs/scootbar/index.md), and before what hosts a tray (`tray.target`, where the session
         # defines one; an ordering against an absent unit does nothing).
         PartOf = [ "graphical-session.target" ];
         After = [ "graphical-session.target" ];
@@ -44,7 +44,7 @@ in
         Restart = "on-failure";
         RestartSec = 2;
         # A bar button or a binding launches apps as the bar's children
-        # (docs/scootbar/cli.md#pointer-input). With the default
+        # (site/src/content/docs/scootbar/cli.md#pointer-input). With the default
         # `control-group` every restart of the bar (a config change, a
         # crash) would kill them with it; `process` stops only the bar.
         KillMode = "process";

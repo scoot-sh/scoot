@@ -2,7 +2,7 @@
 # options, the Stylix defaults, the rendered `bar.toml` and the package
 # with its Cargo features. `scootbar-home.nix` and `scootbar-nixos.nix`
 # import it and add what only their side has (where the file goes, the
-# systemd user unit). Written for docs/nix.md, "The status bar: scootbar".
+# systemd user unit). Written for Written for site/src/content/docs/scootbar/index.md, "The status bar: scootbar".
 #
 # The precedence of a `settings` value, highest first:
 #
@@ -163,7 +163,7 @@ in
     };
 
     # The modules are Cargo features (one per module, `clock` the default;
-    # docs/nix.md). Null builds what `package` is; a list is exactly the
+    # site/src/content/docs/scootbar/index.md). Null builds what `package` is; a list is exactly the
     # modules that build has, so `[ ]` is a plain bar that needs no font.
     features = lib.mkOption {
       type = lib.types.nullOr (lib.types.listOf lib.types.str);
@@ -184,7 +184,7 @@ in
     };
 
     # Free-form: a new option never needs a module change first, and the
-    # file's schema is docs/scootbar/cli.md's, checked by the bar itself
+    # file's schema is site/src/content/docs/scootbar/cli.md's, checked by the bar itself
     # (an unknown key is a loud error naming it, and the check in this
     # flake runs the real binary over the rendered file).
     settings = lib.mkOption {
@@ -202,7 +202,7 @@ in
       };
       description = ''
         The contents of `bar.toml`, rendered as TOML. The options are
-        listed in docs/scootbar/cli.md ("The config file"). What is not
+        listed in site/src/content/docs/scootbar/cli.md ("The config file"). What is not
         set takes its value from Stylix, when `stylix.enable` is on, and
         then from this module's one plain default (a font).
       '';
@@ -323,7 +323,7 @@ in
     # below the user's and Stylix's, the way the look's colors are: a
     # value set in `settings` wins per key. Placement stays yours (the
     # module is defined, not placed -- add `"notifications"` to a list
-    # to show it; see docs/nix.md). Like the look's colors, a bar the
+    # to show it; see site/src/content/docs/scootbar/theming.md). Like the look's colors, a bar the
     # user turned off stays unthemed too. The envelope stands while the
     # text is empty (a quiet desktop keeps a clickable bell, not a
     # hole); it is in DejaVu Sans, the bar's own default font.

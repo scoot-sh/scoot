@@ -35,7 +35,7 @@ let
   # the session and is refused there -- and the loader fails safe (whole
   # file discarded for defaults, session still boots), so a typo costs
   # the config, never the session. See
-  # docs/configuration.md#failure-semantics.
+  # site/src/content/docs/scoot/configure.md#failure-semantics.
   configFile = tomlFormat.generate "scoot-config.toml" renderedSettings;
 
   # `settings`, plus `wallpaper.command` pointing at the installed scootbg
@@ -160,7 +160,7 @@ in
     enable = lib.mkEnableOption "scoot, the scrolling-tiling Wayland compositor";
 
     # One switch plus a look choice for a working desktop (see
-    # `desktop.nix` and docs/nix.md). Each side wires only what it owns;
+    # `desktop.nix` and site/src/content/docs/desktop/index.md). Each side wires only what it owns;
     # this side owns the config file (the look's `[appearance]` and
     # `[wallpaper]`), the portal config and the `[xwayland]` knob.
     desktop = desktop.options;
@@ -194,8 +194,8 @@ in
     # behavior beyond the file (`enable`, `package`, `configFile`,
     # `sessionScript`, `portals.enable`); everything the compositor
     # reads passes through here verbatim. Field names, types and
-    # defaults are documented in docs/configuration.md, and the worked
-    # example in docs/nix.md is pasted from a live
+    # defaults are documented in site/src/content/docs/scoot/configure.md, and the worked
+    # example in site/src/content/docs/scoot/configure.md#example-configtoml is pasted from a live
     # `scoot --print-default-config` emission, not hand-written.
     settings = lib.mkOption {
       type = tomlFormat.type;
@@ -276,7 +276,7 @@ in
     };
 
     # Behavior half of "Starting a session" (see
-    # docs/configuration.md#starting-a-session): the config declares the
+    # site/src/content/docs/scoot/index.md#starting-a-session): the config declares the
     # baseline, a script carries ordering/conditionals. When set, this
     # text is written executable beside the config (at
     # `<dirOf configFile>/session.sh` -- `scoot/session.sh` by default);
@@ -286,7 +286,7 @@ in
     # `<package>/bin/scoot --tty -- /home/<user>/.config/<that path>`
     # line -- an absolute path, since `Exec=` lines get no shell
     # expansion -- so the greeter entry runs this script instead of the
-    # `scoot-session` launcher (see docs/nix.md, which shows the pairing
+    # `scoot-session` launcher (see site/src/content/docs/desktop/index.md#the-greeter, which shows the pairing
     # together). That entry runs without the launcher's session wiring;
     # startup programs that want the wiring belong in `[autostart]`
     # instead. Null writes no file.

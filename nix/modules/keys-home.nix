@@ -2,7 +2,7 @@
 # `[binds]` plus the tools its hardware binds run. The option shapes
 # live in `./desktop.nix` (shared with the NixOS side); the tool
 # `package` defaults live here because only this side has `pkgs`. See
-# docs/nix.md ("Hardware keys and desktop actions").
+# site/src/content/docs/desktop/index.md#hardware-keys-and-desktop-actions ("Hardware keys and desktop actions").
 {
   config,
   lib,
