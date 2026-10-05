@@ -2760,8 +2760,11 @@ let
       assert !hmDesk.config.programs.scoot.desktop.apps.fileManager.enable;
       true
     )
+    # ...while the profile turns the keymap on (a laptop whose Fn
+    # keys do nothing is not daily-drivable): its binds are the
+    # `_keysPins` below.
     (
-      assert !hmDesk.config.programs.scoot.desktop.keys.enable;
+      assert hmDesk.config.programs.scoot.desktop.keys.enable;
       true
     )
     (
