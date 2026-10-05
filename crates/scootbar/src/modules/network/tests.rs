@@ -433,6 +433,24 @@ fn record_menu(tag: &str) -> (Vec<String>, std::path::PathBuf, std::path::PathBu
     )
 }
 
+/// Waits up to 5 s for `file` to hold `want`: `record_menu` runs
+/// `sh -c "cat > FILE"`, so each new menu truncates FILE at spawn and the
+/// write lands only once the child is scheduled — a `read_to_string` right
+/// after `drive()` races it (CI on a no-Rust PR read `""`). The
+/// `connect-command` recorder (`echo ... > FILE`) truncates the same way.
+/// Polls instead of sleeping blind; fails with both sides on mismatch.
+fn wait_file(file: &std::path::Path, want: &str) {
+    let start = std::time::Instant::now();
+    loop {
+        let got = std::fs::read_to_string(file).unwrap_or_default();
+        if got == want || start.elapsed() > Duration::from_secs(5) {
+            assert_eq!(got, want, "the child never wrote {}", file.display());
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 /// Two radios, the route on the shown one: the second radio's cache dumps
 /// after the shown one's, and must not replace it.
 #[test]
@@ -487,7 +505,7 @@ fn only_the_shown_radio_s_scan_is_dumped() {
     let output = crate::modules::OutputView { name: None };
     assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
     let _ = drive(&mut harness);
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "Wimbly\nCafe\n");
+    wait_file(&file, "Wimbly\nCafe\n");
     std::fs::remove_dir_all(&dir).ok();
     let _ = fake.sent();
 }
@@ -542,7 +560,7 @@ fn an_ap_interface_s_empty_cache_never_replaces_the_scan() {
     let output = crate::modules::OutputView { name: None };
     assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
     let _ = drive(&mut harness);
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "Wimbly\n");
+    wait_file(&file, "Wimbly\n");
     std::fs::remove_dir_all(&dir).ok();
     let _ = fake.sent();
 }
@@ -609,10 +627,7 @@ fn the_default_route_moving_relists_the_new_radio() {
     let output = crate::modules::OutputView { name: None };
     assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
     let _ = drive(&mut harness);
-    assert_eq!(
-        std::fs::read_to_string(&file).unwrap(),
-        "FarAway\nElsewhere\n"
-    );
+    wait_file(&file, "FarAway\nElsewhere\n");
     std::fs::remove_dir_all(&dir).ok();
     let _ = fake.sent();
 }
@@ -668,7 +683,7 @@ fn the_shown_radio_vanishing_relists_the_survivor() {
     let output = crate::modules::OutputView { name: None };
     assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
     let _ = drive(&mut harness);
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "FarAway\n");
+    wait_file(&file, "FarAway\n");
     std::fs::remove_dir_all(&dir).ok();
     let _ = fake.sent();
 }
@@ -701,7 +716,7 @@ fn an_idle_station_is_scanned_while_nothing_is_associated() {
     let output = crate::modules::OutputView { name: None };
     assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
     let _ = drive(&mut harness);
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "Cafe\n");
+    wait_file(&file, "Cafe\n");
     std::fs::remove_dir_all(&dir).ok();
     let _ = fake.sent();
 }
@@ -1122,10 +1137,11 @@ fn the_menu_is_fed_the_scan_and_reaped() {
     // list fed twice over.
     assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
     assert_eq!(harness.source_count(), 4);
+    // The second child wrote once it was scheduled (see `wait_file`); the
+    // drive then reaps it, so the count below is settled, not raced.
+    wait_file(&file, "Wimbly\n");
     let _ = drive(&mut harness);
     assert_eq!(harness.source_count(), 3);
-    let fed = std::fs::read_to_string(&file).unwrap();
-    assert_eq!(fed, "Wimbly\n");
     std::fs::remove_dir_all(&dir).ok();
     let _ = fake.sent();
 }
@@ -1892,7 +1908,7 @@ mod popup_list {
             Ok(Update::Unchanged)
         );
         let _ = drive(&mut harness);
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Wimbly\n");
+        wait_file(&file, "Wimbly\n");
         std::fs::remove_dir_all(&dir).ok();
         let _ = fake.sent();
     }
@@ -1999,8 +2015,10 @@ mod popup_list {
         );
         let _ = drive(&mut harness);
         // The SSID alone (not the row's label with its bars), as one
-        // argument.
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Wimbly\n");
+        // argument. The wait comes first (see `wait_file`): the drive
+        // after it then reaps the exited child, so the count is settled.
+        wait_file(&file, "Wimbly\n");
+        let _ = drive(&mut harness);
         // Reaped: no source past the sockets and the timer.
         assert_eq!(harness.source_count(), 3);
         std::fs::remove_dir_all(&dir).ok();
@@ -2042,7 +2060,7 @@ mod popup_list {
         );
         let _ = drive(&mut harness);
         let line = crate::modules::network::netlink::sanitize(&evil);
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{line}\n"));
+        wait_file(&file, &format!("{line}\n"));
         // Through a shell, `$(touch ...)` would have run: nothing was
         // created beside the recording.
         assert!(
@@ -2090,7 +2108,7 @@ mod popup_list {
             Ok(Update::Unchanged)
         );
         let _ = drive(&mut harness);
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Beta\n");
+        wait_file(&file, "Beta\n");
         // Refilled, the list is Beta alone, and row 0 is Beta again
         // (-60 dBm is three bars).
         let mut content = Content::default();
@@ -2250,7 +2268,7 @@ mod popup_list {
         // Menu 1 opens, fed the settled list; its refresh (D1) goes out.
         assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
         let _ = drive(&mut harness);
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Wimbly\n");
+        wait_file(&file, "Wimbly\n");
         let (_, genl) = fake.sent();
         let d1 = request_seq(
             &genl,
@@ -2262,20 +2280,20 @@ mod popup_list {
         // Menu 2 opens, fed P1; its refresh (D2) queues behind D1.
         assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
         let _ = drive(&mut harness);
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Alpha\n");
+        wait_file(&file, "Alpha\n");
         // D1 page P2 arrives late: it appends, it must not clear P1.
         fake.genl(&fake::scan(&[(b"Beta", -7000, false)]));
         let _ = drive(&mut harness);
         // Menu 3 proves the list: P1 and P2, not P2 alone.
         assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
         let _ = drive(&mut harness);
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Alpha\nBeta\n");
+        wait_file(&file, "Alpha\nBeta\n");
         // D1's terminator ends it; the list stands for D2's refill.
         fake.genl(&fake::done_seq(d1));
         assert_eq!(drive(&mut harness), Update::Unchanged);
         assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
         let _ = drive(&mut harness);
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Alpha\nBeta\n");
+        wait_file(&file, "Alpha\nBeta\n");
         // D2 refills: its first page resets, nothing doubles.
         let (_, genl) = fake.sent();
         fake.genl(&fake::station(-50));
@@ -2297,7 +2315,7 @@ mod popup_list {
         assert_eq!(drive(&mut harness), Update::Unchanged);
         assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
         let _ = drive(&mut harness);
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Alpha\nBeta\n");
+        wait_file(&file, "Alpha\nBeta\n");
         std::fs::remove_dir_all(&dir).ok();
         let _ = fake.sent();
     }
