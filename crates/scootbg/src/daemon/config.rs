@@ -186,10 +186,11 @@ fn without_downloads(record: &mut Record) {
 /// but not live is put back if its file is there now, and reported if not
 /// (see the module docs). A download is put back whether or not its file
 /// is cached, so a choice lost to a profile adopt is live again (the worker
-/// fetches it when the outputs are configured). This does not retry a
-/// failed download: a failed draw stays failed until a reconfigure, a new
-/// `set`, a changed section, or a restart, which is the whole retry
-/// policy — nothing polls. Quiet on stderr: the reply says it.
+/// fetches it when the outputs are configured). This fill does not itself
+/// retry a failed download — but [`apply`] below stamps every output (which
+/// clears the failed draw) and reconciles, so any `apply-config`, even an
+/// unchanged reload, tries again: that stamp is the whole retry policy —
+/// nothing polls. Quiet on stderr: the reply says it.
 fn recheck(state: &mut State, section: &Section) -> Vec<String> {
     let mut problems = Vec::new();
     let cache = match crate::fetch::dir() {

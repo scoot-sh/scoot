@@ -98,7 +98,8 @@ both download; the rename settles it, and the cache never holds a partial
 file. An error page, a file past the cap, a hash mismatch, no network, or
 no `curl` is an error naming the URL, and nothing is cached — a fixed
 link is picked up by the next request. A failed download is tried again
-on a new `set`, a changed section, a reconfigured output, or a restart;
+on a new `set`, any `apply-config` (even an unchanged reload — scoot
+sends one per reload), a reconfigured output, or a restart;
 nothing polls. Prefer `https`, and pin `sha256` so a changed byte fails
 loudly instead of landing on screen.
 
@@ -116,7 +117,8 @@ the bytes "do not start as a PNG, JPEG or WebP" and caches nothing; a
 file past 32 MiB says so (link something smaller); a `sha256` mismatch
 prints both hashes (copy the actual one into the config, or drop the
 pin); a cache directory nobody can write names it. Offline at startup,
-the background shows until a restart with the network back.
+the background shows until the next `set`, `apply-config`, reconfigure,
+or restart with the network back.
 
 ## Scale
 
