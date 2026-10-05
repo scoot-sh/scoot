@@ -18,12 +18,15 @@
 # - the session entry is additive (default session untouched) and carries
 #   the `providedSessions` nixpkgs requires of every session package;
 #   with no command it runs the `scoot-session` launcher (the session
-#   wiring: user-manager import, `graphical-session.target`, the
+#   wiring: user-manager import, `scoot-session.target` reaching
+#   `graphical-session.target` past the display import, the
 #   activation environment, teardown), whose user units
-#   (`scoot.service` with `BindsTo`/`Before` the session target and an
-#   `ExecStart` naming the package's binary, plus
-#   `scoot-shutdown.target` conflicting the session targets) are
-#   installed beside the entry and absent with it off;
+#   (`scoot.service` with `PartOf` the session target and an
+#   `ExecStart` naming the package's binary, `scoot-session.target`
+#   `BindsTo` the graphical target it pulls in only once the display
+#   is imported, plus `scoot-shutdown.target` conflicting all three
+#   session targets away) are installed beside the entry and absent
+#   with it off;
 # - `session.command` renders verbatim into `Exec=` (launcher default,
 #   `-- COMMAND` append, wrapper-script path, quoting
 #   with spaces/quotes/pipes intact), stays inert with the entry off,
@@ -1226,24 +1229,44 @@ let
       true
     )
 
-    # The launcher's units ride with the entry: both installed...
+    # The launcher's units ride with the entry: all three installed...
     (
       assert osSession.config.systemd.user.units ? "scoot.service";
+      true
+    )
+    (
+      assert osSession.config.systemd.user.units ? "scoot-session.target";
       true
     )
     (
       assert osSession.config.systemd.user.units ? "scoot-shutdown.target";
       true
     )
-    # ...the service bound to the session target it pulls in, and
-    # ordered before it (so the target activates once the service
-    # starts, and stopping the target stops the service)...
+    # ...the service bound to the session target it stops with, and to
+    # no graphical target (starting the service must not pull the
+    # session in: the launcher starts `scoot-session.target` past the
+    # display import, and anything binding the graphical target at
+    # fork time reintroduces the skipped-`ConditionEnvironment` bug)...
     (
-      assert lib.hasInfix "BindsTo=graphical-session.target" sessionServiceText;
+      assert lib.hasInfix "PartOf=scoot-session.target" sessionServiceText;
+      true
+    )
+    # ...and to no graphical target: only exact directive lines count
+    # (the comments discuss the target they deliberately do not bind).
+    (
+      assert !(builtins.elem "BindsTo=graphical-session.target" sessionServiceLines);
       true
     )
     (
-      assert lib.hasInfix "Before=graphical-session.target" sessionServiceText;
+      assert !(builtins.elem "Before=graphical-session.target" sessionServiceLines);
+      true
+    )
+    # ...the session target pulling in the graphical target once the
+    # launcher starts it (a requirement dependency: starting the
+    # session target starts the graphical one, which is how a
+    # `RefuseManualStart=yes` target is reached at all)...
+    (
+      assert lib.hasInfix "BindsTo=graphical-session.target" sessionTargetText;
       true
     )
     # ...launching this package's binary on `--tty` (the same build the
@@ -1252,10 +1275,11 @@ let
       assert contains "ExecStart=${fakePkg}/bin/scoot --tty" sessionServiceText;
       true
     )
-    # ...and the shutdown target conflicting the session targets away
-    # (which is what stops session-bound units when scoot exits).
+    # ...and the shutdown target conflicting every session target away
+    # (which is what stops the compositor through `PartOf`, and the
+    # session-bound units through theirs, when scoot exits).
     (
-      assert lib.hasInfix "Conflicts=graphical-session.target" sessionShutdownText;
+      assert lib.hasInfix "Conflicts=scoot-session.target graphical-session.target" sessionShutdownText;
       true
     )
     # ...while no entry means no units either (a command with the entry
@@ -1614,6 +1638,7 @@ let
         assert osRealGreeter.config.services.displayManager.regreet.enable;
         assert osRealGreeter.config.services.greetd.enable;
         assert osRealGreeter.config.systemd.user.units ? "scoot.service";
+        assert osRealGreeter.config.systemd.user.units ? "scoot-session.target";
         # The one-screen cage default holds in a real NixOS evaluation
         # too, not only against the stubs.
         assert
@@ -1795,6 +1820,8 @@ let
   desktopFile = "${desktopPkg}/share/wayland-sessions/scoot.desktop";
   # The launcher's units, as the entry's configuration renders them.
   sessionServiceText = osSession.config.systemd.user.units."scoot.service".text;
+  sessionServiceLines = lib.splitString "\n" sessionServiceText;
+  sessionTargetText = osSession.config.systemd.user.units."scoot-session.target".text;
   sessionShutdownText = osSession.config.systemd.user.units."scoot-shutdown.target".text;
   cmdDesktopFile = "${builtins.head osSessionCmd.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
   wrapperDesktopFile = "${builtins.head osSessionWrapper.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
@@ -1838,6 +1865,10 @@ let
     # ...the launcher's units beside that...
     (
       assert osGreeter.config.systemd.user.units ? "scoot.service";
+      true
+    )
+    (
+      assert osGreeter.config.systemd.user.units ? "scoot-session.target";
       true
     )
     (
@@ -2432,16 +2463,20 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   echo "ok: session.command with quoting-needing characters renders verbatim"
 
   # 6f. The launcher's units: the service runs this package's binary on
-  # `--tty`, bound to and before the session target it pulls in; the
-  # shutdown target conflicts the session targets away (which is what
-  # stops session-bound units when scoot exits). (These embed the unit
-  # text in single quotes, so the resource files must stay free of
-  # `'` -- keep the prose apostrophe-free.)
+  # `--tty`, stopped with the session target it is `PartOf` (and bound
+  # to no graphical target, so starting the service never reaches the
+  # session early); the session target pulls the graphical target in
+  # once the launcher starts it past the display import; the shutdown
+  # target conflicts every session target away (stopping the
+  # compositor through `PartOf` when scoot exits). (These embed the
+  # unit text in single quotes, so the resource files must stay free
+  # of `'` -- keep the prose apostrophe-free.)
   printf '%s' '${sessionServiceText}' | grep -F -q "ExecStart=${fakePkg}/bin/scoot --tty"
-  printf '%s' '${sessionServiceText}' | grep -F -x -q 'BindsTo=graphical-session.target'
-  printf '%s' '${sessionServiceText}' | grep -F -x -q 'Before=graphical-session.target'
-  printf '%s' '${sessionShutdownText}' | grep -F -x -q 'Conflicts=graphical-session.target graphical-session-pre.target'
-  echo "ok: session user units wire the service to the session target"
+  printf '%s' '${sessionServiceText}' | grep -F -x -q 'PartOf=scoot-session.target'
+  if printf '%s' '${sessionServiceText}' | grep -F -x -q -e 'BindsTo=graphical-session.target' -e 'Before=graphical-session.target'; then echo "scoot.service must not bind the graphical target" >&2; exit 1; fi
+  printf '%s' '${sessionTargetText}' | grep -F -x -q 'BindsTo=graphical-session.target'
+  printf '%s' '${sessionShutdownText}' | grep -F -x -q 'Conflicts=scoot-session.target graphical-session.target graphical-session-pre.target'
+  echo "ok: session user units reach the session target past the display import"
 
   # 7. A representable-but-wrong scoot type renders as TOML (it is the
   #    loader, at session start, that refuses it -- fail-safe).

@@ -36,10 +36,20 @@ VM..."). Nothing is published; a user reads raw Markdown on GitHub.
 - **History out of user pages**: dated measurements and review narratives go
   to the contributor tree or commit messages; `CLAUDE.md`'s "docs in the same
   PR" rule is restated to target the user pages.
-- **Generator** (decide): mdBook (plain, tiny, Nix-friendly, generic look),
-  Zola (one Rust binary, fully themeable: the coordinator's lean, to make
-  the site look like scoot), or Astro Starlight (prettiest out of the box,
-  brings Node into a Rust/Nix repo). Built by the flake.
+- **Generator: Astro Starlight** (maintainer's decision, 2026-10-04). Node
+  enters the repo for the site only: pin it through the flake (a
+  `buildNpmPackage`-style derivation with a locked `package-lock.json`, no
+  global installs), keep it out of every Rust job's inputs, and give the site
+  its own CI path filter. Theme it to look like scoot (the example looks'
+  palettes, real screenshots), not stock Starlight.
+- **LLM support from the first page** (maintainer, 2026-10-04): publish
+  `/llms.txt` (the llmstxt.org index), `/llms-full.txt` (every page) and a
+  small variant, plus each page as plain Markdown at a stable URL, generated
+  by the build (e.g. the `starlight-llms-txt` plugin; verify it and pin it),
+  so an agent can read the docs without scraping HTML. Pages are written so
+  they read well as plain text too: commands in fenced blocks, no meaning
+  carried only by images or tabs. CI checks the files exist and list every
+  page.
 - **Hosting**: GitHub Pages from `main` by its own workflow, which must
   trigger on `docs/**` explicitly (docs-only pushes start no workflow today,
   by design). Domain: the maintainer's call.
@@ -47,7 +57,8 @@ VM..."). Nothing is published; a user reads raw Markdown on GitHub.
 
 ## Decisions for the maintainer
 
-The generator, the domain, and the page outline (a draft outline for review
+Decided 2026-10-04: Astro Starlight, with llms.txt support from the start.
+Still open: the domain, and the page outline (a draft outline for review
 is the first deliverable, before any move).
 
 ## Not in this ticket

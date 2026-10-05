@@ -37,8 +37,10 @@ let
   # imports the login environment into the user manager, starts
   # `scoot.service`, waits for IPC readiness, imports `WAYLAND_DISPLAY`
   # and `XDG_CURRENT_DESKTOP` into the manager and the D-Bus activation
-  # environment, and on exit stops the session target so session-bound
-  # units stop. See docs/nix.md for the whole flow.
+  # environment, and only then starts `scoot-session.target` (which
+  # pulls in `graphical-session.target`, so the target is reached with
+  # the display already imported), and on exit stops the session
+  # targets so session-bound units stop. See docs/nix.md for the whole flow.
   sessionPackage =
     (pkgs.writeTextDir "share/wayland-sessions/scoot.desktop" ''
       [Desktop Entry]
@@ -79,8 +81,9 @@ let
     "scoot.service".text = builtins.replaceStrings [ "@SCOOT_BIN@" ] [ "${cfg.package}/bin/scoot" ] (
       builtins.readFile ../../resources/systemd/user/scoot.service
     );
-    # The shutdown target names no binary: no substitution to keep in
-    # step, plain text.
+    # The session and shutdown targets name no binary: no substitution
+    # to keep in step, plain text.
+    "scoot-session.target".text = builtins.readFile ../../resources/systemd/user/scoot-session.target;
     "scoot-shutdown.target".text = builtins.readFile ../../resources/systemd/user/scoot-shutdown.target;
   };
 in
@@ -223,7 +226,8 @@ in
       #
       # A set value bypasses `scoot-session`: only the null default runs
       # the launcher, so only it gets the session wiring (user-manager
-      # import, `graphical-session.target`, the activation environment,
+      # import, `scoot-session.target` reaching `graphical-session.target`
+      # past the display import, the activation environment,
       # teardown). A `scoot --tty -- <script>` value still runs exactly
       # what it says -- a session, just an unwired one -- and startup
       # programs that want the wiring belong in scoot's `[autostart]`,
@@ -238,7 +242,8 @@ in
           Full `Exec=` command line for the login-screen session entry.
           Null (the default) renders `<package>/bin/scoot-session`, the
           session launcher, so existing configs gain the session wiring
-          (user-manager import, `graphical-session.target`, the D-Bus
+          (user-manager import, `scoot-session.target` reaching
+          `graphical-session.target` past the display import, the D-Bus
           activation environment, teardown on exit -- see docs/nix.md).
           Set it to run something else instead: the usual shape is
           `<package>/bin/scoot --tty -- <command>`, e.g. the
