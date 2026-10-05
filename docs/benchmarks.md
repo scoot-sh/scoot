@@ -221,7 +221,7 @@ Reading it role by role:
   ticks and ~400 of its 470 wakeups are `scoot-session`'s 1 s poll
   (4–5 ticks, ~200 wakes) plus the user-manager round trips it causes
   (~30 ticks, ~200 wakes) — the already-filed
-  [idle-poll ticket](backlog/core/session-launcher-idle-poll.md), now
+  [idle-poll ticket](backlog/resolved/session-launcher-idle-poll-done.md), now
   quantified: the fix takes the whole session from 0.60% of a core to
   ~0.03%. Hyprland's plumbing is second noisiest (dbus-broker alone
   wakes ~600 times a minute — something chats constantly on its bus;
@@ -254,7 +254,7 @@ state was restored exactly afterwards (threshold 80, timer restarted,
 Biggest expected win first. Each is filed; the first confirms and
 quantifies the ticket this benchmark was built to check.
 
-1. **Kill the 1 s session poll** ([idle-poll ticket](backlog/core/session-launcher-idle-poll.md),
+1. **Kill the 1 s session poll** ([idle-poll ticket](backlog/resolved/session-launcher-idle-poll-done.md),
    already open): 35 of 36 ticks and ~400 of 470 wakeups per minute.
    Nothing else in the session is within an order of magnitude. The
    fix takes scoot from the most CPU-hungry session here (0.60%) to

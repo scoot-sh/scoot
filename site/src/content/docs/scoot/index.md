@@ -124,7 +124,7 @@ IPC, imports the session's own `WAYLAND_DISPLAY`, and only then reaches
 already set. While the session runs it blocks in the bus waiting for
 `scoot.service` to leave the active state: an idle session costs no wakeups,
 and logging out ends the session at once. A user-manager re-exec mid-session
-(a NixOS switch) neither ends the session nor costs it a poll. When scoot
+(a NixOS switch) rides through without ending the session. When scoot
 exits, the session targets stop and the display variables are restored.
 
 > **Symptom:** a login is refused as already running, but no session is up.

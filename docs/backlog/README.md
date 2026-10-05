@@ -294,7 +294,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [`scoot msg` panics when its stdout reader goes away](./resolved/msg-client-broken-pipe-done.md) — RESOLVED 2026-09-17 (PR #62): per-write EPIPE handling at every client-binary stdio site, quiet exit 0; compositor unaffected
 - [IPC focus actions run a full `apply` even when nothing moves](./resolved/focus-action-no-op-fast-path-done.md) — RESOLVED 2026-09-17 (PR #67): already-there focus actions skip `act` and run only the keyboard half, mirroring PR #54; relative steps deliberately left on the full path
 - [Probe Sunshine/Moonlight on the M2](./testing/moonlight-sunshine-on-m2.md) (low, filed 2026-10-04): KMS capture + uinput may already stream a `--tty` session; Asahi's DCP is the open question
-- [Run the scoot-session launcher harness in CI](./testing/scoot-session-harness-in-ci.md) (medium, filed 2026-10-04 from #431's review): 17 asserts run by hand only; the fake cannot see the carried stale-graphical-target limitation
+- [Run the scoot-session launcher harness in CI](./resolved/scoot-session-harness-in-ci-done.md) — RESOLVED 2026-10-05 (PR #453): `session-harness` CI job (sh + python3, ~20 s) with true activation semantics and the carried stale-graphical-target limitation pinned; the heal deliberately does not restart graphical-bound units
 
 ### Input
 - [`msg key` hard-codes `_L` modifier keysyms](./resolved/msg-key-modifier-resolution-done.md) — RESOLVED 2026-09-17 (PR #83): modifiers resolve through the keymap probe like `type_text` (either hand's key; toggle-option layouts work); `msg key A` still refuses
@@ -302,7 +302,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [`zwp_tablet_manager_v2` (drawing-tablet input)](./resolved/tablet-v2-done.md)
 - [[nested] pointer clicks never reach layer-shell surfaces](./resolved/layer-shell-pointer-clicks-done.md) — CLOSED 2026-09-21 as could-not-reproduce (gh #182): the issue's exact `--nested` probes deliver every click shape on current `main` and on the reported rev alike; kept as a wire-level pinning test, no compositor change. Shared root with #183 refuted for the input path.
 - [Touchpad scrolling does not reach Chrome (axis source/v120/stop dropped)](./resolved/touchpad-scroll-chrome-done.md) — RESOLVED 2026-10-04: scrolls forward their real source, wheel `v120`, finger `stop` and relative direction (tty, nested, injected)
-- [The session launcher's 1 s poll is the desktop's biggest idle wakeup source](./core/session-launcher-idle-poll.md) (medium, filed 2026-10-05): 179+178 wakes/min from `sh` + `systemd --user` in a measured idle session
+- [The session launcher's 1 s poll is the desktop's biggest idle wakeup source](./resolved/session-launcher-idle-poll-done.md) — RESOLVED 2026-10-05 (PR #453): the session wait blocks in `busctl wait` (Asahi: 4+32 ticks and 221+470 wakes per 60 s went to zero); loud poll fallback with per-round re-resolve
 - [scoot's `[stack]` mapping reports 17 MB PSS at idle](./resolved/compositor-stack-pss-done.md) — CLOSED 2026-10-05 as a classifier artifact: the benchmark's `smaps.sh` credits each block's PSS to the next block's class, so a client shm buffer read as `[stack]` (live `[stack]` is 128 kB); no compositor change
 
 ### --tty / backend
