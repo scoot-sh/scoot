@@ -1,9 +1,10 @@
 ---
 title: "Fourth example look: moonrise (chill), from an Unsplash illustration"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-04"
 ---
 
 # Fourth example look: moonrise (chill), from an Unsplash illustration
@@ -47,3 +48,29 @@ black tree silhouettes, a coral/amber disc, a slate-navy to dusty-rose sky.
   The `desktop-theme-look` child owns fonts/cursor/GTK/dark-mode.
 - No rename: "moonrise" stands unless the maintainer picks the report's
   alternative.
+
+## Resolution (PR #437, branch `feat/look-moonrise`)
+
+Landed as designed, verified on the Asahi M2 (see the PR body for the
+evidence record):
+
+- `docs/examples/moonrise/` ships the full set (scoot.toml, bar.toml with
+  load/cpu modules, foot.ini, starship.toml, Helix theme + config, btop
+  theme + config, lazygit.yml, regreet.css, README); body text cream on
+  slate navy 10.6:1 (WCAG AA), amber 6.2:1, yellow 8.6:1.
+- `docs/assets/wallpapers/moonrise.png` (4000x2604, 413193 B, Unsplash
+  License, NOTICE + README credit). Unsplash's download/page is bot-walled
+  from here (401 everywhere tried), so the shipped bytes are the
+  maintainer-pasted copy at full resolution; max-compression re-encode
+  measured larger (417874 B).
+- `docs/assets/moonrise-preview.png`: reproducible headless IPC
+  screenshot (fastfetch over btop, Helix with the moonrise theme, the
+  floating bar, `--no-cursor`).
+- `moonrise` registered in `nix/modules/desktop.nix` with eval + file
+  checks in `nix/tests.nix`, `docs/nix.md` row, README gallery cell.
+  `nix build .#checks.aarch64-linux.scoot-modules` exit 0; CI's
+  `nix flake check` green on x86_64.
+- Name: keeping "moonrise" (considered "nightfall"; the disc is the
+  image's subject, so moonrise is the more specific name).
+- Not verified here: the Unsplash license badge (reviewer with browser
+  access please re-confirm), the regreet.css against a live greeter.
