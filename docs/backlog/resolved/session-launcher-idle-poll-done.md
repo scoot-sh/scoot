@@ -1,9 +1,10 @@
 ---
 title: "The session launcher's 1 s poll is the desktop's biggest idle wakeup source"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-05"
 ---
 
 # The session launcher's 1 s poll is the desktop's biggest idle wakeup source
@@ -37,3 +38,26 @@ logout latency. Measure wakes before and after the same way.
 
 scootbar's 57 wakes/min (check what fires once a second with a minute clock)
 and the compositor's 31/min: worth a look, file separately if real.
+
+## Resolved by PR #453 (2026-10-05)
+
+- The session wait blocks in `busctl --user wait` on `scoot.service`'s
+  `PropertiesChanged` and re-asks the manager only on a wake
+  (`resources/scoot-session`). Subscribe-before-check (spawn the waiter,
+  then ask) so a stop between the two still wakes; `timeout 300` bounds
+  the residual sliver. Silence limit, liveness flock, refuse-if-active,
+  session-target ordering, cleanup/restore and the deadline path are
+  unchanged; a loud 1 s poll fallback (re-resolved every round, T13)
+  covers no-busctl and pre-`wait` systems.
+- Measured on the Asahi M2 (scoot-test, vinyl look, greetd login, 90 s
+  settle, 60 s `sample.sh` window, ticks + context switches): launcher
+  `sh` 4 ticks + 221 wakes and `systemd --user` 32 ticks + 470 wakes
+  before, **0 + 0 and 0 + 0 after** — the session went from 0.60% of a
+  core to unmeasurable. Logout ends the session in 0.10 s; a real
+  `nh os switch` mid-session (manager re-exec, no unit changes) leaves
+  the launcher and its still-blocked waiter untouched with IPC answering.
+  Evidence: `before-poll-delta.tsv` / `after-block-delta.tsv` beside the
+  report.
+- Harness 17 → 37 asserts (fake busctl, manager-down re-exec flag, true
+  activation semantics, blocking wait, 50-re-exec storm, logout latency,
+  carried limitation, both fallbacks, transient-resolve recovery).

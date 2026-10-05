@@ -1,9 +1,10 @@
 ---
 title: "Run the scoot-session launcher harness in CI, and note what it cannot see"
-status: "open"
-area: "testing"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-05"
 ---
 
 # Run the scoot-session launcher harness in CI, and note what it cannot see
@@ -40,3 +41,24 @@ graphical-bound units (without touching another desktop's) and say why.
 ## Not in this ticket
 
 Any change to the unit design #431 landed.
+
+## Resolved by PR #453 (2026-10-05)
+
+- CI: new `session-harness` job in `.github/workflows/ci.yml`, gated on a
+  new `session` classify output (`resources/scoot-session`,
+  `resources/systemd/*`, `scripts/scoot-session-test.sh`; `nix/tests.nix`
+  stays on the catch-all, which runs this job too). sh + python3 only, no
+  nix, ubuntu-latest, ~20 s. Green on the PR head.
+- Fake matches systemd activation semantics (Wants fire only on the
+  inactive-to-active transition); T10 pins the carried limitation (a heal
+  over a live foreign graphical target leaves its units on the old
+  session's display until logout).
+- Decision: the heal does NOT restart graphical-bound units. It cannot
+  tell the session's own graphical-bound units from another desktop's in
+  the shared-target case (the harness T5 shape: an active graphical target
+  with scoot's units never run is another session's), and stopping them
+  all would tear down that session. Stale-display units die at logout;
+  the next login is clean.
+- What CI still cannot see (stays manual): a real `systemd --user`
+  (activation edge cases the fake may not match) and the Asahi idle-CPU
+  measurement (the sibling ticket's before/after).

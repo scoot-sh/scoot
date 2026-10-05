@@ -114,6 +114,26 @@ in file order, then the `--` command: the config declares the session
 baseline, the script carries the behavior. Spawning the same bar in
 both places yields two bars — pick one route per program.
 
+**Logging in through a greeter** runs `scoot-session` (shipped beside the
+binary, started by the login-screen session entry) instead of `scoot --tty`
+directly. It refuses a second login while a session is live, heals a stale
+one a crash left behind, imports the login environment into the user manager
+and the D-Bus activation environment, waits for the compositor to answer
+IPC, imports the session's own `WAYLAND_DISPLAY`, and only then reaches
+`graphical-session.target` — so display-gated units start with the display
+already set. While the session runs it blocks in the bus waiting for
+`scoot.service` to leave the active state: an idle session costs no wakeups,
+and logging out ends the session at once. A user-manager re-exec mid-session
+(a NixOS switch) rides through without ending the session. When scoot
+exits, the session targets stop and the display variables are restored.
+
+> **Symptom:** a login is refused as already running, but no session is up.
+> A crashed session's units can outlive it — log in again and the launcher
+> heals them itself when nothing answers IPC. If it keeps refusing, check
+> from a console which unit is stuck (`systemctl --user show -p ActiveState
+> --value scoot.service` names the state, not the exit code) and clear it
+> with `systemctl --user stop scoot.service scoot-session.target`.
+
 Environment scoot reads: `$XDG_RUNTIME_DIR` (required — a missing one
 is a one-line startup error), `$SCOOT_SOCKET`, `$XDG_CONFIG_HOME`,
 `$XCURSOR_THEME`, and the session locale for typing. Environment scoot
