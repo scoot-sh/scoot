@@ -2,7 +2,7 @@
 title: "Desktop clipboard: persistence, history picker, lock behavior"
 status: "open"
 area: "packaging"
-priority: "medium"
+priority: "high"
 blocked: null
 ---
 

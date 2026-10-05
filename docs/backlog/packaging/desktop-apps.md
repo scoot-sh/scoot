@@ -29,7 +29,8 @@ manager — say the defaults):
 - File manager (optional): pick the lightest well-maintained graphical one
   (or bless `yazi` terminal-based to stay light — decide with a closure/RSS
   argument, not taste); `xdg-open`/`mimeapps` defaults so the portal file
-  chooser and browsers agree.
+  chooser and browsers agree, and `xdg.userDirs` so Downloads, Pictures
+  and the screenshot folder exist.
 - Network/Bluetooth pickers: complete what the bar modules start — picker
   UI through the launcher dmenu contract (child `desktop-launcher`), using
   `nmcli`/`bluetoothctl` shims or the bar's own popups (coordinate with the

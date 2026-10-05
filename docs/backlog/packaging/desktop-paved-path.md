@@ -26,7 +26,7 @@ Verified 2026-10-04 against `origin/main` (`73fdb4f25`), from
 | # | Piece | Status | Evidence |
 |---|---|---|---|
 | 1 | Session + greeter | **provided** | `nix/modules/nixos.nix`: session entry `sessionPackage` (38-56), `session.*` (162-235) and `greeter.*` (237-279) options; `docs/nix.md` "NixOS module" + "What a greeter login starts" + "The greeter: ReGreet, opt-in" |
-| 2 | Lock screen | **missing** | `ext-session-lock-v1` implemented (`docs/protocols.md:27`); no locker packaged or wired anywhere in `nix/` — the only locker name in the tree is `swaylock` inside a hand-written snippet (`docs/configuration.md:826`) |
+| 2 | Lock screen | **missing** | `ext-session-lock-v1` implemented (`docs/protocols.md:27`); no locker packaged or wired anywhere in `nix/` — no locker is named in `nix/` (`docs/protocols.md:1903` lists `swaylock`, `gtklock`, `hyprlock` and `waylock` as working); the config docs' only example is `swaylock` inside a hand-written snippet (`docs/configuration.md:826`) |
 | 3 | Idle policy (dim, lock, screens off, lock before sleep, media inhibit) | **partly** | `ext-idle-notify-v1` v2 + `idle-inhibit-v1` (`protocols.md:28-29`), `wlr-output-power-management-v1` (`protocols.md:30`, #427); policy is a hand-written swayidle script (`configuration.md:816-847`); no dim action, no lock-before-sleep, no inhibit-while-media wiring |
 | 4 | Notifications | **missing** | `scootnotify` is a pointer only (`docs/scootbar/backlog/scootnotify.md`: low, M7, blocked on the maintainer starting it); `mako` appears only in examples (`nix/modules/home.nix:210`, `configuration.md:774`) |
 | 5 | Launcher | **missing** | `scootlaunch` is a pointer only (`docs/scootbar/backlog/launcher.md`: low, M7); the default binds reference `wofi` (`docs/nix.md:308`) but the flake installs no launcher |
@@ -115,7 +115,10 @@ only real blockers are recorded as `blocked`):
 4. `desktop-launcher`, 5. `desktop-capture`, 6. `desktop-auth-secrets`,
    7. `desktop-audio-osd`, 8. `desktop-clipboard` (required slot,
    addendum 2026-10-04), 9. `desktop-nightlight`, 10. `desktop-power`,
-   11. `desktop-theme-look`, 12. `desktop-apps` — each extends the profile;
+   11. `desktop-theme-look`, 12. `desktop-apps`, 13. `desktop-keys` (one keymap every child
+   registers into: hardware keys and desktop actions; high, filed after
+   the maintainer's "default key shortcuts" ask), 14. `desktop-displays`,
+   15. `desktop-input-method` (off by default) — each extends the profile;
    each carries eval pins in `nix/tests.nix`, a real-login proof on the M2
    where it matters (lock, idle, power, greeter-adjacent), and docs in
    `docs/nix.md`.

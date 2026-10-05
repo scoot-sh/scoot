@@ -10,8 +10,10 @@ blocked: "branch fix/scoot-session-target-after-display: the session target is r
 
 Filed 2026-10-04, child 2 of `desktop-paved-path`. Serves
 **daily-drive** (a laptop that never locks or never sleeps its panels is not
-daily-drivable) — this is the M2's hand-wired swayidle (lock 10 min,
-`wlopm --off` 5 min… actually dim 2 min, off 5 min) made into a default.
+daily-drivable) — this is the M2's hand-wired swayidle (dim to 10% at 2 min, `wlopm --off`
+at 5 min, no lock yet) made into a default with a lock added. The M2's
+local config is the reference; the `docs/configuration.md` snippet
+(lock 10 min, off 15 min) is only an example.
 
 Blocked on branch `fix/scoot-session-target-after-display`: the session
 target is reached before `WAYLAND_DISPLAY` is imported, so idle/lock user
