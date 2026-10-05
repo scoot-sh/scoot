@@ -19,11 +19,10 @@ use serde_json::{Map, Value};
 /// rather than misread it.
 pub const SCHEMA_VERSION: u32 = 1;
 
-/// Where the human reference lives. There is no published docs site yet (see
-/// `docs/backlog/packaging/docs-site.md`): until it exists, help points at
-/// the reference pages in the repo, which the site will later publish with
-/// `/llms.txt`.
-pub const DOCS_URL: &str = "https://github.com/scoot-sh/scoot/tree/main/docs";
+/// Where the human reference lives: the docs site, published with
+/// `/llms.txt` (one twin per page plus per-app sets; see
+/// `docs/backlog/packaging/docs-site.md` for the plan).
+pub const DOCS_URL: &str = "https://www.scoot.sh";
 
 /// One request verb: what it takes, what it does, one real invocation, and
 /// the shape of its reply.
@@ -457,8 +456,7 @@ pub fn usage(binary: &str, requests_help: &str, actions_help: &str, version: boo
     text.push_str(&format!(
         "\nSEE ALSO:\n\
          \x20   `help requests`, `help actions`, `help exit-codes`, `help environment`\n\
-         \x20   docs: {DOCS_URL}/ipc.md\n\
-         \x20   (published with /llms.txt once the docs site lands)\n"
+         \x20   docs: {DOCS_URL}/scootctl/ (with /llms.txt)\n"
     ));
     text
 }
@@ -617,7 +615,7 @@ pub fn json_value(binary: &str, version: bool) -> Value {
                 .collect::<Vec<_>>(),
         ),
     );
-    root.insert("docs".into(), Value::from(format!("{DOCS_URL}/ipc.md")));
+    root.insert("docs".into(), Value::from(format!("{DOCS_URL}/scootctl/")));
     Value::Object(root)
 }
 

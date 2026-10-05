@@ -1,5 +1,13 @@
 # Docs site outline (proposal for review — phase 1, nothing moves yet)
 
+> Status 2026-10-05: the maintainer approved this outline (scoot desktop
+> as the primary path, three front doors) and PR B (`docs/site-move`)
+> executed the move. The sidebar in `site/astro.config.mjs` is the live
+> structure; this file stays as the mapping record (which `docs/*.md`
+> sections fed each page) and the `dev/` plan for the contributor tree,
+> whose move is still open. One deliberate deviation: `scootbar/modules`
+> is one searchable page rather than thirteen (see the PR).
+
 This is the draft page outline the `docs-site` ticket asks the maintainer to
 review **before** any existing doc is moved or rewritten. The scaffold beside
 it (`site/`, Astro Starlight) proves the shape with 4 adapted pages; every
@@ -37,7 +45,7 @@ keep working unchanged.
 | `/scoot/` (overview) | What the compositor does and how scrolling columns work | `README.md` Why (shortened); `docs/configuration.md` Starting a session |
 | `/scoot/configure/*` (one subpage per config section) | The config file: where it lives, reload, then one page each for `layout`, `appearance`, `output`/`outputs`, `binds`, `floating`, `window_rule`, `autostart`, `xwayland`, `renderer`, `tty` | `docs/configuration.md` The config file, Failure semantics, Reloading, per-section headings, Example config |
 | `/scoot/keybindings` | Every default binding plus how to rebind — **sample, working now** | `docs/configuration.md` `[binds]`, Moving across outputs, Default keybindings; `nix/modules` live defaults referenced by `docs/nix.md` Reference: live defaults |
-| `/scoot/multi-monitor` | Outputs, focus/output movement, hotplug | `docs/configuration.md` Moving across outputs, `[output]`/`[[outputs]]`; `docs/tty.md` Hotplug |
+| `/scoot/outputs` | Outputs, focus/output movement, hotplug | `docs/configuration.md` Moving across outputs, `[output]`/`[[outputs]]`; `docs/tty.md` Hotplug |
 | `/scoot/theming` | Looks: pick one of the three examples, what each file does, what it costs | `docs/examples/{vinyl-sunset,music-desk,radial-burst}/README.md` + `scoot.toml`/`regreet.css` comments; `docs/nix.md` Stylix; `docs/configuration.md#appearance` cost notes |
 | `/scoot/protocols` (reference) | Which Wayland protocols work and what each means for your apps | `docs/protocols.md` per-protocol sections (user half; measurement prose moves to `dev/`) |
 | `/scoot/troubleshooting` | Compositor symptoms ("black screen", "key not working", "no output") | `docs/tty.md` When nothing works, VT switching; `docs/configuration.md` Failure semantics |
@@ -60,7 +68,7 @@ keep working unchanged.
 |---|---|---|
 | `/scootbar/` (overview) | What the bar does, enable it, one annotated config | `docs/nix.md` The status bar; `docs/scootbar/cli.md` The config file, Layout |
 | `/scootbar/configure` | Layout, popups, fonts, colors, layers, outputs, hiding, margins | `docs/scootbar/cli.md` Layout, Popups, Tooltips, Fonts, Colors, Layers and the zone, Outputs, Hiding the bar, Margins, Spacing, Shape and opacity; `docs/scootbar/icons.md` |
-| `/scootbar/modules/*` (one subpage per module) | clock, workspaces, window title, volume, microphone, brightness, battery, network, bluetooth, media, tray, power, button/push/exec | `docs/scootbar/cli.md` Modules + per-module sections (condensed to the daily-use subset each) |
+| `/scootbar/modules` (one searchable page, not one per module) | clock, workspaces, window title, volume, microphone, brightness, battery, network, bluetooth, media, tray, power, button/push/exec | `docs/scootbar/cli.md` Modules + per-module sections (condensed to the daily-use subset each) |
 | `/scootbar/theming` | Theme the bar from a look | Look pipeline + `docs/scootbar/cli.md` Colors, Fonts |
 | `/scootbar/cli` (reference) | Complete flags, `scootbar msg`, agent interface, `--check` | `docs/scootbar/cli.md` Commands, `daemon` flags, `scootbar msg`, The agent interface, `--check` |
 | `/scootbar/troubleshooting` | Bar symptoms ("bar missing on second monitor") with diagnosing commands | `docs/scootbar/cli.md` `--check`; `docs/nix.md` Settings failure modes |

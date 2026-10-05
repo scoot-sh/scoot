@@ -1,7 +1,7 @@
 //! The clock's format string: a small `strftime` subset, compiled once at
 //! start-up and rendered on each tick with no allocation.
 //!
-//! The specifiers (the reference is `docs/scootbar/cli.md`):
+//! The specifiers (the reference is `site/src/content/docs/scootbar/cli.md`):
 //!
 //! | | | | |
 //! |---|---|---|---|

@@ -66,8 +66,7 @@ ENVIRONMENT:
 
 SEE ALSO:
     `scootbg help set`, `scootbg set --help`, `scootbg --help --json`
-    docs: https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/cli.md
-    (published with /llms.txt once the docs site lands)
+    docs: https://www.scoot.sh/scootbg/cli.md (with /llms.txt)
 ";
 
 pub const DAEMON_HELP: &str = "\
@@ -122,7 +121,7 @@ EXIT CODES:
 SEE ALSO:
     `scootbg help daemon` prints this page; `scootbg --help --json` is the
     machine-readable form
-    docs: https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/cli.md
+    docs: https://www.scoot.sh/scootbg/cli.md (with /llms.txt)
 ";
 
 pub const SET_HELP: &str = "\

@@ -31,7 +31,7 @@
 //! window, never which client made the request (measured; pinned as a known
 //! limit by `tests/dnd.rs`). X11 offers no way to close that, and inside the
 //! X server any X client can already drive another's input anyway (the
-//! trust note in `docs/protocols.md`).
+//! trust note in `site/src/content/docs/scoot/protocols.md`).
 //!
 //! A refused drag leaves the press an ordinary press: the X client's own
 //! XDND traffic with other X windows is X-side and untouched.

@@ -10,15 +10,22 @@
     "preview": "astro preview",
     "check": "node ./scripts/check-llms.mjs",
     "test-snippets": "node ./scripts/test-snippets.mjs",
-    "verify": "astro build && node ./scripts/check-llms.mjs && node ./scripts/test-snippets.mjs"
+    "test-nix": "node ./scripts/check-nix.mjs",
+    "verify": "astro build && node ./scripts/check-llms.mjs && node ./scripts/test-snippets.mjs && node ./scripts/check-nix.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "0.42.5",
     "astro": "7.3.5",
+    "sharp": "^0.35.5",
     "starlight-llms-txt": "0.12.0"
   },
   "devDependencies": {
     "smol-toml": "1.9.0",
     "typescript": "5.9.3"
-  }
+  },
+  "description": "Astro Starlight + pnpm, built reproducibly through the flake (`nix build .#docs-site`). The outline awaiting maintainer review is [OUTLINE.md](OUTLINE.md); nothing in `docs/` has moved.",
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

@@ -52,7 +52,7 @@ pub struct OutputSnapshot {
     /// Whether the output is powered on: `false` while
     /// `zwlr_output_power_v1`/`output-power` has it switched off (no page
     /// flips, no render work, no frame callbacks -- see
-    /// `docs/protocols.md`'s power section).
+    /// `site/src/content/docs/scoot/protocols.md`'s power section).
     ///
     /// Defaulted rather than required, like `scale` above and for the same
     /// wire reason: adding a field does not change the internally-tagged

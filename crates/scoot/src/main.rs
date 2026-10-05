@@ -111,7 +111,7 @@ fn print_default_config(_write: bool) -> Result<(), Box<dyn std::error::Error>> 
     // The emission is generated from the compositor's own defaults, which
     // live in the Linux-gated config module -- so there is no `scoot` binary
     // here that could emit them. Copy the example out of
-    // `docs/configuration.md` instead.
+    // `site/src/content/docs/scoot/configure.md` instead.
     Err(
         "`--print-default-config` needs the compositor's defaults, which only exist on Linux"
             .into(),

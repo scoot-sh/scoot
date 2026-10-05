@@ -410,7 +410,7 @@ fn a_screenshot_request_names_its_cursor_when_it_says() {
 
 #[test]
 fn the_screenshot_cursor_default_is_drawn_in() {
-    // The documented default (`docs/ipc.md`): an agent that does not ask
+    // The documented default (`site/src/content/docs/scootctl/index.md`): an agent that does not ask
     // sees the pointer, on every backend.
     const { assert!(SCREENSHOT_CURSOR_DEFAULT) };
 }

@@ -734,7 +734,7 @@ pub struct State {
     /// (`cliphist`, `clipman`). Held only to keep the global alive -- the
     /// handler (`DataControlHandler`, see `handlers.rs`) routes through it.
     /// No client filter: like the session-lock global, an allow-list would be
-    /// theatre without security-context support (see `docs/protocols.md`'s
+    /// theatre without security-context support (see `site/src/content/docs/scoot/protocols.md`'s
     /// trust note). Constructed after `primary_selection_state` because it
     /// borrows it, so data-control clients can also touch the primary
     /// selection.
@@ -764,7 +764,7 @@ pub struct State {
     ///
     /// No client filter, for the same reason the session-lock and
     /// data-control globals have none: an allow-list would be theatre
-    /// without security-context support (see `docs/protocols.md`'s trust
+    /// without security-context support (see `site/src/content/docs/scoot/protocols.md`'s trust
     /// note). Worth naming here because an input method is more privileged
     /// than those two -- it can grab the keyboard and inject text into the
     /// focused client -- so this is a deliberate consistency with the existing
@@ -807,7 +807,7 @@ pub struct State {
     /// IPC `output-power` drives. Read on every bind, every `set_mode` and
     /// every power-state change -- see `output_power.rs`, which owns both
     /// the protocol objects and the on/off state behind them. Unrestricted
-    /// like every other global (see `docs/protocols.md`'s trust note).
+    /// like every other global (see `site/src/content/docs/scoot/protocols.md`'s trust note).
     pub output_power: OutputPower,
     /// `zwp_pointer_constraints_v1` (version 1): pointer lock and confinement,
     /// the half of the games/3D-app pair `relative_pointer.rs` documents.

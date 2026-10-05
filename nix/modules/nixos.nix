@@ -40,7 +40,7 @@ let
   # environment, and only then starts `scoot-session.target` (which
   # pulls in `graphical-session.target`, so the target is reached with
   # the display already imported), and on exit stops the session
-  # targets so session-bound units stop. See docs/nix.md for the whole flow.
+  # targets so session-bound units stop. See site/src/content/docs/desktop/index.md#the-greeter for the whole flow.
   sessionPackage =
     (pkgs.writeTextDir "share/wayland-sessions/scoot.desktop" ''
       [Desktop Entry]
@@ -119,7 +119,7 @@ in
     enable = lib.mkEnableOption "scoot, the scrolling-tiling Wayland compositor";
 
     # One switch plus a look choice for a working desktop (see
-    # `desktop.nix` and docs/nix.md). Each side wires only what it owns;
+    # `desktop.nix` and site/src/content/docs/desktop/index.md). Each side wires only what it owns;
     # this side owns the session entry, the system packages and the
     # greeter (aliased above). The compositor config itself
     # (`[appearance]`, `[wallpaper]`, the `[xwayland]` knob, the
@@ -433,7 +433,7 @@ in
       # teardown). A `scoot --tty -- <script>` value still runs exactly
       # what it says -- a session, just an unwired one -- and startup
       # programs that want the wiring belong in scoot's `[autostart]`,
-      # which runs inside it (see docs/nix.md).
+      # which runs inside it (see site/src/content/docs/scoot/configure.md#autostart).
       command = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
@@ -446,12 +446,12 @@ in
           session launcher, so existing configs gain the session wiring
           (user-manager import, `scoot-session.target` reaching
           `graphical-session.target` past the display import, the D-Bus
-          activation environment, teardown on exit -- see docs/nix.md).
+          activation environment, teardown on exit -- see site/src/content/docs/desktop/index.md#the-greeter).
           Set it to run something else instead: the usual shape is
           `<package>/bin/scoot --tty -- <command>`, e.g. the
           home-manager module's `sessionScript` output at
           `/home/alice/.config/scoot/session.sh` (for a user `alice`;
-          see `programs.scoot.sessionScript` and docs/nix.md, which show
+          see `programs.scoot.sessionScript` and site/src/content/docs/scoot/index.md#starting-a-session, which show
           the pairing together). A wrapper script path (logging,
           environment setup) works too -- that is the gh-issue-#171
           acceptance shape. A set value replaces the whole line and
@@ -472,7 +472,7 @@ in
       # is only ever on when the user sets it. Roll back by turning it
       # off again (or by booting the previous generation): nothing about
       # the previous login screen is uninstalled while it is on, only
-      # displaced. See docs/nix.md.
+      # displaced. See site/src/content/docs/desktop/index.md#the-greeter.
       enable = lib.mkOption {
         type = lib.types.bool;
         default = false;
@@ -904,7 +904,7 @@ in
         {
           # Same, for SDDM. Anything else owning the login screen
           # (lemurs, ly, another greetd setup) must be turned off by
-          # hand -- see docs/nix.md.
+          # hand -- see site/src/content/docs/desktop/index.md#the-greeter.
           assertion = !config.services.displayManager.sddm.enable;
           message = ''
             programs.scoot.greeter.enable conflicts with SDDM
@@ -944,7 +944,7 @@ in
       # instead of being silently shadowed. ReGreet runs under cage,
       # never inside scoot: hosting a pre-login greeter in the
       # compositor would need a locked-down scoot profile (no binds, no
-      # IPC socket), which is out of scope -- see docs/nix.md.
+      # IPC socket), which is out of scope -- see site/src/content/docs/desktop/index.md#the-greeter.
       services.displayManager.regreet = {
         enable = true;
         # One screen, not the whole layout: cage spans every output by

@@ -2,7 +2,7 @@
 # and a systemd user service for every user's graphical session. The
 # options and the Stylix defaults are in ./scootbar.nix; the home-manager
 # side (per-user, the file at the bar's default path) is
-# ./scootbar-home.nix. See docs/nix.md.
+# ./scootbar-home.nix. See See site/src/content/docs/scootbar/index.md..
 { config, lib, ... }:
 
 let

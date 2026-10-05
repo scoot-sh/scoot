@@ -7,19 +7,19 @@ composable shell.
 
 > **Status: early.** `scootbar daemon` puts a bar with a clock on every
 > output (or the ones you list), reserving its space, across outputs coming and going; the flags
-> are in [cli.md](cli.md). Workspaces are one flag away
+> are in [cli.md](https://www.scoot.sh/scootbar/cli.md). Workspaces are one flag away
 > (`--left workspaces`: each output's numbers with the active one
 > marked, click to switch). Every module answers the pointer: clicks,
 > scrolls and hover run a module action, a command or a request to scoot
-> that the config binds ([pointer input](cli.md#pointer-input), M4's
+> that the config binds ([pointer input](https://www.scoot.sh/scootbar/cli.md#pointer-input), M4's
 > [first step](backlog/resolved/pointer-and-interactions-done.md)), and
 > the config can define a `button`, a `push` target for `scootbar msg set`
 > and an `exec` module that streams a command's output, with no Rust
-> ([how](cli.md#button-push-and-exec-modules)). A module can open a popup
+> ([how](https://www.scoot.sh/scootbar/cli.md#button-push-and-exec-modules)). A module can open a popup
 > under itself, drawn from its own state: the volume slider is the first
 > and the network list the second
-> ([popups](cli.md#popups)), and a module's tooltip is shown under it after
-> a hover delay ([tooltips](cli.md#tooltips)). That is M1's
+> ([popups](https://www.scoot.sh/scootbar/cli.md#popups)), and a module's tooltip is shown under it after
+> a hover delay ([tooltips](https://www.scoot.sh/scootbar/cli.md#tooltips)). That is M1's
 > [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its
 > [module API and clock](backlog/resolved/module-api-and-clock-done.md),
 > and its [Nix package](backlog/resolved/nix-package-done.md), which
@@ -31,11 +31,11 @@ composable shell.
 > font rasterizer and clock choices, recorded in
 > [the dependency record](backlog/resolved/dependencies-done.md). M6's
 > first step is a system tray (the StatusNotifierItem watcher and host, on
-> a hand-rolled D-Bus client: [the module](cli.md#tray), menus included), its second the media module (what the MPRIS players
+> a hand-rolled D-Bus client: [the module](https://www.scoot.sh/scootbar/cli.md#tray), menus included), its second the media module (what the MPRIS players
 > are playing, with play/pause, next and previous:
-> [the module](cli.md#media)), and its third the bluetooth module (the
+> [the module](https://www.scoot.sh/scootbar/cli.md#media)), and its third the bluetooth module (the
 > adapter's power and the connected devices over BlueZ, on the system bus:
-> [the module](cli.md#bluetooth)). The plan, milestone by milestone, is the
+> [the module](https://www.scoot.sh/scootbar/cli.md#bluetooth)). The plan, milestone by milestone, is the
 > [backlog](backlog/README.md).
 
 ```sh
@@ -48,18 +48,18 @@ nix run github:scoot-sh/scoot#scootbar-demo                 # with a font, from 
 
 From Nix, `packages.<system>.scootbar` is the bar with no font in its
 closure (give it `--font`), and `scootbar-demo` the same bar with DejaVu
-Sans as its default font ([docs/nix.md](../nix.md#the-status-bar-scootbar)).
+Sans as its default font ([scootbar on the site](https://www.scoot.sh/scootbar/)).
 `programs.scootbar` (home-manager and NixOS modules, a restarting user
 service, Stylix defaults when Stylix is in use) is documented there too
-([the modules](../nix.md#the-modules-programsscootbar)).
+([programs.scootbar](https://www.scoot.sh/scootbar/)).
 
 Every option lives in `$XDG_CONFIG_HOME/scoot/bar.toml` too (the flags
 override it, at start-up and on every reload), and the running bar answers
 `scootbar msg query` with each module's state as JSON — the agent hook,
 the bar read as data instead of OCR. `msg layout` says where each module
 is, `msg invoke` presses one, and `msg subscribe` streams what changes
-([the agent interface](cli.md#the-agent-interface)). The keys, the file and
-the commands are in [cli.md](cli.md#the-config-file).
+([the agent interface](https://www.scoot.sh/scootbar/cli.md#the-agent-interface)). The keys, the file and
+the commands are in [cli.md](https://www.scoot.sh/scootbar/cli.md#the-config-file).
 
 ## What it is for
 
@@ -184,7 +184,7 @@ shows no workspaces yet, so the switching row is a bystander's:
   mounted read-only, so the main column is the read one, and the mapped
   figures come from a root-owned `0444` copy on a read-only bind mount,
   measured again at `de27775` after review tightened the rule
-  ([cli.md](cli.md#fonts) says why).
+  ([cli.md](https://www.scoot.sh/scootbar/cli.md#fonts) says why).
 - **The binary** is 246 KB over the skeleton's: the rasterizer and font
   parser about 103 KB (M0 predicted 115), scootbar's own clock, text,
   layout and render code about 52 KB, generic code from `core`, `std` and

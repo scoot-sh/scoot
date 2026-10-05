@@ -481,7 +481,7 @@ export WAYLAND_DISPLAY
 # sweep above carried for these two names (a greeter-owned display, an
 # unset desktop), so the session's own values win. Scoped to these two
 # because the login half was the place for the whole environment. This
-# is the same two-var line `docs/configuration.md` gives session
+# is the same two-var line `site/src/content/docs/scoot/index.md#starting-a-session` gives session
 # scripts; here the launcher owns it, so systemd sessions need no script
 # line, and the manual line stays for non-systemd setups.
 if command -v dbus-update-activation-environment >/dev/null 2>&1; then

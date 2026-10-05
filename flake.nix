@@ -10,7 +10,7 @@
   # (.github/workflows/nix-build.yml) on every merge to main. A flake's
   # `nixConfig` is *not* silently trusted: Nix asks whether to accept it on
   # first use (unless `accept-flake-config` is set), and substituter
-  # settings from it apply only to trusted users -- see docs/nix.md, which
+  # settings from it apply only to trusted users -- see site/src/content/docs/start/install.md#skip-the-compile-the-binary-cache, which
   # shows the explicit `nix.settings` / `nix.conf` form that needs no
   # prompt and works for untrusted users too.
   nixConfig = {
@@ -74,10 +74,10 @@
       # built `-p scoot` so `$out/bin` carries only the `scoot` binary;
       # `scoot-gpu` is the same binary with the `gpu-scanout` build feature
       # (`--tty --renderer gles` scans out from the GPU instead of reading
-      # back; needs OS EGL drivers -- see docs/nix.md);
+      # back; needs OS EGL drivers -- see site/src/content/docs/start/install.md#which-build-do-i-need);
       # `scoot-xwayland` (and `scoot-gpu-xwayland`) add the `xwayland`
       # build feature and nixpkgs' Xwayland on `PATH` (Linux only; X11 apps
-      # under `--xwayland` -- see below and docs/nix.md);
+      # under `--xwayland` -- see below and site/src/content/docs/scoot/xwayland.md);
       # `scootctl` is the standalone remote-control client that drives a
       # compositor running elsewhere (a VM) over its socket. On Linux the
       # default is the compositor; on Darwin the compositor is cfg'd out of
@@ -366,7 +366,7 @@
               # standard nixpkgs pattern -- bundling Mesa would risk shadowing
               # the host's drivers (notably Asahi's) with wrong ones. So
               # `--renderer gles` from this package needs an OS that provides
-              # EGL drivers; see docs/nix.md.
+              # EGL drivers; see site/src/content/docs/start/install.md#which-build-do-i-need.
               #
               # Linux-only: these are GNU-ld flags and Apple's ld rejects
               # them (`ld: unknown option: --push-state`), and there is no
@@ -636,7 +636,7 @@
           let
             # The opt-in XWayland tier as packages: the `xwayland` Cargo
             # feature (off in the builds above, like gpu-scanout, because a
-            # whole X server is not free -- see docs/nix.md), plus the one
+            # whole X server is not free -- see site/src/content/docs/scoot/xwayland.md), plus the one
             # runtime dependency it has. Smithay starts the server as
             # `Command::new("Xwayland")`, a `PATH` lookup and nothing else,
             # so a `--tty` login whose `PATH` lacks the binary would be a
@@ -844,7 +844,7 @@
       # flake's own builds (the same per-system defaults as `packages`)
       # are injected here, whether or not the overlay is applied, and an
       # explicit setting still wins -- except on Darwin on the HM side
-      # (see below). See docs/nix.md.
+      # (see below). See site/src/content/docs/desktop/index.md.
       homeManagerModules =
         let
           hmWrapper =
@@ -856,7 +856,7 @@
               imports = [ ./nix/modules/home.nix ];
               # On Darwin the per-system default would be `scootctl`, a
               # binary not named `scoot` -- while the option reads "The
-              # scoot package to install" and docs/nix.md frames the
+              # scoot package to install" and site/src/content/docs/start/install.md frames the
               # macOS use as config management (the config edited here
               # deploys to a Linux box). So the Darwin default is null:
               # files-only, which the module explicitly supports. Darwin
@@ -935,7 +935,13 @@
             # evaluates (the Linux-only idle tools stay null there, refused
             # loudly if the policy is enabled).
             flake = {
-              inherit (self) overlays packages;
+              inherit (self)
+                overlays
+                packages
+                homeModules
+                homeManagerModules
+                nixosModules
+                ;
               homeModule = self.homeModules.scoot;
               nixosModule = self.nixosModules.scoot;
             };

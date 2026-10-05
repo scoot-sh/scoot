@@ -66,7 +66,7 @@ command gives it locally.
   headless sway instead (`hotplug.rs`, and the hotplug halves of
   `color.rs`, `image.rs` and `share.rs`). On `--tty`, scoot's own
   handling of a hotplug (layer-shell surfaces re-anchored, `wl_output`
-  withdrawn, see [tty.md](../tty.md#hotplug-and-host-resizes)) is the
+  withdrawn, see [backends](https://www.scoot.sh/scoot/backends.md)) is the
   compositor's record; scootbg itself has not been run through a real
   hotplug on `--tty` yet.
 - **A buffer too large for `wl_shm`, end to end.** That needs an output

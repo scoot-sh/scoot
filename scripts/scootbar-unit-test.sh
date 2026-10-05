@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The scootbar systemd unit that nixosModules.scootbar (default, or --nixos) or
 # homeModules.scootbar (--home) generates, run under the real `systemd --user`
-# against a live (headless) scoot: does it do what docs/nix.md promises? Builds
+# against a live (headless) scoot: does it do what site/src/content/docs/scootbar/index.md promises? Builds
 # the unit, the bar.toml and the package from this checkout's flake (a real NixOS
 # module evaluation, or a real home-manager evaluation, build and `activate`: not a
 # hand-written unit), loads the unit into the user manager's RUNTIME directory
@@ -60,7 +60,7 @@
 # points ExecStart at the same file by its store path; the home-manager one reads
 # $XDG_CONFIG_HOME/scoot/bar.toml, so a drop-in sets XDG_CONFIG_HOME to the scratch
 # home the generation was activated into, and ExecStart is the generated one. Not
-# covered: NixOS's own switch (S9 is --home only: docs/nix.md says what the source of
+# covered: NixOS's own switch (S9 is --home only: site/src/content/docs/scootbar/index.md says what the source of
 # switch-to-configuration does with a user unit).
 #
 # The flake is this checkout read through `git+file`: tracked files, including
@@ -269,7 +269,7 @@ WL=
 for _ in $(seq 40); do WL=$(sed -e 's/\x1b\[[0-9;]*m//g' "$W/scoot.log" | grep 'scoot is up' | grep -o 'wayland-[0-9]*' | head -1); [ -n "$WL" ] && break; sleep 0.25; done
 [ -n "$WL" ] || { cat "$W/scoot.log" >&2; die "scoot did not come up"; }
 echo "   scoot is up on $WL"
-# As a session script does it (`systemctl --user import-environment WAYLAND_DISPLAY`, docs/nix.md):
+# As a session script does it (`systemctl --user import-environment WAYLAND_DISPLAY`, site/src/content/docs/scoot/index.md#starting-a-session):
 WAYLAND_DISPLAY="$WL" sc import-environment WAYLAND_DISPLAY; SET_ENV=1
 rm -f "$UNITDIR/scootbar.service.d/nowhere.conf"; sc daemon-reload
 ck "S1 the unit becomes active on the next retry" wait_for 10 active

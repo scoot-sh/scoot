@@ -1,6 +1,6 @@
 # Whether the session is unlocked, for the clipboard store entry and the
-# history picker (both refuse while locked -- see docs/nix.md
-# "Clipboard"). A shell fragment, not a script: `clipboard-home.nix` and
+# history picker (both refuse while locked -- see
+# site/src/content/docs/desktop/index.md#clipboard). A shell fragment, not a script: `clipboard-home.nix` and
 # `keys-home.nix` embed it with `@SCOOT_BIN@` replaced by the scoot binary
 # (absolute when the module knows one, bare `scoot` from PATH otherwise --
 # the same substitution `nixos.nix` does for the session units).

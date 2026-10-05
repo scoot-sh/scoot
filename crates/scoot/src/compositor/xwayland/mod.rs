@@ -51,7 +51,7 @@
 //!   xterm, zenity, xclock -- re-measured for Phases 2+3, see the ticket),
 //!   a hard `PATH` dependency on the `Xwayland` binary, and a trust-model
 //!   change: any X client can keylog and snoop by design, so running one
-//!   extends full trust to it (see `docs/protocols.md`'s trust note).
+//!   extends full trust to it (see `site/src/content/docs/scoot/protocols.md`'s trust note).
 //!   Precedent is the `gpu-scanout` Cargo feature: own feature
 //!   (`xwayland = ["smithay/xwayland"]`), off by default, `ldd`-gated both
 //!   flavours (re-proven per change; the feature pulls pure-Rust `x11rb` --
@@ -106,7 +106,7 @@
 //!   a known Phase-1 edge: restart the session. A `--tty` login without the
 //!   binary on `PATH` is the same shape (loud fallback, naming the binary
 //!   and the `PATH` searched), which is why the flake's `scoot-xwayland`
-//!   packages append nixpkgs' `Xwayland` to `PATH` (see `docs/nix.md`).
+//!   packages append nixpkgs' `Xwayland` to `PATH` (see `site/src/content/docs/scoot/xwayland.md`).
 //! - **The session lock blanks X windows like every other window, and
 //!   refuses them input.** The X server keeps running under lock (it must
 //!   -- killing it would take every X client with it, and lock is not

@@ -1,6 +1,6 @@
 ---
 title: First session
-description: Run scoot in a window, open a terminal, and learn the five keys that run everything.
+description: "Run scoot in a window, open a terminal, and learn the five keys that run everything."
 ---
 
 Run scoot for the first time — nested in a window, then full-screen on a
@@ -36,7 +36,7 @@ Try it: open three terminals, then <kbd>Super</kbd>+<kbd>h</kbd> and
 <kbd>Super</kbd>+<kbd>l</kbd> to walk between them.
 
 > **Symptom:** `Super` does nothing, or your desktop's own shortcuts fire instead.
-> Your host desktop owns `Super` first inside a nested window. Either use the keys that get through, or [rebind scoot's keys](./keybindings.md#change-one-binding) to something free.
+> Your host desktop owns `Super` first inside a nested window. Either use the keys that get through, or [rebind scoot's keys](../scoot/keybindings.md#change-one-binding) to something free.
 
 ## How the layout works
 
@@ -67,4 +67,4 @@ scoot --tty -- foot
 your usual desktop at any time — they always win over scoot's own keys, so
 you can never strand yourself.
 
-Next: [Keybindings](./keybindings.md) — the full default map, and how to make it yours.
+Next: [Keybindings](../scoot/keybindings.md) — the full default map, and how to make it yours.

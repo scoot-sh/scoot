@@ -111,7 +111,7 @@ class Scootbar(Bar):
         return self.binary
 
     def write_config(self, directory, font_file, scope, compositor):
-        # No configuration file: every option is a flag (docs/scootbar/cli.md).
+        # No configuration file: every option is a flag (site/src/content/docs/scootbar/cli.md).
         # Giving any of --left/--center/--right sets the whole layout, so a
         # part the scope leaves empty is simply not given (M1's command line
         # for the clock scope is unchanged).

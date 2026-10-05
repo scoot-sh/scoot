@@ -541,7 +541,7 @@ read -r unfocused_x unfocused_y unfocused_w < <(
 
 echo "--- parking the pointer clear of everything sampled below ---"
 # A screenshot draws the pointer on every backend (the IPC default -- see
-# docs/ipc.md), wherever it is; it was once only --tty's frames that did, and
+# site/src/content/docs/scootctl/index.md), wherever it is; it was once only --tty's frames that did, and
 # with the pointer at the output's origin the built-in arrow's opaque black
 # outline ran diagonally straight through the background sample at (3,3)
 # below (rgb(0,0,0) under --tty alone). Parking the pointer is what makes

@@ -69,7 +69,7 @@ let
   # in `keys-home.nix` (they need `pkgs` for store paths); the
   # combos live here so both sides and the tests read the one table.
   # Reserved-but-unbound combos (keyboard backlight, window capture,
-  # power menu) are docs-only: see docs/nix.md.
+  # power menu) are docs-only: see site/src/content/docs/desktop/index.md#xwayland-and-what-comes-next.
   keymap = {
     brightnessUp = {
       combo = "XF86MonBrightnessUp";
@@ -198,7 +198,7 @@ in
         the bar `colors`, the session wallpaper where one ships in the
         repository). Null themes nothing. Each value is a default a value
         you set in `settings` beats per key, and Stylix beats where
-        present (Stylix stays the override path); see docs/nix.md.
+        present (Stylix stays the override path); see site/src/content/docs/scoot/theming.md#stylix.
       '';
     };
 
@@ -221,7 +221,7 @@ in
     # The compositor half of XWayland support: on, the `[xwayland] enabled`
     # knob defaults on (read with `desktop.enable`). The package half stays
     # `programs.scoot.package`: point it at the flake's `scoot-xwayland`
-    # (or `scoot-gpu-xwayland`) build for X11 apps -- see docs/nix.md.
+    # (or `scoot-gpu-xwayland`) build for X11 apps -- see site/src/content/docs/scoot/xwayland.md.
     # The NixOS side accepts this and reserves it; the knob itself is
     # config-file (home-manager) wiring.
     xwayland.enable = lib.mkOption {
@@ -231,7 +231,7 @@ in
         Default `[xwayland] enabled` on (read with `desktop.enable`).
         Pair with an XWayland build as `programs.scoot.package` (the
         flake's `scoot-xwayland`); with the default package the knob
-        warns and the session runs Wayland-only. See docs/nix.md.
+        warns and the session runs Wayland-only. See site/src/content/docs/scoot/xwayland.md.
       '';
     };
 
@@ -326,7 +326,7 @@ in
       # panel: `sway-audio-idle-inhibit` (any sink or source running)
       # holding a Wayland idle inhibitor. Needs PipeWire (or PulseAudio)
       # running; without an audio server the unit backs off and stays
-      # stopped (see docs/nix.md).
+      # stopped (see site/src/content/docs/desktop/index.md#idle-and-lock).
       mediaInhibit = {
         enable = lib.mkOption {
           type = lib.types.bool;
@@ -450,7 +450,7 @@ in
           surfaces DND state and the unread count into the bar watches
           the daemon over D-Bus, so every key stays overridable
           without breaking it. Overriding `layer` hides popups under
-          fullscreen windows again (see docs/nix.md).
+          fullscreen windows again (see site/src/content/docs/desktop/index.md#notifications).
         '';
       };
     };
@@ -503,7 +503,7 @@ in
           Keep the clipboard after its source closes: every copy lands
           in cliphist's history (its package beside this), restorable
           with the keymap's picker, with password-manager copies and
-          anything copied while locked kept out (see docs/nix.md).
+          anything copied while locked kept out (see site/src/content/docs/desktop/index.md#clipboard).
           `wl-copy`/`wl-paste` land on PATH beside it.
         '';
       };
@@ -524,7 +524,7 @@ in
       # Where the history db lives. Null keeps cliphist's default
       # (`~/.cache/cliphist/db`, honoring `XDG_CACHE_HOME`): on disk,
       # so history survives reboots -- with secrets never landing in
-      # it by construction (see docs/nix.md for the trade-off). Set it
+      # it by construction (see site/src/content/docs/desktop/index.md#clipboard for the trade-off). Set it
       # to move the db: an absolute path without shell specials (no
       # `~`, spaces, quotes, `$`, backticks, `;` or backslashes -- the
       # store entry, the picker and the idle policy's lock wipe all
@@ -626,7 +626,7 @@ in
           over, one at a time). On with the profile. Binds gated on
           a future slot (launcher, clipboard, notifications,
           capture) appear only while that slot is enabled too;
-          their keys stay reserved either way (see docs/nix.md).
+          their keys stay reserved either way (see site/src/content/docs/desktop/index.md#hardware-keys-and-desktop-actions).
         '';
       };
 
@@ -666,7 +666,7 @@ in
   # committed, and from being fetched for the user automatically, so the
   # session shows the flat `background_color` below
   # unless the user sets `settings.wallpaper` themselves -- see
-  # docs/nix.md), else the in-repo file plus its mode. `image` is a path,
+  # site/src/content/docs/scootbg/index.md#the-wallpaper-section), else the in-repo file plus its mode. `image` is a path,
   # or `{ url, hash }` (a link fetched once with `pkgs.fetchurl` when the
   # profile applies it -- resolved in home.nix, since this module takes
   # only `lib`).

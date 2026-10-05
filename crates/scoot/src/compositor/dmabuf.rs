@@ -266,7 +266,7 @@
 //! security-context support, so an allow-list would be theatre. What this
 //! global now does hand out is a *mapping of the client's own buffer*, which
 //! is the client's memory, not anyone else's -- an import reads one fd the
-//! client passed, and nothing else. See `docs/protocols.md`.
+//! client passed, and nothing else. See `site/src/content/docs/scoot/protocols.md`.
 //!
 //! ## Edge cases, stated rather than re-derived
 //!

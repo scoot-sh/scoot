@@ -24,7 +24,7 @@
 //! scoot has no security-context support to distinguish a privileged idle
 //! daemon from any other client, so an allow-list would be theatre -- the
 //! same rationale as the session-lock and gamma globals, documented in
-//! `docs/protocols.md`'s trust note.
+//! `site/src/content/docs/scoot/protocols.md`'s trust note.
 //!
 //! ## What "off" means
 //!

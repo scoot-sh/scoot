@@ -30,7 +30,7 @@
 //!   terminal the user is typing in;
 //! - and inside the X server there is no isolation to preserve: any X
 //!   client can read and replace another's selection, or type into it,
-//!   by design (see `docs/protocols.md`'s trust note).
+//!   by design (see `site/src/content/docs/scoot/protocols.md`'s trust note).
 //!
 //! What the gate does hold is the Wayland half: while the user is in a
 //! Wayland window (or the lock screen), no X client can read the Wayland

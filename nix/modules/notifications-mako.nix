@@ -3,7 +3,7 @@
 # rev) pulls gtk+3 plus tinysparql, cups, at-spi2-core, avahi and
 # librsvg into the closure -- about 210 MiB over what the desktop
 # profile already has (measured against swaylock's closure, same
-# method as docs/nix.md "Why mako"). mako itself needs none of it: no
+# method as site/src/content/docs/desktop/index.md#notifications "Why mako"). mako itself needs none of it: no
 # GSettings schemas of its own, no toolkit. This override drops the
 # hook and wraps only what mako uses, the way dunst's own package
 # wraps its pixbuf loaders:

@@ -67,7 +67,7 @@ exec = []
 # PNG icons (`[clock] icon-image`): the `png` decoder, and nothing of it
 # without the feature. Not a module, and not in `default`: the decoder is
 # +115 KB on a 1.48 MB bar (release, `lto = "fat"`, stripped, measured in
-# docs/scootbar/icons.md) for a picture where a path icon needs none, so
+# site/src/content/docs/scootbar/configure.md#icons) for a picture where a path icon needs none, so
 # the default build stays inside the resource ratchet
 # (docs/scootbar/backlog/lightest.md). Built in with `--features
 # icon-image`, or the Nix module's `features` list.

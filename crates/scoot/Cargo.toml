@@ -36,7 +36,7 @@ license.workspace = true
 # -- plus `encoding_rs` and `scopeguard`), so the `ldd` pair this re-proves
 # per change is expected to show *no* new `DT_NEEDED` entry on either side;
 # the cost is binary size and the runtime `Xwayland` binary on `PATH`, which
-# is why the session knob stays opt-in (see `docs/protocols.md`'s trust
+# is why the session knob stays opt-in (see `site/src/content/docs/scoot/protocols.md#xwayland-opt-in`'s trust
 # note: any X client can keylog/snoop by design).
 [features]
 default = []
