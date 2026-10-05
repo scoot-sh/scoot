@@ -54,7 +54,7 @@ Building `scootnotify` itself (pointer entry owns that); notification
 portal (`xdg-desktop-portal` Notification forwarding — note if it falls out
 for free, otherwise leave it).
 
-## Landed (PR number below)
+## Landed (PR #441)
 
 Filled the `desktop.notifications` slot: mako as a `Type=dbus` user
 unit (`mako.service`, `WantedBy graphical-session.target`, unending
@@ -98,4 +98,4 @@ swap the login screen; proved instead through a real login plus the
 unchanged launcher ordering, and the WantedBy symlinks verified);
 swaync RSS (closure only: downloading 1.3 GiB to confirm the obvious
 was not justified); journal playback (no persistent journal for the
-test user). PR: (number in next commit).
+test user). PR: #441.
