@@ -3,7 +3,11 @@ title: Drive scoot over IPC
 description: "The IPC socket, the rules agents need, and the map to requests, actions, events and screenshots."
 ---
 
-Drive scoot from a script or an agent: the socket, the rules that keep automation honest, and where the rest lives. The client is `scootctl`; `scoot msg ...` is the same client kept as a permanent alias on the compositor binary — every example works with either, byte for byte.
+Drive scoot from a script or an agent: the socket, the rules that keep automation honest, and where the rest lives. The binaries document themselves
+for agents: `scootctl --help` (topics `requests`, `actions`,
+`exit-codes`, `environment`; `help <verb>` for one verb's row) and
+`scootctl --help --json` for the machine-readable form — see
+[Generated CLI pages](../reference/cli.md) for the contract every binary meets. The client is `scootctl`; `scoot msg ...` is the same client kept as a permanent alias on the compositor binary — every example works with either, byte for byte.
 
 # Driving scoot over IPC
 

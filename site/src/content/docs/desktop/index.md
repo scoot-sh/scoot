@@ -432,6 +432,97 @@ Troubleshooting, by symptom:
 - *Two daemons fight over popups.* Another notifier owns the bus name
   instead: only one can. Turn this one off or uninstall the other.
 
+## Clipboard
+
+Copy in one window, close it, and the paste still works: every copy
+lands in a history kept by cliphist, restorable with one keypress.
+Without this slot, a copy dies with the app that offered it — from
+your side of the screen that reads as data loss, and agents move text
+through the clipboard constantly, so the profile turns it on.
+
+```nix
+programs.scoot.desktop = {
+  enable = true;
+  # A longer tail in a moved db:
+  # clipboard.maxItems = 250;
+  # clipboard.dbPath = "/home/you/.cache/cliphist-test/db";
+  # No history at all on this box (each switch below is its own):
+  # clipboard.enable = false;
+};
+```
+
+What runs: two watcher units (regular clipboard and primary selection,
+wanted by `graphical-session.target`), each a `wl-paste --watch`
+feeding one shared history, plus `wl-copy`/`wl-paste` on `PATH` for
+scripts and terminals. The history keeps 100 entries by default
+(oldest dropped first, each entry at most 5 MB), byte-for-byte:
+trailing newlines survive, and so do images. Press `Super+v` and the
+picker shows the newest first; Enter restores the picked entry to the
+clipboard, then paste as usual:
+
+![The clipboard history picker over the session: four entries, newest first and highlighted, in the music-desk paper and ink](../../../assets/clipboard-picker.png)
+
+Know exactly what "the paste still works" promises, because Wayland
+selections are owner-held: the *history* survives the source app
+closing (and a reboot — it lives in a db on disk), while the *live*
+selection still dies with its owner. So `Ctrl+v` right after closing
+the source finds nothing — open the picker, Enter, paste. One
+keypress, always the same path.
+
+Password-manager copies never land in history, by construction: such
+an offer carries the `x-kde-passwordManagerHint` MIME type, for which
+the watcher stores nothing. Managers that do not set the hint are
+*not* excluded — treat the history as sensitive-adjacent anyway. Try
+it: `wl-copy --sensitive` copies, and the history stays empty.
+
+Over the session lock, two halves: the history is wiped as the session
+locks (pre-lock copies never sit on disk behind the lock screen), and
+nothing copied during the lock is recorded. Without the idle policy
+there is no lock event to ride, so a standalone clipboard wipes
+manually (`cliphist wipe`). The db lives at cliphist's default
+(`~/.cache/cliphist/db`, honoring `XDG_CACHE_HOME`) unless `dbPath`
+moves it — on disk, so history survives reboots. That is the privacy
+trade-off, stated whole: convenience against exposure (any same-uid
+process reads the db file). Secrets never land there by the mechanism
+above, the lock wipes it every lock, and `wipe` empties it any time;
+there is deliberately no encrypt-at-rest.
+
+Every value is an option, applied on rebuild/switch (the units restart
+into the new config; no re-login):
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `desktop.clipboard.enable` | bool | `true` with the profile | keep history (two watcher units), `wl-copy`/`wl-paste` on `PATH`, the picker bind |
+| `desktop.clipboard.maxItems` | int (at least 1) | `100` | history entries kept, oldest dropped first |
+| `desktop.clipboard.dbPath` | string or null | `null` (cliphist's default) | history db path: absolute, letters, digits and `._/+@-` only; anything else fails evaluation |
+| `desktop.theme.targets.clipboard.enable` | bool | `true` | theme the picker from the look; `false` keeps fuzzel's own style |
+
+Troubleshooting, by symptom:
+
+- *Close the app and the paste is empty.* That is the live selection,
+  not the history: open the picker (`Super+v`), Enter on the entry,
+  paste. If the *picker* is empty too, the watcher never stored it:
+  `systemctl --user status scoot-clipboard-store` (and
+  `-primary-store`), then `cliphist list`.
+- *`Super+v` opens nothing.* The slot renders that bind only with
+  `clipboard.enable` beside the keymap (both on with the profile).
+  Then check the menu: `fuzzel --dmenu` from a terminal — with an
+  empty history it exits at once, which is the picker staying quiet,
+  not an error.
+- *Escape clears my clipboard.* It does not: a cancelled pick exits
+  before `wl-copy` runs. If the selection changed anyway, another
+  manager runs beside this one — only one watcher per selection
+  should run.
+- *A password is in the history.* The offering app did not set the
+  hint: delete it (`cliphist list | fuzzel --dmenu | cliphist
+  delete`, or `wipe` for all of it) and tell the app to set it.
+- *Copies made while locked are in the history.* The store entry's
+  probe failed open: check `scoot-clipboard-store` and the
+  compositor's socket. The wipe still ran at lock, so pre-lock
+  entries are gone regardless.
+- *Two pickers / two histories.* Another manager runs beside this
+  one: only one should. Turn this one off or uninstall the other.
+
 ## Hardware keys and desktop actions
 
 A laptop whose brightness and volume keys do nothing is not
@@ -450,7 +541,7 @@ those tools, not to every scoot session.
 | `XF86AudioPlay` / `Pause` / `Stop` / `Next` / `Prev` | play-pause / pause / stop / next / previous | a player speaking MPRIS |
 | `Super+Escape` | lock (through logind) | the locker |
 | `Super+d` | launcher | `launcher.enable` (stub today — binds nothing yet) |
-| `Super+v` | clipboard picker | `clipboard.enable` (stub today) |
+| `Super+v` | clipboard picker | `clipboard.enable` |
 | `Super+n` | dismiss visible notifications | `notifications.enable` |
 | `Super+Shift+n` | do-not-disturb toggle | `notifications.enable` |
 | `Super+Ctrl+n` | show hidden notifications | `notifications.enable` |
@@ -500,8 +591,9 @@ Troubleshooting, by symptom:
 - *Holding volume up steps once.* Known compositor gap: a held key
   fires its bind once (no repeat timer yet). Press per step.
 - *`Super+d` opens nothing.* The launcher slot is still a stub, and so
-  are clipboard and capture — while the `Super+n` family works today
-  whenever `notifications.enable` is on beside the keymap.
+  is capture — while `Super+v` works today (the clipboard picker,
+  [above](#clipboard)) and so does the `Super+n` family (mako's own
+  commands) whenever its slot is on beside the keymap.
 
 ## Wallpaper from a link
 
@@ -553,7 +645,7 @@ child, so those children fill bodies without renaming options:
 | `desktop.capture.enable` | bool + package | `false` | screenshots bound to keys (grim + slurp) |
 | `desktop.auth.enable` / `desktop.secrets.enable` | bool + package | `false` | polkit agent + keyring |
 | `desktop.audio.enable` | bool + package | `false` | audio baseline and OSD |
-| `desktop.clipboard.enable` | bool + package | `false` | clipboard persistence + history |
+| `desktop.clipboard.enable` (+ `maxItems`, `dbPath`, three packages) | bool (+ int, path, packages) | `true` ([Clipboard](#clipboard): history kept, picker bound, wiped at lock) | clipboard persistence + history (lean cliphist + wl-clipboard + fuzzel) |
 | `desktop.nightlight.enable` | bool + package | `false` | night light |
 | `desktop.power.enable` | bool + package | `false` | power profiles, suspend, charge limit |
 | `desktop.theme.enable` | bool + package | `false` | GTK/Qt theme, dark mode |

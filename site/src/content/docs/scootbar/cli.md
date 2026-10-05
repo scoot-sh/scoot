@@ -40,8 +40,15 @@ scootbar msg subscribe                     # stream changes, one JSON line each
 scootbar msg reload                        # re-read the file and live-apply it
 scootbar msg toggle                        # hide the bar (and release its space), or show it
 scootbar --help                              # and `scootbar daemon --help`, `scootbar msg --help`
+scootbar --help --json                       # the same content as JSON (see below)
 scootbar --version
 ```
+
+The binaries document themselves for agents: `scootbar help daemon` and
+`scootbar help msg` print each command's page, and `scootbar --help --json`
+emits commands, daemon flags (with types and defaults), msg commands, the
+modules in the build, exit codes and environment — see
+[Generated CLI pages](../reference/cli.md) for the contract.
 
 `scootbar daemon` runs in the foreground until the compositor goes away
 (start it with `&`, or from your compositor's autostart). It connects to

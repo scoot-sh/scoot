@@ -45,8 +45,10 @@ sets (one per sidebar section) live under `/_llms-txt/`: the
 `scootctl / IPC` set is the grammar reference in one file. Commands in
 fenced blocks, nothing meaningful only in an image.
 
-`--help` prints the usage text, every request and every action; the
-generated CLI pages (from `--help --json`) land in
-[Reference](../reference/cli.md) when that work merges — until then
-this site's [Actions](../scootctl/actions.md) and [CLI
-reference](../scootbar/cli.md) pages are the source.
+`--help` prints the usage text, every request and every action, with
+topics (`scootctl --help`, `help <verb>`) and `--help --json` for the
+machine-readable form — the [contract](../reference/cli.md) every
+binary meets. Per-CLI pages generated from that JSON land in
+[Reference](../reference/cli.md) next; until then this site's
+[Actions](../scootctl/actions.md) and [CLI reference](../scootbar/cli.md)
+pages are the prose source.
