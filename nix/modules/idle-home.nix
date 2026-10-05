@@ -176,8 +176,8 @@ in
         example = "loginctl lock-session";
         description = ''
           The stable lock action: what the idle timeout runs, and what
-          the future `desktop-keys` child binds (the `Super+Escape`
-          class) -- lid-close and manual locks share this path through
+          the keymap's `Super+Escape` bind runs (see
+          `keys-home.nix`) -- lid-close and manual locks share this path through
           logind, which the locker's `lock` event listens on. An
           absolute store path by default, so user units never depend on
           PATH; a bare `loginctl lock-session` works wherever logind

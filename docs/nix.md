@@ -12,6 +12,7 @@
 - [The wallpaper: scootbg](#the-wallpaper-scootbg)
 - [The status bar: scootbar](#the-status-bar-scootbar)
 - [The desktop profile](#the-desktop-profile)
+- [Hardware keys and desktop actions](#hardware-keys-and-desktop-actions)
 - [The overlay](#the-overlay)
 - [Migrating from a hand-rolled packaging](#migrating-from-a-hand-rolled-packaging)
 - [Settings failure modes](#settings-failure-modes)
@@ -1199,7 +1200,7 @@ into the new config; no re-login):
 | `desktop.idle.offTimeout` | int (seconds) | `300` | inactivity before outputs power off; `0` disables the step |
 | `desktop.idle.mediaInhibit.enable` | bool | `true` with the profile | hold idle while audio plays (needs PipeWire or PulseAudio running) |
 | `desktop.idle.lock.enable` | bool | `true` with the profile | lock through the locker below |
-| `desktop.idle.lock.command` | string | `<systemd>/bin/loginctl lock-session` (bare `loginctl lock-session` off Linux) | the stable lock action: what the timeout runs, and what the future `desktop-keys` child binds (`Super+Escape` class) -- lid-close and manual locks share this path through logind |
+| `desktop.idle.lock.command` | string | `<systemd>/bin/loginctl lock-session` (bare `loginctl lock-session` off Linux) | the stable lock action: what the timeout runs, and what the keymap's `Super+Escape` bind runs ([Hardware keys](#hardware-keys-and-desktop-actions)) -- lid-close and manual locks share this path through logind |
 | `desktop.idle.lock.daemon` | enum (`"swaylock"`) | `"swaylock"` | the locker behind the action (smallest working closure, plain-text config, CPU-only; a future scootlock widens this without renaming anything) |
 | `desktop.idle.lock.settings` | attrset of string | `{ }` | extra swaylock lines over the themed ones (a value here wins per key; `""` renders a bare flag, e.g. `{ show-failed-attempts = ""; }`) |
 | `desktop.theme.targets.lock.enable` | bool | `true` | theme the locker from the look (screen and indicator from its palette); `false` keeps swaylock's own style while the rest follows the look |
@@ -1441,26 +1442,143 @@ Troubleshooting, by symptom:
   a desktop's own) owns the bus name instead: only one can. Turn this
   one off (`notifications.enable = false`) or uninstall the other.
 
+## Hardware keys and desktop actions
+
+A laptop whose brightness and volume keys do nothing is not
+daily-drivable, so the profile ships one keymap for them and for the
+desktop actions the other children add -- and it is on with the
+profile. The compositor's own built-in defaults stay window management
+only (see [Default keybindings](configuration.md#default-keybindings)):
+hardware binds spawn tools scoot does not ship, so they belong to the
+profile that installs those tools, not to every scoot session.
+
+| Press | Does | Needs (beside the profile) |
+|---|---|---|
+| `XF86MonBrightnessUp` / `Down` | panel `+5%` / `-5%` (`-e`, so low steps stay usable) | brightnessctl (installed) |
+| `XF86AudioRaiseVolume` / `LowerVolume` | default sink `+5%` / `-5%` | PipeWire running |
+| `XF86AudioMute` | default sink mute toggle | PipeWire running |
+| `XF86AudioMicMute` | default source mute toggle | PipeWire running |
+| `XF86AudioPlay` / `Pause` / `Stop` / `Next` / `Prev` | `playerctl play-pause` / `pause` / `stop` / `next` / `previous` | a player speaking MPRIS |
+| `Super+Escape` | lock (`idle.lock.command`, through logind) | the locker |
+| `Super+d` | launcher | `launcher.enable` (fuzzel) |
+| `Super+v` | clipboard picker | `clipboard.enable` (cliphist through fuzzel) |
+| `Super+n` | dismiss visible notifications | `notifications.enable` (mako) |
+| `Super+Shift+n` | do-not-disturb toggle | `notifications.enable` (mako) |
+| `Super+Ctrl+n` | show hidden notifications | `notifications.enable` (mako) |
+| `Print` | screenshot every output into `~/Pictures` | `capture.enable` (grim) |
+| `Shift+Print` | screenshot a picked region into `~/Pictures` | `capture.enable` (grim plus slurp) |
+
+On an Apple keyboard these are the Fn row: `F1`/`F2` brightness,
+`F7`/`F8`/`F9` previous/play/next, `F10` mute, `F11`/`F12` volume
+down/up. There is deliberately no on-screen display yet: volume and
+brightness step silently until the `desktop-audio-osd` child wires
+one (the bar's volume, brightness, media and microphone modules are
+the display half).
+
+Reserved but unbound (their child binds them; nothing else may take
+the combo): `XF86KbdBrightnessUp`/`Down` (no stable device name --
+the reference machine exposes no keyboard-backlight device, and
+`brightnessctl` without `-d` would drive the panel instead),
+`Super+Shift+s` (window capture, for the capture child),
+`Super+Shift+p` (power menu, for the power child).
+
+Why these combos and not the alternatives: `Super+d` is the launcher
+in niri and fuzzel's own documentation, and `Super+Space` -- the
+other candidate -- already moves focus between floating windows and
+the strip, so taking it would rename a shipped default out from
+under existing users. `Super+v` is the clipboard convention
+everywhere else. `Super+Escape` is free (the compositor binds no
+`Escape` combo), sits beside the quit combo without sharing a
+modifier-slip path with it, and matches the `idle.lock.command`
+action the idle child already declared for exactly this bind. Every
+hardware keysym and every `Super` combo above was checked against
+[Default keybindings](configuration.md#default-keybindings): no
+overlap with any built-in, including `Super+Shift+e` (quit),
+`Super+Shift+Space` (float) and the `Super+Shift+1..9` workspace
+moves.
+
+Every value is an option, applied on rebuild/switch plus a session
+reload (`scootctl reload`) or re-login:
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `desktop.keys.enable` | bool | `true` with the profile | render the keymap into `[binds]` |
+| `desktop.keys.binds.<name>.enable` | bool | `true` | bind that key (`brightnessUp`, `volumeUp`, `volumeMute`, `micMute`, `mediaPlay`, `mediaPause`, `mediaStop`, `mediaNext`, `mediaPrev`, `lock`, `launcher`, `clipboard`, `notifDismiss`, `notifDnd`, `notifHistory`, `captureOutput`, `captureRegion`); `false` leaves its combo unbound |
+| `desktop.keys.brightnessPackage` | package or null | brightnessctl (Linux-only: null off Linux) | the backlight tool the brightness binds run |
+| `desktop.keys.volumePackage` | package or null | wireplumber (Linux-only: null off Linux) | the audio tool the volume and mute binds run (`wpctl`) |
+| `desktop.keys.mediaPackage` | package or null | playerctl (Linux-only: null off Linux) | the MPRIS tool the media binds run |
+
+Each bind renders as a `mkDefault` a value you set in
+`settings.binds` wins over -- so one bind is overridden and one
+removed like this (both shapes are evaluated in `nix/tests.nix`,
+which pins every default bind beside them):
+
+```nix
+programs.scoot.desktop.keys.binds.volumeUp.enable = false;
+programs.scoot.settings.binds."XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 3%+";
+```
+
+Off Linux the tools default to null and the binds render with bare
+tool names for the Linux box the config deploys to, installing
+nothing. A bind whose tool is missing fails quietly -- scoot logs a
+warning and carries on, input never wedges -- so a partial setup
+(stub slots, no PipeWire, no player) degrades to dead keys, never to
+a broken session.
+
+Troubleshooting, by symptom:
+
+- *A Fn key does nothing.* First check the tool, not the bind:
+  `brightnessctl get`, `wpctl get-volume @DEFAULT_AUDIO_SINK@`,
+  `playerctl status` -- a missing tool (or no PipeWire, no player)
+  is the usual cause, and the bind is correctly quiet about it.
+  Then check the bind reached the file: the rendered binds are
+  `[binds]` in `~/.config/scoot/config.toml` (re-login or
+  `scootctl reload` after a rebuild). Then check scoot saw the key:
+  `scoot msg key XF86AudioRaiseVolume` should do what the key
+  does -- if it does, the compositor never received the keystroke
+  (wrong keyboard map on the seat, or a host compositor eating the
+  key under `--nested`).
+- *Volume or brightness keys die at the lock screen.* Known
+  limitation, not a config error: while locked, no `[binds]` action
+  fires except VT switching (the bypass a `spawn` bind from behind
+  the lock would be), so the hardware keys go to the locker as
+  ordinary keystrokes. An explicit per-bind allowlist is filed as a
+  compositor follow-up; until it lands, step before you lock.
+- *Holding volume up steps once.* Also a known compositor gap:
+  Smithay absorbs a repeat press of an already-held key before the
+  bind filter (deliberately, against double-firing shortcuts), and
+  scoot runs no repeat timer of its own -- so a held key fires its
+  bind once. Repeat support is filed as a compositor follow-up;
+  until it lands, press per step.
+- *`Super+d` opens nothing.* The launcher slot is still a stub:
+  that bind renders only with `launcher.enable`, and nothing
+  installs fuzzel until the launcher child lands. Same for
+  `Super+v` (clipboard) and `Print` (capture) -- while the
+  `Super+n` family works today: it runs mako's own commands (see
+  above) whenever `notifications.enable` is on beside the keymap.
+
 **Every later piece has its slot already**, off and inert: one boolean
 (plus a package override where a package is involved) per paved-path child,
 so those children fill bodies without renaming options. Enabling one today
-is accepted and does nothing yet. Changes apply on rebuild/switch, like
+is accepted and does nothing yet -- except where the keymap above says
+otherwise (a slot the keymap gates a bind on: enabling it beside the
+keymap binds that key). Changes apply on rebuild/switch, like
 every other option here:
 
 | Slot | Type | Default | Child | Default tool |
 |---|---|---|---|---|
 | `desktop.idle.enable` / `desktop.idle.lock.enable` (+ timeouts, `lock.command`, `lock.settings`) | bool (+ timeout ints, action string, package per tool) | `true` ([Idle and lock](#idle-and-lock): dim 2 min / 10%, lock 4 min, off 5 min) | idle policy + locker | swayidle + swaylock |
+| `desktop.keys.enable` (+ per-bind `binds.<name>.enable`, tool packages) | bool (+ 19 bools, 3 packages) | `true` ([Hardware keys](#hardware-keys-and-desktop-actions): brightness, volume, media, lock; slot binds with their slots) | the shared keymap every other child registers into | brightnessctl + wireplumber + playerctl |
 | `desktop.notifications.enable` (+ `daemon`, `settings`) | bool (+ enum, lines, package) | `true` ([Notifications](#notifications): mako unit, overlay layer, bar feed) | notifications (mako now, scootnotify later) | mako |
 | `desktop.launcher.enable` | bool + package | `false` | launcher | fuzzel (the default binds still name wofi until that child reconciles them) |
 | `desktop.capture.enable` | bool + package | `false` | screenshots bound to keys | grim + slurp |
 | `desktop.auth.enable` / `desktop.secrets.enable` | bool + package | `false` | polkit agent + keyring | — |
-| `desktop.audio.enable` | bool + package | `false` | audio, brightness and media keys + OSD | pipewire + wireplumber |
+| `desktop.audio.enable` | bool + package | `false` | audio baseline and OSD (the keymap above is its keys half) | pipewire + wireplumber |
 | `desktop.clipboard.enable` | bool + package | `false` | clipboard persistence + history | cliphist + wl-clipboard |
 | `desktop.nightlight.enable` | bool + package | `false` | night light | wlsunset or gammastep |
 | `desktop.power.enable` | bool + package | `false` | power profiles, suspend, charge limit | power-profiles-daemon |
 | `desktop.theme.enable` | bool + package | `false` | GTK/Qt theme, dark mode (non-Stylix fallback) | — |
 | `desktop.apps.terminal.enable` / `desktop.apps.fileManager.enable` | bool + package | `false` | terminal + (optional) file manager | foot; — |
-| `desktop.keys.enable` | bool | `false` | the shared keymap every other child registers into | — |
 | `desktop.displays.enable` | bool | `false` | output policy | — |
 | `desktop.inputMethod.enable` | bool | `false` | input-method wiring | — |
 | `desktop.automount.enable` | bool + package | `false` | removable-media automount (no child filed yet) | udiskie |

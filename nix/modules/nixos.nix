@@ -122,10 +122,53 @@ in
     # `desktop.nix` and docs/nix.md). Each side wires only what it owns;
     # this side owns the session entry, the system packages and the
     # greeter (aliased above). The compositor config itself
-    # (`[appearance]`, `[wallpaper]`, the `[xwayland]` knob) is the
-    # home-manager side's, and the bar is the bar module's (which reads
-    # this profile): this side renders no config file.
+    # (`[appearance]`, `[wallpaper]`, the `[xwayland]` knob, the
+    # `[binds]` keymap) is the home-manager side's, and the bar is the
+    # bar module's (which reads this profile): this side renders no
+    # config file.
     desktop = desktop.options // {
+      # The shared keymap's tool packages: the shapes are in
+      # `desktop.nix` (shared with the home-manager side) and the
+      # `[binds]` they run are that side's (`keys-home.nix`); this
+      # side installs the tools system-wide. Same packages as there,
+      # so either side alone names the same tools. Merged here (not
+      # declared separately below) because one module cannot declare
+      # the same option path twice. The tools are Linux-only: off
+      # Linux each defaults to null and nothing installs.
+      keys = desktop.options.keys // {
+        brightnessPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.brightnessctl or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.brightnessctl or null else null";
+          description = ''
+            The backlight tool to install system-wide for the
+            brightness binds. Null installs nothing. Linux-only:
+            null off Linux.
+          '';
+        };
+
+        volumePackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wireplumber or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.wireplumber or null else null";
+          description = ''
+            The audio tool to install system-wide for the volume
+            and mute binds (`wpctl`). Null installs nothing.
+            Linux-only: null off Linux.
+          '';
+        };
+
+        mediaPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.playerctl or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.playerctl or null else null";
+          description = ''
+            The MPRIS tool to install system-wide for the media
+            binds. Null installs nothing. Linux-only: null off
+            Linux.
+          '';
+        };
+      };
       # The idle policy's tool packages: the shapes are in `desktop.nix`
       # (shared with the home-manager side) and the user units that run
       # them are that side's (`idle-home.nix`); this side installs the
@@ -524,6 +567,12 @@ in
       programs.scoot.session.enable = lib.mkDefault true;
       programs.scoot.wallpaper.enable = lib.mkDefault true;
 
+      # The shared keymap on with the profile (each bind still
+      # individually removable, the whole map disable-able at plain
+      # priority): the tools below install, the `[binds]` come from
+      # the home-manager side.
+      programs.scoot.desktop.keys.enable = lib.mkDefault true;
+
       # The idle policy on with the profile (each still individually
       # disable-able at plain priority): the tools below install, the
       # lid rule locks docked lids, and the user units come from the
@@ -564,6 +613,16 @@ in
     # config are the home-manager side's (`idle-home.nix`): without it
     # the tools sit ready for a hand-written setup, the way a `[wallpaper]`
     # finds scootbg on PATH without the home-manager side.
+    #
+    # The shared keymap's system half just below it: its tools on
+    # PATH (`keys-home.nix` owns the `[binds]`); the slot scripts
+    # beside those binds are per-user, so they stay on that side.
+    (lib.mkIf cfg.desktop.keys.enable {
+      environment.systemPackages =
+        lib.optional (cfg.desktop.keys.brightnessPackage != null) cfg.desktop.keys.brightnessPackage
+        ++ lib.optional (cfg.desktop.keys.volumePackage != null) cfg.desktop.keys.volumePackage
+        ++ lib.optional (cfg.desktop.keys.mediaPackage != null) cfg.desktop.keys.mediaPackage;
+    })
     (lib.mkIf cfg.desktop.idle.enable {
       assertions = [
         {

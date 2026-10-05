@@ -90,7 +90,11 @@
 #   individually disable-able, the locker themed by the look unless
 #   `theme.targets.lock.enable` opts out; an empty or quote-carrying
 #   `lock.command`, and an out-of-range `dimLevel` while the dim step is
-#   on, each fail eval;
+#   on, each fail eval; the shared keymap (`desktop-keys` child) runs
+#   with the profile -- the twelve hardware and lock binds, each a
+#   `mkDefault` a user `[binds]` entry wins over and each removable
+#   through `binds.<name>.enable`, the seven slot-gated binds only
+#   while their slot is on;
 #   the notification daemon (`desktop-notifications` child) runs with
 #   the profile -- mako owning `org.freedesktop.Notifications` as a
 #   `Type=dbus` user unit (activatable, retried like the bar's unit),
@@ -736,6 +740,15 @@ let
     buildFeatures = [ "clock" ];
   };
   sorted = packages: lib.sort lib.lessThan (drvs packages);
+  # A keymap slot script's `bin/` path, found in an evaluation's
+  # installed packages by derivation name (the store hash is not
+  # knowable in the pin, the name is).
+  slotScriptBin =
+    eval: name:
+    let
+      found = lib.findFirst (p: (p.name or "") == name) (throw "no ${name} in home.packages") eval.config.home.packages;
+    in
+    "${found}/bin/${name}";
 
   # --- home-manager evaluations under test ---
   hmEmpty = evalHome { enable = true; };
@@ -1021,6 +1034,65 @@ let
     wallpaper.package = fakeBg;
     desktop.enable = true;
     desktop.launcher.enable = true;
+  };
+
+  # --- shared keymap (`programs.scoot.desktop.keys`) evaluations ---
+  #
+  # The profile alone: the keymap on, future slots off -- the twelve
+  # keymap-owned binds (brightness, volume, mute, media, lock) render,
+  # the slot-gated seven stay out.
+  hmKeys = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+  };
+  # ...every future slot on: all nineteen binds render, the slot
+  # scripts beside them.
+  hmKeysSlots = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.launcher.enable = true;
+    desktop.clipboard.enable = true;
+    desktop.notifications.enable = true;
+    desktop.capture.enable = true;
+  };
+  # ...one bind removed: its combo stays unbound, the rest render.
+  hmKeysOmit = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.keys.binds.volumeUp.enable = false;
+    desktop.keys.binds.lock.enable = false;
+  };
+  # ...one bind overridden: the user's own `[binds]` entry wins.
+  hmKeysOverride = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    settings.binds."XF86AudioRaiseVolume" = "spawn sh -c true";
+  };
+  # ...a slot bind overridden: the user's entry beats the slot's.
+  hmKeysSlotOverride = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.launcher.enable = true;
+    settings.binds."super+d" = "spawn foot";
+  };
+  # ...the whole keymap off: no binds, no tools beyond the profile's
+  # own (the idle policy's five stay -- that is the other child).
+  hmKeysOff = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.keys.enable = false;
   };
 
   # --- idle policy (`programs.scoot.desktop.idle`) evaluations ---
@@ -1314,6 +1386,13 @@ let
     enable = true;
     package = fakePkg;
     desktop.look = "radial-burst";
+  };
+  # The shared keymap off: the profile's other packages only.
+  osKeysOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.keys.enable = false;
   };
   # --- idle policy (`programs.scoot.desktop.idle`) system evaluations ---
   #
@@ -2384,6 +2463,8 @@ let
   hmDeskMusicToml = hmDeskLookMusic.config.xdg.configFile."scoot/config.toml".source;
   hmDeskVinylToml = hmDeskLookVinyl.config.xdg.configFile."scoot/config.toml".source;
   hmDeskMoonToml = hmDeskLookMoon.config.xdg.configFile."scoot/config.toml".source;
+  keysToml = hmKeys.config.xdg.configFile."scoot/config.toml".source;
+  keysSlotsToml = hmKeysSlots.config.xdg.configFile."scoot/config.toml".source;
   hmDeskBarToml = hmDeskBar.config.programs.scootbar.configFile;
   hmDeskBarMoonToml = hmDeskBarMoon.config.programs.scootbar.configFile;
   osDeskBarToml = osDeskBar.config.programs.scootbar.configFile;
@@ -2719,13 +2800,16 @@ let
       true
     )
     # ...which is what installs scootbg for it (beside the idle
-    # policy's five tools and the notification daemon, on with the
-    # profile).
+    # policy's five tools, the notification daemon and the keymap's
+    # three, all on with the profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
       true
     )
     (
+      # `brightnessctl` twice is one package, not two tools: the
+      # idle policy's dim tool and the keymap's brightness tool are
+      # the same derivation, each declared beside its own binds.
       assert
         sorted hmDeskLookMusic.config.home.packages == sorted [
           fakePkg
@@ -2736,6 +2820,9 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
         ];
       true
     )
@@ -3113,10 +3200,13 @@ let
         hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
       true
     )
-    # ...exactly the six tools installed (swayidle, dim, off, locker,
-    # inhibitor, mako -- no scoot package set here, so nothing else).
+    # ...exactly the nine tools installed (swayidle, dim, off,
+    # locker, inhibitor, mako -- no scoot package set here, so nothing
+    # else -- plus the keymap's brightness, volume and media tools;
+    # `brightnessctl` is one package serving two features, so it
+    # appears twice).
     (
-      assert builtins.length hmIdle.config.home.packages == 6;
+      assert builtins.length hmIdle.config.home.packages == 9;
       true
     )
     (
@@ -3128,6 +3218,9 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
         ];
       true
     )
@@ -3146,9 +3239,10 @@ let
       assert hmIdleNoLook.config.xdg.configFile ? "swaylock/config";
       true
     )
-    # The policy off: no units, no files beyond the profile's own, no
-    # tools -- but the notification daemon stays (its switch is its
-    # own, on with the profile).
+    # The policy off: no units, no files beyond the profile's own --
+    # but the notification daemon stays (its switch is its own, on
+    # with the profile) and the keymap stays too (the other child,
+    # still on with the profile), so mako and its three tools stay.
     (
       assert allAssertionsHold hmIdleOff.config;
       true
@@ -3174,11 +3268,18 @@ let
       true
     )
     (
-      assert drvs hmIdleOff.config.home.packages == drvs [ leanMako ];
+      assert
+        sorted hmIdleOff.config.home.packages == sorted [
+          leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
+        ];
       true
     )
     # The lock off: the policy stays (dim and screens-off), the locker
-    # leaves (no config, no package, four idle tools plus mako left).
+    # leaves (no config, no package, four policy tools plus mako and
+    # the keymap's three left).
     (
       assert allAssertionsHold hmLockOff.config;
       true
@@ -3192,10 +3293,11 @@ let
       true
     )
     (
-      assert builtins.length hmLockOff.config.home.packages == 5;
+      assert builtins.length hmLockOff.config.home.packages == 8;
       true
     )
-    # The inhibitor off: the policy without the audio hold.
+    # The inhibitor off: the policy without the audio hold (four
+    # policy tools plus mako and the keymap's three).
     (
       assert allAssertionsHold hmInhibitOff.config;
       true
@@ -3205,7 +3307,7 @@ let
       true
     )
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 5;
+      assert builtins.length hmInhibitOff.config.home.packages == 8;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -3311,9 +3413,10 @@ let
       true
     )
 
-    # NixOS: the profile installs the five tools beside scoot and
-    # scootbg, locks docked lids, and names the locker's PAM service --
-    # staying additive (no default session, ever)...
+    # NixOS: the profile installs the five policy tools, mako and
+    # the keymap's three beside scoot and scootbg, locks docked lids,
+    # and names the locker's PAM service -- staying additive (no
+    # default session, ever)...
     (
       assert allAssertionsHold osIdle.config;
       true
@@ -3329,6 +3432,9 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
         ];
       true
     )
@@ -3345,7 +3451,9 @@ let
       true
     )
     # ...the policy off: the rule untouched (logind's own default
-    # applies), no PAM, the profile's own packages plus the daemon's...
+    # applies), no PAM -- but the daemon stays (its switch is its
+    # own) and the keymap stays too (the other child), so mako and
+    # its three tools stay...
     (
       assert allAssertionsHold osIdleOff.config;
       true
@@ -3364,12 +3472,15 @@ let
           fakePkg
           fakeBg
           leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
         ];
       true
     )
     # ...the lock off: no PAM and no locker, the lid rule still
     # locking (dim and screens-off still run from the home-manager
-    # side)...
+    # side, the keymap's tools beside them)...
     (
       assert allAssertionsHold osLockOff.config;
       true
@@ -3388,6 +3499,9 @@ let
           pkgs.wlopm
           pkgs.sway-audio-idle-inhibit
           leanMako
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
         ];
       true
     )
@@ -3792,6 +3906,193 @@ let
     )
   ];
 
+  # --- shared keymap (fail `nix flake check` at eval) ---
+  #
+  # Linux only: the actions name absolute store paths here (the bare
+  # fallbacks are pinned in `_darwinKeysPins`). Every default bind is
+  # pinned by combo and action below; an override and a removal prove
+  # the two user paths.
+  _keysPins = lib.optionals isLinux [
+    # Home-manager: the profile turns the keymap on...
+    (
+      assert allAssertionsHold hmKeys.config;
+      true
+    )
+    (
+      assert hmKeys.config.programs.scoot.desktop.keys.enable;
+      true
+    )
+    # ...rendering exactly the twelve keymap-owned binds (future
+    # slots off: their seven stay out)...
+    (
+      assert
+        hmKeys.config.programs.scoot.settings.binds == {
+          "XF86MonBrightnessUp" = "spawn ${lib.getExe pkgs.brightnessctl} -e set +5%";
+          "XF86MonBrightnessDown" = "spawn ${lib.getExe pkgs.brightnessctl} -e set 5%-";
+          "XF86AudioRaiseVolume" = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
+          "XF86AudioLowerVolume" = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
+          "XF86AudioMute" = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SINK@ toggle";
+          "XF86AudioMicMute" = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+          "XF86AudioPlay" = "spawn ${lib.getExe pkgs.playerctl} play-pause";
+          "XF86AudioPause" = "spawn ${lib.getExe pkgs.playerctl} pause";
+          "XF86AudioStop" = "spawn ${lib.getExe pkgs.playerctl} stop";
+          "XF86AudioNext" = "spawn ${lib.getExe pkgs.playerctl} next";
+          "XF86AudioPrev" = "spawn ${lib.getExe pkgs.playerctl} previous";
+          "super+escape" = "spawn ${lib.getExe' pkgs.systemd "loginctl"} lock-session";
+        };
+      true
+    )
+    # ...beside the profile's and the policy's packages (scoot, the
+    # five idle tools, the keymap's three)...
+    (
+      assert
+        sorted hmKeys.config.home.packages == sorted [
+          fakePkg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
+        ];
+      true
+    )
+    # ...every future slot on: all nineteen binds (the launcher and
+    # notification binds by bare tool name -- their slots install
+    # nothing yet -- the clipboard and capture binds through the
+    # keymap's own scripts)...
+    (
+      assert allAssertionsHold hmKeysSlots.config;
+      true
+    )
+    (
+      assert builtins.length (builtins.attrNames hmKeysSlots.config.programs.scoot.settings.binds) == 19;
+      true
+    )
+    (
+      assert hmKeysSlots.config.programs.scoot.settings.binds."super+d" == "spawn fuzzel";
+      true
+    )
+    (
+      assert hmKeysSlots.config.programs.scoot.settings.binds."super+v" == "spawn ${slotScriptBin hmKeysSlots "scoot-clipboard-pick"}";
+      true
+    )
+    (
+      assert hmKeysSlots.config.programs.scoot.settings.binds."super+n" == "spawn makoctl dismiss";
+      true
+    )
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."super+shift+n"
+        == "spawn makoctl mode -t do-not-disturb";
+      true
+    )
+    (
+      assert hmKeysSlots.config.programs.scoot.settings.binds."super+ctrl+n" == "spawn makoctl restore";
+      true
+    )
+    (
+      assert hmKeysSlots.config.programs.scoot.settings.binds."print" == "spawn ${slotScriptBin hmKeysSlots "scoot-capture-output"}";
+      true
+    )
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."shift+print" == "spawn ${slotScriptBin hmKeysSlots "scoot-capture-region"}";
+      true
+    )
+    # ...the three slot scripts installed beside the keymap's tools...
+    (
+      assert lib.any (p: (p.name or "") == "scoot-clipboard-pick") hmKeysSlots.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-capture-output") hmKeysSlots.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-capture-region") hmKeysSlots.config.home.packages;
+      true
+    )
+    # ...one bind removed: its combo unbound, the other eleven
+    # still there...
+    (
+      assert allAssertionsHold hmKeysOmit.config;
+      true
+    )
+    (
+      assert !(hmKeysOmit.config.programs.scoot.settings.binds ? "XF86AudioRaiseVolume");
+      true
+    )
+    (
+      assert !(hmKeysOmit.config.programs.scoot.settings.binds ? "super+escape");
+      true
+    )
+    (
+      assert builtins.length (builtins.attrNames hmKeysOmit.config.programs.scoot.settings.binds) == 10;
+      true
+    )
+    # ...one bind overridden: the user's own `[binds]` entry wins...
+    (
+      assert hmKeysOverride.config.programs.scoot.settings.binds."XF86AudioRaiseVolume" == "spawn sh -c true";
+      true
+    )
+    (
+      assert
+        builtins.length (builtins.attrNames hmKeysOverride.config.programs.scoot.settings.binds) == 12;
+      true
+    )
+    # ...a slot bind overridden the same way (the slot's command
+    # loses to the user's)...
+    (
+      assert hmKeysSlotOverride.config.programs.scoot.settings.binds."super+d" == "spawn foot";
+      true
+    )
+    # ...the whole keymap off: no `[binds]` from it (no other eval
+    # sets binds here, so the table is absent entirely), the idle
+    # policy's five beside scoot only...
+    (
+      assert allAssertionsHold hmKeysOff.config;
+      true
+    )
+    (
+      assert !(hmKeysOff.config.programs.scoot.settings ? binds);
+      true
+    )
+    (
+      assert
+        sorted hmKeysOff.config.home.packages == sorted [
+          fakePkg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
+        ];
+      true
+    )
+    # NixOS: the keymap off leaves the profile's other packages
+    # only (the five idle tools beside scoot and scootbg).
+    (
+      assert allAssertionsHold osKeysOff.config;
+      true
+    )
+    (
+      assert
+        sorted osKeysOff.config.environment.systemPackages == sorted [
+          fakePkg
+          fakeBg
+          pkgs.swayidle
+          pkgs.brightnessctl
+          pkgs.wlopm
+          pkgs.swaylock
+          pkgs.sway-audio-idle-inhibit
+        ];
+      true
+    )
+  ];
+
   # --- idle policy off Linux (fail `nix flake check` at eval) ---
   #
   # The tools above are Linux-only: off Linux each package defaults to
@@ -3865,14 +4166,94 @@ let
       true
     )
   ];
+
+  # --- shared keymap off Linux (fail `nix flake check` at eval) ---
+  #
+  # The keymap's tools are Linux-only like the policy's, but the
+  # binds stay benign without them (a missing tool fails quietly at
+  # runtime), so off Linux the tools are null, the binds render in
+  # their bare form for the Linux box the config deploys to, and --
+  # unlike the policy -- nothing refuses.
+  _darwinKeysPins = lib.optionals (!isLinux) [
+    # Home-manager: every keymap tool null, nothing installed for it
+    # (scoot itself aside: this eval sets `package`)...
+    (
+      assert hmKeys.config.programs.scoot.desktop.keys.brightnessPackage == null;
+      true
+    )
+    (
+      assert hmKeys.config.programs.scoot.desktop.keys.volumePackage == null;
+      true
+    )
+    (
+      assert hmKeys.config.programs.scoot.desktop.keys.mediaPackage == null;
+      true
+    )
+    (
+      assert hmKeys.config.home.packages == [ fakePkg ];
+      true
+    )
+    # ...the keymap still on with the profile, its binds in bare
+    # form (the lock action bare too: logind is Linux-only)...
+    (
+      assert hmKeys.config.programs.scoot.desktop.keys.enable;
+      true
+    )
+    (
+      assert
+        hmKeys.config.programs.scoot.settings.binds
+        == {
+          "XF86MonBrightnessUp" = "spawn brightnessctl -e set +5%";
+          "XF86MonBrightnessDown" = "spawn brightnessctl -e set 5%-";
+          "XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+";
+          "XF86AudioLowerVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-";
+          "XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle";
+          "XF86AudioMicMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+          "XF86AudioPlay" = "spawn playerctl play-pause";
+          "XF86AudioPause" = "spawn playerctl pause";
+          "XF86AudioStop" = "spawn playerctl stop";
+          "XF86AudioNext" = "spawn playerctl next";
+          "XF86AudioPrev" = "spawn playerctl previous";
+          "super+escape" = "spawn loginctl lock-session";
+        };
+      true
+    )
+    # ...and the keymap refuses nothing itself: the only failing
+    # assertions are the idle policy's five (its tools are null off
+    # Linux -- pinned in `_darwinIdlePins`), so bare tool names stay
+    # valid config, just quiet at runtime.
+    (
+      assert builtins.length (failing hmKeys.config) == 5;
+      true
+    )
+    (
+      assert lib.all (m: lib.hasInfix "idle." m) (failing hmKeys.config);
+      true
+    )
+    # NixOS: the same nulls, nothing installed for the keymap.
+    (
+      assert osIdle.config.programs.scoot.desktop.keys.brightnessPackage == null;
+      true
+    )
+    (
+      assert osIdle.config.programs.scoot.desktop.keys.volumePackage == null;
+      true
+    )
+    (
+      assert osIdle.config.programs.scoot.desktop.keys.mediaPackage == null;
+      true
+    )
+  ];
 in
 assert lib.all (x: x) _pins;
 assert lib.all (x: x) _greeterPins;
 assert lib.all (x: x) _desktopPins;
 assert lib.all (x: x) _idlePins;
 assert lib.all (x: x) _notifPins;
+assert lib.all (x: x) _keysPins;
 assert lib.all (x: x) _darwinIdlePins;
 assert lib.all (x: x) _darwinNotifPins;
+assert lib.all (x: x) _darwinKeysPins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   set -euo pipefail
@@ -4146,7 +4527,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     echo "ok: a 0 timeout omits that step"
 
     # 11e. Rebound: the lock action override is what the timeout runs
-    #      (the future desktop-keys bind target).
+    #      (and what the keymap's `super+escape` bind runs).
     grep -F "timeout 240 'loginctl lock-session'" ${idleCmdConf}
     echo "ok: the lock action override reaches the timeout"
 
@@ -4328,6 +4709,31 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
     grep -q "bus monitor ended" "$SCOOT_FEED_TEST_DIR/stderr"
     grep -q '^msg set notifications' "$SCOOT_FEED_TEST_DIR/calls"
     echo "ok: garbage monitor line is skipped"
+
+    # 15. Keymap content: the rendered `[binds]` carries the twelve
+    #     keymap-owned binds with absolute tool paths (the sigils --
+    #     `@...@`, `%`, `+` -- intact through TOML), and with every
+    #     slot on all nineteen (slot scripts as store paths, the
+    #     launcher and notification binds by bare tool name).
+    python3 -c '
+    import sys,tomllib
+    got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
+    assert len(got) == 12, got.keys()
+    assert got["XF86AudioRaiseVolume"].startswith("spawn ") and got["XF86AudioRaiseVolume"].endswith(" set-volume @DEFAULT_AUDIO_SINK@ 5%+"), got["XF86AudioRaiseVolume"]
+    assert got["XF86MonBrightnessUp"].endswith(" -e set +5%"), got["XF86MonBrightnessUp"]
+    assert got["super+escape"].endswith(" lock-session"), got["super+escape"]
+    ' ${keysToml}
+    python3 -c '
+    import sys,tomllib
+    got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
+    assert len(got) == 19, got.keys()
+    assert got["super+d"] == "spawn fuzzel", got["super+d"]
+    assert got["super+n"] == "spawn makoctl dismiss", got["super+n"]
+    assert "/bin/scoot-clipboard-pick" in got["super+v"], got["super+v"]
+    assert "/bin/scoot-capture-output" in got["print"], got["print"]
+    assert "/bin/scoot-capture-region" in got["shift+print"], got["shift+print"]
+    ' ${keysSlotsToml}
+    echo "ok: rendered [binds] carries the keymap (twelve owned, nineteen with slots)"
   ''}
 
   touch $out
