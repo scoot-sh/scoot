@@ -665,7 +665,7 @@ fn msg_alias(args: Vec<String>) -> Result<Command, Error> {
         [first, rest @ ..] if first == "--help" || first == "-h" || first == "help" => {
             client_help_page(rest)
         }
-        _ => scootctl::parse_msg(args.into_iter()).map(|msg| Command::Msg {
+        _ => scootctl::parse_msg(args).map(|msg| Command::Msg {
             request: msg.request,
             out: msg.out,
         }),
