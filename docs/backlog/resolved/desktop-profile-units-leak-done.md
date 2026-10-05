@@ -1,9 +1,10 @@
 ---
 title: "Desktop profile user units start in every graphical session"
-status: "open"
-area: "packaging"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-05"
 ---
 
 # Desktop profile user units start in every graphical session
@@ -72,3 +73,26 @@ The launcher's 1 s idle poll (separate ticket); per-unit
 `BindsTo` (stop propagation is one-way `PartOf`, deliberately —
 a failing leaf must not take the session down); moving the NixOS
 system halves (packages, logind, PAM: no units there).
+
+## Resolution (2026-10-05, PR #454)
+
+Landed as proposed. `nix/modules/{idle,notifications,clipboard}-home.nix`
+and `scootbar-{home,nixos}.nix` bind every profile unit to
+`scoot-session.target` (profile-managed bar only; standalone bar
+unchanged); `nix/modules/home.nix` installs `scoot-session.target`
+itself with the same deps as `resources/systemd/user/scoot-session.target`
+(verified identical semantics against the pinned home-manager source:
+`systemd.user.targets."scoot-session"` generates `scoot-session.target`).
+The launcher child (#451, merged mid-work) ships no units — nothing to
+retarget there. `nix/tests.nix` pins every unit's install/part-of
+target plus the HM target's presence/deps/absence; the desktop site
+page documents the scope and the manual start/stop.
+
+Evidence: `nix build .#checks.aarch64-darwin.scoot-modules` (Mac) and
+`#checks.aarch64-linux.scoot-modules` (Asahi M2) green; a reverted-modules
+copy fails eval on the new pins (fail-before). Live on the Asahi M2
+(wrapper flake + `--override-input scoot`, niri as the control):
+scoot login → `scoot-session.target` active and all 7 profile units
+active; niri login → `graphical-session.target` active,
+`scoot-session.target` and all 7 units inactive. Machine restored to
+its pre-proof generation afterwards (`nix-store --gc`, lock untouched).
