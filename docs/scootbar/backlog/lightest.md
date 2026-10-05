@@ -806,7 +806,7 @@ and only that row. Nothing else is waived.
 
 ## M6 popup corners (measured 2026-10-04)
 
-The [rounded popups](../cli.md#popups) (`popup-corners.md`, PR #NNN):
+The [rounded popups](../cli.md#popups) (`popup-corners.md`, PR #429):
 `bar.popup-radius` (unset: the bar's `radius`), drawn by scootbar itself
 in the popup's own buffer with transparent corners, the border following
 the arc at one logical pixel at every scale, the rows clipped to the
