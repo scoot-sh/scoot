@@ -16,7 +16,7 @@ launcher/clipboard must not)"). Serves **daily-drive**: volume and
 brightness keys going dead the moment the session locks is the kind of
 papercut that sends a user back to their old compositor.
 
-## Resolution (PR TBD)
+## Resolution (PR #444)
 
 Landed together with `bind-repeat` in one PR (shared dispatch path,
 table flags and tests). A `spawn` bind opts in with

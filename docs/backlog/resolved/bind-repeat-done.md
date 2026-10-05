@@ -15,7 +15,7 @@ once)"). Serves **daily-drive**: holding volume-up stepping once per
 press is not daily-drivable, and neither is a terminal with no key
 repeat.
 
-## Resolution (PR TBD)
+## Resolution (PR #444)
 
 Landed together with `bind-allow-when-locked` in one PR: both ride the
 same bind dispatch path, the same table flags and the same tests, so one
