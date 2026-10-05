@@ -2904,9 +2904,12 @@ let
       assert hmDeskUserWins.config.programs.scoot.settings.wallpaper.mode == "center";
       true
     )
-    # Stylix beside a look wins every leaf: identical to Stylix alone.
+    # Stylix beside a look wins every leaf: identical to Stylix alone
+    # (minus the keymap's `[binds]`, which only the profile side has).
     (
-      assert hmDeskStylix.config.programs.scoot.settings == hmStylix.config.programs.scoot.settings;
+      assert
+        builtins.removeAttrs hmDeskStylix.config.programs.scoot.settings [ "binds" ]
+        == hmStylix.config.programs.scoot.settings;
       true
     )
     # The xwayland knob defaults the compositor flag on...
@@ -3079,7 +3082,9 @@ let
       true
     )
     (
-      assert hmDeskBarStylix.config.programs.scoot.settings == hmStylix.config.programs.scoot.settings;
+      assert
+        builtins.removeAttrs hmDeskBarStylix.config.programs.scoot.settings [ "binds" ]
+        == hmStylix.config.programs.scoot.settings;
       true
     )
     # ...and `bar.enable = false` leaves the bar entirely alone (no
