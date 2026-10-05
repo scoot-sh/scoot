@@ -82,7 +82,7 @@ ticket needs.
   they keep the documented manual `scoot-session.target` recipe, which
   is now the same mechanism under a launcher-owned unit file.
 
-## Resolution (PR #TBD)
+## Resolution (PR #431)
 
 Landed as designed: new `resources/systemd/user/scoot-session.target`
 (`BindsTo=graphical-session.target`), `scoot.service` on
