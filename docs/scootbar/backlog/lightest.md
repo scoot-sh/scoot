@@ -799,7 +799,10 @@ contract test still pins the loop's source budget (3 with nothing
 running, 4 with a child). `ldd` still shows only libc, libm and
 libgcc_s, and `Cargo.lock` is unchanged.
 
-Not yet waived: for the maintainer.
+**Maintainer's ruling (2026-10-04, given in chat): the stuck-child fix's
+binary-size row is waived.** It covers `.text` +1,248 B (+0.07%) and
+`.rodata` +128 B in the default build (the file's on-disk size is unchanged),
+and only that row. Nothing else is waived.
 
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
