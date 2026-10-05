@@ -136,4 +136,7 @@ them.
 Screenshots and screen capture read the
 same composited frame the outputs show — which is why `scootctl
 screenshot` works on every backend, including `--headless` with no
-display at all. See [Screenshots](../scootctl/screenshots.md).
+display at all. See [Screenshots](../scootctl/screenshots.md). A VNC
+server like wayvnc reads the same frame over the capture protocol and
+drives input through the virtual-input globals — see [Remote
+desktop](./remote-desktop.md).

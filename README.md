@@ -161,7 +161,7 @@ scoot speaks the standard Wayland protocols, so the usual tools work.
 | Lock the screen, or lock and dim when idle | [yes](https://www.scoot.sh/scoot/protocols.md#screen-locking-ext-session-lock-v1) |
 | Turn screens off when idle | [yes](https://www.scoot.sh/scoot/protocols.md#screen-power) |
 | Take screenshots or share the screen | [yes](https://www.scoot.sh/scoot/protocols.md#screen-capture-ext-image-copy-capture-v1) |
-| Reach the desktop over VNC | [yes, with wayvnc](https://www.scoot.sh/scoot/protocols.md#remote-desktop-vnc) |
+| Reach the desktop over VNC | [yes, with wayvnc](https://www.scoot.sh/scoot/remote-desktop/) |
 | Run GPU apps, even with no GPU on the compositor | [yes](https://www.scoot.sh/scoot/protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1) |
 | Use a clipboard manager or middle-click paste | [yes](https://www.scoot.sh/scoot/protocols.md#clipboard-and-primary-selection) |
 | Use a night light | [yes](https://www.scoot.sh/scoot/protocols.md#night-light-wlr-gamma-control-v1) |

@@ -13,9 +13,9 @@ re-applies live with `scootctl reload`. No config file yet?
 `--config PATH` loads a TOML file explicitly. Without it, scoot looks
 for `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml`, and runs on built-in defaults if
-neither exists. Ten optional tables: `[layout]`, `[appearance]`,
-`[output]`, `[renderer]`, `[tty]`, `[xwayland]`, `[autostart]`,
-`[floating]`, `[wallpaper]`, `[binds]` — plus any number of
+neither exists. Eleven optional tables: `[layout]`, `[appearance]`,
+`[output]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
+`[autostart]`, `[floating]`, `[wallpaper]`, `[binds]` — plus any number of
 `[[window_rule]]` entries. Every field in every table is itself
 optional and defaults independently, so a config that only sets `gap`
 leaves everything else at its built-in default.
@@ -86,8 +86,9 @@ each applied field:
 ```
 
 **Refused, explicitly, pending a restart:** `[tty] gpu`, `[renderer]
-backend`, `[xwayland] enabled`, and an `[[outputs]]` entry's `mode` —
-all four take effect on restart, and each refusal says so. A reload
+backend`, `[xwayland] enabled`, `[virtual_input] enabled`, and an
+`[[outputs]]` entry's `mode` — all five take effect on restart, and each
+refusal says so. A reload
 that cannot load the file at all answers an `error` instead, keeps the
 running config untouched, and logs — never defaults, never a
 half-applied session, never an exit.

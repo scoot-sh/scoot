@@ -56,6 +56,8 @@ read your files anyway.
 | `wp-content-type-v1` | 1 | Accepted, [no effect](#rendering-hints). |
 | `xwayland_shell_v1` | 1 | [XWayland (opt-in)](#xwayland-opt-in): pairs each X window with the surface XWayland draws it into; offered to XWayland's own client only. |
 | `zwp_xwayland_keyboard_grab_manager_v1` | 1 | [XWayland (opt-in)](#xwayland-opt-in): no grab is ever granted -- an X client's keyboard grab stays inside the X server. |
+| `zwlr_virtual_pointer_manager_v1` | 2 | [Remote desktop](./remote-desktop.md), opt-in. |
+| `zwp_virtual_keyboard_manager_v1` | 1 | [Remote desktop](./remote-desktop.md), opt-in. |
 
 **Not implemented:**
 

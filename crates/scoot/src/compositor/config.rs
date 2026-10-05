@@ -320,7 +320,7 @@ struct XwaylandConfig {
 /// Off unless the file says on. Any same-uid client could bind these and
 /// type and click as the user, so unlike the clipboard globals (which every
 /// same-uid process can already reach past) they are not advertised at all
-/// until this is set -- see `virtual_input.rs` and `docs/protocols.md`.
+/// until this is set -- see `virtual_input.rs` and `site/src/content/docs/scoot/protocols.md`.
 /// Takes effect on restart: a reload refuses changes with a message naming
 /// that (see `reload.rs`).
 #[derive(Debug, Default, Deserialize, PartialEq)]
@@ -956,7 +956,7 @@ pub fn default_config_toml() -> String {
         "# Offer the virtual-pointer and virtual-keyboard globals a remote-control\n\
          # tool like wayvnc needs to drive the session (off by default: any same-uid\n\
          # client could bind them and type and click as the user). Takes effect on\n\
-         # restart. See docs/protocols.md's \"Remote desktop\" section.\n",
+         # restart. See site/src/content/docs/scoot/protocols.md#remote-desktop-vnc.\n",
     );
     out.push_str("# enabled = false\n");
 

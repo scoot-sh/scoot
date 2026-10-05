@@ -53,3 +53,6 @@ description: "Compositor symptoms and their fixes — picture, keys, config, out
 - *`--renderer gles` exits naming EGL.* Intended: no silent downgrade,
   no automatic fallback. Drop the flag or fix the cause — see
   [Backends](./backends.md#which-renderer-draws-the-frames).
+- *VNC connects but input does nothing.* Remote control is opt-in
+  (`[virtual_input] enabled`, then restart), and nothing virtual
+  delivers while locked. See [Remote desktop](./remote-desktop.md).

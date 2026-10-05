@@ -18,7 +18,7 @@
 //! its fallback path (wayvnc logs which protocol is missing) instead of
 //! discovering a refusal at bind time. An allow-list would be theatre --
 //! scoot has no security-context support, so any same-uid client that can
-//! bind may drive (the trust note in `docs/protocols.md`) -- and a flag can
+//! bind may drive (the trust note in `site/src/content/docs/scoot/protocols.md`) -- and a flag can
 //! only say yes, so this takes effect on restart like `[xwayland] enabled`.
 //!
 //! ## While locked
