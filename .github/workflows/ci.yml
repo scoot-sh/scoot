@@ -104,6 +104,19 @@ jobs:
   #   crates/scootbar/, scripts/scootbar-bench/, scripts/scootbar-appearance-hw-test.sh
   #                                        -> scootbar=true (scootbar job, which
   #                                           also builds the Nix module check)
+  #   site/*, EXCEPT site content that is also matched above (nothing is:
+  #   `*.md | docs/*` does not match `site/`, whose pages live outside
+  #   `docs/` until they move)               -> docs-site=true (docs-site job:
+  #                                           `nix build .#docs-site`, which
+  #                                           also runs the llms and snippet
+  #                                           gates). `nix/docs-site.nix` and
+  #                                           `flake.nix`/`flake.lock` fall to
+  #                                           the catch-all below and run
+  #                                           everything, site included.
+  #                                           `docs/**` does NOT set it yet:
+  #                                           no docs/ page feeds the site in
+  #                                           phase 1 (they are adapted, not
+  #                                           moved); the move PR wires it in.
   #     except its Cargo.toml               -> scoot too, for the flake's
   #     read of its description, as scootbg's
   #   crates/scootbg-mem/                  -> scootbar too: its shm buffer
@@ -135,6 +148,7 @@ jobs:
       scootbg: ${{ steps.classify.outputs.scootbg }}
       scootbar: ${{ steps.classify.outputs.scootbar }}
       backlog: ${{ steps.classify.outputs.backlog }}
+      docs-site: ${{ steps.classify.outputs.docs-site }}
     steps:
       # Depth 2: a pull_request run checks out the merge commit, whose first
       # parent is the base branch tip, so `HEAD^1..HEAD` is exactly the PR.
@@ -151,6 +165,7 @@ jobs:
           scootbg=true
           scootbar=true
           backlog=true
+          docs_site=true
           if [ "$EVENT" = pull_request ] && changed=$(git diff --name-only --no-renames HEAD^1 HEAD) && [ -n "$changed" ]; then
             printf 'Changed:\n%s\n' "$changed"
             scoot=false
@@ -158,8 +173,13 @@ jobs:
             scootbg=false
             scootbar=false
             backlog=false
+            docs_site=false
             while IFS= read -r path; do
               case "$path" in
+                # Before `*.md`: the site's own pages are Markdown, and a
+                # content-only site change must still build the site.
+                site/*)
+                  docs_site=true ;;
                 *.md | docs/*) ;;
                 # Needs a real `systemd --user`, which CI has none of: run by hand
                 # (docs/scootbar/testing.md), so a change to it alone runs nothing.
@@ -210,17 +230,19 @@ jobs:
                   macos=true
                   scootbg=true
                   scootbar=true
-                  backlog=true ;;
+                  backlog=true
+                  docs_site=true ;;
               esac
             done <<<"$changed"
           fi
-          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar backlog=$backlog"
+          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar backlog=$backlog docs_site=$docs_site"
           {
             echo "scoot=$scoot"
             echo "macos=$macos"
             echo "scootbg=$scootbg"
             echo "scootbar=$scootbar"
             echo "backlog=$backlog"
+            echo "docs_site=$docs_site"
           } >>"$GITHUB_OUTPUT"
 
   # scripts/backlog is the swarm's claim tool and pushes to main, so its tests
@@ -237,6 +259,36 @@ jobs:
       - uses: actions/checkout@v7
       - name: scripts/backlog tests
         run: python3 scripts/test_backlog.py
+
+  # The docs site (site/, nix/docs-site.nix): its own build, without any
+  # Rust job gaining Node in its inputs (and without this job gaining
+  # Rust). `nix build .#docs-site` renders the static site and runs both
+  # gates inside the sandbox — `check-llms` (llms.txt covers every page,
+  # every `.md` twin exists) and `test-snippets` (fenced toml/sh blocks
+  # are sound) — so a red gate fails this job, not the deploy. Runs when
+  # `site/**` changes (checked before `*.md`, since the site's own pages
+  # are Markdown), on the catch-all, and on every push to main; fail open
+  # like the other jobs (only an explicit `false` skips). No store cache:
+  # the pnpm dependencies arrive through the derivation's own hash.
+  docs-site:
+    name: Docs site (Starlight + llms.txt)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_site != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # The flake's own formatter over every tracked .nix file: a site-only
+      # change skips the Linux job, which is the only other place this runs.
+      - name: nix fmt --check (all tracked .nix)
+        run: |
+          git ls-files -z '*.nix' | xargs -0 nix fmt -- --check
+
+      - name: nix build .#docs-site (builds the site, runs the llms and snippet gates)
+        run: nix build -L --no-link .#docs-site
 
   linux:
     name: Linux (compositor)
