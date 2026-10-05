@@ -1,9 +1,10 @@
 ---
 title: "Virtual pointer and keyboard protocols, so wayvnc gives full remote control"
-status: "open"
-area: "protocols"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-05"
 ---
 
 # Virtual pointer and keyboard protocols, so wayvnc gives full remote control
@@ -55,3 +56,32 @@ rows and a "Remote desktop" section, a config key in
 
 RDP and the portal's RemoteDesktop interface (no wlroots-family portal
 backend provides it); Sunshine/Moonlight (`moonlight-sunshine-on-m2`).
+
+## Resolution (2026-10-05, PR #448)
+
+Both managers implemented in `crates/scoot/src/compositor/virtual_input.rs`
+(no Smithay fork change: the keyboard uses `KeyboardHandle::input_from_source`
+with per-device auxiliary sources, the pointer is hand-rolled against the
+re-exported `wayland-protocols-wlr` server bindings).
+
+- Gating: `[virtual_input] enabled` (default off; globals unadvertised when
+  off, restart-only with reload refusal). An allow-list was rejected as
+  theatre per `docs/protocols.md`'s trust note; the threat answered is the
+  network (wayvnc listens on TCP), not same-uid processes.
+- wayvnc 0.10.1 verified required: without the managers it fails hard
+  (`Virtual Pointer protocol not supported`), with them it starts clean;
+  capture over `ext-image-copy-capture-v1` (in wayvnc since v0.9.0) already
+  worked, including damage on window spawn.
+- End to end (dev VM, `--headless`): VNC pointer/click/scroll/type into a
+  client (byte-exact keycodes), German `z` through `wayvnc -k de` arriving
+  as seat-`z`, absolute motion onto the named output across two outputs
+  (cursor-bbox proof), lock screen refusing all virtual input (zero events,
+  zero damage, VNC shows only the lock color), idle 0 ticks/10s both sides,
+  ~29k keys/s sustained flood with zero kills.
+- Tests: 26 protocol tests (real clients; lock-surface positive controls;
+  failing-first proven on the lock gate), config + reload tests, paced
+  flood benches (motion 27.5µs, key 24.8µs per event end to end, debug
+  build). Full workspace nextest + clippy + fmt + smoke green; CI green on
+  the head.
+- Not done here: `--tty` on the M2 (seat coordination pending), RDP/
+  RemoteDesktop/Sunshine (out of scope per the ticket).

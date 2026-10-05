@@ -270,7 +270,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [Turn screens off when idle (`wlr-output-power-management`)](./resolved/output-power-management-done.md) — RESOLVED 2026-10-04 (daily-drive: idle Asahi laptop keeps both panels lit; agent IPC half included)
 - [Smaller/general protocol gaps (bundled)](./protocols/protocol-gaps-general.md)
 - [Niche protocol gaps (bundled)](./protocols/protocol-gaps-niche.md)
-- [Virtual pointer and keyboard protocols, so wayvnc gives full remote control](./protocols/virtual-input-remote-control.md) (medium, filed 2026-10-04): capture already works over `ext-image-copy-capture-v1`; input needs the two virtual-input managers, gated and refused under lock
+- [Virtual pointer and keyboard protocols, so wayvnc gives full remote control](./resolved/virtual-input-remote-control-done.md) — RESOLVED 2026-10-05 (PR #448): both managers behind `[virtual_input] enabled`, refused under lock, keys translated by keysym; capture already worked
 - [Per-client allow-list for the virtual-input globals via `security-context-v1`](./protocols/virtual-input-allow-list.md) (low, filed 2026-10-05 from #448's review): the on/off switch gates the network threat, not local clients; an allow-list needs security-context support first
 - [Research: native remote desktop that streams the scene, not pixels](./protocols/native-remote-scene-streaming.md) (research, filed 2026-10-04): per-surface content plus arrangement deltas, so a scroll costs bytes not frames; frame mode for video and thin viewers; network code in a separate helper
 
