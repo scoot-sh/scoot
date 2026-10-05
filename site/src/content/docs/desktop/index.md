@@ -219,7 +219,7 @@ the scope by hand once the display is known, and stop it on the way
 out:
 
 ```sh
-systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
 systemctl --user start scoot-session.target
 # ... on exit:
 systemctl --user stop scoot-session.target
@@ -815,8 +815,18 @@ Troubleshooting, by symptom:
   `scoot`, and the D-Bus activation environment must carry it too —
   the launcher imports it past the display import; a hand-started
   session needs `dbus-update-activation-environment --systemd
-  WAYLAND_DISPLAY XDG_CURRENT_DESKTOP`), and PipeWire runs
+  WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE`), and PipeWire runs
   (`wpctl status` lists sinks — no server, no cast).
+- *Chrome shares a black screen, or offers windows it cannot
+  capture.* Chrome is on its X11 capturer: it picks the portal
+  capturer only with `XDG_SESSION_TYPE=wayland` in its own
+  environment (`tr '\0' '\n' </proc/$(pidof chrome)/environ | grep
+  XDG_SESSION_TYPE` — or `echo $XDG_SESSION_TYPE` in the terminal
+  that started it). Every launcher login exports `wayland`, greeter
+  or console; a hand-started session needs the three-var activation
+  line in the entry above, and a Chrome started outside the session
+  (over ssh, from another desktop's terminal) needs a restart from
+  inside it.
 - *The share starts but shows the wrong screen, or never asks.* The
   chooser is `none` (casts `outputName`, or any output when that is
   null): set `chooser = "fuzzel"` for the list. With two outputs,

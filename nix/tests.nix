@@ -7959,6 +7959,28 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- " -s '#3D579Aff'" ${captureRegionScript}
     grep -F -q -- "| ${pkgs.wl-clipboard}/bin/wl-copy" ${captureClipboardScript}
     echo "ok: the screenshot scripts name the slot's tools absolutely"
+
+    # 20f. Session identity for screen sharing: every login -- greeter
+    #      or console -- exports the Wayland session type (the
+    #      launcher's harness T15 proves it past an inherited `tty`),
+    #      so Chrome picks its portal capturer instead of X11 and Meet
+    #      shares out of the box. The export (set, not defaulted: the
+    #      session being started is always Wayland), the scoped
+    #      manager+bus import, and the exit-time restore.
+    grep -F -q -- "export XDG_SESSION_TYPE=wayland" ${../resources/scoot-session}
+    grep -F -q -- "dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE" ${../resources/scoot-session}
+    grep -F -q -- "import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE" ${../resources/scoot-session}
+    grep -F -q -- "unset-environment XDG_SESSION_TYPE" ${../resources/scoot-session}
+    echo "ok: the launcher exports the Wayland session type to the manager and the bus"
+
+    # 20g. The login-screen entry is a Wayland session naming scoot:
+    #      the directory is what tells the greeter the session type
+    #      (greetd derives `XDG_SESSION_TYPE=wayland` from
+    #      `wayland-sessions`), and `DesktopNames` is what names the
+    #      desktop for the bus and the portal lookup.
+    grep -F -q -- "share/wayland-sessions/scoot.desktop" ${../nix/modules/nixos.nix}
+    grep -F -q -- "DesktopNames=scoot" ${../nix/modules/nixos.nix}
+    echo "ok: the session entry is a wayland-sessions entry for scoot"
   ''}
 
   touch $out

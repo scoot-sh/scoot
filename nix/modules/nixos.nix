@@ -35,9 +35,9 @@ let
   # The entry runs `scoot-session`, not `scoot --tty` directly: the
   # launcher (`resources/scoot-session`, shipped beside the binary)
   # imports the login environment into the user manager, starts
-  # `scoot.service`, waits for IPC readiness, imports `WAYLAND_DISPLAY`
-  # and `XDG_CURRENT_DESKTOP` into the manager and the D-Bus activation
-  # environment, and only then starts `scoot-session.target` (which
+  # `scoot.service`, waits for IPC readiness, imports `WAYLAND_DISPLAY`,
+  # `XDG_CURRENT_DESKTOP` and `XDG_SESSION_TYPE` into the manager and the
+  # D-Bus activation environment, and only then starts `scoot-session.target` (which
   # pulls in `graphical-session.target`, so the target is reached with
   # the display already imported), and on exit stops the session
   # targets so session-bound units stop. See site/src/content/docs/desktop/index.md#the-greeter for the whole flow.

@@ -410,8 +410,8 @@ in
     # `systemd.user.units` carry it whenever `session.enable` is); this
     # side installs its own copy so a home-manager-only setup -- no
     # launcher, no login entry -- still has the target to start: import
-    # `WAYLAND_DISPLAY` (and `XDG_CURRENT_DESKTOP`) into the user
-    # manager, then `systemctl --user start scoot-session.target`
+    # `WAYLAND_DISPLAY`, `XDG_CURRENT_DESKTOP` and `XDG_SESSION_TYPE` into
+    # the user manager, then `systemctl --user start scoot-session.target`
     # (stopped the same way on the way out; see
     # site/src/content/docs/desktop/index.md). It is the same file, not
     # a second definition: `xdg.configFile` sources

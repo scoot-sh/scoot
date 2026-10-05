@@ -13,13 +13,17 @@
 #      systemctl from a VT;
 #   2. import the login environment into the user manager AND the D-Bus
 #      activation environment, so units the session starts later
-#      inherit it;
+#      inherit it (with the session-identity defaults below already
+#      exported, so the bus agrees with what scoot's own children get);
 #   3. start `scoot.service` and wait until the compositor answers IPC
 #      (polled with a deadline, never a blind sleep);
-#   4. import `WAYLAND_DISPLAY` and `XDG_CURRENT_DESKTOP` into the user
+#   4. import `WAYLAND_DISPLAY`, `XDG_CURRENT_DESKTOP` and
+#      `XDG_SESSION_TYPE` into the user
 #      manager AND the D-Bus activation environment, so units ordered
 #      after `graphical-session.target` (the status bar, portals) see
-#      the display;
+#      the display, and D-Bus-activated portals and apps (notably
+#      Chrome, which picks its Wayland screen capturer only with
+#      `XDG_SESSION_TYPE=wayland`) see the session for what it is;
 #   5. start `scoot-session.target` -- and only now: its `BindsTo`
 #      pulls in `graphical-session.target`, so the target is reached
 #      only after the display is in the manager (a unit the service
@@ -75,7 +79,7 @@ die() {
     # before any of that (`captured` unset) and must not touch another
     # session's environment.
     if [ -n "${captured:-}" ]; then
-        restore_display_env
+        restore_session_env
     fi
     exit 1
 }
@@ -84,12 +88,12 @@ note() {
     echo "scoot-session: $*" >&2
 }
 
-# Back to the pre-session state for the two display variables: a
+# Back to the pre-session state for the three session variables: a
 # lingering manager must not offer the next login this session's
-# display -- but only what this session set goes away. Either variable
+# display -- but only what this session set goes away. Any variable
 # may have predated it (an ssh-forwarded display, say); then its old
 # value is restored instead of removed.
-restore_display_env() {
+restore_session_env() {
     if [ -n "${prev_display:-}" ]; then
         systemctl --user set-environment "WAYLAND_DISPLAY=$prev_display" >/dev/null 2>&1 || true
     else
@@ -99,6 +103,11 @@ restore_display_env() {
         systemctl --user set-environment "XDG_CURRENT_DESKTOP=$prev_desktop" >/dev/null 2>&1 || true
     else
         systemctl --user unset-environment XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true
+    fi
+    if [ -n "${prev_session_type:-}" ]; then
+        systemctl --user set-environment "XDG_SESSION_TYPE=$prev_session_type" >/dev/null 2>&1 || true
+    else
+        systemctl --user unset-environment XDG_SESSION_TYPE >/dev/null 2>&1 || true
     fi
 }
 
@@ -347,12 +356,13 @@ for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
     snap_before="$snap_before${sock##*/}:$(stat -c %i "$sock" 2>/dev/null || echo 0) "
 done
 
-# What the manager environment holds for the two display variables
+# What the manager environment holds for the three session variables
 # before this session: restored on the way out (and on every `die`
-# past this point) -- see `restore_display_env`.
+# past this point) -- see `restore_session_env`.
 captured=""
 prev_display=$(systemctl --user show-environment 2>/dev/null | sed -n 's/^WAYLAND_DISPLAY=//p' | head -n 1)
 prev_desktop=$(systemctl --user show-environment 2>/dev/null | sed -n 's/^XDG_CURRENT_DESKTOP=//p' | head -n 1)
+prev_session_type=$(systemctl --user show-environment 2>/dev/null | sed -n 's/^XDG_SESSION_TYPE=//p' | head -n 1)
 captured=1
 
 # Tear the session down even when this script, not scoot, dies first
@@ -388,7 +398,7 @@ cleanup() {
         fi
         sleep 1
     done
-    restore_display_env
+    restore_session_env
 }
 trap 'cleanup; exit 129' HUP
 trap 'cleanup; exit 130' INT
@@ -400,6 +410,25 @@ trap 'cleanup; exit 143' TERM
 # -- below -- the bus agree with what scoot's own children get (the
 # compositor exports the same default to everything it spawns).
 export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-scoot}"
+
+# The session type, unconditionally: this launcher starts exactly one
+# thing -- a scoot Wayland session on this seat -- so `wayland` is
+# always the true answer, whatever the login around it said. A greeter
+# login usually arrives with `wayland` already (greetd derives it from
+# the `wayland-sessions` entry, ReGreet passes it through), and then
+# this changes nothing; a console login (`scoot-session` by hand from
+# a VT, over ssh) arrives with it unset or `tty`, describing the
+# terminal the launcher was run from rather than the session being
+# started. Chrome is the reader that forces the point: without
+# `XDG_SESSION_TYPE=wayland` it captures through X11 even on Wayland,
+# so screen sharing in Meet stays dark unless every login -- greeter
+# or console -- exports it. Set (not defaulted) before the `--all`
+# sweep below, so the manager and the bus agree with scoot's children
+# from the first import, and re-asserted by the scoped import once the
+# display is known. (`XDG_CURRENT_DESKTOP` above stays a default: the
+# greeter owns that name from `DesktopNames`, while no outer context
+# owns this one.)
+export XDG_SESSION_TYPE=wayland
 
 # The login environment, whole, into the user manager AND the D-Bus
 # activation environment together (`--systemd` does both -- that is the
@@ -495,25 +524,26 @@ if [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; then
 fi
 export WAYLAND_DISPLAY
 
-# The two display variables, into the user manager AND the D-Bus
+# The three session variables, into the user manager AND the D-Bus
 # activation environment together (`--systemd` does both): units
 # ordered after the session target inherit them from the manager, and
 # D-Bus-activated portals (which inherit the bus's environment, not any
 # client's) see them on the bus. This overwrites whatever the `--all`
-# sweep above carried for these two names (a greeter-owned display, an
-# unset desktop), so the session's own values win. Scoped to these two
-# because the login half was the place for the whole environment. This
-# is the same two-var line `site/src/content/docs/scoot/index.md#starting-a-session` gives session
+# sweep above carried for these names (a greeter-owned display, an
+# unset desktop, a console's `tty` session type), so the session's own
+# values win. Scoped to these three because the login half was the
+# place for the whole environment. This
+# is the same three-var line `site/src/content/docs/scoot/index.md#starting-a-session` gives session
 # scripts; here the launcher owns it, so systemd sessions need no script
 # line, and the manual line stays for non-systemd setups.
 if command -v dbus-update-activation-environment >/dev/null 2>&1; then
-    dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP \
+    dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE \
         || note "warning: could not update the D-Bus activation environment; portals may miss this session"
 else
     # No dbus tool: the manager half through `import-environment`
-    # (both variables are exported by now, so the names resolve), the
+    # (all three variables are exported by now, so the names resolve), the
     # bus half missed with a warning.
-    systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP \
+    systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE \
         || note "warning: could not import the display into the user manager; units ordered after the session target may miss it"
     note "warning: no dbus-update-activation-environment on PATH; D-Bus-activated portals may miss this session"
 fi
