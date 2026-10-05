@@ -468,6 +468,38 @@ macro_rules! power_help {
     };
 }
 
+// One daemon example line for the main help page: the trio when this
+// build places all three, a bare flag otherwise. Static text naming
+// a module the build lacks would fail `the_help_matches_the_build`, so
+// the line follows the same per-build rule as the rest of the page.
+#[cfg(all(feature = "clock", feature = "workspaces", feature = "window-title"))]
+macro_rules! daemon_example {
+    () => {
+        "    scootbar daemon --left workspaces --center clock --right window-title\n"
+    };
+}
+#[cfg(not(all(feature = "clock", feature = "workspaces", feature = "window-title")))]
+macro_rules! daemon_example {
+    () => {
+        "    scootbar daemon --height 32\n"
+    };
+}
+
+// One invoke example line for the msg page, only where the volume module
+// is in the build (same rule as above: no naming what is not there).
+#[cfg(feature = "volume")]
+macro_rules! invoke_example {
+    () => {
+        "    scootbar msg invoke volume scroll-up --output DP-1\n"
+    };
+}
+#[cfg(not(feature = "volume"))]
+macro_rules! invoke_example {
+    () => {
+        ""
+    };
+}
+
 pub const USAGE: &str = concat!(
     "\
 scootbar -- status bar for Wayland
@@ -491,7 +523,9 @@ COMMANDS:
     msg        ask the running daemon: query, reload, hide, show, toggle, version, kill, set
 
 EXAMPLES:
-    scootbar daemon --left workspaces --center clock --right window-title
+",
+    daemon_example!(),
+    "\
     scootbar daemon --check
     scootbar msg query
     scootbar msg set build-state '{\"text\": \"ok\"}'
@@ -632,7 +666,8 @@ pub fn daemon_help() -> String {
     help
 }
 
-pub const MSG_HELP: &str = "\
+pub const MSG_HELP: &str = concat!(
+    "\
 scootbar msg -- ask the running daemon
 
 USAGE:
@@ -702,7 +737,9 @@ every command fails saying so.
 EXAMPLES:
     scootbar msg query
     scootbar msg layout
-    scootbar msg invoke volume scroll-up --output DP-1
+",
+    invoke_example!(),
+    "\
     scootbar msg set build-state '{\"text\": \"ok\"}'
     scootbar msg subscribe module
 
@@ -715,7 +752,8 @@ SEE ALSO:
     `scootbar help msg` prints this page; `scootbar --help --json` is the
     machine-readable form
     docs: https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/cli.md
-";
+"
+);
 
 /// A help page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
