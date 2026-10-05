@@ -774,6 +774,36 @@ of the multi-radio scan is waived.** It covers `.text` +1,600 B
 (+0.09%) in the default build, and only that row; the file does not
 grow. Nothing else is waived.
 
+## M6 network child replacement (measured 2026-10-04)
+
+The [network child replacement](resolved/network-child-stuck-done.md)
+(PR #428, with its review round): a second `connect`/`menu` ends the
+running child and starts the new one (`SIGTERM` to its own process
+group, `SIGKILL` past 100 ms, reaped either way; drop ends both), and
+the scan-list reset belongs to the dump it was queued for — a
+mid-refill dump's late pages only append, a refill already owed
+coalesces instead of queueing twice, and the `socketpair` runs before
+the old child ends. Release builds (`lto = "fat"`, stripped) on the
+Asahi M2 (aarch64, rustc 1.97.1 via `nix develop`), base `origin/main`
+at `aacdd8a82` against the branch at code commit `9507b4739`, each with
+its own target dir, `readelf -S -W`:
+
+| Build | file bytes | `.text` | `.rodata` |
+| --- | --- | --- | --- |
+| base `aacdd8a82` | 2,233,056 | 1,704,040 (`0x1a0068`) | 134,759 (`0x20e67`) |
+| branch head | 2,233,056 (+0) | 1,705,288 (`0x1a0548`, +1,248, +0.07%) | 134,887 (`0x20ee7`, +128) |
+
+Idle by construction: no new file descriptor, timer or thread (two
+bools on the existing scan state; the queued refill coalesces), and the
+contract test still pins the loop's source budget (3 with nothing
+running, 4 with a child). `ldd` still shows only libc, libm and
+libgcc_s, and `Cargo.lock` is unchanged.
+
+**Maintainer's ruling (2026-10-04, given in chat): the stuck-child fix's
+binary-size row is waived.** It covers `.text` +1,248 B (+0.07%) and
+`.rodata` +128 B in the default build (the file's on-disk size is unchanged),
+and only that row. Nothing else is waived.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`

@@ -41,7 +41,10 @@
 //! show the `nmcli` wrapping); the native list is the alternative
 //! (`on-click = "popup"` for the rows, `connect-command` with the chosen
 //! SSID as its last argument), which is why the bar never reads the
-//! picker's choice back.
+//! picker's choice back. A second `menu` or `connect` while one runs
+//! replaces it (the running child is ended first), and dropping the
+//! module ends both children, so a hung command never blocks the next
+//! one and never outlives the bar's reload.
 //!
 //! ## Shape
 //!
@@ -62,7 +65,9 @@
 
 use std::fmt::Write;
 use std::os::fd::{AsFd, OwnedFd};
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 use rustix::event::PollFlags;
 use rustix::io::Errno;
@@ -335,6 +340,35 @@ struct Nets {
     scan: [Bss; MAX_SCAN],
     scan_n: usize,
     scan_of: u32,
+    /// A re-dump's reset, armed when it is queued: its first page starts
+    /// a new list — or its terminator where it found nothing, so no stale
+    /// radio's list outlives an empty dump. Until either arrives what is
+    /// kept stays listed.
+    ///
+    /// The reset belongs to one dump: [`Nets::scan_reset_live`] says the
+    /// in-flight scan owns it (bound when an owed scan goes out, or
+    /// handed to the unspent scan already out there by the arm itself),
+    /// so a page of a mid-refill dump arriving after a second re-dump
+    /// was queued only appends — it never clears what the first page
+    /// already refilled. [`Nets::scan_reset_spent`] tells those two
+    /// apart: a dump that already carried out a reset only completes
+    /// its refill. Invariant: `scan_reset` implies the owning scan is in
+    /// flight (`scan_reset_live`) or queued (a `GenlDump::Scan`
+    /// waiting); every site that sends or ends a scan upholds all three
+    /// (see `queue_scan`, `pump_genl`, `done_genl`, `drop_genl`,
+    /// `redump_genl`).
+    scan_reset: bool,
+    /// Whether the in-flight scan dump owns [`Nets::scan_reset`]: bound
+    /// at send, or handed over by the arm to the unspent scan already
+    /// in flight for the same target. Consumed by its first page or its
+    /// terminator. A scan that went out before the arm and already
+    /// refilled never owns it again, however late its pages are.
+    scan_reset_live: bool,
+    /// Whether the in-flight scan already carried out a reset: its late
+    /// pages only complete the refill, and a new arm queues the next
+    /// dump instead of handing over. Cleared when a scan goes out and
+    /// when the in-flight dump ends.
+    scan_reset_spent: bool,
     station_of: u32,
     seq: u32,
     out_rt: Vec<u8>,
@@ -547,10 +581,19 @@ impl Nets {
     /// always precedes its replies. Only the scan target's dump is queued
     /// (see [`Nets::scan_target`]): a second radio's cache never reaches
     /// the list, and an AP-mode interface's empty one never even goes out.
-    /// A re-dump of the target's scan supersedes its list and resets it,
-    /// unless a dump is still outstanding — the reset then waits for the
-    /// send (see `pump_genl`), so an in-flight dump's late replies are
-    /// never attributed to the newcomer.
+    /// A re-dump of the target's scan supersedes its list: it arms the
+    /// reset ([`Nets::scan_reset`]), which the owning dump's first page
+    /// — or its terminator where it found nothing — carries out. Until
+    /// then what is kept stays listed, so a second menu before the
+    /// refill arrives is fed what the first one was, not an empty
+    /// refill. A refill is already owed: another queue would only double
+    /// the dump, so it is skipped — and a scan for the target already
+    /// queued carries the reset (it binds at send), so only the missing
+    /// one is queued. Where the target's scan is already in flight and
+    /// has not refilled yet, the arm hands the reset to it: its next
+    /// page starts the refill. A mid-refill dump keeps none of this: its
+    /// late pages only complete what its first page started, and the
+    /// refill queues beside it.
     fn queue_scan(&mut self, index: u32) {
         if index == 0 || index != self.scan_target() {
             return;
@@ -559,18 +602,24 @@ impl Nets {
         if self.find(index).is_some_and(|iface| iface.ap) {
             return;
         }
-        let pending = self
-            .genl_busy
-            .is_some_and(|(_, dump)| matches!(dump, GenlDump::Scan(_)))
-            || self
-                .genl_dumps
-                .iter()
-                .any(|dump| matches!(dump, GenlDump::Scan(_)));
-        if index == self.scan_of || !pending {
-            self.scan_of = index;
-            self.scan_n = 0;
+        if self.scan_reset {
+            return;
         }
-        self.genl_dumps.push_back(GenlDump::Scan(index));
+        self.scan_reset = true;
+        if self
+            .genl_busy
+            .is_some_and(|(_, dump)| dump == GenlDump::Scan(index))
+            && !self.scan_reset_spent
+        {
+            self.scan_reset_live = true;
+        }
+        if !self
+            .genl_dumps
+            .iter()
+            .any(|dump| *dump == GenlDump::Scan(index))
+        {
+            self.genl_dumps.push_back(GenlDump::Scan(index));
+        }
     }
 
     /// Re-asks nl80211 about one interface: a single query, not a dump,
@@ -773,8 +822,17 @@ impl Nets {
                     if msg.seq == 0 {
                         continue;
                     } else {
-                        // Pages append; the next dump resets (see
-                        // `pump_genl`).
+                        // Pages append; the owning re-dump's first page
+                        // resets (bound at send by `pump_genl`, or handed
+                        // over by the arm to the scan already in flight),
+                        // so a mid-refill dump's late pages never clear
+                        // what the refill already listed.
+                        if self.scan_reset && self.scan_reset_live {
+                            self.scan_reset = false;
+                            self.scan_reset_live = false;
+                            self.scan_reset_spent = true;
+                            self.scan_n = 0;
+                        }
                         let mut fresh = [Bss::default(); MAX_SCAN];
                         let n = netlink::fold_scan(msg.body, &mut fresh);
                         for bss in fresh.iter().take(n) {
@@ -860,36 +918,67 @@ impl Nets {
         }
     }
 
-    /// The in-flight generic dump finished.
+    /// The in-flight generic dump finished. A scan whose terminator
+    /// arrives with its reset still owed found nothing: the kept list
+    /// clears instead of outliving an empty dump. Only the owning dump's
+    /// terminator clears: a mid-refill dump ending after a second re-dump
+    /// was queued leaves the refill alone.
     fn done_genl(&mut self, seq: u32) {
         if self.genl_busy.is_some_and(|(busy, _)| busy == seq) {
+            let was_scan = self
+                .genl_busy
+                .is_some_and(|(_, dump)| matches!(dump, GenlDump::Scan(_)));
             self.genl_busy = None;
+            self.scan_reset_spent = false;
             self.genl_failures = 0;
+            if was_scan && self.scan_reset && self.scan_reset_live {
+                self.scan_reset = false;
+                self.scan_reset_live = false;
+                self.scan_n = 0;
+            }
         }
     }
 
     /// The in-flight generic dump failed: refused ones are dropped (they
     /// would fail again), the rest re-queued — until they fail too often
-    /// (see [`MAX_DUMP_FAILURES`]).
+    /// (see [`MAX_DUMP_FAILURES`]). A re-queued owning scan keeps its
+    /// owed reset but rebinds at resend, so pages of whatever goes out
+    /// between never clear the list.
     fn redump_genl(&mut self, seq: u32) {
         if let Some((busy, dump)) = self.genl_busy {
             if busy == seq {
+                let was_scan = matches!(dump, GenlDump::Scan(_));
                 self.genl_busy = None;
+                self.scan_reset_spent = false;
                 self.genl_failures += 1;
                 if self.genl_failures >= MAX_DUMP_FAILURES {
                     self.genl_failures = 0;
                 } else {
                     self.genl_dumps.push_back(dump);
                 }
+                if was_scan {
+                    self.scan_reset_live = false;
+                }
             }
         }
     }
 
-    /// A refused generic dump is dropped, not re-queued.
+    /// A refused generic dump is dropped, not re-queued — and a refused
+    /// owning scan's owed reset with it: no page of it will ever arrive
+    /// to start the list. A refused earlier scan leaves a queued refill's
+    /// reset alone.
     fn drop_genl(&mut self, seq: u32) {
         if self.genl_busy.is_some_and(|(busy, _)| busy == seq) {
+            let was_scan = self
+                .genl_busy
+                .is_some_and(|(_, dump)| matches!(dump, GenlDump::Scan(_)));
             self.genl_busy = None;
+            self.scan_reset_spent = false;
             self.genl_failures = 0;
+            if was_scan && self.scan_reset_live {
+                self.scan_reset = false;
+                self.scan_reset_live = false;
+            }
         }
     }
 
@@ -917,6 +1006,16 @@ struct Sock {
     fd: OwnedFd,
     buf: [u8; READ_LEN],
 }
+
+/// How long [`end_child`] gives a replaced or dropped child to exit on
+/// `SIGTERM` before `SIGKILL`: a `TERM`d command aborts at once, so this
+/// only waits out one that ignores it. Bounded: the invoke and reload
+/// paths stall at most this long per child, and only for a hung one.
+const END_GRACE: Duration = Duration::from_millis(100);
+
+/// How often [`end_child`] re-asks a `SIGTERM`d child while the grace
+/// runs: prompt without spinning.
+const END_POLL: Duration = Duration::from_millis(5);
 
 /// A running menu picker, for the reap. A running `connect` command is
 /// the same shape (a child with its pidfd), kept apart so the two never
@@ -1233,10 +1332,20 @@ impl Network {
         match dump {
             GenlDump::Interfaces => netlink::interface_request(&mut out, id, seq, 0),
             GenlDump::Scan(index) => {
-                // The list resets if the scan moved to another radio: any
-                // reply arriving from here on belongs to this dump (dumps
-                // go out one at a time), while a re-dump of the same scan
-                // already reset at queue time and keeps appending.
+                // The list resets on this dump's first page — or on its
+                // terminator where it found nothing — never here: what is
+                // kept stays listed until the refill arrives (a second menu
+                // is fed what the first one was), while any reply arriving
+                // from here on belongs to this dump (dumps go out one at a
+                // time). The reset binds here, to this dump: a mid-refill
+                // dump's late pages arriving after a second re-dump was
+                // queued only append. A move to another radio resets at
+                // once, as before: no stale radio's list outlives its
+                // target.
+                if self.nets.scan_reset {
+                    self.nets.scan_reset_live = true;
+                }
+                self.nets.scan_reset_spent = false;
                 if self.nets.scan_of != index {
                     self.nets.scan_of = index;
                     self.nets.scan_n = 0;
@@ -1476,15 +1585,15 @@ impl Network {
 
     /// Opens the picker: spawns `menu-command` with the scan list on
     /// stdin. Fire and forget (the M6 popups read the choice back; this
-    /// does not), reaped by pidfd when it exits. Idempotent while one is
-    /// already open.
+    /// does not), reaped by pidfd when it exits. A second menu while one
+    /// runs replaces it: the running picker is ended first, so one left
+    /// open never blocks the next.
     fn open_menu(&mut self) -> Result<Update, InvokeError> {
-        if self.menu.is_some() {
-            return Ok(Update::Unchanged);
-        }
         // Privacy first: with the SSID hidden the scan list must not
         // leave the bar, so there is nothing to pick from. Checked before
         // the command, so a configured command does not suggest otherwise.
+        // A refusal leaves a running picker alone: only a menu that will
+        // open ends the old one.
         if !self.show_ssid {
             crate::print::warn(format_args!(
                 "scootbar: network: the picker stays closed while show-ssid is false"
@@ -1500,6 +1609,9 @@ impl Network {
         if list.is_empty() {
             return Err(InvokeError::Refused("no networks seen yet"));
         }
+        // Every fallible step that can run before the kill does, so its
+        // failure leaves the running picker alone: only the spawn itself
+        // can still fail with the old child already gone (see below).
         let (read, write) = socketpair(
             AddressFamily::UNIX,
             SocketType::STREAM,
@@ -1507,11 +1619,26 @@ impl Network {
             None,
         )
         .map_err(|_| InvokeError::Refused("cannot start the menu command"))?;
+        if self.reap_menu() {
+            crate::print::warn(format_args!(
+                "scootbar: network: ending the running menu for a new one"
+            ));
+            end_child(&mut self.menu);
+        }
         let mut command = Command::new(&self.menu_command[0]);
         command.args(&self.menu_command[1..]);
         command.stdin(Stdio::from(read));
         command.stdout(Stdio::inherit());
         command.stderr(Stdio::inherit());
+        // Its own process group: ending it ([`end_child`]) never
+        // signals the bar's.
+        command.process_group(0);
+        // Past the kill: a failed spawn (a box that cannot fork or exec
+        // a command that spawned fine moments ago is out of processes or
+        // memory, and fails everywhere) leaves no picker running.
+        // Spawning first and killing after would briefly run two pickers
+        // — two overlapping windows fighting over the pointer — for a
+        // failure mode that needs a broken box to reach.
         let child = command
             .spawn()
             .map_err(|_| InvokeError::Refused("cannot start the menu command"))?;
@@ -1562,7 +1689,8 @@ impl Network {
     /// whatever the scan holds there now: a scan that moved underneath is
     /// refused rather than connected to the wrong network, as is one that
     /// no longer shows it at all. One connect at a time; a second while
-    /// one runs is refused. SSIDs are attacker-controlled radio data
+    /// one runs replaces it: the running command is ended first, so a
+    /// hung one never blocks the next. SSIDs are attacker-controlled radio data
     /// (arbitrary bytes, up to 32, possibly non-UTF-8 or control
     /// characters): they travel sanitized (as the picker's stdin does)
     /// and as one argument, so no byte in them starts a command.
@@ -1593,12 +1721,17 @@ impl Network {
         if self.connect_command.is_empty() {
             return Err(InvokeError::Refused("no connect command configured"));
         }
-        if self.connect.is_some() {
-            return Err(InvokeError::Refused("a connect is already running"));
-        }
         let line = netlink::sanitize(ssid);
         if line.is_empty() {
             return Err(InvokeError::Refused("no such network"));
+        }
+        // Every refusal above leaves a running connect alone: only a
+        // connect that will start ends the old one.
+        if self.reap_connect() {
+            crate::print::warn(format_args!(
+                "scootbar: network: ending the running connect for a new one"
+            ));
+            end_child(&mut self.connect);
         }
         let mut command = Command::new(&self.connect_command[0]);
         command.args(&self.connect_command[1..]);
@@ -1606,6 +1739,12 @@ impl Network {
         command.stdin(Stdio::null());
         command.stdout(Stdio::inherit());
         command.stderr(Stdio::inherit());
+        // Its own process group: ending it ([`end_child`]) never
+        // signals the bar's.
+        command.process_group(0);
+        // Past the kill, like the menu's spawn: there is no earlier
+        // fallible step here (no pipe to make), so only the spawn itself
+        // can fail with the old child already gone.
         let child = command
             .spawn()
             .map_err(|_| InvokeError::Refused("cannot start the connect command"))?;
@@ -1646,6 +1785,50 @@ fn reap_child(slot: &mut Option<Menu>) -> bool {
         }
         Ok(None) => true,
     }
+}
+
+/// Ends the child in `slot`, if any: `SIGTERM` to its whole process
+/// group (every child leads its own, so nothing of the bar's is
+/// signalled), then `SIGKILL` past [`END_GRACE`] for one that ignores
+/// `SIGTERM`, reaped either way. A child that exits on the `TERM` costs
+/// two `try_wait`s; one that ignores it costs the grace. The grace is
+/// bounded; the final `wait` past `SIGKILL` is not: a child in
+/// uninterruptible sleep (`D` state) ignores even `SIGKILL` until it
+/// leaves it, and `wait` stalls with it. Nothing bounds that wait.
+/// That is acceptable because only broken storage or a wedged driver
+/// parks a process in `D` — a hung `nmcli` and an open picker both die
+/// on `SIGTERM`/`SIGKILL` promptly — and a non-blocking reap instead
+/// would need somewhere to keep the abandoned handle (there is no such
+/// slot: both child slots are taken into this function), trading a
+/// theoretical stall on a broken box for a zombie on one. A replacement
+/// and the drop both come through here, so a hung child never blocks
+/// the next command and never outlives the module, unreaped.
+/// Allocation-free.
+fn end_child(slot: &mut Option<Menu>) {
+    let Some(mut menu) = slot.take() else {
+        return;
+    };
+    if matches!(menu.child.try_wait(), Ok(Some(_))) {
+        return;
+    }
+    let pid = rustix::process::Pid::from_child(&menu.child);
+    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::TERM);
+    let start = Instant::now();
+    loop {
+        match menu.child.try_wait() {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) => {}
+        }
+        if start.elapsed() >= END_GRACE {
+            break;
+        }
+        std::thread::sleep(END_POLL);
+    }
+    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    // Past `SIGKILL` the child is dead unless it sits in uninterruptible
+    // sleep (see [`end_child`]): this reaps it at once, and stalls with
+    // it where it does.
+    let _ = menu.child.wait();
 }
 
 /// Sends the whole outbox, or as much as goes without blocking. `false`
@@ -1925,6 +2108,18 @@ fn start_with(settings: &Settings, rt: OwnedFd, genl: OwnedFd, family: u16) -> B
         popup_n: 0,
         said_degraded: true,
     })
+}
+
+impl Drop for Network {
+    /// A reload or removal ends both children through [`end_child`]: a
+    /// hung `connect` or a picker left open never outlives the module,
+    /// unreaped. Silent: the reload already says what it is doing. (A
+    /// socket resync is not a drop: it hands the children to the fresh
+    /// state instead.)
+    fn drop(&mut self) {
+        end_child(&mut self.menu);
+        end_child(&mut self.connect);
+    }
 }
 
 impl Module for Network {
