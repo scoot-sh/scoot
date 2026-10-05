@@ -1,0 +1,259 @@
+# `programs.scoot.desktop.notifications` for home-manager: the mako
+# user unit, its config, and the bar feed (DND state and unread count
+# into the bar's `push` module). The option shapes live in
+# `./desktop.nix` (shared with the NixOS side); the `package` default
+# lives here because only this side has `pkgs`. See docs/nix.md
+# ("Notifications").
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+
+let
+  cfg = config.programs.scoot;
+  notif = cfg.desktop.notifications;
+
+  # The desktop profile's shared option subtree and look palettes (the
+  # `enum` type guarantees the name, so the lookup cannot fail).
+  desktop = import ./desktop.nix { inherit lib; };
+  look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
+  themed = look != null && (cfg.desktop.theme.targets.notifications.enable or true);
+
+  # The bar's build, when its module is imported beside this one (the
+  # `or {}` keeps this evaluating without it, the way `scootbar.nix`
+  # reads the profile). The feed calls its CLI by absolute path then;
+  # otherwise by name from PATH, tolerating a missing bar.
+  barBin = (config.programs.scootbar or { }).finalPackage or null;
+  scootbarBin = if barBin != null then lib.getExe barBin else "scootbar";
+
+  # The feed: DND state (`makoctl mode`) and the unread count
+  # (`makoctl list`, urgent when any is critical) into the bar's
+  # `push` module -- the half the `scootnotify` pointer entry promises,
+  # so swapping the daemon later changes nothing the user configured.
+  # `--watch` does an initial sync, then re-syncs on every mako
+  # `PropertiesChanged` signal (arrivals, dismissals, timeouts and
+  # mode changes all emit one: `Notifications` and `Modes` carry
+  # `EMITS_INVALIDATION` in mako v1.11.0's `dbus/mako.c`). No polling,
+  # and no `on-notify` hook, so every mako key stays overridable in
+  # `settings` without breaking the feed.
+  bridge = pkgs.writeShellApplication {
+    name = "scoot-notify-sync";
+    runtimeInputs = [
+      notif.package
+      pkgs.jq
+      pkgs.systemdMinimal # for busctl
+      pkgs.coreutils # for stdbuf
+    ]
+    ++ lib.optional (barBin != null) barBin;
+    text = ''
+      sync_now() {
+          modes="$(makoctl mode 2>/dev/null)" || {
+              echo "scoot-notify-sync: mako is not running, leaving the bar as it is" >&2
+              return 0
+          }
+          # One mode per line (or space-separated): normalize so the
+          # match below needs no assumption about the separator.
+          flat=" $(printf '%s' "$modes" | tr '[:space:]' ' ') "
+          dnd=0
+          case "$flat" in
+              *" do-not-disturb "*) dnd=1 ;;
+          esac
+          list="$(makoctl list -j 2>/dev/null || printf '%s' '[]')"
+          n="$(printf '%s' "$list" | jq 'length')"
+          crit="$(printf '%s' "$list" | jq '[.[] | select(.urgency == 2)] | length')"
+          payload="$(jq -n --argjson n "$n" --argjson dnd "$dnd" --argjson crit "$crit" \
+              'if $dnd == 1 then
+                  {text: (if $n > 0 then "DND \($n)" else "DND" end),
+                   class: "muted",
+                   tooltip: (if $n > 0 then "\($n) notifications held by do-not-disturb -- click to let them through" else "do-not-disturb is on -- click to let notifications through" end)}
+               elif $n > 0 then
+                  {text: "\($n)",
+                   class: (if $crit > 0 then "urgent" else "normal" end),
+                   tooltip: "\($n) notifications -- click to hold them with do-not-disturb"}
+               else {text: ""} end')"
+          [ -n "$payload" ] || return 0
+          ${scootbarBin} msg set notifications "$payload" 2>/dev/null || {
+              echo "scoot-notify-sync: the bar is not running, leaving it" >&2
+          }
+      }
+
+      if [ "''${1-}" = "--watch" ]; then
+          sync_now
+          # The match filters server-side: only mako's own path wakes
+          # this up. A re-sync is idempotent, so a stray signal costs
+          # one cheap query, not correctness.
+          stdbuf -o0 -e0 busctl --user monitor --match "type='signal',interface='org.freedesktop.DBus.Properties',path='/fr/emersion/Mako'" 2>/dev/null | while IFS= read -r line; do
+              case "$line" in
+                  *PropertiesChanged*) sync_now ;;
+              esac
+          done
+          echo "scoot-notify-sync: bus monitor ended" >&2
+          exit 1
+      else
+          sync_now
+      fi
+    '';
+  };
+
+  # The generated mako config: the `overlay` layer first (mako's own
+  # default is `top`, which the compositor hides under fullscreen
+  # windows -- `docs/protocols.md` "Fullscreen"), then the look's
+  # roles as mako leaves when themed, then the two generated sections.
+  # `settings` wins per key over the globals; the sections always
+  # render (only global keys are overridable there).
+  makoConfig = pkgs.writeText "mako-config" (
+    lib.concatStringsSep "\n" (
+      [ "# Generated by programs.scoot.desktop.notifications -- see docs/nix.md." ]
+      ++ lib.mapAttrsToList (name: value: "${name}=${value}") (
+        (
+          {
+            layer = "overlay";
+          }
+          // lib.optionalAttrs themed {
+            background-color = look.barColors.background;
+            text-color = look.barColors.foreground;
+            border-color = look.appearance.focus_ring_active_color;
+            progress-color = "over ${look.barColors.accent}";
+          }
+        )
+        // notif.settings
+      )
+      ++ [
+        "[mode=do-not-disturb]"
+        "invisible=1"
+      ]
+      ++ lib.optionals themed [
+        "[urgency=critical]"
+        "border-color=${look.barColors.urgent}"
+      ]
+    )
+    + "\n"
+  );
+
+  # A null beside `enable` is the loud assertion below, not a throw
+  # inside `getExe`: the same guard the idle policy uses, since
+  # standalone evals collect assertions without enforcing them.
+  toolsReady = notif.package != null;
+in
+{
+  options.programs.scoot.desktop.notifications = {
+    # The tool below is Linux-only: its attribute exists on Darwin
+    # but refuses evaluation when forced, so `or null` alone does not
+    # save it (the Darwin `nix flake check` run reads every default).
+    # Off Linux it defaults to null, which the assertion below
+    # refuses loudly instead of installing nothing silently.
+    package = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.mako or null else null;
+      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.mako or null else null";
+      description = ''
+        The mako package to run the notification daemon from (must
+        speak the daemon's flags and `makoctl`). Null installs
+        nothing. Linux-only: null off Linux.
+      '';
+    };
+  };
+
+  config = lib.mkMerge [
+    # The daemon: its package, its config file, and the unit that runs
+    # it. Wanted by the graphical session (which the launcher reaches
+    # past the display import, so the display is there when mako
+    # starts), retried like the bar's unit rather than conditioned
+    # (a skipped start is never retried). Named `mako.service`, after
+    # the daemon: mako ships a D-Bus activation file for
+    # `org.freedesktop.Notifications` routing through
+    # `SystemdService=mako.service`, so a `Notify` with the daemon
+    # down starts this unit instead of failing -- and the `ExecStart`
+    # below is what it runs.
+    (lib.mkIf notif.enable {
+      assertions = [
+        {
+          assertion = notif.package != null;
+          message = ''
+            programs.scoot.desktop.notifications.enable is set but
+            programs.scoot.desktop.notifications.package is null: set
+            it explicitly (apply the overlay, or point at a mako).
+          '';
+        }
+      ];
+
+      # The bridge runs from its store path in the feed unit below,
+      # not from PATH: installing it would put a second copy of the
+      # package set's shape into every profile user's profile for no
+      # runtime need (a manual sync is `systemctl --user restart
+      # scoot-notify-sync`).
+      home.packages = lib.optional (notif.package != null) notif.package;
+
+      xdg.configFile."mako/config".source = lib.mkIf toolsReady makoConfig;
+
+      systemd.user.services.mako = lib.mkIf toolsReady {
+        Unit = {
+          Description = "mako notification daemon (desktop.notifications)";
+          PartOf = [ "graphical-session.target" ];
+          After = [ "graphical-session.target" ];
+          # A new config restarts the daemon (it starts in
+          # milliseconds; `makoctl reload` would do, but a restart is
+          # what the bar and idle units do).
+          X-Restart-Triggers = [ "${makoConfig}" ];
+        };
+        Service = {
+          # D-Bus activation (`Type=dbus` plus the name): the unit is
+          # started when claimed, and considered started once mako
+          # owns the name.
+          Type = "dbus";
+          BusName = "org.freedesktop.Notifications";
+          # Activation can arrive before the session reaches the
+          # graphical target (a `Notify` in an early autostart): skip
+          # cleanly then -- no restart -- and the next `Notify`
+          # re-activates. The wanted-by below starts it with the
+          # display in the common case.
+          ExecCondition = "${lib.getExe' pkgs.bash "bash"} -c '[ -n \"$WAYLAND_DISPLAY\" ]'";
+          ExecStart = "${lib.getExe notif.package}";
+          ExecReload = "${lib.getExe' notif.package "makoctl"} reload";
+          Restart = "on-failure";
+          RestartSec = 2;
+          # Unending retries, like the bar's unit: a start before the
+          # compositor is up must retry, not die at the burst limit (a
+          # broken config then logs every 2 s until fixed -- loud beats
+          # silent).
+          StartLimitIntervalSec = 0;
+        };
+        Install.WantedBy = [ "graphical-session.target" ];
+      };
+    })
+
+    # The bar feed beside the daemon: an initial sync, then a sync per
+    # mako bus signal. Kept in its own element (and its own unit): the
+    # daemon stays up without it, and it stays quiet without the bar.
+    (lib.mkIf (notif.enable && toolsReady) {
+      systemd.user.services.scoot-notify-sync = {
+        Unit = {
+          Description = "desktop.notifications bar feed (DND + count into the bar)";
+          PartOf = [ "graphical-session.target" ];
+          After = [
+            "graphical-session.target"
+            "mako.service"
+          ];
+          # A new bridge restarts the feed.
+          X-Restart-Triggers = [ "${bridge}" ];
+        };
+        Service = {
+          ExecStart = "${bridge}/bin/scoot-notify-sync --watch";
+          Restart = "on-failure";
+          RestartSec = 2;
+          StartLimitIntervalSec = 0;
+        };
+        Install.WantedBy = [ "graphical-session.target" ];
+      };
+    })
+
+    # The profile turns the daemon on (still individually
+    # disable-able at plain priority, the way `session.enable` works on
+    # the NixOS side).
+    (lib.mkIf cfg.desktop.enable {
+      programs.scoot.desktop.notifications.enable = lib.mkDefault true;
+    })
+  ];
+}

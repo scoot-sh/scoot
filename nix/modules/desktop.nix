@@ -280,10 +280,65 @@ in
         };
       };
     };
-    # mako now, scootnotify later without changing option names.
-    notifications = slot {
-      child = "desktop-notifications";
-      tool = "`mako` (the daemon name is the only visible change when scootnotify replaces it)";
+    # mako now, scootnotify later without changing option names: the
+    # daemon behind `daemon` is the only visible change when
+    # scootnotify replaces it (same `enable`, same bar module, same
+    # DND toggle). Filled by the `desktop-notifications` child: mako
+    # as a user unit bound to `graphical-session.target`, its config
+    # on the `overlay` layer (so popups show above fullscreen windows)
+    # and themed by the look, plus the bar feed (DND state and unread
+    # count into the bar's `push` module, a click toggling DND).
+    #
+    # On with the profile (still individually disable-able); without
+    # it, `enable` works standalone (unthemed: a look needs the
+    # profile, and the user unit needs the home-manager side, the way
+    # the themed config file does).
+    notifications = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Run the notification daemon: mako (its package beside this)
+          owning `org.freedesktop.Notifications` on the session bus,
+          with its popups on the `overlay` layer and a bar feed for
+          DND state and the unread count. Without it nothing owns the
+          name, and `Notify` calls fail.
+        '';
+      };
+
+      daemon = lib.mkOption {
+        type = lib.types.enum [ "mako" ];
+        default = "mako";
+        description = ''
+          The daemon behind `enable`. Only mako today (lightest
+          well-maintained layer-shell daemon: no toolkit, no X11, a
+          plain-text config the look themes per key); a future
+          scootnotify widens this enum, the option and the bar module
+          staying as they are.
+        '';
+      };
+
+      # Free-form `key = value` lines merged over the generated config
+      # (a value here wins per key). Rendered verbatim, so a `#rrggbb`
+      # color keeps its leading `#` (mako's own format). The generated
+      # sections (`[mode=do-not-disturb]`, `[urgency=critical]`) always
+      # render; only global keys are overridable here.
+      settings = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = { };
+        example = {
+          anchor = "bottom-right";
+          max-visible = "3";
+        };
+        description = ''
+          Extra mako config lines, merged over the generated ones (a
+          value here wins per key). Rendered verbatim. The feed that
+          surfaces DND state and the unread count into the bar watches
+          the daemon over D-Bus, so every key stays overridable
+          without breaking it. Overriding `layer` hides popups under
+          fullscreen windows again (see docs/nix.md).
+        '';
+      };
     };
     # fuzzel (layer-shell `overlay` native, no toolkit). Note: the
     # default binds name `wofi` today; the launcher child reconciles that.
@@ -347,6 +402,16 @@ in
             Theme the locker from the look (screen and indicator colors
             from its palette). Set to `false` to keep swaylock's own
             style (`lock.settings` still applies).
+          '';
+        };
+        targets.notifications.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Theme mako from the look (popup background and text, ring
+            and urgent leaves from its palette). Set to `false` to
+            keep mako's own style (`notifications.settings` still
+            applies).
           '';
         };
       };

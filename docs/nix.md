@@ -1278,6 +1278,134 @@ see [Idle: locking and screen
 power](configuration.md#idle-locking-and-screen-power), which keeps the
 manual recipe.
 
+**Notifications** come on with the profile: a desktop with no
+notification daemon drops password prompts, calendar pings and
+low-battery warnings on the floor. The daemon is mako (lightest
+well-maintained layer-shell daemon -- see why below), owning
+`org.freedesktop.Notifications` on the session bus as a user unit
+(`mako.service`, wanted by `graphical-session.target` -- which the
+launcher reaches past the display import, so the display is there when
+it starts), with its popups on the **`overlay`** layer:
+
+```nix
+programs.scoot.desktop = {
+  enable = true;
+  # A popup at the bottom-right, at most three visible:
+  # notifications.settings = { anchor = "bottom-right"; max-visible = "3"; };
+  # No daemon at all on this box (each switch below is its own):
+  # notifications.enable = false;
+};
+```
+
+The one setting that matters most is already set: `layer=overlay`.
+mako's own default is `top`, which the compositor hides under a
+fullscreen window ([Fullscreen](protocols.md#fullscreen)) -- so a
+fullscreen game would swallow every popup. `overlay` stays above it
+(the frame then composites instead of scanning out directly; nothing
+changes on screen, at the cost of one compositing pass). A critical
+popup over a fullscreen window looks like this (blue ring for normal,
+urgent ring for critical -- captured from a real session through
+scoot's own IPC screenshot path):
+
+![A critical notification over a fullscreen terminal: the popup draws above it](assets/notifications-fullscreen.png)
+
+Overriding `layer` back to `top` re-hides popups under fullscreen.
+
+DND state and the unread count reach the bar through its `push`
+module, and a click toggles DND -- the half the future `scootnotify`
+keeps unchanged (the daemon name is the only visible change when it
+replaces mako). The module is defined, not placed: show it with one
+line in your bar config:
+
+```toml
+right = ["notifications", "clock"]
+```
+
+What it shows: the count while any are up (`urgent` when one is
+critical), `DND` (muted) while held, an envelope alone otherwise (so a
+quiet desktop keeps a clickable bell, not a hole -- the glyph is in
+DejaVu Sans, the bar's own default font; set
+`settings.push.notifications.icon` to your own). The feed is a
+small watcher, not a poll: it syncs once at start, then re-syncs on
+every mako bus signal (arrivals, dismissals, timeouts and mode changes
+all emit one), so overriding any mako key in `settings` never breaks
+it. Do-not-disturb itself is mako's mode (`[mode=do-not-disturb]
+invisible=1`, toggled by `makoctl mode -t do-not-disturb` -- the same
+command the bar's click runs, by absolute path). Held popups wait in
+the daemon; the bar reads `DND 2` (muted) while two are held:
+
+![The bar with do-not-disturb on and two notifications held](assets/notifications-dnd.png)
+
+Over the session lock, nothing of a notification's content ever shows:
+while locked the compositor draws nothing but the lock client's own
+surfaces -- windows and layer surfaces on every layer, `overlay`
+included, are not gathered into the frame at all
+([Screen locking](protocols.md#screen-locking-ext-session-lock-v1)).
+mako itself knows nothing of the lock: popups that arrive while locked
+wait in its visible list (no timeout by default) and appear on unlock;
+dismissed ones sit in its history buffer (`max-history`, default 5).
+A notification arriving mid-lock draws nothing -- the frame stays the
+lock screen alone (same IPC screenshot path, password prompt never
+disturbed):
+
+![The session lock with a notification queued: only the lock screen shows](assets/notifications-locked.png)
+Sandboxed apps fall out for free: the portal's Notification interface
+forwards to whoever owns `org.freedesktop.Notifications`, which is
+this daemon (once a portal backend runs -- that wiring is the
+`desktop-capture` child's).
+
+Every value is an option, applied on rebuild/switch (the units restart
+into the new config; no re-login):
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `desktop.notifications.enable` | bool | `true` with the profile | run mako plus the bar feed |
+| `desktop.notifications.daemon` | enum (`"mako"`) | `"mako"` | the daemon behind `enable` (a future scootnotify widens this without renaming anything) |
+| `desktop.notifications.settings` | attrset of string | `{ }` | extra mako lines over the generated ones (a value here wins per key, rendered verbatim, e.g. `{ anchor = "bottom-right"; }`) |
+| `desktop.theme.targets.notifications.enable` | bool | `true` | theme mako from the look (popup background and text, ring, urgent critical ring); `false` keeps mako's own style while the rest follows the look |
+| `desktop.notifications.package` | package or null | mako (Linux-only: null off Linux) | point at your own mako build; null with the switch on fails evaluation naming it |
+
+Why mako, measured at the pinned rev (`8ce4ef6`, `aarch64-linux`,
+`nix path-info --closure-size`): mako 357.4 MiB, dunst 174.7 MiB,
+SwayNotificationCenter 1.3 GiB. dunst's closure is the smaller one (X
+libraries are small; mako's weight is `systemdMinimal`, already in
+every NixOS closure, plus pango/cairo) -- the pick is fit, not bytes:
+mako is Wayland-only (no X stack at all: its inputs name no xorg
+library, where dunst carries both backends), speaks the `overlay`
+layer natively, its mode-based DND is exactly the bar-toggle contract
+above, and its `makoctl list -j` is the feed's count. SwayNotificationCenter
+is a GTK control center indifferent to the slot. Upstream is active
+(1.11.0, MIT, same license as scoot).
+
+Troubleshooting, by symptom:
+
+- *No popups at all.* Check the unit is running:
+  `systemctl --user status mako` -- and that D-Bus knows it:
+  `busctl --user list | grep -F Notifications` should name mako's
+  owner. A `Notify` with the daemon down activates the unit through
+  mako's own activation file; if activation skip-logs, the display was
+  not imported yet (the unit's start condition) and the next `Notify`
+  retries.
+- *Popups vanish under fullscreen.* Something set `layer` back to
+  `top`: read `~/.config/mako/config` (the generated file), the first
+  content line is the layer. A `layer` in `settings` wins over the
+  default -- remove it.
+- *The bar shows nothing.* The module needs placing (the one line
+  above), the bar needs rebuilding with the `push` feature (the
+  default build has it; a `features` list without it fails evaluation
+  naming it), and the feed needs running:
+  `systemctl --user status scoot-notify-sync`.
+- *DND is stuck on.* `makoctl mode` lists the modes; an empty line
+  besides `default` means off. Toggle it back:
+  `makoctl mode -r do-not-disturb`.
+- *A popup stayed up for hours.* That is mako's default (no timeout):
+  dismiss it (`makoctl dismiss -a` clears them all into history) or
+  set one: `notifications.settings.default-timeout = "10000";`
+  (milliseconds).
+- *Two daemons fight over popups.* Another notifier (dunst, swaync,
+  a desktop's own) owns the bus name instead: only one can. Turn this
+  one off (`notifications.enable = false`) or uninstall the other.
+
 **Every later piece has its slot already**, off and inert: one boolean
 (plus a package override where a package is involved) per paved-path child,
 so those children fill bodies without renaming options. Enabling one today
@@ -1287,7 +1415,7 @@ every other option here:
 | Slot | Type | Default | Child | Default tool |
 |---|---|---|---|---|
 | `desktop.idle.enable` / `desktop.idle.lock.enable` (+ timeouts, `lock.command`, `lock.settings`) | bool (+ timeout ints, action string, package per tool) | `true` ([Idle and lock](#idle-and-lock): dim 2 min / 10%, lock 4 min, off 5 min) | idle policy + locker | swayidle + swaylock |
-| `desktop.notifications.enable` | bool + package | `false` | notifications (mako now, scootnotify later) | mako |
+| `desktop.notifications.enable` (+ `daemon`, `settings`) | bool (+ enum, lines, package) | `true` ([Notifications](#notifications): mako unit, overlay layer, bar feed) | notifications (mako now, scootnotify later) | mako |
 | `desktop.launcher.enable` | bool + package | `false` | launcher | fuzzel (the default binds still name wofi until that child reconciles them) |
 | `desktop.capture.enable` | bool + package | `false` | screenshots bound to keys | grim + slurp |
 | `desktop.auth.enable` / `desktop.secrets.enable` | bool + package | `false` | polkit agent + keyring | — |
