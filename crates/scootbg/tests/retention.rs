@@ -50,7 +50,8 @@ fn shows(session: &Session) -> Vec<serde_json::Value> {
 /// The daemon's `Pss_Anon`, in kB (`smaps_rollup`, no per-map classifier —
 /// the benchmark's own `smaps.sh` credits each block's PSS to the *next*
 /// block's class, which misfiles whole shared buffers). `None` where
-/// `/proc` cannot be read (not Linux): the caller skips then.
+/// `/proc` cannot be read (not Linux) or the daemon already exited (its
+/// `/proc/PID` is gone with it): the caller tells the two apart.
 fn anon_kb(pid: u32) -> Option<u64> {
     let rollup = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")).ok()?;
     rollup
@@ -93,6 +94,14 @@ fn no_retained_copy_after_image_settles() {
     let deadline = Instant::now() + PATIENCE;
     let settled = loop {
         let Some(kb) = anon_kb(pid) else {
+            // No reading: either there is no `/proc` (not Linux — a
+            // polite skip) or the daemon already exited (its
+            // `/proc/PID` went with it — a crash masked as a skip).
+            // A daemon that just served `set` plus `query` has no
+            // reason to be gone, so an exited one fails the test.
+            if let Some(status) = daemon.try_wait().expect("cannot poll the daemon") {
+                panic!("the daemon exited ({status}) before its memory settled");
+            }
             eprintln!("skipped -- no /proc/PID/smaps_rollup (not Linux?)");
             assert!(session.run(&["kill"]).status.success());
             assert!(wait_exit(&mut daemon).success());
