@@ -115,7 +115,7 @@ pub fn suggest<'a>(input: &str, candidates: impl IntoIterator<Item = &'a str>) -
     }
     let (candidate, distance) = best?;
     let longest = input.chars().count().max(candidate.chars().count());
-    let allowance = (longest / 4 + 1).min(3).max(1);
+    let allowance = (longest / 4 + 1).clamp(1, 3);
     (distance <= allowance && distance < longest).then_some(candidate)
 }
 
