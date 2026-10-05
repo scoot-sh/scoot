@@ -60,7 +60,7 @@ by real input, lid-close lock, suspend-resume lock); docs in `docs/nix.md`
 
 The OSD for lock state, the greeter (exists), biometric/PIN unlock methods.
 
-## Landed (PR #TBD, 2026-10-05)
+## Landed (PR #435, 2026-10-05)
 
 Filled the `desktop.idle` / `desktop.idle.lock` slots: swayidle user
 unit (`scoot-idle`, `WantedBy graphical-session.target`, `Restart`
