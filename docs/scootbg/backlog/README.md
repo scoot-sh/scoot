@@ -120,10 +120,11 @@ full per-feature cycle.
       — open, medium, waiting on a user decision: `pic-scale-safe`'s
       infallible output `Vec` ends the daemon under `RLIMIT_AS` or strict
       overcommit; accept, probe, fork the scaler, or switch scalers
-13. [**Idle image retention**](image-retention.md) — open, medium, filed
-    2026-10-05 from the five-desktop idle benchmark: the decoded
-    wallpaper stays mapped (12 MB anon) in some idle sessions and not
-    others; find the trigger, drop it once every output has its frame
+13. [**Idle image retention**](resolved/image-retention-done.md) — CLOSED
+    2026-10-05 as two artifacts, no retained copy: the 12 MB "anon" is
+    misclassified shm pools (same `smaps.sh` off-by-one), and the lean
+    cohort never drew the wallpaper (its image file was unreadable, so the
+    compositor's background showed). Pinned by `tests/retention.rs`.
 
 ## Milestone 2: motion
 

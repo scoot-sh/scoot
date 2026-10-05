@@ -1,9 +1,10 @@
 ---
 title: "scootbg holds 12 MB anon at idle in some sessions, near zero in others"
-status: "open"
-area: "scootbg"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-05"
 ---
 
 # scootbg holds 12 MB anon at idle in some sessions, near zero in others
@@ -53,3 +54,44 @@ behavior with a test that asserts anon PSS after settle (the benchmark's
 
 scootbg CPU (zero everywhere measured); the compositor-side shm the
 wallpaper surface costs (that is scoot's, not scootbg's).
+
+## Resolution (2026-10-05): no retained copy — the lean cohort never drew the wallpaper
+
+Traced on a real `--tty` login (Asahi M2, eDP-1 2560x1600 + DP-1
+1920x1080, current main, moonrise `fill`): with the wallpaper up, scootbg
+holds exactly the two output-sized `wl_shm` pools (24.7 MB mapped,
+~12.3 MB PSS shared with the compositor) plus ~0.3 MB anon. The decoded
+source, the crops and the scaled temporaries are all dropped on the worker
+thread before the buffers are allocated (`image::render::render_each`);
+settled `Pss_Anon` measures 0.5–0.8 MB (debug). There is no decoded copy
+to drop, so the fat state is the documented floor (one output-sized buffer
+per output size, `lightest.md`), not a leak.
+
+Two artifacts made it look like one:
+
+- The 12 MB "anon" is misclassified shared memory. The benchmark's
+  `smaps.sh` (`~/fx/cmpde-cerval/smaps.sh`, scratch, not in this repo)
+  credits each block's PSS to the *next* block's class, so whole memfd
+  pools read as `anon-other` (reproduced live: an 8 MB pool reads as
+  8 MB anon, 0 shm). Read with a fixed classifier the fat cohort is shm,
+  as the floor predicts.
+- The lean cohort (2.1 MB, no pools anywhere) never drew anything. The
+  session journal shows for all three second-campaign logins:
+  `scootbg: cannot restore ".../moonrise.png" for every output:
+  Permission denied (os error 13); showing the compositor's own
+  background` — the image lived under 700 `/home/steve`, unreadable to
+  the test user by the second campaign (the first campaign's logins say
+  "applied the [wallpaper] section"). Same binary, same section JSON;
+  only file access differed. A missing-file restore was re-enacted
+  headless: `shows: null`, PSS 2160 kB (debug), zero shm — the lean
+  signature exactly. The compositor's ~12 MB delta is the same pools
+  unmapped on both sides while it shows its own background.
+
+No behavior change: making "lean the only state" while showing wallpaper
+would mean dropping on-screen buffers, against the measured floor tradeoff
+(13 ms saved at 4K per change). Pinned by
+`crates/scootbg/tests/retention.rs`
+(`no_retained_copy_after_image_settles`: settled `Pss_Anon` < 2 MB with
+moonrise fill up — verified to fail with a 12 MB leak injected, pass
+without). Before/after measurements (3 sessions each, fixed classifier)
+are in the PR report; they are identical by construction.

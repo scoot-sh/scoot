@@ -246,15 +246,24 @@ quantifies the ticket this benchmark was built to check.
    Nothing else in the session is within an order of magnitude. The
    fix takes scoot from the most CPU-hungry session here (0.60%) to
    the least (~0.03%, compositor 1 tick + foot 0).
-2. **scootbg's bimodal idle image** ([image-retention](../scootbg/backlog/image-retention.md)):
+2. **scootbg's bimodal idle image** ([image-retention](../scootbg/backlog/resolved/image-retention-done.md)):
    14.7 vs 2.1 MB across identical sessions, and the compositor shows
-   the same ~12 MB campaign delta (75.6 vs 63.6 MB). Find the retention
-   trigger, drop the decoded image once every output has its frame.
-3. **Verify the 17 MB `[stack]`** ([compositor-stack-pss](backlog/core/compositor-stack-pss.md)):
+   the same ~12 MB campaign delta (75.6 vs 63.6 MB). *Correction
+   (2026-10-05): traced to two artifacts, not a leak — the fat cohort's
+   12 MB "anon" is the two output-sized `wl_shm` pools misfiled by the
+   mapping classifier (see below), and the lean cohort never drew the
+   wallpaper at all (its image file was unreadable: `Permission denied`,
+   so the compositor's background showed). No saving to take; the ticket
+   pins the no-retained-copy behavior with a test instead.*
+3. **Verify the 17 MB `[stack]`** ([compositor-stack-pss](backlog/core/resolved/compositor-stack-pss-done.md)):
    the mapping split's largest scoot-owned row after file-backed Mesa.
    If real touched stack, shrink the deep path (up to ~17 MB); if an
    artifact, fix the classifier both this page and the ticket rely on.
    (Hyprland shows the same 17 MB stack row — compare notes, not code.)
+   *Correction (2026-10-05): artifact confirmed — the same classifier
+   off-by-one credited a client shm buffer's PSS to `[stack]` (live
+   `[stack]` is 128 kB); all three fat rounds hold the same ~29.5 MB
+   shm. No compositor change.*
 4. **Mask the Push portal out** ([kunifiedpush-sessions](backlog/packaging/kunifiedpush-sessions.md)):
    `kunifiedpush-distributor` at ~15 MB in every session for push
    notifications nothing uses — bigger than mako, the bar and the idle
@@ -266,7 +275,13 @@ quantifies the ticket this benchmark was built to check.
 
 Where scoot is already lightest, plainly: compositor PSS (63.6 MB, 75.9 in the fat cohort,
 against 83/128/126/~160), bar (4.6 MB against 34/42/270), wallpaper at
-its leanest (2.1 MB, matching swaybg), portals on demand (0 resident
+its leanest (2.1 MB, matching swaybg — *correction (2026-10-05): that
+cohort showed the compositor's background, not the wallpaper; with the
+wallpaper up scootbg holds its output-sized floor, ~12 MB PSS here,
+against swaybg's 2.0 MB, which drops client buffers after upload — a
+possible future lever, kept deliberately for now: see
+[image-retention](../scootbg/backlog/resolved/image-retention-done.md)*),
+portals on demand (0 resident
 against niri's 52 and 44 each for GNOME/KDE), and no XWayland tax. The notification daemon is
 the same small mako everywhere it runs (3–4 MB; the 7.4 MB niri reading is its themed config).
 
