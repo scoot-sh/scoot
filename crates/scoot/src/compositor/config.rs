@@ -956,7 +956,7 @@ pub fn default_config_toml() -> String {
         "# Offer the virtual-pointer and virtual-keyboard globals a remote-control\n\
          # tool like wayvnc needs to drive the session (off by default: any same-uid\n\
          # client could bind them and type and click as the user). Takes effect on\n\
-         # restart. See site/src/content/docs/scoot/protocols.md#remote-desktop-vnc.\n",
+         # restart. See site/src/content/docs/scoot/remote-desktop.md.\n",
     );
     out.push_str("# enabled = false\n");
 
