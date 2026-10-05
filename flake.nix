@@ -581,6 +581,11 @@
           # Linux gets the compositor, Darwin gets the client.
           default = if pkgs.stdenv.hostPlatform.isDarwin then scootctl else scoot;
           inherit scoot scootctl;
+          # The docs site (site/, nix/docs-site.nix): Astro Starlight over
+          # pnpm, built offline with hash-pinned dependencies. On every
+          # system Node runs on (Linux and Darwin alike): it is a static
+          # site, not a compositor binary, so no Linux-only gating applies.
+          docs-site = pkgs.callPackage ./nix/docs-site.nix { };
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           inherit scootbg scootbar;

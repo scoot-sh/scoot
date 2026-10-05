@@ -82,4 +82,7 @@ unchanged, substantially as it exists on Pixabay. The illustration itself is
 not distributed here: the example's `[wallpaper]` table points at a copy the
 user downloads, and only the screenshot above shows it. It stays under the
 Pixabay Content License wherever scoot is redistributed; remove the file (and
-the `[wallpaper]` table in the example) to drop it.
+the `[wallpaper]` table in the example) to drop it. The copy at
+site/public/vinyl-sunset-preview.png is the same screenshot for the docs
+site's home page, under the same terms; remove both copies to drop it
+entirely.
