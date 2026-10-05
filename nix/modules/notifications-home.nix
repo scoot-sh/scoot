@@ -293,6 +293,9 @@ in
           # milliseconds; `makoctl reload` would do, but a restart is
           # what the bar and idle units do).
           X-Restart-Triggers = [ "${makoConfig}" ];
+          # Unending retries, like the bar's unit: `StartLimitIntervalSec`
+          # lives here in `[Unit]` (systemd ignores it in `[Service]`).
+          StartLimitIntervalSec = 0;
         };
         Service = {
           # D-Bus activation (`Type=dbus` plus the name): the unit is
@@ -310,11 +313,10 @@ in
           ExecReload = "${lib.getExe' notif.package "makoctl"} reload";
           Restart = "on-failure";
           RestartSec = 2;
-          # Unending retries, like the bar's unit: a start before the
+          # A start before the
           # compositor is up must retry, not die at the burst limit (a
           # broken config then logs every 2 s until fixed -- loud beats
           # silent).
-          StartLimitIntervalSec = 0;
         };
         Install.WantedBy = [ "scoot-session.target" ];
       };
@@ -334,12 +336,14 @@ in
           ];
           # A new bridge restarts the feed.
           X-Restart-Triggers = [ "${bridge}" ];
+          # Unending retries (`StartLimitIntervalSec` lives in `[Unit]`:
+          # systemd ignores it in `[Service]`).
+          StartLimitIntervalSec = 0;
         };
         Service = {
           ExecStart = "${bridge}/bin/scoot-notify-sync --watch";
           Restart = "on-failure";
           RestartSec = 2;
-          StartLimitIntervalSec = 0;
         };
         Install.WantedBy = [ "scoot-session.target" ];
       };

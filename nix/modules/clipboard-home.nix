@@ -91,6 +91,9 @@ let
       # A new entry script restarts the watcher (it starts in
       # milliseconds).
       X-Restart-Triggers = [ "${storeEntry}" ];
+      # Unending retries, like the bar's unit (`StartLimitIntervalSec`
+      # lives in `[Unit]`: systemd ignores it in `[Service]`).
+      StartLimitIntervalSec = 0;
     };
     Service = {
       # An activation can arrive before the session reaches the
@@ -101,10 +104,8 @@ let
       ExecStart = "${wlPasteBin} ${extraArgs}--watch ${storeEntry}/bin/scoot-clipboard-store-entry";
       Restart = "on-failure";
       RestartSec = 2;
-      # Unending retries, like the bar's and idle units: a start
-      # before the compositor is up must retry, not die at the burst
-      # limit.
-      StartLimitIntervalSec = 0;
+      # A start before the compositor is up must retry, not die at the
+      # burst limit.
     };
     Install.WantedBy = [ "scoot-session.target" ];
   };

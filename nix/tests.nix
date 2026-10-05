@@ -3949,6 +3949,93 @@ let
     )
   ];
 
+  # --- start-rate-limit placement pins (issue #449) ---
+  # systemd reads `StartLimitIntervalSec`/`StartLimitBurst` only in
+  # `[Unit]` and logs "Unknown key ... in section [Service]" otherwise,
+  # silently keeping the default burst limit (5 starts in 10 s). Every
+  # profile unit that retries unendingly names the interval here, so a
+  # future unit that puts it in `[Service]` fails `nix flake check` at
+  # eval. `hmDeskBar` is the full profile beside the bar module: its
+  # services are every user unit the profile can install.
+  _startLimitPins = lib.optionals isLinux (
+    let
+      hmUnits = hmDeskBar.config.systemd.user.services;
+      retryUnits = [
+        "mako"
+        "scoot-notify-sync"
+        "scoot-clipboard-store"
+        "scoot-clipboard-primary-store"
+        "scoot-idle"
+        "scoot-audio-inhibit"
+        "scootbar"
+      ];
+    in
+    # The key sits in `[Unit]` on every retrying unit...
+    (map (
+      name:
+      (
+        assert hmUnits.${name}.Unit.StartLimitIntervalSec == 0;
+        true
+      )
+    ) retryUnits)
+    # ...and in `[Service]` on none of them, nor `StartLimitBurst`
+    # in either section...
+    ++ (map (
+      name:
+      (
+        assert !(hmUnits.${name}.Service ? StartLimitIntervalSec);
+        true
+      )
+    ) retryUnits)
+    ++ (map (
+      name:
+      (
+        assert !(hmUnits.${name}.Service ? StartLimitBurst);
+        true
+      )
+    ) retryUnits)
+    ++ (map (
+      name:
+      (
+        assert !(hmUnits.${name}.Unit ? StartLimitBurst);
+        true
+      )
+    ) retryUnits)
+    # ...and no other profile unit smuggles either key into its
+    # service section either (the sweep: every unit the profile can
+    # install, not just the retrying seven)...
+    ++ (map (
+      name:
+      (
+        assert !((hmUnits.${name}.Service or { }) ? StartLimitIntervalSec);
+        true
+      )
+    ) (builtins.attrNames hmUnits))
+    ++ (map (
+      name:
+      (
+        assert !((hmUnits.${name}.Service or { }) ? StartLimitBurst);
+        true
+      )
+    ) (builtins.attrNames hmUnits))
+    # ...and the NixOS bar unit keeps the same placement through
+    # `unitConfig` (the NixOS side installs no other profile unit).
+    ++ [
+      (
+        assert osDeskBar.config.systemd.user.services.scootbar.unitConfig.StartLimitIntervalSec == 0;
+        true
+      )
+      (
+        assert !(osDeskBar.config.systemd.user.services.scootbar.serviceConfig ? StartLimitIntervalSec);
+        true
+      )
+      (
+        assert !(osDeskBar.config.systemd.user.services.scootbar.serviceConfig ? StartLimitBurst);
+        true
+      )
+    ]
+  );
+
   # --- idle policy structural pins (fail `nix flake check` at eval) ---
   # Linux only, like the profile above: every evaluation here runs the
   # policy, whose tools refuse evaluation on Darwin (the null
@@ -5992,6 +6079,7 @@ assert lib.all (x: x) _pins;
 assert lib.all (x: x) _greeterPins;
 assert lib.all (x: x) _desktopPins;
 assert lib.all (x: x) _sessionPins;
+assert lib.all (x: x) _startLimitPins;
 assert lib.all (x: x) _idlePins;
 assert lib.all (x: x) _notifPins;
 assert lib.all (x: x) _clipPins;
