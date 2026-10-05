@@ -2,9 +2,12 @@
 #
 # `fetchPnpmDeps` vendors the locked dependencies into the store (hash-pinned,
 # no network at build time beyond that hash); `pnpmConfigHook` installs them
-# offline; then `astro build` renders the static site and the two gate scripts
+# offline; then `astro build` renders the static site and the three gate scripts
 # run inside the sandbox: `check-llms` (llms.txt covers every page, every
-# `.md` twin exists) and `test-snippets` (fenced toml/sh blocks are sound).
+# `.md` twin exists), `test-snippets` (fenced toml/sh blocks are sound) and
+# `check-nix` (`nix-instantiate --parse` over every fenced nix block, so the
+# flake/module snippets cannot rot at the syntax level; evaluation is pinned
+# in nix/tests.nix, which `nix flake check` runs).
 # `$out` is the static `dist/` tree, ready for GitHub Pages.
 #
 # Reproducing the `pnpmDeps.hash` below: set it to `""`, run
@@ -16,6 +19,7 @@
   pnpm,
   pnpmConfigHook,
   fetchPnpmDeps,
+  nix,
 }:
 
 stdenv.mkDerivation (finalAttrs: {
@@ -47,6 +51,7 @@ stdenv.mkDerivation (finalAttrs: {
     nodejs-slim
     pnpm
     pnpmConfigHook
+    nix
   ];
 
   buildPhase = ''
@@ -55,6 +60,7 @@ stdenv.mkDerivation (finalAttrs: {
     pnpm build
     pnpm check
     pnpm test-snippets
+    pnpm test-nix
 
     runHook postBuild
   '';
