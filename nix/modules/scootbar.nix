@@ -9,15 +9,21 @@
 #   1. what the user wrote (priority 100, the module system's default);
 #   2. Stylix, when `config.lib.stylix` exists and `stylix.enable` is on
 #      (`lib.mkDefault`, 1000);
-#   3. this module's plain default (`lib.mkOptionDefault`, 1500): a font,
+#   3. the desktop profile's look, when `programs.scoot.desktop` enables
+#      it (`lib.mkOptionDefault`, 1500);
+#   4. this module's plain default (`lib.mkOptionDefault`, 1500): a font,
 #      and only a font, since the bar refuses to start without one.
 #
+# (3) and (4) share a priority but never share a key (`colors.*` against
+# `bar.font`), so they merge instead of conflicting.
+#
 # Everything else the bar reads has its own default in the binary, so an
-# absent key is that default. Each Stylix value is defined at its own
-# leaf (`settings.colors.accent`, not `settings.colors`), which is what
+# absent key is that default. Each Stylix and look value is defined at its
+# own leaf (`settings.colors.accent`, not `settings.colors`), which is what
 # lets the user's `settings.colors.background` replace one token and keep
-# the other four from Stylix: a priority applies to the whole value it
-# wraps, so wrapping a table would make the user's one key discard it all.
+# the other four from Stylix or the look: a priority applies to the whole
+# value it wraps, so wrapping a table would make the user's one key
+# discard it all.
 {
   config,
   lib,
@@ -101,6 +107,26 @@ let
   # without hand-setting either. The bar's own (unthemed) default is
   # still yellow -- only the Stylix default moved.
   palette = config.lib.stylix.colors.withHashtag;
+
+  # The desktop profile (`programs.scoot.desktop` in the scoot modules),
+  # when those are imported beside this one. Each `or` keeps this
+  # evaluating with the scoot module absent (as in this file's own
+  # checks): nothing here requires it. The profile never sets across the
+  # boundary in the other direction either (a conditional set of an
+  # undeclared option fails eval whatever the condition is), so this read
+  # is the whole bar half of the profile.
+  desktopProfile = ((config.programs.scoot or { }).desktop or { });
+  profileOn = desktopProfile.enable or false;
+  # `bar.enable = false` leaves the bar entirely to the user: neither
+  # enabled nor themed by the profile.
+  profileManagesBar = desktopProfile.bar.enable or true;
+  # Null without a look; the scoot side's `enum` type guarantees the name
+  # is one of these, so the lookup cannot fail.
+  profileLook =
+    if (desktopProfile.look or null) == null then
+      null
+    else
+      (import ./desktop.nix { inherit lib; }).looks.${desktopProfile.look};
 in
 {
   options.programs.scootbar = {
@@ -248,6 +274,19 @@ in
       programs.scootbar.settings = lib.mkIf (cfg.features != [ ]) {
         bar.font = lib.mkOptionDefault fallbackFont;
       };
+    })
+
+    # The desktop profile's bar half: the profile turns this bar on (at
+    # `mkDefault`, so an explicit value still wins), and the look themes
+    # its colors, each leaf a priority below Stylix's. `cfg.enable` in the
+    # second gate keeps a bar the user turned off unthemed too.
+    (lib.mkIf (profileOn && profileManagesBar) {
+      programs.scootbar.enable = lib.mkDefault true;
+    })
+    (lib.mkIf (profileOn && profileManagesBar && profileLook != null && cfg.enable) {
+      programs.scootbar.settings.colors = lib.mapAttrs (
+        name: value: lib.mkOptionDefault value
+      ) profileLook.barColors;
     })
 
     (lib.mkIf (cfg.enable && cfg.stylix.enable && stylix) {

@@ -9,6 +9,12 @@ let
   cfg = config.programs.scoot;
   tomlFormat = pkgs.formats.toml { };
 
+  # The desktop profile's shared option subtree and look palettes.
+  desktop = import ./desktop.nix { inherit lib; };
+  # Null without a look; the `enum` type guarantees the name is one of
+  # these, so the lookup cannot fail.
+  look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
+
   # Stylix is not an input of this flake: its presence is
   # `config.lib.stylix` (defined by its palette module whether or not it is
   # enabled), and `stylix.enable` (false by default in Stylix itself) says
@@ -76,6 +82,12 @@ in
 {
   options.programs.scoot = {
     enable = lib.mkEnableOption "scoot, the scrolling-tiling Wayland compositor";
+
+    # One switch plus a look choice for a working desktop (see
+    # `desktop.nix` and docs/nix.md). Each side wires only what it owns;
+    # this side owns the config file (the look's `[appearance]` and
+    # `[wallpaper]`), the portal config and the `[xwayland]` knob.
+    desktop = desktop.options;
 
     # `pkgs.scoot` when the flake's overlay (`overlays.default`) is
     # applied, else null: nothing is guessed, since a `scoot` from anywhere
@@ -309,6 +321,77 @@ in
         source = ../../resources/scoot-portals.conf;
       };
     })
+
+    # The desktop profile's user half. `enable` owns the session-adjacent
+    # defaults this side has (the portal config; the session entry and the
+    # system packages are the NixOS side's, the bar is the bar module's,
+    # which reads this profile). `look` themes the rendered config, each
+    # leaf at `mkOptionDefault` so a value the user wrote wins and Stylix
+    # (a `mkDefault` one level up) wins where present -- Stylix stays the
+    # override path.
+    (lib.mkIf cfg.desktop.enable {
+      assertions = [
+        {
+          # A profile for a compositor that is not installed is
+          # nonsense; without `enable` there is no session for the
+          # profile's daemons to join.
+          assertion = cfg.enable;
+          message = ''
+            programs.scoot.desktop.enable needs programs.scoot.enable:
+            the profile themes and serves a scoot session, so scoot itself
+            must be installed.
+          '';
+        }
+      ];
+
+      programs.scoot.portals.enable = lib.mkDefault true;
+    })
+
+    # The `[xwayland]` knob, in its own element: a nested `mkIf` on the leaf
+    # would leave an empty `settings.xwayland` behind when off (the
+    # condition empties the value, not the path), which a whole-element
+    # gate does not.
+    (lib.mkIf (cfg.desktop.enable && cfg.desktop.xwayland.enable) {
+      programs.scoot.settings.xwayland.enabled = lib.mkDefault true;
+    })
+
+    # A look without the profile is a silent no-op; refuse it loudly
+    # instead (kept outside `desktop.enable` so it still fires then, the
+    # way the greeter's assertions sit outside `enable`).
+    (lib.mkIf (cfg.desktop.look != null) {
+      assertions = [
+        {
+          assertion = cfg.desktop.enable;
+          message = ''
+            programs.scoot.desktop.look needs programs.scoot.desktop.enable:
+            the look is applied by the profile, so the profile must be on.
+          '';
+        }
+      ];
+    })
+
+    # The look's compositor colors plus, where the look ships an in-repo
+    # wallpaper, its image and mode (which is what turns `wallpaper.enable`
+    # on and installs scootbg for it). A look without one (`vinyl-sunset`,
+    # whose illustration cannot be committed) sets no `[wallpaper]` keys:
+    # the session shows the flat `background_color` below, and a
+    # `wallpaper` table the user sets themselves pairs with it untouched.
+    # `toString` is the identity on the mode and renders the image path as
+    # its store path.
+    (lib.mkIf (cfg.desktop.enable && cfg.desktop.look != null) {
+      programs.scoot.settings = {
+        appearance = lib.mapAttrs (name: value: lib.mkOptionDefault value) look.appearance;
+      }
+      // lib.optionalAttrs (look.wallpaper != null) {
+        wallpaper = lib.mapAttrs (name: value: lib.mkOptionDefault (toString value)) look.wallpaper;
+      };
+    })
+
+    # The bar half lives in the bar module (`nix/modules/scootbar.nix`
+    # reads this profile): a set of `programs.scootbar` here would need
+    # that module imported, and a conditional set of an undeclared option
+    # fails eval whatever the condition is, so the profile never sets
+    # across the module boundary.
 
     # Stylix defaults, each at its own leaf (`settings.appearance.X`, not
     # `settings.appearance`), which is what lets the user's one value
