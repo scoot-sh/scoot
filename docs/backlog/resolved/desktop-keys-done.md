@@ -14,7 +14,7 @@ ship default key shortcuts that do screen brightness, volume, all of that
 too. Maximize and all the other main ones." Serves **daily-drive**: a laptop
 whose brightness and volume keys do nothing is not daily-drivable.
 
-## Resolution (PR #TBD, 2026-10-05)
+## Resolution (PR #442, 2026-10-05)
 
 Landed as `programs.scoot.desktop.keys` (`nix/modules/keys-home.nix`,
 shapes in `desktop.nix`, system tools in `nixos.nix`, pins in
