@@ -33,7 +33,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use wayland_client::protocol::{
     wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm, wl_surface,
 };
-use wayland_client::{Connection, Dispatch, QueueHandle};
+use wayland_client::{Connection, Dispatch, DispatchError, QueueHandle};
 use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1, ext_session_lock_surface_v1, ext_session_lock_v1,
 };
@@ -759,9 +759,13 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     .keyboard_object
                     .clone()
                     .ok_or("no virtual keyboard")?;
+                // No separate flush: the poison rides `expect_error`'s own
+                // round trip, so the write that provokes the disconnect and
+                // the read that observes it are one step. A flush here plus
+                // a later round trip loses the posted error to EPIPE when
+                // the server closes between the two.
                 keyboard.key(0, code, 1);
-                queue.flush().map_err(|e| e.to_string())?;
-                expect_error(&mut queue, &mut client, &contains)?;
+                expect_error(&conn, &mut queue, &mut client, &contains)?;
                 acks.send(Ack::Done).map_err(|e| e.to_string())?;
                 return Ok(());
             }
@@ -784,9 +788,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     .keyboard_object
                     .clone()
                     .ok_or("no virtual keyboard")?;
+                // No separate flush, as above: the poison rides the round
+                // trip that observes the disconnect.
                 keyboard.modifiers(0, 0, 0, 0);
-                queue.flush().map_err(|e| e.to_string())?;
-                expect_error(&mut queue, &mut client, &contains)?;
+                expect_error(&conn, &mut queue, &mut client, &contains)?;
                 acks.send(Ack::Done).map_err(|e| e.to_string())?;
                 return Ok(());
             }
@@ -808,28 +813,13 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::ExpectError { contains } => {
                 // A protocol error kills the connection: round-trip until
                 // the error (or a deadline), then answer with what it said.
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-                loop {
-                    match queue.roundtrip(&mut client) {
-                        Err(error) => {
-                            let message = error.to_string();
-                            if message.contains(&contains) {
-                                acks.send(Ack::Done).map_err(|e| e.to_string())?;
-                                return Ok(());
-                            }
-                            return Err(format!(
-                                "expected a protocol error containing {contains:?}, got: {message}"
-                            ));
-                        }
-                        Ok(_) => {
-                            if std::time::Instant::now() >= deadline {
-                                return Err(format!(
-                                    "the compositor never sent a protocol error containing {contains:?}"
-                                ));
-                            }
-                        }
-                    }
-                }
+                // The error may already be posted (forged compositor-side
+                // before this step arrived), so the round trip's own write
+                // can hit a closed socket: `expect_error` drains the posted
+                // error before deciding.
+                expect_error(&conn, &mut queue, &mut client, &contains)?;
+                acks.send(Ack::Done).map_err(|e| e.to_string())?;
+                return Ok(());
             }
         }
     }
@@ -837,9 +827,19 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
 }
 
 /// Round-trips until the connection dies with a protocol error containing
-/// `contains`: the poison was just flushed, so the error is still on the
-/// wire rather than behind a teardown the harness already settled.
+/// `contains`: the poison rides the round trip's own flush, so the error is
+/// still on the wire rather than behind a teardown the harness already
+/// settled.
+///
+/// A write after the server closes fails with EPIPE while the error the
+/// server posted is still sitting in the socket buffer, and the round trip
+/// reports the write failure instead of the posted error. So on an I/O
+/// error -- the disconnect without its explanation -- this drains read-side
+/// only (`dispatch_pending`, one `prepare_read`/`read`, `dispatch_pending`,
+/// the same shape as `client_fds`/`drm_syncobj`'s `sync`) and reads what
+/// was actually posted from `conn.protocol_error()` before deciding.
 fn expect_error(
+    conn: &Connection,
     queue: &mut wayland_client::EventQueue<TestClient>,
     client: &mut TestClient,
     contains: &str,
@@ -851,6 +851,25 @@ fn expect_error(
                 let message = error.to_string();
                 if message.contains(contains) {
                     return Ok(());
+                }
+                if matches!(
+                    error,
+                    DispatchError::Backend(wayland_client::backend::WaylandError::Io(_))
+                ) {
+                    let _ = queue.dispatch_pending(client);
+                    if let Some(guard) = conn.prepare_read() {
+                        let _ = guard.read();
+                    }
+                    let _ = queue.dispatch_pending(client);
+                    if let Some(posted) = conn.protocol_error() {
+                        if posted.message.contains(contains) {
+                            return Ok(());
+                        }
+                        return Err(format!(
+                            "expected a protocol error containing {contains:?}, got: {}",
+                            posted.message
+                        ));
+                    }
                 }
                 return Err(format!(
                     "expected a protocol error containing {contains:?}, got: {message}"
