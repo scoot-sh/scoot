@@ -52,6 +52,31 @@ const EVENTS: u32 = 20_000;
 /// Requests flushed per batch: small enough that neither socket fills mid-run.
 const BATCH: u32 = 500;
 
+/// Flushes, yielding to the server when its socket is momentarily full: a
+/// flood outruns a compositor dispatching in slices, and a single flush
+/// that errors `WouldBlock` is backpressure, not failure. Bounded, so a
+/// dead server still fails loudly instead of spinning.
+fn flush_paced(
+    queue: &mut wayland_client::EventQueue<FloodClient>,
+    client: &mut FloodClient,
+) -> Result<(), String> {
+    use std::io::ErrorKind;
+    for _ in 0..100_000 {
+        match queue.flush() {
+            Ok(()) => return Ok(()),
+            Err(wayland_client::backend::WaylandError::Io(error))
+                if error.kind() == ErrorKind::WouldBlock =>
+            {
+                queue
+                    .dispatch_pending(client)
+                    .map_err(|e| format!("flood drain: {e}"))?;
+            }
+            Err(error) => return Err(format!("flood flush: {error}")),
+        }
+    }
+    Err("the server stopped draining mid-flood".to_owned())
+}
+
 type BenchFixture = Harness<(), Flooded>;
 
 /// The flood's own acknowledgement: how many requests went out.
@@ -216,8 +241,12 @@ fn flood_client_inner(
     let qh = queue.handle();
     let _registry = conn.display().get_registry(&qh, ());
     let mut client = FloodClient::default();
-    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
-    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    queue
+        .roundtrip(&mut client)
+        .map_err(|e| format!("setup registry 1: {e}"))?;
+    queue
+        .roundtrip(&mut client)
+        .map_err(|e| format!("setup registry 2: {e}"))?;
 
     // One mapped window, so both foci exist and delivery has somewhere to go.
     let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
@@ -281,10 +310,10 @@ fn flood_client_inner(
         for i in 0..EVENTS {
             keyboard.key(0, 30, u32::from(i % 2 == 0));
             if i % BATCH == 0 {
-                queue.flush().map_err(|e| e.to_string())?;
+                flush_paced(&mut queue, &mut client)?;
             }
         }
-        queue.flush().map_err(|e| e.to_string())?;
+        flush_paced(&mut queue, &mut client)?;
     } else {
         let manager = client.pointer_manager.clone().ok_or("no pointer manager")?;
         let seat = client.seat.clone().ok_or("no wl_seat")?;
@@ -297,10 +326,10 @@ fn flood_client_inner(
             pointer.motion_absolute(0, x, u32::MAX / 2, u32::MAX, u32::MAX);
             pointer.frame();
             if i % BATCH == 0 {
-                queue.flush().map_err(|e| e.to_string())?;
+                flush_paced(&mut queue, &mut client)?;
             }
         }
-        queue.flush().map_err(|e| e.to_string())?;
+        flush_paced(&mut queue, &mut client)?;
     }
     acks.send(Flooded { events: EVENTS })
         .map_err(|e| e.to_string())?;
