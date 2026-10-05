@@ -788,7 +788,7 @@ If you drive scoot from an agent or a script, skip the portals:
 `scoot msg screenshot` captures an output over the privileged IPC
 socket with no portal, no picker and no clipboard involved — the
 agent path, while everything above is the human path. See
-[Screenshots](../scootctl/screenshots.md).
+[Screenshots](../msg/screenshots.md).
 
 Every value is an option, applied on rebuild/switch (the chooser
 file and the binds re-render; no re-login):
