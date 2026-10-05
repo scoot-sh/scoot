@@ -67,9 +67,38 @@ let
           sha256 = image.hash;
         }
       else
-        throw "programs.scoot wallpaper `image` as a set needs string `url` and `hash` (hash in `sha256-...` form)"
+        throw "programs.scoot wallpaper `image` as a set needs string `url` and `hash` (hash as SRI (`sha256-...`) or hex)"
     else
       image;
+
+  # One `[wallpaper]` table with every `{ url, hash }` image — the
+  # top-level `image` and each per-output `output.<name>.image` —
+  # fetched into the store. Anything else renders as written: left as
+  # a set, one would render as a TOML table that scoot's strict section
+  # parse refuses at startup, so a set without string `url` and `hash`
+  # fails here instead, naming the missing half.
+  resolveWallpaperTable =
+    table:
+    let
+      top =
+        if builtins.isAttrs (table.image or null) then
+          table // { image = toString (resolveWallpaperImage table.image); }
+        else
+          table;
+    in
+    if builtins.isAttrs (top.output or null) then
+      top
+      // {
+        output = builtins.mapAttrs (
+          name: per:
+          if builtins.isAttrs per && builtins.isAttrs (per.image or null) then
+            per // { image = toString (resolveWallpaperImage per.image); }
+          else
+            per
+        ) top.output;
+      }
+    else
+      top;
 
   renderedSettings =
     let
@@ -84,22 +113,13 @@ let
           }
         else
           cfg.settings;
-      # A user's `{ url, hash }` image, fetched like a look's above: the
-      # TOML only takes a string here, so the derivation stringifies to
-      # its output path. Anything else under `wallpaper`
+      # A user's `{ url, hash }` images, fetched like a look's above:
+      # the TOML only takes strings here, so each derivation
+      # stringifies to its output path. Anything else under `wallpaper`
       # (a color, a plain string image, a non-table) renders as written.
       fetched =
-        if
-          commanded ? wallpaper
-          && builtins.isAttrs commanded.wallpaper
-          && builtins.isAttrs (commanded.wallpaper.image or null)
-        then
-          commanded
-          // {
-            wallpaper = commanded.wallpaper // {
-              image = toString (resolveWallpaperImage commanded.wallpaper.image);
-            };
-          }
+        if commanded ? wallpaper && builtins.isAttrs commanded.wallpaper then
+          commanded // { wallpaper = resolveWallpaperTable commanded.wallpaper; }
         else
           commanded;
     in

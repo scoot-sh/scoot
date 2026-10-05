@@ -769,10 +769,13 @@ user profile and points `command` at it; NixOS alone puts it on the
 system `PATH` for a hand-written config.
 
 **The wallpaper can be a link.** A look's `image` — and a `settings.wallpaper.image`
-you write — takes `{ url = "..."; hash = "sha256-..."; }` as well as a
+you write — takes `{ url = "..."; hash = "sha256-..."; }` (the hash as
+SRI or hex) as well as a
 path: the profile fetches it once with `pkgs.fetchurl` (the hash verified
 by Nix, the file cached in the store), and scootbg sees an ordinary file.
-A set without string `url` and `hash` fails evaluation. A plain string URL
+A set without string `url` and `hash` fails evaluation. A per-output
+`output.<name>.image` takes the same `{ url, hash }` set and is fetched
+the same way. A plain string URL
 works too, and then scootbg itself downloads and caches it at runtime:
 
 ```nix
@@ -793,7 +796,9 @@ programs.scoot.settings.wallpaper = {
 };
 ```
 
-Runtime downloads need `curl` on `PATH` (NixOS ships it by default).
+Runtime downloads need `curl` on `PATH`: the flake's `scootbg` package
+carries it (appended after your own `PATH`, so yours still wins); a
+`scootbg` from anywhere else needs `curl` installed.
 How the cache works, and what each failure says, is in
 [scootbg's command reference](scootbg/cli.md#a-wallpaper-from-a-link).
 

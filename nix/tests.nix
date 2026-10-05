@@ -571,6 +571,20 @@ let
           url = "file://${urlWallpaperFile}";
         };
       }).config.xdg.configFile."scoot/config.toml".source;
+  # ...and a per-output `{ url, hash }` image resolves the same way: the
+  # top-level string renders as written beside the fetched per-output file.
+  hmWallPerOutputUrl = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    settings.wallpaper = {
+      image = "~/Pictures/hills.jpg";
+      output."DP-2".image = {
+        url = "file://${urlWallpaperFile}";
+        hash = urlWallpaperHash;
+      };
+    };
+  };
 
   # --- Stylix evaluations under test ---
   # Themed: colors, cursor and wallpaper from the stub. `package` and
@@ -1733,6 +1747,16 @@ let
       assert !hmWallUrlBad.success;
       true
     )
+    # ...and a per-output `{ url, hash }` image is fetched at build time
+    # too (the rendered TOML below names the fetched file).
+    (
+      assert allAssertionsHold hmWallPerOutputUrl.config;
+      true
+    )
+    (
+      assert hmWallPerOutputUrl.config.programs.scoot.wallpaper.enable;
+      true
+    )
 
     # --- Stylix (`programs.scoot.stylix.enable`) ---
     # On: the ring and background colors from base16, the cursor name
@@ -2150,6 +2174,7 @@ let
   hmNoWallToml = hmNoWall.config.xdg.configFile."scoot/config.toml".source;
   hmWallNotTableToml = hmWallNotTable.config.xdg.configFile."scoot/config.toml".source;
   hmWallUrlToml = hmWallUrl.config.xdg.configFile."scoot/config.toml".source;
+  hmWallPerOutputUrlToml = hmWallPerOutputUrl.config.xdg.configFile."scoot/config.toml".source;
   hmStylixToml = hmStylix.config.xdg.configFile."scoot/config.toml".source;
   hmStylixColorToml = hmStylixColor.config.xdg.configFile."scoot/config.toml".source;
   hmDeskMusicToml = hmDeskLookMusic.config.xdg.configFile."scoot/config.toml".source;
@@ -3401,6 +3426,17 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   assert got["command"].endswith("/bin/scootbg"), got
   ' ${hmWallUrlToml}
   echo "ok: a [wallpaper] { url, hash } image renders as the fetched file"
+  #    ...and a per-output `{ url, hash }` image renders as the fetched
+  #    file's store path beside the top-level image as written.
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))["wallpaper"]
+  assert got["image"] == "~/Pictures/hills.jpg", got
+  per = got["output"]["DP-2"]
+  assert per["image"].endswith("url-wallpaper.png"), got
+  assert got["command"].endswith("/bin/scootbg"), got
+  ' ${hmWallPerOutputUrlToml}
+  echo "ok: a per-output [wallpaper] { url, hash } image renders as the fetched file"
 
   # 9. Stylix: the rendered file carries the themed appearance, cursor
   #    and wallpaper (with the injected scootbg `command` beside the
