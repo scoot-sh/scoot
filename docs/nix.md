@@ -724,7 +724,10 @@ scoot on is enough: nothing else to install, no path to write.
   `PATH`, for every user and for a session the greeter starts, with or
   without home-manager. Installing it changes nothing until a config asks
   for a wallpaper, which is why it is on by default while the login
-  entry stays opt-in.
+  entry stays opt-in. Direct-module use without the overlay (no package):
+  it defaults off, and only an explicit `wallpaper.enable = true` fails
+  at eval — set `wallpaper.package`, or leave it off with
+  `wallpaper.enable = false` where no wallpaper daemon is wanted at all.
 - **home-manager** installs it whenever `settings` has a `wallpaper`
   table, and renders `command` as the package's store path, so the
   section works whatever is on `PATH`. The path changes with every
@@ -764,6 +767,35 @@ programs.scoot = {
 Either half alone works too: home-manager alone installs scootbg into the
 user profile and points `command` at it; NixOS alone puts it on the
 system `PATH` for a hand-written config.
+
+**The wallpaper can be a link.** A look's `image` — and a `settings.wallpaper.image`
+you write — takes `{ url = "..."; hash = "sha256-..."; }` as well as a
+path: the profile fetches it once with `pkgs.fetchurl` (the hash verified
+by Nix, the file cached in the store), and scootbg sees an ordinary file.
+A set without string `url` and `hash` fails evaluation. A plain string URL
+works too, and then scootbg itself downloads and caches it at runtime:
+
+```nix
+# Fetched at build time (verified, in the store, no network at runtime):
+programs.scoot.settings.wallpaper = {
+  image = {
+    url = "https://example.com/hills.jpg";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  };
+  mode = "fill";
+};
+
+# Or fetched by scootbg at runtime (cached under ~/.cache/scootbg/):
+programs.scoot.settings.wallpaper = {
+  image = "https://example.com/hills.jpg";
+  sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+  mode = "fill";
+};
+```
+
+Runtime downloads need `curl` on `PATH` (NixOS ships it by default).
+How the cache works, and what each failure says, is in
+[scootbg's command reference](scootbg/cli.md#a-wallpaper-from-a-link).
 
 No NixOS VM test boots a session to look at the wallpaper: CI proves the
 same path end to end without one (`scripts/smoke-test.sh` and
@@ -1091,6 +1123,14 @@ programs.scoot.settings.wallpaper = {
 };
 ```
 
+The look does not fetch it for you, deliberately: the illustration's
+license forbids passing it on standalone (naming wallpaper) and automated
+downloading is at best unclear under Pixabay's terms, so no URL is wired
+into the look — your machine downloads it from Pixabay, under Pixabay's
+license, when you choose to. To drop the illustration entirely, remove the
+`[wallpaper]` table: the flat espresso `background_color` is the look
+without it.
+
 **The greeter is passthrough, not profiled.**
 `programs.scoot.desktop.greeter` is `programs.scoot.greeter` under the
 profile's name (same options, same assertions, same forced session entry),
@@ -1236,9 +1276,10 @@ manual recipe.
 **Every later piece has its slot already**, off and inert: one boolean
 (plus a package override where a package is involved) per paved-path child,
 so those children fill bodies without renaming options. Enabling one today
-is accepted and does nothing yet:
+is accepted and does nothing yet. Changes apply on rebuild/switch, like
+every other option here:
 
-| Slot | Type | Default (with `desktop.enable`) | Child | Tool |
+| Slot | Type | Default | Child | Default tool |
 |---|---|---|---|---|
 | `desktop.idle.enable` / `desktop.idle.lock.enable` (+ timeouts, `lock.command`, `lock.settings`) | bool (+ timeout ints, action string, package per tool) | `true` ([Idle and lock](#idle-and-lock): dim 2 min / 10%, lock 4 min, off 5 min) | idle policy + locker | swayidle + swaylock |
 | `desktop.notifications.enable` | bool + package | `false` | notifications (mako now, scootnotify later) | mako |
@@ -1255,6 +1296,9 @@ is accepted and does nothing yet:
 | `desktop.displays.enable` | bool | `false` | output policy | — |
 | `desktop.inputMethod.enable` | bool | `false` | input-method wiring | — |
 | `desktop.automount.enable` | bool + package | `false` | removable-media automount (no child filed yet) | udiskie |
+
+Every slot that installs something also takes `<slot>.package` (a package
+or null, default null): null installs nothing.
 
 Portal backend packages (`xdg-desktop-portal`, `-wlr`, `-gtk`) have no slot
 yet: the profile owns the portal *config* half today, and the capture child

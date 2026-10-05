@@ -52,17 +52,53 @@ let
     && cfg.wallpaper.package != null
     && hasWallpaper
     && builtins.isAttrs cfg.settings.wallpaper;
-  renderedSettings =
-    if injectCommand then
-      cfg.settings
-      // {
-        wallpaper = {
-          command = lib.getExe' cfg.wallpaper.package "scootbg";
-        }
-        // cfg.settings.wallpaper;
-      }
+
+  # An `image` as a look or a user gives it: a path renders as its store
+  # path; `{ url, hash }` is fetched once, into the store, at build time
+  # (`pkgs.fetchurl`, hash verified by Nix), so scootbg and the rendered
+  # TOML only ever see a file. Anything else shaped as a set is a loud
+  # eval error, not a TOML table scoot would refuse at startup.
+  resolveWallpaperImage = image:
+    if builtins.isAttrs image then
+      if image ? url && image ? hash && builtins.isString image.url && builtins.isString image.hash then
+        pkgs.fetchurl { url = image.url; sha256 = image.hash; }
+      else
+        throw "programs.scoot wallpaper `image` as a set needs string `url` and `hash` (hash in `sha256-...` form)"
     else
-      cfg.settings;
+      image;
+
+  renderedSettings =
+    let
+      commanded =
+        if injectCommand then
+          cfg.settings
+          // {
+            wallpaper = {
+              command = lib.getExe' cfg.wallpaper.package "scootbg";
+            }
+            // cfg.settings.wallpaper;
+          }
+        else
+          cfg.settings;
+      # A user's `{ url, hash }` image, fetched like a look's above: the
+      # TOML only takes a string here, so the derivation stringifies to
+      # its output path. Anything else under `wallpaper`
+      # (a color, a plain string image, a non-table) renders as written.
+      fetched =
+        if commanded ? wallpaper
+        && builtins.isAttrs commanded.wallpaper
+        && builtins.isAttrs (commanded.wallpaper.image or null)
+        then
+          commanded
+          // {
+            wallpaper = commanded.wallpaper // {
+              image = toString (resolveWallpaperImage commanded.wallpaper.image);
+            };
+          }
+        else
+          commanded;
+    in
+    fetched;
 
   # Session script path: beside the rendered config, derived from
   # `configFile`'s directory, so a relocated config keeps its script
@@ -377,19 +413,21 @@ in
     })
 
     # The look's compositor colors plus, where the look ships an in-repo
-    # wallpaper, its image and mode (which is what turns `wallpaper.enable`
+    # wallpaper (or a `{ url, hash }` link, fetched at build time), its
+    # image and mode (which is what turns `wallpaper.enable`
     # on and installs scootbg for it). A look without one (`vinyl-sunset`,
-    # whose illustration cannot be committed) sets no `[wallpaper]` keys:
+    # whose illustration cannot be committed or auto-fetched under its
+    # license) sets no `[wallpaper]` keys:
     # the session shows the flat `background_color` below, and a
     # `wallpaper` table the user sets themselves pairs with it untouched.
-    # `toString` is the identity on the mode and renders the image path as
-    # its store path.
+    # `toString` renders the mode as is and the resolved image as its
+    # store path.
     (lib.mkIf (cfg.desktop.enable && cfg.desktop.look != null) {
       programs.scoot.settings = {
         appearance = lib.mapAttrs (name: value: lib.mkOptionDefault value) look.appearance;
       }
       // lib.optionalAttrs (look.wallpaper != null) {
-        wallpaper = lib.mapAttrs (name: value: lib.mkOptionDefault (toString value)) look.wallpaper;
+        wallpaper = lib.mapAttrs (name: value: lib.mkOptionDefault (toString (resolveWallpaperImage value))) look.wallpaper;
       };
     })
 

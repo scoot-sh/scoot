@@ -45,8 +45,10 @@
 #   off installs nothing, with no package it defaults off and only an
 #   explicit `true` fails loudly at eval; the
 #   home-manager side installs it whenever `settings.wallpaper` exists and
-#   renders `command` as its store path (a user's own `command` wins);
-#   the flake wrappers default both packages to the flake's own builds;
+#   renders `command` as its store path (a user's own `command` wins); a
+#   `{ url, hash }` image is fetched once at build time and renders as the
+#   fetched file's store path (a set without both fails loudly), over a
+#   `file://` fixture so the check needs no network;
 #   a macOS home-manager config with a `[wallpaper]` table evaluates, with
 #   no scootbg; and the overlay provides `pkgs.scootbg` (Linux only) and
 #   is what the pure modules default to.
@@ -542,6 +544,33 @@ let
     wallpaper.package = fakeBg;
     settings.wallpaper = "blue";
   };
+  # ...a `{ url, hash }` image: fetched once at build time (a `file://`
+  # fixture, so the check needs no network: fixed-output fetching runs
+  # anywhere), the settings and the rendered TOML naming the fetched file.
+  urlWallpaperFile = builtins.toFile "url-wallpaper.png" "fake downloaded wallpaper";
+  urlWallpaperHash = builtins.hashFile "sha256" urlWallpaperFile;
+  hmWallUrl = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    settings.wallpaper = {
+      image = {
+        url = "file://${urlWallpaperFile}";
+        hash = urlWallpaperHash;
+      };
+      mode = "fill";
+    };
+  };
+  # ...a set without string `url` and `hash` fails loudly at eval (caught
+  # here by `tryEval`, forcing the rendered config file).
+  hmWallUrlBad =
+    builtins.tryEval
+      (evalHome {
+        enable = true;
+        settings.wallpaper.image = {
+          url = "file://${urlWallpaperFile}";
+        };
+      }).config.xdg.configFile."scoot/config.toml".source;
 
   # --- Stylix evaluations under test ---
   # Themed: colors, cursor and wallpaper from the stub. `package` and
@@ -1687,6 +1716,23 @@ let
       assert drvs hmWallNotTable.config.home.packages == drvs [ fakeBg ];
       true
     )
+    # ...a `{ url, hash }` image is fetched at build time (which is what
+    # turns `wallpaper.enable` on and installs scootbg for it; the
+    # rendered TOML below names the fetched file, while `settings` keeps
+    # the user's value verbatim until render)...
+    (
+      assert allAssertionsHold hmWallUrl.config;
+      true
+    )
+    (
+      assert hmWallUrl.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    # ...and a set without string `url` and `hash` never renders.
+    (
+      assert !hmWallUrlBad.success;
+      true
+    )
 
     # --- Stylix (`programs.scoot.stylix.enable`) ---
     # On: the ring and background colors from base16, the cursor name
@@ -2103,6 +2149,7 @@ let
   hmWallOffToml = hmWallOff.config.xdg.configFile."scoot/config.toml".source;
   hmNoWallToml = hmNoWall.config.xdg.configFile."scoot/config.toml".source;
   hmWallNotTableToml = hmWallNotTable.config.xdg.configFile."scoot/config.toml".source;
+  hmWallUrlToml = hmWallUrl.config.xdg.configFile."scoot/config.toml".source;
   hmStylixToml = hmStylix.config.xdg.configFile."scoot/config.toml".source;
   hmStylixColorToml = hmStylixColor.config.xdg.configFile."scoot/config.toml".source;
   hmDeskMusicToml = hmDeskLookMusic.config.xdg.configFile."scoot/config.toml".source;
@@ -2718,6 +2765,11 @@ let
       assert !hmDeskBarOff.config.programs.scootbar.enable;
       true
     )
+    # ...and no look colors reach it either (no `colors` at all).
+    (
+      assert (hmDeskBarOff.config.programs.scootbar.settings.colors or { }) == { };
+      true
+    )
     (
       assert !(hmDeskBarOff.config.systemd.user.services ? scootbar);
       true
@@ -2763,6 +2815,10 @@ let
     )
     (
       assert !osDeskBarOff.config.programs.scootbar.enable;
+      true
+    )
+    (
+      assert (osDeskBarOff.config.programs.scootbar.settings.colors or { }) == { };
       true
     )
     (
@@ -3335,6 +3391,16 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   assert tomllib.load(open(sys.argv[2],"rb")) == {"wallpaper": "blue"}
   ' ${hmNoWallToml} ${hmWallNotTableToml}
   echo "ok: no [wallpaper] table is added, and a non-table renders as written"
+  #    ...a `{ url, hash }` image renders as the fetched file's store path
+  #    (beside the injected scootbg `command`).
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))["wallpaper"]
+  assert got["mode"] == "fill", got
+  assert got["image"].endswith("url-wallpaper.png"), got
+  assert got["command"].endswith("/bin/scootbg"), got
+  ' ${hmWallUrlToml}
+  echo "ok: a [wallpaper] { url, hash } image renders as the fetched file"
 
   # 9. Stylix: the rendered file carries the themed appearance, cursor
   #    and wallpaper (with the injected scootbg `command` beside the

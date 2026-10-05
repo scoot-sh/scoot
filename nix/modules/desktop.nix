@@ -389,11 +389,15 @@ in
 
   # The palettes behind `look`, read from `docs/examples/*` (the
   # `scoot.toml` `[appearance]` and `bar.toml` `[colors]` each look ships).
-  # `wallpaper` is null where the look ships no image in the repository
+  # `wallpaper` is null where the look has no image to ship
   # (`vinyl-sunset`: its illustration is license-barred from being
-  # committed, so the session shows the flat `background_color` below
+  # committed, and from being fetched for the user automatically, so the
+  # session shows the flat `background_color` below
   # unless the user sets `settings.wallpaper` themselves -- see
-  # docs/nix.md), else the in-repo file plus its mode.
+  # docs/nix.md), else the in-repo file plus its mode. `image` is a path,
+  # or `{ url, hash }` (a link fetched once with `pkgs.fetchurl` when the
+  # profile applies it -- resolved in home.nix, since this module takes
+  # only `lib`).
   looks = {
     vinyl-sunset = {
       appearance = {
