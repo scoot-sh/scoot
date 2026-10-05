@@ -16,6 +16,7 @@ mod color;
 mod control;
 mod daemon;
 mod density;
+mod fetch;
 mod framing;
 mod image;
 mod jobs;

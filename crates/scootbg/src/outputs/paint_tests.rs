@@ -29,6 +29,7 @@ fn image(serial: u64) -> Wallpaper {
             filter: Filter::Lanczos3,
         },
         serial,
+        fetch: None,
     }))
 }
 

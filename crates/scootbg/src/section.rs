@@ -9,10 +9,12 @@
 //! ```
 //!
 //! **The schema.** One object. At the top, the wallpaper for every output:
-//! `image` (an absolute path) or `color` (`#rrggbb`), never both, with
-//! `mode`, `fill` and `filter` for an image only, as `scootbg set` takes
-//! them. Neither is nothing: the compositor's own background. `output` is
-//! an object of per-output tables, by connector name, each the same five
+//! `image` (an absolute path, or an `http(s)` URL, downloaded once and
+//! cached: `crate::fetch`) or `color` (`#rrggbb`), never both, with `mode`,
+//! `fill` and `filter` for an image only, as `scootbg set` takes them, and
+//! `sha256` (64 hex digits, pinning a download's bytes) for a URL image
+//! only. Neither is nothing: the compositor's own background. `output` is
+//! an object of per-output tables, by connector name, each the same six
 //! keys and nothing else; an empty one means nothing on that output.
 //! **Each table stands alone**, as a `scootbg set` does: an output's image
 //! does not take the top level's `mode`. `command` is scoot's (where to
@@ -23,8 +25,9 @@
 //! given twice, a `null` or a value of the wrong type, an array where an
 //! object belongs, a relative path (scoot resolves `~/` and relative paths
 //! against its config file before sending; scootbg's working directory is
-//! not the config's), a path with a NUL byte or longer than Linux opens
-//! (`PATH_MAX`), a malformed color, an unknown mode or filter, an empty
+//! not the config's), a URL that is not `http(s)`, a path with a NUL byte or
+//! longer than Linux opens (`PATH_MAX`), a URL past [`crate::fetch::MAX_URL`],
+//! a malformed color or hash, an unknown mode or filter, an empty
 //! output name, more than [`MAX_OUTPUTS`] outputs, or more than
 //! [`MAX_SECTION`] bytes of JSON.
 //!
@@ -38,11 +41,13 @@
 //! that changes with every upgrade under home-manager) never does.
 
 use std::fmt;
+use std::path::Path;
 
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, de::value::MapAccessDeserializer};
 
 use crate::color::{Color, ColorError};
+use crate::fetch::{Fetch, MAX_URL, is_url};
 use crate::image::render::Look;
 use crate::image::{Filter, Mode};
 use crate::protocol::{DEFAULT_FILL, MAX_REQUEST_LINE, PROTOCOL_VERSION};
@@ -74,7 +79,53 @@ pub struct Section {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Table {
     raw: Raw,
-    pick: Pick,
+    pick: Chosen,
+}
+
+/// What one table chooses, validated but not yet resolved: a URL becomes
+/// its cache file only in [`Section::record`], once the cache directory is
+/// known (resolving it at parse time would freeze one machine's
+/// `XDG_CACHE_HOME` into the choice).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Chosen {
+    Clear,
+    Color(Color),
+    Image { source: ImageSource, look: Look },
+}
+
+/// Where a chosen image comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ImageSource {
+    Path(String),
+    Url { url: String, sha256: Option<[u8; 32]> },
+}
+
+impl Chosen {
+    /// Resolves the choice into a [`Pick`]: a URL into its file in
+    /// `cache`.
+    fn record(&self, cache: &Path) -> Pick {
+        match self {
+            Self::Clear => Pick::Clear,
+            Self::Color(color) => Pick::Color(*color),
+            Self::Image { source, look } => match source {
+                ImageSource::Path(path) => Pick::Image {
+                    path: path.clone(),
+                    look: *look,
+                    fetch: None,
+                },
+                ImageSource::Url { url, sha256 } => Pick::Image {
+                    path: crate::fetch::cached_path(cache, url)
+                        .to_string_lossy()
+                        .into_owned(),
+                    look: *look,
+                    fetch: Some(Fetch {
+                        url: url.clone(),
+                        sha256: *sha256,
+                    }),
+                },
+            },
+        }
+    }
 }
 
 /// A table's keys as given. Field order is the canonical key order.
@@ -91,6 +142,8 @@ struct Raw {
     image: Option<String>,
     #[serde(default, deserialize_with = "present")]
     mode: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    sha256: Option<String>,
 }
 
 /// The top level as given: a table's keys, `output` and `command`.
@@ -109,6 +162,8 @@ struct RawSection {
     image: Option<String>,
     #[serde(default, deserialize_with = "present")]
     mode: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    sha256: Option<String>,
     #[serde(default, deserialize_with = "outputs")]
     output: Option<Vec<(String, Raw)>>,
     /// scoot's; accepted and ignored (never part of the fingerprint).
@@ -202,6 +257,17 @@ pub enum SectionError {
     },
     Mode(At, String),
     Filter(At, String),
+    /// A `sha256` that is not 64 hex digits.
+    Sha(At, String),
+    /// A `sha256` with a file: it pins a download. (With a color it is
+    /// the generic image-only refusal, like `mode`.)
+    ShaImageOnly(At),
+    /// An image URL that is not `http(s)`.
+    Scheme(At, String),
+    /// A URL past [`crate::fetch::MAX_URL`].
+    UrlTooLong(At, usize),
+    /// A URL with a NUL byte.
+    UrlNul(At),
 }
 
 /// Which table, for a message: the top level, or an output's.
@@ -253,6 +319,36 @@ impl fmt::Display for SectionError {
                 f,
                 "{at}: unknown filter {filter:?}: lanczos3, catmull-rom, bilinear or nearest"
             ),
+            Self::Sha(at, text) => write!(
+                f,
+                "{at}: the sha256 {text:?} is not 64 hex digits (as `sha256sum` prints)"
+            ),
+            Self::ShaImageOnly(at) => write!(
+                f,
+                "{at}: `sha256` pins a downloaded image, and this one is not a URL"
+            ),
+            Self::Scheme(at, url) => {
+                let scheme = url.split("://").next().unwrap_or_default();
+                if scheme == "file" {
+                    write!(
+                        f,
+                        "{at}: the image {url:?} is a `file://` URL: give the path itself \
+                         (it starts with `/`)"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "{at}: the image URL scheme {scheme:?} is not fetched (`http` and \
+                         `https` are)"
+                    )
+                }
+            }
+            Self::UrlTooLong(at, len) => write!(
+                f,
+                "{at}: the image URL is {len} bytes, longer than the {} taken",
+                crate::fetch::MAX_URL
+            ),
+            Self::UrlNul(at) => write!(f, "{at}: the image URL has a NUL byte"),
         }
     }
 }
@@ -275,6 +371,7 @@ impl Section {
             filter: raw.filter,
             image: raw.image,
             mode: raw.mode,
+            sha256: raw.sha256,
         };
         let all = Table::validate(table, At(None))?;
         let outputs = match raw.output {
@@ -323,21 +420,22 @@ impl Section {
     /// Nothing to show anywhere: no `image` or `color` at the top, and no
     /// per-output table (`{}`, or only `command`).
     pub fn is_empty(&self) -> bool {
-        self.all.pick == Pick::Clear && self.outputs.as_ref().is_none_or(Vec::is_empty)
+        self.all.pick == Chosen::Clear && self.outputs.as_ref().is_none_or(Vec::is_empty)
     }
 
     /// What it chooses, as the state file would record it: the choice for
     /// every output (nothing, when it names none), then each output's.
-    pub fn record(&self) -> Record {
+    /// `cache` turns a URL into its file; a file choice needs no cache.
+    pub fn record(&self, cache: &Path) -> Record {
         Record {
             profile: None,
             fingerprint: None,
-            all: Some(self.all.pick.clone()),
+            all: Some(self.all.pick.record(cache)),
             named: self
                 .outputs
                 .iter()
                 .flatten()
-                .map(|(name, table)| (name.clone(), table.pick.clone()))
+                .map(|(name, table)| (name.clone(), table.pick.record(cache)))
                 .collect(),
         }
     }
@@ -372,44 +470,56 @@ impl Table {
                     ("mode", &raw.mode),
                     ("fill", &raw.fill),
                     ("filter", &raw.filter),
+                    ("sha256", &raw.sha256),
                 ] {
                     if given.is_some() {
                         return Err(SectionError::ImageOnly(at, key));
                     }
                 }
                 match color {
-                    None => Pick::Clear,
-                    Some(text) => Pick::Color(parse_color(&at, "color", text)?),
+                    None => Chosen::Clear,
+                    Some(text) => Chosen::Color(parse_color(&at, "color", text)?),
                 }
             }
-            (Some(path), None) => {
-                if !path.starts_with('/') {
-                    return Err(SectionError::RelativePath(at, path.clone()));
-                }
-                if path.contains('\0') {
-                    return Err(SectionError::PathNul(at));
-                }
-                if path.len() > MAX_PATH {
-                    return Err(SectionError::PathTooLong(at, path.len()));
-                }
-                let mode = match &raw.mode {
-                    None => Mode::default(),
-                    Some(name) => Mode::from_name(name)
-                        .ok_or_else(|| SectionError::Mode(at.clone(), name.clone()))?,
+            (Some(image), None) => {
+                let look = parse_look(&raw, &at)?;
+                let source = if is_url(image) {
+                    if image.contains('\0') {
+                        return Err(SectionError::UrlNul(at));
+                    }
+                    if image.len() > MAX_URL {
+                        return Err(SectionError::UrlTooLong(at, image.len()));
+                    }
+                    let sha256 = match &raw.sha256 {
+                        None => None,
+                        Some(text) => Some(
+                            crate::fetch::parse_sha256(text)
+                                .map_err(|_| SectionError::Sha(at.clone(), text.clone()))?,
+                        ),
+                    };
+                    ImageSource::Url {
+                        url: image.clone(),
+                        sha256,
+                    }
+                } else {
+                    if image.contains("://") {
+                        return Err(SectionError::Scheme(at, image.clone()));
+                    }
+                    if raw.sha256.is_some() {
+                        return Err(SectionError::ShaImageOnly(at));
+                    }
+                    if !image.starts_with('/') {
+                        return Err(SectionError::RelativePath(at, image.clone()));
+                    }
+                    if image.contains('\0') {
+                        return Err(SectionError::PathNul(at));
+                    }
+                    if image.len() > MAX_PATH {
+                        return Err(SectionError::PathTooLong(at, image.len()));
+                    }
+                    ImageSource::Path(image.clone())
                 };
-                let filter = match &raw.filter {
-                    None => Filter::default(),
-                    Some(name) => Filter::from_name(name)
-                        .ok_or_else(|| SectionError::Filter(at.clone(), name.clone()))?,
-                };
-                let fill = match &raw.fill {
-                    None => DEFAULT_FILL,
-                    Some(text) => parse_color(&at, "fill", text)?,
-                };
-                Pick::Image {
-                    path: path.clone(),
-                    look: Look { mode, fill, filter },
-                }
+                Chosen::Image { source, look }
             }
         };
         Ok(Self { raw, pick })
@@ -426,6 +536,7 @@ impl Raw {
             ("filter", &self.filter),
             ("image", &self.image),
             ("mode", &self.mode),
+            ("sha256", &self.sha256),
         ] {
             if let Some(value) = value {
                 key(out, first, name);
@@ -433,6 +544,27 @@ impl Raw {
             }
         }
     }
+}
+
+/// `mode`, `fill` and `filter` as a [`Look`].
+fn parse_look(raw: &Raw, at: &At) -> Result<Look, SectionError> {
+    let mode = match &raw.mode {
+        None => Mode::default(),
+        Some(name) => {
+            Mode::from_name(name).ok_or_else(|| SectionError::Mode(at.clone(), name.clone()))?
+        }
+    };
+    let filter = match &raw.filter {
+        None => Filter::default(),
+        Some(name) => {
+            Filter::from_name(name).ok_or_else(|| SectionError::Filter(at.clone(), name.clone()))?
+        }
+    };
+    let fill = match &raw.fill {
+        None => DEFAULT_FILL,
+        Some(text) => parse_color(at, "fill", text)?,
+    };
+    Ok(Look { mode, fill, filter })
 }
 
 fn parse_color(at: &At, key: &'static str, text: &str) -> Result<Color, SectionError> {

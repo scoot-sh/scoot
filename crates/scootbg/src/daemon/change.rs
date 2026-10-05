@@ -27,7 +27,7 @@ use crate::jobs::{Jobs, Target, Trial};
 use crate::outputs::{Entry, Output};
 use crate::paint::{self, Plan};
 use crate::print::warn;
-use crate::protocol::{OutputList, Show};
+use crate::protocol::{OutputList, Show, Source};
 use crate::waiters::{self, Waiters};
 use crate::wallpaper::{Image, Wallpaper};
 
@@ -206,15 +206,31 @@ impl Changes for Control<'_> {
             Some(Show::Image(request)) => {
                 // Nothing changes until it has decoded (`crate::jobs`): a
                 // trial, drawn for the outputs it targets once none of them
-                // is about to be configured (`images::pump`).
+                // is about to be configured (`images::pump`). A download
+                // is fetched by the worker thread before it decodes.
+                let (path, fetch) = match request.source {
+                    Source::Path(path) => (path.into_owned(), None),
+                    Source::Url { url, sha256 } => {
+                        let fetch = crate::fetch::Fetch {
+                            url: url.into_owned(),
+                            sha256,
+                        };
+                        let path = crate::fetch::dir()
+                            .map(|dir| crate::fetch::cached_path(&dir, &fetch.url))
+                            .map_err(|error| ChangeError::Cache(error.to_string()))?;
+                        let path = path.to_string_lossy().into_owned();
+                        (path, Some(fetch))
+                    }
+                };
                 let image = Arc::new(Image {
-                    path: request.path.into_owned(),
+                    path,
                     look: crate::image::render::Look {
                         mode: request.mode,
                         fill: request.fill,
                         filter: request.filter,
                     },
                     serial: generation,
+                    fetch,
                 });
                 let trial = Trial {
                     conn,

@@ -4,7 +4,7 @@ use std::os::unix::ffi::OsStringExt;
 use super::{ApplyOptions, Command, DaemonOptions, Error, Topic, USAGE, parse, version_string};
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
-use crate::protocol::{ImageRequest, Request, Show};
+use crate::protocol::{ImageRequest, Request, Show, Source};
 use crate::section::Section;
 use crate::state::Profile;
 
@@ -160,7 +160,29 @@ fn image(
 ) -> Result<Command, Error> {
     Ok(Command::Client(Request::Set {
         show: Show::Image(ImageRequest {
-            path: path.to_owned().into(),
+            source: Source::Path(path.to_owned().into()),
+            mode,
+            fill: Color::parse(fill).unwrap(),
+            filter,
+        }),
+        output: output.map(|o| o.to_owned().into()),
+    }))
+}
+
+fn download(
+    url: &str,
+    sha256: Option<[u8; 32]>,
+    mode: Mode,
+    fill: &str,
+    filter: Filter,
+    output: Option<&str>,
+) -> Result<Command, Error> {
+    Ok(Command::Client(Request::Set {
+        show: Show::Image(ImageRequest {
+            source: Source::Url {
+                url: url.to_owned().into(),
+                sha256,
+            },
             mode,
             fill: Color::parse(fill).unwrap(),
             filter,
@@ -295,6 +317,65 @@ fn a_path_is_an_image_made_absolute() {
             image("/a", mode, "#000000", Filter::Lanczos3, None)
         );
     }
+}
+
+#[test]
+fn a_url_is_a_download_not_a_path() {
+    let sha = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    let pinned = crate::sha256::digest(b"test");
+    // Untouched by the working directory, with the other flags as usual.
+    assert_eq!(
+        args(&["set", "https://example.com/a.png"]),
+        download(
+            "https://example.com/a.png",
+            None,
+            Mode::Fill,
+            "#000000",
+            Filter::Lanczos3,
+            None
+        )
+    );
+    assert_eq!(
+        args(&[
+            "set",
+            "http://127.0.0.1:1/a.png",
+            "--mode",
+            "fit",
+            "--sha256",
+            sha,
+            "--output",
+            "DP-1"
+        ]),
+        download(
+            "http://127.0.0.1:1/a.png",
+            Some(pinned),
+            Mode::Fit,
+            "#000000",
+            Filter::Lanczos3,
+            Some("DP-1")
+        )
+    );
+    // A hash that is not one, or with a color or a file, is a usage
+    // error here, not a daemon round trip.
+    assert_eq!(
+        args(&["set", "https://example.com/a.png", "--sha256", "zz"]),
+        Err(Error::BadSha("zz".into()))
+    );
+    assert_eq!(
+        args(&["set", "#000000", "--sha256", sha]),
+        Err(Error::ImageOnly("--sha256"))
+    );
+    assert_eq!(
+        args(&["set", "/a.png", "--sha256", sha]),
+        Err(Error::ShaImageOnly)
+    );
+    assert_eq!(
+        args(&["clear", "--sha256", sha]),
+        Err(Error::Unexpected {
+            command: "clear",
+            argument: "--sha256".into(),
+        })
+    );
 }
 
 #[test]

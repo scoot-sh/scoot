@@ -135,7 +135,10 @@ pub enum Origin {
 
 /// [`apply`], from either origin. Returns what could not be shown (an image
 /// that is not a regular file now), one line each, also said on stderr;
-/// each stays saved all the same.
+/// each stays saved all the same. A downloaded image is always put live:
+/// its cache file may not be there yet, and the worker fetches it when the
+/// outputs are configured; a failed fetch says so then, as a failed draw
+/// does.
 pub fn put(state: &mut State, record: Record, show: bool, origin: Origin) -> Vec<String> {
     let mut problems = Vec::new();
     let mut put = |output: Option<&str>, pick: Pick| {
@@ -143,10 +146,11 @@ pub fn put(state: &mut State, record: Record, show: bool, origin: Origin) -> Vec
         let choice: Choice = match pick {
             Pick::Clear => None,
             Pick::Color(color) => Some(Wallpaper::Color(color)),
-            Pick::Image { path, look } => Some(Wallpaper::Image(Arc::new(Image {
+            Pick::Image { path, look, fetch } => Some(Wallpaper::Image(Arc::new(Image {
                 path,
                 look,
                 serial: generation,
+                fetch,
             }))),
         };
         state.saved.choices.set(output, choice.clone(), generation);
@@ -154,20 +158,24 @@ pub fn put(state: &mut State, record: Record, show: bool, origin: Origin) -> Vec
             return;
         }
         if let Some(Wallpaper::Image(image)) = &choice {
-            if let Err(why) = present(&image.path) {
-                let problem = format!("{:?} for {}: {why}", image.path, Target(output));
-                let what = match origin {
-                    Origin::StateFile => "cannot restore",
-                    Origin::Config => "cannot show, from the [wallpaper] section,",
-                };
-                warn(format_args!(
-                    "scootbg: {what} {problem}; showing the compositor's own background \
-                     there (it stays saved until the next `scootbg set` or `clear` for it)"
-                ));
-                problems.push(problem);
-                // Nothing older shows there instead.
-                state.choices.set(output, None, generation);
-                return;
+            // Remote: recorded live whatever the cache holds (see the
+            // function docs); local: a missing file shows the background.
+            if image.fetch.is_none() {
+                if let Err(why) = present(&image.path) {
+                    let problem = format!("{:?} for {}: {why}", image.path, Target(output));
+                    let what = match origin {
+                        Origin::StateFile => "cannot restore",
+                        Origin::Config => "cannot show, from the [wallpaper] section,",
+                    };
+                    warn(format_args!(
+                        "scootbg: {what} {problem}; showing the compositor's own background \
+                         there (it stays saved until the next `scootbg set` or `clear` for it)"
+                    ));
+                    problems.push(problem);
+                    // Nothing older shows there instead.
+                    state.choices.set(output, None, generation);
+                    return;
+                }
             }
         }
         state.choices.set(output, choice, generation);

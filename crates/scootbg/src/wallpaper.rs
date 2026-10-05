@@ -8,10 +8,14 @@
 //! reads the file again (it may have changed). Outputs of one size share
 //! one image's pixels only within one request (`daemon::canvas::Pixels`
 //! are found by `serial`).
+//!
+//! A remote image (`fetch`) decodes from its cache file (`path`), fetched
+//! on demand by the worker thread (`crate::fetch`).
 
 use std::sync::Arc;
 
 use crate::color::Color;
+use crate::fetch::Fetch;
 use crate::image::render::Look;
 
 #[cfg(test)]
@@ -21,11 +25,18 @@ mod tests;
 #[derive(Debug)]
 pub struct Image {
     /// Absolute (the CLI resolves it, the daemon refuses anything else):
-    /// the daemon's working directory is not the client's.
+    /// the daemon's working directory is not the client's. A remote
+    /// image's cache file (`crate::fetch::cached_path`), best effort when
+    /// the cache directory is not UTF-8 (lossy): the worker decodes what
+    /// [`crate::fetch::ensure`] returns, never this string, so this stays
+    /// only a name for messages, the state file and the choice comparison.
     pub path: String,
     pub look: Look,
     /// The request's generation (`crate::waiters`): unique to it.
     pub serial: u64,
+    /// A download, when the image is a URL: the worker fetches it into
+    /// the cache before decoding. `None` for a file.
+    pub fetch: Option<Fetch>,
 }
 
 #[derive(Debug, Clone)]

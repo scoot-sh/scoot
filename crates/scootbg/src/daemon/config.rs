@@ -149,19 +149,60 @@ pub fn apply(
 }
 
 /// Puts `section`'s choices in place and records its fingerprint; returns
-/// what could not be shown.
+/// what could not be shown. A section naming a download without a cache
+/// directory applies without it (one problem); the fingerprint is still
+/// recorded.
 fn put(state: &mut State, section: &Section, fingerprint: String) -> Vec<String> {
-    let problems = restore::put(state, section.record(), true, Origin::Config);
+    let mut problems = Vec::new();
+    let cache = crate::fetch::dir().map_err(|error| {
+        problems.push(format!(
+            "cannot cache a downloaded wallpaper ({error}); showing the compositor's own \
+             background where the section names one, until the section changes"
+        ));
+    });
+    let mut record = section.record(cache.as_deref().unwrap_or(std::path::Path::new("")));
+    if cache.is_err() {
+        without_downloads(&mut record);
+    }
+    problems.extend(restore::put(state, record, true, Origin::Config));
     state.saved.applied_config(fingerprint);
     problems
 }
 
+/// Drops every downloaded image from `record` (see [`put`]): without a
+/// cache directory there is no file to name for one.
+fn without_downloads(record: &mut Record) {
+    record.all = record.all.take().filter(|pick| match pick {
+        Pick::Image { fetch, .. } => fetch.is_none(),
+        _ => true,
+    });
+    record
+        .named
+        .retain(|(_, pick)| match pick {
+            Pick::Image { fetch, .. } => fetch.is_none(),
+            _ => true,
+        });
+}
+
 /// For an unchanged section: each image it chose that is saved as its own
 /// but not live is put back if its file is there now, and reported if not
-/// (see the module docs). Quiet on stderr: the reply says it.
+/// (see the module docs). A download is put back whether or not its file
+/// is cached, so a choice lost to a profile adopt is live again (the worker
+/// fetches it when the outputs are configured). This does not retry a
+/// failed download: a failed draw stays failed until a reconfigure, a new
+/// `set`, a changed section, or a restart, which is the whole retry
+/// policy — nothing polls. Quiet on stderr: the reply says it.
 fn recheck(state: &mut State, section: &Section) -> Vec<String> {
     let mut problems = Vec::new();
-    let record = section.record();
+    let cache = match crate::fetch::dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            return vec![format!(
+                "cannot cache a downloaded wallpaper ({error}); nothing was re-fetched"
+            )];
+        }
+    };
+    let record = section.record(&cache);
     let entries = record.all.iter().map(|pick| (None, pick)).chain(
         record
             .named
@@ -169,18 +210,24 @@ fn recheck(state: &mut State, section: &Section) -> Vec<String> {
             .map(|(name, pick)| (Some(name.as_str()), pick)),
     );
     for (output, pick) in entries {
-        let Pick::Image { path, look } = pick else {
+        let Pick::Image { path, look, fetch } = pick else {
             continue;
         };
         let is_it = |choice: Option<&Choice>| {
             matches!(
                 choice,
-                Some(Some(Wallpaper::Image(image))) if image.path == *path && image.look == *look
+                Some(Some(Wallpaper::Image(image)))
+                    if image.path == *path && image.look == *look && image.fetch == *fetch
             )
         };
         let saved = state.saved.choices.exact(output);
         if !is_it(saved) || is_it(state.choices.exact(output)) {
             // Replaced by a `set` since, or showing.
+            continue;
+        }
+        if fetch.is_some() {
+            let saved = saved.cloned().flatten();
+            state.choices.fill(output, saved);
             continue;
         }
         match restore::present(path) {

@@ -33,6 +33,7 @@ fn image(path: &std::path::Path, mode: Mode) -> Image {
             filter: Filter::Lanczos3,
         },
         serial: 1,
+        fetch: None,
     }
 }
 

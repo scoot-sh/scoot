@@ -25,6 +25,7 @@ fn image(path: &str) -> Choice {
         path: path.to_owned(),
         look: LOOK,
         serial: 1,
+        fetch: None,
     })))
 }
 
@@ -62,6 +63,7 @@ fn pick_image(path: &str) -> Pick {
     Pick::Image {
         path: path.to_owned(),
         look: LOOK,
+        fetch: None,
     }
 }
 
@@ -78,7 +80,7 @@ fn the_file_reads_as_documented() {
     );
     assert_eq!(
         written,
-        "scootbg-state 1\n\
+        "scootbg-state 2\n\
          profile default\n\
          fingerprint 9c1e\n\
          all color #1e1e2e\n\
@@ -110,7 +112,7 @@ fn everything_round_trips() {
     );
     // Nothing chosen: only the header and profile, and nothing read back.
     let empty = text(None, None, &[]);
-    assert_eq!(empty, "scootbg-state 1\nprofile default\n");
+    assert_eq!(empty, "scootbg-state 2\nprofile default\n");
     let record = clean(empty.as_bytes());
     assert_eq!((record.all, record.named.len()), (None, 0));
     // A clear of every output is a choice, and kept.
@@ -241,7 +243,7 @@ fn a_raw_non_utf8_path_is_skipped_with_a_warning() {
 }
 
 #[test]
-fn headers_other_than_version_1_restore_nothing() {
+fn headers_other_than_versions_1_and_2_restore_nothing() {
     for header in [
         "",
         "scootbg-state",
@@ -275,12 +277,12 @@ fn headers_other_than_version_1_restore_nothing() {
 /// daemon never writes over it.
 #[test]
 fn a_newer_version_is_neither_read_nor_to_be_written() {
-    let parsed = decode(b"scootbg-state 2\nall color #ffffff\nsomething new\n");
+    let parsed = decode(b"scootbg-state 3\nall color #ffffff\nsomething new\n");
     assert!(parsed.newer);
     assert_eq!(parsed.record, Record::default());
     assert_eq!(parsed.warnings.len(), 1);
     assert!(
-        parsed.warnings[0].contains("version 2"),
+        parsed.warnings[0].contains("version 3"),
         "{:?}",
         parsed.warnings
     );
@@ -509,5 +511,84 @@ fn arbitrary_bytes_never_panic() {
         assert!(parsed.record.named.len() <= MAX_OUTPUTS);
         let raw: Vec<u8> = bytes[16..].to_vec();
         let _ = decode(&raw);
+    }
+}
+
+/// A downloaded image round-trips with its URL and its pin; a version-1
+/// file still reads, as a file choice.
+#[test]
+fn downloads_round_trip_and_version_1_still_reads() {
+    use crate::fetch::Fetch;
+    let sha = crate::sha256::digest(b"test");
+    let sha_hex = crate::sha256::hex(b"test");
+    let downloaded = || {
+        Some(Wallpaper::Image(Arc::new(Image {
+            path: "/cache/9f86d081".to_owned(),
+            look: LOOK,
+            serial: 1,
+            fetch: Some(Fetch {
+                url: "https://example.com/a b.png".to_owned(),
+                sha256: Some(sha),
+            }),
+        })))
+    };
+    let written = text(None, Some(&downloaded()), &[]);
+    assert_eq!(
+        written,
+        format!(
+            "scootbg-state 2\nprofile default\nall image /cache/9f86d081 fit #101014 \
+             catmull-rom url https://example.com/a%20b.png sha256 {sha_hex}\n"
+        )
+    );
+    let record = clean(written.as_bytes());
+    assert_eq!(
+        record.all,
+        Some(Pick::Image {
+            path: "/cache/9f86d081".to_owned(),
+            look: LOOK,
+            fetch: Some(Fetch {
+                url: "https://example.com/a b.png".to_owned(),
+                sha256: Some(sha),
+            }),
+        })
+    );
+    // Without a pin, no `sha256` is written.
+    let unpinned = Some(Wallpaper::Image(Arc::new(Image {
+        path: "/cache/aa".to_owned(),
+        look: LOOK,
+        serial: 1,
+        fetch: Some(Fetch {
+            url: "http://127.0.0.1:1/a.png".to_owned(),
+            sha256: None,
+        }),
+    })));
+    let written = text(None, Some(&unpinned), &[]);
+    assert!(
+        written.ends_with("url http://127.0.0.1:1/a.png\n"),
+        "{written}"
+    );
+    // Version 1 has no trailer: its lines read as file choices.
+    let record = clean(b"scootbg-state 1\nall image /a.png fit #101014 catmull-rom\n");
+    assert_eq!(record.all, Some(pick_image("/a.png")));
+}
+
+/// A bad trailer is one skipped line, not a lost file.
+#[test]
+fn bad_trailers_are_skipped() {
+    for line in [
+        // Not a URL.
+        "all image /a.png fit #101014 catmull-rom url /a.png",
+        // Not hex.
+        "all image /a.png fit #101014 catmull-rom url https://example.com/a.png sha256 zz",
+        // A pin without a URL.
+        "all image /a.png fit #101014 catmull-rom sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+        // Anything else back there.
+        "all image /a.png fit #101014 catmull-rom url https://example.com/a.png sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 extra",
+        "all image /a.png fit #101014 catmull-rom url",
+    ] {
+        let parsed = decode(format!("scootbg-state 2\n{line}\n").as_bytes());
+        assert_eq!(parsed.record.all, None, "{line}");
+        assert_eq!(parsed.warnings.len(), 1, "{line}: {:?}", parsed.warnings);
+        assert!(!parsed.newer);
     }
 }

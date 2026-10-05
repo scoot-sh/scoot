@@ -129,6 +129,7 @@ fn image(path: &str, serial: u64) -> Option<Wallpaper> {
             filter: Filter::Lanczos3,
         },
         serial,
+        fetch: None,
     })))
 }
 
@@ -177,7 +178,7 @@ fn the_fingerprint_and_profile_are_kept_as_read() {
     );
     assert_eq!(
         saved.text(),
-        "scootbg-state 1\nprofile scoot\nfingerprint abc123\n"
+        "scootbg-state 2\nprofile scoot\nfingerprint abc123\n"
     );
 }
 
@@ -272,7 +273,7 @@ fn an_applied_section_records_its_fingerprint() {
     assert!(saved.flush(Duration::from_secs(10)));
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
-        "scootbg-state 1\nprofile scoot\nfingerprint f00d\nall color #010101\n\
+        "scootbg-state 2\nprofile scoot\nfingerprint f00d\nall color #010101\n\
          output DP-2 color #020202\n"
     );
     // A `set` after it keeps the fingerprint.
@@ -280,7 +281,7 @@ fn an_applied_section_records_its_fingerprint() {
     assert!(saved.flush(Duration::from_secs(10)));
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
-        "scootbg-state 1\nprofile scoot\nfingerprint f00d\nall color #030303\n"
+        "scootbg-state 2\nprofile scoot\nfingerprint f00d\nall color #030303\n"
     );
     // With nowhere to save, it is still remembered for the daemon's life.
     let mut nowhere = Saved::nowhere();

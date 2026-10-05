@@ -48,6 +48,8 @@ pub type Done = Result<Vec<Rendered>, JobError>;
 #[derive(Debug)]
 pub enum JobError {
     Decode(DecodeError),
+    /// A download failed (`crate::fetch`): said once, naming the URL.
+    Fetch(crate::fetch::FetchError),
     /// The thread ended without a result (a panic, in a build that
     /// unwinds).
     Lost,
@@ -59,9 +61,18 @@ impl std::fmt::Display for JobError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Decode(error) => write!(f, "{error}"),
+            Self::Fetch(error) => write!(f, "{error}"),
             Self::Lost => write!(f, "the decoding thread failed"),
             Self::Spawn(error) => write!(f, "cannot start a decoding thread: {error}"),
         }
+    }
+}
+
+impl JobError {
+    /// Whether the job's download failed (said once per job, not once per
+    /// output: `daemon::images`).
+    pub fn is_fetch(&self) -> bool {
+        matches!(self, Self::Fetch(_))
     }
 }
 
@@ -226,10 +237,19 @@ impl Drop for Guard {
 
 /// Decodes the image once and draws it once per distinct size among the
 /// targets: outputs of one size share that buffer (`daemon::images`
-/// offers it to each). The source is handed to the last size's draw by
+/// offers it to each). A download is fetched first, on this thread (off
+/// the loop); the decoded source is handed to the last size's draw by
 /// value, so it is dropped before that buffer is allocated.
 pub fn work(image: &Image, targets: &[Target]) -> Done {
-    let decoded = decode_file(Path::new(&image.path), image.look.fill).map_err(JobError::Decode)?;
+    let path;
+    let file = match &image.fetch {
+        None => Path::new(&image.path),
+        Some(fetch) => {
+            path = crate::fetch::ensure_cached(fetch).map_err(JobError::Fetch)?;
+            path.as_path()
+        }
+    };
+    let decoded = decode_file(file, image.look.fill).map_err(JobError::Decode)?;
     let mut sizes: Vec<(u32, u32)> = Vec::with_capacity(targets.len());
     for target in targets {
         if !sizes.contains(&target.dims) {

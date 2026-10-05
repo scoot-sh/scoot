@@ -57,9 +57,15 @@ pub fn digest(data: &[u8]) -> [u8; 32] {
 
 /// The digest of `data` in lowercase hex, 64 characters.
 pub fn hex(data: &[u8]) -> String {
+    hex_bytes(&digest(data))
+}
+
+/// `bytes` in lowercase hex, hashed nothing: for showing a digest (a
+/// pinned `sha256`, a cache key), where [`hex`] would hash them again.
+pub fn hex_bytes(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut text = String::with_capacity(64);
-    for byte in digest(data) {
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
         text.push(char::from(DIGITS[usize::from(byte >> 4)]));
         text.push(char::from(DIGITS[usize::from(byte & 0xf)]));
     }

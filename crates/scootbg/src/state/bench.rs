@@ -55,6 +55,7 @@ fn saving() {
                 filter: Filter::Lanczos3,
             },
             serial: 1,
+            fetch: None,
         })))
     };
     // A typical file: an image for every output, and three by name.

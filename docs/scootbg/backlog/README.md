@@ -128,6 +128,7 @@ full per-feature cycle.
 
 ## Milestone 3: extras
 
+- [Wallpapers from a link, downloaded once and cached](resolved/wallpaper-from-url-done.md) — RESOLVED 2026-10-05: `set`/section URLs via `curl` + cache, state format v2, Nix `{ url, hash }`; vinyl-sunset deliberately not auto-fetched (Pixabay terms)
 - [A wallpaper per workspace](per-workspace.md) (`ext-workspace-v1`)
 - [A config file, and rotating through a directory](config-and-rotation.md)
 - [More image formats: AVIF, JPEG XL, HEIF](more-formats.md)
