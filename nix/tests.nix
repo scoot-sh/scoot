@@ -8714,11 +8714,12 @@ let
       assert hmPower.config.programs.scoot.desktop.power.profiles.package == null;
       true
     )
-    # ...refused loudly beside the profile's other fourteen (the
+    # ...refused loudly beside the profile's other sixteen (the
     # idle policy's five, the daemon's one, the launcher's one, the
-    # clipboard slot's three, the capture slot's four).
+    # clipboard slot's three, the capture slot's four, the audio
+    # slot's two).
     (
-      assert builtins.length (failing hmPower.config) == 15;
+      assert builtins.length (failing hmPower.config) == 17;
       true
     )
     (
@@ -8732,10 +8733,11 @@ let
     )
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
-    # three plus the capture slot's five on this side), while the
+    # three plus the capture slot's five on this side plus the audio
+    # slot's two), while the
     # docked-lid rule (plain values, no tools) still lands.
     (
-      assert builtins.length (failing osPower.config) == 16;
+      assert builtins.length (failing osPower.config) == 18;
       true
     )
     (
