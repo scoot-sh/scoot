@@ -196,21 +196,6 @@ on NixOS. `scootbg` and `scootbar` are Linux-only: no macOS package,
 and on macOS a `[wallpaper]` section renders as written and installs
 nothing.
 
-> **Symptom:** converting an old `flexwm` setup builds fine but the
-> session boots on built-in defaults — scale and binds silently gone —
-> or the login entry fails. Three renames, all silent at build time
-> (Nix interpolates store paths without checking the binary exists):
-> `${pkg}/bin/flexwm` → `${pkg}/bin/scoot` in wrappers and `Exec=`
-> lines; `xdg.configFile."flexwm/config.toml"` → `programs.scoot.settings`
-> (or `"scoot/config.toml"`) — this is the dangerous one, so move the
-> content and delete the old entry, otherwise your real config sits
-> orphaned at a path nothing reads; and the module split
-> (`homeModules.scoot`, with the legacy `homeManagerModules.scoot`
-> spelling still resolving, owns the config file, `nixosModules.scoot`
-> owns the binaries and the login entry — a hand-rolled `xdg.configFile`
-> next to the module manages a file scoot never reads, so keep the
-> module's and delete the hand-rolled one).
-
 > **Symptom:** rebuild fails with `not of type 'TOML value'` naming
 > `programs.scoot.settings`. A value with no TOML representation (a Nix
 > function in `settings`) fails the option type-check at evaluation

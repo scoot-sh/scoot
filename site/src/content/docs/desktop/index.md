@@ -72,7 +72,7 @@ pointing scoot's inputs at *your* nixpkgs instead, every store path
 differs, the cache misses, and you compile locally the first time
 (minutes). Turn `follows` on only to unify the tree with your system
 at that cost. Which package name to take, the overlay, `nix run`, the
-macOS split and the old-`flexwm` renames are under [Packaging
+macOS split are under [Packaging
 notes](../start/install.md#packaging-notes).
 
 ## NixOS
