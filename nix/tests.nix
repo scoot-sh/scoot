@@ -34,9 +34,13 @@
 # - the greeter (Linux only: it imports nixpkgs' own regreet module):
 #   `greeter.enable` turns on `services.displayManager.regreet`, forces
 #   the session entry (and its units) on beside it, confines cage to one
-#   output (`-m last`, which a user's own `cageArgs` overrides), leaves
+#   output (`-m last`, which a user's own `cageArgs` overrides), ends the
+#   greeter's processes with its session (`KillUserProcesses` scoped to
+#   the greeter user through `KillOnlyUsers`, which a user's own
+#   `KillUserProcesses` overrides), leaves
 #   the backdrop alone by default and renders a set one as ReGreet's
-#   `background.path`; off changes nothing; GDM/SDDM, an explicitly
+#   `background.path`; off changes nothing (no logind change either);
+#   GDM/SDDM, an explicitly
 #   disabled session entry, a missing `enable`, and a Stylix-owned
 #   backdrop are each refused at eval, naming the conflict;
 # - the two settings failure modes behave as documented (see below);
@@ -313,12 +317,15 @@ let
     # goes: the real option is a freeform submodule, this proves the
     # value lands, and the real-NixOS pin below checks it against
     # nixpkgs' own module). Unset here, as there (logind's own
-    # default, "ignore", then applies). Bools beside strings:
-    # nixpkgs declares `KillUserProcesses` a bool (defaulting to
-    # false), which the modules leave to nixpkgs (the real-NixOS pin
-    # below checks the inherited default).
+    # default, "ignore", then applies). Strings, bools and string
+    # lists: nixpkgs declares `KillUserProcesses` a bool (defaulting
+    # to false, which the power policy leaves alone -- the real-NixOS
+    # pin below checks that inherited default), and the greeter sets
+    # `KillOnlyUsers = [ "greeter" ]` through the freeform leaves.
     options.services.logind.settings.Login = lib.mkOption {
-      type = lib.types.attrsOf (lib.types.either lib.types.str lib.types.bool);
+      type = lib.types.attrsOf (
+        lib.types.either lib.types.str (lib.types.either lib.types.bool (lib.types.listOf lib.types.str))
+      );
       default = { };
     };
     # The locker's PAM service (any key goes: the real option is an
@@ -1141,6 +1148,14 @@ let
     package = fakePkg;
     greeter.enable = true;
   } (greeterUser // { services.displayManager.regreet.cageArgs = [ "-s" ]; });
+  # ...with the user's own `KillUserProcesses`: kept verbatim (a plain
+  # assignment beats the greeter's `mkDefault`, so a user who manages
+  # logind themselves still evaluates with their value standing).
+  osGreeterLogindOverride = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    greeter.enable = true;
+  } (greeterUser // { services.logind.settings.Login.KillUserProcesses = false; });
 
   # --- desktop profile (`programs.scoot.desktop`) evaluations under test ---
   #
@@ -3376,6 +3391,13 @@ let
             "-m"
             "last"
           ];
+        # The greeter's session cleanup holds there too, and renders
+        # into logind.conf (the freeform `KillOnlyUsers` list as one
+        # `greeter` line).
+        assert osRealGreeter.config.services.logind.settings.Login.KillUserProcesses == true;
+        assert osRealGreeter.config.services.logind.settings.Login.KillOnlyUsers == [ "greeter" ];
+        assert lib.hasInfix "KillOnlyUsers=greeter"
+          osRealGreeter.config.environment.etc."systemd/logind.conf".text;
         true
       )
       # The profile's idle half in a real NixOS evaluation too: the
@@ -3804,8 +3826,32 @@ let
       assert osGreeterCageOverride.config.services.displayManager.regreet.cageArgs == [ "-s" ];
       true
     )
+    # ...the greeter's session cleanup: logind kills what the greeter
+    # session leaves behind (`KillUserProcesses`), scoped to the
+    # greeter user (`KillOnlyUsers`), so other users' lingering
+    # processes are untouched.
+    (
+      assert osGreeter.config.services.logind.settings.Login.KillUserProcesses == true;
+      true
+    )
+    (
+      assert osGreeter.config.services.logind.settings.Login.KillOnlyUsers == [ "greeter" ];
+      true
+    )
+    # ...while a user's own `KillUserProcesses` wins over it (a plain
+    # assignment beats our `mkDefault`): still evaluates, assertions
+    # hold, their value stands.
+    (
+      assert allAssertionsHold osGreeterLogindOverride.config;
+      true
+    )
+    (
+      assert osGreeterLogindOverride.config.services.logind.settings.Login.KillUserProcesses == false;
+      true
+    )
     # Off changes nothing: no ReGreet, and (no session entry either) no
-    # entry and no units.
+    # entry and no units -- and no logind change either (the cleanup
+    # pair rides with the greeter, not with the module).
     (
       assert !osGreeterOff.config.services.displayManager.regreet.enable;
       true
@@ -3816,6 +3862,14 @@ let
     )
     (
       assert osGreeterOff.config.systemd.user.units == { };
+      true
+    )
+    (
+      assert !(osGreeterOff.config.services.logind.settings.Login ? KillUserProcesses);
+      true
+    )
+    (
+      assert !(osGreeterOff.config.services.logind.settings.Login ? KillOnlyUsers);
       true
     )
     (

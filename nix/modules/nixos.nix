@@ -1511,6 +1511,25 @@ in
           path = toString cfg.greeter.background;
         };
       };
+
+      # The greeter's processes end with its session: when the greeter
+      # session stops, logind kills whatever is left in its scope. Today
+      # the session-bus `dbus-daemon` that `dbus-run-session` starts (and
+      # ReGreet's AT-SPI bus daemon beside it) survives the session, and
+      # the scope sits `active (abandoned)` with the session `closing`
+      # for good -- one leaked pair per login, greeter crash, and greetd
+      # restart (see the `greeter-session-leak` backlog entry).
+      # Scoped to the greeter user, so every other user's lingering
+      # processes (tmux, ssh agents) are untouched: checked against
+      # `manager_shall_kill` in the pinned systemd source, which with a
+      # non-empty `KillOnlyUsers` kills only that user whatever
+      # `KillUserProcesses` says. Both `mkDefault`, so an explicit user
+      # setting still wins (this composes with the power policy, which
+      # deliberately leaves `KillUserProcesses` alone). The greeter
+      # user's manager (`user@greeter.service`: dbus-broker, pipewire)
+      # is a separate unit outside the session scope, so it survives.
+      services.logind.settings.Login.KillUserProcesses = lib.mkDefault true;
+      services.logind.settings.Login.KillOnlyUsers = lib.mkDefault [ "greeter" ];
     })
   ];
 }

@@ -1234,6 +1234,15 @@ the greeter stays an explicit opt-in on top of the profile. Logging in
 through it starts the same session [First session](../start/first-session.md)
 describes.
 
+**No buildup across logins.**
+While the greeter is on, each greeter session's leftover processes
+(the session bus, ReGreet's accessibility bus) are stopped with the
+session through logind (`KillUserProcesses` scoped to the `greeter`
+user only), so repeated logins leave no `closing` sessions behind.
+An explicit `services.logind.settings.Login.KillUserProcesses` (or
+`KillOnlyUsers`) of your own still wins; with the greeter off, logind
+is left exactly as nixpkgs ships it.
+
 ## XWayland, and what comes next
 
 **XWayland** is a knob plus your existing package choice: the profile's
