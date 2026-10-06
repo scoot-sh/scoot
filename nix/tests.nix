@@ -8749,6 +8749,13 @@ let
       assert osApps.config.services.udisks2.enable;
       true
     )
+    # ...with `/etc/nvme` present, so udisksd's watch on it is an
+    # inotify watch instead of GLib's 4-second retry on a missing
+    # path...
+    (
+      assert builtins.elem "d /etc/nvme 0755 root root -" osApps.config.systemd.tmpfiles.rules;
+      true
+    )
     # ...while neither NetworkManager nor the Bluetooth hardware is
     # touched (no takeover: the pickers only call the CLIs)...
     (
@@ -8785,6 +8792,11 @@ let
     # ...the automounter off: no udisks2, no udiskie...
     (
       assert !osAppsAutomountOff.config.services.udisks2.enable;
+      true
+    )
+    (
+      assert
+        !(builtins.elem "d /etc/nvme 0755 root root -" osAppsAutomountOff.config.systemd.tmpfiles.rules);
       true
     )
     (
@@ -12822,7 +12834,8 @@ let
       true
     )
     (
-      assert osPowerChargeOff.config.systemd.tmpfiles.rules == [ ];
+      # (Only the automount slot's `/etc/nvme`, on with the profile.)
+      assert osPowerChargeOff.config.systemd.tmpfiles.rules == [ "d /etc/nvme 0755 root root -" ];
       true
     )
     (

@@ -1565,6 +1565,16 @@ in
 
       services.udisks2.enable = lib.mkDefault true;
 
+      # udisksd watches `/etc/nvme` (NVMe-oF host identity) through a
+      # GLib directory monitor, and GLib re-tries a watch on a missing
+      # path every 4 s for as long as it is missing: 15 wakeups a
+      # minute, forever, on every box without that directory (measured
+      # on the M2: 15 context switches per idle minute in udisksd's
+      # main-loop thread, all `inotify_add_watch("/etc/nvme") =
+      # ENOENT`; 0 once the directory exists). An empty directory
+      # turns the poll into a plain inotify watch.
+      systemd.tmpfiles.rules = lib.optional config.services.udisks2.enable "d /etc/nvme 0755 root root -";
+
       environment.systemPackages = lib.optional (
         cfg.desktop.automount.package != null
       ) cfg.desktop.automount.package;
