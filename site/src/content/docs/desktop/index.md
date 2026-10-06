@@ -1885,6 +1885,12 @@ Troubleshooting, by symptom:
   to your config's scales, and no event tells the watcher about it.
   Run `scoot-displays apply` to converge now, or wait for the next
   plug.
+- *A scale I set by hand reverted.* With profiles configured, every
+  apply (each plug and unplug, and each idle resume) sets every
+  connected output's scale: the profile's, or your config's when the
+  profile gives none or nothing matches. A hand
+  `scoot msg output-scale` lasts until the next apply; put the scale
+  in a profile (or in `programs.scoot.settings.outputs`) instead.
 - *`apply` exits non-zero.* Its stderr (and the unit's journal) names
   the call that failed and scoot's reason. An output unplugged
   mid-apply is the common one; the next output event applies again.

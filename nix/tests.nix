@@ -13242,7 +13242,22 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
           echo "refused: the test refuses $call" >&2; exit 1
         fi
         printf '%s\n' "$call" >> "$d/calls"; printf '{"type":"ok","locked":false}\n' ;;
-      "msg subscribe") cat "$d/events" ;;
+      "msg subscribe")
+        # With `plug` present, a real dock: answer `subscribed`, wait
+        # (at most 10 s) until the watcher's start-up apply has made a
+        # call past the count `plug` holds, then plug DP-1 in -- the
+        # set becomes the docked one -- and send the add.
+        if [ -f "$d/plug" ]; then
+          printf '%s\n' '{"type":"subscribed","events":["output"]}'
+          for _ in $(seq 100); do
+            [ "$(wc -l < "$d/calls")" -gt "$(cat "$d/plug")" ] && break
+            sleep 0.1
+          done
+          cp "$d/outputs-docked.json" "$d/outputs.json"
+          printf '%s\n' '{"type":"output_added","output":2,"name":"DP-1","width":3840,"height":2160,"scale":1.0}'
+        else
+          cat "$d/events"
+        fi ;;
       *) echo "unexpected scoot args: $*" >&2; exit 99 ;;
     esac
     EOF
@@ -13380,18 +13395,25 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     test "$(ncalls)" -gt "$before"
     echo "ok: one apply at a time"
     # ...watch applies once subscribed (not before, so a plug between
-    # the two is an event, never a miss) and per output event -- an
-    # `output_added` included, the first plug of a monitor that no
-    # restore follows -- ignores other lines, then exits 1 when the
-    # stream ends (so the unit resubscribes instead of idling
-    # unsubscribed)...
-    printf '%s\n' \
-      '{"type":"subscribed","events":["output"]}' \
-      '{"type":"output_added","output":2,"name":"DP-1","width":3840,"height":2160,"scale":1.0}' \
-      > "$SCOOT_DISPLAYS_TEST_DIR/events"
+    # the two is an event, never a miss), then a first plug of DP-1 --
+    # an `output_added` that no restore follows -- turns undocked into
+    # docked: the stub plugs it in only after the start-up apply, and
+    # the add alone drives the docked apply (the panel recorded and
+    # off). The stream then ends, and watch exits 1 (so the unit
+    # resubscribes instead of idling unsubscribed)...
+    rm -f "$held_file"
+    cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-undocked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
     before="$(ncalls)"
-    if ${displaysWatcher} watch 2>/dev/null; then echo "watch exited 0 on stream end (21f)" >&2; exit 1; fi
-    test "$(calls_since "$before" | grep -c -F -x "output-scale DP-1 1")" = 2
+    printf '%s' "$before" > "$SCOOT_DISPLAYS_TEST_DIR/plug"
+    if ${displaysWatcher} watch 2> "$SCOOT_DISPLAYS_TEST_DIR/stderr"; then echo "watch exited 0 on stream end (21f)" >&2; exit 1; fi
+    rm "$SCOOT_DISPLAYS_TEST_DIR/plug"
+    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 2\noutput-scale eDP-1 2\noutput-scale DP-1 1\noutput-power 1 off')"
+    grep -F -q "profile 'undocked' applied" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    grep -F -q "profile 'docked' applied" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    test "$(held)" = '["eDP-1"]'
+    echo "ok: a first plug (output_added) under watch turns undocked into docked"
+    # ...other lines (another kind's event) apply nothing beyond the
+    # start-up apply, and an empty stream applies nothing at all...
     printf '%s\n' \
       '{"type":"subscribed","events":["output"]}' \
       '{"type":"keyboard_changed","name":"English (US)","index":0}' \
@@ -13403,7 +13425,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     before="$(ncalls)"
     if ${displaysWatcher} watch 2>/dev/null; then echo "watch exited 0 on an empty stream (21f)" >&2; exit 1; fi
     test "$(ncalls)" = "$before"
-    echo "ok: watch applies once subscribed and per output event (an add included), and fails on stream end"
+    echo "ok: watch applies once subscribed, ignores other lines, and fails on stream end"
     # ...the clamshell undock: a docked profile darkens the panel, the
     # dock leaves, and with no profile for the panel alone the panel
     # still comes back on (an off the watcher made, so one it undoes),
