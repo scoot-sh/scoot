@@ -195,6 +195,43 @@ let
     ${grimBin} -g "$(${slurpBin}${slurpRegionFlags})" - | ${clipCopyBin}
   '';
 
+  # The power-profile switch: `powerprofilesctl` by absolute store
+  # path when the power child names its package, bare name from PATH
+  # otherwise (off Linux, or without the overlay), with the same
+  # fail-loud contract as the other slot scripts (a missing daemon
+  # exits nonzero with usage, never silently). `cycle` rotates in
+  # PPD's canonical order (power-saver, balanced, performance); an
+  # unrecognized current profile (a driverless daemon, a future
+  # fourth) lands on balanced rather than erroring. `set` refuses
+  # anything but the three. Every path prints the resulting profile,
+  # so the keybind's effect is visible in a terminal too.
+  pow = cfg.desktop.power;
+  ppdBin =
+    if pow.profiles.package != null then lib.getExe pow.profiles.package else "powerprofilesctl";
+  powerProfileScript = pkgs.writeShellScriptBin "scoot-power-profile" ''
+    ctl=${lib.escapeShellArg ppdBin}
+    usage() { echo "usage: scoot-power-profile [status|set <profile>|cycle]" >&2; exit 2; }
+    case "''${1:-status}" in
+      status) exec "$ctl" get ;;
+      set)
+        case "''${2:-}" in
+          performance|balanced|power-saver) exec "$ctl" set "$2" ;;
+          *) usage ;;
+        esac
+        ;;
+      cycle)
+        case "$("$ctl" get)" in
+          power-saver) next=balanced ;;
+          balanced) next=performance ;;
+          performance) next=power-saver ;;
+          *) next=balanced ;;
+        esac
+        "$ctl" set "$next" && "$ctl" get
+        ;;
+      *) usage ;;
+    esac
+  '';
+
   # Whether a slot-gated bind's slot is on.
   slotOn = name: (cfg.desktop.${name}.enable or false);
 
@@ -239,6 +276,7 @@ let
         notifDismiss = "spawn ${makoctl} dismiss";
         notifDnd = "spawn ${makoctl} mode -t do-not-disturb";
         notifHistory = "spawn ${makoctl} restore";
+        powerProfile = "spawn ${powerProfileScript}/bin/scoot-power-profile cycle";
         captureOutput = "spawn ${captureOutput}/bin/scoot-capture-output";
         captureRegion = "spawn ${captureRegion}/bin/scoot-capture-region";
         captureClipboard = "spawn ${captureClipboard}/bin/scoot-capture-clipboard";
@@ -271,6 +309,7 @@ let
   slotScripts =
     lib.optional (slotOn "launcher") launcherScript
     ++ lib.optional (slotOn "clipboard") clipboardPick
+    ++ lib.optional (slotOn "power") powerProfileScript
     ++ lib.optional (slotOn "capture") captureOutput
     ++ lib.optional (slotOn "capture") captureRegion
     ++ lib.optional (slotOn "capture") captureClipboard;

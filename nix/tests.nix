@@ -133,6 +133,18 @@
 #   `theme.targets.capture.enable` opts out); a null tool, a
 #   too-old backend or grim, a negative frame cap and an empty
 #   fixed output each fail eval;
+#   the power policy (`desktop-power` child) is opt-in (never with
+#   the profile): PPD as the system service plus the keymap's
+#   `Super+p` switch (power-saver, balanced, performance, through
+#   `scoot-power-profile` or `powerprofilesctl`, with opt-in
+#   auto-switch on AC transitions), the lid and power-key actions on
+#   the canonical logind path (docked locks, never suspends;
+#   logout never kills user processes), low-battery suspend through
+#   UPower (Suspend at 2%, not the HybridSleep default that fails
+#   without persistent swap), and the desk-aware charge-limit service
+#   (80% default, full-once, trip; inert without the sysfs node); a
+#   null daemon, a cap outside 1..100, a blank battery name and a
+#   low-battery percent above UPower's critical each fail eval;
 #   every profile unit (the idle pair, mako, the bar feed, both
 #   clipboard watchers, and the profile-managed bar -- never the
 #   standalone bar) starts in `scoot-session.target`, never the shared
@@ -301,9 +313,11 @@ let
     # goes: the real option is a freeform submodule, this proves the
     # value lands, and the real-NixOS pin below checks it against
     # nixpkgs' own module). Unset here, as there (logind's own
-    # default, "ignore", then applies).
+    # default, "ignore", then applies). Bools beside strings:
+    # nixpkgs declares `KillUserProcesses` a bool (defaulting to
+    # false), and the power policy sets it explicitly.
     options.services.logind.settings.Login = lib.mkOption {
-      type = lib.types.attrsOf lib.types.str;
+      type = lib.types.attrsOf (lib.types.either lib.types.str lib.types.bool);
       default = { };
     };
     # The locker's PAM service (any key goes: the real option is an
@@ -331,6 +345,34 @@ let
     options.services.pipewire.enable = lib.mkOption {
       type = lib.types.bool;
       default = false;
+    };
+    # The power policy's system services (PPD, UPower, udev rules,
+    # system units, tmpfiles): plain values the pins read, like the
+    # logind and PAM stubs above. The real options merge repeated
+    # `extraRules` the same way (nixpkgs' `lines` type concatenates).
+    options.services.power-profiles-daemon = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+    options.services.upower = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+    options.services.udev.extraRules = lib.mkOption {
+      type = lib.types.lines;
+      default = "";
+    };
+    options.systemd.services = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+    options.systemd.timers = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+    options.systemd.tmpfiles.rules = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
     };
   };
 
@@ -789,6 +831,15 @@ let
   osRealIdle = evalRealNixos {
     enable = true;
     desktop.enable = true;
+  };
+  # The power policy in a real NixOS evaluation: the daemon, UPower,
+  # logind and the charge units against nixpkgs' own modules (not the
+  # stubs) -- in particular PPD's real service, UPower's real
+  # percentage options, and the udev rule merge.
+  osRealPower = evalRealNixos {
+    enable = true;
+    desktop.enable = true;
+    desktop.power.enable = true;
   };
   hmFlake = evalHomeWith flake.homeModule pkgs {
     enable = true;
@@ -2033,6 +2084,240 @@ let
       version = "1.4.0";
     });
   };
+  # --- power policy (`programs.scoot.desktop.power`) evaluations ---
+  #
+  # Opt-in (never with the profile): the daemon, the logind/UPower
+  # policy and the charge service, plus the keymap's profile bind.
+  hmPower = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.power.enable = true;
+  };
+  # ...standalone (no profile): the switch and the CLI run unthemed.
+  hmPowerStandalone = evalHome {
+    enable = true;
+    desktop.power.enable = true;
+  };
+  # ...the charge cap off: the daemon and the lid policy without it.
+  hmPowerChargeOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.chargeLimit.enable = false;
+  };
+  # ...with charge bounds (a lower cap on a named battery, an hourly
+  # trip, a half-day trip end).
+  hmPowerChargeBounds = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.chargeLimit.limit = 70;
+    desktop.power.chargeLimit.battery = "BAT0";
+    desktop.power.chargeLimit.fullAfter = 3600;
+    desktop.power.chargeLimit.tripEndsAfter = 43200;
+  };
+  # ...with auto-switch and lid overrides (values are plain: the udev
+  # merge they render is pinned on the NixOS side below).
+  hmPowerAuto = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.profileOnAC = "performance";
+    desktop.power.profileOnBattery = "power-saver";
+  };
+  hmPowerLid = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.lidSwitch = "lock";
+    desktop.power.powerKey = "ignore";
+  };
+  # ...with a PowerOff trip (no risky-action flag for it).
+  hmPowerLowAction = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.lowBattery.action = "PowerOff";
+  };
+  # Refusals: the policy with no daemon to run it (pinned by message
+  # in `_powerPins`)...
+  hmPowerNoPkg = evalHome {
+    enable = true;
+    desktop.power.enable = true;
+    desktop.power.profiles.package = null;
+  };
+  # ...a cap outside 1..100, and a blank battery name (each pinned by
+  # message in `_powerPins`)...
+  hmPowerBadLimit = evalHome {
+    enable = true;
+    desktop.power.enable = true;
+    desktop.power.chargeLimit.limit = 101;
+  };
+  hmPowerBadBattery = evalHome {
+    enable = true;
+    desktop.power.enable = true;
+    desktop.power.chargeLimit.battery = "   ";
+  };
+  # ...and a low-battery percent above UPower's critical (pinned by
+  # message in `_powerPins`).
+  hmPowerBadLowPct = evalHome {
+    enable = true;
+    desktop.power.enable = true;
+    desktop.power.lowBattery.percentage = 10;
+  };
+
+  # --- power policy system evaluations ---
+  #
+  # The profile with the policy: the daemon installed, the lid and
+  # power-key actions on the canonical logind path, low-battery
+  # suspend through UPower, the charge service, timer and udev rules
+  # present, still additive (no default session).
+  osPower = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.power.enable = true;
+  };
+  # ...standalone (no profile): the policy without the session entry.
+  osPowerStandalone = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.power.enable = true;
+  };
+  # ...the profile without the policy: no daemon, no UPower, logind
+  # untouched, no charge units.
+  osPowerOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  # ...the charge cap off: the daemon and the lid policy without it.
+  osPowerChargeOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.chargeLimit.enable = false;
+  };
+  # ...with auto-switch set: the udev rules select profiles on AC
+  # transitions.
+  osPowerAuto = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.profileOnAC = "performance";
+    desktop.power.profileOnBattery = "power-saver";
+  };
+  # ...with an explicit lid action: the user's value wins over the
+  # policy default (a separate module, the way the greeter's
+  # overrides ride along -- the evaluation above can only set
+  # `programs.scoot`).
+  osPowerLidOverride =
+    evalNixosWith
+      [
+        ./modules/nixos.nix
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        { services.logind.settings.Login.HandleLidSwitch = "ignore"; }
+      ]
+      pkgs
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+        desktop.power.enable = true;
+      };
+  # ...with a PowerOff trip: no risky-action flag beside it.
+  osPowerLowAction = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.lowBattery.action = "PowerOff";
+  };
+  # Refusals: the policy with no daemon, a cap outside 1..100, a
+  # blank battery name, and a low-battery percent above UPower's
+  # critical (each pinned by message in `_powerPins`).
+  osPowerNoPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.profiles.package = null;
+  };
+  osPowerBadLimit = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.chargeLimit.limit = 0;
+  };
+  osPowerBadBattery = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.chargeLimit.battery = "";
+  };
+  osPowerBadLowPct = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    desktop.power.lowBattery.percentage = 6;
+  };
+
+  # A fake PPD for the profile-switch behavior tests: stub
+  # `powerprofilesctl`, scripted at RUN time through files under
+  # `$SCOOT_POWER_TEST_DIR`, so one HM evaluation covers every
+  # scenario. `get` prints the last `set` profile (`current` before
+  # any set) and exits `get-code`; `set` appends its profile to
+  # `sets` and exits `set-code`. Named `powerprofilesctl`, so the
+  # switch script's `lib.getExe` resolves to this binary (the
+  # evaluation below points `profiles.package` at the stubs).
+  ppdStubs =
+    (pkgs.runCommand "powerprofilesctl" { } ''
+      mkdir -p $out/bin
+      cat > $out/bin/powerprofilesctl <<'EOF'
+      #!${pkgs.runtimeShell}
+      case "$1" in
+        get)
+          if [ -s "$SCOOT_POWER_TEST_DIR/sets" ]; then tail -n 1 "$SCOOT_POWER_TEST_DIR/sets"; else cat "$SCOOT_POWER_TEST_DIR/current"; fi
+          exit "$(cat "$SCOOT_POWER_TEST_DIR/get-code")" ;;
+        set) printf '%s\n' "$2" >> "$SCOOT_POWER_TEST_DIR/sets"; exit "$(cat "$SCOOT_POWER_TEST_DIR/set-code")" ;;
+        *) echo "unexpected powerprofilesctl args: $*" >&2; exit 99 ;;
+      esac
+      EOF
+      chmod +x $out/bin/powerprofilesctl
+    '')
+    // {
+      meta = {
+        mainProgram = "powerprofilesctl";
+      };
+    };
+  # The slot on, running the stubs: the switch below is the real
+  # `scoot-power-profile` from the keymap (installed beside the
+  # binds, found by derivation name like the capture scripts -- the
+  # keymap is on explicitly, since there is no profile here to turn
+  # it on).
+  hmPowerScriptTest = evalHome {
+    enable = true;
+    desktop.keys.enable = true;
+    desktop.power.enable = true;
+    desktop.power.profiles.package = ppdStubs;
+  };
+  powerSwitch = slotScriptBin hmPowerScriptTest "scoot-power-profile";
+  # The charge script with no trip (`fullAfter = 0`): the trip
+  # scenario below runs this build beside the default one.
+  chargeScriptNoTrip = import ./modules/power-charge.nix {
+    inherit pkgs lib;
+    limit = 80;
+    fullAfter = 0;
+    tripEndsAfter = 86400;
+    battery = null;
+  };
 
   # Refusals: the profile without scoot, and a look without the profile
   # (both pinned by message in `_desktopPins`)...
@@ -3029,6 +3314,29 @@ let
         assert lib.any (p: (p.pname or "") == "swaylock") osRealIdle.config.environment.systemPackages;
         true
       )
+      # The policy's power half in a real NixOS evaluation too: the
+      # profiles daemon enabled, low-battery suspend through UPower's
+      # own options, the lid actions on the canonical logind path, the
+      # charge service, timer and udev rules merged with nixpkgs' own
+      # -- and still no default session. (Same `allAssertionsHold`
+      # caveat as above.)
+      (
+        assert osRealPower.config.services.power-profiles-daemon.enable;
+        assert osRealPower.config.services.upower.enable;
+        assert osRealPower.config.services.upower.percentageAction == 2;
+        assert osRealPower.config.services.upower.criticalPowerAction == "Suspend";
+        assert osRealPower.config.services.logind.settings.Login.HandleLidSwitch == "suspend";
+        assert osRealPower.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+        assert osRealPower.config.services.logind.settings.Login.KillUserProcesses == false;
+        assert osRealPower.config.systemd.services ? scoot-charge-sync;
+        assert osRealPower.config.systemd.timers ? scoot-charge-sync;
+        assert lib.hasInfix "charge_control_end_threshold" osRealPower.config.services.udev.extraRules;
+        assert osRealPower.config.services.displayManager.defaultSession == null;
+        assert lib.any (
+          p: (p.pname or "") == "power-profiles-daemon"
+        ) osRealPower.config.environment.systemPackages;
+        true
+      )
       # The documented install configs (desktop/index.md) evaluate with
       # the profile on: the minimal NixOS desktop, the GPU-package plus
       # opt-in-greeter variant, and standalone home-manager. A renamed
@@ -3261,6 +3569,7 @@ let
   hmDocsDesktopToml = hmDocsDesktopPure.config.xdg.configFile."scoot/config.toml".source;
   keysToml = hmKeys.config.xdg.configFile."scoot/config.toml".source;
   keysSlotsToml = hmKeysSlots.config.xdg.configFile."scoot/config.toml".source;
+  keysPowerToml = hmPower.config.xdg.configFile."scoot/config.toml".source;
   hmDeskBarToml = hmDeskBar.config.programs.scootbar.configFile;
   hmDeskBarMoonToml = hmDeskBarMoon.config.programs.scootbar.configFile;
   osDeskBarToml = osDeskBar.config.programs.scootbar.configFile;
@@ -3326,6 +3635,17 @@ let
   captureRegionNoLook = slotScriptBin hmCaptureNoLook "scoot-capture-region";
   captureClipboardScript = slotScriptBin hmCapture "scoot-capture-clipboard";
   launchMoon = slotScriptBin hmLaunchLookMoon "scoot-launcher";
+  # The power policy's generated files: the switch script as the
+  # keymap runs it, the charge script as the service runs it (the
+  # `sync` verb stripped), the merged udev rules, and the charge
+  # unit, timer and tmpfiles rule the content checks read.
+  powerSwitchScript = slotScriptBin hmPower "scoot-power-profile";
+  chargeScript = lib.removeSuffix " sync" osPower.config.systemd.services.scoot-charge-sync.serviceConfig.ExecStart;
+  chargeService = osPower.config.systemd.services.scoot-charge-sync;
+  chargeTimer = osPower.config.systemd.timers.scoot-charge-sync;
+  chargeTmpfiles = osPower.config.systemd.tmpfiles.rules;
+  chargeUdev = osPower.config.services.udev.extraRules;
+  chargeAutoUdev = osPowerAuto.config.services.udev.extraRules;
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
   #
@@ -3588,7 +3908,8 @@ let
     # `desktop-notifications` child filled it, `clipboard` when the
     # `desktop-clipboard` child did, `launcher` when the
     # `desktop-launcher` child did, `capture` when the
-    # `desktop-capture` child did).
+    # `desktop-capture` child did -- `power` stays on it: filled by
+    # the `desktop-power` child but opt-in, never with the profile).
     (
       assert hmDesk.config.programs.scoot.desktop.capture.enable;
       true
@@ -3627,6 +3948,12 @@ let
     )
     (
       assert !hmDesk.config.programs.scoot.desktop.power.enable;
+      true
+    )
+    # ...and the charge cap stays off with it (opt-in through the
+    # policy, never through the profile).
+    (
+      assert !hmDesk.config.programs.scoot.desktop.power.chargeLimit.enable;
       true
     )
     (
@@ -7038,6 +7365,482 @@ let
       true
     )
   ];
+
+  # --- power policy (`programs.scoot.desktop.power`) pins (fail
+  # `nix flake check` at eval) ---
+  #
+  # Linux only: the daemon, the logind/UPower policy and the charge
+  # service are system-level wirings with no meaning on Darwin (same
+  # gating as the idle policy above). Each refusal pin also proves
+  # the message names the option (the `hasInfix` half), not just that
+  # something fails.
+  _powerPins = lib.optionals isLinux [
+    # Home-manager: every assertion holds, standalone or with the
+    # profile...
+    (
+      assert allAssertionsHold hmPower.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmPowerStandalone.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmPowerChargeOff.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmPowerChargeBounds.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmPowerAuto.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmPowerLid.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmPowerLowAction.config;
+      true
+    )
+    # ...the charge cap rides with the policy (still individually
+    # disable-able)...
+    (
+      assert hmPower.config.programs.scoot.desktop.power.chargeLimit.enable;
+      true
+    )
+    (
+      assert hmPowerStandalone.config.programs.scoot.desktop.power.chargeLimit.enable;
+      true
+    )
+    (
+      assert !hmPowerChargeOff.config.programs.scoot.desktop.power.chargeLimit.enable;
+      true
+    )
+    # ...the M2's values as defaults (80% cap, auto-detect battery,
+    # trip after 30 min on battery, back after a day on the
+    # charger)...
+    (
+      assert hmPower.config.programs.scoot.desktop.power.chargeLimit.limit == 80;
+      true
+    )
+    (
+      assert hmPower.config.programs.scoot.desktop.power.chargeLimit.battery == null;
+      true
+    )
+    (
+      assert hmPower.config.programs.scoot.desktop.power.chargeLimit.fullAfter == 1800;
+      true
+    )
+    (
+      assert hmPower.config.programs.scoot.desktop.power.chargeLimit.tripEndsAfter == 86400;
+      true
+    )
+    # ...the charge bounds as set (a lower cap on a named battery, an
+    # hourly trip, a half-day trip end)...
+    (
+      assert hmPowerChargeBounds.config.programs.scoot.desktop.power.chargeLimit.limit == 70;
+      true
+    )
+    (
+      assert hmPowerChargeBounds.config.programs.scoot.desktop.power.chargeLimit.battery == "BAT0";
+      true
+    )
+    (
+      assert hmPowerChargeBounds.config.programs.scoot.desktop.power.chargeLimit.fullAfter == 3600;
+      true
+    )
+    (
+      assert hmPowerChargeBounds.config.programs.scoot.desktop.power.chargeLimit.tripEndsAfter == 43200;
+      true
+    )
+    # ...no auto-switch by default (PPD holds whatever is set), the
+    # lid and power-key actions as set, the PowerOff trip as set...
+    (
+      assert hmPower.config.programs.scoot.desktop.power.profileOnAC == null;
+      true
+    )
+    (
+      assert hmPower.config.programs.scoot.desktop.power.profileOnBattery == null;
+      true
+    )
+    (
+      assert hmPowerAuto.config.programs.scoot.desktop.power.profileOnAC == "performance";
+      true
+    )
+    (
+      assert hmPowerAuto.config.programs.scoot.desktop.power.profileOnBattery == "power-saver";
+      true
+    )
+    (
+      assert hmPower.config.programs.scoot.desktop.power.lidSwitch == "suspend";
+      true
+    )
+    (
+      assert hmPower.config.programs.scoot.desktop.power.lidSwitchDocked == "lock";
+      true
+    )
+    (
+      assert hmPower.config.programs.scoot.desktop.power.lidSwitchExternalPower == "suspend";
+      true
+    )
+    (
+      assert hmPower.config.programs.scoot.desktop.power.powerKey == "suspend";
+      true
+    )
+    (
+      assert hmPowerLid.config.programs.scoot.desktop.power.lidSwitch == "lock";
+      true
+    )
+    (
+      assert hmPowerLid.config.programs.scoot.desktop.power.powerKey == "ignore";
+      true
+    )
+    (
+      assert hmPower.config.programs.scoot.desktop.power.lowBattery.percentage == 2;
+      true
+    )
+    (
+      assert hmPower.config.programs.scoot.desktop.power.lowBattery.action == "Suspend";
+      true
+    )
+    (
+      assert hmPowerLowAction.config.programs.scoot.desktop.power.lowBattery.action == "PowerOff";
+      true
+    )
+    # ...the daemon's package on PATH beside the switch script...
+    (
+      assert lib.any (p: (p.pname or "") == "power-profiles-daemon") hmPower.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-power-profile") hmPower.config.home.packages;
+      true
+    )
+    # ...and the profile bind beside the keymap's twenty-one (a
+    # plain string: fire once, never while locked, like the other
+    # slot binds)...
+    (
+      assert builtins.length (builtins.attrNames hmPower.config.programs.scoot.settings.binds) == 22;
+      true
+    )
+    (
+      assert lib.isString hmPower.config.programs.scoot.settings.binds."super+p";
+      true
+    )
+    (
+      assert lib.hasInfix "/bin/scoot-power-profile cycle"
+        hmPower.config.programs.scoot.settings.binds."super+p";
+      true
+    )
+    # ...while the profile without the policy stays at twenty-one
+    # (the new bind is slot-gated, not keymap-owned).
+    (
+      assert builtins.length (builtins.attrNames hmKeys.config.programs.scoot.settings.binds) == 21;
+      true
+    )
+    # Refusals: the policy with no daemon...
+    (
+      assert builtins.length (failing hmPowerNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "power.profiles.package is null" (builtins.head (failing hmPowerNoPkg.config));
+      true
+    )
+    # ...a cap outside 1..100...
+    (
+      assert builtins.length (failing hmPowerBadLimit.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "chargeLimit.limit" (builtins.head (failing hmPowerBadLimit.config));
+      true
+    )
+    # ...a blank battery name...
+    (
+      assert builtins.length (failing hmPowerBadBattery.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "chargeLimit.battery" (builtins.head (failing hmPowerBadBattery.config));
+      true
+    )
+    # ...and a low-battery percent above UPower's critical.
+    (
+      assert builtins.length (failing hmPowerBadLowPct.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "lowBattery.percentage" (builtins.head (failing hmPowerBadLowPct.config));
+      true
+    )
+    # NixOS: every assertion holds, with the profile or standalone...
+    (
+      assert allAssertionsHold osPower.config;
+      true
+    )
+    (
+      assert allAssertionsHold osPowerStandalone.config;
+      true
+    )
+    (
+      assert allAssertionsHold osPowerChargeOff.config;
+      true
+    )
+    (
+      assert allAssertionsHold osPowerAuto.config;
+      true
+    )
+    (
+      assert allAssertionsHold osPowerLidOverride.config;
+      true
+    )
+    (
+      assert allAssertionsHold osPowerLowAction.config;
+      true
+    )
+    # ...the profiles daemon enabled, the flake's package behind it
+    # (still additive: no default session, ever)...
+    (
+      assert osPower.config.services.power-profiles-daemon.enable;
+      true
+    )
+    (
+      assert
+        osPower.config.services.power-profiles-daemon.package.drvPath == pkgs.power-profiles-daemon.drvPath;
+      true
+    )
+    (
+      assert osPower.config.services.displayManager.defaultSession == null;
+      true
+    )
+    # ...low battery through UPower (suspend at 2%, the risky-action
+    # flag beside it -- s2idle, not the HybridSleep default that
+    # would fail without persistent swap)...
+    (
+      assert osPower.config.services.upower.enable;
+      true
+    )
+    (
+      assert osPower.config.services.upower.percentageAction == 2;
+      true
+    )
+    (
+      assert osPower.config.services.upower.criticalPowerAction == "Suspend";
+      true
+    )
+    (
+      assert osPower.config.services.upower.allowRiskyCriticalPowerAction;
+      true
+    )
+    # ...with a PowerOff trip the flag stays out...
+    (
+      assert osPowerLowAction.config.services.upower.criticalPowerAction == "PowerOff";
+      true
+    )
+    (
+      assert !(osPowerLowAction.config.services.upower ? allowRiskyCriticalPowerAction);
+      true
+    )
+    # ...the lid and power-key actions on the canonical logind path
+    # (docked locks, never suspends; logout never takes the user
+    # processes a remote session shares this manager with)...
+    (
+      assert osPower.config.services.logind.settings.Login.HandleLidSwitch == "suspend";
+      true
+    )
+    (
+      assert osPower.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+      true
+    )
+    (
+      assert osPower.config.services.logind.settings.Login.HandleLidSwitchExternalPower == "suspend";
+      true
+    )
+    (
+      assert osPower.config.services.logind.settings.Login.HandlePowerKey == "suspend";
+      true
+    )
+    (
+      assert osPower.config.services.logind.settings.Login.KillUserProcesses == false;
+      true
+    )
+    # ...an explicit lid action winning over the policy default...
+    (
+      assert osPowerLidOverride.config.services.logind.settings.Login.HandleLidSwitch == "ignore";
+      true
+    )
+    # ...the charge cap on with the policy (still individually
+    # disable-able)...
+    (
+      assert osPower.config.programs.scoot.desktop.power.chargeLimit.enable;
+      true
+    )
+    (
+      assert !osPowerChargeOff.config.programs.scoot.desktop.power.chargeLimit.enable;
+      true
+    )
+    # ...the daemon and the charge script installed beside the
+    # profile's own system packages (exactly those two added)...
+    (
+      assert
+        sorted osPower.config.environment.systemPackages == sorted (
+          osDesk.config.environment.systemPackages
+          ++ [
+            pkgs.power-profiles-daemon
+            (import ./modules/power-charge.nix {
+              inherit pkgs lib;
+              limit = 80;
+              fullAfter = 1800;
+              tripEndsAfter = 86400;
+              battery = null;
+            })
+          ]
+        );
+      true
+    )
+    # ...standalone (no profile): the policy without the session
+    # entry or its units...
+    (
+      assert osPowerStandalone.config.services.displayManager.sessionPackages == [ ];
+      true
+    )
+    (
+      assert osPowerStandalone.config.systemd.user.units == { };
+      true
+    )
+    # ...the profile without the policy: no daemon, no UPower, no
+    # charge units, no udev rules -- while the idle child's
+    # docked-lid rule (which the policy twins when on) still lands.
+    (
+      assert osPowerOff.config.services.power-profiles-daemon == { };
+      true
+    )
+    (
+      assert osPowerOff.config.services.upower == { };
+      true
+    )
+    (
+      assert osPowerOff.config.services.logind.settings.Login == { HandleLidSwitchDocked = "lock"; };
+      true
+    )
+    (
+      assert !(osPowerOff.config.systemd.services ? scoot-charge-sync);
+      true
+    )
+    (
+      assert !(osPowerOff.config.systemd.timers ? scoot-charge-sync);
+      true
+    )
+    (
+      assert osPowerOff.config.services.udev.extraRules == "";
+      true
+    )
+    (
+      assert !osPowerOff.config.programs.scoot.desktop.power.chargeLimit.enable;
+      true
+    )
+    # ...the charge cap off: the daemon and the lid policy without
+    # the service, the timer or any udev rule...
+    (
+      assert !(osPowerChargeOff.config.systemd.services ? scoot-charge-sync);
+      true
+    )
+    (
+      assert !(osPowerChargeOff.config.systemd.timers ? scoot-charge-sync);
+      true
+    )
+    (
+      assert osPowerChargeOff.config.systemd.tmpfiles.rules == [ ];
+      true
+    )
+    (
+      assert osPowerChargeOff.config.services.udev.extraRules == "";
+      true
+    )
+    # Refusals: the policy with no daemon, a cap outside 1..100, a
+    # blank battery name, and a low-battery percent above UPower's
+    # critical (each naming the option).
+    (
+      assert builtins.length (failing osPowerNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "power.profiles.package is null" (builtins.head (failing osPowerNoPkg.config));
+      true
+    )
+    (
+      assert builtins.length (failing osPowerBadLimit.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "chargeLimit.limit" (builtins.head (failing osPowerBadLimit.config));
+      true
+    )
+    (
+      assert builtins.length (failing osPowerBadBattery.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "chargeLimit.battery" (builtins.head (failing osPowerBadBattery.config));
+      true
+    )
+    (
+      assert builtins.length (failing osPowerBadLowPct.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "lowBattery.percentage" (builtins.head (failing osPowerBadLowPct.config));
+      true
+    )
+  ];
+
+  # --- power policy off Linux (fail `nix flake check` at eval) ---
+  #
+  # The daemon package is Linux-only like the idle policy's tools: off
+  # Linux it defaults to null, which the assertion refuses loudly
+  # instead of installing nothing silently. The logind, UPower and
+  # charge values are plain data, so the docked-lid rule (and the
+  # rest) still land. (The Linux check above is where the policy is
+  # pinned.)
+  _darwinPowerPins = lib.optionals (!isLinux) [
+    # Home-manager: the daemon null...
+    (
+      assert hmPower.config.programs.scoot.desktop.power.profiles.package == null;
+      true
+    )
+    # ...refused loudly beside the profile's other fourteen (the
+    # idle policy's five, the daemon's one, the launcher's one, the
+    # clipboard slot's three, the capture slot's four).
+    (
+      assert builtins.length (failing hmPower.config) == 15;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "power.profiles.package is null" m) (failing hmPower.config);
+      true
+    )
+    # NixOS: the same null...
+    (
+      assert osPower.config.programs.scoot.desktop.power.profiles.package == null;
+      true
+    )
+    # ...refused loudly there too (the idle policy's five plus the
+    # daemon's one plus the launcher's one plus the clipboard slot's
+    # three plus the capture slot's five on this side), while the
+    # docked-lid rule (plain values, no tools) still lands.
+    (
+      assert builtins.length (failing osPower.config) == 16;
+      true
+    )
+    (
+      assert osPower.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+      true
+    )
+  ];
 in
 assert lib.all (x: x) _pins;
 assert lib.all (x: x) _greeterPins;
@@ -7050,12 +7853,14 @@ assert lib.all (x: x) _clipPins;
 assert lib.all (x: x) _launchPins;
 assert lib.all (x: x) _capturePins;
 assert lib.all (x: x) _keysPins;
+assert lib.all (x: x) _powerPins;
 assert lib.all (x: x) _darwinIdlePins;
 assert lib.all (x: x) _darwinNotifPins;
 assert lib.all (x: x) _darwinClipPins;
 assert lib.all (x: x) _darwinLaunchPins;
 assert lib.all (x: x) _darwinCapturePins;
 assert lib.all (x: x) _darwinKeysPins;
+assert lib.all (x: x) _darwinPowerPins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   set -euo pipefail
@@ -7981,6 +8786,167 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "share/wayland-sessions/scoot.desktop" ${../nix/modules/nixos.nix}
     grep -F -q -- "DesktopNames=scoot" ${../nix/modules/nixos.nix}
     echo "ok: the session entry is a wayland-sessions entry for scoot"
+    # 21. Power policy content: the switch script wraps this
+    #     profile's powerprofilesctl by absolute store path and
+    #     rotates in PPD's canonical order (power-saver, balanced,
+    #     performance); the keymap's profile bind is the nineteenth
+    #     bind with the policy on (a plain string: fire once, never
+    #     while locked, like the other slot binds).
+    grep -F -q -- "${pkgs.power-profiles-daemon}/bin/powerprofilesctl" ${powerSwitchScript}
+    grep -F -q -- "power-saver) next=balanced" ${powerSwitchScript}
+    grep -F -q -- "balanced) next=performance" ${powerSwitchScript}
+    grep -F -q -- "performance) next=power-saver" ${powerSwitchScript}
+    echo "ok: the switch wraps powerprofilesctl and rotates"
+    python3 -c '
+    import sys,tomllib
+    got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
+    assert len(got) == 22, got.keys()
+    assert isinstance(got["super+p"], str), got["super+p"]
+    assert got["super+p"].endswith("/bin/scoot-power-profile cycle"), got["super+p"]
+    ' ${keysPowerToml}
+    echo "ok: the profile bind cycles the daemon on super+p"
+
+    # 21b. The charge service, timer and udev rules: the unit runs
+    #      `scoot-charge sync` as a oneshot; the timer re-syncs five
+    #      minutes after boot and activity; tmpfiles owns the state
+    #      dir for the users group; udev re-applies the group write
+    #      on whatever supply owns a threshold node and re-runs the
+    #      policy on every AC change (no per-machine kernel names in
+    #      the rules -- the timer catches a missed event either way).
+    printf '%s' '${chargeService.serviceConfig.ExecStart}' | grep -F -q -- "/bin/scoot-charge sync"
+    test "${chargeService.serviceConfig.Type}" = oneshot
+    test "${chargeTimer.timerConfig.OnBootSec}" = 1min
+    test "${chargeTimer.timerConfig.OnUnitActiveSec}" = 5min
+    printf '%s' '${lib.concatStringsSep "\n" chargeTmpfiles}' | grep -F -q -- "d /var/lib/scoot-charge 2775 root users -"
+    printf '%s' '${chargeUdev}' | grep -F -q -- 'TEST=="charge_control_end_threshold"'
+    printf '%s' '${chargeUdev}' | grep -F -q -- 'ENV{POWER_SUPPLY_TYPE}=="Mains"'
+    echo "ok: the charge service, timer and udev rules"
+
+    # 21c. The opt-in auto-switch: each set half adds its udev rule
+    #      (AC online selects the AC profile, offline the battery
+    #      one); without either half no rule selects a profile.
+    printf '%s' '${chargeAutoUdev}' | grep -F -q -- 'POWER_SUPPLY_ONLINE}=="1"'
+    printf '%s' '${chargeAutoUdev}' | grep -F -q -- "set performance"
+    printf '%s' '${chargeAutoUdev}' | grep -F -q -- 'POWER_SUPPLY_ONLINE}=="0"'
+    printf '%s' '${chargeAutoUdev}' | grep -F -q -- "set power-saver"
+    if printf '%s' '${chargeUdev}' | grep -F -q -- "powerprofilesctl set"; then echo "auto-switch rule without opt-in (21c)" >&2; exit 1; fi
+    echo "ok: auto-switch is opt-in per power state"
+
+    # 21d. The switch, against stub powerprofilesctl (the REAL script
+    #      from the keymap; scenario files below -- `current` is what
+    #      `get` prints until a `set` lands, `sets` what `set` was
+    #      asked, both codes how it answers).
+    export SCOOT_POWER_TEST_DIR="$PWD/power-test"
+    mkdir -p "$SCOOT_POWER_TEST_DIR"
+    power_setup() {
+      # $1 current, $2 get-code, $3 set-code
+      printf '%s' "$1" > "$SCOOT_POWER_TEST_DIR/current"
+      printf '%s' "$2" > "$SCOOT_POWER_TEST_DIR/get-code"
+      printf '%s' "$3" > "$SCOOT_POWER_TEST_DIR/set-code"
+      : > "$SCOOT_POWER_TEST_DIR/sets"
+    }
+    # balanced cycles to performance, printing it...
+    power_setup 'balanced' 0 0
+    switched="$(${powerSwitch} cycle)"; test "$switched" = performance
+    grep -q -F -x performance "$SCOOT_POWER_TEST_DIR/sets"
+    echo "ok: balanced cycles to performance"
+    # ...performance to power-saver, power-saver to balanced, an
+    # unknown answer back to balanced...
+    power_setup 'performance' 0 0
+    switched="$(${powerSwitch} cycle)"; test "$switched" = power-saver
+    power_setup 'power-saver' 0 0
+    switched="$(${powerSwitch} cycle)"; test "$switched" = balanced
+    power_setup 'quiet' 0 0
+    switched="$(${powerSwitch} cycle)"; test "$switched" = balanced
+    grep -q -F -x balanced "$SCOOT_POWER_TEST_DIR/sets"
+    echo "ok: the rotation covers every state"
+    # ...a failed set fails the cycle (no silent landing)...
+    power_setup 'balanced' 0 1
+    if switched="$(${powerSwitch} cycle)"; then echo "failed set cycled (21d)" >&2; exit 1; fi
+    echo "ok: a failed set fails the cycle"
+    # ...status prints the daemon's answer, set takes exactly the
+    # three, anything else is usage (exit 2).
+    power_setup 'power-saver' 0 0
+    switched="$(${powerSwitch})"; test "$switched" = power-saver
+    switched="$(${powerSwitch} status)"; test "$switched" = power-saver
+    ${powerSwitch} set balanced
+    grep -q -F -x balanced "$SCOOT_POWER_TEST_DIR/sets"
+    if ${powerSwitch} set turbo; then echo "bogus profile accepted (21d)" >&2; exit 1; fi
+    if ${powerSwitch} frobnicate; then echo "bogus verb accepted (21d)" >&2; exit 1; fi
+    echo "ok: status prints, set refuses the rest"
+
+    # 21e. The charge policy, against a fake sysfs (the REAL script
+    #      from the service -- `SCOOT_CHARGE_*` override the battery,
+    #      the AC file and the state dir, so the check needs no
+    #      hardware).
+    export SCOOT_CHARGE_STATE="$PWD/charge-test/state"
+    BAT="$PWD/charge-test/sys/class/power_supply/macsmc-battery"
+    mkdir -p "$BAT" "$SCOOT_CHARGE_STATE"
+    export SCOOT_CHARGE_BATTERY="$BAT"
+    export SCOOT_CHARGE_AC="$PWD/charge-test/sys/class/power_supply/macsmc-ac/online"
+    mkdir -p "$(dirname "$SCOOT_CHARGE_AC")"
+    echo 80 > "$BAT/charge_control_end_threshold"
+    echo 75 > "$BAT/capacity"
+    echo 1 > "$SCOOT_CHARGE_AC"
+    # the limit holds on AC (the first sync baselines, changing
+    # nothing)...
+    ${chargeScript} sync
+    test "$(cat "$BAT/charge_control_end_threshold")" = 80
+    test "$(cat "$SCOOT_CHARGE_STATE/last_ac")" = 1
+    echo "ok: the limit holds on AC"
+    # ...toggle charges full once...
+    ${chargeScript} toggle
+    test "$(cat "$SCOOT_CHARGE_STATE/mode")" = once
+    test "$(cat "$BAT/charge_control_end_threshold")" = 100
+    echo "ok: toggle charges full once"
+    # ...unplug ends the once (back to the limit in the same sync)...
+    echo 0 > "$SCOOT_CHARGE_AC"
+    ${chargeScript} sync
+    test "$(cat "$SCOOT_CHARGE_STATE/mode")" = limit
+    test "$(cat "$BAT/charge_control_end_threshold")" = 80
+    echo "ok: unplug ends full-once"
+    # ...thirty minutes on battery trips the refill on replug...
+    echo $(( $(date +%s) - 2000 )) > "$SCOOT_CHARGE_STATE/unplugged_at"
+    echo 1 > "$SCOOT_CHARGE_AC"
+    ${chargeScript} sync
+    test "$(cat "$SCOOT_CHARGE_STATE/mode")" = trip
+    test "$(cat "$BAT/charge_control_end_threshold")" = 100
+    echo "ok: time on battery trips the refill"
+    # ...a day on the charger ends the trip...
+    echo $(( $(date +%s) - 90000 )) > "$SCOOT_CHARGE_STATE/plugged_at"
+    ${chargeScript} sync
+    test "$(cat "$SCOOT_CHARGE_STATE/mode")" = limit
+    test "$(cat "$BAT/charge_control_end_threshold")" = 80
+    echo "ok: a day on the charger ends the trip"
+    # ...without the trip (fullAfter = 0) the refill never comes...
+    export SCOOT_CHARGE_STATE="$PWD/charge-test/state-no-trip"
+    mkdir -p "$SCOOT_CHARGE_STATE"
+    echo 0 > "$SCOOT_CHARGE_AC"
+    ${chargeScriptNoTrip}/bin/scoot-charge sync
+    echo $(( $(date +%s) - 2000 )) > "$SCOOT_CHARGE_STATE/unplugged_at"
+    echo 1 > "$SCOOT_CHARGE_AC"
+    ${chargeScriptNoTrip}/bin/scoot-charge sync
+    # never written: the implicit default is the limit (no trip was
+    # armed, so there is no mode to persist)
+    test "$(cat "$SCOOT_CHARGE_STATE/mode" 2>/dev/null || echo limit)" = limit
+    test "$(cat "$BAT/charge_control_end_threshold")" = 80
+    echo "ok: fullAfter = 0 disables the trip"
+    # ...status reports the whole state on one line...
+    export SCOOT_CHARGE_STATE="$PWD/charge-test/state"
+    ${chargeScript} status > "$PWD/charge-test/status"
+    grep -F -x -q "mode=limit threshold=80 ac=1 capacity=75%" "$PWD/charge-test/status"
+    echo "ok: status reports the state"
+    # ...without the sysfs node the service is inert, never
+    # refused...
+    export SCOOT_CHARGE_BATTERY="$PWD/charge-test/empty-battery"
+    mkdir -p "$SCOOT_CHARGE_BATTERY"
+    ${chargeScript} sync
+    ${chargeScript} status > "$PWD/charge-test/status-empty"
+    grep -F -q "threshold=unsupported" "$PWD/charge-test/status-empty"
+    echo "ok: no node is inert, not refused"
+    # ...and anything else is usage (exit 2).
+    if ${chargeScript} frobnicate; then echo "bogus charge verb accepted (21e)" >&2; exit 1; fi
+    echo "ok: usage refuses unknown verbs"
   ''}
 
   touch $out

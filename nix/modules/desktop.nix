@@ -161,6 +161,11 @@ let
       slot = "notifications";
       blurb = "show hidden notifications (`makoctl restore`)";
     };
+    powerProfile = {
+      combo = "super+p";
+      slot = "power";
+      blurb = "cycle the power profile (`scoot-power-profile cycle`: power-saver, balanced, performance)";
+    };
     captureOutput = {
       combo = "print";
       slot = "capture";
@@ -191,6 +196,20 @@ let
   isStateIcon =
     icon:
     icon == "" || (builtins.stringLength icon <= 4 && builtins.match "^[ -~]$|^[^ -~]+$" icon != null);
+  # What logind may do on a lid or power-key event (logind.conf(5)
+  # `Handle*=`): the benign set. `kexec` and `factory-reset` are left
+  # out deliberately -- no lid or key should ever trigger those.
+  logindAction = lib.types.enum [
+    "ignore"
+    "lock"
+    "suspend"
+    "hibernate"
+    "hybrid-sleep"
+    "suspend-then-hibernate"
+    "poweroff"
+    "reboot"
+    "halt"
+  ];
 in
 {
   # The shared keymap table above, beside the option subtree and the
@@ -730,9 +749,278 @@ in
       tool = "`wlsunset` (single purpose) or `gammastep` (undecided)";
     };
     # Power profiles, lid and low-battery suspend, charge limit.
-    power = slot {
-      child = "desktop-power";
-      tool = "`power-profiles-daemon` plus logind wiring";
+    # Filled by the `desktop-power` child: `power-profiles-daemon` as
+    # the system service (switched from the keymap's `Super+p` through
+    # `scoot-power-profile`, or with `powerprofilesctl` directly), lid
+    # and power-key policy plus low-battery suspend through logind and
+    # UPower, and the M2's desk-aware charge-limit service (80%
+    # default, full-once, trip) where the hardware has the sysfs node.
+    # Each `package` lives beside this in the side modules (`nixos.nix`
+    # installs system-wide, `power-home.nix` for the user), which is
+    # also where their defaults live; everything here is plain values,
+    # so this file stays `lib`-only.
+    #
+    # Opt-in (NOT on with the profile): lid-close suspend and an 80%
+    # charge cap change what the machine does, with real consequences
+    # on a remotely-driven box (suspend cuts SSH; the reference M2 is
+    # driven over it), so the profile must not smuggle them in -- set
+    # `power.enable` explicitly. Without it, `enable` works standalone
+    # (unthemed: there is nothing the look themes here -- the charge
+    # button inherits the bar's own colors -- and the daemons need the
+    # NixOS side, the way the locker's PAM does).
+    power = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Run the power policy: `power-profiles-daemon` (its package
+          beside this) owning `org.freedesktop.UPower.PowerProfiles`
+          on the system bus, the lid and power-key actions through
+          logind, low-battery suspend through UPower, and the
+          charge-limit service below. Opt-in, never with the profile:
+          lid-close suspend and the charge cap change what the machine
+          does (see site/src/content/docs/desktop/index.md#power).
+        '';
+      };
+
+      # Which profile an AC transition selects (udev, so it covers boot
+      # coldplug too: whichever matches the state at boot applies).
+      # Null holds whatever is set (PPD boots to balanced and keeps the
+      # last `set` across transitions -- PPD deliberately has no
+      # auto-switch of its own: a profile is user intent, not power
+      # state). Set both for the TLP-shaped behavior.
+      profileOnAC = lib.mkOption {
+        type = lib.types.nullOr (
+          lib.types.enum [
+            "performance"
+            "balanced"
+            "power-saver"
+          ]
+        );
+        default = null;
+        example = "performance";
+        description = ''
+          Profile to select when AC is connected (null keeps the
+          current one). Needs `power.enable`.
+        '';
+      };
+
+      # Which profile running on battery selects. Same shape as
+      # `profileOnAC`; null keeps the current one.
+      profileOnBattery = lib.mkOption {
+        type = lib.types.nullOr (
+          lib.types.enum [
+            "performance"
+            "balanced"
+            "power-saver"
+          ]
+        );
+        default = null;
+        example = "power-saver";
+        description = ''
+          Profile to select when running on battery (null keeps the
+          current one). Needs `power.enable`.
+        '';
+      };
+
+      # What closing the lid does (logind's `HandleLidSwitch`). The
+      # M2's proven value: suspend. Over SSH this suspends under you --
+      # hold it off per session with
+      # `systemd-inhibit --what=handle-lid-switch sleep 1d`, or set
+      # `lock` (needs the idle policy's locker) or `ignore`.
+      lidSwitch = lib.mkOption {
+        type = logindAction;
+        default = "suspend";
+        example = "lock";
+        description = ''
+          What closing the lid does (logind's `HandleLidSwitch`).
+          Suspends under SSH too unless inhibited -- see
+          site/src/content/docs/desktop/index.md#power.
+        '';
+      };
+
+      # What closing the lid does with a dock attached or a second
+      # output connected (logind's `HandleLidSwitchDocked`, which fires
+      # only then -- external power alone does not count). Lock, never
+      # suspend: a closed lid on a multi-output box means the user
+      # walked away to the external screen, not that the session should
+      # die. The twin of the idle child's rule (same value, same path,
+      # so the two merge); effective only while the idle policy's
+      # locker listens for logind's Lock.
+      lidSwitchDocked = lib.mkOption {
+        type = logindAction;
+        default = "lock";
+        example = "ignore";
+        description = ''
+          What closing the lid does while docked or multi-output
+          (logind's `HandleLidSwitchDocked`). Lock, never suspend: the
+          session stays up behind the external screen.
+        '';
+      };
+
+      # What closing the lid does on external power without a dock
+      # (logind's `HandleLidSwitchExternalPower`). The M2's proven
+      # value: suspend (a charger is not a screen).
+      lidSwitchExternalPower = lib.mkOption {
+        type = logindAction;
+        default = "suspend";
+        example = "lock";
+        description = ''
+          What closing the lid does on external power without a dock
+          (logind's `HandleLidSwitchExternalPower`).
+        '';
+      };
+
+      # What the power key does (logind's `HandlePowerKey`). The M2's
+      # proven value: suspend (short press; long press is the
+      # firmware's, not logind's).
+      powerKey = lib.mkOption {
+        type = logindAction;
+        default = "suspend";
+        example = "ignore";
+        description = ''
+          What the power key does (logind's `HandlePowerKey`).
+        '';
+      };
+
+      # Low-battery suspend through UPower (which the M2 already runs:
+      # its `macsmc-battery` is visible there with history and
+      # statistics). No auto-suspend on idle timers -- the idle child
+      # owns idle timing and deliberately suspends nothing (see its
+      # reference: the box is reached over SSH) -- only this
+      # battery-percentage trip, plus the lid and power-key paths
+      # above. Hibernate is not wired: s2idle is the only sleep state
+      # the reference hardware has, and its swap is zram (no
+      # persistent image to hibernate into), so the UPower default
+      # (`HybridSleep`) would fail there instead of sleeping -- the
+      # default below suspends, which s2idle does.
+      lowBattery = {
+        # Battery percent that trips the action (UPower's
+        # `PercentageAction`, against its `PercentageLow` 20 /
+        # `PercentageCritical` 5, which stay at UPower's defaults:
+        # anything above 5 breaks the descending order and UPower
+        # silently falls back to its own triple, so the range ends
+        # there).
+        percentage = lib.mkOption {
+          type = lib.types.int;
+          default = 2;
+          example = 5;
+          description = ''
+            Battery percent that trips `action` (UPower's
+            `PercentageAction`). 0 to 5: above 5 UPower discards the
+            whole triple for its defaults.
+          '';
+        };
+
+        # What the trip does (UPower's `CriticalPowerAction`).
+        # `Suspend` (the default) needs UPower's risky-action flag,
+        # which the module sets beside it; `PowerOff` needs none.
+        # `Hibernate` and `HybridSleep` are accepted for hardware with
+        # persistent swap and a deeper sleep state, and unsupported on
+        # the reference box (see above).
+        action = lib.mkOption {
+          type = lib.types.enum [
+            "Suspend"
+            "PowerOff"
+            "Hibernate"
+            "HybridSleep"
+            "Ignore"
+          ];
+          default = "Suspend";
+          example = "PowerOff";
+          description = ''
+            What low battery does (UPower's `CriticalPowerAction`).
+            Suspend by default (s2idle); hibernate needs persistent
+            swap the reference box has not got.
+          '';
+        };
+      };
+
+      # The desk-aware charge limit, ported from the M2's hand-wired
+      # `charge.nix` (which this obsoletes when adopted): the battery
+      # normally stops at `limit` percent (sitting at 100% on the
+      # charger is what wears it most), charges to 100% once on demand
+      # (`scoot-charge full-once`, until the next unplug), and refills
+      # to 100% on its own after `fullAfter` seconds on battery (a
+      # trip needs the range), dropping back after `tripEndsAfter`
+      # seconds straight on the charger. Root re-syncs on every AC
+      # change (udev) and every 5 minutes (a timer, which catches a
+      # missed event); the bar button (`scoot-charge toggle` on the
+      # push module's click) needs no password: the threshold file and
+      # the state directory are group-writable, and every change is
+      # pushed to the bar (which never polls).
+      #
+      # Where the hardware has no charge-control node the service is
+      # inert, not refused: it logs one line and exits 0 (eval cannot
+      # see the machine -- refusing there would break one shared
+      # config across heterogeneous hardware). A set `limit` outside
+      # 1..100, or a blank `battery`, fails evaluation.
+      chargeLimit = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Cap the charge through the battery's
+            `charge_control_end_threshold` node (the desk-aware policy
+            above: limit, full-once, trip). On with `power.enable`
+            (still individually disable-able); inert without the sysfs
+            node.
+          '';
+        };
+
+        # The percent the battery normally stops at (80: the M2's
+        # measured default -- longevity over range, day to day).
+        limit = lib.mkOption {
+          type = lib.types.int;
+          default = 80;
+          example = 70;
+          description = ''
+            The percent the battery normally stops at. 1 to 100.
+          '';
+        };
+
+        # Which battery to cap, as the kernel names it in
+        # `/sys/class/power_supply` (`macsmc-battery` on Apple
+        # silicon, `BAT0` on most laptops). Null takes the first
+        # supply with a `charge_control_end_threshold` node, so one
+        # config travels across machines.
+        battery = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          example = "BAT0";
+          description = ''
+            Which battery to cap (a `/sys/class/power_supply` name).
+            Null auto-detects the first supply with a
+            `charge_control_end_threshold` node.
+          '';
+        };
+
+        # Seconds on battery before the next charge refills to 100%
+        # (the trip: 30 min, the M2's value). 0 disables the trip
+        # (full-once stays manual).
+        fullAfter = lib.mkOption {
+          type = lib.types.int;
+          default = 1800;
+          example = 3600;
+          description = ''
+            Seconds on battery before the next charge goes to 100%.
+            0 disables the trip.
+          '';
+        };
+
+        # Seconds straight on the charger before a trip drops back to
+        # the limit (a day, the M2's value). 0 keeps the trip until
+        # the next unplug.
+        tripEndsAfter = lib.mkOption {
+          type = lib.types.int;
+          default = 86400;
+          example = 43200;
+          description = ''
+            Seconds on the charger before a trip drops back to
+            `limit`. 0 keeps it until unplug.
+          '';
+        };
+      };
     };
     # GTK/Qt settings, dark-mode signal and a non-Stylix fallback.
     # Stylix stays the override path where present (as for `look`).

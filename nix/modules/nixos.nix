@@ -86,6 +86,22 @@ let
     "scoot-session.target".text = builtins.readFile ../../resources/systemd/user/scoot-session.target;
     "scoot-shutdown.target".text = builtins.readFile ../../resources/systemd/user/scoot-shutdown.target;
   };
+
+  # The desk-aware charge-limit script, with the charge option values
+  # baked in (see `power-charge.nix`): the service below runs its
+  # `sync`, the bar button its `toggle`, and it installs on PATH
+  # beside them. Lazy, like everything else here: referenced only
+  # while `power.chargeLimit.enable` is on, so a config without the
+  # policy never builds it.
+  scootCharge = import ./power-charge.nix {
+    inherit pkgs lib;
+    inherit (cfg.desktop.power.chargeLimit)
+      limit
+      fullAfter
+      tripEndsAfter
+      battery
+      ;
+  };
 in
 {
   # nixpkgs' own ReGreet module, so `services.displayManager.regreet`
@@ -412,6 +428,28 @@ in
             themed flags are the home-manager side's). Null installs
             nothing. Linux-only: null off Linux.
           '';
+        };
+      };
+
+      # The power policy's daemon package: the shape is in `desktop.nix`
+      # (shared with the home-manager side) and the profile switch that
+      # calls it is that side's (`keys-home.nix`); this side runs the
+      # daemon system-wide. The same package as there, so either side
+      # alone names the same daemon. Merged here for the same
+      # one-declaration reason as above. Linux-only: off Linux it
+      # defaults to null, which the assertion below refuses loudly.
+      power = desktop.options.power // {
+        profiles = {
+          package = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.power-profiles-daemon or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.power-profiles-daemon or null else null";
+            description = ''
+              The power-profiles-daemon package to run system-wide
+              (its `powerprofilesctl` is the profile switch's CLI).
+              Null installs nothing. Linux-only: null off Linux.
+            '';
+          };
         };
       };
     };
@@ -979,6 +1017,193 @@ in
           ++ [ "max_fps=${toString cap.maxFps}" ]
         )
         + "\n";
+    })
+    # The power policy's system half: the profiles daemon, the lid and
+    # power-key actions, low-battery suspend, and the charge-limit
+    # service. The profile switch and the charge button's fill unit are
+    # the home-manager side's (`keys-home.nix`, `power-home.nix`):
+    # without it the daemon and the tools sit ready for a hand-written
+    # setup, the way a `[wallpaper]` finds scootbg on PATH without the
+    # home-manager side. Opt-in (never with the profile): lid-close
+    # suspend and the charge cap are behavior changes, not defaults.
+    (lib.mkIf cfg.desktop.power.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.power.profiles.package != null;
+          message = ''
+            programs.scoot.desktop.power.enable is set but
+            programs.scoot.desktop.power.profiles.package is null: set
+            it explicitly (apply the overlay, or point at a
+            power-profiles-daemon).
+          '';
+        }
+        {
+          # Loud at eval, not a threshold the kernel refuses at write:
+          # `charge_control_end_threshold` takes a percent.
+          assertion =
+            !cfg.desktop.power.chargeLimit.enable
+            || (cfg.desktop.power.chargeLimit.limit >= 1 && cfg.desktop.power.chargeLimit.limit <= 100);
+          message = ''
+            programs.scoot.desktop.power.chargeLimit.limit is a charge
+            percent, 1 to 100.
+          '';
+        }
+        {
+          # Loud at eval, like `session.command`'s: the name renders
+          # into sysfs and udev paths, so an explicitly empty or
+          # whitespace-only value would address the wrong file.
+          assertion =
+            !cfg.desktop.power.chargeLimit.enable
+            || cfg.desktop.power.chargeLimit.battery == null
+            || builtins.match "^[[:space:]]*$" cfg.desktop.power.chargeLimit.battery == null;
+          message = ''
+            programs.scoot.desktop.power.chargeLimit.battery is empty
+            or blank: set the kernel's battery name (e.g. `BAT0`), or
+            leave it null to auto-detect.
+          '';
+        }
+        {
+          # Loud at eval: UPower discards its whole percentage triple
+          # for its own defaults unless low <= critical <= action is
+          # descending, and this module leaves low (20) and critical
+          # (5) at UPower's defaults -- so the action must stay at or
+          # under 5, or the setting would silently do nothing.
+          assertion =
+            cfg.desktop.power.lowBattery.percentage >= 0 && cfg.desktop.power.lowBattery.percentage <= 5;
+          message = ''
+            programs.scoot.desktop.power.lowBattery.percentage is a
+            battery percent at or under 5: UPower keeps `PercentageLow`
+            20 and `PercentageCritical` 5, and anything above 5 breaks
+            the descending order, so UPower would silently use its own
+            triple instead.
+          '';
+        }
+      ];
+
+      # The charge cap rides with the policy (still individually
+      # disable-able at plain priority, the way the lock rides with
+      # the idle policy).
+      programs.scoot.desktop.power.chargeLimit.enable = lib.mkDefault true;
+
+      # The profiles daemon behind the keymap's switch. On hardware
+      # with no PPD driver (Apple silicon: no `platform_profile`, no
+      # EPP -- measured on the M2, whose cpufreq runs `apple-cpufreq`
+      # with the `schedutil` governor and the `apple_idle` deep state)
+      # the daemon still runs and still owns the bus name -- which is
+      # what widgets read (the M2's own shell pulls it in for its
+      # battery/power widgets) -- but changes no CPU behavior. That is
+      # inert, not refused: eval cannot see the machine, and refusing
+      # would break one shared config across heterogeneous hardware.
+      services.power-profiles-daemon.enable = true;
+      services.power-profiles-daemon.package = lib.mkIf (
+        cfg.desktop.power.profiles.package != null
+      ) cfg.desktop.power.profiles.package;
+
+      # Low battery through UPower (which already sees the
+      # `macsmc-battery` on the M2, with history and statistics).
+      # Suspend, not the UPower default HybridSleep: s2idle is the
+      # only sleep state the reference hardware has, and its swap is
+      # zram (no persistent image to hibernate into), so HybridSleep
+      # would fail there instead of sleeping. `Suspend` is a UPower
+      # "risky" action (RAM stays powered on a dying battery), hence
+      # the flag beside it -- set only while the action needs it.
+      services.upower.enable = true;
+      services.upower.percentageAction = cfg.desktop.power.lowBattery.percentage;
+      services.upower.criticalPowerAction = cfg.desktop.power.lowBattery.action;
+      services.upower.allowRiskyCriticalPowerAction = lib.mkIf (
+        cfg.desktop.power.lowBattery.action == "Suspend" || cfg.desktop.power.lowBattery.action == "Ignore"
+      ) true;
+
+      # Lid and power-key actions through logind (the canonical
+      # `settings.Login.*` path, not the renamed aliases). Each a
+      # `mkDefault`, so an explicit value still wins. The docked rule
+      # is the twin of the idle child's (same value, same path, so
+      # the two merge): a closed lid on a multi-output box locks,
+      # never suspends. `KillUserProcesses` is a bool in nixpkgs (its
+      # own default is already false, for the tmux/mosh reason quoted
+      # there): set explicitly so the value is pinned, not inherited
+      # -- a logout (or a dropped SSH session sharing this user
+      # manager) never takes agents and multiplexers with it, which
+      # is what a remotely-driven box needs.
+      services.logind.settings.Login.HandleLidSwitch = lib.mkDefault cfg.desktop.power.lidSwitch;
+      services.logind.settings.Login.HandleLidSwitchDocked =
+        lib.mkDefault cfg.desktop.power.lidSwitchDocked;
+      services.logind.settings.Login.HandleLidSwitchExternalPower =
+        lib.mkDefault cfg.desktop.power.lidSwitchExternalPower;
+      services.logind.settings.Login.HandlePowerKey = lib.mkDefault cfg.desktop.power.powerKey;
+      services.logind.settings.Login.KillUserProcesses = lib.mkDefault false;
+
+      environment.systemPackages =
+        lib.optional (cfg.desktop.power.profiles.package != null) cfg.desktop.power.profiles.package
+        ++ lib.optional (cfg.desktop.power.chargeLimit.enable) scootCharge;
+    })
+    # The charge-limit service itself: root re-syncs the threshold on
+    # every AC change (udev, which also re-applies the group write on
+    # the node) and every 5 minutes (a timer, which catches a missed
+    # event). Kept in its own element (not under `power.enable`):
+    # with `enable` on and `chargeLimit.enable` off, nothing here may
+    # run -- and the udev AC rule below is what also carries the
+    # opt-in profile auto-switch, which needs no charge hardware.
+    (lib.mkIf (cfg.desktop.power.enable && cfg.desktop.power.chargeLimit.enable) {
+      systemd.services.scoot-charge-sync = {
+        description = "Apply the desk-aware battery charge policy";
+        after = [ "systemd-udevd.service" ];
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${scootCharge}/bin/scoot-charge sync";
+        };
+      };
+      systemd.timers.scoot-charge-sync = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnBootSec = "1min";
+          OnUnitActiveSec = "5min";
+          AccuracySec = "1min";
+        };
+      };
+      systemd.tmpfiles.rules = [ "d /var/lib/scoot-charge 2775 root users -" ];
+
+      # The threshold and the state are the `users` group's to change
+      # (the bar button runs as the logged-in user); every power-supply
+      # change re-runs the policy (the timer catches a missed event).
+      # `TEST` matches whatever supply owns a threshold node
+      # (`macsmc-battery`, `BAT0`, ...), and `Mains` whatever AC
+      # adapter feeds it -- no per-machine kernel names in the rule.
+      services.udev.extraRules = ''
+        SUBSYSTEM=="power_supply", TEST=="charge_control_end_threshold", RUN+="${pkgs.coreutils}/bin/chgrp users /sys%p/charge_control_end_threshold", RUN+="${pkgs.coreutils}/bin/chmod g+w /sys%p/charge_control_end_threshold"
+        SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", RUN+="${pkgs.systemd}/bin/systemctl start --no-block scoot-charge-sync.service"
+      '';
+    })
+    # The opt-in profile auto-switch on AC transitions (udev, which
+    # fires on boot coldplug too, so the matching profile applies
+    # from boot). Each half only while set: null holds whatever is
+    # set (PPD's own behavior -- a profile is user intent, not power
+    # state). Root on the system bus needs no policy exception.
+    # The 5-minute charge timer does NOT re-apply these (only AC
+    # transitions do): a manual switch mid-session stays until the
+    # next plug event. A null package beside a set profile renders the
+    # bare name (the refusal above still fires: eval must not throw
+    # where it should refuse).
+    (lib.mkIf (cfg.desktop.power.enable && cfg.desktop.power.profileOnAC != null) {
+      services.udev.extraRules = ''
+        SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", ENV{POWER_SUPPLY_ONLINE}=="1", RUN+="${
+          if cfg.desktop.power.profiles.package != null then
+            lib.getExe cfg.desktop.power.profiles.package
+          else
+            "powerprofilesctl"
+        } set ${cfg.desktop.power.profileOnAC}"
+      '';
+    })
+    (lib.mkIf (cfg.desktop.power.enable && cfg.desktop.power.profileOnBattery != null) {
+      services.udev.extraRules = ''
+        SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", ENV{POWER_SUPPLY_ONLINE}=="0", RUN+="${
+          if cfg.desktop.power.profiles.package != null then
+            lib.getExe cfg.desktop.power.profiles.package
+          else
+            "powerprofilesctl"
+        } set ${cfg.desktop.power.profileOnBattery}"
+      '';
     })
     # The idle policy's system half: its tools on PATH, the docked-lid
     # rule, and the locker's PAM service. The timers and the locker
