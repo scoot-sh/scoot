@@ -10025,7 +10025,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     got=$(audio_shown ${audioBehaviorBrightness} up)
     [ "$got" = "0:50" ] || { echo "brightness showed '$got', want '0:50' (22e5)"; echo "--- devs:"; cat "$SCOOT_AUDIO_TEST_DIR/devs"; echo "--- calls:"; cat "$SCOOT_AUDIO_TEST_DIR/calls"; exit 1; } >&2
     grep -q "brightness-set -e -d panel set +5%" "$SCOOT_AUDIO_TEST_DIR/calls" || { echo "panel step missing (22e5)"; cat "$SCOOT_AUDIO_TEST_DIR/calls"; exit 1; } >&2
-    grep -q "brightness-set -e -d ext set +5%" "$SCOOT_AUDIO_TEST_DIR/calls" || { echo "ext step missing (22e5)"; echo "--- devs:"; cat "$SCOOT_AUDIO_TEST_DIR/devs"; echo "--- calls:"; cat "$SCOOT_AUDIO_TEST_DIR/calls"; exit 1; } >&2
+    grep -q "brightness-set -e -d ext set +5%" "$SCOOT_AUDIO_TEST_DIR/calls" || { echo "ext step missing (22e5)"; echo "--- devs:"; od -c "$SCOOT_AUDIO_TEST_DIR/devs" | head -8; echo "--- calls:"; cat "$SCOOT_AUDIO_TEST_DIR/calls"; echo "--- probe:"; printf '%b' 'A\neB\n' | od -c | head -3; exit 1; } >&2
     if grep -q "kbd" "$SCOOT_AUDIO_TEST_DIR/calls"; then echo "keyboard LED stepped (22e5)" >&2; exit 1; fi
     echo "ok: brightness steps every panel and shows the average"
 
