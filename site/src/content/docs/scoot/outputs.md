@@ -34,7 +34,8 @@ A scale can also change without touching the file:
 id), and `scoot msg output-scale DP-1 reset` drops it again. That is
 runtime state, like `output-power`: it beats the file's scale for that
 connector (a replugged monitor comes back at it), and a successful
-reload or a restart goes back to the file's scales. It takes the same
+reload (which lists each scale it moved in its `applied`) or a restart
+goes back to the file's scales. It takes the same
 range, refusing a value outside it instead of clamping. The
 [display profiles](../desktop/index.md#displays) watcher drives scale
 this way. See [requests](../msg/requests.md).

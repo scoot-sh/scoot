@@ -32,8 +32,9 @@
 //!   kinds (`output`, `keyboard`, `workspace`, `lock`); the server sends every event of those
 //!   kinds,
 //!   and the client filters or debounces further itself. Standby cycles
-//!   fire removal/restore pairs routinely -- that is accepted, and stated
-//!   on each payload, rather than filtered server-side.
+//!   fire removal/add pairs (and a restore, when the monitor held windows)
+//!   routinely -- that is accepted, and stated on each payload, rather
+//!   than filtered server-side.
 //!
 //! [`Request`]: crate::Request
 //! [`Response`]: crate::Response
@@ -43,8 +44,9 @@ use serde::{Deserialize, Serialize};
 
 /// One class of event a connection can subscribe to.
 ///
-/// [`EventKind::Output`] covers output removed/restored/changed -- see
-/// [`OutputRemoved`], [`OutputRestored`] and [`OutputChanged`].
+/// [`EventKind::Output`] covers output added/removed/restored/changed -- see
+/// [`OutputAdded`], [`OutputRemoved`], [`OutputRestored`] and
+/// [`OutputChanged`].
 /// [`EventKind::Keyboard`] covers the active keyboard layout changing -- see
 /// [`KeyboardLayout`].
 /// [`EventKind::Workspace`] covers workspace occupancy changing -- see
@@ -58,10 +60,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
-    /// Output removed, restored and changed, carrying the adoption for the
-    /// first two (which output adopted the removed output's workspaces, the
-    /// adopted workspace range, and the adopter's active workspace before
-    /// and after) and the new mode for the third.
+    /// Output added, removed, restored and changed: the new output's mode
+    /// and scale for an add, the adoption for a removal and a restore
+    /// (which output adopted the removed output's workspaces, the adopted
+    /// workspace range, and the adopter's active workspace before and
+    /// after), and the new mode for a change.
     Output,
     /// The active keyboard layout (xkb group) changed. No standard Wayland
     /// protocol reports this to an unfocused client -- `wl_keyboard` sends
@@ -175,6 +178,42 @@ pub struct OutputRestored {
     /// How many still-open windows actually moved back. Windows moved by
     /// hand or closed in between stay where they are.
     pub moved: usize,
+}
+
+/// An output was added: a monitor plugged in (or back in) under `--tty`, or
+/// an output created at startup.
+///
+/// Fires on **every** add, whatever came before it: a monitor never seen
+/// this session, a replug of one that held no windows, and a replug that
+/// also restores windows -- that one sends this first, then
+/// [`OutputRestored`] for the windows. So a consumer that wants "the
+/// connected set changed" listens to this and [`OutputRemoved`] alone;
+/// [`OutputRestored`] fires only when a removal filed windows to bring
+/// back, which a first plug or an empty monitor's replug never does.
+///
+/// Sent after the new output is laid out, so an `outputs` query answered
+/// after it already lists the output. The outputs a session starts with
+/// predate any subscriber (no connection is served before the event loop
+/// runs): read `outputs` once for the baseline, then apply events after it.
+///
+/// The same fields as [`OutputChanged`]: the size and the scale the output
+/// came up at, for a density-watching script deciding the scale it wants.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutputAdded {
+    /// The new output's id, as `outputs` reports it. A fresh one on every
+    /// add, never a removed output's: ids are stable for the session, not
+    /// across unplug cycles.
+    pub output: u64,
+    /// Its connector name (`DP-1` under `--tty`, `headless-2` otherwise) --
+    /// the same string `outputs` names it by.
+    pub name: String,
+    /// The framebuffer size in physical pixels.
+    pub width: i32,
+    /// The framebuffer size in physical pixels.
+    pub height: i32,
+    /// The scale the output came up at (its live `output-scale` scale, else
+    /// the config file's).
+    pub scale: f64,
 }
 
 /// An output's mode changed in place: the same connector at a new

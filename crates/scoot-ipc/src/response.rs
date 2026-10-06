@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::event::{
-    EventKind, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored, WorkspaceSnapshot,
+    EventKind, KeyboardLayout, OutputAdded, OutputChanged, OutputRemoved, OutputRestored,
+    WorkspaceSnapshot,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -334,7 +335,7 @@ pub enum Response {
     },
     /// What a `Subscribe` request answers on success: the event kinds this
     /// connection is now dedicated to, echoed back. Afterwards the
-    /// connection carries [`OutputRemoved`]/[`OutputRestored`]/
+    /// connection carries [`OutputAdded`]/[`OutputRemoved`]/[`OutputRestored`]/
     /// [`OutputChanged`]/[`KeyboardChanged`]/[`Workspaces`] unasked, and
     /// any other request on it is refused with an error.
     ///
@@ -368,6 +369,14 @@ pub enum Response {
     /// constant's doc): an older client handed one would fail its decode,
     /// which can only happen to a client new enough to have subscribed.
     OutputChanged(OutputChanged),
+    /// An output was added; see [`OutputAdded`] for what each field means
+    /// and when this fires. Sent only to connections subscribed to
+    /// [`EventKind::Output`].
+    ///
+    /// A new variant, so this moves `PROTOCOL_VERSION` 9 → 10 (see that
+    /// constant's doc): an older client handed one would fail its decode,
+    /// which can only happen to a client new enough to have subscribed.
+    OutputAdded(OutputAdded),
     /// The answer to [`Request::Keyboard`](crate::Request::Keyboard): the
     /// seat keyboard's currently effective layout -- see [`KeyboardLayout`]
     /// for what each field means.

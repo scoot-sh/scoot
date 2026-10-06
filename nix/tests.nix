@@ -3013,6 +3013,19 @@ let
       }
     ];
   };
+  # ...a profile that disables its whole set (every screen dark the
+  # moment it matches)...
+  hmDisplaysSelfDark = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "solo";
+        outputs = [ "eDP-1" ];
+        disabled = [ "eDP-1" ];
+      }
+    ];
+  };
   # ...two profiles alike by name, and two alike by connected set...
   hmDisplaysDupName = evalHome {
     enable = true;
@@ -3081,8 +3094,29 @@ let
       }
     ];
   };
+  # ...and the clamshell shape on its own: a docked profile that darkens
+  # the laptop panel, with no profile for the panel alone -- the undock
+  # that must still light it.
+  hmDisplaysClamshell = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [
+          "eDP-1"
+          "DP-1"
+        ];
+        scale = {
+          "DP-1" = 1.5;
+        };
+        disabled = [ "eDP-1" ];
+      }
+    ];
+  };
   displaysWatcher = slotScriptBin hmDisplaysScriptTest "scoot-displays";
   displaysWatcherIdle = slotScriptBin hmDisplaysNoProfiles "scoot-displays";
+  displaysWatcherClamshell = slotScriptBin hmDisplaysClamshell "scoot-displays";
   displaysProfilesJson = hmDisplaysScriptTest.config.xdg.configFile."scoot/displays.json".source;
 
   # --- audio (`programs.scoot.desktop.audio`) evaluations ---
@@ -5052,6 +5086,7 @@ let
   idleLockConf = hmIdle.config.xdg.configFile."swaylock/config".source;
   idleNoLockConf = hmLockOff.config.xdg.configFile."swayidle/config".source;
   idleTimeoutsConf = hmIdleTimeouts.config.xdg.configFile."swayidle/config".source;
+  idleStandaloneConf = hmIdleStandalone.config.xdg.configFile."swayidle/config".source;
   idleZeroConf = hmIdleZero.config.xdg.configFile."swayidle/config".source;
   idleCmdConf = hmLockCmd.config.xdg.configFile."swayidle/config".source;
   idleSettingsConf = hmLockSettings.config.xdg.configFile."swaylock/config".source;
@@ -11757,6 +11792,38 @@ let
       );
       true
     )
+    # ...a profile that disables every output it matches...
+    (
+      assert builtins.length (failing hmDisplaysSelfDark.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "disables every output it matches" (
+        builtins.head (failing hmDisplaysSelfDark.config)
+      );
+      true
+    )
+    # ...(an empty set stays one refusal, not two: the self-dark
+    # check is guarded on a non-empty set)...
+    (
+      assert builtins.length (failing hmDisplaysEmptySet.config) == 1;
+      true
+    )
+    # ...the watcher handed to the idle policy only while it is
+    # installed: set with the slot on, null with it off, and null
+    # with the idle policy on its own (whose resume then stays bare)...
+    (
+      assert hmDisplays.config.programs.scoot.desktop.displays.watcher != null;
+      true
+    )
+    (
+      assert hmDisplaysOff.config.programs.scoot.desktop.displays.watcher == null;
+      true
+    )
+    (
+      assert hmIdleStandalone.config.programs.scoot.desktop.displays.watcher == null;
+      true
+    )
     # ...and two profiles alike by name, and two alike by connected
     # set.
     (
@@ -12126,7 +12193,13 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     #     matches throughout: the quoting is the assertion.)
     grep -F "timeout 120 '${pkgs.brightnessctl}/bin/brightnessctl -s set 10%' resume '${pkgs.brightnessctl}/bin/brightnessctl -r'" ${idleConf}
     grep -F "timeout 240 '${pkgs.systemd}/bin/loginctl lock-session'" ${idleConf}
-    grep -F "timeout 300 '${pkgs.wlopm}/bin/wlopm --off \"*\"' resume '${pkgs.wlopm}/bin/wlopm --on \"*\"'" ${idleConf}
+    # With display profiles on (the profile turns them on), the resume
+    # re-applies the matched profile after lighting every screen, so a
+    # profile's disabled panel does not stay lit; without them it is
+    # exactly `--on "*"`.
+    grep -F "timeout 300 '${pkgs.wlopm}/bin/wlopm --off \"*\"' resume '${pkgs.wlopm}/bin/wlopm --on \"*\"; ${hmIdle.config.programs.scoot.desktop.displays.watcher}/bin/scoot-displays apply'" ${idleConf}
+    grep -F "resume '${pkgs.wlopm}/bin/wlopm --on \"*\"'" ${idleStandaloneConf}
+    if grep -F -q "scoot-displays" ${idleStandaloneConf}; then echo "the idle resume calls the watcher with display profiles off" >&2; exit 1; fi
     grep -F "before-sleep '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
     grep -F "lock '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
     echo "ok: swayidle config carries the idle timeouts, the sleep lock and the lock event"
@@ -13206,44 +13279,53 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     EOF
     calls_since() { tail -n "+$(( $1 + 1 ))" "$SCOOT_DISPLAYS_TEST_DIR/calls"; }
     ncalls() { wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls"; }
+    held_file="$XDG_RUNTIME_DIR/scoot-displays.off"
+    held() { if [ -f "$held_file" ]; then ${pkgs.jq}/bin/jq -c '[.[] | .name] | sort' "$held_file"; else echo '[]'; fi; }
     # docked matches (first match wins: the docked profile names both)...
     cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-docked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
     status="$(${displaysWatcher} status)"; test "$status" = 'docked (connected: ["DP-1","eDP-1"])'
     echo "ok: status names the matched profile"
-    # ...apply sets each scale by connector name, then powers the set
-    # by live id (the disabled panel off, the other on), over IPC only...
+    # ...apply sets each scale by connector name, then powers off what
+    # the profile disables by live id, recording it as its own -- and
+    # powers nothing on (nothing of its own was off), over IPC only...
     ${displaysWatcher} apply 2> "$SCOOT_DISPLAYS_TEST_DIR/stderr"
-    test "$(cat "$SCOOT_DISPLAYS_TEST_DIR/calls")" = "$(printf 'output-scale eDP-1 2\noutput-scale DP-1 1\noutput-power 1 off\noutput-power 2 on')"
+    test "$(cat "$SCOOT_DISPLAYS_TEST_DIR/calls")" = "$(printf 'output-scale eDP-1 2\noutput-scale DP-1 1\noutput-power 1 off')"
     grep -F -q "profile 'docked' applied" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
-    echo "ok: apply sets scales by name and power by id, over IPC only"
-    # ...and touches no file: the read-only symlinked config is still a
-    # symlink, byte-identical, with nothing written beside it...
+    test "$(${pkgs.jq}/bin/jq -c . "$held_file")" = '[{"name":"eDP-1","id":1}]'
+    echo "ok: apply sets scales by name and power by id, over IPC only, recording its off"
+    # ...and touches no config file: the read-only symlinked config is
+    # still a symlink, byte-identical, with nothing written beside it
+    # (its one record lives in the runtime dir)...
     test -L "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
     test "$(sha256sum < "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml")" = "$config_sum"
     test "$(find "$SCOOT_DISPLAYS_TEST_DIR/home" -mindepth 1 | sort)" = "$(printf '%s\n%s' "$SCOOT_DISPLAYS_TEST_DIR/home/scoot" "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml")"
     echo "ok: apply leaves the read-only symlinked config alone"
     # ...a second apply re-asserts the same calls (each a no-op
-    # server-side) and still reports applied...
+    # server-side; the off again, since an idle resume may have lit
+    # it) and still reports applied...
     before="$(ncalls)"
     ${displaysWatcher} apply 2> "$SCOOT_DISPLAYS_TEST_DIR/stderr"
-    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 2\noutput-scale DP-1 1\noutput-power 1 off\noutput-power 2 on')"
+    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 2\noutput-scale DP-1 1\noutput-power 1 off')"
     grep -F -q "profile 'docked' applied" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    test "$(held)" = '["eDP-1"]'
     echo "ok: a repeated apply re-asserts the same calls"
-    # ...undocked matches the other profile and powers the panel back
-    # on...
+    # ...undocked matches the other profile: the panel the watcher
+    # darkened comes back on first, then rescales...
     cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-undocked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
     status="$(${displaysWatcher} status)"; test "$status" = 'undocked (connected: ["eDP-1"])'
     before="$(ncalls)"
     ${displaysWatcher} apply 2>/dev/null
-    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 2\noutput-power 1 on')"
-    echo "ok: undocked rescales and powers the panel back on"
+    test "$(calls_since "$before")" = "$(printf 'output-power 1 on\noutput-scale eDP-1 2')"
+    test "$(held)" = '[]'
+    echo "ok: undocked powers back on the panel it darkened, then rescales"
     # ...an output the profile does not scale is reset to the config
-    # file's scale, so another profile's scale never lingers...
+    # file's scale, so another profile's scale never lingers -- and
+    # nothing the watcher did not darken is powered on...
     cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-presenting.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
     before="$(ncalls)"
     ${displaysWatcher} apply 2>/dev/null
-    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 1.5\noutput-scale HDMI-A-1 reset\noutput-power 1 on\noutput-power 3 on')"
-    echo "ok: an unscaled member of the set goes back to the config's scale"
+    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 1.5\noutput-scale HDMI-A-1 reset')"
+    echo "ok: an unscaled member of the set goes back to the config's scale, and no power call"
     # ...an unknown set resets every connected output's scale and
     # leaves power alone...
     cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-unknown.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
@@ -13252,7 +13334,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     ${displaysWatcher} apply 2> "$SCOOT_DISPLAYS_TEST_DIR/stderr"
     test "$(calls_since "$before")" = "output-scale DP-2 reset"
     grep -F -q "no profile for" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
-    echo "ok: no match resets scales to the config's and touches no power"
+    echo "ok: no match resets scales to the config's and touches no power it does not hold"
     # ...a refused call fails the apply loud: non-zero, the call named,
     # no "applied" -- while the other calls still run (the rest of the
     # set still converges)...
@@ -13264,9 +13346,27 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -E -q 'scoot msg output-scale DP-1 1(\.0*)?` failed' "$SCOOT_DISPLAYS_TEST_DIR/stderr"
     grep -F -q "NOT fully applied" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
     if grep -F -q "' applied" "$SCOOT_DISPLAYS_TEST_DIR/stderr"; then echo "a failed apply claimed applied (21f)" >&2; exit 1; fi
-    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 2\noutput-power 1 off\noutput-power 2 on')"
+    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 2\noutput-power 1 off')"
     rm "$SCOOT_DISPLAYS_TEST_DIR/refuse"
     echo "ok: a refused call exits non-zero, named, never claiming applied"
+    # ...a refused off is not recorded (the output is not the
+    # watcher's to light later)...
+    rm -f "$held_file"
+    printf 'output-power 1 off' > "$SCOOT_DISPLAYS_TEST_DIR/refuse"
+    if ${displaysWatcher} apply 2>/dev/null; then echo "apply exited 0 past a refused off (21f)" >&2; exit 1; fi
+    test "$(held)" = '[]'
+    rm "$SCOOT_DISPLAYS_TEST_DIR/refuse"
+    echo "ok: a refused off is not recorded as the watcher's"
+    # ...an off the watcher cannot record is never made (it could not
+    # undo it later): exit non-zero, no off call...
+    rm -f "$held_file"
+    mkdir "$held_file"
+    before="$(ncalls)"
+    if ${displaysWatcher} apply 2> "$SCOOT_DISPLAYS_TEST_DIR/stderr"; then echo "apply exited 0 with no record (21f)" >&2; exit 1; fi
+    grep -F -q "could not record power state" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    if calls_since "$before" | grep -F -q "output-power 1 off"; then echo "an unrecordable off was made (21f)" >&2; exit 1; fi
+    rmdir "$held_file"
+    echo "ok: an off it cannot record is never made"
     # ...applies are serialized: while another holder has the lock, an
     # apply waits (here: is killed while waiting, having made no call),
     # and runs once the lock is free...
@@ -13279,20 +13379,83 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     ${displaysWatcher} apply 2>/dev/null
     test "$(ncalls)" -gt "$before"
     echo "ok: one apply at a time"
-    # ...watch applies at start and per output event, then exits 1 when
-    # the stream ends (so the unit resubscribes instead of idling
+    # ...watch applies once subscribed (not before, so a plug between
+    # the two is an event, never a miss) and per output event -- an
+    # `output_added` included, the first plug of a monitor that no
+    # restore follows -- ignores other lines, then exits 1 when the
+    # stream ends (so the unit resubscribes instead of idling
     # unsubscribed)...
-    printf '%s\n' '{"type":"output_changed","output":2,"name":"DP-1","width":3840,"height":2160,"scale":1.0}' > "$SCOOT_DISPLAYS_TEST_DIR/events"
+    printf '%s\n' \
+      '{"type":"subscribed","events":["output"]}' \
+      '{"type":"output_added","output":2,"name":"DP-1","width":3840,"height":2160,"scale":1.0}' \
+      > "$SCOOT_DISPLAYS_TEST_DIR/events"
     before="$(ncalls)"
     if ${displaysWatcher} watch 2>/dev/null; then echo "watch exited 0 on stream end (21f)" >&2; exit 1; fi
     test "$(calls_since "$before" | grep -c -F -x "output-scale DP-1 1")" = 2
-    echo "ok: watch applies at start and per event, and fails on stream end"
-    # ...with no profiles the watcher makes no call at all, matched or
-    # not (scales someone else set stay theirs)...
+    printf '%s\n' \
+      '{"type":"subscribed","events":["output"]}' \
+      '{"type":"keyboard_changed","name":"English (US)","index":0}' \
+      > "$SCOOT_DISPLAYS_TEST_DIR/events"
+    before="$(ncalls)"
+    if ${displaysWatcher} watch 2>/dev/null; then echo "watch exited 0 on stream end (21f)" >&2; exit 1; fi
+    test "$(calls_since "$before" | grep -c -F -x "output-scale DP-1 1")" = 1
+    : > "$SCOOT_DISPLAYS_TEST_DIR/events"
+    before="$(ncalls)"
+    if ${displaysWatcher} watch 2>/dev/null; then echo "watch exited 0 on an empty stream (21f)" >&2; exit 1; fi
+    test "$(ncalls)" = "$before"
+    echo "ok: watch applies once subscribed and per output event (an add included), and fails on stream end"
+    # ...the clamshell undock: a docked profile darkens the panel, the
+    # dock leaves, and with no profile for the panel alone the panel
+    # still comes back on (an off the watcher made, so one it undoes),
+    # before its scale resets...
+    rm -f "$held_file"
+    cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-docked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
+    before="$(ncalls)"
+    ${displaysWatcherClamshell} apply 2>/dev/null
+    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 reset\noutput-scale DP-1 1.5\noutput-power 1 off')"
+    cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-undocked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
+    before="$(ncalls)"
+    ${displaysWatcherClamshell} apply 2> "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    test "$(calls_since "$before")" = "$(printf 'output-power 1 on\noutput-scale eDP-1 reset')"
+    grep -F -q "no profile for" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    test "$(held)" = '[]'
+    echo "ok: undocking from a clamshell profile with no match lights the panel"
+    # ...while a panel something else blanked (the idle policy's
+    # screens-off: off, but not in the record) stays off, matched or
+    # not...
+    ${pkgs.jq}/bin/jq -c '.outputs[0].powered = false' "$SCOOT_DISPLAYS_TEST_DIR/outputs-undocked.json" > "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
+    before="$(ncalls)"
+    ${displaysWatcherClamshell} apply 2>/dev/null
+    test "$(calls_since "$before")" = "output-scale eDP-1 reset"
+    before="$(ncalls)"
+    ${displaysWatcher} apply 2>/dev/null
+    test "$(calls_since "$before")" = "output-scale eDP-1 2"
+    echo "ok: an output the watcher did not darken is never powered on"
+    # ...a held output that came back under a fresh id (unplugged and
+    # replugged: scoot forgot its off, and it is on again) is released
+    # without a call...
+    printf '%s\n' '[{"name":"eDP-1","id":9}]' > "$held_file"
+    cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-undocked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
+    before="$(ncalls)"
+    ${displaysWatcherClamshell} apply 2>/dev/null
+    test "$(calls_since "$before")" = "output-scale eDP-1 reset"
+    test "$(held)" = '[]'
+    echo "ok: a held output under a fresh id is released without a call"
+    # ...with no profiles the watcher makes no call at all (scales
+    # someone else set stay theirs)...
+    rm -f "$held_file"
     before="$(ncalls)"
     ${displaysWatcherIdle} apply 2>/dev/null
     test "$(ncalls)" = "$before"
     echo "ok: no profiles, no calls"
+    # ...except to undo its own offs: removing the profile that
+    # darkened the panel must not leave it dark.
+    printf '%s\n' '[{"name":"eDP-1","id":1}]' > "$held_file"
+    before="$(ncalls)"
+    ${displaysWatcherIdle} apply 2>/dev/null
+    test "$(calls_since "$before")" = "output-power 1 on"
+    test "$(held)" = '[]'
+    echo "ok: no profiles still undoes its own offs"
     # ...the config is still untouched after all of the above...
     test -L "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
     test "$(sha256sum < "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml")" = "$config_sum"

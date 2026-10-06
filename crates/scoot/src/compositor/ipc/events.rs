@@ -3,9 +3,10 @@
 //! A subscription dedicates one connection to events (see `scoot_ipc::event`
 //! for the protocol half): `Request::Subscribe` names the [`EventKind`]s,
 //! the reply is `Response::Subscribed`, and afterwards the connection
-//! carries [`Response::OutputRemoved`]/[`Response::OutputRestored`]/
-//! [`Response::OutputChanged`]/[`Response::KeyboardChanged`]/
-//! [`Response::Workspaces`]/[`Response::LockChanged`] unasked as
+//! carries [`Response::OutputAdded`]/[`Response::OutputRemoved`]/
+//! [`Response::OutputRestored`]/[`Response::OutputChanged`]/
+//! [`Response::KeyboardChanged`]/[`Response::Workspaces`]/
+//! [`Response::LockChanged`] unasked as
 //! outputs come, go and change size, the keyboard layout changes,
 //! workspace occupancy moves, and the session locks and unlocks.
 //! This module is the server side of that: who is subscribed, getting events
@@ -16,7 +17,8 @@
 //! which shares the file status flags, so it is non-blocking like the
 //! original -- plus the same [`Outbound`] queue a connection uses. Output
 //! events are emitted on the event-loop thread from the hotplug paths
-//! (`State::remove_output`, `State::restore_displaced`) and the resize path
+//! (`headless::add_output_with`, `State::remove_output`,
+//! `State::restore_displaced`) and the resize path
 //! (`State::resize_output_of`), which are cold
 //! (a monitor plug cycle or mode change, never per frame), so one encode
 //! per event plus
@@ -62,7 +64,8 @@ use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use scoot_ipc::{
-    EventKind, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored, Response, encode,
+    EventKind, KeyboardLayout, OutputAdded, OutputChanged, OutputRemoved, OutputRestored, Response,
+    encode,
 };
 
 use super::{Outbound, State};
@@ -174,6 +177,15 @@ impl State {
         }
     }
 
+    /// Sends an output-added event to every `Output` subscriber.
+    /// See the module doc for what happens to one that stops reading.
+    pub fn emit_output_added(&mut self, event: OutputAdded) {
+        let Ok(line) = encode(&Response::OutputAdded(event)) else {
+            return;
+        };
+        self.emit(EventKind::Output, &line);
+    }
+
     /// Sends an output-removed event to every `Output` subscriber.
     /// See the module doc for what happens to one that stops reading.
     pub fn emit_output_removed(&mut self, event: OutputRemoved) {
@@ -232,7 +244,7 @@ impl State {
         self.emit(EventKind::Lock, &line);
     }
 
-    /// The shared tail of all six emitters: one encoded line to every
+    /// The shared tail of all seven emitters: one encoded line to every
     /// subscriber of `kind`.
     ///
     /// `line` is encoded once, outside, and cloned per subscriber -- one

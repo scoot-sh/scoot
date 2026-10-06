@@ -420,7 +420,7 @@ slot you wire yourself. After this many seconds without input:
 |---|---|---|
 | 2 min | the panel dims to 10% (`brightnessctl -s set 10%`, restored on activity) | the backlight is most of idle draw (measured on the M2: 4.55 W screens on, 1.52 W both off) |
 | 4 min | the session locks (`loginctl lock-session`, locker over `ext-session-lock-v1`) | after dim, **before** screens off, so the lock is already up when the panel goes dark and no unlocked frame is ever visible on wake |
-| 5 min | every output powers off (`wlopm --off '*'`, back on at the first input, locked or not) | the measured 3 W saving |
+| 5 min | every output powers off (`wlopm --off '*'`, back on at the first input, locked or not; with [display profiles](#displays) on, the matched profile then re-applies, so its `disabled` outputs stay off) | the measured 3 W saving |
 | sleep | locks first, then sleeps (swayidle's `before-sleep`, waited on) | suspend must never land on an unlocked session |
 | docked lid close | locks, does not suspend | a closed lid on a multi-output box means the user walked away, not that the session should die |
 
@@ -1764,8 +1764,10 @@ Troubleshooting, by symptom:
 
 A laptop moving between a desk monitor and no monitor keeps its
 scale and power following the connected set: dock, and the external
-panel comes up at its own scale; undock, and the laptop panel takes
-over again. No hand-editing the config on every move:
+panel comes up at its own scale (and, with `disabled`, the lid panel
+goes dark); undock, and the laptop panel takes over again, lit even
+if the docked profile turned it off. No hand-editing the config on
+every move:
 
 ```nix
 programs.scoot.desktop.displays.profiles = [
@@ -1792,26 +1794,42 @@ per output, a scale and whether the panel stays off. It does not place
 outputs (they pack left to right in connection order), does not set
 modes, and cannot match on make or model (scoot's IPC reports
 connector names only). The watcher (`scoot-displays`, a user unit
-bound to `scoot-session.target`) re-matches once at session start and
-on every output event, first match winning in list order.
+bound to `scoot-session.target`) re-matches once at session start
+and on every output event: each plug (`output_added`, which fires for
+a monitor's first plug and every replug), each unplug, and each mode
+change, settling 2 s after the first of a burst. First match wins, in
+list order. With the [idle policy](#idle-and-lock) on, it also
+re-applies when the screens come back from idle.
 
-How a match applies, all over scoot's own IPC, with no file written:
+How a match applies, all over scoot's own IPC, with no config file
+written:
 
 - **Scale.** Each output of the set runs at the profile's scale
   (`scoot msg output-scale NAME SCALE`). An output the profile gives
   no scale goes back to your config's scale
   (`scoot msg output-scale NAME reset`), so one profile's scale never
   lingers into the next.
-- **Power.** Each output of the set is powered on unless the
-  profile's `disabled` names it (`scoot msg output-power`), so a
-  stale off from another profile never lingers.
+- **Power off.** Each output the profile's `disabled` names is
+  powered off (`scoot msg output-power ID off`), and the watcher
+  records that it did.
+- **Power back on.** An output the watcher itself turned off comes
+  back on as soon as the matched profile stops disabling it, or no
+  profile matches at all. That is the undock from a clamshell
+  profile: `docked` darkens `eDP-1`, the monitor leaves, and `eDP-1`
+  lights again whether or not an `undocked` profile exists.
+- **Every other power state is left alone.** An output the watcher
+  did not turn off is never turned on: screens the idle policy
+  blanked stay dark through a monitor's standby unplug, and so does
+  one you turned off by hand.
 - **No match.** Every connected output goes back to your config's
-  scale. Power is left alone.
+  scale, and the watcher's own offs come back on.
 
-These are live runtime settings, not config: your config file (under
-home-manager, a read-only link into the Nix store) is never touched.
-A successful `scoot msg reload` or a restart goes back to the config's
-scales until the watcher applies again (at the next output event or
+The record of its own offs is `$XDG_RUNTIME_DIR/scoot-displays.off`
+(gone at logout, like the session). Everything else is live runtime
+state, not config: your config file (under home-manager, a read-only
+link into the Nix store) is never touched. A successful
+`scoot msg reload` or a restart goes back to the config's scales until
+the watcher applies again (at the next output event, idle resume or
 login). A home-manager rebuild never reloads the session, so it never
 drops an applied scale. The apply reports `applied` only when every
 call succeeded. Otherwise it exits non-zero and names each failed
@@ -1847,7 +1865,7 @@ restart the watcher, which re-applies at start):
 | `profiles[].name` | string (unique) | — | the profile's name, as `status` prints it |
 | `profiles[].outputs` | list of strings (non-empty, unique set) | — | the exact connected connector-name set this profile answers |
 | `profiles[].scale` | attrset of number (0.5–4.0) | `{ }` | per-output scale, applied live; an output in `outputs` with no entry runs at your config's scale (every key names an output in `outputs`) |
-| `profiles[].disabled` | list of strings | `[ ]` | outputs to power off under this profile, live (empty disables nothing; every entry names an output in `outputs`) |
+| `profiles[].disabled` | list of strings | `[ ]` | outputs to power off under this profile, live, and back on once it no longer applies (empty disables nothing; every entry names an output in `outputs`, and at least one output of `outputs` stays out of it) |
 
 A mode is not a profile field: a mode cannot change live, and a
 profile that sets `mode` fails evaluation. Set one per connector in
@@ -1871,12 +1889,31 @@ Troubleshooting, by symptom:
   the call that failed and scoot's reason. An output unplugged
   mid-apply is the common one; the next output event applies again.
 - *An output stays dark.* Either the matched profile disables it
-  (`disabled`), or a stale off lingers from before the watcher ran:
-  `status` names the profile, and a fresh `apply` powers every
-  member of the set that `disabled` does not name back on. Outside
-  any profile, `scoot msg output-power <id> on` (ids come from
-  `scoot msg outputs`, stable for the session, fresh after every
-  unplug).
+  (`disabled`; `status` names the profile), or something other than
+  the watcher turned it off (the idle policy, `wlopm`, a hand
+  `output-power`), which the watcher deliberately leaves alone: the
+  next input after idle lights it, or `scoot msg output-power <id> on`
+  does (ids come from `scoot msg outputs`, stable for the session,
+  fresh after every unplug). An off the watcher made itself always
+  comes back on when its profile stops matching. Turning the slot
+  off (`enable = false`) stops the watcher where it stands, so an
+  output it had off stays off until that `output-power` call or the
+  next login.
+- *The laptop panel lit up while idle, docked.* A monitor that drops
+  its connection in standby is an unplug to scoot, so with the
+  docked profile no longer matching, the watcher lights the panel it
+  darkened rather than risk leaving no screen on (it cannot tell that
+  unplug from a real undock). The panel goes dark again when the
+  monitor reconnects and the docked profile matches; otherwise the
+  idle policy's next screens-off covers it.
+- *A disabled panel lit up after idle.* Without the idle policy,
+  something else ran `wlopm --on '*'` (or `output-power all on`):
+  `scoot-displays apply` turns it back off. With the idle policy on,
+  its resume re-applies by itself.
+- *Evaluation refuses a profile that "disables every output it
+  matches".* Its `disabled` names every output of its own `outputs`,
+  which would leave no screen on whenever it matched. Keep at least
+  one out.
 - *Two profiles could match.* The first in list order wins; two
   profiles for one set fail evaluation instead of shadowing.
 - *The watcher is not running.* It starts with the session scope:
@@ -1957,7 +1994,7 @@ child, so those children fill bodies without renaming options:
 | `desktop.power.enable` | bool + package | `false` (opt-in, never with the profile — [Power](#power): profiles on `Super+p`, lid/low-battery suspend, charge limit) | power profiles, suspend, charge limit |
 | `desktop.theme.enable` | bool + package | `false` | GTK/Qt theme, dark mode |
 | `desktop.apps.terminal.enable` / `desktop.apps.fileManager.enable` | bool + package | `false` | terminal + file manager |
-| `desktop.displays.enable` (+ `profiles`) | bool (+ list) | `true` ([Displays](#displays): the watcher re-matches the connected set on every output event and sets scale and power live over IPC, never writing the config) | output policy (scoot-native profiles, a stopgap: stock kanshi cannot drive the read-only output-management write half) |
+| `desktop.displays.enable` (+ `profiles`) | bool (+ list) | `true` ([Displays](#displays): the watcher re-matches the connected set at login, on every plug and unplug, and on idle resume, sets scale and power live over IPC, never writing the config, and turns back on only the outputs it turned off) | output policy (scoot-native profiles, a stopgap: stock kanshi cannot drive the read-only output-management write half) |
 | `desktop.inputMethod.enable` | bool | `false` | input-method wiring |
 | `desktop.automount.enable` | bool + package | `false` | removable-media automount |
 

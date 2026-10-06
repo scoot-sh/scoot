@@ -103,12 +103,17 @@ the locked session, so those wait for the first unlocked reload).
 
 A successful reload also drops every live `scoot msg output-scale`
 scale: the outputs go back to the file's scales (see
-[Outputs](./outputs.md)), whether or not the file changed. A reload
-that cannot load the file keeps them.
+[Outputs](./outputs.md)), whether or not the file changed. Each dropped
+scale the file disagrees with is listed in `applied` as
+`outputs.<name>.scale`, the same name a changed `[[outputs]]` entry
+reports under (a monitor unplugged since it was set is listed too: it
+would have come back at that scale). A reload that cannot load the file
+keeps them.
 
 > **Symptom:** a reload changed nothing and both lists are empty.
 > That means "the reload changed nothing it was asked to" — the file
-> and the session already agree. Edit first, then reload.
+> and the session already agree, and no live `output-scale` scale was
+> left to drop. Edit first, then reload.
 
 ## Autostart
 

@@ -73,6 +73,30 @@ home-manager rebuild never reloads the session, so it never drops an
 applied scale; a manual reload does, and no IPC event reports it, so the
 docs say to run `scoot-displays apply` after one.
 
+A second review round found the watcher deaf to the most common dock and
+able to strand the user on a dark screen; both were fixed in the same PR:
+
+- **A first plug was silent.** scoot emitted output events only on removal,
+  on a restore that brought windows back, and on an in-place mode change, so
+  a monitor's first plug of the session (or a replug of one that held no
+  windows) never woke the watcher. scoot now sends `output_added` on every
+  add (protocol 9 → 10), before any `output_restored`, and the watcher
+  applies on it. It also takes its start-up apply once subscribed, so a
+  plug between the two is never missed.
+- **The clamshell undock went dark.** A `docked` profile that disables
+  `eDP-1`, with no `undocked` profile, left the panel off after the undock
+  (no match left power alone). The watcher now records the offs it makes
+  (`$XDG_RUNTIME_DIR/scoot-displays.off`, written atomically under its lock)
+  and powers back on exactly those once the matched profile stops
+  disabling them, match or no match. It never turns on an output it did
+  not turn off, so idle screens-off stays off, and the matched path no
+  longer powers every member on. A profile whose `disabled` covers its
+  whole set now fails evaluation.
+- The idle policy's resume (`wlopm --on "*"`) re-applies the matched profile
+  while the slot is on, so a disabled output does not stay lit after idle.
+- A reload that drops live `output-scale` scales now lists each one it moved
+  in `applied` as `outputs.<name>.scale`.
+
 Software proof is headless on the M2 (see the PR). Physical DP-1
 plug/unplug steps are in the PR body for the maintainer (no scoot session
 drives the real outputs right now).

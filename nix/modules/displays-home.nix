@@ -25,11 +25,15 @@
 # watcher that edited it would either fail while reporting success or
 # replace the symlink and lose to every rebuild. Scales and power are
 # runtime state instead: a successful reload or a restart goes back to
-# the config file's scales (power is untouched by either), and the
-# watcher re-applies at session start and on every output event --
-# not on a reload, which no IPC event reports (see the site's
-# troubleshooting entry). A home-manager rebuild never reloads the
-# session, so it never drops an applied scale.
+# the config file's scales (a reload leaves power alone; a restart
+# starts every output on), and the watcher re-applies at session start,
+# on every output event (an add included, so a first plug is heard),
+# and on the idle policy's resume -- not on a reload, which no IPC
+# event reports (see the site's troubleshooting entry). A home-manager
+# rebuild never reloads the session, so it never drops an applied
+# scale. The one file it does write is its own record of the outputs
+# it powered off (`$XDG_RUNTIME_DIR/scoot-displays.off`), so it can
+# undo exactly those and nothing an idle policy blanked.
 #
 # The option shapes live in `./desktop.nix` (shared with the NixOS
 # side); there are no `package` defaults here because the slot installs
@@ -65,6 +69,8 @@ let
   jqBin = lib.getExe pkgs.jq;
   sleepBin = lib.getExe' pkgs.coreutils "sleep";
   flockBin = lib.getExe' pkgs.util-linux "flock";
+  mvBin = lib.getExe' pkgs.coreutils "mv";
+  rmBin = lib.getExe' pkgs.coreutils "rm";
 
   # The profiles, as the watcher matches them: the `outputs` set per
   # profile (exact connected set, connector names), the per-output
@@ -89,6 +95,20 @@ let
     JQ=${lib.escapeShellArg jqBin}
     SLEEP=${lib.escapeShellArg sleepBin}
     FLOCK=${lib.escapeShellArg flockBin}
+    MV=${lib.escapeShellArg mvBin}
+    RM=${lib.escapeShellArg rmBin}
+    RUNTIME="''${XDG_RUNTIME_DIR:-''${TMPDIR:-/tmp}}"
+    # The outputs this watcher powered off and has not powered back on,
+    # as `[{"name":..,"id":..}]`: the only offs it ever undoes. An off
+    # made by anything else (the idle policy's screens-off, `wlopm`, a
+    # hand `scoot msg output-power`) is not in here, so the watcher
+    # never lights a screen it did not darken. Beside the lock, never
+    # beside the config (which the watcher never touches). It outlives
+    # a watcher restart (a rebuild's new profiles must still undo the
+    # old ones' offs); one left by an earlier session in the same
+    # runtime dir can at worst match a fresh session's id and power on
+    # an output that session already started on.
+    HELD="$RUNTIME/scoot-displays.off"
 
     # The live outputs, or a loud refusal (no session: exit 1, so the
     # unit's on-failure retry covers a watcher started too early).
@@ -132,55 +152,150 @@ let
       fi
     }
 
+    # The held record, or `[]` when there is none (or it is unreadable:
+    # a record nobody can parse holds nothing the watcher could undo).
+    read_held() {
+      if [ -f "$HELD" ] && "$JQ" -e 'type == "array"' "$HELD" >/dev/null 2>&1; then
+        "$JQ" -c . "$HELD"
+      else
+        echo '[]'
+      fi
+    }
+
+    # Replaces the held record atomically: a temp file in the same
+    # directory renamed over it, so a watcher killed mid-write leaves
+    # the old record or the new one, never half of either. Called only
+    # under the apply lock. Unchanged content writes nothing.
+    write_held() {
+      if [ "$1" = "$(read_held)" ]; then
+        return 0
+      fi
+      tmp="$HELD.tmp.$$"
+      if printf '%s\n' "$1" > "$tmp" && "$MV" -fT "$tmp" "$HELD"; then
+        return 0
+      fi
+      "$RM" -f "$tmp"
+      echo "scoot-displays: could not record power state in $HELD" >&2
+      return 1
+    }
+
     # Applies the matched profile purely over IPC, never touching a
-    # file: every output of the set gets the profile's scale, or (no
-    # entry) its live scale reset to the config file's, so a scale
-    # from an earlier profile never lingers; then every output of the
-    # set is powered on unless the profile disables it. With no
-    # matching profile every connected output's scale resets to the
-    # config file's, and power is left alone. Every call runs even
-    # after one fails (the rest still converge), and the apply reports
-    # "applied" only when all of them succeeded -- otherwise it exits
-    # non-zero, each failed call named above.
+    # file. Every call runs even after one fails (the rest still
+    # converge), and the apply reports "applied" only when all of them
+    # succeeded -- otherwise it exits non-zero, each failed call named.
+    #
+    # Power, in this order, the same rule whether a profile matches or
+    # not:
+    # 1. every held output still connected under the same id, and not
+    #    disabled by the matched profile, is powered back on and
+    #    released -- so undocking from a clamshell profile lights the
+    #    panel it darkened, matched profile or none. A held output that
+    #    left (or came back under a fresh id) is released without a
+    #    call: scoot forgets an output's power state on removal, and a
+    #    replugged one comes back on;
+    # 2. every output the matched profile disables is recorded as held
+    #    first, then powered off -- recorded before the call, so a
+    #    watcher killed in between never forgets an off it made.
+    # Nothing else is powered on: an output someone else turned off
+    # (the idle policy's screens-off above all) stays off.
+    #
+    # Scale: every output of a matched set gets the profile's scale,
+    # or (no entry) its live scale reset to the config file's, so a
+    # scale from an earlier profile never lingers. With no match every
+    # connected output's scale resets. With no profiles at all no scale
+    # call is made (scales someone else set stay theirs), but held
+    # outputs are still released: removing the profile that darkened a
+    # panel must not leave it dark.
     do_apply() {
       outputs=$(live_outputs) || return 1
       connected=$(connected_names "$outputs")
-      profile=$(match_profile "$connected")
       failed=0
-      # No profiles at all: nothing is the watcher's to change, so it
-      # stays idle rather than resetting scales someone else set.
+      have_profiles=1
+      profile=""
       if [ "$("$JQ" length "$PROFILES")" -eq 0 ]; then
-        echo "scoot-displays: no profiles configured; changing nothing" >&2
-        return 0
+        have_profiles=0
+      else
+        profile=$(match_profile "$connected")
       fi
-      if [ -z "$profile" ]; then
+      if [ -n "$profile" ]; then
+        disabled=$("$JQ" -c '.disabled' <<<"$profile")
+      else
+        disabled='[]'
+      fi
+
+      # 1. Release: held entries still live under the same id.
+      held=$(read_held)
+      keep=$("$JQ" -c --argjson live "$outputs" --argjson off "$disabled" \
+        '[.[] | . as $h | select(any($live.outputs[]; .name == $h.name and .id == $h.id))
+              | select($off | index($h.name))]' <<<"$held")
+      while IFS=$'\t' read -r out id; do
+        [ -n "$out" ] || continue
+        if ! call output-power "$id" on; then
+          failed=1
+          keep=$("$JQ" -c --arg n "$out" --argjson i "$id" '. + [{name: $n, id: $i}]' <<<"$keep")
+        fi
+      done < <("$JQ" -r --argjson live "$outputs" --argjson off "$disabled" \
+        '.[] | . as $h | select(any($live.outputs[]; .name == $h.name and .id == $h.id))
+             | select(($off | index($h.name)) | not) | [.name, .id] | @tsv' <<<"$held")
+      write_held "$keep" || failed=1
+
+      # 2. Scale.
+      if [ "$have_profiles" -eq 1 ] && [ -z "$profile" ]; then
         while IFS= read -r out; do
           call output-scale "$out" reset || failed=1
         done < <("$JQ" -r '.outputs[].name' <<<"$outputs")
-        if [ "$failed" -ne 0 ]; then
-          echo "scoot-displays: no profile for $connected, and resetting its scales failed" >&2
-          return 1
-        fi
-        echo "scoot-displays: no profile for $connected: scales back at the config file's, power left alone" >&2
-        return 0
+      elif [ -n "$profile" ]; then
+        # By connector name: the request takes one, so no id lookup
+        # (and no `outputs` answer a hotplug could make stale first).
+        while IFS=$'\t' read -r out scale; do
+          call output-scale "$out" "$scale" || failed=1
+        done < <("$JQ" -r '.outputs[] as $n | [$n, (.scale[$n] // "reset" | tostring)] | @tsv' <<<"$profile")
       fi
-      name=$("$JQ" -r '.name' <<<"$profile")
-      # Scale by connector name: the request takes one, so no id lookup
-      # (and no `outputs` answer a hotplug could make stale first).
-      while IFS=$'\t' read -r out scale; do
-        call output-scale "$out" "$scale" || failed=1
-      done < <("$JQ" -r '.outputs[] as $n | [$n, (.scale[$n] // "reset" | tostring)] | @tsv' <<<"$profile")
-      # Power takes ids, fresh from this apply's `outputs` (ids are
-      # stable for the session, not across unplug cycles).
-      while IFS=$'\t' read -r out state; do
+
+      # 3. Off: record, then call. Power takes ids, fresh from this
+      # apply's `outputs` (ids are stable for the session, not across
+      # unplug cycles).
+      while IFS= read -r out; do
+        [ -n "$out" ] || continue
         id=$("$JQ" -r --arg n "$out" '.outputs[] | select(.name == $n) | .id' <<<"$outputs")
         if [ -z "$id" ]; then
           echo "scoot-displays: '$out' left before its power could be set" >&2
           failed=1
           continue
         fi
-        call output-power "$id" "$state" || failed=1
-      done < <("$JQ" -r '.outputs[] as $n | [$n, (if (.disabled | index($n)) != null then "off" else "on" end)] | @tsv' <<<"$profile")
+        before="$keep"
+        keep=$("$JQ" -c --arg n "$out" --argjson i "$id" \
+          'if any(.[]; .name == $n and .id == $i) then . else . + [{name: $n, id: $i}] end' <<<"$keep")
+        if ! write_held "$keep"; then
+          # Never make an off this watcher could not undo later.
+          keep="$before"
+          failed=1
+          continue
+        fi
+        if ! call output-power "$id" off; then
+          failed=1
+          keep="$before"
+          write_held "$keep" || true
+        fi
+      done < <("$JQ" -r '.[]' <<<"$disabled")
+
+      if [ "$have_profiles" -eq 0 ]; then
+        if [ "$failed" -ne 0 ]; then
+          echo "scoot-displays: no profiles configured, and releasing a held output failed" >&2
+          return 1
+        fi
+        echo "scoot-displays: no profiles configured; changing nothing it did not change itself" >&2
+        return 0
+      fi
+      if [ -z "$profile" ]; then
+        if [ "$failed" -ne 0 ]; then
+          echo "scoot-displays: no profile for $connected, and resetting it failed" >&2
+          return 1
+        fi
+        echo "scoot-displays: no profile for $connected: scales back at the config file's, only its own power-offs undone" >&2
+        return 0
+      fi
+      name=$("$JQ" -r '.name' <<<"$profile")
       if [ "$failed" -ne 0 ]; then
         echo "scoot-displays: profile '$name' NOT fully applied ($connected)" >&2
         return 1
@@ -189,15 +304,15 @@ let
       return 0
     }
 
-    # One apply at a time: a manual `apply` racing a hotplug-driven one
-    # would interleave their calls, and both could report "applied"
-    # over a set the other half-changed. `flock` on a file in the
-    # runtime dir (never beside the config, which the watcher never
-    # touches): the kernel drops the lock with the holder, so a killed
-    # applier never wedges the next. Held around the apply only, never
-    # across the watch loop's settle sleeps.
+    # One apply at a time: a manual `apply` (or the idle policy's
+    # resume) racing a hotplug-driven one would interleave their calls
+    # and their held records, and both could report "applied" over a
+    # set the other half-changed. `flock` on a file in the runtime dir:
+    # the kernel drops the lock with the holder, so a killed applier
+    # never wedges the next. Held around the apply only, never across
+    # the watch loop's settle sleeps.
     do_apply_locked() {
-      lock="''${XDG_RUNTIME_DIR:-''${TMPDIR:-/tmp}}/scoot-displays.lock"
+      lock="$RUNTIME/scoot-displays.lock"
       {
         if ! "$FLOCK" -w 30 9; then
           echo "scoot-displays: another apply held $lock for 30 s; giving up" >&2
@@ -208,17 +323,26 @@ let
     }
 
     do_watch() {
-      do_apply_locked || true
       # A clean end of stream (the session went away) is a failure for
       # a watcher: exit 1 so the unit's on-failure retry resubscribes
       # when the session is back, instead of idling unsubscribed.
       "$SCOOT" msg subscribe output | while IFS= read -r event; do
         case "$event" in
-          *output_removed* | *output_restored* | *output_changed*) ;;
+          # The start-up apply, once subscribed rather than before: a
+          # plug between the two is then an event, never a miss.
+          *'"type":"subscribed"'*)
+            do_apply_locked || true
+            continue
+            ;;
+          # Every add, removal, restore and in-place mode change: an
+          # add fires for every plug, a first one or a replug of an
+          # empty monitor included.
+          *output_added* | *output_removed* | *output_restored* | *output_changed*) ;;
           *) continue ;;
         esac
-        # Settle: hotplug arrives as a burst (remove/restore/changed);
-        # wait out 2 s, then drain up to 1 s more, then apply once.
+        # Settle: hotplug arrives as a burst (added/restored, removed,
+        # changed); wait out 2 s, then drain up to 1 s more, then apply
+        # once.
         "$SLEEP" 2
         while IFS= read -r -t 1 _drained; do :; done
         do_apply_locked || true
@@ -239,6 +363,23 @@ let
 
 in
 {
+  # Internal wiring, not a user option: the watcher, read by the idle
+  # policy (`idle-home.nix` re-applies through it on resume, since its
+  # `wlopm --on "*"` would otherwise relight a profile's `disabled`
+  # output with nothing telling the watcher). Null unless the watcher
+  # is installed (the slot on, on Linux), so the idle policy's resume
+  # stays exactly `wlopm --on "*"` without it.
+  options.programs.scoot.desktop.displays.watcher = lib.mkOption {
+    type = lib.types.nullOr lib.types.package;
+    default = null;
+    internal = true;
+    visible = false;
+    description = ''
+      Internal: the display-profile watcher (`scoot-displays`), read
+      by the idle policy's resume. Not for direct use.
+    '';
+  };
+
   config = lib.mkMerge [
     (lib.mkIf dis.enable {
       assertions = [
@@ -333,6 +474,21 @@ in
             '';
           }
           {
+            # A profile that disables its whole set leaves every screen
+            # dark the moment it matches -- at every session start, if
+            # that is the set the session starts with. Refused here
+            # rather than applied (guarded on a non-empty set, which
+            # its own refusal above covers).
+            assertion = profile.outputs == [ ] || lib.subtractLists profile.disabled profile.outputs != [ ];
+            message = ''
+              programs.scoot.desktop.displays.profiles profile
+              "${profile.name}" disables every output it matches
+              (${lib.concatStringsSep ", " profile.outputs}), which would
+              leave no screen on: keep at least one output of `outputs`
+              out of `disabled`.
+            '';
+          }
+          {
             # The compositor's own range (`output_scale.rs`): outside
             # it `output-scale` refuses, so fail here instead of
             # shipping a profile that fails every apply.
@@ -349,6 +505,7 @@ in
       # The watcher (Linux only: the session it serves is
       # Linux-only, the way the OSD scripts are).
       home.packages = lib.optionals isLinux [ scootDisplays ];
+      programs.scoot.desktop.displays.watcher = lib.mkIf isLinux scootDisplays;
     })
 
     # The profiles file and the unit (Linux only, beside the watcher

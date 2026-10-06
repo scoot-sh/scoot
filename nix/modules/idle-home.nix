@@ -102,6 +102,18 @@ let
     + " wipe; "
   );
 
+  # With display profiles on, the resume re-applies the matched one
+  # after lighting every screen: `--on "*"` also lights an output the
+  # profile disables (a clamshell panel), and nothing else would tell
+  # the watcher. `;`, so a watcher failure never stops the screens
+  # coming back on. The watcher serializes with its own hotplug
+  # applies (one lock), and swayidle's `-w` waits for it -- an apply is
+  # a handful of IPC calls.
+  displaysWatcher = cfg.desktop.displays.watcher or null;
+  displaysResume = lib.optionalString (
+    displaysWatcher != null
+  ) "; ${lib.getExe' displaysWatcher "scoot-displays"} apply";
+
   # swayidle parses each config line with wordexp (shell quoting), and
   # each command must be ONE quoted word: `sh -c` runs it, and the `"*"`
   # stays quoted so the shell never globs it into filenames (the same
@@ -119,7 +131,7 @@ let
       ) "timeout ${toString idle.lockTimeout} '${idle.lock.command}'"
       ++ lib.optional (idle.offTimeout != 0) (
         "timeout ${toString idle.offTimeout} '${lib.getExe idle.offPackage} --off \"*\"'"
-        + " resume '${lib.getExe idle.offPackage} --on \"*\"'"
+        + " resume '${lib.getExe idle.offPackage} --on \"*\"${displaysResume}'"
       )
       # Before sleep the locker runs directly (not through
       # `lock.command`), so `-w` waits for the lock before logind

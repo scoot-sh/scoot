@@ -129,7 +129,10 @@ pub fn init_named(
     // name alone. `--tty` upgrades this to the full connector identity once
     // it knows it (`State::note_output_identity`); the primary is the first
     // output, so nothing displaced can be waiting for it and no restore runs
-    // here (unlike `add_output_with` below).
+    // here (unlike `add_output_with` below). Nor does an added event: this
+    // runs once, before the event loop serves any connection, so no
+    // subscriber can exist yet -- a subscriber reads `outputs` for the
+    // outputs the session started with.
     state
         .output_identities
         .insert(id, OutputIdentity::named(name));
@@ -243,6 +246,7 @@ pub fn add_output_with(
         }
     };
     let area = logical_area(state, &output, width, height);
+    let scale = super::output_scale::scale_of(&output);
     let id = state.outputs.add(output);
     state.backends.insert(id, backend);
     // An output at a scale no other runs at starts `apply()`'s per-window
@@ -274,6 +278,21 @@ pub fn add_output_with(
     // The core lays out against one more output now, and `apply()` is what
     // pushes that arrangement onto the windows; it ends in `request_render()`.
     state.apply();
+    // Every add tells `Output` subscribers, whatever comes after it: a first
+    // plug and an empty monitor's replug restore nothing, so without this
+    // they would be silent (a display-profile watcher would never hear the
+    // dock). After `apply()`, so an `outputs` query answered after the event
+    // lists the output; before the restore, so a replug that brings windows
+    // back reads added, then restored -- on `--tty` too, whose second
+    // restore attempt runs after this returns. Free with no subscriber
+    // (`emit` returns at once), which is every startup add.
+    state.emit_output_added(scoot_ipc::OutputAdded {
+        output: id.0,
+        name: name.to_owned(),
+        width,
+        height,
+        scale,
+    });
     state.restore_displaced(id);
     Ok(id)
 }
@@ -295,11 +314,13 @@ pub(crate) fn add_output_without_backend(
 ) -> OutputId {
     let output = create_output(state, name, width, height, (0, 0));
     let area = logical_area(state, &output, width, height);
+    let scale = super::output_scale::scale_of(&output);
     let id = state.outputs.add(output);
     state.note_output_scales();
-    // Name-only, like the other add paths, and the restore: a harness output
-    // added under a removed output's name gets its windows back the same way
-    // a hotplugged monitor does.
+    // Name-only, like the other add paths, then the added event and the
+    // restore: a harness output added under a removed output's name gets
+    // its windows back the same way a hotplugged monitor does, and tells
+    // subscribers the same way too.
     state
         .output_identities
         .insert(id, OutputIdentity::named(name));
@@ -308,6 +329,13 @@ pub(crate) fn add_output_without_backend(
         .handle_event(CoreEvent::OutputAdded { id, area });
     #[cfg(feature = "xwayland")]
     state.refit_xwayland();
+    state.emit_output_added(scoot_ipc::OutputAdded {
+        output: id.0,
+        name: name.to_owned(),
+        width,
+        height,
+        scale,
+    });
     state.restore_displaced(id);
     id
 }

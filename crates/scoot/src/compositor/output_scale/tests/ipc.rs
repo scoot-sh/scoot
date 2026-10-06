@@ -8,8 +8,9 @@
 //! the scale lands in `msg outputs` (rect and scale), bad input is refused
 //! with a reason, a repeat set is a silent no-op, a reset goes back to the
 //! config file's scale, a successful reload restores the config file's
-//! scale (a failed one keeps the live scale), and a replugged monitor comes
-//! back at its runtime scale by name.
+//! scale and reports each runtime scale it moved (a failed one keeps the
+//! live scale), and a replugged monitor comes back at its runtime scale by
+//! name.
 
 use std::fs;
 
@@ -229,9 +230,14 @@ fn a_reload_restores_the_config_files_scale() {
         refused.is_empty(),
         "restoring the config scale refuses nothing: {response:?}"
     );
-    assert!(
-        !applied.iter().any(|name| name.contains("scale")),
-        "the config did not change, so no scale field reports: {response:?}"
+    let scales: Vec<&String> = applied
+        .iter()
+        .filter(|name| name.contains("scale"))
+        .collect();
+    assert_eq!(
+        scales,
+        ["outputs.headless.scale"],
+        "the dropped runtime scale moved the output, so it reports: {response:?}"
     );
     assert_eq!(
         fixture.scale_of(1),
@@ -241,6 +247,66 @@ fn a_reload_restores_the_config_files_scale() {
     assert!(
         fixture.state.runtime_scales.is_empty(),
         "the runtime map is empty after a reload"
+    );
+}
+
+/// What a reload's reply says about the runtime scales it drops: one the
+/// file disagrees with is a move, reported once by name and sorted --
+/// connected or not, since a replug would have come back at it -- and one
+/// the file agrees with moved nothing and reports nothing. A changed entry
+/// for the same name reports once, not twice.
+#[test]
+fn a_reload_reports_exactly_the_runtime_scales_it_moved() {
+    let mut fixture = Fixture::with_outputs(3);
+    let dir = fixture.install_config("[[outputs]]\nname = \"headless-3\"\nscale = 1.5\n");
+    assert!(matches!(
+        fixture.state.handle_request(Request::Reload),
+        Response::Reloaded { .. }
+    ));
+    assert_eq!(fixture.scale_of(3), 1.5);
+    // A live scale equal to the file's (headless-3 at 1.5), one that
+    // differs on a connected output (headless-2), one on a monitor that has
+    // since been unplugged (DP-1, set while it was here), and one whose file
+    // entry itself changes in this reload (headless, to 1.25 below).
+    for (name, scale) in [("headless-3", 1.5), ("headless-2", 2.0), ("headless", 3.0)] {
+        ok(&fixture.state.handle_request(Request::OutputScale {
+            output: OutputTarget::Name(name.into()),
+            scale: Some(scale),
+        }));
+    }
+    fixture.state.runtime_scales.insert("DP-1".into(), 2.0);
+    fs::write(
+        dir.path().join("config.toml"),
+        "[[outputs]]\nname = \"headless-3\"\nscale = 1.5\n\n\
+         [[outputs]]\nname = \"headless\"\nscale = 1.25\n",
+    )
+    .expect("the edited config");
+    let response = fixture.state.handle_request(Request::Reload);
+    let Response::Reloaded { applied, refused } = &response else {
+        panic!("a reload must report: {response:?}");
+    };
+    assert!(refused.is_empty(), "{response:?}");
+    assert_eq!(
+        applied,
+        &[
+            "outputs.headless.scale".to_owned(),
+            "outputs.DP-1.scale".to_owned(),
+            "outputs.headless-2.scale".to_owned(),
+        ],
+        "the changed entry once, then each moved runtime scale, sorted"
+    );
+    assert_eq!(fixture.scale_of(1), 1.25);
+    assert_eq!(fixture.scale_of(2), 1.0);
+    assert_eq!(fixture.scale_of(3), 1.5);
+    assert!(fixture.state.runtime_scales.is_empty());
+    // And a second reload agrees silently: nothing live is left to drop.
+    let response = fixture.state.handle_request(Request::Reload);
+    assert_eq!(
+        response,
+        Response::Reloaded {
+            applied: vec![],
+            refused: vec![],
+        }
     );
 }
 

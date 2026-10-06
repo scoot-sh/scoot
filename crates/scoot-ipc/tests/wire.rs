@@ -2,9 +2,9 @@
 //! `PROTOCOL_VERSION` bump.
 
 use scoot_ipc::{
-    Action, BindRow, EventKind, Horizontal, KeyboardLayout, OutputChanged, OutputRemoved,
-    OutputRestored, OutputSnapshot, OutputTarget, PROTOCOL_VERSION, PointerButton, Rect, Request,
-    Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, SkippedBind, WindowSnapshot,
+    Action, BindRow, EventKind, Horizontal, KeyboardLayout, OutputAdded, OutputChanged,
+    OutputRemoved, OutputRestored, OutputSnapshot, OutputTarget, PROTOCOL_VERSION, PointerButton,
+    Rect, Request, Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, SkippedBind, WindowSnapshot,
     WorkspaceSnapshot, decode, encode,
 };
 use serde_json::{Value, json};
@@ -473,15 +473,15 @@ fn a_reload_report_round_trips_with_both_lists() {
 
 /// The Phase 4-6 record: the refusal *strings* moved (restart wording, the
 /// autostart spawn delta) while the reply *shape* did not -- so this still
-/// decodes as the same two string lists. (The protocol is at 9 now for the
-/// lock query and event, and the binds query, below; these strings are still
-/// payload, not wire.)
+/// decodes as the same two string lists. (The protocol is at 10 now for the
+/// lock query and event, the binds query, and the output-added event, below;
+/// these strings are still payload, not wire.)
 /// Strings are payload, not wire format: an older client parses this reply
 /// exactly as it parsed the old strings.
 #[test]
 fn reworded_reload_refusals_are_payload_not_wire_format() {
     assert_eq!(
-        PROTOCOL_VERSION, 9,
+        PROTOCOL_VERSION, 10,
         "no new reply variant or field shipped with the reload completion"
     );
     let response = Response::Reloaded {
@@ -1166,6 +1166,41 @@ fn an_output_changed_event_round_trips_with_the_new_mode() {
     );
 }
 
+/// The added payload: the new output's id and connector name, with the size
+/// and scale it came up at -- the same fields as `output_changed`. A new
+/// tag on the `output` kind, so it moved the protocol 9 → 10: an older
+/// subscriber handed one fails its decode, which is the break the bump
+/// announces.
+#[test]
+fn an_output_added_event_round_trips_and_moved_the_protocol() {
+    assert_eq!(
+        PROTOCOL_VERSION, 10,
+        "the output-added event moved the protocol 9 → 10"
+    );
+    let response = Response::OutputAdded(OutputAdded {
+        output: 3,
+        name: "DP-1".into(),
+        width: 3840,
+        height: 2160,
+        scale: 1.5,
+    });
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "output_added",
+            "output": 3,
+            "name": "DP-1",
+            "width": 3840,
+            "height": 2160,
+            "scale": 1.5,
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
 /// A removal with no adopter and a restore against a gone one still have a
 /// shape: explicit nulls, not missing fields. New variants, new clients --
 /// nothing here decodes asymmetrically against an older server, because an
@@ -1278,8 +1313,8 @@ fn a_locked_query_round_trips_with_the_live_state() {
 #[test]
 fn a_binds_query_round_trips_rows_and_skipped() {
     assert_eq!(
-        PROTOCOL_VERSION, 9,
-        "the binds reply moved the protocol 8 → 9"
+        PROTOCOL_VERSION, 10,
+        "the binds reply moved the protocol 8 → 9 (and the output-added event 9 → 10)"
     );
     let request = Request::Binds;
     assert_eq!(json_of(&request), json!({ "type": "binds" }));

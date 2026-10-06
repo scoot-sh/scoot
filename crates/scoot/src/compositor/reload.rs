@@ -462,8 +462,11 @@ impl State {
     /// Every live `output-scale` scale ([`State::runtime_scales`]) is
     /// dropped here, file changed or not: a reload means "the file's
     /// scales", and a reload that fails to load never gets this far, so it
-    /// keeps them. Dropping one is not a field change, so it reports
-    /// nothing; it re-lays-out like any other moved scale.
+    /// keeps them. A dropped scale that differs from the file's is a scale
+    /// the reload moved, so it reports as `outputs.<name>.scale` in
+    /// `applied` like a changed entry (once per name, sorted, whether or
+    /// not that monitor is connected now: a replug would have come back at
+    /// it); one equal to the file's moved nothing and reports nothing.
     ///
     /// Under `--nested` every difference refuses instead: the host owns the
     /// scale there (`compositor::run` forced the live value to 1.0 with a
@@ -480,12 +483,22 @@ impl State {
         }
         // Live IPC scales (`output-scale`) end here: a reload goes back to
         // the config file's scales, which is what `configured_scale` reads
-        // once the map below is empty. Remembered only to defeat the
-        // early return: with an unchanged file but a live runtime scale,
-        // there is still a move to undo.
-        let had_runtime = !self.runtime_scales.is_empty();
-        self.runtime_scales.clear();
-        if default == ScaleReload::Agree && entries.scales.is_empty() && !had_runtime {
+        // once the map is empty. Each one the file disagrees with is a
+        // move this reload makes, reported unless a changed entry for the
+        // same name already reports it. Sorted, because the map's order is
+        // not the caller's to see. A reload is a cold path; the `Vec` is
+        // empty, and allocates nothing, without a live scale.
+        let mut dropped: Vec<String> = self
+            .runtime_scales
+            .drain()
+            .filter(|(name, scale)| {
+                *scale != fresh.outputs.scale_for(name, fresh.scale)
+                    && !entries.scales.contains(name)
+            })
+            .map(|(name, _)| name)
+            .collect();
+        dropped.sort_unstable();
+        if default == ScaleReload::Agree && entries.scales.is_empty() && dropped.is_empty() {
             return;
         }
         self.default_scale = fresh.scale;
@@ -493,7 +506,7 @@ impl State {
         if default == ScaleReload::Apply {
             report.applied.push(field::SCALE.to_owned());
         }
-        for name in &entries.scales {
+        for name in entries.scales.iter().chain(&dropped) {
             report.applied.push(output_field(name, "scale"));
         }
         let moved = self.outputs.iter().any(|output| {

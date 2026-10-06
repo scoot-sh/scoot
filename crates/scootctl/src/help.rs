@@ -146,7 +146,7 @@ pub const REQUESTS: &[RequestDoc] = &[
         syntax: "subscribe [EVENT...]",
         description: "stream events (output, keyboard, workspace, lock; default: output) until killed",
         example: "scoot msg subscribe workspace",
-        reply: "one compact JSON object per line, e.g. `{\"type\":\"subscribed\",...}` then events",
+        reply: "`{\"type\":\"subscribed\",...}`, then one event per line, e.g. `{\"type\":\"output_added\",...}`",
     },
 ];
 
