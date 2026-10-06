@@ -36,6 +36,7 @@
 
 mod buffers;
 mod crtcs;
+mod ctm;
 mod dumb;
 mod flip_tracker;
 mod gpu;
@@ -1026,6 +1027,9 @@ impl Tty {
     /// or when it reports something unusable (zero -- no LUT, which is what
     /// Apple's DCP reports on both of its CRTCs -- or absurdly large, which
     /// would turn every `set_gamma` allocation into a memory hog). A
+    /// LUT-less size still advertises the fallback rather than zero: with a
+    /// `CTM` property on the CRTC the ramp is applied as a matrix (see
+    /// [`ctm`]), and only without one does the first push fail. A
     /// wrong-but-sane size degrades to a `failed` event on the first
     /// `set_gamma` the hardware refuses, which is the protocol's own answer
     /// for an output that doesn't support gamma tables.
@@ -1036,13 +1040,21 @@ impl Tty {
         }
     }
 
-    /// Pushes one `set_gamma` ramp to output `id`'s CRTC gamma LUT: three
+    /// Pushes one `set_gamma` ramp to output `id`: three
     /// slices of [`gamma_size`](Self::gamma_size) `u16` entries (red, green,
     /// blue).
     ///
     /// There is no Smithay helper for this -- `drm`'s own `set_gamma` ioctl
     /// wrapper, on the already-open device, addressed at the head's own
-    /// CRTC. Any failure (no DRM master after a VT switch, a driver that
+    /// CRTC. When the CRTC reports no usable LUT length but exposes a `CTM`
+    /// blob property (Apple DCP), the ramp's white endpoints go out as a
+    /// diagonal color matrix through that property instead (see `ctm`). The
+    /// LUT always wins when a CRTC has both; neither is the caller's to
+    /// turn into a `failed` event, as before. A linear ramp converts back
+    /// to the identity matrix, so restoring the default needs no special
+    /// case on either path.
+    ///
+    /// Any failure (no DRM master after a VT switch, a driver that
     /// refuses the size, an output this backend does not drive) is the
     /// caller's to turn into a `failed` event; the session keeps running.
     pub(super) fn set_gamma_ramp(
@@ -1057,7 +1069,22 @@ impl Tty {
         let head = self.head(id).ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, "no crtc drives this output")
         })?;
-        self.drm.set_gamma(head.presenter.crtc(), red, green, blue)
+        let crtc = head.presenter.crtc();
+        if lut_usable(&self.drm, crtc) {
+            return self.drm.set_gamma(crtc, red, green, blue);
+        }
+        let Some(ctm_prop) = ctm::prop(&self.drm, crtc) else {
+            return Err(std::io::Error::other(
+                "crtc has neither a usable gamma LUT nor a CTM property",
+            ));
+        };
+        let Some(ctm) = ctm::from_ramps(red, green, blue) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "gamma ramps are empty or of ragged lengths",
+            ));
+        };
+        ctm::commit(&self.drm, crtc, ctm_prop, &ctm)
     }
 
     /// Powers output `id`'s panel off or on through its connector's DPMS
@@ -1400,12 +1427,33 @@ impl Tty {
     }
 }
 
+/// Largest CRTC LUT length `zwlr_gamma_control_v1` can sanely advertise:
+/// anything wider turns every `set_gamma` allocation into a memory hog.
+/// Shared by [`crtc_gamma_size`] and [`lut_usable`], which must agree on
+/// what "a usable LUT" means -- a CRTC one calls usable and the other
+/// does not would advertise a size it then refuses to push to, or push
+/// to a length it refused to advertise.
+const MAX_SANE_GAMMA_SIZE: u32 = 4096;
+
+/// Whether `crtc` carries a gamma LUT worth pushing to: a length the
+/// protocol can sanely advertise. Zero (no LUT, e.g. Apple DCP) and the
+/// absurd both answer `false`, as does a query failure -- pushing blind
+/// at a CRTC whose length is unknown risks exactly the refusal the caller
+/// turns into a `failed` event. Read per `set_gamma`, not cached: LUT
+/// presence is connector hardware state, and one extra query ioctl on a
+/// path that runs at most about once per second costs nothing.
+fn lut_usable(drm: &DrmDevice, crtc: crtc::Handle) -> bool {
+    use smithay::reexports::drm::control::Device as ControlDevice;
+
+    drm.get_crtc(crtc)
+        .is_ok_and(|info| (2..=MAX_SANE_GAMMA_SIZE).contains(&info.gamma_length()))
+}
+
 /// Entries per gamma ramp on `crtc`, clamped to what `zwlr_gamma_control_v1`
 /// can sanely advertise -- see [`Tty::gamma_size`], the only caller.
 fn crtc_gamma_size(drm: &DrmDevice, crtc: crtc::Handle) -> u32 {
     use smithay::reexports::drm::control::Device as ControlDevice;
 
-    const MAX_SANE_GAMMA_SIZE: u32 = 4096;
     match drm.get_crtc(crtc) {
         Ok(info) => {
             let size = info.gamma_length();

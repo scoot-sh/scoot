@@ -37,18 +37,23 @@
 //! ## Backends
 //!
 //! The ramp is accepted on every backend. It is *applied* only
-//! under `--tty`, where there is a real CRTC gamma LUT to push it to (see
-//! [`Tty::set_gamma_ramp`](super::tty::Tty::set_gamma_ramp)). Under
-//! `--headless`/`--nested` there is no hardware LUT: the request succeeds
-//! but nothing on screen changes -- and an IPC
-//! screenshot reads the framebuffer, which is pre-LUT, so it shows the
-//! unmodified frame either way. `site/src/content/docs/scoot/protocols.md` says this where a user
+//! under `--tty`, where there is real CRTC color hardware to push it to
+//! (see [`Tty::set_gamma_ramp`](super::tty::Tty::set_gamma_ramp)): the
+//! CRTC gamma LUT where one exists, else the CRTC `CTM` blob property,
+//! which carries the ramp's white endpoints as a diagonal color matrix --
+//! the Apple DCP exposes no LUT but does expose `CTM`, so the night light
+//! works there too. Under `--headless`/`--nested` there is no color
+//! hardware at all: the request succeeds but nothing on screen changes --
+//! and an IPC screenshot reads the framebuffer, which is pre-LUT and
+//! pre-CTM, so it shows the unmodified frame either way.
+//! `site/src/content/docs/scoot/protocols.md` says this where a user
 //! will find it.
 //!
 //! Any DRM failure while applying (no master after a VT switch, a driver
-//! that refuses the size) retires the control with a `failed` event and the
-//! session keeps running -- per the protocol, "setting the gamma tables
-//! failed" invalidates the object, it does not take down the compositor.
+//! that refuses the size, neither LUT nor `CTM` on the CRTC) retires the
+//! control with a `failed` event and the session keeps running -- per the
+//! protocol, "setting the gamma tables failed" invalidates the object, it
+//! does not take down the compositor.
 //!
 //! Lock-session interaction: none. Gamma is output-level hardware state, not
 //! a surface, so a control keeps working while the session is locked --
@@ -218,6 +223,28 @@ pub(super) fn linear_ramp(size: u32) -> Vec<u16> {
         .collect()
 }
 
+/// Three concatenated linear ramps for [`restore_default`]'s
+/// `set_gamma_ramp` call: red, green and blue back to the default.
+///
+/// [`restore_default`]: fn.restore_default
+///
+/// One buffer rather than three vectors so the call below slices exactly
+/// the shape [`Tty::set_gamma_ramp`](super::tty::Tty::set_gamma_ramp)
+/// takes, with no chance of a one-ramp buffer sliced as three (which is
+/// what panicked here before: `linear_ramp` holds one ramp, and
+/// `&ramp[size..2 * size]` is out of range on it). Allocated fresh per
+/// call: restore runs once per control destroy or client disconnect -- a
+/// cold path -- so no reusable buffer; the most this ever holds is
+/// `3 * 4096` `u16` entries (~24 KB).
+pub(super) fn default_ramps(size: u32) -> Vec<u16> {
+    let ramp = linear_ramp(size);
+    let mut out = Vec::with_capacity(size as usize * 3);
+    out.extend_from_slice(&ramp);
+    out.extend_from_slice(&ramp);
+    out.extend_from_slice(&ramp);
+    out
+}
+
 /// Global data for the manager. Empty: every client may bind (see the module
 /// doc's trust model), so there is no filter to carry.
 pub(super) struct GammaControlManagerGlobalData;
@@ -380,7 +407,7 @@ fn set_gamma(state: &mut State, resource: &ZwlrGammaControlV1, fd: OwnedFd) {
             return;
         }
     };
-    // Nowhere to apply to outside `--tty` (headless/nested have no LUT):
+    // Nowhere to apply to outside `--tty` (headless/nested have no color hardware):
     // the length check above is the whole validation and the request
     // succeeds. The accepted bytes are deliberately not kept -- nothing
     // reads a stored ramp back (a future "report the current ramp" surface
@@ -428,11 +455,39 @@ fn restore_default(state: &mut State, id: OutputId) {
         // rather than crashing the session; the next control starts clean
         // either way. Only this output's CRTC: another screen's ramp is its
         // own control's business.
+        //
+        // Every path below returns rather than panics, which is what makes
+        // that promise true:
+        // - a recorded size below 2 (no size this backend records is -- both
+        //   `Tty::gamma_size` and the hotplug CRTC switch clamp to at least
+        //   2 -- but a corrupt record must not take the session down)
+        //   leaves the last ramp in place instead of reaching `linear_ramp`'s
+        //   divide-by-zero assert;
+        // - an output this backend no longer drives (CRTC gone mid-disconnect)
+        //   is `set_gamma_ramp`'s `NotFound` error, warned on below;
+        // - empty or ragged ramps cannot reach `set_gamma_ramp`'s CTM branch
+        //   as an index panic: the three slices are equal-length by
+        //   construction here, and `ctm::from_ramps` turns anything else
+        //   into the same warned-on error.
         let size = state.gamma_control.size_of(id);
-        let ramp = linear_ramp(size);
+        if size < 2 {
+            tracing::warn!(
+                output = id.0,
+                size,
+                "recorded gamma size cannot hold a ramp; leaving the last ramp on the hardware"
+            );
+            return;
+        }
+        let ramps = default_ramps(size);
         let size = size as usize;
+        debug_assert_eq!(ramps.len(), size * 3);
         if tty
-            .set_gamma_ramp(id, &ramp[..size], &ramp[size..2 * size], &ramp[2 * size..])
+            .set_gamma_ramp(
+                id,
+                &ramps[..size],
+                &ramps[size..2 * size],
+                &ramps[2 * size..],
+            )
             .is_err()
         {
             tracing::warn!(output = id.0, "could not restore the default gamma ramp");
