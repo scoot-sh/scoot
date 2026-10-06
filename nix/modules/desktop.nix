@@ -1725,8 +1725,9 @@ in
         ];
         description = ''
           Arrangement profiles, first match wins in list order. Empty
-          matches nothing (the watcher stays idle: no scale or power
-          call at all). Profiles set scale and power only: no
+          matches nothing (the watcher sets no scale and turns nothing
+          off, and only turns back on an output it turned off itself under
+          an earlier list). Profiles set scale and power only: no
           positions, no modes, no make/model matching.
         '';
       };

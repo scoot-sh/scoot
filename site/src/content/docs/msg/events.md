@@ -17,8 +17,8 @@ afterwards that connection carries events until the session ends:
 ```sh
 $ scoot msg subscribe
 {"type":"subscribed","events":["output"]}
-{"type":"output_added","output":3,"name":"DP-1","width":3840,"height":2160,"scale":1.5}
 {"type":"output_removed","output":2,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":0,"adopter_active":2,"origin":"DP-1"}
+{"type":"output_added","output":3,"name":"DP-1","width":3840,"height":2160,"scale":1.5}
 {"type":"output_restored","output":3,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":2,"adopter_active":0,"origin":"DP-1","moved":3}
 {"type":"output_changed","output":1,"name":"DP-1","width":2952,"height":1660,"scale":1.5}
 $ scoot msg subscribe keyboard

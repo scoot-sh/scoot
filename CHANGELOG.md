@@ -9,6 +9,30 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-10-06 — display profiles, live per-output scale, and an output-added event (IPC protocol 10, breaking)
+
+- **Display profiles in the NixOS/home-manager desktop profile.**
+  `programs.scoot.desktop.displays.profiles` matches the exact set of
+  connected monitors and sets each one's scale and power: dock and the
+  external panel comes up at its own scale, with the laptop panel off if
+  the profile says so; undock and that panel comes back on. Profiles set
+  scale and power only (no positions or modes); modes stay in
+  `settings.outputs`. The watcher never writes your config file. See
+  [Displays](site/src/content/docs/desktop/index.md#displays).
+- **`scoot msg output-scale ID|NAME SCALE|reset`** sets one output's scale
+  live (0.5–4, the same range as the config file), or `reset` goes back to
+  the config's scale. It is runtime state: **a successful `scoot msg
+  reload` or a restart goes back to the config's scales**, and the reload
+  reply lists each live scale it dropped that differed from the file, as
+  `outputs.<name>.scale` in `applied`.
+  With display profiles on, run `scoot-displays apply` after a reload.
+- **Breaking: the IPC protocol is now 10.** `scoot msg subscribe` (the
+  `output` kind) sends a new `output_added` event on every monitor add, on
+  every backend, before any `output_restored` for it. A client written for
+  protocol 9 that subscribes to `output` sees a message type it does not
+  know, and an older `scoot msg subscribe` exits on the first one. Update
+  anything that reads the event stream to accept `output_added`.
+
 ### 2026-10-06 — a visible pointer no longer keeps a fullscreen video composited on Apple Silicon
 
 - **On a display with no cursor plane but a free overlay plane (Apple

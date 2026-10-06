@@ -1824,8 +1824,12 @@ written:
 - **No match.** Every connected output goes back to your config's
   scale, and the watcher's own offs come back on.
 
-The record of its own offs is `$XDG_RUNTIME_DIR/scoot-displays.off`
-(gone at logout, like the session). Everything else is live runtime
+The record of its own offs is `$XDG_RUNTIME_DIR/scoot-displays.off`.
+It goes when your last session logs out (unless lingering is on), but
+it survives a compositor restart inside one login, so a fresh scoot can find an old record:
+until the watcher's first apply in that session, an entry whose name
+and id match a live output can turn that output on once. It only ever
+lights a screen, never darkens one. Everything else is live runtime
 state, not config: your config file (under home-manager, a read-only
 link into the Nix store) is never touched. A successful
 `scoot msg reload` or a restart goes back to the config's scales until
@@ -1860,7 +1864,7 @@ restart the watcher, which re-applies at start):
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `desktop.displays.enable` | bool | `true` with the profile | match the connected set and apply scale and power (with no profiles the watcher stays idle: no scale or power call at all) |
+| `desktop.displays.enable` | bool | `true` with the profile | match the connected set and apply scale and power (with no profiles the watcher sets no scale and turns nothing off; it only turns back on an output it turned off itself under an earlier profile list) |
 | `desktop.displays.profiles` | list of profiles | `[]` | arrangement profiles, first match wins in list order |
 | `profiles[].name` | string (unique) | — | the profile's name, as `status` prints it |
 | `profiles[].outputs` | list of strings (non-empty, unique set) | — | the exact connected connector-name set this profile answers |
@@ -1910,8 +1914,10 @@ Troubleshooting, by symptom:
   docked profile no longer matching, the watcher lights the panel it
   darkened rather than risk leaving no screen on (it cannot tell that
   unplug from a real undock). The panel goes dark again when the
-  monitor reconnects and the docked profile matches; otherwise the
-  idle policy's next screens-off covers it.
+  monitor reconnects and the docked profile matches. The idle
+  policy does not darken it again on its own: its screens-off fires
+  once per idle stretch, so the panel stays lit until the monitor
+  comes back or you return.
 - *A disabled panel lit up after idle.* Without the idle policy,
   something else ran `wlopm --on '*'` (or `output-power all on`):
   `scoot-displays apply` turns it back off. With the idle policy on,

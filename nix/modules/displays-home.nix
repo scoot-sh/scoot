@@ -105,9 +105,12 @@ let
     # never lights a screen it did not darken. Beside the lock, never
     # beside the config (which the watcher never touches). It outlives
     # a watcher restart (a rebuild's new profiles must still undo the
-    # old ones' offs); one left by an earlier session in the same
-    # runtime dir can at worst match a fresh session's id and power on
-    # an output that session already started on.
+    # old ones' offs) and a compositor restart inside one login (the
+    # runtime dir lives until the last session logs out). So a fresh
+    # compositor can find an old record: an entry whose name and id
+    # match a live output turns that output on at the first apply, even
+    # if something else turned it off in between. It only ever lights a
+    # screen, never darkens one.
     HELD="$RUNTIME/scoot-displays.off"
 
     # The live outputs, or a loud refusal (no session: exit 1, so the
@@ -556,8 +559,9 @@ in
 
     # The profile turns the slot on (still individually disable-able
     # at plain priority, the way the clipboard slot works). With no
-    # profiles the watcher stays idle (no scale or power call at all),
-    # so turning it on is safe before any profile exists.
+    # profiles the watcher sets no scale and turns nothing off (it only
+    # turns back on an output it turned off itself under an earlier
+    # list), so turning it on is safe before any profile exists.
     (lib.mkIf cfg.desktop.enable {
       programs.scoot.desktop.displays.enable = lib.mkDefault true;
     })

@@ -284,8 +284,10 @@ pub fn add_output_with(
     // dock). After `apply()`, so an `outputs` query answered after the event
     // lists the output; before the restore, so a replug that brings windows
     // back reads added, then restored -- on `--tty` too, whose second
-    // restore attempt runs after this returns. Free with no subscriber
-    // (`emit` returns at once), which is every startup add.
+    // restore attempt runs after this returns. With no subscriber (every
+    // startup add) it still copies the name and encodes the line before
+    // `emit` finds nobody to send to, like the other output events: one
+    // small allocation on an add, never on a per-frame path.
     state.emit_output_added(scoot_ipc::OutputAdded {
         output: id.0,
         name: name.to_owned(),
