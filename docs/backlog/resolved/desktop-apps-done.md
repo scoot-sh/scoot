@@ -55,7 +55,7 @@ the browser); printer/scanner setup (CUPS notes at most).
 
 ## Resolution (2026-10-06)
 
-Landed in PR #PRNUM (`feat(nix): desktop apps`), documented at
+Landed in PR #484 (`feat(nix): desktop apps`), documented at
 site/src/content/docs/desktop/index.md (*Terminal, files, and removable
 media*; *WiFi and Bluetooth*).
 
