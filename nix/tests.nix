@@ -99,7 +99,7 @@
 #   on, each fail eval; the shared keymap (`desktop-keys` child) runs
 #   with the profile -- the twelve hardware and lock binds, each a
 #   `mkDefault` a user `[binds]` entry wins over and each removable
-#   through `binds.<name>.enable`, the nine slot-gated binds only
+#   through `binds.<name>.enable`, the eleven slot-gated binds only
 #   while their slot is on, the volume, brightness and mic-mute binds
 #   through the audio slot's scripts while that slot is on;
 #   the notification daemon (`desktop-notifications` child) runs with
@@ -183,9 +183,29 @@
 #   through scripts that also poke the OSD (wob on the `overlay`
 #   layer, above fullscreen, themed by the look unless
 #   `theme.targets.osd.enable` opts out), and a sink helper
-#   (`list`, `set`, `cycle`) for the future picker; a null OSD or
-#   dump tool, a negative hide timeout and an unknown `daemon` each
-#   fail eval;
+#   (`list`, `set`, `cycle`) the Bluetooth picker calls; a null OSD
+#   or dump tool, a negative hide timeout and an unknown `daemon`
+#   each fail eval;
+#   the terminal, the file manager, the pickers and the automounter
+#   (`desktop-apps` child) run with the profile -- foot installed
+#   (keeping the compositor's built-in `Super+Return` bind true) with
+#   `TERMINAL` set beside it, the WiFi picker (`Super+w`,
+#   `scoot-network-pick` through `nmcli`: saved connections first,
+#   then the cached scan, the psk from the keyring's `scoot-wifi`
+#   entries) and the Bluetooth picker (`Super+b`,
+#   `scoot-bluetooth-pick` through `bluetoothctl`: paired devices,
+#   power, an audio-sink row through the audio slot's helper) through
+#   the launcher's dmenu contract and themed by the look unless
+#   `theme.targets.network/bluetooth.enable` opts out, `xdg-open`
+#   answering directories through the file manager while it is on
+#   (pcmanfm, explicitly optional -- off with the profile -- with
+#   `xdg-open` failing loud without it) and `xdg.userDirs` keeping
+#   Downloads, Pictures and the rest present, and trayless `udiskie`
+#   (`-a -n -T`) automounting over the udisks2 daemon with
+#   `udiskie-umount` for safe removal; each null tool and an empty
+#   directory entry each fail eval; neither picker touches its
+#   service (no NetworkManager takeover, no Bluetooth hardware
+#   switch -- pinned off);
 #   the theme (`desktop-theme-look` child) runs with the profile --
 #   the look's cursor in the compositor config (one priority below
 #   Stylix's), GTK settings, the qt6ct config plus
@@ -204,8 +224,8 @@
 #   no daemon runs for any of it (files, packages and session
 #   variables only);
 #   every profile unit (the idle pair, mako, the bar feed, both
-#   clipboard watchers, the night light, the OSD, and the
-#   profile-managed bar -- never the standalone bar) starts in
+#   clipboard watchers, the night light, the OSD, the automounter,
+#   and the profile-managed bar -- never the standalone bar) starts in
 #   `scoot-session.target`, never the shared
 #   `graphical-session.target`, so no other desktop starts them; the
 #   home-manager side installs that target itself (present exactly
@@ -344,6 +364,40 @@ let
     };
     options.home.sessionSearchVariables = lib.mkOption {
       type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      default = { };
+    };
+    # The apps slot's user dirs and file associations
+    # (`xdg.userDirs`/`xdg.mimeApps` from `nix/modules/apps-home.nix`):
+    # plain data the pins read; the real home-manager options create
+    # the directories and write `mimeapps.list` at activation.
+    options.xdg.userDirs = lib.mkOption {
+      type = lib.types.submodule {
+        options = {
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+          };
+          createDirectories = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+          };
+        };
+      };
+      default = { };
+    };
+    options.xdg.mimeApps = lib.mkOption {
+      type = lib.types.submodule {
+        options = {
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+          };
+          defaultApplications = lib.mkOption {
+            type = lib.types.attrsOf lib.types.str;
+            default = { };
+          };
+        };
+      };
       default = { };
     };
   };
@@ -498,6 +552,23 @@ let
     # from `regreetStubs`, which rides along in every NixOS
     # evaluation -- it only gates the PAM pair, which the real-NixOS
     # pins check against the real modules.
+    # The automounter's daemon (udisks2, which the trayless udiskie
+    # mounts through) and the services the pickers must never take
+    # over (NetworkManager, Bluetooth hardware): plain bools the pins
+    # read, proving the module leaves the latter two alone. The real
+    # options enable the daemons; here only the values land.
+    options.services.udisks2.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.networking.networkmanager.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.hardware.bluetooth.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
   };
 
   # Stand-ins for what nixpkgs' own regreet module
@@ -1402,16 +1473,17 @@ let
 
   # --- shared keymap (`programs.scoot.desktop.keys`) evaluations ---
   #
-  # The profile alone: the keymap on, future slots off -- the twelve
-  # keymap-owned binds (brightness, volume, mute, media, lock) render,
-  # the slot-gated seven stay out.
+  # The profile alone: the keymap on -- the twelve keymap-owned
+  # binds (brightness, volume, mute, media, lock) render, and every
+  # slot-gated bind but the power policy's (the policy is opt-in, so
+  # its switch stays unbound).
   hmKeys = evalHome {
     enable = true;
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
   };
-  # ...every future slot on: all twenty-one binds render, the slot
+  # ...every future slot on: all twenty-three binds render, the slot
   # scripts beside them.
   hmKeysSlots = evalHome {
     enable = true;
@@ -1878,6 +1950,200 @@ let
     desktop.clipboard.dbPath = "";
   };
 
+  # --- desktop apps (`programs.scoot.desktop.apps`, `.automount`) evaluations ---
+  #
+  # The profile with a look: the terminal, both pickers and the
+  # automounter on (packages on PATH, `TERMINAL`/`BROWSER` set, the
+  # user dirs created, the picker scripts beside the keymap's binds,
+  # the trayless unit wanted by the session scope), the file manager
+  # off (optional: nothing references one), the pickers themed by
+  # the look.
+  hmApps = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...without a look: the slots run unthemed (fuzzel's own colors --
+  # pinned by content below).
+  hmAppsNoLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...the file manager on: its package on PATH and the directory
+  # association answering through it.
+  hmAppsFiles = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.apps.fileManager.enable = true;
+  };
+  # ...the terminal off: no foot, no `TERMINAL`, no user dirs (the
+  # file manager stays off too, so nothing opens files).
+  hmAppsTermOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.apps.terminal.enable = false;
+  };
+  # ...the pickers off: no tools, no scripts, their binds unbound
+  # (the keymap's own exact match in `_keysPins` pins the on shape).
+  hmAppsPickersOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.apps.network.enable = false;
+    desktop.apps.bluetooth.enable = false;
+  };
+  # ...the automounter off: no daemon, no unit (the profile's other
+  # packages only).
+  hmAppsAutomountOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.automount.enable = false;
+  };
+  # ...standalone (no profile): the terminal runs (foot on PATH,
+  # `TERMINAL` set, dirs created), the pickers run unthemed, the
+  # automounter runs (its unit scoped to the session target).
+  hmAppsStandalone = evalHome {
+    enable = true;
+    desktop.apps.terminal.enable = true;
+    desktop.apps.network.enable = true;
+    desktop.apps.bluetooth.enable = true;
+    desktop.automount.enable = true;
+  };
+  # ...opted out of picker theming (the look leaves fuzzel alone).
+  hmAppsTargetOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.network.enable = false;
+    desktop.theme.targets.bluetooth.enable = false;
+  };
+  # Refusals: each tool missing (pinned by message in `_appsPins`)...
+  hmAppsNoTerm = evalHome {
+    enable = true;
+    desktop.apps.terminal.enable = true;
+    desktop.apps.terminal.package = null;
+  };
+  hmAppsNoFiles = evalHome {
+    enable = true;
+    desktop.apps.fileManager.enable = true;
+    desktop.apps.fileManager.package = null;
+  };
+  hmAppsNoFilesEntry = evalHome {
+    enable = true;
+    desktop.apps.fileManager.enable = true;
+    desktop.apps.fileManager.desktopEntry = "";
+  };
+  hmAppsNoNetCli = evalHome {
+    enable = true;
+    desktop.apps.network.enable = true;
+    desktop.apps.network.cliPackage = null;
+  };
+  hmAppsNoNetMenu = evalHome {
+    enable = true;
+    desktop.apps.network.enable = true;
+    desktop.apps.network.menuPackage = null;
+  };
+  hmAppsNoBlueCli = evalHome {
+    enable = true;
+    desktop.apps.bluetooth.enable = true;
+    desktop.apps.bluetooth.cliPackage = null;
+  };
+  hmAppsNoBlueMenu = evalHome {
+    enable = true;
+    desktop.apps.bluetooth.enable = true;
+    desktop.apps.bluetooth.menuPackage = null;
+  };
+  hmAppsNoAutomountPkg = evalHome {
+    enable = true;
+    desktop.automount.enable = true;
+    desktop.automount.package = null;
+  };
+
+  # Fake picker toolchains for the picker behavior tests: stub
+  # `nmcli`, `bluetoothctl`, `fuzzel` and `secret-tool`, scripted at
+  # RUN time through files under `$SCOOT_APPS_TEST_DIR`, so one HM
+  # evaluation per script covers every scenario. `nmcli` answers
+  # `dev` from `dev` (exit `dev-code`), saved connections from
+  # `connections`, the cached scan from `scan`, and logs every
+  # `connection up` and `dev wifi connect` to `calls`;
+  # `bluetoothctl` answers `show` from `show` (exit `show-code`),
+  # paired devices from `paired`, connection state from `connected`
+  # (one MAC per line), and logs every connect/disconnect/power to
+  # `calls`; `fuzzel` records its stdin to `menu-input`, prints
+  # `pick` (exit `pick-code`); `secret-tool lookup` prints `secret`
+  # (exit `secret-code`). The scripts under test resolve every tool
+  # by absolute path into this package (the evaluations below point
+  # each package option at the stubs).
+  appsStubs = pkgs.runCommand "apps-stubs" { } ''
+    mkdir -p $out/bin
+    cat > $out/bin/nmcli <<'EOF'
+    #!${pkgs.runtimeShell}
+    case "$*" in
+      *"connection show"*)
+        cat "$SCOOT_APPS_TEST_DIR/connections"; exit 0 ;;
+      *"dev wifi list"*)
+        cat "$SCOOT_APPS_TEST_DIR/scan"; exit 0 ;;
+      *"connection up"*)
+        printf '%s\n' "nmcli-$*" >> "$SCOOT_APPS_TEST_DIR/calls"; exit 0 ;;
+      *"dev wifi connect"*)
+        printf '%s\n' "nmcli-$*" >> "$SCOOT_APPS_TEST_DIR/calls"; exit 0 ;;
+      *" dev")
+        cat "$SCOOT_APPS_TEST_DIR/dev"; exit "$(cat "$SCOOT_APPS_TEST_DIR/dev-code")" ;;
+      *) echo "unexpected nmcli args: $*" >&2; exit 99 ;;
+    esac
+    EOF
+    cat > $out/bin/bluetoothctl <<'EOF'
+    #!${pkgs.runtimeShell}
+    case "$1" in
+      show) cat "$SCOOT_APPS_TEST_DIR/show"; exit "$(cat "$SCOOT_APPS_TEST_DIR/show-code")" ;;
+      devices) cat "$SCOOT_APPS_TEST_DIR/paired"; exit 0 ;;
+      info)
+        if grep -q -F -x "$2" "$SCOOT_APPS_TEST_DIR/connected"; then echo "Connected: yes"; else echo "Connected: no"; fi
+        exit 0 ;;
+      connect|disconnect|power)
+        printf '%s\n' "bluetoothctl-$*" >> "$SCOOT_APPS_TEST_DIR/calls"; exit "$(cat "$SCOOT_APPS_TEST_DIR/call-code")" ;;
+      *) echo "unexpected bluetoothctl args: $*" >&2; exit 99 ;;
+    esac
+    EOF
+    cat > $out/bin/fuzzel <<'EOF'
+    #!${pkgs.runtimeShell}
+    cat > "$SCOOT_APPS_TEST_DIR/menu-input"
+    cat "$SCOOT_APPS_TEST_DIR/pick"; exit "$(cat "$SCOOT_APPS_TEST_DIR/pick-code")"
+    EOF
+    cat > $out/bin/secret-tool <<'EOF'
+    #!${pkgs.runtimeShell}
+    case "$1" in
+      lookup) cat "$SCOOT_APPS_TEST_DIR/secret"; exit "$(cat "$SCOOT_APPS_TEST_DIR/secret-code")" ;;
+      *) echo "unexpected secret-tool args: $*" >&2; exit 99 ;;
+    esac
+    EOF
+    chmod +x $out/bin/nmcli $out/bin/bluetoothctl $out/bin/fuzzel $out/bin/secret-tool
+  '';
+  # The slots on, running the stubs: every package option points at
+  # them, so the pickers under test resolve all their tools by
+  # absolute path into this package (no look: unthemed, for exact
+  # matching below).
+  hmAppsNetTest = evalHome {
+    enable = true;
+    desktop.apps.network.enable = true;
+    desktop.apps.network.cliPackage = appsStubs;
+    desktop.apps.network.menuPackage = appsStubs;
+    desktop.secrets.clientPackage = appsStubs;
+  };
+  hmAppsBlueTest = evalHome {
+    enable = true;
+    desktop.apps.bluetooth.enable = true;
+    desktop.apps.bluetooth.cliPackage = appsStubs;
+    desktop.apps.bluetooth.menuPackage = appsStubs;
+  };
+  appsNetPick = slotScriptBin hmAppsNetTest "scoot-network-pick";
+  appsBluePick = slotScriptBin hmAppsBlueTest "scoot-bluetooth-pick";
+  # The themed pickers (music-desk roles as fuzzel CLI colors, opaque
+  # -- pinned by content below).
+  appsNetPickThemed = slotScriptBin hmApps "scoot-network-pick";
+  appsBluePickThemed = slotScriptBin hmApps "scoot-bluetooth-pick";
+  appsNetPickNoLook = slotScriptBin hmAppsNoLook "scoot-network-pick";
+  appsBluePickTargetOff = slotScriptBin hmAppsTargetOff "scoot-bluetooth-pick";
+
   # A fake clipboard toolchain for the store-entry and picker behavior
   # tests: stub `cliphist`, `wl-copy`, `fuzzel` and `scoot`, scripted at
   # RUN time through files under `$SCOOT_CLIP_TEST_DIR`, so one HM
@@ -1993,6 +2259,89 @@ let
     package = fakePkg;
     desktop.enable = true;
     desktop.clipboard.menuPackage = null;
+  };
+
+  # --- desktop apps system evaluations ---
+  #
+  # The profile: the terminal, the file manager (off -- optional),
+  # both pickers' tools and the automounter installed, udisks2
+  # running for the automounter, and neither NetworkManager nor the
+  # Bluetooth hardware touched (no takeover: the CLIs only call).
+  osApps = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  osAppsFiles = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.apps.fileManager.enable = true;
+  };
+  # ...the terminal off: no foot system-wide.
+  osAppsTermOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.apps.terminal.enable = false;
+  };
+  # ...the pickers off: no CLIs system-wide.
+  osAppsPickersOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.apps.network.enable = false;
+    desktop.apps.bluetooth.enable = false;
+  };
+  # ...the automounter off: no udisks2, no udiskie.
+  osAppsAutomountOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.automount.enable = false;
+  };
+  # Refusals: each tool missing (pinned by message in `_appsPins`).
+  osAppsNoTerm = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.apps.terminal.enable = true;
+    desktop.apps.terminal.package = null;
+  };
+  osAppsNoFiles = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.apps.fileManager.enable = true;
+    desktop.apps.fileManager.package = null;
+  };
+  osAppsNoNetCli = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.apps.network.enable = true;
+    desktop.apps.network.cliPackage = null;
+  };
+  osAppsNoNetMenu = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.apps.network.enable = true;
+    desktop.apps.network.menuPackage = null;
+  };
+  osAppsNoBlueCli = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.apps.bluetooth.enable = true;
+    desktop.apps.bluetooth.cliPackage = null;
+  };
+  osAppsNoBlueMenu = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.apps.bluetooth.enable = true;
+    desktop.apps.bluetooth.menuPackage = null;
+  };
+  osAppsNoAutomountPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.automount.enable = true;
+    desktop.automount.package = null;
   };
 
   # --- launcher (`programs.scoot.desktop.launcher`) evaluations ---
@@ -5530,8 +5879,11 @@ let
     # `desktop-launcher` child did, `capture` when the
     # `desktop-capture` child did, `audio` when the
     # `desktop-audio-osd` child did, `nightlight` when the
-    # `desktop-nightlight` child did -- `power` stays on it: filled by
-    # the `desktop-power` child but opt-in, never with the profile).
+    # `desktop-nightlight` child did, `terminal`, the pickers and the
+    # automounter when the `desktop-apps` child did -- `power` stays
+    # on it: filled by the `desktop-power` child but opt-in, never
+    # with the profile, and the file manager with it: filled but
+    # optional, off with the profile).
     (
       assert hmDesk.config.programs.scoot.desktop.capture.enable;
       true
@@ -5659,11 +6011,23 @@ let
       true
     )
     (
-      assert !hmDesk.config.programs.scoot.desktop.apps.terminal.enable;
+      assert hmDesk.config.programs.scoot.desktop.apps.terminal.enable;
       true
     )
     (
       assert !hmDesk.config.programs.scoot.desktop.apps.fileManager.enable;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.apps.network.enable;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.apps.bluetooth.enable;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.automount.enable;
       true
     )
     # ...while the profile turns the keymap on (a laptop whose Fn
@@ -5682,10 +6046,6 @@ let
     )
     (
       assert !hmDesk.config.programs.scoot.desktop.inputMethod.enable;
-      true
-    )
-    (
-      assert !hmDesk.config.programs.scoot.desktop.automount.enable;
       true
     )
     # music-desk: the example palette in the compositor config (plus
@@ -5718,8 +6078,10 @@ let
     # policy's five tools, the notification daemon, the launcher
     # package and its script, the clipboard slot's three, its picker
     # script, the capture slot's four, the audio slot's OSD and its
-    # four scripts, the displays watcher, the night light's tool, the agent and the
-    # secrets client, and the keymap's three,
+    # four scripts, the displays watcher, the night light's tool, the
+    # agent and the secrets client, the terminal and its `xdg-open`
+    # plumbing, both pickers' tools and their scripts, the
+    # automounter, and the keymap's three,
     # and the theme's seven (cursor, icon, all three faces, qt6ct and
     # its Adwaita style), all on with the profile).
     (
@@ -5730,8 +6092,9 @@ let
       # `brightnessctl` twice is one package, not two tools: the
       # idle policy's dim tool and the keymap's brightness tool are
       # the same derivation, each declared beside its own binds (and
-      # `fuzzel` three times the same way: the clipboard picker's
-      # menu, the launcher package and the capture chooser's menu --
+      # `fuzzel` five times the same way: the clipboard picker's
+      # menu, the launcher package, the capture chooser's menu and
+      # both pickers' menus --
       # and `wl-clipboard` twice: the clipboard slot's tools and the
       # capture slot's clipboard bind).
       assert
@@ -5766,6 +6129,15 @@ let
           pkgs.wlsunset
           pkgs.polkit_gnome
           pkgs.libsecret
+          pkgs.foot
+          pkgs.xdg-utils
+          pkgs.networkmanager
+          pkgs.fuzzel
+          (slotScriptDrv hmDeskLookMusic "scoot-network-pick")
+          pkgs.bluez
+          pkgs.fuzzel
+          (slotScriptDrv hmDeskLookMusic "scoot-bluetooth-pick")
+          pkgs.udiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -6432,6 +6804,7 @@ let
       hmUnits = hmDeskBar.config.systemd.user.services;
       retryUnits = [
         "mako"
+        "scoot-automount"
         "scoot-notify-sync"
         "scoot-clipboard-store"
         "scoot-clipboard-primary-store"
@@ -6576,18 +6949,20 @@ let
         hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
       true
     )
-    # ...exactly the thirty-eight packages installed (swayidle, dim,
+    # ...exactly the forty-seven packages installed (swayidle, dim,
     # off, locker, inhibitor, mako, the clipboard slot's three, its
     # picker script, the launcher package and its script, the capture
     # slot's four tools and its three scripts, the night light's
     # tool, the OSD and its four scripts, the displays watcher, the
-    # agent and the secrets
+    # terminal and its `xdg-open` plumbing, both pickers' tools and
+    # their scripts, the automounter, the agent and the secrets
     # client, the theme's seven -- no scoot package
     # set here, so nothing else -- plus the keymap's brightness,
-    # volume and media tools; `brightnessctl` and `fuzzel` each serve
-    # two features, so each appears twice).
+    # volume and media tools; `brightnessctl` serves two features, so
+    # it appears twice, and `fuzzel` five (the clipboard picker, the
+    # launcher, the capture chooser and both pickers' menus).
     (
-      assert builtins.length hmIdle.config.home.packages == 38;
+      assert builtins.length hmIdle.config.home.packages == 47;
       true
     )
     (
@@ -6621,6 +6996,15 @@ let
           pkgs.wlsunset
           pkgs.polkit_gnome
           pkgs.libsecret
+          pkgs.foot
+          pkgs.xdg-utils
+          pkgs.networkmanager
+          pkgs.fuzzel
+          (slotScriptDrv hmIdle "scoot-network-pick")
+          pkgs.bluez
+          pkgs.fuzzel
+          (slotScriptDrv hmIdle "scoot-bluetooth-pick")
+          pkgs.udiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -6663,6 +7047,7 @@ let
       assert
         builtins.attrNames hmIdleOff.config.systemd.user.services == [
           "mako"
+          "scoot-automount"
           "scoot-clipboard-primary-store"
           "scoot-clipboard-store"
           "scoot-displays"
@@ -6710,6 +7095,15 @@ let
           pkgs.wlsunset
           pkgs.polkit_gnome
           pkgs.libsecret
+          pkgs.foot
+          pkgs.xdg-utils
+          pkgs.networkmanager
+          pkgs.fuzzel
+          (slotScriptDrv hmIdleOff "scoot-network-pick")
+          pkgs.bluez
+          pkgs.fuzzel
+          (slotScriptDrv hmIdleOff "scoot-bluetooth-pick")
+          pkgs.udiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -6720,7 +7114,9 @@ let
     # leaves (no config, no package, four policy tools plus mako, the
     # clipboard slot's three, its picker script, the launcher package
     # and its script, the capture slot's four, the audio slot's OSD
-    # and its four scripts, the displays watcher, the night light's tool, the agent and
+    # and its four scripts, the displays watcher, the terminal and its
+    # `xdg-open` plumbing, both pickers' tools and their scripts, the
+    # automounter, the night light's tool, the agent and
     # the secrets client, and the keymap's three
     # left).
     (
@@ -6736,14 +7132,15 @@ let
       true
     )
     (
-      assert builtins.length hmLockOff.config.home.packages == 30;
+      assert builtins.length hmLockOff.config.home.packages == 39;
       true
     )
     # The inhibitor off: the policy without the audio hold (four
     # policy tools plus mako, the clipboard slot's three, its picker
     # script, the launcher package and its script, the capture slot's
     # four, the audio slot's OSD and its four scripts, the displays
-    # watcher, the night
+    # watcher, the terminal and its `xdg-open` plumbing, both pickers'
+    # tools and their scripts, the automounter, the night
     # light's tool, the agent and the secrets client, and the
     # keymap's three).
     (
@@ -6755,7 +7152,7 @@ let
       true
     )
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 30;
+      assert builtins.length hmInhibitOff.config.home.packages == 39;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -6898,6 +7295,12 @@ let
           pkgs.polkit_gnome
           pkgs.gnome-keyring
           pkgs.libsecret
+          pkgs.foot
+          pkgs.networkmanager
+          pkgs.fuzzel
+          pkgs.bluez
+          pkgs.fuzzel
+          pkgs.udiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -6955,6 +7358,12 @@ let
           pkgs.polkit_gnome
           pkgs.gnome-keyring
           pkgs.libsecret
+          pkgs.foot
+          pkgs.networkmanager
+          pkgs.fuzzel
+          pkgs.bluez
+          pkgs.fuzzel
+          pkgs.udiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -6998,6 +7407,12 @@ let
           pkgs.polkit_gnome
           pkgs.gnome-keyring
           pkgs.libsecret
+          pkgs.foot
+          pkgs.networkmanager
+          pkgs.fuzzel
+          pkgs.bluez
+          pkgs.fuzzel
+          pkgs.udiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -7848,6 +8263,500 @@ let
   # Linux only, like the slots above: the package refuses evaluation
   # on Darwin (the null degradation itself is pinned in
   # `_darwinLaunchPins`).
+  _appsPins = lib.optionals isLinux [
+    # Home-manager: the profile turns the terminal, both pickers and
+    # the automounter on (assertions hold), the file manager staying
+    # optional...
+    (
+      assert allAssertionsHold hmApps.config;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.terminal.enable;
+      true
+    )
+    (
+      assert !hmApps.config.programs.scoot.desktop.apps.fileManager.enable;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.network.enable;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.bluetooth.enable;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.automount.enable;
+      true
+    )
+    # ...foot from nixpkgs (the bind names it), `TERMINAL` set for
+    # everything that asks, and `BROWSER` answering through the
+    # scheme handler (no browser slot: a URL opens through
+    # `xdg-open`, not a hardcoded browser)...
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.terminal.package.drvPath == pkgs.foot.drvPath;
+      true
+    )
+    (
+      assert hmApps.config.systemd.user.sessionVariables.TERMINAL == "foot";
+      true
+    )
+    (
+      assert hmApps.config.systemd.user.sessionVariables.BROWSER == "xdg-open";
+      true
+    )
+    # ...the user dirs created (Downloads, Pictures -- where the
+    # capture slot writes -- and the rest)...
+    (
+      assert hmApps.config.xdg.userDirs.enable;
+      true
+    )
+    (
+      assert hmApps.config.xdg.userDirs.createDirectories;
+      true
+    )
+    # ...no directory association without the manager (a dangling
+    # entry would wedge `xdg-open` on a file that is not installed:
+    # without it `xdg-open` fails loud instead)...
+    (
+      assert !hmApps.config.xdg.mimeApps.enable;
+      true
+    )
+    # ...the pickers' tools stock from nixpkgs, each menu the one
+    # fuzzel the launcher already themes (same derivation, no second
+    # copy)...
+    (
+      assert
+        hmApps.config.programs.scoot.desktop.apps.network.cliPackage.drvPath == pkgs.networkmanager.drvPath;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.network.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.bluetooth.cliPackage.drvPath == pkgs.bluez.drvPath;
+      true
+    )
+    (
+      assert
+        hmApps.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+      true
+    )
+    # ...the automounter stock too, trayless behind its unit (wanted
+    # by the session scope, never the shared graphical target, so no
+    # other desktop starts it; retried like the bar's unit)...
+    (
+      assert hmApps.config.programs.scoot.desktop.automount.package.drvPath == pkgs.udiskie.drvPath;
+      true
+    )
+    (
+      assert
+        hmApps.config.systemd.user.services.scoot-automount.Install.WantedBy == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmApps.config.systemd.user.services.scoot-automount.Unit.PartOf == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert lib.hasSuffix "/bin/udiskie -a -n -T"
+        hmApps.config.systemd.user.services.scoot-automount.Service.ExecStart;
+      true
+    )
+    (
+      assert lib.hasInfix "org.freedesktop.UDisks2"
+        hmApps.config.systemd.user.services.scoot-automount.Service.ExecCondition;
+      true
+    )
+    # ...and the NixOS side defaults to the same derivations (either
+    # side alone names the same tools)...
+    (
+      assert osApps.config.programs.scoot.desktop.apps.terminal.package.drvPath == pkgs.foot.drvPath;
+      true
+    )
+    (
+      assert
+        osApps.config.programs.scoot.desktop.apps.network.cliPackage.drvPath == pkgs.networkmanager.drvPath;
+      true
+    )
+    (
+      assert osApps.config.programs.scoot.desktop.apps.bluetooth.cliPackage.drvPath == pkgs.bluez.drvPath;
+      true
+    )
+    (
+      assert osApps.config.programs.scoot.desktop.automount.package.drvPath == pkgs.udiskie.drvPath;
+      true
+    )
+    # ...without a look: the slots run unthemed (fuzzel's own colors --
+    # pinned by content below)...
+    (
+      assert allAssertionsHold hmAppsNoLook.config;
+      true
+    )
+    # ...the file manager on: pcmanfm on PATH and the directory
+    # association answering through its entry (overridable beside
+    # the package, so a `thunar` names `thunar.desktop`)...
+    (
+      assert allAssertionsHold hmAppsFiles.config;
+      true
+    )
+    (
+      assert
+        hmAppsFiles.config.programs.scoot.desktop.apps.fileManager.package.drvPath == pkgs.pcmanfm.drvPath;
+      true
+    )
+    (
+      assert hmAppsFiles.config.programs.scoot.desktop.apps.fileManager.desktopEntry == "pcmanfm.desktop";
+      true
+    )
+    (
+      assert hmAppsFiles.config.xdg.mimeApps.enable;
+      true
+    )
+    (
+      assert hmAppsFiles.config.xdg.mimeApps.defaultApplications."inode/directory" == "pcmanfm.desktop";
+      true
+    )
+    # ...the terminal off: no foot, no `TERMINAL`, no user dirs (the
+    # manager stays off too, so nothing opens files -- while the
+    # automounter keeps `xdg-open` and `BROWSER` for its Browse
+    # action)...
+    (
+      assert allAssertionsHold hmAppsTermOff.config;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "foot") hmAppsTermOff.config.home.packages);
+      true
+    )
+    (
+      assert !(hmAppsTermOff.config.systemd.user.sessionVariables ? TERMINAL);
+      true
+    )
+    (
+      assert !hmAppsTermOff.config.xdg.userDirs.enable;
+      true
+    )
+    (
+      assert hmAppsTermOff.config.systemd.user.sessionVariables.BROWSER == "xdg-open";
+      true
+    )
+    # ...the pickers off: no tools, no scripts, their binds unbound
+    # (the keymap's own exact match in `_keysPins` pins the on
+    # shape)...
+    (
+      assert allAssertionsHold hmAppsPickersOff.config;
+      true
+    )
+    (
+      assert !(hmAppsPickersOff.config.programs.scoot.settings.binds ? "super+w");
+      true
+    )
+    (
+      assert !(hmAppsPickersOff.config.programs.scoot.settings.binds ? "super+b");
+      true
+    )
+    (
+      assert !(lib.any (p: (p.name or "") == "scoot-network-pick") hmAppsPickersOff.config.home.packages);
+      true
+    )
+    (
+      assert
+        !(lib.any (p: (p.name or "") == "scoot-bluetooth-pick") hmAppsPickersOff.config.home.packages);
+      true
+    )
+    # ...the automounter off: no daemon, no unit (the profile's other
+    # packages only)...
+    (
+      assert allAssertionsHold hmAppsAutomountOff.config;
+      true
+    )
+    (
+      assert !(hmAppsAutomountOff.config.systemd.user.services ? scoot-automount);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "udiskie") hmAppsAutomountOff.config.home.packages);
+      true
+    )
+    # ...standalone (no profile): every slot runs, the unit scoped,
+    # the session scope present for it...
+    (
+      assert allAssertionsHold hmAppsStandalone.config;
+      true
+    )
+    (
+      assert
+        hmAppsStandalone.config.systemd.user.services.scoot-automount.Unit.PartOf
+        == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert hmAppsStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target";
+      true
+    )
+    # ...opted out of picker theming (the look leaves fuzzel alone --
+    # pinned by content below)...
+    (
+      assert !hmAppsTargetOff.config.programs.scoot.desktop.theme.targets.network.enable;
+      true
+    )
+    (
+      assert !hmAppsTargetOff.config.programs.scoot.desktop.theme.targets.bluetooth.enable;
+      true
+    )
+    # ...and each refusal naming its tool (pinned by message here,
+    # counted in `_darwinAppsPins` off Linux)...
+    (
+      assert builtins.length (failing hmAppsNoTerm.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.terminal.package is null" (builtins.head (failing hmAppsNoTerm.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmAppsNoFiles.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.fileManager.package is null" (
+        builtins.head (failing hmAppsNoFiles.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmAppsNoFilesEntry.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "fileManager.desktopEntry is" (
+        builtins.head (failing hmAppsNoFilesEntry.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmAppsNoNetCli.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.network.cliPackage is null" (
+        builtins.head (failing hmAppsNoNetCli.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmAppsNoNetMenu.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.network.menuPackage is null" (
+        builtins.head (failing hmAppsNoNetMenu.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmAppsNoBlueCli.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.bluetooth.cliPackage is null" (
+        builtins.head (failing hmAppsNoBlueCli.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmAppsNoBlueMenu.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.bluetooth.menuPackage is null" (
+        builtins.head (failing hmAppsNoBlueMenu.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmAppsNoAutomountPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "automount.package is null" (
+        builtins.head (failing hmAppsNoAutomountPkg.config)
+      );
+      true
+    )
+    # ...the profile on the NixOS side: the terminal, both pickers
+    # and the automounter on, the manager staying optional...
+    (
+      assert allAssertionsHold osApps.config;
+      true
+    )
+    (
+      assert osApps.config.programs.scoot.desktop.apps.terminal.enable;
+      true
+    )
+    (
+      assert !osApps.config.programs.scoot.desktop.apps.fileManager.enable;
+      true
+    )
+    (
+      assert osApps.config.programs.scoot.desktop.apps.network.enable;
+      true
+    )
+    (
+      assert osApps.config.programs.scoot.desktop.apps.bluetooth.enable;
+      true
+    )
+    (
+      assert osApps.config.programs.scoot.desktop.automount.enable;
+      true
+    )
+    # ...their tools on PATH (foot for the bind, the CLIs for the
+    # pickers and hand runs, udiskie for the unit and `udiskie-umount`)...
+    (
+      assert lib.any (p: (p.pname or "") == "foot") osApps.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "networkmanager") osApps.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "bluez") osApps.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "udiskie") osApps.config.environment.systemPackages;
+      true
+    )
+    # ...the udisks2 daemon running for the automounter (plain
+    # `mkDefault`, so an explicit value still wins)...
+    (
+      assert osApps.config.services.udisks2.enable;
+      true
+    )
+    # ...while neither NetworkManager nor the Bluetooth hardware is
+    # touched (no takeover: the pickers only call the CLIs)...
+    (
+      assert !osApps.config.networking.networkmanager.enable;
+      true
+    )
+    (
+      assert !osApps.config.hardware.bluetooth.enable;
+      true
+    )
+    # ...the file manager on: pcmanfm system-wide...
+    (
+      assert lib.any (p: (p.pname or "") == "pcmanfm") osAppsFiles.config.environment.systemPackages;
+      true
+    )
+    # ...the terminal off: no foot system-wide...
+    (
+      assert !(lib.any (p: (p.pname or "") == "foot") osAppsTermOff.config.environment.systemPackages);
+      true
+    )
+    # ...the pickers off: no CLIs system-wide...
+    (
+      assert
+        !(lib.any (
+          p: (p.pname or "") == "networkmanager"
+        ) osAppsPickersOff.config.environment.systemPackages);
+      true
+    )
+    (
+      assert
+        !(lib.any (p: (p.pname or "") == "bluez") osAppsPickersOff.config.environment.systemPackages);
+      true
+    )
+    # ...the automounter off: no udisks2, no udiskie...
+    (
+      assert !osAppsAutomountOff.config.services.udisks2.enable;
+      true
+    )
+    (
+      assert
+        !(lib.any (p: (p.pname or "") == "udiskie") osAppsAutomountOff.config.environment.systemPackages);
+      true
+    )
+    # ...and each refusal naming its tool on this side as well.
+    (
+      assert builtins.length (failing osAppsNoTerm.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.terminal.package is null" (builtins.head (failing osAppsNoTerm.config));
+      true
+    )
+    (
+      assert builtins.length (failing osAppsNoFiles.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.fileManager.package is null" (
+        builtins.head (failing osAppsNoFiles.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing osAppsNoNetCli.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.network.cliPackage is null" (
+        builtins.head (failing osAppsNoNetCli.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing osAppsNoNetMenu.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.network.menuPackage is null" (
+        builtins.head (failing osAppsNoNetMenu.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing osAppsNoBlueCli.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.bluetooth.cliPackage is null" (
+        builtins.head (failing osAppsNoBlueCli.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing osAppsNoBlueMenu.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.bluetooth.menuPackage is null" (
+        builtins.head (failing osAppsNoBlueMenu.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing osAppsNoAutomountPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "automount.package is null" (
+        builtins.head (failing osAppsNoAutomountPkg.config)
+      );
+      true
+    )
+  ];
+
+  # --- launcher structural pins (fail `nix flake check` at eval) ---
+  # Linux only, like the slots above: the package refuses evaluation
+  # on Darwin (the null degradation itself is pinned in
+  # `_darwinLaunchPins`).
   _launchPins = lib.optionals isLinux [
     # Home-manager: the whole slot on (the package beside the
     # profile's own, the wrapper script beside the keymap's binds)...
@@ -8031,13 +8940,14 @@ let
     # launcher's one plus the clipboard slot's three plus the capture
     # slot's four plus the audio slot's two plus the night light's
     # one plus the theme's seven plus the agent's one plus the keyring's
-    # two: the profile is on in this evaluation, so its slot is open).
+    # two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one):
+    # the profile is on in this evaluation, so its slot is open).
     (
       assert hmLaunch.config.programs.scoot.desktop.launcher.package == null;
       true
     )
     (
-      assert builtins.length (failing hmLaunch.config) == 27;
+      assert builtins.length (failing hmLaunch.config) == 33;
       true
     )
     (
@@ -8051,7 +8961,7 @@ let
     )
     # ...refused loudly there too.
     (
-      assert builtins.length (failing osLaunch.config) == 21;
+      assert builtins.length (failing osLaunch.config) == 27;
       true
     )
   ];
@@ -9130,7 +10040,8 @@ let
       true
     )
     # ...without a look, and with the slot off, the theme is inert
-    # (no files, no variables, no cursor keys)...
+    # (no files, no cursor keys -- the session variables left are the
+    # apps slot's `TERMINAL`/`BROWSER`, not the theme's)...
     (
       assert allAssertionsHold hmThemeNoLook.config;
       true
@@ -9160,7 +10071,11 @@ let
       true
     )
     (
-      assert hmThemeNoLook.config.systemd.user.sessionVariables == { };
+      assert
+        hmThemeNoLook.config.systemd.user.sessionVariables == {
+          TERMINAL = "foot";
+          BROWSER = "xdg-open";
+        };
       true
     )
     (
@@ -9176,7 +10091,11 @@ let
       true
     )
     (
-      assert hmThemeOff.config.systemd.user.sessionVariables == { };
+      assert
+        hmThemeOff.config.systemd.user.sessionVariables == {
+          TERMINAL = "foot";
+          BROWSER = "xdg-open";
+        };
       true
     )
     # ...Stylix beside a look wins per key (its base16 ring over the
@@ -9690,10 +10609,10 @@ let
     # policy's five plus the daemon's one plus the launcher's one
     # plus the clipboard slot's three plus the capture slot's four
     # plus the audio slot's two plus the night light's one plus
-    # the agent's one plus the keyring's two: the profile is on
+    # the agent's one plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one): the profile is on
     # in this evaluation)...
     (
-      assert builtins.length (failing hmAuth.config) == 20;
+      assert builtins.length (failing hmAuth.config) == 26;
       true
     )
     (
@@ -9731,9 +10650,9 @@ let
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five on this side plus the
     # audio slot's two plus the night light's one plus the
-    # agent's one plus the keyring's two).
+    # agent's one plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one)).
     (
-      assert builtins.length (failing osAuth.config) == 21;
+      assert builtins.length (failing osAuth.config) == 27;
       true
     )
   ];
@@ -9819,10 +10738,10 @@ let
     # tool (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the clipboard slot's three plus this slot's
     # four plus the audio slot's two plus the night light's one plus
-    # the theme's seven plus the agent's one plus the keyring's two:
+    # the theme's seven plus the agent's one plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one):
     # the profile is on in this evaluation).
     (
-      assert builtins.length (failing hmCapture.config) == 27;
+      assert builtins.length (failing hmCapture.config) == 33;
       true
     )
     (
@@ -9859,9 +10778,9 @@ let
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus this slot's five -- gtk beside wlr -- plus the
     # audio slot's two plus the night light's one plus the agent's
-    # one plus the keyring's two).
+    # one plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one)).
     (
-      assert builtins.length (failing osCapture.config) == 21;
+      assert builtins.length (failing osCapture.config) == 27;
       true
     )
   ];
@@ -9890,10 +10809,10 @@ let
     # switch (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the slot's three plus the capture slot's
     # four plus the audio slot's two plus the night light's one plus
-    # the theme's seven plus the agent's one plus the keyring's two:
+    # the theme's seven plus the agent's one plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one):
     # the profile is on in this evaluation).
     (
-      assert builtins.length (failing hmClip.config) == 27;
+      assert builtins.length (failing hmClip.config) == 33;
       true
     )
     (
@@ -9920,9 +10839,111 @@ let
     )
     # ...refused loudly there too (one more than before: the
     # launcher's null joins the count on this side as well -- plus
-    # the audio slot's two plus the night light's one beside it).
+    # the audio slot's two plus the night light's one beside it,
+    # plus the apps slots' six).
     (
-      assert builtins.length (failing osClip.config) == 21;
+      assert builtins.length (failing osClip.config) == 27;
+      true
+    )
+  ];
+
+  # --- desktop apps off Linux (fail `nix flake check` at eval) ---
+  #
+  # foot, pcmanfm, nmcli, bluetoothctl, fuzzel and udiskie are
+  # Linux-only: off Linux their packages default to null, which each
+  # slot's own assertion refuses loudly instead of installing nothing
+  # silently. Empty off Linux (the Linux check above is where the
+  # slots are pinned).
+  _darwinAppsPins = lib.optionals (!isLinux) [
+    # Home-manager: every tool null, nothing installed for the slots...
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.terminal.package == null;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.fileManager.package == null;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.network.cliPackage == null;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.network.menuPackage == null;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.bluetooth.cliPackage == null;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.bluetooth.menuPackage == null;
+      true
+    )
+    (
+      assert hmApps.config.programs.scoot.desktop.automount.package == null;
+      true
+    )
+    # ...and the slots' own assertions refusing loudly, naming each
+    # switch (the idle policy's five plus the daemon's one plus the
+    # launcher's one plus the clipboard slot's three plus the capture
+    # slot's four plus this slot's six plus the audio slot's two plus
+    # the night light's one plus the theme's seven plus the agent's
+    # one plus the keyring's two: the profile is on in this
+    # evaluation)...
+    (
+      assert builtins.length (failing hmApps.config) == 33;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "apps.terminal.package is null" m) (failing hmApps.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "apps.network.cliPackage is null" m) (failing hmApps.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "apps.network.menuPackage is null" m) (failing hmApps.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "apps.bluetooth.cliPackage is null" m) (failing hmApps.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "apps.bluetooth.menuPackage is null" m) (failing hmApps.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "automount.package is null" m) (failing hmApps.config);
+      true
+    )
+    # Standalone (no profile): just the slots' own six.
+    (
+      assert builtins.length (failing hmAppsStandalone.config) == 6;
+      true
+    )
+    # NixOS: the same nulls (no tools installed for the slots)...
+    (
+      assert osApps.config.programs.scoot.desktop.apps.terminal.package == null;
+      true
+    )
+    (
+      assert osApps.config.programs.scoot.desktop.apps.network.cliPackage == null;
+      true
+    )
+    (
+      assert osApps.config.programs.scoot.desktop.apps.bluetooth.cliPackage == null;
+      true
+    )
+    (
+      assert osApps.config.programs.scoot.desktop.automount.package == null;
+      true
+    )
+    # ...refused loudly there too.
+    (
+      assert builtins.length (failing osApps.config) == 27;
       true
     )
   ];
@@ -9938,14 +10959,14 @@ let
     # (the idle policy's five plus the daemon's one plus the launcher's
     # one plus the clipboard slot's three plus the capture slot's
     # four plus the audio slot's two plus the night light's one plus
-    # the theme's seven plus the agent's one plus the keyring's two:
+    # the theme's seven plus the agent's one plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one):
     # the profile is on in this evaluation, so its slot is open).
     (
       assert hmNotif.config.programs.scoot.desktop.notifications.package == null;
       true
     )
     (
-      assert builtins.length (failing hmNotif.config) == 27;
+      assert builtins.length (failing hmNotif.config) == 33;
       true
     )
     (
@@ -9961,10 +10982,10 @@ let
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five -- gtk beside wlr -- plus the
     # audio slot's two plus the night light's one plus the
-    # agent's one plus the keyring's two: the profile is on in this
+    # agent's one plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one): the profile is on in this
     # evaluation, so its slot is open).
     (
-      assert builtins.length (failing osNotif.config) == 21;
+      assert builtins.length (failing osNotif.config) == 27;
       true
     )
     (
@@ -10334,9 +11355,9 @@ let
     # policy's five, the daemon's one, the launcher's one, the
     # clipboard slot's three, the capture slot's four, the audio
     # slot's two, the night light's one, the theme's seven, the
-    # agent's one, the keyring's two).
+    # agent's one, the keyring's two, the apps slots' six (the terminal's one, each picker's two, the automounter's one)).
     (
-      assert builtins.length (failing hmNight.config) == 27;
+      assert builtins.length (failing hmNight.config) == 33;
       true
     )
     (
@@ -10352,9 +11373,9 @@ let
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five -- gtk beside wlr -- plus the
     # audio slot's two plus the night light's one plus the agent's
-    # one plus the keyring's two).
+    # one plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one)).
     (
-      assert builtins.length (failing osNight.config) == 21;
+      assert builtins.length (failing osNight.config) == 27;
       true
     )
   ];
@@ -10375,14 +11396,15 @@ let
       assert hmKeys.config.programs.scoot.desktop.keys.enable;
       true
     )
-    # ...rendering exactly the twenty-one binds beside the profile
+    # ...rendering exactly the twenty-three binds beside the profile
     # (the twelve keymap-owned binds plus the three notification
-    # binds, the clipboard picker, the two launcher binds and the
-    # three capture binds -- the daemon, the clipboard slot, the
-    # launcher slot and the capture slot are on with the profile, so
-    # their slots are open; every other future slot is off: its binds
-    # stay out; the volume, brightness and mic-mute binds run through
-    # the audio slot's scripts, which is on with the profile too)...
+    # binds, the clipboard picker, the two launcher binds, the two
+    # apps pickers and the three capture binds -- the daemon, the
+    # clipboard slot, the launcher slot, the apps pickers and the
+    # capture slot are on with the profile, so their slots are open;
+    # every other future slot is off: its binds stay out; the volume,
+    # brightness and mic-mute binds run through the audio slot's
+    # scripts, which is on with the profile too)...
     (
       assert
         hmKeys.config.programs.scoot.settings.binds == {
@@ -10451,13 +11473,17 @@ let
           "print" = "spawn ${slotScriptBin hmKeys "scoot-capture-output"}";
           "shift+print" = "spawn ${slotScriptBin hmKeys "scoot-capture-region"}";
           "ctrl+print" = "spawn ${slotScriptBin hmKeys "scoot-capture-clipboard"}";
+          "super+w" = "spawn ${slotScriptBin hmKeys "scoot-network-pick"} pick";
+          "super+b" = "spawn ${slotScriptBin hmKeys "scoot-bluetooth-pick"} pick";
         };
       true
     )
     # ...beside the profile's and the policy's packages (scoot, the
     # five idle tools, mako, the clipboard slot's three, the launcher
     # package, the capture slot's four tools, the audio slot's OSD and
-    # its four scripts, the displays watcher, the five slot scripts, the agent and the
+    # its four scripts, the displays watcher, the terminal and its
+    # `xdg-open` plumbing, both pickers' tools and their scripts, the
+    # automounter, the slot scripts, the agent and the
     # secrets client
     # and the keymap's three)...
     (
@@ -10492,21 +11518,31 @@ let
           pkgs.wlsunset
           pkgs.polkit_gnome
           pkgs.libsecret
+          pkgs.foot
+          pkgs.xdg-utils
+          pkgs.networkmanager
+          pkgs.fuzzel
+          (slotScriptDrv hmKeys "scoot-network-pick")
+          pkgs.bluez
+          pkgs.fuzzel
+          (slotScriptDrv hmKeys "scoot-bluetooth-pick")
+          pkgs.udiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
         ];
       true
     )
-    # ...every other future slot on: all twenty-one binds (the
+    # ...every other future slot on: all twenty-three binds (the
     # launcher, clipboard and capture binds through the keymap's own
-    # scripts, the notification binds through mako's absolute path)...
+    # scripts, the notification binds through mako's absolute path,
+    # the pickers through theirs)...
     (
       assert allAssertionsHold hmKeysSlots.config;
       true
     )
     (
-      assert builtins.length (builtins.attrNames hmKeysSlots.config.programs.scoot.settings.binds) == 21;
+      assert builtins.length (builtins.attrNames hmKeysSlots.config.programs.scoot.settings.binds) == 23;
       true
     )
     (
@@ -10572,9 +11608,29 @@ let
         == "spawn ${slotScriptBin hmKeysSlots "scoot-capture-clipboard"}";
       true
     )
-    # ...the four slot scripts installed beside the keymap's tools...
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."super+w"
+        == "spawn ${slotScriptBin hmKeysSlots "scoot-network-pick"} pick";
+      true
+    )
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."super+b"
+        == "spawn ${slotScriptBin hmKeysSlots "scoot-bluetooth-pick"} pick";
+      true
+    )
+    # ...the six slot scripts installed beside the keymap's tools...
     (
       assert lib.any (p: (p.name or "") == "scoot-clipboard-pick") hmKeysSlots.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-network-pick") hmKeysSlots.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-bluetooth-pick") hmKeysSlots.config.home.packages;
       true
     )
     (
@@ -10607,9 +11663,10 @@ let
       assert lib.any (p: (p.name or "") == "scoot-audio-sink") hmKeysSlots.config.home.packages;
       true
     )
-    # ...one bind removed: its combo unbound, the other nineteen
-    # still there (twenty-one with the daemon, the clipboard slot,
-    # the launcher slot and the capture slot on, minus two)...
+    # ...one bind removed: its combo unbound, the other twenty-one
+    # still there (twenty-three with the daemon, the clipboard slot,
+    # the launcher slot, the apps pickers and the capture slot on,
+    # minus two)...
     (
       assert allAssertionsHold hmKeysOmit.config;
       true
@@ -10623,7 +11680,7 @@ let
       true
     )
     (
-      assert builtins.length (builtins.attrNames hmKeysOmit.config.programs.scoot.settings.binds) == 19;
+      assert builtins.length (builtins.attrNames hmKeysOmit.config.programs.scoot.settings.binds) == 21;
       true
     )
     # ...one bind overridden: the user's own `[binds]` entry wins...
@@ -10634,7 +11691,7 @@ let
     )
     (
       assert
-        builtins.length (builtins.attrNames hmKeysOverride.config.programs.scoot.settings.binds) == 21;
+        builtins.length (builtins.attrNames hmKeysOverride.config.programs.scoot.settings.binds) == 23;
       true
     )
     # ...a slot bind overridden the same way (the slot's command
@@ -10695,6 +11752,15 @@ let
           pkgs.wlsunset
           pkgs.polkit_gnome
           pkgs.libsecret
+          pkgs.foot
+          pkgs.xdg-utils
+          pkgs.networkmanager
+          pkgs.fuzzel
+          (slotScriptDrv hmKeysOff "scoot-network-pick")
+          pkgs.bluez
+          pkgs.fuzzel
+          (slotScriptDrv hmKeysOff "scoot-bluetooth-pick")
+          pkgs.udiskie
         ];
       true
     )
@@ -10733,6 +11799,12 @@ let
           pkgs.polkit_gnome
           pkgs.gnome-keyring
           pkgs.libsecret
+          pkgs.foot
+          pkgs.networkmanager
+          pkgs.fuzzel
+          pkgs.bluez
+          pkgs.fuzzel
+          pkgs.udiskie
         ];
       true
     )
@@ -10780,11 +11852,11 @@ let
     # daemon's one, the launcher's one, the clipboard slot's three,
     # the capture slot's four, the audio slot's two (the OSD and the
     # sink helper's dump tool), the night light's one, the theme's
-    # seven, the agent's one plus the keyring's two,
+    # seven, the agent's one plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one),
     # on with the profile; order-insensitive: the daemon's module
     # contributes its refusal first).
     (
-      assert builtins.length (failing hmIdle.config) == 27;
+      assert builtins.length (failing hmIdle.config) == 33;
       true
     )
     (
@@ -10813,10 +11885,10 @@ let
     # three plus the capture slot's five -- gtk beside wlr -- plus the
     # audio slot's two (the OSD and the sink helper's dump tool) plus
     # the night light's one plus the agent's one plus the keyring's
-    # two -- while the docked-lid rule (plain values, no tools) still
-    # lands.
+    # two plus the apps slots' six -- while the docked-lid rule (plain
+    # values, no tools) still lands.
     (
-      assert builtins.length (failing osIdle.config) == 21;
+      assert builtins.length (failing osIdle.config) == 27;
       true
     )
     (
@@ -10863,10 +11935,10 @@ let
       assert hmKeys.config.programs.scoot.desktop.keys.enable;
       true
     )
-    # Twenty-one binds: the fifteen above plus the picker, the two
-    # launcher binds and the three capture binds, whose store paths
-    # are unknowable in the pin (so each is matched by suffix, and
-    # the rest byte-equal without them).
+    # Twenty-three binds: the fifteen above plus the picker, the two
+    # launcher binds, the two apps pickers and the three capture
+    # binds, whose store paths are unknowable in the pin (so each is
+    # matched by suffix, and the rest byte-equal without them).
     (
       assert
         builtins.removeAttrs hmKeys.config.programs.scoot.settings.binds [
@@ -10876,6 +11948,8 @@ let
           "print"
           "shift+print"
           "ctrl+print"
+          "super+w"
+          "super+b"
         ] == {
           "XF86MonBrightnessUp" = {
             action = "spawn brightnessctl -e set +5%";
@@ -10968,6 +12042,16 @@ let
         hmKeys.config.programs.scoot.settings.binds."ctrl+print";
       true
     )
+    (
+      assert lib.hasSuffix "/bin/scoot-network-pick pick"
+        hmKeys.config.programs.scoot.settings.binds."super+w";
+      true
+    )
+    (
+      assert lib.hasSuffix "/bin/scoot-bluetooth-pick pick"
+        hmKeys.config.programs.scoot.settings.binds."super+b";
+      true
+    )
     # ...and the picker, both launcher binds and the three capture
     # binds stay plain strings: never repeat, never allowed while
     # locked (unlike the eleven hardware tables above).
@@ -10996,14 +12080,14 @@ let
       true
     )
     (
-      assert builtins.length (builtins.attrNames hmKeys.config.programs.scoot.settings.binds) == 21;
+      assert builtins.length (builtins.attrNames hmKeys.config.programs.scoot.settings.binds) == 23;
       true
     )
     # ...and the keymap refuses nothing itself: the only failing
     # assertions are the idle policy's five plus the daemon's one plus
     # the launcher's one plus the clipboard slot's three plus the
     # capture slot's four plus the audio slot's two plus the night
-    # light's one plus the agent's one plus the keyring's two (their
+    # light's one plus the agent's one plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one) (their
     # packages are null off Linux -- the daemon's pinned in
     # `_darwinNotifPins`, the launcher's in `_darwinLaunchPins`, the
     # clipboard slot's in `_darwinClipPins`, the capture slot's in
@@ -11012,7 +12096,7 @@ let
     # the keyring's in `_darwinAuthPins`), so bare tool names stay
     # valid config, just quiet at runtime.
     (
-      assert builtins.length (failing hmKeys.config) == 20;
+      assert builtins.length (failing hmKeys.config) == 26;
       true
     )
     (
@@ -11088,7 +12172,7 @@ let
       true
     )
     # ...without it no switch script, no daemon package and no bind
-    # (twenty-one binds, the keymap without the policy's own)...
+    # (twenty-three binds, the keymap without the policy's own)...
     (
       assert
         !(lib.any (p: (p.name or "") == "scoot-power-profile") hmPowerNoProfiles.config.home.packages);
@@ -11101,7 +12185,7 @@ let
     )
     (
       assert
-        builtins.length (builtins.attrNames hmPowerNoProfiles.config.programs.scoot.settings.binds) == 21;
+        builtins.length (builtins.attrNames hmPowerNoProfiles.config.programs.scoot.settings.binds) == 23;
       true
     )
     (
@@ -11241,11 +12325,11 @@ let
       assert !(hmPower.config.systemd.user.services ? scoot-charge-push);
       true
     )
-    # ...and the profile bind beside the keymap's twenty-one (a
+    # ...and the profile bind beside the keymap's twenty-three (a
     # plain string: fire once, never while locked, like the other
     # slot binds)...
     (
-      assert builtins.length (builtins.attrNames hmPower.config.programs.scoot.settings.binds) == 22;
+      assert builtins.length (builtins.attrNames hmPower.config.programs.scoot.settings.binds) == 24;
       true
     )
     (
@@ -11257,10 +12341,10 @@ let
         hmPower.config.programs.scoot.settings.binds."super+p";
       true
     )
-    # ...while the profile without the policy stays at twenty-one
+    # ...while the profile without the policy stays at twenty-three
     # (the new bind is slot-gated, not keymap-owned).
     (
-      assert builtins.length (builtins.attrNames hmKeys.config.programs.scoot.settings.binds) == 21;
+      assert builtins.length (builtins.attrNames hmKeys.config.programs.scoot.settings.binds) == 23;
       true
     )
     # Refusals: the policy with no daemon...
@@ -11862,9 +12946,9 @@ let
     # idle policy's five, the daemon's one, the launcher's one, the
     # clipboard slot's three, the capture slot's four, the audio
     # slot's two, the night light's one, the agent's one, the
-    # keyring's two).
+    # keyring's two, the apps slots' six (the terminal's one, each picker's two, the automounter's one)).
     (
-      assert builtins.length (failing hmPower.config) == 21;
+      assert builtins.length (failing hmPower.config) == 27;
       true
     )
     (
@@ -11880,10 +12964,10 @@ let
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five on this side plus the audio
     # slot's two plus the night light's one plus the agent's one
-    # plus the keyring's two), while the docked-lid rule (plain
+    # plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one)), while the docked-lid rule (plain
     # values, no tools) still lands.
     (
-      assert builtins.length (failing osPower.config) == 22;
+      assert builtins.length (failing osPower.config) == 28;
       true
     )
     (
@@ -11900,6 +12984,7 @@ assert lib.all (x: x) _startLimitPins;
 assert lib.all (x: x) _idlePins;
 assert lib.all (x: x) _notifPins;
 assert lib.all (x: x) _clipPins;
+assert lib.all (x: x) _appsPins;
 assert lib.all (x: x) _launchPins;
 assert lib.all (x: x) _capturePins;
 assert lib.all (x: x) _audioPins;
@@ -11912,6 +12997,7 @@ assert lib.all (x: x) _displaysPins;
 assert lib.all (x: x) _darwinIdlePins;
 assert lib.all (x: x) _darwinNotifPins;
 assert lib.all (x: x) _darwinClipPins;
+assert lib.all (x: x) _darwinAppsPins;
 assert lib.all (x: x) _darwinLaunchPins;
 assert lib.all (x: x) _darwinCapturePins;
 assert lib.all (x: x) _darwinNightlightPins;
@@ -12631,7 +13717,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       echo "ok: empty DND icon stays out of the payload"
 
     # 15. Keymap content: the rendered `[binds]` carries the
-    #     twenty-one profile binds (the sigils -- `@...@`, `%`, `+` --
+    #     twenty-three profile binds (the sigils -- `@...@`, `%`, `+` --
     #     intact through TOML; the notification binds through mako's
     #     absolute path, the daemon, the clipboard slot, the launcher
     #     slot and the capture slot being on with the profile -- the
@@ -12639,7 +13725,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     #     through their own scripts -- and the volume, brightness and
     #     mic-mute binds through the audio slot's scripts, on with the
     #     profile too),
-    #     and with every slot on all twenty-one (slot scripts as store
+    #     and with every slot on all twenty-three (slot scripts as store
     #     paths). No `wofi` anywhere: the launcher child reconciled the
     #     old default. The launcher binds stay plain strings (never
     #     repeat, never allowed while locked -- unlike the hardware
@@ -12647,7 +13733,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
-    assert len(got) == 21, got.keys()
+    assert len(got) == 23, got.keys()
     assert "wofi" not in open(sys.argv[1]).read(), "wofi default left in [binds]"
     vol = got["XF86AudioRaiseVolume"]
     assert vol["action"].endswith("/bin/scoot-volume sink-up"), vol
@@ -12674,11 +13760,15 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     assert "/bin/scoot-capture-region" in got["shift+print"], got["shift+print"]
     assert isinstance(got["ctrl+print"], str), got["ctrl+print"]
     assert "/bin/scoot-capture-clipboard" in got["ctrl+print"], got["ctrl+print"]
+    assert isinstance(got["super+w"], str), got["super+w"]
+    assert got["super+w"].endswith("/bin/scoot-network-pick pick"), got["super+w"]
+    assert isinstance(got["super+b"], str), got["super+b"]
+    assert got["super+b"].endswith("/bin/scoot-bluetooth-pick pick"), got["super+b"]
     ' ${keysToml}
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
-    assert len(got) == 21, got.keys()
+    assert len(got) == 23, got.keys()
     assert "wofi" not in open(sys.argv[1]).read(), "wofi default left in [binds]"
     assert "/bin/scoot-launcher" in got["super+d"] and "--list-executables-in-path" not in got["super+d"], got["super+d"]
     assert got["ctrl+alt+space"].endswith("/bin/scoot-launcher --list-executables-in-path"), got["ctrl+alt+space"]
@@ -12689,13 +13779,15 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     assert "/bin/scoot-capture-output" in got["print"], got["print"]
     assert "/bin/scoot-capture-region" in got["shift+print"], got["shift+print"]
     assert "/bin/scoot-capture-clipboard" in got["ctrl+print"], got["ctrl+print"]
+    assert got["super+w"].endswith("/bin/scoot-network-pick pick"), got["super+w"]
+    assert got["super+b"].endswith("/bin/scoot-bluetooth-pick pick"), got["super+b"]
     ' ${keysSlotsToml}
     # No `wofi` default left in the modules either (a dangling default
     # that spawns nothing): `clipboard-cliphist.nix` still names it
     # once, as the rejected picker fat the lean package drops -- that
     # comment is documentation, not a default, so it is excluded here.
     if grep -rn "wofi" ${./modules} | grep -v "clipboard-cliphist.nix"; then echo "wofi default left in nix/modules" >&2; exit 1; fi
-    echo "ok: rendered [binds] carries the keymap (twenty-one with the daemon and the slots)"
+    echo "ok: rendered [binds] carries the keymap (twenty-three with the daemon and the slots)"
 
     # 16. Clipboard slot content: the idle policy's lock lines carry
     #     the wipe (absolute cliphist path, before the locker, on both
@@ -13045,7 +14137,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
-    assert len(got) == 22, got.keys()
+    assert len(got) == 24, got.keys()
     assert isinstance(got["super+p"], str), got["super+p"]
     assert got["super+p"].endswith("/bin/scoot-power-profile cycle"), got["super+p"]
     ' ${keysPowerToml}
@@ -13716,6 +14808,187 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -q "no OSD running" "$SCOOT_AUDIO_TEST_DIR/stderr"
     echo "ok: show validates, lands byte-exact, and misses loud with no daemon"
   ''}
+
+    ${lib.optionalString isLinux ''
+          # 23. Apps slot content: the pickers carry the look (music-desk
+          #     roles as fuzzel CLI colors, opaque), the dmenu contract
+          #     flags, and the keyring/pairing wiring; lookless and opted
+          #     out carry no themed flag at all.
+          grep -F -q -- "--background-color=FCFBFBff" ${appsNetPickThemed}
+          grep -F -q -- "--text-color=1A2032ff" ${appsNetPickThemed}
+          grep -F -q -- "--border-color=3D579Aff" ${appsNetPickThemed}
+          grep -F -q -- "--selection-color=3D579Aff" ${appsNetPickThemed}
+          grep -F -q -- "--selection-text-color=FCFBFBff" ${appsNetPickThemed}
+          grep -F -q -- "--match-color=5D7AB0ff" ${appsNetPickThemed}
+          grep -F -q -- "--prompt-color=1A2032ff" ${appsNetPickThemed}
+          grep -F -q -- "--dmenu --prompt='wifi: ' --no-run-if-empty --only-match" ${appsNetPickThemed}
+          grep -F -q -- "--dmenu --prompt='bluetooth: ' --no-run-if-empty --only-match" ${appsBluePickThemed}
+          grep -F -q "lookup scoot-wifi" ${appsNetPickThemed}
+          grep -F -q "devices Paired" ${appsBluePickThemed}
+          grep -F -q "scoot-audio-sink" ${appsBluePickThemed}
+          if grep -q -- "--background-color=" ${appsNetPickNoLook}; then echo "themed flag present with no look (23)" >&2; exit 1; fi
+          grep -F -q -- "--dmenu --prompt='wifi: '" ${appsNetPickNoLook}
+          if grep -q -- "--background-color=" ${appsBluePickTargetOff}; then echo "themed flag present with theming off (23)" >&2; exit 1; fi
+          echo "ok: the pickers carry the look, the dmenu contract and their wiring"
+
+          # 23a-i. The WiFi picker, against stub tools (the REAL script
+          #     from the module -- `dev`/`dev-code` how `nmcli dev`
+          #     answers, `connections` the saved list, `scan` the cached
+          #     scan, `secret`/`secret-code` the keyring, `pick`/`pick-code`
+          #     how `fuzzel` answers, `calls` what `nmcli` was asked,
+          #     `menu-input` what the menu was offered). Every scenario
+          #     asserts the exit status and the exact resulting files.
+          export SCOOT_APPS_TEST_DIR="$PWD/apps-test"
+          mkdir -p "$SCOOT_APPS_TEST_DIR"
+          net_setup() {
+            # $1 dev-code, $2 secret-code
+            printf 'wlan0:wifi:connected\neth0:ethernet:connected\n' > "$SCOOT_APPS_TEST_DIR/dev"
+            printf '%s' "$1" > "$SCOOT_APPS_TEST_DIR/dev-code"
+            printf 'HomeNet:abc-uuid:802-11-wireless\nWorkNet:def-uuid:wifi\nWired:xyz:ethernet\n' > "$SCOOT_APPS_TEST_DIR/connections"
+            printf 'HomeNet:70:WPA2\nHotel\\: Lobby:45:WPA1 WPA2\nCaf\xc3\xa9:60:WPA2\nOpenNet:80:\n' > "$SCOOT_APPS_TEST_DIR/scan"
+            printf 'hunter2' > "$SCOOT_APPS_TEST_DIR/secret"
+            printf '%s' "$2" > "$SCOOT_APPS_TEST_DIR/secret-code"
+            : > "$SCOOT_APPS_TEST_DIR/calls"
+            : > "$SCOOT_APPS_TEST_DIR/menu-input"
+            : > "$SCOOT_APPS_TEST_DIR/pick"
+            printf '0' > "$SCOOT_APPS_TEST_DIR/pick-code"
+          }
+
+          # 23a. List: saved connections first, then the cached scan,
+          #      deduplicated -- a colon-carrying SSID surviving the `-t`
+          #      round trip as one row, the ethernet connection left out.
+          net_setup 0 0
+          got=$(${appsNetPick} list)
+          want="HomeNet
+      WorkNet
+      Hotel: Lobby
+      Café
+      OpenNet"
+          [ "$got" = "$want" ] || { echo "list showed '$got', want '$want' (23a)" >&2; exit 1; }
+          echo "ok: list merges saved and scan, escapes intact"
+
+          # 23b. No WiFi device (a VM, a headless box): loud, naming it.
+          net_setup 0 0
+          printf 'eth0:ethernet:connected\nlo:loopback:connected\n' > "$SCOOT_APPS_TEST_DIR/dev"
+          if ${appsNetPick} list 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no wifi device (23b)" >&2; exit 1; fi
+          grep -q "no Wi-Fi device" "$SCOOT_APPS_TEST_DIR/stderr"
+          echo "ok: no wifi device fails loud"
+
+          # 23c. No NetworkManager: nmcli's own error propagates, never
+          #      swallowed (a silent pick would join nothing while looking
+          #      like it did).
+          net_setup 0 0
+          printf 'Error: Could not create NMClient object.' > "$SCOOT_APPS_TEST_DIR/dev"
+          printf '1' > "$SCOOT_APPS_TEST_DIR/dev-code"
+          if ${appsNetPick} list 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no daemon (23c)" >&2; exit 1; fi
+          grep -q "cannot talk to NetworkManager" "$SCOOT_APPS_TEST_DIR/stderr"
+          echo "ok: no daemon fails loud"
+
+          # 23d. A saved connection goes up by UUID (no secret needed).
+          net_setup 0 0
+          ${appsNetPick} connect HomeNet
+          grep -F -q "connection up uuid abc-uuid" "$SCOOT_APPS_TEST_DIR/calls"
+          echo "ok: saved connections go up by UUID"
+
+          # 23e. An open network connects directly (empty security still
+          #      reads as seen -- the 23-prover for the seen/open split).
+          net_setup 0 0
+          ${appsNetPick} connect OpenNet
+          grep -F -q "dev wifi connect OpenNet" "$SCOOT_APPS_TEST_DIR/calls"
+          if grep -q "password" "$SCOOT_APPS_TEST_DIR/calls"; then echo "password sent to an open network (23e)" >&2; exit 1; fi
+          echo "ok: open networks connect directly"
+
+          # 23f. A secured network reads its psk from the keyring.
+          net_setup 0 0
+          ${appsNetPick} connect "Café"
+          grep -F -q "dev wifi connect" "$SCOOT_APPS_TEST_DIR/calls"
+          grep -F -q "password hunter2" "$SCOOT_APPS_TEST_DIR/calls"
+          echo "ok: secured networks read the keyring"
+
+          # 23g. A secured network with no key: loud, with the two exact
+          #      remedies (stash the key, or join once from a terminal).
+          net_setup 0 1
+          : > "$SCOOT_APPS_TEST_DIR/secret"
+          if ${appsNetPick} connect "Café" 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no key (23g)" >&2; exit 1; fi
+          grep -q "needs its key" "$SCOOT_APPS_TEST_DIR/stderr"
+          grep -q "secret-tool store" "$SCOOT_APPS_TEST_DIR/stderr"
+          if [ -s "$SCOOT_APPS_TEST_DIR/calls" ]; then echo "connect attempted with no key (23g)" >&2; exit 1; fi
+          echo "ok: no key fails loud with remedies"
+
+          # 23h. A cancelled pick exits 0 having joined nothing.
+          net_setup 0 0
+          printf '1' > "$SCOOT_APPS_TEST_DIR/pick-code"
+          ${appsNetPick} pick
+          if [ -s "$SCOOT_APPS_TEST_DIR/calls" ]; then echo "cancelled pick connected (23h)" >&2; exit 1; fi
+          [ -s "$SCOOT_APPS_TEST_DIR/menu-input" ] || { echo "menu offered nothing (23h)" >&2; exit 1; }
+          echo "ok: cancel joins nothing"
+
+          # 23i. A picked row connects (the menu's exact bytes round-trip
+          #      into `connect`, colon and all).
+          net_setup 0 0
+          printf 'Hotel: Lobby' > "$SCOOT_APPS_TEST_DIR/pick"
+          ${appsNetPick} pick
+          grep -F -q "password hunter2" "$SCOOT_APPS_TEST_DIR/calls"
+          echo "ok: picked rows connect"
+
+          # 23j-o. The Bluetooth picker, against the same stub shape
+          #     (`show`/`show-code` the controller, `paired` the paired
+          #     devices, `connected` one MAC per line, `call-code` how
+          #     actions answer).
+          blue_setup() {
+            # $1 show-code
+            printf 'Controller AA:BB:CC:DD:EE:FF testbox\n\tPowered: yes\n' > "$SCOOT_APPS_TEST_DIR/show"
+            printf '%s' "$1" > "$SCOOT_APPS_TEST_DIR/show-code"
+            printf 'Device 11:22:33:44:55:66 Headphones\nDevice 77:88:99:AA:BB:CC Keyboard\n' > "$SCOOT_APPS_TEST_DIR/paired"
+            printf '11:22:33:44:55:66\n' > "$SCOOT_APPS_TEST_DIR/connected"
+            printf '0' > "$SCOOT_APPS_TEST_DIR/call-code"
+            : > "$SCOOT_APPS_TEST_DIR/calls"
+            : > "$SCOOT_APPS_TEST_DIR/menu-input"
+            : > "$SCOOT_APPS_TEST_DIR/pick"
+            printf '0' > "$SCOOT_APPS_TEST_DIR/pick-code"
+          }
+
+          # 23j. List: paired devices, connected marked (stdout owns the
+          #      picker, like the audio slot's sink helper).
+          blue_setup 0
+          got=$(${appsBluePick} list)
+          want="* 11:22:33:44:55:66 Headphones
+        77:88:99:AA:BB:CC Keyboard"
+          [ "$got" = "$want" ] || { echo "list showed '$got', want '$want' (23j)" >&2; exit 1; }
+          echo "ok: list marks connected devices"
+
+          # 23k. No controller (no hardware, no BlueZ): loud, naming it.
+          blue_setup 0
+          printf 'No default controller available' > "$SCOOT_APPS_TEST_DIR/show"
+          if ${appsBluePick} list 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no controller (23k)" >&2; exit 1; fi
+          grep -q "no Bluetooth controller" "$SCOOT_APPS_TEST_DIR/stderr"
+          echo "ok: no controller fails loud"
+
+          # 23l. Toggle: a connected device disconnects, any other
+          #      connects -- by MAC or by name.
+          blue_setup 0
+          ${appsBluePick} connect Keyboard
+          grep -F -q "bluetoothctl-connect 77:88:99:AA:BB:CC" "$SCOOT_APPS_TEST_DIR/calls"
+          : > "$SCOOT_APPS_TEST_DIR/calls"
+          printf '* 11:22:33:44:55:66 Headphones' > "$SCOOT_APPS_TEST_DIR/pick"
+          ${appsBluePick} pick
+          grep -F -q "bluetoothctl-disconnect 11:22:33:44:55:66" "$SCOOT_APPS_TEST_DIR/calls"
+          echo "ok: toggle connects and disconnects"
+
+          # 23m. Unknown devices say the pairing command (pairing needs
+          #      physical confirmation, so the picker never pairs blind).
+          blue_setup 0
+          if ${appsBluePick} connect Nope 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success on unknown (23m)" >&2; exit 1; fi
+          grep -q "pair it first" "$SCOOT_APPS_TEST_DIR/stderr"
+          echo "ok: unknown devices name the pairing command"
+
+          # 23n. Power toggles; anything else is usage.
+          blue_setup 0
+          ${appsBluePick} power off
+          grep -F -q "bluetoothctl-power off" "$SCOOT_APPS_TEST_DIR/calls"
+          if ${appsBluePick} power maybe 2>/dev/null; then echo "silent success on bogus power (23n)" >&2; exit 1; fi
+          echo "ok: power toggles, bogus is usage"
+    ''}
 
   touch $out
   echo "scoot-modules: all file-content checks passed"

@@ -233,8 +233,26 @@ let
     esac
   '';
 
-  # Whether a slot-gated bind's slot is on.
-  slotOn = name: (cfg.desktop.${name}.enable or false);
+  # The apps pickers' scripts: absolute when the apps child built
+  # them (always, where that module is imported), bare names from
+  # PATH otherwise (same fail-loud contract as the capture tools
+  # above: a missing picker fails in the script, never wedging
+  # input -- so the binds are always safe to render).
+  appsScripts = cfg.desktop.apps.scripts or { };
+  networkPickBin =
+    if (appsScripts.network or null) != null then
+      "${appsScripts.network}/bin/scoot-network-pick"
+    else
+      "scoot-network-pick";
+  bluetoothPickBin =
+    if (appsScripts.bluetooth or null) != null then
+      "${appsScripts.bluetooth}/bin/scoot-bluetooth-pick"
+    else
+      "scoot-bluetooth-pick";
+
+  # Whether a slot-gated bind's slot is on. Dotted for slots nested
+  # one level (the apps pickers: `apps.network`, `apps.bluetooth`).
+  slotOn = name: (lib.attrByPath (lib.splitString "." name) { } cfg.desktop).enable or false;
 
   # Whether the volume, brightness and mic-mute binds run through the
   # audio slot's OSD scripts (set the control AND show the OSD) or
@@ -260,8 +278,8 @@ let
 
   # One `[binds]` entry per enabled bind: the combo from the shared
   # table, the action built here. Slot-gated binds (launcher,
-  # clipboard, notifications, capture) render only while their slot
-  # is enabled; the rest render with the keymap. A `false` flag
+  # clipboard, notifications, capture, the apps pickers) render only
+  # while their slot is enabled; the rest render with the keymap. A `false` flag
   # leaves that combo unbound; a value the user sets in
   # `settings.binds` wins per key (`mkDefault` below). The volume,
   # brightness and mic-mute binds run through the audio slot's scripts
@@ -323,6 +341,8 @@ let
         captureOutput = "spawn ${captureOutput}/bin/scoot-capture-output";
         captureRegion = "spawn ${captureRegion}/bin/scoot-capture-region";
         captureClipboard = "spawn ${captureClipboard}/bin/scoot-capture-clipboard";
+        network = "spawn ${networkPickBin} pick";
+        bluetooth = "spawn ${bluetoothPickBin} pick";
       };
       wanted = lib.filterAttrs (
         name: _:

@@ -150,7 +150,10 @@ in
   # consumers) so the profile's user side is one import. The audio
   # slot's user half (the OSD unit, its config, the control scripts),
   # the privilege-prompt and keyring halves (the agent package, the
-  # secrets client), the capture slot's user half, and the theme's
+  # secrets client), the capture slot's user half, the apps slot's
+  # user half (the terminal and file manager, the `xdg-open`
+  # plumbing, the WiFi/Bluetooth pickers, the automounter), and the
+  # theme's
   # user half (fonts, cursor, GTK/Qt settings, the dark-mode signal,
   # the look's app files) ride the same way.
   #
@@ -167,6 +170,7 @@ in
     ./nightlight-home.nix
     ./power-home.nix
     ./displays-home.nix
+    ./apps-home.nix
     ./keys-home.nix
     ./theme-home.nix
   ];
@@ -448,6 +452,7 @@ in
         || cfg.desktop.audio.enable
         || cfg.desktop.nightlight.enable
         || cfg.desktop.displays.enable
+        || cfg.desktop.automount.enable
       )
       {
         xdg.configFile."systemd/user/scoot-session.target".source =
