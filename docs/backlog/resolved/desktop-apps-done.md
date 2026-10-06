@@ -1,9 +1,10 @@
 ---
 title: "Desktop apps: terminal, file manager, network/bluetooth pickers, automount"
-status: "open"
-area: "packaging"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-06"
 ---
 
 # Desktop apps: terminal, file manager, network/bluetooth pickers, automount
@@ -51,3 +52,38 @@ thumb-drive automount + safe removal); docs in `docs/nix.md`.
 
 Email/calendar/contacts clients; browsers (say the default `BROWSER`, not
 the browser); printer/scanner setup (CUPS notes at most).
+
+## Resolution (2026-10-06)
+
+Landed in PR #PRNUM (`feat(nix): desktop apps`), documented at
+site/src/content/docs/desktop/index.md (*Terminal, files, and removable
+media*; *WiFi and Bluetooth*).
+
+- Terminal: foot on with the profile, `TERMINAL=foot`, `xdg-open` plus
+  `BROWSER=xdg-open` (no browser slot), `xdg.userDirs` created.
+- File manager: pcmanfm, opt-in, directories and mount points opening in
+  it. Picked on numbers (M2): 347 MiB full closure and 5.3 MiB over the
+  profile against thunar's 376/27.0 and wrapped yazi's 525/75.1; ~50 MB
+  idle RSS, 0 context switches in 60 s idle (yazi in foot: 418), nothing
+  left running once closed.
+- Pickers: `Super+w`/`Super+b` and the bar's network/bluetooth modules
+  (menu-command/connect-command wired at `mkOptionDefault`) through fuzzel.
+  WiFi joins saved networks by UUID (matched by SSID), open ones directly,
+  secured ones with the keyring's key or a masked prompt, the key on
+  nmcli's stdin, a failed first join's profile removed. Bluetooth toggles
+  paired devices, pairs new ones after a bounded 10 s scan with a no-input
+  agent (PIN devices from a terminal), switches power and the audio sink.
+  Every bluetoothctl call is bounded: with no bluetoothd it waits forever
+  (measured against an empty private bus on the M2). Failures notify.
+  Neither picker takes over NetworkManager or BlueZ.
+- Automount: trayless udiskie over udisks2, its config ignoring the
+  machine's own disks (stock udiskie would try every unmounted internal
+  partition at login, an admin prompt each on a dual-boot box), safe
+  removal by `udiskie-umount -d`. udiskie ~58 MB RSS, 0 wakeups; kept over
+  a hand-rolled `udisksctl monitor` loop (~8 MB floor) for its partition,
+  LUKS and Browse handling. An empty `/etc/nvme` stops udisksd's 4 s GLib
+  retry on the missing directory (15 wakeups/min to 0, measured).
+- Proven live on the M2 in a real greetd `scoot-test` login against stub
+  `nmcli`/`bluetoothctl` (the M2's networking is off limits); the physical
+  Bluetooth pair and a real thumb drive are the maintainer's checklist in
+  the PR.
