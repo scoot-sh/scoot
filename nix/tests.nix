@@ -140,6 +140,17 @@
 #   `theme.targets.capture.enable` opts out); a null tool, a
 #   too-old backend or grim, a negative frame cap and an empty
 #   fixed output each fail eval;
+#   the night light (`desktop-nightlight` child) runs with the
+#   profile -- wlsunset on the manual schedule (day 6500, the look's
+#   own night warmth, 07:00/19:00 over 15 min, no location or network
+#   needed) as a user unit, gammastep for location-based
+#   sunrise/sunset, themed by the look unless
+#   `theme.targets.nightlight.enable` opts out; a null tool, a
+#   temperature outside 1000..10000, a night bluer than the day, a
+#   sunrise/sunset outside 24-hour `HH:MM`, a transition outside
+#   0..7200, a multiplier outside 0.1..10, a coordinate outside its
+#   degrees, one coordinate without the other, and gammastep with no
+#   location each fail eval;
 #   the power policy (`desktop-power` child) is opt-in (never with
 #   the profile): PPD as the system service plus the keymap's
 #   `Super+p` switch (power-saver, balanced, performance, through
@@ -162,12 +173,13 @@
 #   dump tool, a negative hide timeout and an unknown `daemon` each
 #   fail eval;
 #   every profile unit (the idle pair, mako, the bar feed, both
-#   clipboard watchers, the OSD, and the profile-managed bar -- never the
-#   standalone bar) starts in `scoot-session.target`, never the shared
-#   `graphical-session.target`, so no other desktop starts them; the
-#   home-manager side installs that target itself (present exactly
-#   while a unit can want it), which is what carries a launcher-less
-#   setup too;
+#   every profile unit (the idle pair, mako, the bar feed, both
+#   clipboard watchers, the night light, the OSD, and the
+#   profile-managed bar -- never the standalone bar) starts in `scoot-session.target`,
+#   never the shared `graphical-session.target`, so no other desktop
+#   starts them; the home-manager side installs that target itself
+#   (present exactly while a unit can want it), which is what carries
+#   a launcher-less setup too;
 #   every remaining future slot
 #   defaults off and inert; `enable` without scoot, a look without the
 #   profile, and an unknown look each fail eval;
@@ -1259,15 +1271,14 @@ let
     desktop.xwayland.enable = true;
   };
   # A future slot enabled today: accepted and inert (assertions hold,
-  # nothing installed beyond the profile's own -- nightlight, whose
-  # child wires nothing yet, not even a keymap script the way the
-  # capture and clipboard slots already do).
+  # nothing installed beyond the profile's own -- auth, whose child
+  # wires nothing yet).
   hmDeskSlotOn = evalHome {
     enable = true;
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.nightlight.enable = true;
+    desktop.auth.enable = true;
   };
 
   # --- shared keymap (`programs.scoot.desktop.keys`) evaluations ---
@@ -2138,6 +2149,166 @@ let
       version = "1.4.0";
     });
   };
+  # --- night light (`programs.scoot.desktop.nightlight`) evaluations ---
+  #
+  # The profile with a look: the whole slot on (the tool on PATH, the
+  # user unit), warming to the look's own night temperature.
+  hmNight = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...without a look: the slot runs on the plain default (3500 K).
+  hmNightNoLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...the slot off (the profile turns it on, like the idle policy;
+  # the switch back off disables just its half: no tool, no unit).
+  hmNightOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.nightlight.enable = false;
+  };
+  # ...standalone (no profile): the tool and the unit, unthemed, with
+  # the session scope installed for it.
+  hmNightStandalone = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+  };
+  # ...opted out of look theming (the plain default stands while the
+  # rest follows the look, a user value winning either way).
+  hmNightTargetOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.nightlight.enable = false;
+  };
+  # ...a user night temperature beside a look (winning per key over
+  # the look's own).
+  hmNightUserWins = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.nightlight.nightTemp = 3000;
+  };
+  # ...location mode (the sun computes the boundaries: the manual pair
+  # and the duration go unread)...
+  hmNightLocated = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.nightlight.latitude = 37.33;
+    desktop.nightlight.longitude = -121.89;
+  };
+  # ...and the gammastep daemon (location-based: the only mode it has).
+  hmNightGamma = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.nightlight.daemon = "gammastep";
+    desktop.nightlight.latitude = 37.33;
+    desktop.nightlight.longitude = -121.89;
+  };
+  # Refusals: the slot with no tool to run it (pinned by message in
+  # `_nightlightPins`)...
+  hmNightNoPkg = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.package = null;
+  };
+  # ...a day outside 1000..10000, a night outside it, and a night
+  # bluer than the day...
+  hmNightBadDay = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.dayTemp = 20000;
+  };
+  hmNightBadNight = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.nightTemp = 500;
+  };
+  hmNightNightAboveDay = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.dayTemp = 4000;
+    desktop.nightlight.nightTemp = 5000;
+  };
+  # ...a sunrise/sunset outside 24-hour `HH:MM`...
+  hmNightBadRise = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.sunrise = "7am";
+  };
+  hmNightBadSet = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.sunset = "25:00";
+  };
+  # ...a transition outside 0..7200, and a multiplier outside
+  # 0.1..10...
+  hmNightBadDuration = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.duration = 10800;
+  };
+  hmNightBadGamma = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.gamma = 0.05;
+  };
+  # ...a latitude/longitude outside its degrees, and one coordinate
+  # without the other...
+  hmNightBadLat = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.latitude = 95;
+    desktop.nightlight.longitude = -121.89;
+  };
+  hmNightHalfLoc = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.latitude = 37.33;
+  };
+  # ...gammastep with nowhere to stand (geoclue is not wired)...
+  hmNightGammaNoLoc = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.daemon = "gammastep";
+  };
+  # ...and an unknown daemon, which is an option type error (the
+  # `enum`'s own message names the valid values), caught here by
+  # `tryEval`.
+  hmNightDaemonBogus =
+    builtins.tryEval
+      (evalHome {
+        enable = true;
+        desktop.nightlight.enable = true;
+        desktop.nightlight.daemon = "bogus-daemon";
+      }).config.programs.scoot.desktop.nightlight.daemon;
+
+  # --- night light system evaluations ---
+  osNight = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  osNightOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.nightlight.enable = false;
+  };
+  osNightStandalone = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.nightlight.enable = true;
+  };
+  osNightNoPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.nightlight.package = null;
+  };
   # --- power policy (`programs.scoot.desktop.power`) evaluations ---
   #
   # Opt-in (never with the profile): the daemon, the logind/UPower
@@ -2635,7 +2806,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.nightlight.enable = true;
+    desktop.auth.enable = true;
   };
   # The knob is accepted here (its effect is home-manager wiring; the
   # package choice stays `programs.scoot.package`).
@@ -4333,7 +4504,8 @@ let
     # `desktop-clipboard` child did, `launcher` when the
     # `desktop-launcher` child did, `capture` when the
     # `desktop-capture` child did, `audio` when the
-    # `desktop-audio-osd` child did -- `power` stays on it: filled by
+    # `desktop-audio-osd` child did, `nightlight` when the
+    # `desktop-nightlight` child did -- `power` stays on it: filled by
     # the `desktop-power` child but opt-in, never with the profile).
     (
       assert hmDesk.config.programs.scoot.desktop.capture.enable;
@@ -4385,8 +4557,53 @@ let
       assert hmDesk.config.programs.scoot.desktop.theme.targets.osd.enable;
       true
     )
+    # ...the night light on with the profile (the
+    # `desktop-nightlight` child): wlsunset behind the unit, warming
+    # on the manual schedule (07:00/19:00, 15 min over, no location
+    # needed), themed by the look unless opted out (without forcing
+    # the half-built `theme` slot on)...
     (
-      assert !hmDesk.config.programs.scoot.desktop.nightlight.enable;
+      assert hmDesk.config.programs.scoot.desktop.nightlight.enable;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.nightlight.daemon == "wlsunset";
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.nightlight.dayTemp == 6500;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.nightlight.nightTemp == 3500;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.nightlight.sunrise == "07:00";
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.nightlight.sunset == "19:00";
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.nightlight.duration == 900;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.nightlight.gamma == 1.0;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.nightlight.latitude == null;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.nightlight.longitude == null;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.theme.targets.nightlight.enable;
       true
     )
     (
@@ -4457,8 +4674,8 @@ let
     # policy's five tools, the notification daemon, the launcher
     # package and its script, the clipboard slot's three, its picker
     # script, the capture slot's four, the audio slot's OSD and its
-    # four scripts, and the keymap's three, all on
-    # with the profile).
+    # four scripts, the night light's tool, and the keymap's three,
+    # all on with the profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
       true
@@ -4499,6 +4716,7 @@ let
           (slotScriptDrv hmDeskLookMusic "scoot-volume")
           (slotScriptDrv hmDeskLookMusic "scoot-brightness")
           (slotScriptDrv hmDeskLookMusic "scoot-audio-sink")
+          pkgs.wlsunset
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -4953,6 +5171,10 @@ let
       assert hmAudioStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target";
       true
     )
+    (
+      assert hmNightStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target";
+      true
+    )
     # ...and absent with nothing to scope (an idle target file with no
     # unit wanting it starts nothing, so none is written).
     (
@@ -5102,6 +5324,7 @@ let
         "scoot-idle"
         "scoot-audio-inhibit"
         "scoot-osd"
+        "scoot-nightlight"
         "scootbar"
       ];
     in
@@ -5239,15 +5462,16 @@ let
         hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
       true
     )
-    # ...exactly the twenty-two packages installed (swayidle, dim,
+    # ...exactly the twenty-three packages installed (swayidle, dim,
     # off, locker, inhibitor, mako, the clipboard slot's three, its
     # picker script, the launcher package and its script, the capture
-    # slot's four tools and its three scripts -- no scoot package
+    # slot's four tools and its three scripts, the night light's tool
+    # -- no scoot package
     # set here, so nothing else -- plus the keymap's brightness,
     # volume and media tools; `brightnessctl` and `fuzzel` each serve
     # two features, so each appears twice).
     (
-      assert builtins.length hmIdle.config.home.packages == 27;
+      assert builtins.length hmIdle.config.home.packages == 28;
       true
     )
     (
@@ -5277,6 +5501,7 @@ let
           (slotScriptDrv hmIdle "scoot-volume")
           (slotScriptDrv hmIdle "scoot-brightness")
           (slotScriptDrv hmIdle "scoot-audio-sink")
+          pkgs.wlsunset
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5314,6 +5539,7 @@ let
           "mako"
           "scoot-clipboard-primary-store"
           "scoot-clipboard-store"
+          "scoot-nightlight"
           "scoot-notify-sync"
           "scoot-osd"
         ];
@@ -5353,6 +5579,7 @@ let
           (slotScriptDrv hmIdleOff "scoot-volume")
           (slotScriptDrv hmIdleOff "scoot-brightness")
           (slotScriptDrv hmIdleOff "scoot-audio-sink")
+          pkgs.wlsunset
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5363,7 +5590,8 @@ let
     # leaves (no config, no package, four policy tools plus mako, the
     # clipboard slot's three, its picker script, the launcher package
     # and its script, the capture slot's four, the audio slot's OSD
-    # and its four scripts, and the keymap's three
+    # and its four scripts, the night light's tool, and the keymap's
+    # three
     # left).
     (
       assert allAssertionsHold hmLockOff.config;
@@ -5378,14 +5606,14 @@ let
       true
     )
     (
-      assert builtins.length hmLockOff.config.home.packages == 26;
+      assert builtins.length hmLockOff.config.home.packages == 27;
       true
     )
     # The inhibitor off: the policy without the audio hold (four
     # policy tools plus mako, the clipboard slot's three, its picker
     # script, the launcher package and its script, the capture slot's
-    # four, the audio slot's OSD and its four scripts, and the
-    # keymap's three).
+    # four, the audio slot's OSD and its four scripts, the night
+    # light's tool, and the keymap's three).
     (
       assert allAssertionsHold hmInhibitOff.config;
       true
@@ -5395,7 +5623,7 @@ let
       true
     )
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 26;
+      assert builtins.length hmInhibitOff.config.home.packages == 27;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -5533,6 +5761,7 @@ let
           pkgs.fuzzel
           pkgs.wob
           pkgs.pipewire
+          pkgs.wlsunset
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5586,6 +5815,7 @@ let
           pkgs.fuzzel
           pkgs.wob
           pkgs.pipewire
+          pkgs.wlsunset
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5625,6 +5855,7 @@ let
           pkgs.fuzzel
           pkgs.wob
           pkgs.pipewire
+          pkgs.wlsunset
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -6656,14 +6887,15 @@ let
     # Home-manager: null, and the slot's assertion refusing loudly
     # (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the clipboard slot's three plus the capture
-    # slot's four plus the audio slot's two: the profile is
+    # slot's four plus the audio slot's two plus the night light's
+    # one: the profile is
     # on in this evaluation, so its slot is open).
     (
       assert hmLaunch.config.programs.scoot.desktop.launcher.package == null;
       true
     )
     (
-      assert builtins.length (failing hmLaunch.config) == 16;
+      assert builtins.length (failing hmLaunch.config) == 17;
       true
     )
     (
@@ -6677,7 +6909,7 @@ let
     )
     # ...refused loudly there too.
     (
-      assert builtins.length (failing osLaunch.config) == 17;
+      assert builtins.length (failing osLaunch.config) == 18;
       true
     )
   ];
@@ -7350,9 +7582,10 @@ let
     # ...and the slot's own assertions refusing loudly, naming each
     # tool (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the clipboard slot's three plus this slot's
-    # four plus the audio slot's two: the profile is on in this evaluation).
+    # four plus the audio slot's two plus the night light's one:
+    # the profile is on in this evaluation).
     (
-      assert builtins.length (failing hmCapture.config) == 16;
+      assert builtins.length (failing hmCapture.config) == 17;
       true
     )
     (
@@ -7387,10 +7620,10 @@ let
     )
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
-    # three plus this slot's five -- gtk beside wlr -- plus the audio
-    # slot's two).
+    # three plus this slot's five -- gtk beside wlr -- plus the
+    # audio slot's two plus the night light's one).
     (
-      assert builtins.length (failing osCapture.config) == 17;
+      assert builtins.length (failing osCapture.config) == 18;
       true
     )
   ];
@@ -7418,10 +7651,10 @@ let
     # ...and the slot's own assertions refusing loudly, naming each
     # switch (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the slot's three plus the capture slot's
-    # four plus the audio slot's two: the profile is on in this
-    # evaluation).
+    # four plus the audio slot's two plus the night light's one:
+    # the profile is on in this evaluation).
     (
-      assert builtins.length (failing hmClip.config) == 16;
+      assert builtins.length (failing hmClip.config) == 17;
       true
     )
     (
@@ -7448,9 +7681,9 @@ let
     )
     # ...refused loudly there too (one more than before: the
     # launcher's null joins the count on this side as well -- plus
-    # the audio slot's two).
+    # the audio slot's two plus the night light's one beside it).
     (
-      assert builtins.length (failing osClip.config) == 17;
+      assert builtins.length (failing osClip.config) == 18;
       true
     )
   ];
@@ -7465,14 +7698,14 @@ let
     # Home-manager: null, and the daemon's assertion refusing loudly
     # (the idle policy's five plus the daemon's one plus the launcher's
     # one plus the clipboard slot's three plus the capture slot's
-    # four plus the audio slot's two: the profile is on in this
-    # evaluation, so its slot is open).
+    # four plus the audio slot's two plus the night light's one:
+    # the profile is on in this evaluation, so its slot is open).
     (
       assert hmNotif.config.programs.scoot.desktop.notifications.package == null;
       true
     )
     (
-      assert builtins.length (failing hmNotif.config) == 16;
+      assert builtins.length (failing hmNotif.config) == 17;
       true
     )
     (
@@ -7487,10 +7720,10 @@ let
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five -- gtk beside wlr -- plus the
-    # audio slot's two: the
+    # audio slot's two plus the night light's one: the
     # profile is on in this evaluation, so its slot is open).
     (
-      assert builtins.length (failing osNotif.config) == 17;
+      assert builtins.length (failing osNotif.config) == 18;
       true
     )
     (
@@ -7500,6 +7733,380 @@ let
     # ...while the bar feed stays unwritten (no daemon, no toggle).
     (
       assert (hmDeskBarNotif.config.programs.scootbar.settings.push or { }) == { };
+      true
+    )
+  ];
+
+  # --- night light (`programs.scoot.desktop.nightlight`) pins (fail
+  # `nix flake check` at eval) ---
+  #
+  # Linux only: the unit names absolute store paths here (off Linux the
+  # tool is null, refused loudly -- pinned in
+  # `_darwinNightlightPins`). The profile turns the slot on; the manual
+  # schedule needs neither location nor network, and the gammastep
+  # daemon covers location-based sunrise/sunset.
+  _nightlightPins = lib.optionals isLinux [
+    # Home-manager: the whole slot on with the profile (the tool on
+    # PATH, the user unit bound to the session scope)...
+    (
+      assert allAssertionsHold hmNight.config;
+      true
+    )
+    (
+      assert hmNight.config.programs.scoot.desktop.nightlight.enable;
+      true
+    )
+    (
+      assert hmNight.config.programs.scoot.desktop.nightlight.daemon == "wlsunset";
+      true
+    )
+    (
+      assert hmNight.config.programs.scoot.desktop.nightlight.package.drvPath == pkgs.wlsunset.drvPath;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "wlsunset") hmNight.config.home.packages;
+      true
+    )
+    (
+      assert
+        hmNight.config.systemd.user.services.scoot-nightlight.Install.WantedBy
+        == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmNight.config.systemd.user.services.scoot-nightlight.Unit.PartOf == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmNight.config.systemd.user.services.scoot-nightlight.Unit.After == [ "scoot-session.target" ];
+      true
+    )
+    # ...warming to the look's own night temperature (music-desk keeps
+    # most blue at 4000)...
+    (
+      assert hmNight.config.programs.scoot.desktop.nightlight.nightTemp == 4000;
+      true
+    )
+    # ...each remaining look warming to its own (vinyl-sunset warmest,
+    # moonrise and radial-burst between)...
+    (
+      assert
+        (evalHome {
+          enable = true;
+          desktop.enable = true;
+          desktop.look = "vinyl-sunset";
+        }).config.programs.scoot.desktop.nightlight.nightTemp == 3200;
+      true
+    )
+    (
+      assert
+        (evalHome {
+          enable = true;
+          desktop.enable = true;
+          desktop.look = "moonrise";
+        }).config.programs.scoot.desktop.nightlight.nightTemp == 3400;
+      true
+    )
+    (
+      assert
+        (evalHome {
+          enable = true;
+          desktop.enable = true;
+          desktop.look = "radial-burst";
+        }).config.programs.scoot.desktop.nightlight.nightTemp == 3500;
+      true
+    )
+    # ...a user value winning per key over the look's...
+    (
+      assert hmNightUserWins.config.programs.scoot.desktop.nightlight.nightTemp == 3000;
+      true
+    )
+    (
+      assert allAssertionsHold hmNightUserWins.config;
+      true
+    )
+    # ...opted out of look theming (the plain 3500 stands while the
+    # rest follows the look)...
+    (
+      assert hmNightTargetOff.config.programs.scoot.desktop.nightlight.nightTemp == 3500;
+      true
+    )
+    (
+      assert allAssertionsHold hmNightTargetOff.config;
+      true
+    )
+    # ...and without a look the plain default stands.
+    (
+      assert hmNightNoLook.config.programs.scoot.desktop.nightlight.nightTemp == 3500;
+      true
+    )
+    (
+      assert allAssertionsHold hmNightNoLook.config;
+      true
+    )
+    # The unit runs the manual schedule by default (day 6500, night
+    # from the look, 07:00/19:00 over 15 min, gamma neutral)...
+    (
+      assert lib.hasInfix "wlsunset -T 6500 -t 4000 -S 07:00 -s 19:00 -d 900 -g 1.000000"
+        hmNight.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
+      true
+    )
+    # ...location mode instead with the pair set (the manual times and
+    # the duration unread: the sun computes the boundaries)...
+    (
+      assert allAssertionsHold hmNightLocated.config;
+      true
+    )
+    (
+      assert lib.hasInfix "wlsunset -T 6500 -t 3500 -l 37.330000 -L -121.890000 -g 1.000000"
+        hmNightLocated.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
+      true
+    )
+    (
+      assert
+        !(lib.hasInfix "-S" hmNightLocated.config.systemd.user.services.scoot-nightlight.Service.ExecStart);
+      true
+    )
+    # ...and the gammastep daemon in its own spelling (Wayland method,
+    # day:night, location, per-channel gamma).
+    (
+      assert allAssertionsHold hmNightGamma.config;
+      true
+    )
+    (
+      assert
+        hmNightGamma.config.programs.scoot.desktop.nightlight.package.drvPath == pkgs.gammastep.drvPath;
+      true
+    )
+    (
+      assert lib.hasInfix
+        "gammastep -m wayland -t 6500:3500 -l 37.330000:-121.890000 -g 1.000000:1.000000:1.000000"
+        hmNightGamma.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
+      true
+    )
+    # ...the slot off: no tool, no unit (the profile's own stay)...
+    (
+      assert allAssertionsHold hmNightOff.config;
+      true
+    )
+    (
+      assert !(hmNightOff.config.systemd.user.services ? scoot-nightlight);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "wlsunset") hmNightOff.config.home.packages);
+      true
+    )
+    # ...standalone (no profile): the tool and the unit, unthemed, with
+    # the session scope installed for it...
+    (
+      assert allAssertionsHold hmNightStandalone.config;
+      true
+    )
+    (
+      assert hmNightStandalone.config.systemd.user.services ? scoot-nightlight;
+      true
+    )
+    (
+      assert hmNightStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target";
+      true
+    )
+    # Refusals, each naming its switch: no tool to run...
+    (
+      assert builtins.length (failing hmNightNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "nightlight.package is null" (builtins.head (failing hmNightNoPkg.config));
+      true
+    )
+    # ...a day outside 1000..10000, a night outside it, and a night
+    # bluer than the day...
+    (
+      assert builtins.length (failing hmNightBadDay.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "nightlight.dayTemp" (builtins.head (failing hmNightBadDay.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmNightBadNight.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "nightlight.nightTemp" (builtins.head (failing hmNightBadNight.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmNightNightAboveDay.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "warmer" (builtins.head (failing hmNightNightAboveDay.config));
+      true
+    )
+    # ...a sunrise/sunset outside 24-hour `HH:MM`...
+    (
+      assert builtins.length (failing hmNightBadRise.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "nightlight.sunrise" (builtins.head (failing hmNightBadRise.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmNightBadSet.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "nightlight.sunset" (builtins.head (failing hmNightBadSet.config));
+      true
+    )
+    # ...a transition outside 0..7200, and a multiplier outside
+    # 0.1..10...
+    (
+      assert builtins.length (failing hmNightBadDuration.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "nightlight.duration" (builtins.head (failing hmNightBadDuration.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmNightBadGamma.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "nightlight.gamma" (builtins.head (failing hmNightBadGamma.config));
+      true
+    )
+    # ...a latitude outside its degrees, and one coordinate without
+    # the other...
+    (
+      assert builtins.length (failing hmNightBadLat.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "nightlight.latitude" (builtins.head (failing hmNightBadLat.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmNightHalfLoc.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "only one of" (builtins.head (failing hmNightHalfLoc.config));
+      true
+    )
+    # ...gammastep with nowhere to stand...
+    (
+      assert builtins.length (failing hmNightGammaNoLoc.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "is \"gammastep\" with" (builtins.head (failing hmNightGammaNoLoc.config));
+      true
+    )
+    # ...and an unknown daemon, an enum type error (verified by hand
+    # to name the two valid values).
+    (
+      assert !hmNightDaemonBogus.success;
+      true
+    )
+    # NixOS: the profile installs the tool system-wide, still additive
+    # (no default session)...
+    (
+      assert allAssertionsHold osNight.config;
+      true
+    )
+    (
+      assert osNight.config.programs.scoot.desktop.nightlight.enable;
+      true
+    )
+    (
+      assert osNight.config.programs.scoot.desktop.nightlight.package.drvPath == pkgs.wlsunset.drvPath;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "wlsunset") osNight.config.environment.systemPackages;
+      true
+    )
+    # ...the slot off: the profile's own packages only...
+    (
+      assert allAssertionsHold osNightOff.config;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "wlsunset") osNightOff.config.environment.systemPackages);
+      true
+    )
+    # ...standalone (no profile): the tool without the session entry...
+    (
+      assert allAssertionsHold osNightStandalone.config;
+      true
+    )
+    (
+      assert builtins.length osNightStandalone.config.services.displayManager.sessionPackages == 0;
+      true
+    )
+    (
+      assert lib.any (
+        p: (p.pname or "") == "wlsunset"
+      ) osNightStandalone.config.environment.systemPackages;
+      true
+    )
+    # ...and the refusal names the switch on this side as well.
+    (
+      assert builtins.length (failing osNightNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "nightlight.package is null" (builtins.head (failing osNightNoPkg.config));
+      true
+    )
+  ];
+
+  # --- night light off Linux (fail `nix flake check` at eval) ---
+  #
+  # The tool is Linux-only like the idle policy's: off Linux its
+  # package defaults to null, which the slot's own assertion refuses
+  # loudly instead of installing nothing silently. The schedule values
+  # are plain data, so they still land. (The Linux check above is where
+  # the slot is pinned.)
+  _darwinNightlightPins = lib.optionals (!isLinux) [
+    # Home-manager: null, the daemon following it (wlsunset without a
+    # package to name)...
+    (
+      assert hmNight.config.programs.scoot.desktop.nightlight.package == null;
+      true
+    )
+    # ...refused loudly beside the profile's other sixteen (the idle
+    # policy's five, the daemon's one, the launcher's one, the
+    # clipboard slot's three, the capture slot's four, the audio
+    # slot's two, the night light's one).
+    (
+      assert builtins.length (failing hmNight.config) == 17;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "nightlight.package is null" m) (failing hmNight.config);
+      true
+    )
+    # NixOS: the same null (no tool installed)...
+    (
+      assert osNight.config.programs.scoot.desktop.nightlight.package == null;
+      true
+    )
+    # ...refused loudly there too (the idle policy's five plus the
+    # daemon's one plus the launcher's one plus the clipboard slot's
+    # three plus the capture slot's five -- gtk beside wlr -- plus the
+    # audio slot's two plus the night light's one).
+    (
+      assert builtins.length (failing osNight.config) == 18;
       true
     )
   ];
@@ -7632,6 +8239,7 @@ let
           (slotScriptDrv hmKeys "scoot-volume")
           (slotScriptDrv hmKeys "scoot-brightness")
           (slotScriptDrv hmKeys "scoot-audio-sink")
+          pkgs.wlsunset
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -7797,8 +8405,9 @@ let
     # sets binds here, so the table is absent entirely) and none of
     # the keymap's own slot scripts either (those install beside the
     # binds), so the idle policy's five, mako, the launcher, the
-    # clipboard slot's tools, the capture slot's tools and the audio
-    # slot's OSD and scripts beside scoot only...
+    # clipboard slot's tools, the capture slot's tools, the audio
+    # slot's OSD and scripts and the night light's tool beside scoot
+    # only...
     (
       assert allAssertionsHold hmKeysOff.config;
       true
@@ -7830,13 +8439,14 @@ let
           (slotScriptDrv hmKeysOff "scoot-volume")
           (slotScriptDrv hmKeysOff "scoot-brightness")
           (slotScriptDrv hmKeysOff "scoot-audio-sink")
+          pkgs.wlsunset
         ];
       true
     )
     # NixOS: the keymap off leaves the profile's other packages
     # only (the five idle tools, mako, the launcher, the clipboard
-    # slot's tools, the capture slot's tools and the audio slot's OSD
-    # beside scoot and scootbg).
+    # slot's tools, the capture slot's tools, the audio slot's OSD
+    # and the night light's tool beside scoot and scootbg).
     (
       assert allAssertionsHold osKeysOff.config;
       true
@@ -7863,6 +8473,7 @@ let
           pkgs.fuzzel
           pkgs.wob
           pkgs.pipewire
+          pkgs.wlsunset
         ];
       true
     )
@@ -7907,13 +8518,13 @@ let
     # ...and the policy's own assertions refusing loudly, naming the
     # switch (one per null tool: the policy, the dim and screens-off
     # steps, the inhibitor, the locker -- plus the notification
-    # daemon's one, the launcher's one, the clipboard slot's three
-    # and the capture slot's four, plus the audio slot's two (the OSD
-    # and the sink helper's dump tool),
+    # daemon's one, the launcher's one, the clipboard slot's three,
+    # the capture slot's four, the audio slot's two (the OSD and the
+    # sink helper's dump tool) and the night light's one,
     # on with the profile; order-insensitive: the daemon's module
     # contributes its refusal first).
     (
-      assert builtins.length (failing hmIdle.config) == 16;
+      assert builtins.length (failing hmIdle.config) == 17;
       true
     )
     (
@@ -7939,12 +8550,13 @@ let
     )
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
-    # three plus this slot's five -- gtk beside wlr -- plus the audio
-    # slot's two (the OSD and the sink helper's dump tool) -- while the
+    # three plus the capture slot's five -- gtk beside wlr -- plus the
+    # audio slot's two (the OSD and the sink helper's dump tool) plus
+    # the night light's one -- while the
     # docked-lid rule (plain values, no tools) still
     # lands.
     (
-      assert builtins.length (failing osIdle.config) == 17;
+      assert builtins.length (failing osIdle.config) == 18;
       true
     )
     (
@@ -8130,15 +8742,17 @@ let
     # ...and the keymap refuses nothing itself: the only failing
     # assertions are the idle policy's five plus the daemon's one plus
     # the launcher's one plus the clipboard slot's three plus the
-    # capture slot's four plus the audio slot's two (their
+    # capture slot's four plus the audio slot's two plus the night
+    # light's one (their
     # packages are null off Linux -- the daemon's pinned in
     # `_darwinNotifPins`, the launcher's in `_darwinLaunchPins`, the
     # clipboard slot's in `_darwinClipPins`, the capture slot's in
-    # `_darwinCapturePins`, the audio slot's in `_darwinAudioPins`),
-    # so bare tool names stay valid
+    # `_darwinCapturePins`, the audio slot's in `_darwinAudioPins`,
+    # the night light's in
+    # `_darwinNightlightPins`), so bare tool names stay valid
     # config, just quiet at runtime.
     (
-      assert builtins.length (failing hmKeys.config) == 16;
+      assert builtins.length (failing hmKeys.config) == 17;
       true
     )
     (
@@ -8727,12 +9341,12 @@ let
       assert hmPower.config.programs.scoot.desktop.power.profiles.package == null;
       true
     )
-    # ...refused loudly beside the profile's other sixteen (the
+    # ...refused loudly beside the profile's other seventeen (the
     # idle policy's five, the daemon's one, the launcher's one, the
     # clipboard slot's three, the capture slot's four, the audio
-    # slot's two).
+    # slot's two, the night light's one).
     (
-      assert builtins.length (failing hmPower.config) == 17;
+      assert builtins.length (failing hmPower.config) == 18;
       true
     )
     (
@@ -8747,10 +9361,10 @@ let
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five on this side plus the audio
-    # slot's two), while the
+    # slot's two plus the night light's one), while the
     # docked-lid rule (plain values, no tools) still lands.
     (
-      assert builtins.length (failing osPower.config) == 18;
+      assert builtins.length (failing osPower.config) == 19;
       true
     )
     (
@@ -8770,6 +9384,7 @@ assert lib.all (x: x) _clipPins;
 assert lib.all (x: x) _launchPins;
 assert lib.all (x: x) _capturePins;
 assert lib.all (x: x) _audioPins;
+assert lib.all (x: x) _nightlightPins;
 assert lib.all (x: x) _keysPins;
 assert lib.all (x: x) _powerPins;
 assert lib.all (x: x) _darwinIdlePins;
@@ -8778,6 +9393,7 @@ assert lib.all (x: x) _darwinClipPins;
 assert lib.all (x: x) _darwinLaunchPins;
 assert lib.all (x: x) _darwinCapturePins;
 assert lib.all (x: x) _darwinAudioPins;
+assert lib.all (x: x) _darwinNightlightPins;
 assert lib.all (x: x) _darwinKeysPins;
 assert lib.all (x: x) _darwinPowerPins;
 assert lib.all (x: x) _flakePins;

@@ -793,10 +793,161 @@ in
         '';
       };
     };
-    # Night light over `wlr-gamma-control-v1`.
-    nightlight = slot {
-      child = "desktop-nightlight";
-      tool = "`wlsunset` (single purpose) or `gammastep` (undecided)";
+    # Night light over `wlr-gamma-control-v1`. Filled by the
+    # `desktop-nightlight` child: `wlsunset` as a user unit bound to
+    # `scoot-session.target` (single purpose, tiny -- see
+    # site/src/content/docs/desktop/index.md#night-light for the measured
+    # pick), manual sunrise/sunset by default (no location, no geoclue,
+    # no network), `gammastep` for location-based sunrise/sunset.
+    # Each `package` lives beside this in the side modules (`nixos.nix`
+    # installs system-wide, `nightlight-home.nix` for the user, each
+    # defaulting to the daemon's own tool), which is also where its
+    # default lives; everything here is plain values, so this file
+    # stays `lib`-only.
+    #
+    # On with the profile (still individually disable-able); without
+    # it, `enable` works standalone (unthemed: a look needs the
+    # profile, and the user unit needs the home-manager side, the way
+    # the themed picker does).
+    nightlight = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Warm the screen at night: the daemon behind `daemon`
+          (its package beside this) driving every output's gamma ramp
+          through `wlr-gamma-control-v1`, one control per output (the
+          compositor retires a control with `failed` on CRTC moves, so
+          the daemon re-reads `gamma_size` and re-pushes -- see
+          site/src/content/docs/desktop/index.md#night-light). Without
+          it the ramp stays linear day and night.
+        '';
+      };
+
+      # `wlsunset` warms on a fixed schedule with no location (neither
+      # geoclue nor network: `-S`/`-s`), `gammastep` on sunrise/sunset
+      # computed from `latitude`/`longitude` (which it then requires:
+      # without either it would reach for geoclue, which is not wired
+      # -- see site/src/content/docs/desktop/index.md#night-light). A
+      # future scoot-native widens this enum, the option and the unit
+      # staying as they are (the native-replacement contract).
+      daemon = lib.mkOption {
+        type = lib.types.enum [
+          "wlsunset"
+          "gammastep"
+        ];
+        default = "wlsunset";
+        example = "gammastep";
+        description = ''
+          The program behind `enable`. `wlsunset` (single purpose: one
+          small binary warming on a fixed schedule) or `gammastep`
+          (sunrise/sunset from `latitude`/`longitude`).
+        '';
+      };
+
+      # Day color temperature in Kelvin (the neutral point: 6500 changes
+      # nothing, higher is bluer). 1000 to 10000, either daemon's range.
+      dayTemp = lib.mkOption {
+        type = lib.types.int;
+        default = 6500;
+        example = 6000;
+        description = ''
+          Day color temperature in Kelvin. 1000 to 10000.
+        '';
+      };
+
+      # Night color temperature in Kelvin (lower is warmer). 1000 to
+      # 10000, at or under `dayTemp` (above it fails evaluation: a
+      # night bluer than the day is a typo). Without a look (or opted
+      # out below) the default below; with a look each look warms to
+      # its own default (its palette's warmth: the espresso look
+      # warmest, the paper look brightest), a value here winning per
+      # key the way `settings` wins over a look.
+      nightTemp = lib.mkOption {
+        type = lib.types.int;
+        default = 3500;
+        example = 3000;
+        description = ''
+          Night color temperature in Kelvin (lower is warmer). 1000 to
+          10000, at or under `dayTemp`.
+        '';
+      };
+
+      # Manual sunrise/sunset as 24-hour `HH:MM` (read only while no
+      # location is set: a set `latitude`/`longitude` pair switches the
+      # daemon to location mode instead). `07:00`/`19:00`: a fixed
+      # schedule that works with neither geoclue nor network.
+      sunrise = lib.mkOption {
+        type = lib.types.str;
+        default = "07:00";
+        example = "06:30";
+        description = ''
+          Manual sunrise as 24-hour `HH:MM` (when the schedule warms
+          back up). Read only without `latitude`/`longitude`.
+        '';
+      };
+
+      sunset = lib.mkOption {
+        type = lib.types.str;
+        default = "19:00";
+        example = "21:30";
+        description = ''
+          Manual sunset as 24-hour `HH:MM` (when the schedule warms
+          down). Read only without `latitude`/`longitude`.
+        '';
+      };
+
+      # Where on earth the session is (decimal degrees). Null (the
+      # default) keeps the manual schedule above; set both for
+      # location mode (sunrise/sunset computed, the manual pair unread
+      # -- and `-d` unread with it: wlsunset's duration applies to
+      # manual times only). One without the other fails evaluation.
+      # `gammastep` needs both (geoclue is not wired, so nothing else
+      # can locate it).
+      latitude = lib.mkOption {
+        type = lib.types.nullOr lib.types.number;
+        default = null;
+        example = 37.33;
+        description = ''
+          Latitude in decimal degrees (-90 to 90). Null keeps the
+          manual schedule; set beside `longitude` for location mode.
+        '';
+      };
+
+      longitude = lib.mkOption {
+        type = lib.types.nullOr lib.types.number;
+        default = null;
+        example = -121.89;
+        description = ''
+          Longitude in decimal degrees (-180 to 180). Null keeps the
+          manual schedule; set beside `latitude` for location mode.
+        '';
+      };
+
+      # Seconds the warm-up/warm-down takes (manual schedule only:
+      # location mode follows the sun, not this). 900 (15 min: gentle,
+      # over long before either boundary matters); 0 snaps, 7200 (2 h)
+      # is the most gradual. Outside 0..7200 fails evaluation.
+      duration = lib.mkOption {
+        type = lib.types.int;
+        default = 900;
+        example = 1800;
+        description = ''
+          Seconds the day/night transition takes (manual schedule
+          only). 0 snaps, at most 7200.
+        '';
+      };
+
+      # Extra gamma multiplier (1.0 is neutral). 0.1 to 10, either
+      # daemon's range.
+      gamma = lib.mkOption {
+        type = lib.types.number;
+        default = 1.0;
+        example = 0.8;
+        description = ''
+          Gamma multiplier (1.0 is neutral). 0.1 to 10.
+        '';
+      };
     };
     # Power profiles, lid and low-battery suspend, charge limit.
     # Filled by the `desktop-power` child: `power-profiles-daemon` as
@@ -1166,6 +1317,17 @@ in
             100%). Set to `false` to keep wob's own style.
           '';
         };
+        targets.nightlight.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Warm to the look's own night temperature (each look's
+            `nightTemp`: the espresso look warmest, the paper look
+            brightest). Set to `false` to keep the plain `nightTemp`
+            default (or a value you set) while the rest follows the
+            look.
+          '';
+        };
       };
     # The terminal the default binds spawn, and a file manager.
     # The manager is explicitly optional: nothing references one anywhere
@@ -1232,6 +1394,9 @@ in
 
   # The palettes behind `look`, read from `docs/examples/*` (the
   # `scoot.toml` `[appearance]` and `bar.toml` `[colors]` each look ships).
+  # `nightTemp` is each look's own night warmth for the nightlight slot
+  # (the espresso look warmest, the paper look brightest -- a value the
+  # user sets in `nightlight.nightTemp` wins per key).
   # `wallpaper` is null where the look has no image to ship
   # (`vinyl-sunset`: its illustration is license-barred from being
   # committed, and from being fetched for the user automatically, so the
@@ -1256,6 +1421,7 @@ in
         dim = "#604F50";
         urgent = "#C76B47";
       };
+      nightTemp = 3200;
       wallpaper = null;
     };
     music-desk = {
@@ -1272,6 +1438,7 @@ in
         dim = "#C9CBD0";
         urgent = "#EE6F5E";
       };
+      nightTemp = 4000;
       wallpaper = {
         image = ../../docs/assets/wallpapers/music-desk.png;
         mode = "fill";
@@ -1290,6 +1457,7 @@ in
         dim = "#99911d";
         urgent = "#bf128d";
       };
+      nightTemp = 3500;
       wallpaper = {
         image = ../../docs/assets/wallpapers/radial-burst.png;
         mode = "fill";
@@ -1309,6 +1477,7 @@ in
         dim = "#9C8B95";
         urgent = "#E87F6A";
       };
+      nightTemp = 3400;
       wallpaper = {
         image = ../../docs/assets/wallpapers/moonrise.png;
         mode = "fill";
