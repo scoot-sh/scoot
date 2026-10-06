@@ -146,8 +146,9 @@ in
   # config, the bar feed): options under `programs.scoot.desktop.idle`
   # and `...notifications`, declared there. Imported here (not by
   # consumers) so the profile's user side is one import. The audio
-  # slot's user half (the OSD unit, its config, the control scripts)
-  # and the capture slot's user half ride the same way.
+  # slot's user half (the OSD unit, its config, the control scripts),
+  # the privilege-prompt and keyring halves (the agent unit, the
+  # secrets client) and the capture slot's user half ride the same way.
   #
   # The shared keymap's user half (`programs.scoot.desktop.keys`):
   # the `[binds]`, its tools and its slot scripts. Same pattern.
@@ -157,6 +158,7 @@ in
     ./clipboard-home.nix
     ./launcher-home.nix
     ./capture-home.nix
+    ./auth-home.nix
     ./audio-home.nix
     ./nightlight-home.nix
     ./power-home.nix

@@ -666,14 +666,87 @@ in
       };
     };
     # The privilege prompt.
-    auth = slot {
-      child = "desktop-auth-secrets";
-      tool = "a polkit agent";
+    # Filled by the `desktop-auth-secrets` child: a polkit
+    # authentication agent spawned in-scope by the session leader
+    # (named through the login entry's `SCOOT_POLKIT_AGENT` -- a user
+    # unit could never register, see `auth-home.nix`), so GUI
+    # privilege prompts (disks, network, printers) work instead of
+    # failing with no agent.
+    # `daemon` names the agent (polkit-gnome by default: the smallest
+    # closure of the maintained set, measured against lxqt-policykit
+    # and hyprpolkitagent -- see site/src/content/docs/desktop/index.md#privilege-prompts-and-the-keyring);
+    # a future scoot agent widens that enum without changing the
+    # option (the native-replacement contract).
+    #
+    # On with the profile (still individually disable-able); without
+    # it, `enable` works standalone (the authority still needs the
+    # NixOS side's polkitd, the way the portal backends need that
+    # side).
+    auth = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Run the polkit authentication agent: the daemon behind
+          `daemon` (its package beside this) owning
+          `org.freedesktop.PolicyKit1.AuthenticationAgent` on the
+          session bus. Without it privilege prompts fail with
+          polkit's own no-agent refusal.
+        '';
+      };
+
+      daemon = lib.mkOption {
+        type = lib.types.enum [
+          "gnome"
+          "lxqt"
+          "hyprpolkit"
+        ];
+        default = "gnome";
+        example = "lxqt";
+        description = ''
+          The agent behind `enable`. `gnome` (polkit-gnome: the
+          smallest closure of the maintained set), `lxqt`
+          (lxqt-policykit-agent) or `hyprpolkit` (hyprpolkitagent);
+          a future scoot agent widens this enum, the option staying
+          as it is.
+        '';
+      };
     };
     # The keyring.
-    secrets = slot {
-      child = "desktop-auth-secrets";
-      tool = "a secrets service";
+    # Filled by the `desktop-auth-secrets` child: gnome-keyring with
+    # the `secrets` component, D-Bus activated (no unit: the daemon
+    # starts on the first `org.freedesktop.secrets` call and holds
+    # the unlocked keyring until the session ends), auto-unlocked
+    # from the login password on greetd logins (a PAM pair confined
+    # to greetd's own service -- see `nixos.nix`).
+    #
+    # On with the profile (still individually disable-able); without
+    # it, `enable` works standalone (the D-Bus activation files need
+    # the NixOS side, the way the portal backends do). First use per
+    # login unlocks once; the rest is seamless.
+    secrets = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Provide the secrets service: gnome-keyring (its package
+          beside this) owning `org.freedesktop.secrets` on the
+          session bus, D-Bus activated on first use. Without it
+          every app re-prompts for secrets.
+        '';
+      };
+
+      daemon = lib.mkOption {
+        type = lib.types.enum [ "gnome-keyring" ];
+        default = "gnome-keyring";
+        description = ''
+          The daemon behind `enable`. Only gnome-keyring today (the
+          only candidate with a login-password unlock path -- see
+          site/src/content/docs/desktop/index.md#privilege-prompts-and-the-keyring
+          for the measured pick); a future scoot keyring widens this
+          enum, the option staying as it is.
+        '';
+      };
     };
     # PipeWire baseline, media keys, brightness keys and an OSD.
     # Filled by the `desktop-audio-osd` child: PipeWire with

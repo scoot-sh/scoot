@@ -41,13 +41,26 @@ let
   # pulls in `graphical-session.target`, so the target is reached with
   # the display already imported), and on exit stops the session
   # targets so session-bound units stop. See site/src/content/docs/desktop/index.md#the-greeter for the whole flow.
+  #
+  # With the privilege prompt on, the entry also names the polkit
+  # agent (`SCOOT_POLKIT_AGENT`, an `env` prefix before the launcher):
+  # the leader spawns it in-scope once the display is known, which a
+  # user unit could never do (see `auth-home.nix`). A set
+  # `session.command` replaces the whole line (agent env included),
+  # so a hand entry carries the agent by setting the variable itself.
   sessionPackage =
     (pkgs.writeTextDir "share/wayland-sessions/scoot.desktop" ''
       [Desktop Entry]
       Name=scoot
       Comment=scoot scrolling-tiling Wayland compositor
       Exec=${
-        if cfg.session.command == null then "${cfg.package}/bin/scoot-session" else cfg.session.command
+        if cfg.session.command == null then
+          (lib.optionalString (
+            cfg.desktop.auth.enable && cfg.desktop.auth.package != null
+          ) "${lib.getExe' pkgs.coreutils "env"} SCOOT_POLKIT_AGENT=${agentCommand} ")
+          + "${cfg.package}/bin/scoot-session"
+        else
+          cfg.session.command
       }
       Type=Application
       DesktopNames=scoot
@@ -86,6 +99,29 @@ let
     "scoot-session.target".text = builtins.readFile ../../resources/systemd/user/scoot-session.target;
     "scoot-shutdown.target".text = builtins.readFile ../../resources/systemd/user/scoot-shutdown.target;
   };
+
+  # The polkit agent's command for the session entry's
+  # `SCOOT_POLKIT_AGENT` below (which the session leader spawns
+  # in-scope -- a user unit could never register, see
+  # `auth-home.nix`): absolute store path when the slot names its
+  # package, bare name from PATH otherwise (off Linux, or a
+  # direct-module setup without the overlay). A null beside `enable`
+  # is the slot's own loud assertion, not a throw here: the entry
+  # below only names it beside a non-null package.
+  agentCommand =
+    if cfg.desktop.auth.package != null then
+      if cfg.desktop.auth.daemon == "gnome" then
+        "${cfg.desktop.auth.package}/libexec/polkit-gnome-authentication-agent-1"
+      else if cfg.desktop.auth.daemon == "lxqt" then
+        lib.getExe' cfg.desktop.auth.package "lxqt-policykit-agent"
+      else
+        lib.getExe cfg.desktop.auth.package
+    else if cfg.desktop.auth.daemon == "gnome" then
+      "polkit-gnome-authentication-agent-1"
+    else if cfg.desktop.auth.daemon == "lxqt" then
+      "lxqt-policykit-agent"
+    else
+      "hyprpolkitagent";
 
   # The desk-aware charge-limit script, with the charge option values
   # baked in (see `power-charge.nix`): the service below runs its
@@ -431,6 +467,70 @@ in
         };
       };
 
+      # The privilege prompt's agent package: the shape is in
+      # `desktop.nix` (shared with the home-manager side) and the user
+      # unit that runs it is that side's (`auth-home.nix`); this side
+      # installs it system-wide. The same pick as there (following
+      # `daemon`), so either side alone names the same agent. Merged
+      # here for the same one-declaration reason as above.
+      # Linux-only: off Linux it defaults to null, which the
+      # assertion below refuses loudly.
+      auth = desktop.options.auth // {
+        package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              (
+                {
+                  gnome = if pkgs ? polkit_gnome then pkgs.polkit_gnome else null;
+                  lxqt = if (pkgs.lxqt or { }) ? lxqt-policykit then pkgs.lxqt.lxqt-policykit else null;
+                  hyprpolkit = if pkgs ? hyprpolkitagent then pkgs.hyprpolkitagent else null;
+                }
+                .${cfg.desktop.auth.daemon} or null
+              )
+            else
+              null;
+          defaultText = lib.literalExpression "per-daemon (polkit_gnome, lxqt-policykit or hyprpolkitagent)";
+          description = ''
+            The polkit agent package to install system-wide (following
+            the `daemon` pick, the same default as the home-manager
+            side). Null installs nothing. Linux-only: null off Linux.
+          '';
+        };
+      };
+
+      # The secrets slot's packages: the shapes are in `desktop.nix`
+      # (shared with the home-manager side); this side installs the
+      # daemon system-wide and publishes its D-Bus activation files,
+      # so the daemon starts on the first secrets call. The same
+      # packages as there, so either side alone names the same
+      # daemon. Merged here for the same one-declaration reason as
+      # above. Linux-only: off Linux each defaults to null, which
+      # the assertions below refuse loudly.
+      secrets = desktop.options.secrets // {
+        package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.gnome-keyring or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.gnome-keyring else null";
+          description = ''
+            The keyring package to install system-wide (its daemon,
+            its PAM module, its D-Bus activation files). Null installs
+            nothing. Linux-only: null off Linux.
+          '';
+        };
+
+        clientPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.libsecret or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.libsecret else null";
+          description = ''
+            The secrets client to install system-wide (`secret-tool`,
+            from libsecret). Null installs nothing. Linux-only: null
+            off Linux.
+          '';
+        };
+      };
+
       # The night light's tool: the shape is in `desktop.nix`
       # (shared with the home-manager side) and the user unit that runs
       # it is that side's (`nightlight-home.nix`); this side installs it
@@ -646,7 +746,10 @@ in
           acceptance shape. A set value replaces the whole line and
           bypasses the launcher, so a set entry runs without the session
           wiring (for wired startup programs, use `[autostart]`
-          instead); dropping `--tty` (or the binary path) breaks the
+          instead); it also drops the privilege prompt's
+          `SCOOT_POLKIT_AGENT` (a hand entry that wants prompts sets
+          that variable itself, to the agent's absolute path, before
+          running the launcher); dropping `--tty` (or the binary path) breaks the
           entry loudly at the greeter, not at eval -- copy the example
           shape. `Exec=` lines get no shell expansion (`~` and `$HOME`
           arrive literally), so always use an absolute path.
@@ -839,6 +942,18 @@ in
       # below install, PipeWire runs, and the chooser config comes
       # from the home-manager side.
       programs.scoot.desktop.capture.enable = lib.mkDefault true;
+
+      # The privilege prompt on with the profile (still individually
+      # disable-able at plain priority): the authority below runs,
+      # the agent installs, and the unit comes from the
+      # home-manager side.
+      programs.scoot.desktop.auth.enable = lib.mkDefault true;
+
+      # The keyring on with the profile (still individually
+      # disable-able at plain priority): the daemon installs with
+      # its D-Bus activation below, primed from the login password
+      # on greetd logins (first use unlocks once).
+      programs.scoot.desktop.secrets.enable = lib.mkDefault true;
 
       # The audio slot on with the profile (still individually
       # disable-able at plain priority): the OSD package below
@@ -1114,6 +1229,140 @@ in
         cfg.desktop.nightlight.package != null
       ) cfg.desktop.nightlight.package;
     })
+    # The privilege prompt's system half: the polkit authority, the
+    # agent on PATH, and its command in the session entry (which the
+    # session leader spawns in-scope -- a user unit could never
+    # register, see `auth-home.nix`). Without the home-manager side
+    # the authority answers and the agent binary sits ready for a
+    # hand-written setup, the way a `[wallpaper]` finds scootbg on
+    # PATH without the home-manager side.
+    (lib.mkIf cfg.desktop.auth.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.auth.package != null;
+          message = ''
+            programs.scoot.desktop.auth.enable is set but
+            programs.scoot.desktop.auth.package is null: set it
+            explicitly (apply the overlay, or point at a polkit
+            agent).
+          '';
+        }
+      ];
+
+      # polkitd, the authority the agent answers to. Plain
+      # `mkDefault`, so an explicit value still wins.
+      security.polkit.enable = lib.mkDefault true;
+
+      environment.systemPackages = lib.optional (
+        cfg.desktop.auth.package != null
+      ) cfg.desktop.auth.package;
+    })
+    # The secrets slot's system half: the daemon on PATH, its D-Bus
+    # activation files on the session bus, the IPC-lock wrapper its
+    # service files exec through, and the greetd PAM pair that
+    # unlocks the login keyring from the login password. No unit:
+    # the daemon starts on the first `org.freedesktop.secrets` call
+    # (`--components=secrets`, per its own service files) and holds
+    # the unlocked keyring until the session ends. The client is the
+    # home-manager side's (`auth-home.nix` installs `secret-tool`):
+    # without it the daemon sits ready for a hand-written setup,
+    # the way a `[wallpaper]` finds scootbg on PATH without the
+    # home-manager side.
+    (lib.mkIf cfg.desktop.secrets.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.secrets.package != null;
+          message = ''
+            programs.scoot.desktop.secrets.enable is set but
+            programs.scoot.desktop.secrets.package is null: set it
+            explicitly (apply the overlay, or point at a
+            gnome-keyring).
+          '';
+        }
+        {
+          assertion = cfg.desktop.secrets.clientPackage != null;
+          message = ''
+            programs.scoot.desktop.secrets.enable is set but
+            programs.scoot.desktop.secrets.clientPackage is null:
+            set it explicitly (apply the overlay, or point at a
+            libsecret).
+          '';
+        }
+      ];
+
+      environment.systemPackages =
+        lib.optional (cfg.desktop.secrets.package != null) cfg.desktop.secrets.package
+        ++ lib.optional (cfg.desktop.secrets.clientPackage != null) cfg.desktop.secrets.clientPackage;
+
+      # The activation files (`org.freedesktop.secrets`,
+      # `org.gnome.keyring`, and the Secret portal backend) resolve
+      # through these. The `!= null` guard keeps a null out of the
+      # list, so a missing daemon fails with the slot's own
+      # assertion message above rather than a type error.
+      services.dbus.packages = lib.optional (
+        cfg.desktop.secrets.package != null
+      ) cfg.desktop.secrets.package;
+
+      # The wrapper the activation files exec through
+      # (`/run/wrappers/bin/gnome-keyring-daemon`, with `cap_ipc_lock`
+      # so the unlocked keyring is never swapped out): the stock
+      # `services.gnome.gnome-keyring.enable` switch provides this
+      # same wrapper, but that switch also owns the `login` PAM
+      # service -- this slot confines its PAM change to greetd's own
+      # service below, so it wires the wrapper directly instead.
+      # The `!= null` guard is load-bearing the way the session
+      # entry's is: the `source` interpolation fails while evaluating
+      # the value itself (before `assertions` are checked), so
+      # without it a null package would fail with a bare coercion
+      # error instead of the assertion's message.
+      security.wrappers.gnome-keyring-daemon = lib.mkIf (cfg.desktop.secrets.package != null) {
+        owner = "root";
+        group = "root";
+        capabilities = "cap_ipc_lock=ep";
+        source = "${cfg.desktop.secrets.package}/bin/gnome-keyring-daemon";
+      };
+    })
+    # The login-keyring unlock, confined to greetd's own PAM service.
+    # `security.pam.services.greetd` authenticates the login user when
+    # a greeter (ReGreet, or the IPC login the live test drives)
+    # creates the session -- so the password is available to exactly
+    # this stack: `auth` caches it for the keyring, `session` starts
+    # the daemon holding it (`auto_start`). This deliberately does
+    # NOT use nixpkgs' per-service `enableGnomeKeyring` flag (probed
+    # at the pinned rev: that flag lives inside the default-rules
+    # block, and greetd's service sets `useDefaultRules = false` with
+    # its own `login`-substack rules, so the flag is a silent no-op
+    # there) and does NOT touch the `login` service (what the stock
+    # `services.gnome.gnome-keyring.enable` switch owns): SSH logins,
+    # TTY logins and autologins (no password through PAM) keep
+    # working, and the keyring prompts once to unlock instead -- the
+    # documented second prompt. Each `order` rides ten past the
+    # `login` substack it belongs after (the documented relative
+    # pattern: a constant would silently reorder under a nixpkgs
+    # update). Gated on greetd itself: without the login path there
+    # is no stack to extend. The package-null guard beside each keeps
+    # a null out of the interpolation, so that failure stays the
+    # slot's own assertion message (same reason as the wrapper
+    # above).
+    (lib.mkIf
+      (cfg.desktop.secrets.enable && config.services.greetd.enable && cfg.desktop.secrets.package != null)
+      {
+        security.pam.services.greetd.rules.auth.gnome_keyring = {
+          control = "optional";
+          modulePath = "${cfg.desktop.secrets.package}/lib/security/pam_gnome_keyring.so";
+          order = config.security.pam.services.greetd.rules.auth.login.order + 10;
+          settings = { };
+        };
+        security.pam.services.greetd.rules.session.gnome_keyring = {
+          control = "optional";
+          modulePath = "${cfg.desktop.secrets.package}/lib/security/pam_gnome_keyring.so";
+          order = config.security.pam.services.greetd.rules.session.login.order + 10;
+          settings = {
+            auto_start = true;
+          };
+        };
+      }
+    )
     # The power policy's system half: the profiles daemon, the lid and
     # power-key actions, low-battery suspend, and the charge-limit
     # service. The profile switch and the charge button's fill unit are
