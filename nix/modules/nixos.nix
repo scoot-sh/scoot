@@ -10,8 +10,11 @@ let
   cfg = config.programs.scoot;
 
   # The desktop profile's shared option subtree (the look palettes stay
-  # where they are applied: the home-manager side and the bar module).
+  # where they are applied: the home-manager side and the bar module),
+  # plus the one helper that reads look-derived values.
   desktop = import ./desktop.nix { inherit lib; };
+  themeLook = import ./theme-look.nix { inherit lib; };
+  lookNix = themeLook.lookFor cfg.desktop;
 
   # The login-screen entry. Built as a package exposing
   # `share/wayland-sessions/scoot.desktop` with `providedSessions`,
@@ -608,11 +611,97 @@ in
         dumpPackage = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
           default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.pipewire or null else null;
-          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.pipewire or null else null";
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.pipewire else null";
           description = ''
             The PipeWire package to install system-wide for the sink
             helper's `pw-dump`. Null installs nothing. Linux-only:
             null off Linux.
+          '';
+        };
+      };
+      # The theme's packages: the value shapes are in `desktop.nix`
+      # (shared with the home-manager side) and the files that use
+      # them are that side's (`theme-home.nix`); this side declares
+      # the same paths (so either side alone names the same theme)
+      # and installs what the greeter itself needs. The same packages
+      # as there, so a combined setup agrees. Merged here for the
+      # same one-declaration reason as above. Linux-only: off Linux
+      # each defaults to null.
+      theme = desktop.options.theme // {
+        cursor.package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.vanilla-dmz or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.vanilla-dmz else null";
+          description = ''
+            The cursor theme to install system-wide for the look
+            (Vanilla-DMZ). Null installs nothing. Linux-only: null
+            off Linux.
+          '';
+        };
+
+        icon.package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.adwaita-icon-theme or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.adwaita-icon-theme else null";
+          description = ''
+            The icon theme to install system-wide for the look
+            (Adwaita). Null installs nothing. Linux-only: null off
+            Linux.
+          '';
+        };
+
+        fonts.uiPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default =
+            if pkgs.stdenv.hostPlatform.isLinux then pkgs.nerd-fonts.droid-sans-mono or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.nerd-fonts.droid-sans-mono else null";
+          description = ''
+            The look's UI face to install system-wide (the greeter's
+            font). Null installs nothing. Linux-only: null off Linux.
+          '';
+        };
+
+        fonts.monoPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              (
+                if cfg.desktop.look == "radial-burst" then
+                  (if pkgs ? dejavu_fonts then pkgs.dejavu_fonts else null)
+                else
+                  (pkgs.nerd-fonts.fira-code or null)
+              )
+            else
+              null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then per-look monospace package else null";
+          description = ''
+            The look's terminal face to install system-wide.
+            Null installs nothing. Linux-only: null off Linux.
+          '';
+        };
+
+        qt.package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then (pkgs.qt6Packages.qt6ct or null) else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.qt6Packages.qt6ct else null";
+          description = ''
+            The Qt config tool to install system-wide (no daemon:
+            Qt reads its file at startup). Null installs nothing.
+            Linux-only: null off Linux.
+          '';
+        };
+
+        qt.stylePackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              (if pkgs ? adwaita-qt6 then pkgs.adwaita-qt6 else null)
+            else
+              null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.adwaita-qt6 else null";
+          description = ''
+            The Adwaita Qt style to install system-wide. Null
+            installs nothing. Linux-only: null off Linux.
           '';
         };
       };
@@ -1945,5 +2034,70 @@ in
         builtins.toJSON config.services.logind.settings.Login
       );
     })
+    # The look on the login screen (the `desktop-theme-look` child):
+    # backdrop pairing, the dark/light GTK setting, the look's CSS
+    # and font, each at plain `mkDefault` so an explicit value still
+    # wins. Off with no look behind the profile, or while
+    # `theme.targets.greeter` opts out. A look without a shippable
+    # backdrop (`vinyl-sunset`, license-barred from being committed)
+    # leaves the backdrop alone. No extra daemons: ReGreet reads its
+    # config and CSS at startup, and the packages below put the
+    # font, icons and cursor on the system lookup paths its session
+    # reads.
+    (lib.mkIf
+      (
+        cfg.greeter.enable
+        && cfg.desktop.enable
+        && lookNix != null
+        && (cfg.desktop.theme.targets.greeter.enable or true)
+      )
+      {
+        assertions = [
+          {
+            assertion = cfg.desktop.theme.fonts.uiPackage != null;
+            message = ''
+              programs.scoot.desktop.look needs a greeter font but
+              programs.scoot.desktop.theme.fonts.uiPackage is null: set
+              it explicitly (apply the overlay, or point at the look's
+              UI font).
+            '';
+          }
+        ];
+
+        # The backdrop pairing: the session wallpaper behind the login
+        # card (null keeps ReGreet's own background, which is also
+        # what a license-barred look does). An explicit `background`
+        # wins over this default.
+        programs.scoot.greeter.background = lib.mkIf (lookNix.wallpaper != null) (
+          lib.mkDefault lookNix.wallpaper.image
+        );
+
+        services.displayManager.regreet = {
+          # The dark/light half of the look (what the session's GTK
+          # apps follow through `settings.ini`).
+          settings.GTK.application_prefer_dark_theme = lib.mkDefault lookNix.isDark;
+          # The look's CSS and UI face (12 pt, the measured greeter
+          # size). An explicit `extraCss`/`font` wins over these.
+          extraCss = lib.mkDefault lookNix.appFiles.regreetCss;
+          font = lib.mkDefault {
+            package = cfg.desktop.theme.fonts.uiPackage;
+            name = lookNix.fonts.ui;
+            size = 12;
+          };
+        };
+
+        # The greeter's lookup paths: the UI face (its `font` above),
+        # the icon theme its widgets expect, and the cursor. The
+        # `!= null` guards keep a null out of the lists, so a missing
+        # package fails with the assertion above rather than a type
+        # error (the same guard the portal backends use).
+        fonts.packages = lib.optional (
+          cfg.desktop.theme.fonts.uiPackage != null
+        ) cfg.desktop.theme.fonts.uiPackage;
+        environment.systemPackages =
+          lib.optional (cfg.desktop.theme.icon.package != null) cfg.desktop.theme.icon.package
+          ++ lib.optional (cfg.desktop.theme.cursor.package != null) cfg.desktop.theme.cursor.package;
+      }
+    )
   ];
 }

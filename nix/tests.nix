@@ -186,6 +186,23 @@
 #   (`list`, `set`, `cycle`) for the future picker; a null OSD or
 #   dump tool, a negative hide timeout and an unknown `daemon` each
 #   fail eval;
+#   the theme (`desktop-theme-look` child) runs with the profile --
+#   the look's cursor in the compositor config (one priority below
+#   Stylix's), GTK settings plus `GTK_THEME`, the qt6ct config plus
+#   `QT_QPA_PLATFORMTHEME`, the dark-mode preference from the look's
+#   polarity, the fontconfig default (UI face for sans-serif,
+#   terminal face for monospace), the look's UI face as the bar's
+#   font file, and the look's own app files from the flake (foot,
+#   starship, Helix config beside its theme, btop config beside its
+#   theme where the example ships them -- `radial-burst` ships no
+#   shell, editor or monitor files, so those targets are inert for
+#   it); each per-target opt-out drops just its piece, an upstream
+#   home-manager module owning the same path wins, and each null
+#   tool fails eval; the greeter wears the look too (backdrop
+#   pairing, dark setting, the look's CSS and font -- `vinyl-sunset`
+#   leaves the backdrop alone, its illustration license-barred);
+#   no daemon runs for any of it (files, packages and session
+#   variables only);
 #   every profile unit (the idle pair, mako, the bar feed, both
 #   clipboard watchers, the night light, the OSD, and the
 #   profile-managed bar -- never the standalone bar) starts in
@@ -297,6 +314,14 @@ let
     };
     options.systemd.user.targets = lib.mkOption {
       type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+    # The theme's session variables (`systemd.user.sessionVariables`
+    # from `nix/modules/theme-home.nix`): plain values the pins read,
+    # like the units above. The real home-manager option merges
+    # repeated keys the same way.
+    options.systemd.user.sessionVariables = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
       default = { };
     };
   };
@@ -2850,6 +2875,246 @@ let
         desktop.audio.daemon = "bogus-daemon";
       }).config.programs.scoot.desktop.audio.daemon;
 
+  # --- theme-look (`programs.scoot.desktop.theme`) evaluations ---
+  #
+  # The profile with a light look: the whole theme on (GTK settings,
+  # Qt config, fontconfig default, cursor in the compositor config,
+  # the look's app files, session variables). Dark, radial-burst and
+  # moonrise variants below reuse the shared look pins; what differs
+  # per look (polarity, mono face, shipped files) is pinned by
+  # content.
+  hmTheme = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...a dark look (Adwaita-dark, prefer-dark).
+  hmThemeDark = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "vinyl-sunset";
+  };
+  # ...radial-burst (DejaVu mono, no shell/editor/monitor files).
+  hmThemeBurst = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "radial-burst";
+  };
+  # ...without a look: the slot is inert (no theme files, no theme
+  # packages, no cursor keys in the compositor config).
+  hmThemeNoLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...the slot off beside a look: inert the same way.
+  hmThemeOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.enable = false;
+  };
+  # ...Stylix beside a look: Stylix wins per key (cursor, appearance),
+  # the look carries the rest (GTK/Qt/files, which Stylix does not
+  # set here).
+  hmThemeStylix = evalHomeStylix { } {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...Stylix, a look, and user values: the user wins per key over
+  # both (compositor cursor, one GTK key).
+  hmThemeStylixUser = evalHomeStylix { } {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    settings.appearance.cursor_theme = "Adwaita";
+    desktop.theme.settings.gtk-xft-hintstyle = "hintslight";
+  };
+  # ...with extra GTK keys (one winning per key over the generated
+  # theme name, one new).
+  hmThemeSettings = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.settings = {
+      gtk-theme-name = "HighContrast";
+      gtk-xft-hintstyle = "hintslight";
+    };
+  };
+  # ...each target off drops just its piece (one evaluation per
+  # target: GTK files, Qt file, cursor keys, fonts).
+  hmThemeGtkOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.gtk.enable = false;
+  };
+  hmThemeQtOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.qt.enable = false;
+  };
+  hmThemeCursorOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.cursor.enable = false;
+  };
+  hmThemeFontsOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.fonts.enable = false;
+  };
+  hmThemeTerminalOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.terminal.enable = false;
+  };
+  # ...an upstream home-manager module owning the same path wins (its
+  # file stands, ours stays out, so the two never merge-conflict).
+  # Stub modules standing in for home-manager's own `programs.foot`
+  # and friends (only `enable` is read); the bar half rides along,
+  # unread.
+  upstreamStubs = {
+    options.programs.foot.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.programs.starship.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.programs.helix.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.programs.btop.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+  };
+  hmThemeUpstream = evalHomeDesktopWith [ upstreamStubs ] {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  } { package = fakeBar; };
+  hmThemeUpstreamOn =
+    evalHomeDesktopWith
+      [
+        upstreamStubs
+        {
+          programs.foot.enable = true;
+          programs.starship.enable = true;
+          programs.helix.enable = true;
+          programs.btop.enable = true;
+        }
+      ]
+      {
+        enable = true;
+        package = fakePkg;
+        wallpaper.package = fakeBg;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+      }
+      { package = fakeBar; };
+  # Refusals: each null tool beside its target (pinned by message in
+  # `_themePins`).
+  hmThemeNoCursorPkg = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.cursor.package = null;
+  };
+  hmThemeNoIconPkg = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.icon.package = null;
+  };
+  hmThemeNoUiPkg = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.fonts.uiPackage = null;
+  };
+  hmThemeNoMonoPkg = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.fonts.monoPackage = null;
+  };
+  hmThemeNoQtPkg = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.qt.package = null;
+  };
+  hmThemeNoQtStylePkg = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.qt.stylePackage = null;
+  };
+  # ...beside the bar module: the look's UI face as a file (never the
+  # icon-less DejaVu default), falling back to it opted out.
+  hmThemeBar = evalHomeDesktopWith [ ] {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  } { package = fakeBar; };
+  hmThemeBarFontsOff = evalHomeDesktopWith [ ] {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.fonts.enable = false;
+  } { package = fakeBar; };
+
+  # --- theme-look greeter evaluations (NixOS) ---
+  #
+  # The greeter behind the profile with a look: backdrop pairing, the
+  # dark setting, the look's CSS and font.
+  osThemeGreeterMoon = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+    greeter.enable = true;
+  } greeterUser;
+  # ...vinyl-sunset: no shippable backdrop (license-barred), so the
+  # backdrop stays alone while the rest themes.
+  osThemeGreeterVinyl = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.look = "vinyl-sunset";
+    greeter.enable = true;
+  } greeterUser;
+  # ...opted out of greeter theming: ReGreet stands unthemed.
+  osThemeGreeterOff = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+    desktop.theme.targets.greeter.enable = false;
+    greeter.enable = true;
+  } greeterUser;
+  # ...no look: the greeter stands unthemed.
+  osThemeGreeterNoLook = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    greeter.enable = true;
+  } greeterUser;
+
   # --- audio system evaluations ---
   osAudio = evalNixos {
     enable = true;
@@ -4324,6 +4589,22 @@ let
   # the lookless, recolored and opt-out variants the content checks
   # read, and the bar file carrying the feed's push module.
   notifConf = hmNotif.config.xdg.configFile."mako/config".source;
+  # The theme's generated files: GTK settings (light look, dark look,
+  # user-recolored, Stylix-beside-look), the Qt config (both
+  # polarities), the fontconfig default, and the look's static app
+  # files the content checks read.
+  gtkLightConf = hmTheme.config.xdg.configFile."gtk-3.0/settings.ini".source;
+  gtkDarkConf = hmThemeDark.config.xdg.configFile."gtk-3.0/settings.ini".source;
+  gtkSettingsConf = hmThemeSettings.config.xdg.configFile."gtk-3.0/settings.ini".source;
+  gtkStylixUserConf = hmThemeStylixUser.config.xdg.configFile."gtk-3.0/settings.ini".source;
+  qtLightConf = hmTheme.config.xdg.configFile."qt6ct/qt6ct.conf".source;
+  qtDarkConf = hmThemeDark.config.xdg.configFile."qt6ct/qt6ct.conf".source;
+  themeFontsConf = hmTheme.config.xdg.configFile."fontconfig/conf.d/10-scoot-look.conf".source;
+  themeFootConf = hmTheme.config.xdg.configFile."foot/foot.ini".source;
+  themeStarshipConf = hmTheme.config.xdg.configFile."starship.toml".source;
+  themeHelixConf = hmTheme.config.xdg.configFile."helix/config.toml".source;
+  themeHelixTheme = hmTheme.config.xdg.configFile."helix/themes/scoot-light.toml".source;
+  themeBtopConf = hmTheme.config.xdg.configFile."btop/btop.conf".source;
   notifNoLookConf = hmNotifNoLook.config.xdg.configFile."mako/config".source;
   notifSettingsConf = hmNotifSettings.config.xdg.configFile."mako/config".source;
   notifTargetOffConf = hmNotifTargetOff.config.xdg.configFile."mako/config".source;
@@ -4675,7 +4956,7 @@ let
       true
     )
     # ...the swaylock daemon behind the lock, and the locker theme
-    # opt-out on (without forcing the half-built `theme` slot on)...
+    # opt-out on (with the filled `theme` slot on beside it)...
     (
       assert hmDesk.config.programs.scoot.desktop.idle.lock.daemon == "swaylock";
       true
@@ -4685,13 +4966,13 @@ let
       true
     )
     (
-      assert !hmDesk.config.programs.scoot.desktop.theme.enable;
+      assert hmDesk.config.programs.scoot.desktop.theme.enable;
       true
     )
     # ...the clipboard slot on with the profile (the
     # `desktop-clipboard` child): history kept, the tools named, the
-    # picker themed unless opted out (without forcing the half-built
-    # `theme` slot on)...
+    # picker themed unless opted out (with the filled `theme` slot on
+    # beside it)...
     (
       assert hmDesk.config.programs.scoot.desktop.clipboard.enable;
       true
@@ -4775,7 +5056,7 @@ let
     # `overlay` layer behind the keymap's volume, brightness and
     # mic-mute binds (routed through its scripts), the sink helper
     # for the future picker, the OSD themed unless opted out
-    # (without forcing the half-built `theme` slot on)...
+    # (with the filled `theme` slot on beside it)...
     (
       assert hmDesk.config.programs.scoot.desktop.audio.enable;
       true
@@ -4846,13 +5127,15 @@ let
       true
     )
     # ...and the charge cap stays off with it (opt-in through the
-    # policy, never through the profile).
+    # policy, never through the profile) -- while the filled `theme`
+    # slot runs with the profile (fonts, cursor, GTK/Qt, the greeter
+    # pairing and the look's app files).
     (
       assert !hmDesk.config.programs.scoot.desktop.power.chargeLimit.enable;
       true
     )
     (
-      assert !hmDesk.config.programs.scoot.desktop.theme.enable;
+      assert hmDesk.config.programs.scoot.desktop.theme.enable;
       true
     )
     (
@@ -4882,7 +5165,8 @@ let
       assert !hmDesk.config.programs.scoot.desktop.automount.enable;
       true
     )
-    # music-desk: the example palette in the compositor config...
+    # music-desk: the example palette in the compositor config (plus
+    # the theme's cursor, one priority below Stylix's)...
     (
       assert allAssertionsHold hmDeskLookMusic.config;
       true
@@ -4893,6 +5177,8 @@ let
           background_color = "#FCFBFB";
           focus_ring_active_color = "#3D579A";
           focus_ring_inactive_color = "#D5D7DD";
+          cursor_theme = "Vanilla-DMZ";
+          cursor_size = 24;
         };
       true
     )
@@ -4911,7 +5197,8 @@ let
     # script, the capture slot's four, the audio slot's OSD and its
     # four scripts, the night light's tool, the agent and the
     # secrets client, and the keymap's three,
-    # all on with the profile).
+    # and the theme's seven (cursor, icon, all three faces, qt6ct and
+    # its Adwaita style), all on with the profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
       true
@@ -4958,6 +5245,13 @@ let
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
+          pkgs.vanilla-dmz
+          pkgs.adwaita-icon-theme
+          pkgs.nerd-fonts.droid-sans-mono
+          pkgs.dejavu_fonts.minimal
+          pkgs.nerd-fonts.fira-code
+          pkgs.qt6Packages.qt6ct
+          pkgs.adwaita-qt6
         ];
       true
     )
@@ -4969,6 +5263,8 @@ let
           background_color = "#271A1F";
           focus_ring_active_color = "#E59560";
           focus_ring_inactive_color = "#423F51";
+          cursor_theme = "Vanilla-DMZ";
+          cursor_size = 24;
         };
       true
     )
@@ -4987,6 +5283,8 @@ let
           background_color = "#241721";
           focus_ring_active_color = "#31a9e5";
           focus_ring_inactive_color = "#e36e38";
+          cursor_theme = "Vanilla-DMZ";
+          cursor_size = 24;
         };
       true
     )
@@ -5002,6 +5300,8 @@ let
           background_color = "#2B3648";
           focus_ring_active_color = "#FF9A49";
           focus_ring_inactive_color = "#5E4B5B";
+          cursor_theme = "Vanilla-DMZ";
+          cursor_size = 24;
         };
       true
     )
@@ -5752,17 +6052,17 @@ let
         hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
       true
     )
-    # ...exactly the thirty packages installed (swayidle, dim,
+    # ...exactly the thirty-seven packages installed (swayidle, dim,
     # off, locker, inhibitor, mako, the clipboard slot's three, its
     # picker script, the launcher package and its script, the capture
     # slot's four tools and its three scripts, the night light's
     # tool, the OSD and its four scripts, the agent and the secrets
-    # client -- no scoot package
+    # client, the theme's seven -- no scoot package
     # set here, so nothing else -- plus the keymap's brightness,
     # volume and media tools; `brightnessctl` and `fuzzel` each serve
     # two features, so each appears twice).
     (
-      assert builtins.length hmIdle.config.home.packages == 30;
+      assert builtins.length hmIdle.config.home.packages == 37;
       true
     )
     (
@@ -5798,6 +6098,13 @@ let
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
+          pkgs.vanilla-dmz
+          pkgs.adwaita-icon-theme
+          pkgs.nerd-fonts.droid-sans-mono
+          pkgs.dejavu_fonts.minimal
+          pkgs.nerd-fonts.fira-code
+          pkgs.qt6Packages.qt6ct
+          pkgs.adwaita-qt6
         ];
       true
     )
@@ -7638,7 +7945,7 @@ let
       true
     )
     (
-      assert !hmAudio.config.programs.scoot.desktop.theme.enable;
+      assert hmAudio.config.programs.scoot.desktop.theme.enable;
       true
     )
     (
@@ -8105,6 +8412,418 @@ let
       true
     )
   ];
+  _themePins = lib.optionals isLinux [
+    # Home-manager: the whole theme on (files, packages, session
+    # variables, cursor in the compositor config).
+    (
+      assert allAssertionsHold hmTheme.config;
+      true
+    )
+    (
+      assert hmTheme.config.programs.scoot.desktop.theme.enable;
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile ? "gtk-3.0/settings.ini";
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile ? "gtk-4.0/settings.ini";
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile ? "qt6ct/qt6ct.conf";
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile ? "fontconfig/conf.d/10-scoot-look.conf";
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile ? "foot/foot.ini";
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile ? "starship.toml";
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile ? "helix/config.toml";
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile ? "helix/themes/scoot-light.toml";
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile ? "btop/btop.conf";
+      true
+    )
+    # ...music-desk ships no btop theme file (its `color_theme`
+    # stays commented out), so none renders beside the config...
+    (
+      assert
+        builtins.filter (n: lib.hasPrefix "btop/themes/" n) (
+          builtins.attrNames hmTheme.config.xdg.configFile
+        ) == [ ];
+      true
+    )
+    (
+      assert hmTheme.config.systemd.user.sessionVariables.GTK_THEME == "Adwaita";
+      true
+    )
+    (
+      assert hmTheme.config.systemd.user.sessionVariables.QT_QPA_PLATFORMTHEME == "qt6ct";
+      true
+    )
+    (
+      assert hmTheme.config.systemd.user.sessionVariables.XCURSOR_THEME == "Vanilla-DMZ";
+      true
+    )
+    (
+      assert hmTheme.config.systemd.user.sessionVariables.XCURSOR_SIZE == "24";
+      true
+    )
+    (
+      assert hmTheme.config.programs.scoot.settings.appearance.cursor_theme == "Vanilla-DMZ";
+      true
+    )
+    (
+      assert hmTheme.config.programs.scoot.settings.appearance.cursor_size == 24;
+      true
+    )
+    # ...a dark look names the dark theme and preference...
+    (
+      assert allAssertionsHold hmThemeDark.config;
+      true
+    )
+    (
+      assert hmThemeDark.config.systemd.user.sessionVariables.GTK_THEME == "Adwaita-dark";
+      true
+    )
+    # ...radial-burst carries no shell, editor or monitor files (the
+    # example ships none: those targets are inert for it), while the
+    # rest themes...
+    (
+      assert allAssertionsHold hmThemeBurst.config;
+      true
+    )
+    (
+      assert hmThemeBurst.config.xdg.configFile ? "foot/foot.ini";
+      true
+    )
+    (
+      assert !(hmThemeBurst.config.xdg.configFile ? "starship.toml");
+      true
+    )
+    (
+      assert !(hmThemeBurst.config.xdg.configFile ? "helix/config.toml");
+      true
+    )
+    (
+      assert !(hmThemeBurst.config.xdg.configFile ? "btop/btop.conf");
+      true
+    )
+    # ...without a look, and with the slot off, the theme is inert
+    # (no files, no variables, no cursor keys)...
+    (
+      assert allAssertionsHold hmThemeNoLook.config;
+      true
+    )
+    (
+      assert !(hmThemeNoLook.config.xdg.configFile ? "gtk-3.0/settings.ini");
+      true
+    )
+    (
+      assert !(hmThemeNoLook.config.xdg.configFile ? "qt6ct/qt6ct.conf");
+      true
+    )
+    (
+      assert !(hmThemeNoLook.config.xdg.configFile ? "fontconfig/conf.d/10-scoot-look.conf");
+      true
+    )
+    (
+      assert !(hmThemeNoLook.config.xdg.configFile ? "foot/foot.ini");
+      true
+    )
+    (
+      assert hmThemeNoLook.config.systemd.user.sessionVariables == { };
+      true
+    )
+    (
+      assert !((hmThemeNoLook.config.programs.scoot.settings.appearance or { }) ? cursor_theme);
+      true
+    )
+    (
+      assert allAssertionsHold hmThemeOff.config;
+      true
+    )
+    (
+      assert !(hmThemeOff.config.xdg.configFile ? "gtk-3.0/settings.ini");
+      true
+    )
+    (
+      assert hmThemeOff.config.systemd.user.sessionVariables == { };
+      true
+    )
+    # ...Stylix beside a look wins per key (its base16 ring over the
+    # look's), the look carrying the rest...
+    (
+      assert allAssertionsHold hmThemeStylix.config;
+      true
+    )
+    (
+      assert hmThemeStylix.config.programs.scoot.settings.appearance.focus_ring_active_color == "#0000ff";
+      true
+    )
+    (
+      assert hmThemeStylix.config.xdg.configFile ? "gtk-3.0/settings.ini";
+      true
+    )
+    # ...a user value wins per key over both (compositor cursor over
+    # Stylix's, one GTK key over the generated theme name -- pinned by
+    # content below)...
+    (
+      assert hmThemeStylixUser.config.programs.scoot.settings.appearance.cursor_theme == "Adwaita";
+      true
+    )
+    # ...each target off drops just its piece...
+    (
+      assert !(hmThemeGtkOff.config.xdg.configFile ? "gtk-3.0/settings.ini");
+      true
+    )
+    (
+      assert !(hmThemeGtkOff.config.xdg.configFile ? "gtk-4.0/settings.ini");
+      true
+    )
+    (
+      assert hmThemeGtkOff.config.xdg.configFile ? "qt6ct/qt6ct.conf";
+      true
+    )
+    (
+      assert !(hmThemeQtOff.config.xdg.configFile ? "qt6ct/qt6ct.conf");
+      true
+    )
+    (
+      assert !(hmThemeQtOff.config.systemd.user.sessionVariables ? QT_QPA_PLATFORMTHEME);
+      true
+    )
+    (
+      assert !(hmThemeCursorOff.config.programs.scoot.settings.appearance ? cursor_theme);
+      true
+    )
+    (
+      assert !(hmThemeCursorOff.config.systemd.user.sessionVariables ? XCURSOR_THEME);
+      true
+    )
+    (
+      assert !(hmThemeFontsOff.config.xdg.configFile ? "fontconfig/conf.d/10-scoot-look.conf");
+      true
+    )
+    (
+      assert !(hmThemeTerminalOff.config.xdg.configFile ? "foot/foot.ini");
+      true
+    )
+    (
+      assert hmThemeTerminalOff.config.xdg.configFile ? "starship.toml";
+      true
+    )
+    # ...an upstream module owning the same path wins (its file
+    # stands, ours stays out)...
+    (
+      assert allAssertionsHold hmThemeUpstream.config;
+      true
+    )
+    (
+      assert hmThemeUpstream.config.xdg.configFile ? "foot/foot.ini";
+      true
+    )
+    (
+      assert allAssertionsHold hmThemeUpstreamOn.config;
+      true
+    )
+    (
+      assert !(hmThemeUpstreamOn.config.xdg.configFile ? "foot/foot.ini");
+      true
+    )
+    (
+      assert !(hmThemeUpstreamOn.config.xdg.configFile ? "starship.toml");
+      true
+    )
+    (
+      assert !(hmThemeUpstreamOn.config.xdg.configFile ? "helix/config.toml");
+      true
+    )
+    (
+      assert !(hmThemeUpstreamOn.config.xdg.configFile ? "btop/btop.conf");
+      true
+    )
+    # ...beside the bar module the look's UI face reaches the bar as
+    # a file (never the icon-less DejaVu default)...
+    (
+      assert allAssertionsHold hmThemeBar.config;
+      true
+    )
+    (
+      assert lib.hasPrefix builtins.storeDir hmThemeBar.config.programs.scootbar.settings.bar.font;
+      true
+    )
+    (
+      assert lib.hasInfix "scootbar-font" hmThemeBar.config.programs.scootbar.settings.bar.font;
+      true
+    )
+    # ...opted out of fonts, the DejaVu default stands...
+    (
+      assert
+        hmThemeBarFontsOff.config.programs.scootbar.settings.bar.font
+        == "${pkgs.dejavu_fonts.minimal}/share/fonts/truetype/DejaVuSans.ttf";
+      true
+    )
+    # Refusals: each null tool beside its target...
+    (
+      assert builtins.length (failing hmThemeNoCursorPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "theme.cursor.package is null" (
+        builtins.head (failing hmThemeNoCursorPkg.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmThemeNoIconPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "theme.icon.package is null" (builtins.head (failing hmThemeNoIconPkg.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmThemeNoUiPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "theme.fonts.uiPackage is null" (builtins.head (failing hmThemeNoUiPkg.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmThemeNoMonoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "theme.fonts.monoPackage is null" (
+        builtins.head (failing hmThemeNoMonoPkg.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmThemeNoQtPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "theme.qt.package is null" (builtins.head (failing hmThemeNoQtPkg.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmThemeNoQtStylePkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "theme.qt.stylePackage is null" (
+        builtins.head (failing hmThemeNoQtStylePkg.config)
+      );
+      true
+    )
+    # NixOS: the greeter behind the profile with a look (backdrop
+    # pairing, the dark setting, the look's CSS and font)...
+    (
+      assert allAssertionsHold osThemeGreeterMoon.config;
+      true
+    )
+    (
+      assert osThemeGreeterMoon.config.services.displayManager.regreet.enable;
+      true
+    )
+    (
+      assert
+        osThemeGreeterMoon.config.services.displayManager.regreet.settings.GTK.application_prefer_dark_theme;
+      true
+    )
+    (
+      assert lib.hasSuffix "regreet.css" (
+        toString osThemeGreeterMoon.config.services.displayManager.regreet.extraCss
+      );
+      true
+    )
+    (
+      assert
+        osThemeGreeterMoon.config.services.displayManager.regreet.font.name == "DroidSansM Nerd Font Propo";
+      true
+    )
+    (
+      assert osThemeGreeterMoon.config.services.displayManager.regreet.font.size == 12;
+      true
+    )
+    (
+      assert lib.hasSuffix "moonrise.png" (
+        toString osThemeGreeterMoon.config.programs.scoot.greeter.background
+      );
+      true
+    )
+    (
+      assert builtins.elem osThemeGreeterMoon.config.programs.scoot.desktop.theme.fonts.uiPackage
+        osThemeGreeterMoon.config.fonts.packages;
+      true
+    )
+    # ...vinyl-sunset: no shippable backdrop, so the backdrop stays
+    # alone (null) while the rest themes...
+    (
+      assert allAssertionsHold osThemeGreeterVinyl.config;
+      true
+    )
+    (
+      assert osThemeGreeterVinyl.config.programs.scoot.greeter.background == null;
+      true
+    )
+    (
+      assert
+        osThemeGreeterVinyl.config.services.displayManager.regreet.settings.GTK.application_prefer_dark_theme;
+      true
+    )
+    # ...opted out, and without a look, the greeter stands unthemed
+    # (no look CSS, no look backdrop, no forced dark setting)...
+    (
+      assert allAssertionsHold osThemeGreeterOff.config;
+      true
+    )
+    (
+      assert osThemeGreeterOff.config.services.displayManager.regreet.extraCss == "";
+      true
+    )
+    (
+      assert osThemeGreeterOff.config.programs.scoot.greeter.background == null;
+      true
+    )
+    (
+      assert
+        ((osThemeGreeterOff.config.services.displayManager.regreet.settings.GTK or { })
+          .application_prefer_dark_theme or null
+        ) == null;
+      true
+    )
+    (
+      assert allAssertionsHold osThemeGreeterNoLook.config;
+      true
+    )
+    (
+      assert osThemeGreeterNoLook.config.services.displayManager.regreet.extraCss == "";
+      true
+    )
+    (
+      assert osThemeGreeterNoLook.config.programs.scoot.greeter.background == null;
+      true
+    )
+  ];
 
   _darwinAudioPins = lib.optionals (!isLinux) [
     # Home-manager: every tool null, nothing installed for the slot...
@@ -8148,6 +8867,8 @@ let
   ];
 
   # --- auth/secrets slots off Linux (fail `nix flake check` at eval) ---
+  #
+  # --- theme-look off Linux (fail `nix flake check` at eval) ---
   #
   # The tools above are Linux-only: off Linux each package defaults to
   # null, which the slot's own assertions refuse loudly instead of
@@ -8215,6 +8936,51 @@ let
     # agent's one plus the keyring's two).
     (
       assert builtins.length (failing osAuth.config) == 21;
+      true
+    )
+  ];
+  _darwinThemePins = lib.optionals (!isLinux) [
+    # Home-manager: every tool null...
+    (
+      assert hmTheme.config.programs.scoot.desktop.theme.cursor.package == null;
+      true
+    )
+    (
+      assert hmTheme.config.programs.scoot.desktop.theme.icon.package == null;
+      true
+    )
+    (
+      assert hmTheme.config.programs.scoot.desktop.theme.fonts.uiPackage == null;
+      true
+    )
+    (
+      assert hmTheme.config.programs.scoot.desktop.theme.fonts.monoPackage == null;
+      true
+    )
+    (
+      assert hmTheme.config.programs.scoot.desktop.theme.qt.package == null;
+      true
+    )
+    (
+      assert hmTheme.config.programs.scoot.desktop.theme.qt.stylePackage == null;
+      true
+    )
+    # ...refused loudly, naming each tool (among the other slots'
+    # own refusals beside them -- hence `any`, never a count)...
+    (
+      assert lib.any (m: lib.hasInfix "theme.cursor.package is null" m) (failing hmTheme.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "theme.icon.package is null" m) (failing hmTheme.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "theme.fonts.uiPackage is null" m) (failing hmTheme.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "theme.qt.package is null" m) (failing hmTheme.config);
       true
     )
   ];
@@ -10074,6 +10840,7 @@ assert lib.all (x: x) _capturePins;
 assert lib.all (x: x) _audioPins;
 assert lib.all (x: x) _nightlightPins;
 assert lib.all (x: x) _authPins;
+assert lib.all (x: x) _themePins;
 assert lib.all (x: x) _keysPins;
 assert lib.all (x: x) _powerPins;
 assert lib.all (x: x) _darwinIdlePins;
@@ -10081,9 +10848,9 @@ assert lib.all (x: x) _darwinNotifPins;
 assert lib.all (x: x) _darwinClipPins;
 assert lib.all (x: x) _darwinLaunchPins;
 assert lib.all (x: x) _darwinCapturePins;
-assert lib.all (x: x) _darwinAudioPins;
 assert lib.all (x: x) _darwinNightlightPins;
 assert lib.all (x: x) _darwinAuthPins;
+assert lib.all (x: x) _darwinThemePins;
 assert lib.all (x: x) _darwinKeysPins;
 assert lib.all (x: x) _darwinPowerPins;
 assert lib.all (x: x) _flakePins;
@@ -10287,12 +11054,13 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   echo "ok: stylix.wallpaper.enable = false leaves a user color alone"
 
   # 10. Desktop profile, music-desk: the example palette in the compositor
-  #     config (appearance plus the shipped wallpaper beside the injected
-  #     scootbg command), and the same palette in the bar file.
+  #     config (appearance plus the theme cursor and the shipped wallpaper
+  #     beside the injected scootbg command), and the same palette in the
+  #     bar file.
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["appearance"] == {"background_color": "#FCFBFB", "focus_ring_active_color": "#3D579A", "focus_ring_inactive_color": "#D5D7DD"}, got["appearance"]
+  assert got["appearance"] == {"background_color": "#FCFBFB", "focus_ring_active_color": "#3D579A", "focus_ring_inactive_color": "#D5D7DD", "cursor_theme": "Vanilla-DMZ", "cursor_size": 24}, got["appearance"]
   assert got["wallpaper"]["mode"] == "fill", got["wallpaper"]
   assert got["wallpaper"]["image"].endswith("music-desk.png"), got["wallpaper"]
   assert got["wallpaper"]["command"].endswith("/bin/scootbg"), got["wallpaper"]
@@ -10326,12 +11094,13 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   echo "ok: desktop look renders into the NixOS-side bar config"
 
   # 10d. Desktop profile, moonrise: the example palette in the compositor
-  #      config (appearance plus the shipped wallpaper beside the injected
-  #      scootbg command), and the same palette in the bar file.
+  #      config (appearance plus the theme cursor and the shipped wallpaper
+  #      beside the injected scootbg command), and the same palette in the
+  #      bar file.
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B"}, got["appearance"]
+  assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B", "cursor_theme": "Vanilla-DMZ", "cursor_size": 24}, got["appearance"]
   assert got["wallpaper"]["mode"] == "fill", got["wallpaper"]
   assert got["wallpaper"]["image"].endswith("moonrise.png"), got["wallpaper"]
   assert got["wallpaper"]["command"].endswith("/bin/scootbg"), got["wallpaper"]
@@ -10518,6 +11287,56 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     assert not missing, "state icons missing from DejaVu Sans: %s" % ", ".join(missing)
     ' ${pkgs.dejavu_fonts.minimal}/share/fonts/truetype/DejaVuSans.ttf '${hmNotif.config.programs.scoot.desktop.notifications.bar.icons.idle}' '${hmNotif.config.programs.scoot.desktop.notifications.bar.icons.unread}' '${hmNotif.config.programs.scoot.desktop.notifications.bar.icons.dnd}'
     echo "ok: default state icons are each one glyph in DejaVu Sans"
+
+    # 13h. Theme GTK settings, music-desk (light): the Adwaita theme,
+    #      the icon theme, the look's UI face and cursor, and no
+    #      dark preference.
+    grep -F -x "gtk-theme-name=Adwaita" ${gtkLightConf}
+    grep -F -x "gtk-icon-theme-name=Adwaita" ${gtkLightConf}
+    grep -F -x "gtk-font-name=DroidSansM Nerd Font Propo 11" ${gtkLightConf}
+    grep -F -x "gtk-cursor-theme-name=Vanilla-DMZ" ${gtkLightConf}
+    grep -F -x "gtk-cursor-theme-size=24" ${gtkLightConf}
+    grep -F -x "gtk-application-prefer-dark-theme=false" ${gtkLightConf}
+    echo "ok: GTK settings carry the light look"
+
+    # 13i. ...vinyl-sunset (dark): the dark theme and preference.
+    grep -F -x "gtk-theme-name=Adwaita-dark" ${gtkDarkConf}
+    grep -F -x "gtk-application-prefer-dark-theme=true" ${gtkDarkConf}
+    echo "ok: GTK settings carry the dark look"
+
+    # 13j. A theme setting wins per key (verbatim theme name over the
+    #      generated one, plus a new key), and a user value wins over
+    #      Stylix and the look alike.
+    grep -F -x "gtk-theme-name=HighContrast" ${gtkSettingsConf}
+    if grep -q "^gtk-theme-name=Adwaita$" ${gtkSettingsConf}; then echo "overridden default still present" >&2; exit 1; fi
+    grep -F -x "gtk-xft-hintstyle=hintslight" ${gtkSettingsConf}
+    grep -F -x "gtk-xft-hintstyle=hintslight" ${gtkStylixUserConf}
+    grep -F -x "gtk-theme-name=Adwaita" ${gtkStylixUserConf}
+    echo "ok: theme settings win per key, user over Stylix over look"
+
+    # 13k. Theme Qt config: the Adwaita style in the look's polarity
+    #      plus the icon theme (no faked per-look palette).
+    grep -F -x "style=adwaita" ${qtLightConf}
+    grep -F -x "icon_theme=Adwaita" ${qtLightConf}
+    grep -F -x "style=adwaita-dark" ${qtDarkConf}
+    echo "ok: Qt config carries the look's polarity"
+
+    # 13l. Theme fontconfig default: the UI face for sans-serif, the
+    #      terminal face for monospace.
+    grep -F "<family>DroidSansM Nerd Font Propo</family>" ${themeFontsConf}
+    grep -F "<family>FiraCode Nerd Font</family>" ${themeFontsConf}
+    echo "ok: fontconfig defaults to the look's faces"
+
+    # 13m. The look's static app files apply from the flake (foot
+    #      palette, starship prompt, Helix config beside its theme,
+    #      btop config): each the example's own file, not generated.
+    grep -F -q "font=FiraCode Nerd Font:size=10.5" ${themeFootConf}
+    grep -F -q "background=fcfbfb" ${themeFootConf}
+    grep -F -q 'style = "bold #3D579A"' ${themeStarshipConf}
+    grep -F -q 'theme = "scoot-light"' ${themeHelixConf}
+    grep -F -q '"ui.background" = {}' ${themeHelixTheme}
+    grep -F -q "theme_background = False" ${themeBtopConf}
+    echo "ok: the look's app files apply from the flake"
 
     # 14. The bar feed, against stub tools (the REAL bridge script from
     #     the module, scenario files below -- `mode`/`list` are what
@@ -10900,11 +11719,12 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     echo "ok: a locked pick is refused"
 
     # 18. The documented standalone desktop (site/desktop/index.md's
-    #     home.nix snippet) renders the moonrise look end to end.
+    #     home.nix snippet) renders the moonrise look end to end
+    #     (appearance plus the theme cursor).
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))
-    assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B"}, got["appearance"]
+    assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B", "cursor_theme": "Vanilla-DMZ", "cursor_size": 24}, got["appearance"]
     assert got["wallpaper"]["image"].endswith("moonrise.png"), got["wallpaper"]
     ' ${hmDocsDesktopToml}
     echo "ok: documented home-manager desktop renders moonrise"

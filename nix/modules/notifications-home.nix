@@ -15,11 +15,11 @@ let
   cfg = config.programs.scoot;
   notif = cfg.desktop.notifications;
 
-  # The desktop profile's shared option subtree and look palettes (the
-  # `enum` type guarantees the name, so the lookup cannot fail).
-  desktop = import ./desktop.nix { inherit lib; };
-  look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
-  themed = look != null && (cfg.desktop.theme.targets.notifications.enable or true);
+  # The desktop profile's shared option subtree and the one helper
+  # that reads look-derived values (never hand-mapped here).
+  themeLook = import ./theme-look.nix { inherit lib; };
+  look = themeLook.lookFor cfg.desktop;
+  themed = themeLook.themed cfg.desktop "notifications";
 
   # The bar's build, when its module is imported beside this one (the
   # `or {}` keeps this evaluating without it, the way `scootbar.nix`

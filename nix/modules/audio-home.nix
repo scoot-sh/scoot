@@ -16,15 +16,15 @@ let
   cfg = config.programs.scoot;
   audio = cfg.desktop.audio;
 
-  # The desktop profile's shared option subtree and look palettes (the
-  # `enum` type guarantees the name, so the lookup cannot fail).
-  desktop = import ./desktop.nix { inherit lib; };
-  look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
-  themed = look != null && (cfg.desktop.theme.targets.osd.enable or true);
+  # The desktop profile's shared option subtree and the one helper
+  # that reads look-derived values (never hand-mapped here).
+  themeLook = import ./theme-look.nix { inherit lib; };
+  look = themeLook.lookFor cfg.desktop;
+  themed = themeLook.themed cfg.desktop "osd";
 
   # A `#rrggbb` look token as wob's `RRGGBBAA` (opaque: the OSD never
   # wants translucency -- text over a terminal needs the contrast).
-  hexA = color: "${lib.removePrefix "#" color}ff";
+  hexA = themeLook.withAlpha;
 
   # The OSD's themed colors, from the same roles the bar, the locker
   # and the menus are themed from (one menu, one palette): the bar's

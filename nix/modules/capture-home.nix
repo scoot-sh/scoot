@@ -18,11 +18,11 @@ let
   cfg = config.programs.scoot;
   cap = cfg.desktop.capture;
 
-  # The desktop profile's shared option subtree and look palettes (the
-  # `enum` type guarantees the name, so the lookup cannot fail).
-  desktop = import ./desktop.nix { inherit lib; };
-  look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
-  themed = look != null && (cfg.desktop.theme.targets.capture.enable or true);
+  # The desktop profile's shared option subtree and the one helper
+  # that reads look-derived values (never hand-mapped here).
+  themeLook = import ./theme-look.nix { inherit lib; };
+  look = themeLook.lookFor cfg.desktop;
+  themed = themeLook.themed cfg.desktop "capture";
 
   # The chooser's and the region picker's theme: the look's roles the
   # same way the launcher and the history picker carry them (opaque
@@ -30,7 +30,7 @@ let
   # the same roles, so the three menus read as one). Nothing without
   # a look (or opted out): their own styles stand.
   fuzzelTheme = import ./fuzzel-theme.nix { inherit lib; };
-  hexA = color: "${lib.removePrefix "#" color}ff";
+  hexA = themeLook.withAlpha;
   # Quoted: a bare `#rrggbb` would start a shell comment wherever
   # xdpw runs the chooser through a shell and eat the rest of the
   # line.
