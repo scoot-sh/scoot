@@ -675,10 +675,60 @@ in
       child = "desktop-auth-secrets";
       tool = "a secrets service";
     };
-    # Pipewire/wireplumber baseline, media keys, brightness keys and an OSD.
-    audio = slot {
-      child = "desktop-audio-osd";
-      tool = "pipewire plus wireplumber, with the bar's volume, brightness, media and microphone modules as the display half";
+    # PipeWire baseline, media keys, brightness keys and an OSD.
+    # Filled by the `desktop-audio-osd` child: PipeWire with
+    # WirePlumber running for the keymap's volume binds (`wpctl` is
+    # WirePlumber's own CLI, so a PipeWire-only shape would leave the
+    # binds with nothing to call), the keymap's volume, brightness
+    # and mic-mute binds routed through small scripts that also poke
+    # the OSD, a sink helper (`list`, `set`, `cycle`) the future
+    # Bluetooth picker in `desktop-apps` calls, and the OSD itself:
+    # wob on the `overlay` layer (so it shows above fullscreen
+    # windows), themed by the look.
+    #
+    # On with the profile (still individually disable-able); without
+    # it, `enable` works standalone (unthemed: a look needs the
+    # profile, and PipeWire itself needs the NixOS side, the way the
+    # portal backends do).
+    audio = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Run the audio baseline: PipeWire with WirePlumber (their
+          packages beside this), the keymap's volume, brightness and
+          mic-mute binds through the OSD scripts, and the OSD on the
+          `overlay` layer. Without it nothing answers the volume
+          binds' `wpctl` calls and the hardware binds run silent.
+        '';
+      };
+
+      daemon = lib.mkOption {
+        type = lib.types.enum [ "wob" ];
+        default = "wob";
+        description = ''
+          The program behind the OSD. Only wob today (a single-purpose
+          overlay bar with no toolkit -- see site/src/content/docs/desktop/index.md#sound-brightness-keys-and-the-on-screen-display
+          for the measured pick); a future scoot OSD widens this
+          enum, the option and the binds staying as they are.
+        '';
+      };
+
+      osd = {
+        # Milliseconds the OSD stays mapped after the last key press
+        # (wob's `timeout`: it destroys its surface on expiry, so a
+        # hidden OSD holds no surface and wakes nothing). At least 0
+        # (0 hides at once: useful only to prove the bind fires).
+        timeoutMs = lib.mkOption {
+          type = lib.types.int;
+          default = 1500;
+          example = 2500;
+          description = ''
+            Milliseconds the OSD stays visible after the last step.
+            At least 0.
+          '';
+        };
+      };
     };
     # Clipboard persistence plus history and a picker bind. Filled by
     # the `desktop-clipboard` child: a lean cliphist (its contrib
@@ -1104,6 +1154,16 @@ in
             slurp picker's dim, border and selection -- the same
             roles the launcher and the history picker are themed
             from). Set to `false` to keep their own style.
+          '';
+        };
+        targets.osd.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Theme the on-screen display from the look (bar
+            background and text, fill and border from its palette,
+            a washed style while muted and an urgent fill past
+            100%). Set to `false` to keep wob's own style.
           '';
         };
       };

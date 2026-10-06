@@ -100,7 +100,8 @@
 #   with the profile -- the twelve hardware and lock binds, each a
 #   `mkDefault` a user `[binds]` entry wins over and each removable
 #   through `binds.<name>.enable`, the nine slot-gated binds only
-#   while their slot is on;
+#   while their slot is on, the volume, brightness and mic-mute binds
+#   through the audio slot's scripts while that slot is on;
 #   the notification daemon (`desktop-notifications` child) runs with
 #   the profile -- mako owning `org.freedesktop.Notifications` as a
 #   `Type=dbus` user unit (activatable, retried like the bar's unit),
@@ -151,8 +152,17 @@
 #   (80% default, full-once, trip; inert without the sysfs node); a
 #   null daemon, a cap outside 1..100, a blank battery name and a
 #   low-battery percent above UPower's critical each fail eval;
+#   the audio slot (`desktop-audio-osd` child) runs with the
+#   profile -- PipeWire with WirePlumber running for the keymap's
+#   volume binds, the volume, brightness and mic-mute binds routed
+#   through scripts that also poke the OSD (wob on the `overlay`
+#   layer, above fullscreen, themed by the look unless
+#   `theme.targets.osd.enable` opts out), and a sink helper
+#   (`list`, `set`, `cycle`) for the future picker; a null OSD or
+#   dump tool, a negative hide timeout and an unknown `daemon` each
+#   fail eval;
 #   every profile unit (the idle pair, mako, the bar feed, both
-#   clipboard watchers, and the profile-managed bar -- never the
+#   clipboard watchers, the OSD, and the profile-managed bar -- never the
 #   standalone bar) starts in `scoot-session.target`, never the shared
 #   `graphical-session.target`, so no other desktop starts them; the
 #   home-manager side installs that target itself (present exactly
@@ -2422,6 +2432,169 @@ let
     battery = null;
   };
 
+  # --- audio (`programs.scoot.desktop.audio`) evaluations ---
+  #
+  # The profile with a look: the whole slot on (the OSD and its unit,
+  # the control scripts, the sink helper), the OSD themed by the look.
+  hmAudio = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...without a look: the slot runs unthemed (wob's own colors --
+  # pinned by content below).
+  hmAudioNoLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...the slot off (the profile turns it on; the switch back off
+  # disables just its half: no OSD, no scripts, the binds run silent).
+  hmAudioOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.audio.enable = false;
+  };
+  # ...standalone (no profile): the slot runs, unthemed, its unit in
+  # the session scope.
+  hmAudioStandalone = evalHome {
+    enable = true;
+    desktop.audio.enable = true;
+  };
+  # ...retimed (a longer on-screen hold)...
+  hmAudioTimeout = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.audio.osd.timeoutMs = 2500;
+  };
+  # ...opted out of OSD theming (the look leaves wob alone, the muted
+  # style still defined so mute never names a missing style).
+  hmAudioTargetOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.osd.enable = false;
+  };
+  # Refusals: the slot with no OSD to run (pinned by message in
+  # `_audioPins`)...
+  hmAudioNoPkg = evalHome {
+    enable = true;
+    desktop.audio.enable = true;
+    desktop.audio.osd.package = null;
+  };
+  # ...with no dump tool for the sink helper...
+  hmAudioNoDump = evalHome {
+    enable = true;
+    desktop.audio.enable = true;
+    desktop.audio.dumpPackage = null;
+  };
+  # ...with a negative hide timeout...
+  hmAudioNegTimeout = evalHome {
+    enable = true;
+    desktop.audio.enable = true;
+    desktop.audio.osd.timeoutMs = -1;
+  };
+  # ...and an unknown daemon, which is an option type error (the
+  # `enum`'s own message names the valid value), caught here by
+  # `tryEval`.
+  hmAudioDaemonBogus =
+    builtins.tryEval
+      (evalHome {
+        enable = true;
+        desktop.audio.enable = true;
+        desktop.audio.daemon = "bogus-daemon";
+      }).config.programs.scoot.desktop.audio.daemon;
+
+  # --- audio system evaluations ---
+  osAudio = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  osAudioOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.audio.enable = false;
+  };
+  osAudioStandalone = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.audio.enable = true;
+  };
+  osAudioNoPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.audio.osd.package = null;
+  };
+  osAudioNoDump = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.audio.dumpPackage = null;
+  };
+
+  # A fake audio toolchain for the control-script behavior tests:
+  # stub `wpctl`, `brightnessctl`, `pw-dump` and `wob`, scripted at
+  # RUN time through files under `$SCOOT_AUDIO_TEST_DIR`, so one HM
+  # evaluation covers every scenario. `wpctl get-volume` prints `vol`
+  # (exit `vol-code`); `set-volume`/`set-mute` append their argv to
+  # `calls` (exit `set-code`); `inspect` prints `inspect` (exit 0);
+  # `set-default` appends to `calls` and records the id in
+  # `default-id`; `brightnessctl -m -l` prints `devs` (exit 0);
+  # `brightnessctl set` appends to `calls`; `pw-dump` prints `dump`
+  # (exit `dump-code`); `wob` is never run (the OSD writer is tested
+  # against a fifo, not the daemon). `jq`, `awk`, `tail` and `mkfifo`
+  # stay the real ones from the scripts' own references.
+  audioStubs = pkgs.runCommand "audio-stubs" { } ''
+    mkdir -p $out/bin
+    cat > $out/bin/wpctl <<'EOF'
+    #!${pkgs.runtimeShell}
+    case "$1" in
+      get-volume) cat "$SCOOT_AUDIO_TEST_DIR/vol"; exit "$(cat "$SCOOT_AUDIO_TEST_DIR/vol-code")" ;;
+      set-volume|set-mute) printf '%s\n' "wpctl-$1 $*" >> "$SCOOT_AUDIO_TEST_DIR/calls"; exit "$(cat "$SCOOT_AUDIO_TEST_DIR/set-code")" ;;
+      inspect) cat "$SCOOT_AUDIO_TEST_DIR/inspect"; exit 0 ;;
+      set-default) printf '%s\n' "set-default $2" >> "$SCOOT_AUDIO_TEST_DIR/calls"; printf '%s' "$2" > "$SCOOT_AUDIO_TEST_DIR/default-id"; exit 0 ;;
+      *) echo "unexpected wpctl args: $*" >&2; exit 99 ;;
+    esac
+    EOF
+    cat > $out/bin/brightnessctl <<'EOF'
+    #!${pkgs.runtimeShell}
+    case "$*" in
+      *"-m -l"*) cat "$SCOOT_AUDIO_TEST_DIR/devs"; exit 0 ;;
+      *" set "*) printf '%s\n' "brightness-set $*" >> "$SCOOT_AUDIO_TEST_DIR/calls"; exit "$(cat "$SCOOT_AUDIO_TEST_DIR/set-code")" ;;
+      *) echo "unexpected brightnessctl args: $*" >&2; exit 99 ;;
+    esac
+    EOF
+    cat > $out/bin/pw-dump <<'EOF'
+    #!${pkgs.runtimeShell}
+    cat "$SCOOT_AUDIO_TEST_DIR/dump"; exit "$(cat "$SCOOT_AUDIO_TEST_DIR/dump-code")"
+    EOF
+    cat > $out/bin/wob <<'EOF'
+    #!${pkgs.runtimeShell}
+    echo "unexpected wob run: $*" >&2; exit 99
+    EOF
+    chmod +x $out/bin/wpctl $out/bin/brightnessctl $out/bin/pw-dump $out/bin/wob
+  '';
+  # The slot on, running the stubs: every package option points at
+  # them, so the scripts under test resolve all three controls by
+  # absolute path into this package.
+  hmAudioBehavior = evalHome {
+    enable = true;
+    desktop.audio.enable = true;
+    desktop.keys.volumePackage = audioStubs;
+    desktop.keys.brightnessPackage = audioStubs;
+    desktop.audio.dumpPackage = audioStubs;
+    desktop.audio.osd.package = audioStubs;
+  };
+  audioBehaviorVolume = slotScriptBin hmAudioBehavior "scoot-volume";
+  audioBehaviorBrightness = slotScriptBin hmAudioBehavior "scoot-brightness";
+  audioBehaviorSink = slotScriptBin hmAudioBehavior "scoot-audio-sink";
+  audioBehaviorOsd = slotScriptBin hmAudioBehavior "scoot-osd";
+  # The retimed OSD config (what the unit runs the daemon with).
+  audioTimeoutIni = hmAudioTimeout.config.xdg.configFile."wob/wob.ini".source;
+
   # Refusals: the profile without scoot, and a look without the profile
   # (both pinned by message in `_desktopPins`)...
   hmDeskNoEnable = evalHome { desktop.enable = true; };
@@ -3797,6 +3970,16 @@ let
   chargeTmpfiles = osPower.config.systemd.tmpfiles.rules;
   chargeUdev = osPower.config.services.udev.extraRules;
   chargeAutoUdev = osPowerAuto.config.services.udev.extraRules;
+  # The audio slot's generated files: the wob config -- themed
+  # (music-desk), lookless, opt-out -- plus the OSD script and the
+  # three control scripts as the keymap's binds run them.
+  audioThemed = hmAudio.config.xdg.configFile."wob/wob.ini".source;
+  audioNoLook = hmAudioNoLook.config.xdg.configFile."wob/wob.ini".source;
+  audioTargetOff = hmAudioTargetOff.config.xdg.configFile."wob/wob.ini".source;
+  audioOsdScript = slotScriptBin hmAudio "scoot-osd";
+  audioVolumeScript = slotScriptBin hmAudio "scoot-volume";
+  audioBrightnessScript = slotScriptBin hmAudio "scoot-brightness";
+  audioSinkScript = slotScriptBin hmAudio "scoot-audio-sink";
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
   #
@@ -4135,7 +4318,8 @@ let
     # `desktop-notifications` child filled it, `clipboard` when the
     # `desktop-clipboard` child did, `launcher` when the
     # `desktop-launcher` child did, `capture` when the
-    # `desktop-capture` child did -- `power` stays on it: filled by
+    # `desktop-capture` child did, `audio` when the
+    # `desktop-audio-osd` child did -- `power` stays on it: filled by
     # the `desktop-power` child but opt-in, never with the profile).
     (
       assert hmDesk.config.programs.scoot.desktop.capture.enable;
@@ -4165,8 +4349,26 @@ let
       assert !hmDesk.config.programs.scoot.desktop.secrets.enable;
       true
     )
+    # ...the audio slot on with the profile (the
+    # `desktop-audio-osd` child): PipeWire running, the OSD on the
+    # `overlay` layer behind the keymap's volume, brightness and
+    # mic-mute binds (routed through its scripts), the sink helper
+    # for the future picker, the OSD themed unless opted out
+    # (without forcing the half-built `theme` slot on)...
     (
-      assert !hmDesk.config.programs.scoot.desktop.audio.enable;
+      assert hmDesk.config.programs.scoot.desktop.audio.enable;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.audio.daemon == "wob";
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.audio.osd.timeoutMs == 1500;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.theme.targets.osd.enable;
       true
     )
     (
@@ -4240,7 +4442,8 @@ let
     # ...which is what installs scootbg for it (beside the idle
     # policy's five tools, the notification daemon, the launcher
     # package and its script, the clipboard slot's three, its picker
-    # script, the capture slot's four and the keymap's three, all on
+    # script, the capture slot's four, the audio slot's OSD and its
+    # four scripts, and the keymap's three, all on
     # with the profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
@@ -4277,6 +4480,11 @@ let
           (slotScriptDrv hmDeskLookMusic "scoot-capture-output")
           (slotScriptDrv hmDeskLookMusic "scoot-capture-region")
           (slotScriptDrv hmDeskLookMusic "scoot-capture-clipboard")
+          pkgs.wob
+          (slotScriptDrv hmDeskLookMusic "scoot-osd")
+          (slotScriptDrv hmDeskLookMusic "scoot-volume")
+          (slotScriptDrv hmDeskLookMusic "scoot-brightness")
+          (slotScriptDrv hmDeskLookMusic "scoot-audio-sink")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -4457,6 +4665,21 @@ let
     )
     (
       assert osDesk.config.services.pipewire.enable;
+      true
+    )
+    # ...the audio slot on with it: the OSD installed, PipeWire
+    # running (the capture slot defaults the same switch, which
+    # merges), and `wpctl` on PATH through the keymap's volume tool...
+    (
+      assert osDesk.config.programs.scoot.desktop.audio.enable;
+      true
+    )
+    (
+      assert osDesk.config.programs.scoot.desktop.audio.daemon == "wob";
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "wob") osDesk.config.environment.systemPackages;
       true
     )
     # ...a future slot on is accepted and inert there too...
@@ -4712,15 +4935,24 @@ let
       assert hmClipStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target";
       true
     )
+    (
+      assert hmAudioStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target";
+      true
+    )
     # ...and absent with nothing to scope (an idle target file with no
     # unit wanting it starts nothing, so none is written).
     (
       assert !(hmOff.config.xdg.configFile ? "systemd/user/scoot-session.target");
       true
     )
-    # No profile unit is left on the shared target: besides the three
-    # pins above (idle, mako, clipboard), the feed and the
+    # No profile unit is left on the shared target: besides the four
+    # pins above (idle, mako, clipboard, audio), the feed and the
     # profile-managed bar ride the same scope...
+    (
+      assert
+        hmAudio.config.systemd.user.services.scoot-osd.Unit.PartOf == [ "scoot-session.target" ];
+      true
+    )
     (
       assert
         hmNotif.config.systemd.user.services.scoot-notify-sync.Unit.PartOf == [ "scoot-session.target" ];
@@ -5001,7 +5233,7 @@ let
     # volume and media tools; `brightnessctl` and `fuzzel` each serve
     # two features, so each appears twice).
     (
-      assert builtins.length hmIdle.config.home.packages == 22;
+      assert builtins.length hmIdle.config.home.packages == 27;
       true
     )
     (
@@ -5026,6 +5258,11 @@ let
           (slotScriptDrv hmIdle "scoot-capture-output")
           (slotScriptDrv hmIdle "scoot-capture-region")
           (slotScriptDrv hmIdle "scoot-capture-clipboard")
+          pkgs.wob
+          (slotScriptDrv hmIdle "scoot-osd")
+          (slotScriptDrv hmIdle "scoot-volume")
+          (slotScriptDrv hmIdle "scoot-brightness")
+          (slotScriptDrv hmIdle "scoot-audio-sink")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5096,6 +5333,11 @@ let
           (slotScriptDrv hmIdleOff "scoot-capture-output")
           (slotScriptDrv hmIdleOff "scoot-capture-region")
           (slotScriptDrv hmIdleOff "scoot-capture-clipboard")
+          pkgs.wob
+          (slotScriptDrv hmIdleOff "scoot-osd")
+          (slotScriptDrv hmIdleOff "scoot-volume")
+          (slotScriptDrv hmIdleOff "scoot-brightness")
+          (slotScriptDrv hmIdleOff "scoot-audio-sink")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5272,6 +5514,8 @@ let
           pkgs.grim
           pkgs.slurp
           pkgs.fuzzel
+          pkgs.wob
+          pkgs.pipewire
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5323,6 +5567,8 @@ let
           pkgs.grim
           pkgs.slurp
           pkgs.fuzzel
+          pkgs.wob
+          pkgs.pipewire
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5360,6 +5606,8 @@ let
           pkgs.grim
           pkgs.slurp
           pkgs.fuzzel
+          pkgs.wob
+          pkgs.pipewire
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -6391,14 +6639,14 @@ let
     # Home-manager: null, and the slot's assertion refusing loudly
     # (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the clipboard slot's three plus the capture
-    # slot's four: the profile is
+    # slot's four plus the audio slot's two: the profile is
     # on in this evaluation, so its slot is open).
     (
       assert hmLaunch.config.programs.scoot.desktop.launcher.package == null;
       true
     )
     (
-      assert builtins.length (failing hmLaunch.config) == 14;
+      assert builtins.length (failing hmLaunch.config) == 16;
       true
     )
     (
@@ -6412,7 +6660,7 @@ let
     )
     # ...refused loudly there too.
     (
-      assert builtins.length (failing osLaunch.config) == 15;
+      assert builtins.length (failing osLaunch.config) == 17;
       true
     )
   ];
@@ -6795,6 +7043,250 @@ let
     )
   ];
 
+  # --- audio slot (fail `nix flake check` at eval) ---
+  #
+  # Linux only: the actions name absolute store paths here (the bare
+  # fallbacks are pinned in `_darwinAudioPins`). The profile turns the
+  # slot on; PipeWire and the OSD arrive with it.
+  _audioPins = lib.optionals isLinux [
+    # Home-manager: the whole slot on (the OSD and its unit, the
+    # control scripts, the sink helper), the OSD themed by the look.
+    (
+      assert allAssertionsHold hmAudio.config;
+      true
+    )
+    (
+      assert hmAudio.config.programs.scoot.desktop.audio.enable;
+      true
+    )
+    (
+      assert hmAudio.config.programs.scoot.desktop.audio.daemon == "wob";
+      true
+    )
+    (
+      assert hmAudio.config.programs.scoot.desktop.audio.osd.timeoutMs == 1500;
+      true
+    )
+    (
+      assert hmAudio.config.programs.scoot.desktop.theme.targets.osd.enable;
+      true
+    )
+    (
+      assert !hmAudio.config.programs.scoot.desktop.theme.enable;
+      true
+    )
+    (
+      assert hmAudio.config.xdg.configFile ? "wob/wob.ini";
+      true
+    )
+    # ...the OSD unit in the session scope (never the shared target),
+    # running the OSD script's daemon...
+    (
+      assert hmAudio.config.systemd.user.services.scoot-osd.Unit.PartOf == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert hmAudio.config.systemd.user.services.scoot-osd.Unit.After == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert hmAudio.config.systemd.user.services.scoot-osd.Install.WantedBy == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        lib.hasSuffix "/bin/scoot-osd daemon"
+          hmAudio.config.systemd.user.services.scoot-osd.Service.ExecStart;
+      true
+    )
+    # ...the volume, brightness and mic-mute binds through the scripts
+    # (control plus OSD -- the keymap's own exact match in `_keysPins`
+    # pins every routed action; here the off shape)...
+    (
+      assert allAssertionsHold hmAudioOff.config;
+      true
+    )
+    (
+      assert
+        hmAudioOff.config.programs.scoot.settings.binds."XF86AudioRaiseVolume" == {
+          action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
+          repeat = true;
+          allow_when_locked = true;
+        };
+      true
+    )
+    (
+      assert
+        hmAudioOff.config.programs.scoot.settings.binds."XF86MonBrightnessUp" == {
+          action = "spawn ${lib.getExe pkgs.brightnessctl} -e set +5%";
+          repeat = true;
+          allow_when_locked = true;
+        };
+      true
+    )
+    # ...with the slot off: no unit, no config, no scripts...
+    (
+      assert !(hmAudioOff.config.systemd.user.services ? scoot-osd);
+      true
+    )
+    (
+      assert !(hmAudioOff.config.xdg.configFile ? "wob/wob.ini");
+      true
+    )
+    # ...without a look: the slot runs unthemed (wob's own colors,
+    # the muted style still defined -- pinned by content below)...
+    (
+      assert allAssertionsHold hmAudioNoLook.config;
+      true
+    )
+    # ...standalone (no profile): the slot runs, the unit scoped...
+    (
+      assert allAssertionsHold hmAudioStandalone.config;
+      true
+    )
+    (
+      assert hmAudioStandalone.config.systemd.user.services.scoot-osd.Unit.PartOf == [ "scoot-session.target" ];
+      true
+    )
+    # ...retimed and opted out...
+    (
+      assert hmAudioTimeout.config.programs.scoot.desktop.audio.osd.timeoutMs == 2500;
+      true
+    )
+    (
+      assert !hmAudioTargetOff.config.programs.scoot.desktop.theme.targets.osd.enable;
+      true
+    )
+    # Refusals: the slot with no OSD to run it...
+    (
+      assert builtins.length (failing hmAudioNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "audio.osd.package is null" (builtins.head (failing hmAudioNoPkg.config));
+      true
+    )
+    # ...with no dump tool for the sink helper...
+    (
+      assert builtins.length (failing hmAudioNoDump.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "audio.dumpPackage is null" (builtins.head (failing hmAudioNoDump.config));
+      true
+    )
+    # ...with a negative hide timeout...
+    (
+      assert builtins.length (failing hmAudioNegTimeout.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "audio.osd.timeoutMs" (builtins.head (failing hmAudioNegTimeout.config));
+      true
+    )
+    # ...and an unknown daemon, which is an option type error (the
+    # `enum`'s own message names the valid value).
+    (
+      assert !hmAudioDaemonBogus.success;
+      true
+    )
+    # NixOS: the profile turns the slot on (PipeWire running, the OSD
+    # installed)...
+    (
+      assert allAssertionsHold osAudio.config;
+      true
+    )
+    (
+      assert osAudio.config.programs.scoot.desktop.audio.enable;
+      true
+    )
+    (
+      assert osAudio.config.services.pipewire.enable;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "wob") osAudio.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "pipewire") osAudio.config.environment.systemPackages;
+      true
+    )
+    # ...the slot off: neither installed...
+    (
+      assert allAssertionsHold osAudioOff.config;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "wob") osAudioOff.config.environment.systemPackages);
+      true
+    )
+    # ...standalone (no profile): the slot runs...
+    (
+      assert allAssertionsHold osAudioStandalone.config;
+      true
+    )
+    # Refusals: the slot with no OSD or dump tool to install (each
+    # pinned by message)...
+    (
+      assert builtins.length (failing osAudioNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "audio.osd.package is null" (builtins.head (failing osAudioNoPkg.config));
+      true
+    )
+    (
+      assert builtins.length (failing osAudioNoDump.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "audio.dumpPackage is null" (builtins.head (failing osAudioNoDump.config));
+      true
+    )
+  ];
+
+  _darwinAudioPins = lib.optionals (!isLinux) [
+    # Home-manager: every tool null, nothing installed for the slot...
+    (
+      assert hmAudio.config.programs.scoot.desktop.audio.osd.package == null;
+      true
+    )
+    (
+      assert hmAudio.config.programs.scoot.desktop.audio.dumpPackage == null;
+      true
+    )
+    # ...and the slot's own assertions refusing loudly, naming each
+    # tool (this slot's two)...
+    (
+      assert lib.any (m: lib.hasInfix "audio.osd.package is null" m) (failing hmAudio.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "audio.dumpPackage is null" m) (failing hmAudio.config);
+      true
+    )
+    # Standalone (no profile): just the slot's own two.
+    (
+      assert builtins.length (failing hmAudioStandalone.config) == 2;
+      true
+    )
+    # NixOS: the same nulls (no OSD installed for the slot)...
+    (
+      assert osAudio.config.programs.scoot.desktop.audio.osd.package == null;
+      true
+    )
+    (
+      assert osAudio.config.programs.scoot.desktop.audio.dumpPackage == null;
+      true
+    )
+    # ...refused loudly there too.
+    (
+      assert builtins.length (failing osAudioStandalone.config) == 2;
+      true
+    )
+  ];
+
   # --- capture slot off Linux (fail `nix flake check` at eval) ---
   #
   # The tools above are Linux-only: off Linux each package defaults to
@@ -6822,9 +7314,9 @@ let
     # ...and the slot's own assertions refusing loudly, naming each
     # tool (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the clipboard slot's three plus this slot's
-    # four: the profile is on in this evaluation).
+    # four plus the audio slot's two: the profile is on in this evaluation).
     (
-      assert builtins.length (failing hmCapture.config) == 14;
+      assert builtins.length (failing hmCapture.config) == 16;
       true
     )
     (
@@ -6859,9 +7351,10 @@ let
     )
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
-    # three plus this slot's five -- gtk beside wlr).
+    # three plus this slot's five -- gtk beside wlr -- plus the audio
+    # slot's two).
     (
-      assert builtins.length (failing osCapture.config) == 15;
+      assert builtins.length (failing osCapture.config) == 17;
       true
     )
   ];
@@ -6889,10 +7382,10 @@ let
     # ...and the slot's own assertions refusing loudly, naming each
     # switch (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the slot's three plus the capture slot's
-    # four: the profile is on in this
+    # four plus the audio slot's two: the profile is on in this
     # evaluation).
     (
-      assert builtins.length (failing hmClip.config) == 14;
+      assert builtins.length (failing hmClip.config) == 16;
       true
     )
     (
@@ -6918,9 +7411,10 @@ let
       true
     )
     # ...refused loudly there too (one more than before: the
-    # launcher's null joins the count on this side as well).
+    # launcher's null joins the count on this side as well -- plus
+    # the audio slot's two).
     (
-      assert builtins.length (failing osClip.config) == 15;
+      assert builtins.length (failing osClip.config) == 17;
       true
     )
   ];
@@ -6935,14 +7429,14 @@ let
     # Home-manager: null, and the daemon's assertion refusing loudly
     # (the idle policy's five plus the daemon's one plus the launcher's
     # one plus the clipboard slot's three plus the capture slot's
-    # four: the profile is on in this
+    # four plus the audio slot's two: the profile is on in this
     # evaluation, so its slot is open).
     (
       assert hmNotif.config.programs.scoot.desktop.notifications.package == null;
       true
     )
     (
-      assert builtins.length (failing hmNotif.config) == 14;
+      assert builtins.length (failing hmNotif.config) == 16;
       true
     )
     (
@@ -6956,10 +7450,11 @@ let
     )
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
-    # three plus the capture slot's five -- gtk beside wlr: the
+    # three plus the capture slot's five -- gtk beside wlr -- plus the
+    # audio slot's two: the
     # profile is on in this evaluation, so its slot is open).
     (
-      assert builtins.length (failing osNotif.config) == 15;
+      assert builtins.length (failing osNotif.config) == 17;
       true
     )
     (
@@ -6995,37 +7490,38 @@ let
     # three capture binds -- the daemon, the clipboard slot, the
     # launcher slot and the capture slot are on with the profile, so
     # their slots are open; every other future slot is off: its binds
-    # stay out)...
+    # stay out; the volume, brightness and mic-mute binds run through
+    # the audio slot's scripts, which is on with the profile too)...
     (
       assert
         hmKeys.config.programs.scoot.settings.binds == {
           "XF86MonBrightnessUp" = {
-            action = "spawn ${lib.getExe pkgs.brightnessctl} -e set +5%";
+            action = "spawn ${slotScriptBin hmKeys "scoot-brightness"} up";
             repeat = true;
             allow_when_locked = true;
           };
           "XF86MonBrightnessDown" = {
-            action = "spawn ${lib.getExe pkgs.brightnessctl} -e set 5%-";
+            action = "spawn ${slotScriptBin hmKeys "scoot-brightness"} down";
             repeat = true;
             allow_when_locked = true;
           };
           "XF86AudioRaiseVolume" = {
-            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
+            action = "spawn ${slotScriptBin hmKeys "scoot-volume"} sink-up";
             repeat = true;
             allow_when_locked = true;
           };
           "XF86AudioLowerVolume" = {
-            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
+            action = "spawn ${slotScriptBin hmKeys "scoot-volume"} sink-down";
             repeat = true;
             allow_when_locked = true;
           };
           "XF86AudioMute" = {
-            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SINK@ toggle";
+            action = "spawn ${slotScriptBin hmKeys "scoot-volume"} sink-mute";
             repeat = true;
             allow_when_locked = true;
           };
           "XF86AudioMicMute" = {
-            action = "spawn ${lib.getExe' pkgs.wireplumber "wpctl"} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+            action = "spawn ${slotScriptBin hmKeys "scoot-volume"} mic-mute";
             repeat = true;
             allow_when_locked = true;
           };
@@ -7069,7 +7565,8 @@ let
     )
     # ...beside the profile's and the policy's packages (scoot, the
     # five idle tools, mako, the clipboard slot's three, the launcher
-    # package, the capture slot's four tools, the five slot scripts
+    # package, the capture slot's four tools, the audio slot's OSD and
+    # its four scripts, the five slot scripts
     # and the keymap's three)...
     (
       assert
@@ -7094,6 +7591,11 @@ let
           (slotScriptDrv hmKeys "scoot-capture-output")
           (slotScriptDrv hmKeys "scoot-capture-region")
           (slotScriptDrv hmKeys "scoot-capture-clipboard")
+          pkgs.wob
+          (slotScriptDrv hmKeys "scoot-osd")
+          (slotScriptDrv hmKeys "scoot-volume")
+          (slotScriptDrv hmKeys "scoot-brightness")
+          (slotScriptDrv hmKeys "scoot-audio-sink")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -7191,6 +7693,24 @@ let
       assert lib.any (p: (p.name or "") == "scoot-capture-clipboard") hmKeysSlots.config.home.packages;
       true
     )
+    # ...and the audio slot's four beside them (the OSD and its three
+    # control scripts, on with the profile)...
+    (
+      assert lib.any (p: (p.name or "") == "scoot-osd") hmKeysSlots.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-volume") hmKeysSlots.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-brightness") hmKeysSlots.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-audio-sink") hmKeysSlots.config.home.packages;
+      true
+    )
     # ...one bind removed: its combo unbound, the other nineteen
     # still there (twenty-one with the daemon, the clipboard slot,
     # the launcher slot and the capture slot on, minus two)...
@@ -7238,10 +7758,11 @@ let
       true
     )
     # ...the whole keymap off: no `[binds]` from it (no other eval
-    # sets binds here, so the table is absent entirely) and no slot
-    # scripts either (the keymap installs those beside the binds), so
-    # the idle policy's five, mako, the launcher, the clipboard
-    # slot's tools and the capture slot's tools beside scoot only...
+    # sets binds here, so the table is absent entirely) and none of
+    # the keymap's own slot scripts either (those install beside the
+    # binds), so the idle policy's five, mako, the launcher, the
+    # clipboard slot's tools, the capture slot's tools and the audio
+    # slot's OSD and scripts beside scoot only...
     (
       assert allAssertionsHold hmKeysOff.config;
       true
@@ -7268,13 +7789,18 @@ let
           pkgs.slurp
           pkgs.fuzzel
           pkgs.wl-clipboard
+          pkgs.wob
+          (slotScriptDrv hmKeysOff "scoot-osd")
+          (slotScriptDrv hmKeysOff "scoot-volume")
+          (slotScriptDrv hmKeysOff "scoot-brightness")
+          (slotScriptDrv hmKeysOff "scoot-audio-sink")
         ];
       true
     )
     # NixOS: the keymap off leaves the profile's other packages
     # only (the five idle tools, mako, the launcher, the clipboard
-    # slot's tools and the capture slot's tools beside scoot and
-    # scootbg).
+    # slot's tools, the capture slot's tools and the audio slot's OSD
+    # beside scoot and scootbg).
     (
       assert allAssertionsHold osKeysOff.config;
       true
@@ -7287,7 +7813,6 @@ let
           pkgs.swayidle
           pkgs.brightnessctl
           pkgs.wlopm
-          pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
           pkgs.fuzzel
@@ -7299,6 +7824,11 @@ let
           pkgs.grim
           pkgs.slurp
           pkgs.fuzzel
+          pkgs.wob
+          pkgs.pipewire
+          pkgs.brightnessctl
+          pkgs.wireplumber
+          pkgs.playerctl
         ];
       true
     )
@@ -7344,11 +7874,12 @@ let
     # switch (one per null tool: the policy, the dim and screens-off
     # steps, the inhibitor, the locker -- plus the notification
     # daemon's one, the launcher's one, the clipboard slot's three
-    # and the capture slot's four,
+    # and the capture slot's four, plus the audio slot's two (the OSD
+    # and the sink helper's dump tool),
     # on with the profile; order-insensitive: the daemon's module
     # contributes its refusal first).
     (
-      assert builtins.length (failing hmIdle.config) == 14;
+      assert builtins.length (failing hmIdle.config) == 16;
       true
     )
     (
@@ -7374,11 +7905,12 @@ let
     )
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
-    # three plus this slot's five -- gtk beside wlr -- while the
+    # three plus this slot's five -- gtk beside wlr -- plus the audio
+    # slot's two (the OSD and the sink helper's dump tool) -- while the
     # docked-lid rule (plain values, no tools) still
     # lands.
     (
-      assert builtins.length (failing osIdle.config) == 15;
+      assert builtins.length (failing osIdle.config) == 17;
       true
     )
     (
@@ -7564,14 +8096,15 @@ let
     # ...and the keymap refuses nothing itself: the only failing
     # assertions are the idle policy's five plus the daemon's one plus
     # the launcher's one plus the clipboard slot's three plus the
-    # capture slot's four (their
+    # capture slot's four plus the audio slot's two (their
     # packages are null off Linux -- the daemon's pinned in
     # `_darwinNotifPins`, the launcher's in `_darwinLaunchPins`, the
     # clipboard slot's in `_darwinClipPins`, the capture slot's in
-    # `_darwinCapturePins`), so bare tool names stay valid
+    # `_darwinCapturePins`, the audio slot's in `_darwinAudioPins`),
+    # so bare tool names stay valid
     # config, just quiet at runtime.
     (
-      assert builtins.length (failing hmKeys.config) == 14;
+      assert builtins.length (failing hmKeys.config) == 16;
       true
     )
     (
@@ -8200,6 +8733,7 @@ assert lib.all (x: x) _notifPins;
 assert lib.all (x: x) _clipPins;
 assert lib.all (x: x) _launchPins;
 assert lib.all (x: x) _capturePins;
+assert lib.all (x: x) _audioPins;
 assert lib.all (x: x) _keysPins;
 assert lib.all (x: x) _powerPins;
 assert lib.all (x: x) _darwinIdlePins;
@@ -8207,6 +8741,7 @@ assert lib.all (x: x) _darwinNotifPins;
 assert lib.all (x: x) _darwinClipPins;
 assert lib.all (x: x) _darwinLaunchPins;
 assert lib.all (x: x) _darwinCapturePins;
+assert lib.all (x: x) _darwinAudioPins;
 assert lib.all (x: x) _darwinKeysPins;
 assert lib.all (x: x) _darwinPowerPins;
 assert lib.all (x: x) _flakePins;
@@ -8744,12 +9279,14 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       echo "ok: empty DND icon stays out of the payload"
 
     # 15. Keymap content: the rendered `[binds]` carries the
-    #     twenty-one profile binds with absolute tool paths (the sigils --
-    #     `@...@`, `%`, `+` -- intact through TOML; the notification
-    #     binds through mako's absolute path, the daemon, the clipboard
-    #     slot, the launcher slot and the capture slot being on with
-    #     the profile -- the picker, both launcher binds and the three
-    #     capture binds through their own scripts),
+    #     twenty-one profile binds (the sigils -- `@...@`, `%`, `+` --
+    #     intact through TOML; the notification binds through mako's
+    #     absolute path, the daemon, the clipboard slot, the launcher
+    #     slot and the capture slot being on with the profile -- the
+    #     picker, both launcher binds and the three capture binds
+    #     through their own scripts -- and the volume, brightness and
+    #     mic-mute binds through the audio slot's scripts, on with the
+    #     profile too),
     #     and with every slot on all twenty-one (slot scripts as store
     #     paths). No `wofi` anywhere: the launcher child reconciled the
     #     old default. The launcher binds stay plain strings (never
@@ -8761,10 +9298,12 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     assert len(got) == 21, got.keys()
     assert "wofi" not in open(sys.argv[1]).read(), "wofi default left in [binds]"
     vol = got["XF86AudioRaiseVolume"]
-    assert vol["action"].startswith("spawn ") and vol["action"].endswith(" set-volume @DEFAULT_AUDIO_SINK@ 5%+"), vol
+    assert vol["action"].endswith("/bin/scoot-volume sink-up"), vol
     assert vol["repeat"] is True and vol["allow_when_locked"] is True, vol
+    assert got["XF86AudioMute"]["action"].endswith("/bin/scoot-volume sink-mute"), got["XF86AudioMute"]
+    assert got["XF86AudioMicMute"]["action"].endswith("/bin/scoot-volume mic-mute"), got["XF86AudioMicMute"]
     bri = got["XF86MonBrightnessUp"]
-    assert bri["action"].endswith(" -e set +5%"), bri
+    assert bri["action"].endswith("/bin/scoot-brightness up"), bri
     assert bri["repeat"] is True and bri["allow_when_locked"] is True, bri
     assert got["super+escape"].endswith(" lock-session"), got["super+escape"]
     assert isinstance(got["super+v"], str), got["super+v"]
@@ -8793,6 +9332,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     assert got["ctrl+alt+space"].endswith("/bin/scoot-launcher --list-executables-in-path"), got["ctrl+alt+space"]
     assert got["super+n"].endswith("/bin/makoctl dismiss"), got["super+n"]
     assert "/bin/scoot-clipboard-pick" in got["super+v"], got["super+v"]
+    assert "/bin/scoot-volume sink-up" in got["XF86AudioRaiseVolume"], got["XF86AudioRaiseVolume"]
+    assert "/bin/scoot-brightness up" in got["XF86MonBrightnessUp"], got["XF86MonBrightnessUp"]
     assert "/bin/scoot-capture-output" in got["print"], got["print"]
     assert "/bin/scoot-capture-region" in got["shift+print"], got["shift+print"]
     assert "/bin/scoot-capture-clipboard" in got["ctrl+print"], got["ctrl+print"]
@@ -9322,6 +9863,221 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     # ...and anything else is usage (exit 2).
     if ${chargeScript} frobnicate; then echo "bogus charge verb accepted (21e)" >&2; exit 1; fi
     echo "ok: usage refuses unknown verbs"
+
+    # 22. Audio slot content: the wob config -- geometry, the hide
+    #     timeout and the overflow clamp, the look's roles as wob
+    #     colors (opaque `RRGGBBAA`), a washed muted style and an
+    #     urgent overflow style.
+    grep -F -x "timeout = 1500" ${audioThemed}
+    grep -F -x "max = 100" ${audioThemed}
+    grep -F -x "width = 400" ${audioThemed}
+    grep -F -x "height = 40" ${audioThemed}
+    grep -F -x "anchor = bottom" ${audioThemed}
+    grep -F -x "margin = 48" ${audioThemed}
+    grep -F -x "overflow_mode = nowrap" ${audioThemed}
+    grep -F -x "background_color = FCFBFBff" ${audioThemed}
+    grep -F -x "bar_color = 3D579Aff" ${audioThemed}
+    grep -F -x "border_color = 3D579Aff" ${audioThemed}
+    grep -F -x "overflow_bar_color = EE6F5Eff" ${audioThemed}
+    grep -F -q -- "[style.muted]" ${audioThemed}
+    grep -F -x "bar_color = C9CBD0ff" ${audioThemed}
+    echo "ok: the OSD config carries the geometry, the timeout and the look"
+
+    # 22b. Lookless (or opted out): geometry and the timeout stay, the
+    #      look's colors leave (wob's own stand), the muted style still
+    #      defined so mute never names a missing style.
+    grep -F -x "timeout = 1500" ${audioNoLook}
+    if grep -q "FCFBFBff" ${audioNoLook}; then echo "look color present with no look (22b)" >&2; exit 1; fi
+    grep -F -q -- "[style.muted]" ${audioNoLook}
+    grep -F -x "bar_color = 888888ff" ${audioNoLook}
+    if grep -q "FCFBFBff" ${audioTargetOff}; then echo "look color present with theming off (22b)" >&2; exit 1; fi
+    grep -F -q -- "[style.muted]" ${audioTargetOff}
+    echo "ok: opting out (or no look) leaves wob unthemed but mute-safe"
+
+    # 22c. Retimed: the override lands.
+    grep -F -x "timeout = 2500" ${audioTimeoutIni}
+    echo "ok: the retimed OSD renders its override"
+
+    # 22d. The control scripts name the slot's tools by absolute store
+    #      path and show through the one OSD script.
+    grep -F -q -- "bin/wpctl set-volume" ${audioBehaviorVolume}
+    grep -F -q -- "bin/wpctl set-mute" ${audioBehaviorVolume}
+    grep -F -q -- "bin/wpctl get-volume" ${audioBehaviorVolume}
+    grep -F -q -- "bin/scoot-osd show" ${audioBehaviorVolume}
+    grep -F -q -- "bin/brightnessctl" ${audioBehaviorBrightness}
+    grep -F -q -- "bin/scoot-osd show" ${audioBehaviorBrightness}
+    grep -F -q -- "bin/pw-dump" ${audioBehaviorSink}
+    grep -F -q -- "bin/wpctl set-default" ${audioBehaviorSink}
+    grep -F -q -- "bin/scoot-volume sink-show" ${audioBehaviorSink}
+    echo "ok: the control scripts name the slot's tools absolutely"
+
+    # 22e. Volume, brightness and sink behavior, against stub tools
+    #      (scripted through files under `$SCOOT_AUDIO_TEST_DIR`, one
+    #      evaluation covering every scenario: the stub `wpctl`
+    #      answers `get-volume` from `vol` (exit `vol-code`),
+    #      records `set-volume`/`set-mute` in `calls`
+    #      (exit `set-code`), answers `inspect` from `inspect` and
+    #      records `set-default` in `calls` plus `default-id`; the
+    #      stub `brightnessctl` lists `devs` and records sets; the
+    #      stub `pw-dump` prints `dump`).
+    export SCOOT_AUDIO_TEST_DIR="$PWD/audio-test"
+    mkdir -p "$SCOOT_AUDIO_TEST_DIR"
+    audio_setup() {
+      printf '%s' "$1" > "$SCOOT_AUDIO_TEST_DIR/vol"
+      printf '%s' "$2" > "$SCOOT_AUDIO_TEST_DIR/vol-code"
+      printf '%s' "$3" > "$SCOOT_AUDIO_TEST_DIR/set-code"
+      printf '%s' "$4" > "$SCOOT_AUDIO_TEST_DIR/devs"
+      printf '%s' "$5" > "$SCOOT_AUDIO_TEST_DIR/dump"
+      printf '%s' "$6" > "$SCOOT_AUDIO_TEST_DIR/dump-code"
+      printf '%s' "$7" > "$SCOOT_AUDIO_TEST_DIR/inspect"
+      : > "$SCOOT_AUDIO_TEST_DIR/calls"
+    }
+    audio_fifo() {
+      export XDG_RUNTIME_DIR="$SCOOT_AUDIO_TEST_DIR/rt"
+      mkdir -p "$XDG_RUNTIME_DIR"
+      rm -f "$XDG_RUNTIME_DIR/scoot-osd.fifo"
+      mkfifo "$XDG_RUNTIME_DIR/scoot-osd.fifo"
+    }
+    audio_shown() {
+      # Drain one OSD line: the reader starts first (a read-only
+      # open blocks until the writer arrives), the writer's
+      # read-write open never blocks, and its exit closes the fifo
+      # so the reader ends too.
+      cat "$XDG_RUNTIME_DIR/scoot-osd.fifo" > "$SCOOT_AUDIO_TEST_DIR/shown" &
+      reader=$!
+      "$@"
+      status=$?
+      wait "$reader"
+      printf '%s:' "$status"
+      cat "$SCOOT_AUDIO_TEST_DIR/shown"
+      echo
+    }
+
+    # 22e1. Volume up: the step runs, the level shows (percent form).
+    audio_setup 'Volume: 80%' 0 0 "" "" 0 ""
+    audio_fifo
+    got=$(audio_shown ${audioBehaviorVolume} sink-up)
+    [ "$got" = "0:80" ] || { echo "volume up showed '$got', want '0:80' (22e1)" >&2; exit 1; }
+    grep -q "set-volume @DEFAULT_AUDIO_SINK@ 5%+" "$SCOOT_AUDIO_TEST_DIR/calls"
+    echo "ok: volume up steps and shows the level"
+
+    # 22e2. Fraction form and mute: `1.5 [MUTED]` shows `150 muted`
+    #      (past full: wob clamps it into the urgent overflow style).
+    audio_setup 'Volume: 1.5 [MUTED]' 0 0 "" "" 0 ""
+    audio_fifo
+    got=$(audio_shown ${audioBehaviorVolume} sink-mute)
+    [ "$got" = "0:150 muted" ] || { echo "mute showed '$got', want '0:150 muted' (22e2)" >&2; exit 1; }
+    echo "ok: mute shows the level washed out, past full overflows urgent"
+
+    # 22e3. No device: the step fails -- loud (exit 1), nothing
+    #      shown. Both halves fail loud: the step itself...
+    audio_setup 'Volume: 80%' 0 1 "" "" 0 ""
+    audio_fifo
+    if ${audioBehaviorVolume} sink-up 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success on a failed step (22e3)" >&2; exit 1; fi
+    # ...and the read-back.
+    audio_setup 'Error: no such device' 1 0 "" "" 0 ""
+    audio_fifo
+    if ${audioBehaviorVolume} sink-up 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success with no device (22e3)" >&2; exit 1; fi
+    grep -q "no audio device" "$SCOOT_AUDIO_TEST_DIR/stderr"
+    echo "ok: no device fails loud per entry"
+
+    # 22e4. Mic mute toggles the source and shows its level.
+    audio_setup 'Volume: 0.5' 0 0 "" "" 0 ""
+    audio_fifo
+    got=$(audio_shown ${audioBehaviorVolume} mic-mute)
+    [ "$got" = "0:50" ] || { echo "mic mute showed '$got', want '0:50' (22e4)" >&2; exit 1; }
+    grep -q "set-mute @DEFAULT_AUDIO_SOURCE@ toggle" "$SCOOT_AUDIO_TEST_DIR/calls"
+    echo "ok: mic mute toggles the source and shows it"
+
+    # 22e5. Brightness: every backlight device steps the same amount
+    #      (keyboard LEDs excluded: class `leds`), the OSD shows the
+    #      rounded average.
+    audio_setup "" 0 0 "$(printf 'panel,backlight,400,40%,1000\nnext,backlight,600,60%,1000\nkbd,leds,0,0%,255\n')" "" 0 ""
+    audio_fifo
+    got=$(audio_shown ${audioBehaviorBrightness} up)
+    [ "$got" = "0:50" ] || { echo "brightness showed '$got', want '0:50' (22e5)" >&2; exit 1; }
+    grep -q "brightness-set -e -d panel set +5%" "$SCOOT_AUDIO_TEST_DIR/calls"
+    grep -q "brightness-set -e -d ext set +5%" "$SCOOT_AUDIO_TEST_DIR/calls"
+    if grep -q "kbd" "$SCOOT_AUDIO_TEST_DIR/calls"; then echo "keyboard LED stepped (22e5)" >&2; exit 1; fi
+    echo "ok: brightness steps every panel and shows the average"
+
+    # 22e6. No backlight: loud, naming it.
+    audio_setup "" 0 0 "" "" 0 ""
+    if ${audioBehaviorBrightness} up 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success with no backlight (22e6)" >&2; exit 1; fi
+    grep -q "no backlight devices" "$SCOOT_AUDIO_TEST_DIR/stderr"
+    echo "ok: no backlight fails loud per entry"
+
+    # 22e7. Sink list: id plus description, sources excluded.
+    audio_setup "" 0 0 "" '[{"id":42,"info":{"props":{"media.class":"Audio/Sink","node.description":"Dummy Output"}}},{"id":43,"info":{"props":{"media.class":"Audio/Sink","node.name":"alsa_out"}}},{"id":99,"info":{"props":{"media.class":"Audio/Source"}}}]' 0 ""
+    got=$(${audioBehaviorSink} list)
+    [ "$got" = "42 Dummy Output
+43 alsa_out" ] || { echo "sink list showed '$got' (22e7)" >&2; exit 1; }
+    echo "ok: sink list names id plus description"
+
+    # 22e8. Sink set by name moves the default and shows its level
+    #      (the confirmation on stderr: `list` owns stdout).
+    audio_fifo
+    cat "$XDG_RUNTIME_DIR/scoot-osd.fifo" > "$SCOOT_AUDIO_TEST_DIR/shown" &
+    reader=$!
+    ${audioBehaviorSink} set alsa_out 2>"$SCOOT_AUDIO_TEST_DIR/stderr"
+    wait "$reader"
+    [ "$(cat "$SCOOT_AUDIO_TEST_DIR/shown")" = "50" ] || { echo "sink set showed '$(cat "$SCOOT_AUDIO_TEST_DIR/shown")', want '50' (22e8)" >&2; exit 1; }
+    grep -q "Default sink: alsa_out" "$SCOOT_AUDIO_TEST_DIR/stderr"
+    grep -q "set-default 43" "$SCOOT_AUDIO_TEST_DIR/calls"
+    echo "ok: sink set moves the default and shows it"
+
+    # 22e9. Sink set with no (or an ambiguous) match: loud.
+    if ${audioBehaviorSink} set nope 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success on no match (22e9)" >&2; exit 1; fi
+    grep -q "no single sink matches" "$SCOOT_AUDIO_TEST_DIR/stderr"
+    audio_setup "" 0 0 "" '[{"id":42,"info":{"props":{"media.class":"Audio/Sink","node.description":"Same"}}},{"id":43,"info":{"props":{"media.class":"Audio/Sink","node.description":"Same"}}}]' 0 ""
+    if ${audioBehaviorSink} set Same 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success on ambiguity (22e9)" >&2; exit 1; fi
+    grep -q "no single sink matches" "$SCOOT_AUDIO_TEST_DIR/stderr"
+    echo "ok: sink set refuses no and ambiguous matches"
+
+    # 22f0. Cycle: next after the current default, wrapping past the end.
+    audio_setup 'Volume: 0.5' 0 0 "" '[{"id":42,"info":{"props":{"media.class":"Audio/Sink","node.description":"Dummy Output"}}},{"id":43,"info":{"props":{"media.class":"Audio/Sink","node.name":"alsa_out"}}}]' 0 'id 42, type PipeWire:Interface:Node'
+    audio_fifo
+    audio_shown ${audioBehaviorSink} cycle > /dev/null
+    grep -q "set-default 43" "$SCOOT_AUDIO_TEST_DIR/calls"
+    printf '%s' 'id 43, type PipeWire:Interface:Node' > "$SCOOT_AUDIO_TEST_DIR/inspect"
+    : > "$SCOOT_AUDIO_TEST_DIR/calls"
+    audio_fifo
+    audio_shown ${audioBehaviorSink} cycle > /dev/null
+    grep -q "set-default 42" "$SCOOT_AUDIO_TEST_DIR/calls"
+    # ...and with a single sink it stays, saying so.
+    audio_setup 'Volume: 0.5' 0 0 "" '[{"id":42,"info":{"props":{"media.class":"Audio/Sink","node.description":"Only"}}}]' 0 'id 42, type PipeWire:Interface:Node'
+    audio_fifo
+    cat "$XDG_RUNTIME_DIR/scoot-osd.fifo" > "$SCOOT_AUDIO_TEST_DIR/shown" &
+    reader=$!
+    ${audioBehaviorSink} cycle 2>"$SCOOT_AUDIO_TEST_DIR/stderr"
+    wait "$reader"
+    grep -q "only one sink, staying" "$SCOOT_AUDIO_TEST_DIR/stderr"
+    if grep -q "set-default" "$SCOOT_AUDIO_TEST_DIR/calls"; then echo "cycle moved a single sink (22f0)" >&2; exit 1; fi
+    [ "$(cat "$SCOOT_AUDIO_TEST_DIR/shown")" = "50" ] || { echo "single-sink cycle showed '$(cat "$SCOOT_AUDIO_TEST_DIR/shown")' (22f0)" >&2; exit 1; }
+    echo "ok: sink cycle moves to the next sink and wraps"
+
+    # 22f1. No sinks (or no server): loud.
+    audio_setup "" 0 0 "" '[]' 0 ""
+    if ${audioBehaviorSink} list 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success with no sinks (22f1)" >&2; exit 1; fi
+    grep -q "no audio sinks" "$SCOOT_AUDIO_TEST_DIR/stderr"
+    audio_setup "" 0 0 "" "" 1 ""
+    if ${audioBehaviorSink} list 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success with no server (22f1)" >&2; exit 1; fi
+    grep -q "no audio sinks" "$SCOOT_AUDIO_TEST_DIR/stderr"
+    echo "ok: no sinks fails loud per entry"
+
+    # 22f2. `show` validates its percent and lands byte-exact; with no
+    #      daemon it fails loud instead of wedging.
+    if ${audioBehaviorOsd} show 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success on missing percent (22f2)" >&2; exit 1; fi
+    if ${audioBehaviorOsd} show abc 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success on a non-number (22f2)" >&2; exit 1; fi
+    if ${audioBehaviorOsd} frobnicate 2>/dev/null; then echo "silent success on a bogus command (22f2)" >&2; exit 1; fi
+    audio_fifo
+    got=$(audio_shown ${audioBehaviorOsd} show 42 muted)
+    [ "$got" = "0:42 muted" ] || { echo "show landed '$got', want '0:42 muted' (22f2)" >&2; exit 1; }
+    export XDG_RUNTIME_DIR="$SCOOT_AUDIO_TEST_DIR/no-rt"
+    mkdir -p "$XDG_RUNTIME_DIR"
+    if ${audioBehaviorOsd} show 42 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success with no daemon (22f2)" >&2; exit 1; fi
+    grep -q "no OSD running" "$SCOOT_AUDIO_TEST_DIR/stderr"
+    echo "ok: show validates, lands byte-exact, and misses loud with no daemon"
   ''}
 
   touch $out
