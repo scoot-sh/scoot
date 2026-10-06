@@ -188,7 +188,7 @@
 #   fail eval;
 #   the theme (`desktop-theme-look` child) runs with the profile --
 #   the look's cursor in the compositor config (one priority below
-#   Stylix's), GTK settings plus `GTK_THEME`, the qt6ct config plus
+#   Stylix's), GTK settings, the qt6ct config plus
 #   `QT_QPA_PLATFORMTHEME`, the dark-mode preference from the look's
 #   polarity, the fontconfig default (UI face for sans-serif,
 #   terminal face for monospace), the look's UI face as the bar's
@@ -8563,8 +8563,15 @@ let
         ) == [ ];
       true
     )
+    # ...no `GTK_THEME` force anywhere (it would make libadwaita
+    # skip its own providers, leaving rendering the `gtk.css` cannot
+    # reach -- `settings.ini` names the theme instead)...
     (
-      assert hmTheme.config.systemd.user.sessionVariables.GTK_THEME == "Adwaita";
+      assert !(hmTheme.config.systemd.user.sessionVariables ? GTK_THEME);
+      true
+    )
+    (
+      assert !(hmThemeDark.config.systemd.user.sessionVariables ? GTK_THEME);
       true
     )
     (
@@ -8591,13 +8598,10 @@ let
       assert hmTheme.config.programs.scoot.settings.appearance.cursor_size == 24;
       true
     )
-    # ...a dark look names the dark theme and preference...
+    # ...a dark look sets the dark Qt style (the GTK side needs no
+    # theme force: `settings.ini` names it)...
     (
       assert allAssertionsHold hmThemeDark.config;
-      true
-    )
-    (
-      assert hmThemeDark.config.systemd.user.sessionVariables.GTK_THEME == "Adwaita-dark";
       true
     )
     # ...radial-burst carries no shell, editor or monitor files (the

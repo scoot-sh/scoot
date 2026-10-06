@@ -490,17 +490,24 @@ in
         ++ lib.optional (qtThemed && theme.qt.stylePackage != null) theme.qt.stylePackage;
 
       # Session variables for the systemd user session (user units and
-      # D-Bus-activated apps inherit the manager environment): the
-      # GTK theme force, the Qt platform theme that reads the config
-      # below plus the plugin path its platformtheme and style live
-      # on (Qt only searches its compiled-in paths otherwise, so an
-      # unpackaged style would silently fall back), and the X cursor
-      # for X11/XWayland apps (the Wayland cursor comes from the
-      # compositor config beside this). Each at `mkDefault`, so an
-      # explicit value still wins. Qt6 only: the plugin directory
-      # spelling below is Qt6's.
+      # D-Bus-activated apps inherit the manager environment): the Qt
+      # platform theme that reads the config below plus the plugin path
+      # its platformtheme and style live on (Qt only searches its
+      # compiled-in paths otherwise, so an unpackaged style would
+      # silently fall back), and the X cursor for X11/XWayland apps
+      # (the Wayland cursor comes from the compositor config beside
+      # this). Each at `mkDefault`, so an explicit value still wins.
+      # Qt6 only: the plugin directory spelling below is Qt6's.
+      #
+      # Deliberately no `GTK_THEME`: it names a theme GTK must find,
+      # and on GTK4/libadwaita its presence makes libadwaita skip
+      # installing its own stylesheet providers entirely (pinned 1.9.3
+      # `adw-style-manager.c`: without `GTK_THEME` it forces
+      # `Adwaita-empty` plus its theme, accent and fonts providers),
+      # leaving plain-GTK fallback rendering the `gtk.css` cannot
+      # reach. `settings.ini` already names the theme (`Adwaita` /
+      # `Adwaita-dark`) everywhere a name is read, so nothing is lost.
       systemd.user.sessionVariables = lib.mkMerge [
-        (lib.mkIf gtkThemed { GTK_THEME = lib.mkDefault gtkTheme; })
         (lib.mkIf qtThemed { QT_QPA_PLATFORMTHEME = lib.mkDefault "qt6ct"; })
         (lib.mkIf (qtThemed && theme.qt.package != null && theme.qt.stylePackage != null) {
           QT_PLUGIN_PATH = lib.mkDefault "${theme.qt.package}/lib/qt-6/plugins:${theme.qt.stylePackage}/lib/qt-6/plugins";
