@@ -282,12 +282,19 @@ in
       # Session variables for the systemd user session (user units and
       # D-Bus-activated apps inherit the manager environment): the
       # GTK theme force, the Qt platform theme that reads the config
-      # below, and the X cursor for X11/XWayland apps (the Wayland
-      # cursor comes from the compositor config beside this). Each at
-      # `mkDefault`, so an explicit value still wins.
+      # below plus the plugin path its platformtheme and style live
+      # on (Qt only searches its compiled-in paths otherwise, so an
+      # unpackaged style would silently fall back), and the X cursor
+      # for X11/XWayland apps (the Wayland cursor comes from the
+      # compositor config beside this). Each at `mkDefault`, so an
+      # explicit value still wins. Qt6 only: the plugin directory
+      # spelling below is Qt6's.
       systemd.user.sessionVariables = lib.mkMerge [
         (lib.mkIf gtkThemed { GTK_THEME = lib.mkDefault gtkTheme; })
         (lib.mkIf qtThemed { QT_QPA_PLATFORMTHEME = lib.mkDefault "qt6ct"; })
+        (lib.mkIf (qtThemed && theme.qt.package != null && theme.qt.stylePackage != null) {
+          QT_PLUGIN_PATH = lib.mkDefault "${theme.qt.package}/lib/qt-6/plugins:${theme.qt.stylePackage}/lib/qt-6/plugins";
+        })
         (lib.mkIf cursorThemed {
           XCURSOR_THEME = lib.mkDefault themeLook.cursor.name;
           XCURSOR_SIZE = lib.mkDefault (toString themeLook.cursor.size);

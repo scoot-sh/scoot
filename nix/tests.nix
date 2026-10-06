@@ -8477,6 +8477,10 @@ let
       true
     )
     (
+      assert lib.hasInfix "qt-6/plugins" hmTheme.config.systemd.user.sessionVariables.QT_PLUGIN_PATH;
+      true
+    )
+    (
       assert hmTheme.config.systemd.user.sessionVariables.XCURSOR_THEME == "Vanilla-DMZ";
       true
     )

@@ -312,7 +312,7 @@ variables only, no daemon, so the theme costs no wakeups.
 | Piece | Option | Type | Default | Notes |
 |---|---|---|---|---|
 | GTK apps | `desktop.theme.targets.gtk.enable` | bool | `true` | `settings.ini` (GTK 3 + 4) plus `GTK_THEME`: Adwaita, or Adwaita-dark for a dark look, with the look's font, cursor and dark preference |
-| Qt apps | `desktop.theme.targets.qt.enable` | bool | `true` | `qt6ct.conf` through `QT_QPA_PLATFORMTHEME=qt6ct`: the Adwaita Qt style in the look's polarity, Adwaita icons |
+| Qt apps | `desktop.theme.targets.qt.enable` | bool | `true` | `qt6ct.conf` through `QT_QPA_PLATFORMTHEME=qt6ct` (plus `QT_PLUGIN_PATH` for its platformtheme and style): the Adwaita Qt style in the look's polarity, Adwaita icons |
 | Cursor | `desktop.theme.targets.cursor.enable` | bool | `true` | Vanilla-DMZ at 24 px: the compositor cursor plus `XCURSOR_THEME`/`XCURSOR_SIZE` for X11 apps |
 | Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DroidSansM Nerd Font Propo for sans-serif, FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the bar's font file, so the bar never falls back to icon-less DejaVu |
 | Login screen | `desktop.theme.targets.greeter.enable` | bool | `true` | the session wallpaper behind the login card (nothing for `vinyl-sunset`: its illustration is license-barred), the dark setting, the look's ReGreet CSS and font — needs `greeter.enable` too |
