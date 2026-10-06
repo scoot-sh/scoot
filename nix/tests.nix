@@ -7501,14 +7501,14 @@ let
     # (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the clipboard slot's three plus the capture
     # slot's four plus the audio slot's two plus the night light's
-    # one plus the agent's one plus the keyring's two: the profile
-    # is on in this evaluation, so its slot is open).
+    # one plus the theme's six plus the agent's one plus the keyring's
+    # two: the profile is on in this evaluation, so its slot is open).
     (
       assert hmLaunch.config.programs.scoot.desktop.launcher.package == null;
       true
     )
     (
-      assert builtins.length (failing hmLaunch.config) == 20;
+      assert builtins.length (failing hmLaunch.config) == 26;
       true
     )
     (
@@ -9016,11 +9016,11 @@ let
     # ...and the slot's own assertions refusing loudly, naming each
     # tool (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the clipboard slot's three plus this slot's
-    # four plus the audio slot's two plus the night light's one
-    # plus the agent's one plus the keyring's two: the profile is
-    # on in this evaluation).
+    # four plus the audio slot's two plus the night light's one plus
+    # the theme's six plus the agent's one plus the keyring's two:
+    # the profile is on in this evaluation).
     (
-      assert builtins.length (failing hmCapture.config) == 20;
+      assert builtins.length (failing hmCapture.config) == 26;
       true
     )
     (
@@ -9087,11 +9087,11 @@ let
     # ...and the slot's own assertions refusing loudly, naming each
     # switch (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the slot's three plus the capture slot's
-    # four plus the audio slot's two plus the night light's one
-    # plus the agent's one plus the keyring's two: the profile is
-    # on in this evaluation).
+    # four plus the audio slot's two plus the night light's one plus
+    # the theme's six plus the agent's one plus the keyring's two:
+    # the profile is on in this evaluation).
     (
-      assert builtins.length (failing hmClip.config) == 20;
+      assert builtins.length (failing hmClip.config) == 26;
       true
     )
     (
@@ -9135,15 +9135,15 @@ let
     # Home-manager: null, and the daemon's assertion refusing loudly
     # (the idle policy's five plus the daemon's one plus the launcher's
     # one plus the clipboard slot's three plus the capture slot's
-    # four plus the audio slot's two plus the night light's one
-    # plus the agent's one plus the keyring's two: the profile is
-    # on in this evaluation, so its slot is open).
+    # four plus the audio slot's two plus the night light's one plus
+    # the theme's six plus the agent's one plus the keyring's two:
+    # the profile is on in this evaluation, so its slot is open).
     (
       assert hmNotif.config.programs.scoot.desktop.notifications.package == null;
       true
     )
     (
-      assert builtins.length (failing hmNotif.config) == 20;
+      assert builtins.length (failing hmNotif.config) == 26;
       true
     )
     (
@@ -9528,13 +9528,13 @@ let
       assert hmNight.config.programs.scoot.desktop.nightlight.package == null;
       true
     )
-    # ...refused loudly beside the profile's other nineteen (the idle
+    # ...refused loudly beside the profile's other twenty-five (the idle
     # policy's five, the daemon's one, the launcher's one, the
     # clipboard slot's three, the capture slot's four, the audio
-    # slot's two, the night light's one, the agent's one, the
-    # keyring's two).
+    # slot's two, the night light's one, the theme's six, the
+    # agent's one, the keyring's two).
     (
-      assert builtins.length (failing hmNight.config) == 20;
+      assert builtins.length (failing hmNight.config) == 26;
       true
     )
     (
@@ -9975,12 +9975,12 @@ let
     # steps, the inhibitor, the locker -- plus the notification
     # daemon's one, the launcher's one, the clipboard slot's three,
     # the capture slot's four, the audio slot's two (the OSD and the
-    # sink helper's dump tool), the night light's one, the agent's
-    # one plus the keyring's two,
+    # sink helper's dump tool), the night light's one, the theme's
+    # six, the agent's one plus the keyring's two,
     # on with the profile; order-insensitive: the daemon's module
     # contributes its refusal first).
     (
-      assert builtins.length (failing hmIdle.config) == 20;
+      assert builtins.length (failing hmIdle.config) == 26;
       true
     )
     (
