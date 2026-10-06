@@ -137,7 +137,7 @@ let
           ${mkfifoBin} -m 600 "$fifo"
         fi
         exec ${tailBin} -f "$fifo" | exec ${
-          if audio.osd.package != null then lib.getExe audio.osd.package else "wob"
+          if audio.osd.package != null then lib.getExe' audio.osd.package "wob" else "wob"
         } -c ${osdIni}
         ;;
       *)
