@@ -7836,6 +7836,7 @@ let
           pkgs.swayidle
           pkgs.brightnessctl
           pkgs.wlopm
+          pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
           pkgs.fuzzel
@@ -7849,9 +7850,6 @@ let
           pkgs.fuzzel
           pkgs.wob
           pkgs.pipewire
-          pkgs.brightnessctl
-          pkgs.wireplumber
-          pkgs.playerctl
         ];
       true
     )
