@@ -1,9 +1,9 @@
 ---
-title: scoot knocks your windows sideways
+title: knocks your windows sideways.
 description: "A scrolling-tiling Wayland compositor that runs without a GPU."
 template: splash
 hero:
-  title: scoot knocks your windows sideways
+  title: knocks your windows sideways.
   tagline: A scrolling Wayland compositor. Windows tile in sideways-scrolling columns, it runs without a GPU, and agents can drive it over IPC.
   image:
     html: '<picture class="hero-art"><source type="image/avif" srcset="./hero-cat-960.avif 960w, ./hero-cat-1440.avif 1440w" sizes="(max-width: 1280px) 100vw, 1280px" /><source type="image/webp" srcset="./hero-cat-960.webp 960w, ./hero-cat-1440.webp 1440w" sizes="(max-width: 1280px) 100vw, 1280px" /><img src="./hero-cat-960.jpg" fetchpriority="high" decoding="async" alt="scoot — a grumpy ginger cat swats terminal windows sideways off a black background, under a huge white scoot wordmark" /></picture>'

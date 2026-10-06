@@ -2,7 +2,7 @@
  *
  * Brand decision (2026-10-06, site/OUTLINE.md): true-black ground, white
  * type, one ginger accent sampled from the cat's fur in
- * `docs/assets/logo.png`, Archivo Black display type matching the
+ * `docs/assets/logo.png`, League Spartan Black display type matching the
  * wordmark, the logo itself as the home hero. Plain: no gradients,
  * glows, shadows or textures anywhere.
  *
@@ -18,20 +18,25 @@
  *     on white (6.82:1). Delta-E 25.0 from `#D97757`.
  *   seam  #2A2A2A — hairlines on night, decorative only, never text.
  *
- * Type: Archivo Black (OFL 1.1, Omnibus-Type, self-hosted latin subset
- * `src/assets/fonts/archivo-black-latin.woff2`, 9,792 bytes) for the
- * header wordmark, the hero title and headings only. Body and code stay
- * on the system stacks: a text companion would cost bytes without
- * carrying brand. Chosen over Nunito 900, Baloo 2 800 and Fredoka 700 in
- * a side-by-side against the logo wordmark (see the brand report): the
- * rounded faces read soft; Archivo matches the logo's blunt grotesque
- * weight and round bowls.
+ * Type: League Spartan 900 (OFL 1.1, The League Spartan Project
+ * Authors — Micah Rich and Tyler Finck, self-hosted latin subset
+ * `src/assets/fonts/league-spartan-latin-900.woff2`, 12,648 bytes) for
+ * the header wordmark, the hero title and headings only (including
+ * Starlight's page title, which lives outside `.sl-markdown-content`).
+ * Body and code stay on the system stacks: a text companion would cost
+ * bytes without carrying brand. Chosen over Montserrat 900, Poppins
+ * 900, Outfit 900, Urbanist 900, Lexend 900 and the previous Archivo
+ * Black in a side-by-side against the logo wordmark at matched
+ * t-height (see the fix-round report): the only geometric with the
+ * logo's flat angled `t` terminal, the most circular `o` counter
+ * (0.917 vs 1.02 on the logo) and a wide `s` (0.853 of the `o`
+ * advance vs 0.815 on the logo).
  */
 
 @font-face {
-  font-family: 'Archivo Black';
-  src: url('../assets/fonts/archivo-black-latin.woff2') format('woff2');
-  font-weight: 400;
+  font-family: 'League Spartan';
+  src: url('../assets/fonts/league-spartan-latin-900.woff2') format('woff2');
+  font-weight: 900;
   font-style: normal;
   font-display: swap;
 }
@@ -84,23 +89,29 @@
   --sl-color-bg-sidebar: #ffffff;
 }
 
-/* Display type: header wordmark, hero title, headings. Tight, like the
- * logo. (Unlayered rules beat Starlight's `@layer starlight.core` ones
- * at any specificity.) */
+/* Display type: header wordmark, hero title, page title, headings.
+ * Tight, like the logo. (Unlayered rules beat Starlight's
+ * `@layer starlight.core` ones at any specificity.) Starlight renders
+ * the page title as a direct `h1` child of `.sl-container`, outside
+ * `.sl-markdown-content`, with a zero-specificity `:where()` rule —
+ * so it needs its own selector here; without it the title falls back
+ * to the system bold while h2 uses the display face. */
 .site-title,
 .hero h1,
+.content-panel > .sl-container > h1,
 .sl-markdown-content h1,
 .sl-markdown-content h2,
 .sl-markdown-content h3 {
-  font-family: 'Archivo Black', var(--sl-font-system);
-  font-weight: 400;
+  font-family: 'League Spartan', var(--sl-font-system);
+  font-weight: 900;
   letter-spacing: -0.02em;
 }
 .hero h1 {
   font-size: clamp(2.75rem, 8vw, 4.5rem);
   line-height: 1;
 }
-.sl-markdown-content h1 {
+.sl-markdown-content h1,
+.content-panel > .sl-container > h1 {
   font-size: 2rem;
   line-height: 1.15;
 }
@@ -189,7 +200,12 @@ kbd {
  * get the same page everyone else does. */
 
 /* Hero art is plain, like the logo: square edges, no frame, no shadow.
- * The class is on the `<picture>` wrapper (see index.md). */
+ * The class is on the `<picture>` wrapper (see index.md). On desktop
+ * the art is capped to the viewport (42vh from ~1100px up) so the art,
+ * headline, tagline and both actions all fit in the first 900px —
+ * stacked and art-first, not side-by-side, so the short headline still
+ * reads as the punchline under the image's own giant wordmark. Phone
+ * keeps the full-bleed stacked art; it already works. */
 .hero-art {
   display: block;
   width: 100%;
@@ -198,6 +214,14 @@ kbd {
   display: block;
   width: 100%;
   height: auto;
+}
+@media (min-width: 1100px) {
+  .hero-art img {
+    width: auto;
+    max-width: 100%;
+    max-height: 42vh;
+    margin-inline: auto;
+  }
 }
 
 /* Looks strip: plain linked figures, no cards, no shadows. A responsive

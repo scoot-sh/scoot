@@ -162,12 +162,15 @@ edit `.claude/*`, so those two are flagged for the maintainer):
 - `src/pages/[...page].md.ts` — per-page Markdown twins at stable `/<slug>.md` URLs (the plugin covers the aggregates; this covers the per-page requirement).
 - Per-app `customSets` in the plugin config (`Start`, `scoot` today): one llms set per sidebar section that has pages, served at `/_llms-txt/<set>.txt` and linked from `llms.txt`. Paths match Starlight's extensionless page ids, so sets widen to `<app>/**` when slugs nest in the move PR.
 - `scripts/check-llms.mjs` — build gate: fails if `llms.txt` misses a page, a `.md` twin, or a linked bundle 404s (bundles and `_llms-txt/` sets alike).
-- Fonts: **one display face is bundled.** Archivo Black (OFL 1.1,
-  Omnibus-Type, self-hosted latin-subset woff2,
-  `src/assets/fonts/archivo-black-latin.woff2`, 9,792 bytes) for the
-  header wordmark, the hero title and headings — the closest OFL match
-  to the logo wordmark (compared side by side against Nunito 900,
-  Baloo 2 800 and Fredoka 700; see the brand report). Body and code
+- Fonts: **one display face is bundled.** League Spartan 900 (OFL 1.1,
+  The League Spartan Project Authors — Micah Rich and Tyler Finck,
+  self-hosted latin-subset woff2,
+  `src/assets/fonts/league-spartan-latin-900.woff2`, 12,648 bytes) for
+  the header wordmark, the hero title, page titles and headings — the
+  closest OFL match to the logo wordmark (compared side by side at
+  matched t-height against Montserrat 900, Poppins 900, Outfit 900,
+  Urbanist 900, Lexend 900 and the previous Archivo Black; see the
+  fix-round report and `brand.font-compare.png`). Body and code
   stay on the system stacks. The bar's Nerd Fonts stay out for the
   same reason as before.
 
@@ -196,8 +199,8 @@ reference pages stay calm and fast to read.
   `#2A2A2A` hairlines, decorative only. No gradients, glows, shadows
   or textures. The terminal-dot motif appears exactly once (the 404
   chrome); motion lines nowhere.
-- **Type:** Archivo Black for wordmark, hero and headings (see Fonts
-  above); system stacks elsewhere.
+- **Type:** League Spartan 900 for wordmark, hero, page titles and
+  headings (see Fonts above); system stacks elsewhere.
 - **Header/surface:** Starlight `logo` is the cat's face in a black
   circle (`src/assets/cat-head.png`, face box (985,235)-(1315,565))
   beside real-text "scoot"; favicon and social card from the same crop

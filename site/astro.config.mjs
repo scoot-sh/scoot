@@ -34,7 +34,7 @@ export default defineConfig({
       // The cat's face in a black circle, from the project logo
       // (`docs/assets/logo.png`, face box (985,235)-(1315,565)); the black
       // surround works on either theme ground. The "scoot" title text
-      // beside it is set in Archivo Black (see custom.css).
+      // beside it is set in League Spartan 900 (see custom.css).
       logo: {
         src: './src/assets/cat-head.png',
         alt: 'scoot — a grumpy ginger cat about to swat a window sideways',
