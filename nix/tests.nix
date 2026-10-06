@@ -9353,8 +9353,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     assert got["ctrl+alt+space"].endswith("/bin/scoot-launcher --list-executables-in-path"), got["ctrl+alt+space"]
     assert got["super+n"].endswith("/bin/makoctl dismiss"), got["super+n"]
     assert "/bin/scoot-clipboard-pick" in got["super+v"], got["super+v"]
-    assert "/bin/scoot-volume sink-up" in got["XF86AudioRaiseVolume"], got["XF86AudioRaiseVolume"]
-    assert "/bin/scoot-brightness up" in got["XF86MonBrightnessUp"], got["XF86MonBrightnessUp"]
+    assert "/bin/scoot-volume sink-up" in got["XF86AudioRaiseVolume"]["action"], got["XF86AudioRaiseVolume"]
+    assert "/bin/scoot-brightness up" in got["XF86MonBrightnessUp"]["action"], got["XF86MonBrightnessUp"]
     assert "/bin/scoot-capture-output" in got["print"], got["print"]
     assert "/bin/scoot-capture-region" in got["shift+print"], got["shift+print"]
     assert "/bin/scoot-capture-clipboard" in got["ctrl+print"], got["ctrl+print"]
@@ -10000,6 +10000,11 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     audio_fifo
     if ${audioBehaviorVolume} sink-up 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success with no device (22e3)" >&2; exit 1; fi
     grep -q "no audio device" "$SCOOT_AUDIO_TEST_DIR/stderr"
+    # ...and an unparsable level (no digits at all).
+    audio_setup 'Volume: --' 0 0 "" "" 0 ""
+    audio_fifo
+    if ${audioBehaviorVolume} sink-up 2>"$SCOOT_AUDIO_TEST_DIR/stderr"; then echo "silent success on garbage level (21e3)" >&2; exit 1; fi
+    grep -q "cannot parse" "$SCOOT_AUDIO_TEST_DIR/stderr"
     echo "ok: no device fails loud per entry"
 
     # 22e4. Mic mute toggles the source and shows its level.

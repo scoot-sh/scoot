@@ -196,6 +196,13 @@ let
         ;;
     esac
     case "$vol" in
+      *[0-9]*) ;;
+      *)
+        echo "scoot-volume: cannot parse the level from '$out'" >&2
+        exit 1
+        ;;
+    esac
+    case "$vol" in
       *%) vol="''${vol%\%}" ;;
       *) vol="$(${awkBin} -v v="$vol" 'BEGIN { printf "%d", v * 100 + 0.5 }')" ;;
     esac
