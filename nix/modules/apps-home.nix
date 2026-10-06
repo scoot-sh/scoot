@@ -85,13 +85,20 @@ let
   # - `list` prints candidate SSIDs (saved connections first, then
   #   the cached scan, deduplicated): a first join from a terminal
   #   stores a system connection, so the daily switch is one row.
-  # - `pick` runs `list` through the menu into `connect`.
+  # - `pick` runs `list` through the menu below (the keymap's bind).
+  # - `menu` runs the lines on stdin through the menu below: the
+  #   bar's `network` module calls this as its `menu-command`,
+  #   feeding the cached scan (so a hidden SSID stays hidden with
+  #   `show-ssid = false`: an empty feed shows nothing instead of
+  #   listing from the cache beside it).
   # - `connect <ssid>` joins: a saved connection goes up by UUID
   #   (no secret needed); an open network connects directly; a
   #   secured one reads its psk from the keyring (`secret-tool
   #   lookup scoot-wifi <ssid>`, stored once with `secret-tool
   #   store --label="WiFi <ssid>" scoot-wifi <ssid>`); anything else
-  #   fails loud with the one terminal command that joins it.
+  #   fails loud with the one terminal command that joins it (and
+  #   the bar's `connect-command` calls exactly this, with the
+  #   row's SSID as its last argument).
   # No WiFi device (a VM, a headless box) fails loud, naming it;
   # without NetworkManager running, nmcli's own error propagates
   # (never swallowed: a silent pick would join nothing while
@@ -241,18 +248,24 @@ let
       echo "then pick it again (or join once from a terminal: nmcli dev wifi connect '$ssid' --ask)" >&2
       exit 1
     }
+    # The menu half: stdin lines through fuzzel into `connect`
+    # (a cancel -- Escape, or an empty feed with `--no-run-if-empty`
+    # -- joins nothing: the same contract as the clipboard picker's
+    # cancel).
+    menu_pick() {
+      sel="$($MENU --dmenu --prompt='wifi: ' --no-run-if-empty --only-match $THEME)" || exit 0
+      case "$sel" in
+        "") exit 0 ;;
+      esac
+      do_connect "$sel"
+    }
     case "''${1:-}" in
       list) do_list ;;
-      pick)
-        sel="$(do_list | $MENU --dmenu --prompt='wifi: ' --no-run-if-empty --only-match $THEME)" || exit 0
-        case "$sel" in
-          "") exit 0 ;;
-        esac
-        do_connect "$sel"
-        ;;
+      pick) do_list | menu_pick ;;
+      menu) menu_pick ;;
       connect) do_connect "''${2:-}" ;;
       *)
-        echo "usage: scoot-network-pick {list|pick|connect <ssid>}" >&2
+        echo "usage: scoot-network-pick {list|pick|menu|connect <ssid>}" >&2
         exit 1
         ;;
     esac
@@ -269,9 +282,14 @@ let
   # - `list` prints paired devices (`MAC name`, a `*` first while
   #   connected): stdout owns the picker, everything else to
   #   stderr (the audio slot's contract).
-  # - `pick` runs `list` through the menu: a connected device
-  #   disconnects, any other connects; an `Audio output...` row
-  #   delegates to the audio slot's sink helper.
+  # - `pick` runs `list` through the menu below (the keymap's bind),
+  #   with an `Audio output...` row delegating to the audio slot's
+  #   sink helper.
+  # - `menu` runs the lines on stdin through the menu below: the
+  #   bar's `bluetooth` module calls this as its `menu-command`,
+  #   feeding `Name` lines with a ` (connected)` suffix where
+  #   connected (exactly what the bar shows, so the row a click
+  #   offers is the row the picker toggles).
   # - `connect`/`disconnect <mac-or-name>` and `power <on|off>`
   #   run one action, loud on failure.
   # No controller (no hardware, no BlueZ) fails loud, naming it.
@@ -349,6 +367,18 @@ let
             ;;
         esac
         ;;
+      # The bar-fed menu: stdin lines are `Name` with a ` (connected)`
+      # suffix where connected (the bar's own row text), toggled by
+      # name -- a fed device never paired here (visible but new) says
+      # the pairing command instead of pairing blind.
+      menu)
+        sel="$($MENU --dmenu --prompt='bluetooth: ' --no-run-if-empty --only-match $THEME)" || exit 0
+        case "$sel" in
+          "") exit 0 ;;
+        esac
+        name="''${sel% \(connected\)}"
+        do_toggle "$name"
+        ;;
       connect)
         mac="$(resolve "''${2:-}")"
         [ -n "$mac" ] || {
@@ -375,7 +405,7 @@ let
         esac
         ;;
       *)
-        echo "usage: scoot-bluetooth-pick {list|pick|connect <mac-or-name>|disconnect <mac-or-name>|power <on|off>}" >&2
+        echo "usage: scoot-bluetooth-pick {list|pick|menu|connect <mac-or-name>|disconnect <mac-or-name>|power <on|off>}" >&2
         exit 1
         ;;
     esac

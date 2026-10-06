@@ -14810,184 +14810,205 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   ''}
 
     ${lib.optionalString isLinux ''
-          # 23. Apps slot content: the pickers carry the look (music-desk
-          #     roles as fuzzel CLI colors, opaque), the dmenu contract
-          #     flags, and the keyring/pairing wiring; lookless and opted
-          #     out carry no themed flag at all.
-          grep -F -q -- "--background-color=FCFBFBff" ${appsNetPickThemed}
-          grep -F -q -- "--text-color=1A2032ff" ${appsNetPickThemed}
-          grep -F -q -- "--border-color=3D579Aff" ${appsNetPickThemed}
-          grep -F -q -- "--selection-color=3D579Aff" ${appsNetPickThemed}
-          grep -F -q -- "--selection-text-color=FCFBFBff" ${appsNetPickThemed}
-          grep -F -q -- "--match-color=5D7AB0ff" ${appsNetPickThemed}
-          grep -F -q -- "--prompt-color=1A2032ff" ${appsNetPickThemed}
-          grep -F -q -- "--dmenu --prompt='wifi: ' --no-run-if-empty --only-match" ${appsNetPickThemed}
-          grep -F -q -- "--dmenu --prompt='bluetooth: ' --no-run-if-empty --only-match" ${appsBluePickThemed}
-          grep -F -q "lookup scoot-wifi" ${appsNetPickThemed}
-          grep -F -q "devices Paired" ${appsBluePickThemed}
-          grep -F -q "scoot-audio-sink" ${appsBluePickThemed}
-          if grep -q -- "--background-color=" ${appsNetPickNoLook}; then echo "themed flag present with no look (23)" >&2; exit 1; fi
-          grep -F -q -- "--dmenu --prompt='wifi: '" ${appsNetPickNoLook}
-          if grep -q -- "--background-color=" ${appsBluePickTargetOff}; then echo "themed flag present with theming off (23)" >&2; exit 1; fi
-          echo "ok: the pickers carry the look, the dmenu contract and their wiring"
+            # 23. Apps slot content: the pickers carry the look (music-desk
+            #     roles as fuzzel CLI colors, opaque), the dmenu contract
+            #     flags, and the keyring/pairing wiring; lookless and opted
+            #     out carry no themed flag at all.
+            grep -F -q -- "--background-color=FCFBFBff" ${appsNetPickThemed}
+            grep -F -q -- "--text-color=1A2032ff" ${appsNetPickThemed}
+            grep -F -q -- "--border-color=3D579Aff" ${appsNetPickThemed}
+            grep -F -q -- "--selection-color=3D579Aff" ${appsNetPickThemed}
+            grep -F -q -- "--selection-text-color=FCFBFBff" ${appsNetPickThemed}
+            grep -F -q -- "--match-color=5D7AB0ff" ${appsNetPickThemed}
+            grep -F -q -- "--prompt-color=1A2032ff" ${appsNetPickThemed}
+            grep -F -q -- "--dmenu --prompt='wifi: ' --no-run-if-empty --only-match" ${appsNetPickThemed}
+            grep -F -q -- "--dmenu --prompt='bluetooth: ' --no-run-if-empty --only-match" ${appsBluePickThemed}
+            grep -F -q "lookup scoot-wifi" ${appsNetPickThemed}
+            grep -F -q "devices Paired" ${appsBluePickThemed}
+            grep -F -q "scoot-audio-sink" ${appsBluePickThemed}
+            if grep -q -- "--background-color=" ${appsNetPickNoLook}; then echo "themed flag present with no look (23)" >&2; exit 1; fi
+            grep -F -q -- "--dmenu --prompt='wifi: '" ${appsNetPickNoLook}
+            if grep -q -- "--background-color=" ${appsBluePickTargetOff}; then echo "themed flag present with theming off (23)" >&2; exit 1; fi
+            echo "ok: the pickers carry the look, the dmenu contract and their wiring"
 
-          # 23a-i. The WiFi picker, against stub tools (the REAL script
-          #     from the module -- `dev`/`dev-code` how `nmcli dev`
-          #     answers, `connections` the saved list, `scan` the cached
-          #     scan, `secret`/`secret-code` the keyring, `pick`/`pick-code`
-          #     how `fuzzel` answers, `calls` what `nmcli` was asked,
-          #     `menu-input` what the menu was offered). Every scenario
-          #     asserts the exit status and the exact resulting files.
-          export SCOOT_APPS_TEST_DIR="$PWD/apps-test"
-          mkdir -p "$SCOOT_APPS_TEST_DIR"
-          net_setup() {
-            # $1 dev-code, $2 secret-code
-            printf 'wlan0:wifi:connected\neth0:ethernet:connected\n' > "$SCOOT_APPS_TEST_DIR/dev"
-            printf '%s' "$1" > "$SCOOT_APPS_TEST_DIR/dev-code"
-            printf 'HomeNet:abc-uuid:802-11-wireless\nWorkNet:def-uuid:wifi\nWired:xyz:ethernet\n' > "$SCOOT_APPS_TEST_DIR/connections"
-            printf 'HomeNet:70:WPA2\nHotel\\: Lobby:45:WPA1 WPA2\nCaf\xc3\xa9:60:WPA2\nOpenNet:80:\n' > "$SCOOT_APPS_TEST_DIR/scan"
-            printf 'hunter2' > "$SCOOT_APPS_TEST_DIR/secret"
-            printf '%s' "$2" > "$SCOOT_APPS_TEST_DIR/secret-code"
+            # 23a-i. The WiFi picker, against stub tools (the REAL script
+            #     from the module -- `dev`/`dev-code` how `nmcli dev`
+            #     answers, `connections` the saved list, `scan` the cached
+            #     scan, `secret`/`secret-code` the keyring, `pick`/`pick-code`
+            #     how `fuzzel` answers, `calls` what `nmcli` was asked,
+            #     `menu-input` what the menu was offered). Every scenario
+            #     asserts the exit status and the exact resulting files.
+            export SCOOT_APPS_TEST_DIR="$PWD/apps-test"
+            mkdir -p "$SCOOT_APPS_TEST_DIR"
+            net_setup() {
+              # $1 dev-code, $2 secret-code
+              printf 'wlan0:wifi:connected\neth0:ethernet:connected\n' > "$SCOOT_APPS_TEST_DIR/dev"
+              printf '%s' "$1" > "$SCOOT_APPS_TEST_DIR/dev-code"
+              printf 'HomeNet:abc-uuid:802-11-wireless\nWorkNet:def-uuid:wifi\nWired:xyz:ethernet\n' > "$SCOOT_APPS_TEST_DIR/connections"
+              printf 'HomeNet:70:WPA2\nHotel\\: Lobby:45:WPA1 WPA2\nCaf\xc3\xa9:60:WPA2\nOpenNet:80:\n' > "$SCOOT_APPS_TEST_DIR/scan"
+              printf 'hunter2' > "$SCOOT_APPS_TEST_DIR/secret"
+              printf '%s' "$2" > "$SCOOT_APPS_TEST_DIR/secret-code"
+              : > "$SCOOT_APPS_TEST_DIR/calls"
+              : > "$SCOOT_APPS_TEST_DIR/menu-input"
+              : > "$SCOOT_APPS_TEST_DIR/pick"
+              printf '0' > "$SCOOT_APPS_TEST_DIR/pick-code"
+            }
+
+            # 23a. List: saved connections first, then the cached scan,
+            #      deduplicated -- a colon-carrying SSID surviving the `-t`
+            #      round trip as one row, the ethernet connection left out.
+            net_setup 0 0
+            got=$(${appsNetPick} list)
+            want="HomeNet
+        WorkNet
+        Hotel: Lobby
+        Café
+        OpenNet"
+            [ "$got" = "$want" ] || { echo "list showed '$got', want '$want' (23a)" >&2; exit 1; }
+            echo "ok: list merges saved and scan, escapes intact"
+
+            # 23b. No WiFi device (a VM, a headless box): loud, naming it.
+            net_setup 0 0
+            printf 'eth0:ethernet:connected\nlo:loopback:connected\n' > "$SCOOT_APPS_TEST_DIR/dev"
+            if ${appsNetPick} list 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no wifi device (23b)" >&2; exit 1; fi
+            grep -q "no Wi-Fi device" "$SCOOT_APPS_TEST_DIR/stderr"
+            echo "ok: no wifi device fails loud"
+
+            # 23c. No NetworkManager: nmcli's own error propagates, never
+            #      swallowed (a silent pick would join nothing while looking
+            #      like it did).
+            net_setup 0 0
+            printf 'Error: Could not create NMClient object.' > "$SCOOT_APPS_TEST_DIR/dev"
+            printf '1' > "$SCOOT_APPS_TEST_DIR/dev-code"
+            if ${appsNetPick} list 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no daemon (23c)" >&2; exit 1; fi
+            grep -q "cannot talk to NetworkManager" "$SCOOT_APPS_TEST_DIR/stderr"
+            echo "ok: no daemon fails loud"
+
+            # 23d. A saved connection goes up by UUID (no secret needed).
+            net_setup 0 0
+            ${appsNetPick} connect HomeNet
+            grep -F -q "connection up uuid abc-uuid" "$SCOOT_APPS_TEST_DIR/calls"
+            echo "ok: saved connections go up by UUID"
+
+            # 23e. An open network connects directly (empty security still
+            #      reads as seen -- the 23-prover for the seen/open split).
+            net_setup 0 0
+            ${appsNetPick} connect OpenNet
+            grep -F -q "dev wifi connect OpenNet" "$SCOOT_APPS_TEST_DIR/calls"
+            if grep -q "password" "$SCOOT_APPS_TEST_DIR/calls"; then echo "password sent to an open network (23e)" >&2; exit 1; fi
+            echo "ok: open networks connect directly"
+
+            # 23f. A secured network reads its psk from the keyring.
+            net_setup 0 0
+            ${appsNetPick} connect "Café"
+            grep -F -q "dev wifi connect" "$SCOOT_APPS_TEST_DIR/calls"
+            grep -F -q "password hunter2" "$SCOOT_APPS_TEST_DIR/calls"
+            echo "ok: secured networks read the keyring"
+
+            # 23g. A secured network with no key: loud, with the two exact
+            #      remedies (stash the key, or join once from a terminal).
+            net_setup 0 1
+            : > "$SCOOT_APPS_TEST_DIR/secret"
+            if ${appsNetPick} connect "Café" 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no key (23g)" >&2; exit 1; fi
+            grep -q "needs its key" "$SCOOT_APPS_TEST_DIR/stderr"
+            grep -q "secret-tool store" "$SCOOT_APPS_TEST_DIR/stderr"
+            if [ -s "$SCOOT_APPS_TEST_DIR/calls" ]; then echo "connect attempted with no key (23g)" >&2; exit 1; fi
+            echo "ok: no key fails loud with remedies"
+
+            # 23h. A cancelled pick exits 0 having joined nothing.
+            net_setup 0 0
+            printf '1' > "$SCOOT_APPS_TEST_DIR/pick-code"
+            ${appsNetPick} pick
+            if [ -s "$SCOOT_APPS_TEST_DIR/calls" ]; then echo "cancelled pick connected (23h)" >&2; exit 1; fi
+            [ -s "$SCOOT_APPS_TEST_DIR/menu-input" ] || { echo "menu offered nothing (23h)" >&2; exit 1; }
+            echo "ok: cancel joins nothing"
+
+      # 23i. A picked row connects (the menu's exact bytes round-trip
+      #      into `connect`, colon and all).
+      net_setup 0 0
+      printf 'Hotel: Lobby' > "$SCOOT_APPS_TEST_DIR/pick"
+      ${appsNetPick} pick
+      grep -F -q "password hunter2" "$SCOOT_APPS_TEST_DIR/calls"
+      echo "ok: picked rows connect"
+
+      # 23i2. The bar-fed menu: stdin SSIDs through the menu into
+      #       `connect` (an empty feed, as with `show-ssid = false`,
+      #       shows nothing instead of listing beside it).
+      net_setup 0 0
+      printf 'WorkNet' > "$SCOOT_APPS_TEST_DIR/pick"
+      printf 'WorkNet\n' | ${appsNetPick} menu
+      grep -F -q "connection up uuid def-uuid" "$SCOOT_APPS_TEST_DIR/calls"
+      : > "$SCOOT_APPS_TEST_DIR/calls"
+      printf '1' > "$SCOOT_APPS_TEST_DIR/pick-code"
+      printf ''' | ${appsNetPick} menu
+      if [ -s "$SCOOT_APPS_TEST_DIR/calls" ]; then echo "empty feed connected (23i2)" >&2; exit 1; fi
+      echo "ok: the bar-fed menu connects fed rows, empty stays quiet"
+
+            # 23j-o. The Bluetooth picker, against the same stub shape
+            #     (`show`/`show-code` the controller, `paired` the paired
+            #     devices, `connected` one MAC per line, `call-code` how
+            #     actions answer).
+            blue_setup() {
+              # $1 show-code
+              printf 'Controller AA:BB:CC:DD:EE:FF testbox\n\tPowered: yes\n' > "$SCOOT_APPS_TEST_DIR/show"
+              printf '%s' "$1" > "$SCOOT_APPS_TEST_DIR/show-code"
+              printf 'Device 11:22:33:44:55:66 Headphones\nDevice 77:88:99:AA:BB:CC Keyboard\n' > "$SCOOT_APPS_TEST_DIR/paired"
+              printf '11:22:33:44:55:66\n' > "$SCOOT_APPS_TEST_DIR/connected"
+              printf '0' > "$SCOOT_APPS_TEST_DIR/call-code"
+              : > "$SCOOT_APPS_TEST_DIR/calls"
+              : > "$SCOOT_APPS_TEST_DIR/menu-input"
+              : > "$SCOOT_APPS_TEST_DIR/pick"
+              printf '0' > "$SCOOT_APPS_TEST_DIR/pick-code"
+            }
+
+            # 23j. List: paired devices, connected marked (stdout owns the
+            #      picker, like the audio slot's sink helper).
+            blue_setup 0
+            got=$(${appsBluePick} list)
+            want="* 11:22:33:44:55:66 Headphones
+          77:88:99:AA:BB:CC Keyboard"
+            [ "$got" = "$want" ] || { echo "list showed '$got', want '$want' (23j)" >&2; exit 1; }
+            echo "ok: list marks connected devices"
+
+            # 23k. No controller (no hardware, no BlueZ): loud, naming it.
+            blue_setup 0
+            printf 'No default controller available' > "$SCOOT_APPS_TEST_DIR/show"
+            if ${appsBluePick} list 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no controller (23k)" >&2; exit 1; fi
+            grep -q "no Bluetooth controller" "$SCOOT_APPS_TEST_DIR/stderr"
+            echo "ok: no controller fails loud"
+
+            # 23l. Toggle: a connected device disconnects, any other
+            #      connects -- by MAC or by name.
+            blue_setup 0
+            ${appsBluePick} connect Keyboard
+            grep -F -q "bluetoothctl-connect 77:88:99:AA:BB:CC" "$SCOOT_APPS_TEST_DIR/calls"
             : > "$SCOOT_APPS_TEST_DIR/calls"
-            : > "$SCOOT_APPS_TEST_DIR/menu-input"
-            : > "$SCOOT_APPS_TEST_DIR/pick"
-            printf '0' > "$SCOOT_APPS_TEST_DIR/pick-code"
-          }
+            printf '* 11:22:33:44:55:66 Headphones' > "$SCOOT_APPS_TEST_DIR/pick"
+            ${appsBluePick} pick
+            grep -F -q "bluetoothctl-disconnect 11:22:33:44:55:66" "$SCOOT_APPS_TEST_DIR/calls"
+            echo "ok: toggle connects and disconnects"
 
-          # 23a. List: saved connections first, then the cached scan,
-          #      deduplicated -- a colon-carrying SSID surviving the `-t`
-          #      round trip as one row, the ethernet connection left out.
-          net_setup 0 0
-          got=$(${appsNetPick} list)
-          want="HomeNet
-      WorkNet
-      Hotel: Lobby
-      Café
-      OpenNet"
-          [ "$got" = "$want" ] || { echo "list showed '$got', want '$want' (23a)" >&2; exit 1; }
-          echo "ok: list merges saved and scan, escapes intact"
+            # 23m. Unknown devices say the pairing command (pairing needs
+            #      physical confirmation, so the picker never pairs blind).
+            blue_setup 0
+            if ${appsBluePick} connect Nope 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success on unknown (23m)" >&2; exit 1; fi
+            grep -q "pair it first" "$SCOOT_APPS_TEST_DIR/stderr"
+            echo "ok: unknown devices name the pairing command"
 
-          # 23b. No WiFi device (a VM, a headless box): loud, naming it.
-          net_setup 0 0
-          printf 'eth0:ethernet:connected\nlo:loopback:connected\n' > "$SCOOT_APPS_TEST_DIR/dev"
-          if ${appsNetPick} list 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no wifi device (23b)" >&2; exit 1; fi
-          grep -q "no Wi-Fi device" "$SCOOT_APPS_TEST_DIR/stderr"
-          echo "ok: no wifi device fails loud"
+      # 23n. Power toggles; anything else is usage.
+      blue_setup 0
+      ${appsBluePick} power off
+      grep -F -q "bluetoothctl-power off" "$SCOOT_APPS_TEST_DIR/calls"
+      if ${appsBluePick} power maybe 2>/dev/null; then echo "silent success on bogus power (23n)" >&2; exit 1; fi
+      echo "ok: power toggles, bogus is usage"
 
-          # 23c. No NetworkManager: nmcli's own error propagates, never
-          #      swallowed (a silent pick would join nothing while looking
-          #      like it did).
-          net_setup 0 0
-          printf 'Error: Could not create NMClient object.' > "$SCOOT_APPS_TEST_DIR/dev"
-          printf '1' > "$SCOOT_APPS_TEST_DIR/dev-code"
-          if ${appsNetPick} list 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no daemon (23c)" >&2; exit 1; fi
-          grep -q "cannot talk to NetworkManager" "$SCOOT_APPS_TEST_DIR/stderr"
-          echo "ok: no daemon fails loud"
-
-          # 23d. A saved connection goes up by UUID (no secret needed).
-          net_setup 0 0
-          ${appsNetPick} connect HomeNet
-          grep -F -q "connection up uuid abc-uuid" "$SCOOT_APPS_TEST_DIR/calls"
-          echo "ok: saved connections go up by UUID"
-
-          # 23e. An open network connects directly (empty security still
-          #      reads as seen -- the 23-prover for the seen/open split).
-          net_setup 0 0
-          ${appsNetPick} connect OpenNet
-          grep -F -q "dev wifi connect OpenNet" "$SCOOT_APPS_TEST_DIR/calls"
-          if grep -q "password" "$SCOOT_APPS_TEST_DIR/calls"; then echo "password sent to an open network (23e)" >&2; exit 1; fi
-          echo "ok: open networks connect directly"
-
-          # 23f. A secured network reads its psk from the keyring.
-          net_setup 0 0
-          ${appsNetPick} connect "Café"
-          grep -F -q "dev wifi connect" "$SCOOT_APPS_TEST_DIR/calls"
-          grep -F -q "password hunter2" "$SCOOT_APPS_TEST_DIR/calls"
-          echo "ok: secured networks read the keyring"
-
-          # 23g. A secured network with no key: loud, with the two exact
-          #      remedies (stash the key, or join once from a terminal).
-          net_setup 0 1
-          : > "$SCOOT_APPS_TEST_DIR/secret"
-          if ${appsNetPick} connect "Café" 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no key (23g)" >&2; exit 1; fi
-          grep -q "needs its key" "$SCOOT_APPS_TEST_DIR/stderr"
-          grep -q "secret-tool store" "$SCOOT_APPS_TEST_DIR/stderr"
-          if [ -s "$SCOOT_APPS_TEST_DIR/calls" ]; then echo "connect attempted with no key (23g)" >&2; exit 1; fi
-          echo "ok: no key fails loud with remedies"
-
-          # 23h. A cancelled pick exits 0 having joined nothing.
-          net_setup 0 0
-          printf '1' > "$SCOOT_APPS_TEST_DIR/pick-code"
-          ${appsNetPick} pick
-          if [ -s "$SCOOT_APPS_TEST_DIR/calls" ]; then echo "cancelled pick connected (23h)" >&2; exit 1; fi
-          [ -s "$SCOOT_APPS_TEST_DIR/menu-input" ] || { echo "menu offered nothing (23h)" >&2; exit 1; }
-          echo "ok: cancel joins nothing"
-
-          # 23i. A picked row connects (the menu's exact bytes round-trip
-          #      into `connect`, colon and all).
-          net_setup 0 0
-          printf 'Hotel: Lobby' > "$SCOOT_APPS_TEST_DIR/pick"
-          ${appsNetPick} pick
-          grep -F -q "password hunter2" "$SCOOT_APPS_TEST_DIR/calls"
-          echo "ok: picked rows connect"
-
-          # 23j-o. The Bluetooth picker, against the same stub shape
-          #     (`show`/`show-code` the controller, `paired` the paired
-          #     devices, `connected` one MAC per line, `call-code` how
-          #     actions answer).
-          blue_setup() {
-            # $1 show-code
-            printf 'Controller AA:BB:CC:DD:EE:FF testbox\n\tPowered: yes\n' > "$SCOOT_APPS_TEST_DIR/show"
-            printf '%s' "$1" > "$SCOOT_APPS_TEST_DIR/show-code"
-            printf 'Device 11:22:33:44:55:66 Headphones\nDevice 77:88:99:AA:BB:CC Keyboard\n' > "$SCOOT_APPS_TEST_DIR/paired"
-            printf '11:22:33:44:55:66\n' > "$SCOOT_APPS_TEST_DIR/connected"
-            printf '0' > "$SCOOT_APPS_TEST_DIR/call-code"
-            : > "$SCOOT_APPS_TEST_DIR/calls"
-            : > "$SCOOT_APPS_TEST_DIR/menu-input"
-            : > "$SCOOT_APPS_TEST_DIR/pick"
-            printf '0' > "$SCOOT_APPS_TEST_DIR/pick-code"
-          }
-
-          # 23j. List: paired devices, connected marked (stdout owns the
-          #      picker, like the audio slot's sink helper).
-          blue_setup 0
-          got=$(${appsBluePick} list)
-          want="* 11:22:33:44:55:66 Headphones
-        77:88:99:AA:BB:CC Keyboard"
-          [ "$got" = "$want" ] || { echo "list showed '$got', want '$want' (23j)" >&2; exit 1; }
-          echo "ok: list marks connected devices"
-
-          # 23k. No controller (no hardware, no BlueZ): loud, naming it.
-          blue_setup 0
-          printf 'No default controller available' > "$SCOOT_APPS_TEST_DIR/show"
-          if ${appsBluePick} list 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success with no controller (23k)" >&2; exit 1; fi
-          grep -q "no Bluetooth controller" "$SCOOT_APPS_TEST_DIR/stderr"
-          echo "ok: no controller fails loud"
-
-          # 23l. Toggle: a connected device disconnects, any other
-          #      connects -- by MAC or by name.
-          blue_setup 0
-          ${appsBluePick} connect Keyboard
-          grep -F -q "bluetoothctl-connect 77:88:99:AA:BB:CC" "$SCOOT_APPS_TEST_DIR/calls"
-          : > "$SCOOT_APPS_TEST_DIR/calls"
-          printf '* 11:22:33:44:55:66 Headphones' > "$SCOOT_APPS_TEST_DIR/pick"
-          ${appsBluePick} pick
-          grep -F -q "bluetoothctl-disconnect 11:22:33:44:55:66" "$SCOOT_APPS_TEST_DIR/calls"
-          echo "ok: toggle connects and disconnects"
-
-          # 23m. Unknown devices say the pairing command (pairing needs
-          #      physical confirmation, so the picker never pairs blind).
-          blue_setup 0
-          if ${appsBluePick} connect Nope 2>"$SCOOT_APPS_TEST_DIR/stderr"; then echo "silent success on unknown (23m)" >&2; exit 1; fi
-          grep -q "pair it first" "$SCOOT_APPS_TEST_DIR/stderr"
-          echo "ok: unknown devices name the pairing command"
-
-          # 23n. Power toggles; anything else is usage.
-          blue_setup 0
-          ${appsBluePick} power off
-          grep -F -q "bluetoothctl-power off" "$SCOOT_APPS_TEST_DIR/calls"
-          if ${appsBluePick} power maybe 2>/dev/null; then echo "silent success on bogus power (23n)" >&2; exit 1; fi
-          echo "ok: power toggles, bogus is usage"
+      # 23o. The bar-fed menu: a fed `Name (connected)` row toggles by
+      #      name (the suffix stripped, never resolved as a device).
+      blue_setup 0
+      printf 'Headphones (connected)' > "$SCOOT_APPS_TEST_DIR/pick"
+      printf 'Headphones (connected)\n' | ${appsBluePick} menu
+      grep -F -q "bluetoothctl-disconnect 11:22:33:44:55:66" "$SCOOT_APPS_TEST_DIR/calls"
+      echo "ok: the bar-fed menu toggles fed rows"
     ''}
 
   touch $out
