@@ -5,7 +5,7 @@ description: "The lightest status bar that is still beautiful — enable it, pla
 
 A status bar for scoot, and for any compositor with
 `wlr-layer-shell-v1`: the lightest bar that is still beautiful and
-configurable. It starts as a clock, gains workspaces, and grows by
+configurable. One thin strip, nothing knocked off the table. It starts as a clock, gains workspaces, and grows by
 modules. It runs anywhere a layer-shell bar runs (scoot, sway, niri,
 Hyprland) — on scoot it also answers the desktop profile's theming.
 

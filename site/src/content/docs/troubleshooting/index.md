@@ -3,7 +3,8 @@ title: Symptom index
 description: "Fixes by symptom, across every app — find it here, fix it there."
 ---
 
-Something wrong? Find the symptom, follow the link. Each app's own
+Something wrong? Find the symptom, follow the link. Start with the one
+that looks most like yours. Each app's own
 troubleshooting page has the full diagnosis; this index gets you to the
 right one.
 

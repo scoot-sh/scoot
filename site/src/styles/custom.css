@@ -1,24 +1,63 @@
-/* The scoot docs theme: the vinyl-sunset look's palette, not stock Starlight.
+/* The scoot docs theme: the logo's character, not stock Starlight.
  *
- * Espresso `#271A1F` surfaces, cream `#F1E3C6` text, sunset orange `#E59560`
- * accents, plum `#423F51` muted rings — from docs/examples/vinyl-sunset
- * (its scoot.toml `[appearance]` and bar.toml `[colors]`). System font
- * stack throughout: the bar's Nerd Fonts are OFL-licensed but vendoring
- * binaries into the site buys nothing (see site/OUTLINE.md). */
+ * Brand decision (2026-10-06, site/OUTLINE.md): true-black ground, white
+ * type, one ginger accent sampled from the cat's fur in
+ * `docs/assets/logo.png`, League Spartan Black display type matching the
+ * wordmark, the logo itself as the home hero. Plain: no gradients,
+ * glows, shadows or textures anywhere.
+ *
+ * Tokens:
+ *   night #000000 — ground (measured: logo ground pixels are #000000;
+ *     the `#010000`/`#000101` entries are quantizer dither)
+ *   paper #FFFFFF — primary type on night (21.00:1)
+ *   fur   #CB6F34 — the one ginger accent; brightest readable member of
+ *     the lit-fur cluster, forehead box (1075,300)-(1175,380). 5.86:1 on
+ *     night (AA body). Delta-E 14.1 from stock `#D97757`.
+ *   ash   #8A8A8A — secondary type on night (6.08:1)
+ *   ember #8A4A1E — ginger for the light theme, fur darkened to hold AA
+ *     on white (6.82:1). Delta-E 25.0 from `#D97757`.
+ *   seam  #2A2A2A — hairlines on night, decorative only, never text.
+ *
+ * Type: League Spartan 900 (OFL 1.1, The League Spartan Project
+ * Authors — Micah Rich and Tyler Finck, self-hosted latin subset
+ * `src/assets/fonts/league-spartan-latin-900.woff2`, 12,648 bytes) for
+ * the header wordmark, the hero title and headings only (including
+ * Starlight's page title, which lives outside `.sl-markdown-content`).
+ * Body and code stay on the system stacks: a text companion would cost
+ * bytes without carrying brand. Chosen over Montserrat 900, Poppins
+ * 900, Outfit 900, Urbanist 900, Lexend 900 and the previous Archivo
+ * Black in a side-by-side against the logo wordmark at matched
+ * t-height (see the fix-round report): the only geometric with the
+ * logo's flat angled `t` terminal, the most circular `o` counter
+ * (0.917 vs 1.02 on the logo) and a wide `s` (0.853 of the `o`
+ * advance vs 0.815 on the logo).
+ */
 
-/* Dark theme (the default: scoot's looks are dark). */
+@font-face {
+  font-family: 'League Spartan';
+  src: url('../assets/fonts/league-spartan-latin-900.woff2') format('woff2');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Dark theme (the default): the logo's own black/white/ginger. */
 :root {
-  --sl-color-accent-low: #3a2a2e;
-  --sl-color-accent: #e59560;
-  --sl-color-accent-high: #fdc58b;
-  --sl-color-white: #f1e3c6;
-  --sl-color-gray-1: #f6ead2;
-  --sl-color-gray-2: #ddb590;
-  --sl-color-gray-3: #a08c7a;
-  --sl-color-gray-4: #604f50;
-  --sl-color-gray-5: #423f51;
-  --sl-color-gray-6: #32272e;
-  --sl-color-black: #271a1f;
+  --sl-color-accent-low: #3a2410;
+  --sl-color-accent: #cb6f34;
+  --sl-color-accent-high: #e09a5c;
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #ededed;
+  --sl-color-gray-2: #c9c9c9;
+  --sl-color-gray-3: #8a8a8a;
+  --sl-color-gray-4: #5c5c5c;
+  --sl-color-gray-5: #2a2a2a;
+  --sl-color-gray-6: #1a1a1a;
+  --sl-color-black: #000000;
+
+  --sl-color-bg: #000000;
+  --sl-color-bg-nav: #000000;
+  --sl-color-bg-sidebar: #000000;
 
   --sl-font-system:
     ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -30,20 +69,65 @@
   --sl-text-code: var(--sl-color-accent-high);
 }
 
-/* Light theme: cream paper, espresso ink, brick `#C76B47` accents
- * (orange on cream is too low-contrast for links). */
+/* Light theme: the brand inverted — white ground, black ink, the fur
+ * darkened to ember so links still pass AA (6.82:1 on white). */
 :root[data-theme='light'] {
-  --sl-color-accent-low: #f6ead2;
-  --sl-color-accent: #c76b47;
-  --sl-color-accent-high: #8a5a3b;
-  --sl-color-white: #271a1f;
-  --sl-color-gray-1: #3a2a2e;
-  --sl-color-gray-2: #423f51;
-  --sl-color-gray-3: #604f50;
-  --sl-color-gray-4: #a08c7a;
-  --sl-color-gray-5: #ddb590;
-  --sl-color-gray-6: #f1e3c6;
-  --sl-color-black: #fbf4e4;
+  --sl-color-accent-low: #f5e9d2;
+  --sl-color-accent: #8a4a1e;
+  --sl-color-accent-high: #5e3413;
+  --sl-color-white: #000000;
+  --sl-color-gray-1: #1a1a1a;
+  --sl-color-gray-2: #333333;
+  --sl-color-gray-3: #595959;
+  --sl-color-gray-4: #8a8a8a;
+  --sl-color-gray-5: #e4ddc9;
+  --sl-color-gray-6: #f1ead8;
+  --sl-color-black: #ffffff;
+
+  --sl-color-bg: #ffffff;
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #ffffff;
+}
+
+/* Display type: header wordmark, hero title, page title, headings.
+ * Tight, like the logo. (Unlayered rules beat Starlight's
+ * `@layer starlight.core` ones at any specificity.) Starlight renders
+ * the page title as a direct `h1` child of `.sl-container`, outside
+ * `.sl-markdown-content`, with a zero-specificity `:where()` rule —
+ * so it needs its own selector here; without it the title falls back
+ * to the system bold while h2 uses the display face. */
+.site-title,
+.hero h1,
+.content-panel > .sl-container > h1,
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+  font-family: 'League Spartan', var(--sl-font-system);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+.hero h1 {
+  font-size: clamp(2.75rem, 8vw, 4.5rem);
+  line-height: 1;
+}
+.sl-markdown-content h1,
+.content-panel > .sl-container > h1 {
+  font-size: 2rem;
+  line-height: 1.15;
+}
+.sl-markdown-content h2 {
+  font-size: 1.375rem;
+  line-height: 1.3;
+}
+.sl-markdown-content h3 {
+  font-size: 1.125rem;
+  line-height: 1.4;
+}
+
+/* Visible keyboard focus everywhere: the ginger ring on either ground. */
+:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
 }
 
 /* Keybinding cheat-sheet keys: every keybinding page renders combos in
@@ -78,19 +162,30 @@ kbd {
   font-size: 0.9em;
 }
 
-/* Home hero: stacked and centered. The art is a wide desktop capture, so
- * the stock splash grid (copy 7fr / art 4fr past 50rem) squeezes the
- * headline into a sliver and clips the art off the viewport edge. Copy on
- * top, art below at full width capped to a reading measure — the same
- * deliberate stack at every width. (Unlayered rules beat Starlight's
- * `@layer starlight.core` ones at any specificity.) */
+/* Home hero: the logo's black band. The art carries its own pure-black
+ * ground, so on the dark theme it melts into the page; on the light
+ * theme the hero stays a black panel (the brand anchor) and only the
+ * copy below follows the theme. Art first, then the punchline. */
 .hero {
   grid-template-columns: 100%;
   justify-items: center;
+  background: #000000;
+  padding: 2rem 1rem 3rem;
+  /* Night-theme accents on the black band in either theme. */
+  --sl-color-white: #ffffff;
+  --sl-color-gray-2: #c9c9c9;
+  /* Links and focus rings on the band take this ginger. The primary
+   * button does not: Starlight's --sl-color-text-accent resolves on
+   * :root, so in the light theme the button keeps ember (#8A4A1E, white
+   * text 6.82:1). Pointing the button at --sl-color-accent here would
+   * drop it to white on #CB6F34, 3.58:1, which fails AA. */
+  --sl-color-accent: #cb6f34;
+  --sl-color-accent-high: #e09a5c;
+  --sl-color-accent-low: #3a2410;
 }
 .hero > .hero-html {
-  order: 2;
-  width: min(100%, 60rem);
+  order: -1;
+  width: min(100%, 80rem);
 }
 .hero .stack {
   align-items: center;
@@ -103,16 +198,99 @@ kbd {
   justify-content: center;
 }
 
-/* Hero art gets the look's rounded corners and a soft shadow. The class is
- * on the `<img>` itself (see index.md), so this is `img.hero-image`, not
- * a descendant selector. */
-img.hero-image {
+/* No entrance motion: a fade/slide-in on the hero delayed LCP by ~500 ms
+ * in headless-Chrome measurement (the hero paints transparent until the
+ * animation runs), against the brief's no-regression bar. The cat is the
+ * statement; it does not need an entrance. `prefers-reduced-motion` users
+ * get the same page everyone else does. */
+
+/* Hero art is plain, like the logo: square edges, no frame, no shadow.
+ * The class is on the `<picture>` wrapper (see index.md). On desktop
+ * the art is capped to the viewport (42vh from ~1100px up) so the art,
+ * headline, tagline and both actions all fit in the first 900px —
+ * stacked and art-first, not side-by-side, so the short headline still
+ * reads as the punchline under the image's own giant wordmark. Phone
+ * keeps the full-bleed stacked art; it already works. */
+.hero-art {
+  display: block;
+  width: 100%;
+}
+.hero-art img {
   display: block;
   width: 100%;
   height: auto;
-  border-radius: 12px;
+}
+@media (min-width: 1100px) {
+  .hero-art img {
+    width: auto;
+    max-width: 100%;
+    max-height: 42vh;
+    margin-inline: auto;
+  }
+}
+
+/* Looks strip: plain linked figures, no cards, no shadows. A responsive
+ * grid, never a horizontal scroll trap. */
+.looks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.5rem;
+  margin-block: 1rem 2rem;
+}
+.looks a {
+  color: inherit;
+  text-decoration: none;
+}
+.looks img {
+  display: block;
+  width: 100%;
+  height: auto;
   border: 1px solid var(--sl-color-gray-5);
-  box-shadow: 0 32px 64px -24px rgb(0 0 0 / 0.5);
+}
+.looks span {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--sl-color-gray-3);
+}
+.looks a:hover span {
+  color: var(--sl-color-accent-high);
+}
+
+/* 404 terminal chrome: the one place the three-dot motif appears — the
+ * logo's own terminal windows, red/yellow/green over a black bar. */
+.term-bar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  background: #000000;
+  border: 1px solid var(--sl-color-gray-5);
+  border-bottom: 0;
+  border-radius: 0.5rem 0.5rem 0 0;
+  padding: 0.6rem 0.9rem;
+}
+.term-bar i {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+}
+.term-bar i:nth-child(1) {
+  background: #ff5f57;
+}
+.term-bar i:nth-child(2) {
+  background: #febc2e;
+}
+.term-bar i:nth-child(3) {
+  background: #28c840;
+}
+.term-body {
+  background: #000000;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0 0 0.5rem 0.5rem;
+  padding: 0.9rem;
+  font-family: var(--sl-font-system-mono);
+  font-size: 0.9rem;
+  color: #ffffff;
 }
 
 /* Keybinding action strings are copy-paste tokens (`scoot msg action`

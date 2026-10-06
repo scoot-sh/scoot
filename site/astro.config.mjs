@@ -31,6 +31,44 @@ export default defineConfig({
       description:
         'A scrolling-tiling Wayland compositor that runs without a GPU: install it, learn it, configure it, drive it from an agent.',
       social: [{ label: 'GitHub', href: 'https://github.com/scoot-sh/scoot', icon: 'github' }],
+      // The cat's face in a black circle, from the project logo
+      // (`docs/assets/logo.png`, face box (985,235)-(1315,565)); the black
+      // surround works on either theme ground. The "scoot" title text
+      // beside it is set in League Spartan 900 (see custom.css).
+      logo: {
+        src: './src/assets/cat-head.png',
+        alt: 'scoot — a grumpy ginger cat about to swat a window sideways',
+      },
+      favicon: '/cat-favicon-32.png',
+      head: [
+        {
+          tag: 'meta',
+          attrs: { name: 'theme-color', content: '#000000' },
+        },
+        {
+          tag: 'link',
+          attrs: {
+            rel: 'apple-touch-icon',
+            href: `${base}apple-touch-icon.png`,
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image', content: `${site}og-cat.jpg` },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image:alt',
+            content:
+              'scoot — a grumpy ginger cat about to swat a terminal window sideways',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: { name: 'twitter:card', content: 'summary_large_image' },
+        },
+      ],
       customCss: ['./src/styles/custom.css'],
       // One group per app (see site/OUTLINE.md): cross-cutting Start
       // first, the scoot desktop as the primary path, then each app

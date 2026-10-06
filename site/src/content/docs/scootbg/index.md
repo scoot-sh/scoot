@@ -5,7 +5,8 @@ description: "The lightest wallpaper daemon for Wayland — color or image on ea
 
 The lightest wallpaper daemon for Wayland, in place of `swaybg`,
 `hyprpaper`, `wpaperd` and friends. It shows a color or an image on
-each output, and one command changes it. Built for scoot and set up by
+each output, and one command changes it. It holds the wallpaper still
+while everything else slides around. Built for scoot and set up by
 scoot's own config, but not tied to it: scootbg speaks only standard
 protocols, so it also runs on any compositor with
 `wlr-layer-shell-v1`.

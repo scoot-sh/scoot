@@ -6,7 +6,7 @@ description: "Set up a machine for agent-driven use — headless sessions, IPC, 
 An agent setting up a machine should find this page first. The whole
 stack an agent needs: a headless session with no display, the IPC
 socket to drive it, screenshots to see it, and this documentation as
-plain Markdown.
+plain Markdown. The compositor as a lab bench.
 
 ## The loop
 
