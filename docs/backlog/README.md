@@ -588,6 +588,7 @@ be revisited.
   — RESOLVED 2026-10-03 in #400: `focus-output-left/right` + `move-window-to-output-left/right` (wrapping ring in scoot-core); defaults retargeted.
 - [Nested scoot waits forever at startup against a host that accepts but never answers](./resolved/nested-startup-wedge-done.md)
   — RESOLVED 2026-10-06 in #469: the startup handshake waits at most 10 s, then a loud host-naming error and exit 1 for the supervisor to retry.
+- [Night light on outputs with no gamma LUT (Apple DCP): warm the image in scoot's renderer](./core/nightlight-without-lut.md) (medium, filed 2026-10-06 from #472): the M2's DCP refuses every gamma ramp
 - [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
 - [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
 - [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
