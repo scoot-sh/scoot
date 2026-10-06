@@ -155,6 +155,7 @@ in
     ./clipboard-home.nix
     ./launcher-home.nix
     ./capture-home.nix
+    ./power-home.nix
     ./keys-home.nix
   ];
 
