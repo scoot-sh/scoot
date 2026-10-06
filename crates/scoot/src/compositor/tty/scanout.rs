@@ -70,7 +70,7 @@ use super::present_retry::{self, PresentRetries};
 use crate::compositor::dmabuf::scanout::FormatsKey;
 use crate::compositor::drm_syncobj::ExplicitBuffers;
 use crate::compositor::drm_syncobj::release_hold::ReleaseHold;
-use crate::compositor::render::{CursorInFrame, Plane};
+use crate::compositor::render::{CursorInFrame, CursorPlanes, GbmUpload, Plane};
 
 /// The concrete `DrmCompositor` this backend drives.
 ///
@@ -204,15 +204,15 @@ type Compositor = DrmCompositor<GbmAllocator<DrmDeviceFd>, LayoutKeepingExporter
 ///
 /// No scoot-side arbitration between the two: Smithay tries elements
 /// front-to-back, so the cursor (above) is offered the planes before a window
-/// below it, and a composited cursor overlapping the candidate refuses the
-/// ride through the overlap guard -- the cursor effectively wins ties, and a
-/// window rides once the pointer is hidden or parked off it (the same shape
-/// as primary-direct on a CRTC with no cursor plane). When the
-/// cursor-on-overlay work
-/// (`docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md`) lands,
-/// the cursor will take the topmost compatible plane by that same order and
-/// the window what is left; until then the cursor stays composited and only
-/// the window rides.
+/// below it, and it walks the overlays front to back too (sorted by
+/// descending zpos in `DrmCompositor::new`). So the cursor takes the topmost
+/// overlay that passes its test and the window what is left below it. Where
+/// the CRTC has no cursor plane, the drawn cursor shapes reach an overlay as
+/// dma-buf twins ([`ScanoutPresenter::cursor_overlay`],
+/// `render::cursor_plane`). A cursor that still composites (its test failed,
+/// or a client's shm cursor surface) and overlaps the candidate refuses the
+/// window's ride through the overlap guard, the same shape as primary-direct
+/// on a CRTC with no cursor plane.
 ///
 /// Pinned below, with [`COMPOSITE_FLAGS`] and [`frame_flags`]'s three rows.
 const DIRECT_FLAGS: FrameFlags =
@@ -257,6 +257,14 @@ const fn composite_only(flags: FrameFlags) -> FrameFlags {
     flags.difference(
         FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT.union(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY),
     )
+}
+
+/// Whether the drawn cursor may be offered an overlay this frame: the CRTC has
+/// no cursor plane of its own, has an overlay, and has shown a frame since it
+/// was last (re)configured (`ScanoutPresenter`'s `lit` field says why). Pure,
+/// so every row is pinnable without a DRM device.
+fn cursor_rides_overlay(lit: bool, cursor_planes: usize, overlay_planes: usize) -> bool {
+    lit && cursor_planes == 0 && overlay_planes > 0
 }
 
 /// Whether any element Smithay assigned to an overlay plane (`overlay`, off
@@ -391,7 +399,11 @@ impl ForceComposite {
 /// and no change to the cursor plane (it renders into buffers of its own
 /// through its own exporter, `NodeFilter::None` inside Smithay). The one newly reachable
 /// assignment is a *client cursor surface* whose buffer is a dma-buf riding
-/// an overlay plane where the cursor plane could not take it. The worse
+/// an overlay plane where the cursor plane could not take it. (scoot's own
+/// drawn cursor twins, `render::cursor_plane`, ride an overlay too, but they
+/// are not client buffers: the fork's `ExportBuffer::Dmabuf` arm admits them
+/// whatever this filter says, and they are never opaque, so never an
+/// underlay.) The worse
 /// variant of that: where a CRTC has an overlay plane with a zpos *below*
 /// the primary, Smithay may put an *opaque* element there as an underlay and
 /// punch a transparent hole in the primary above it, so the swapchain slot a
@@ -565,6 +577,26 @@ pub(crate) struct ScanoutPresenter {
     /// `drm_syncobj/release_hold.rs`. Always empty in a session that never
     /// saw an explicit-sync commit.
     release_hold: ReleaseHold<ClientBuffer>,
+    /// The drawn cursor shapes as dma-bufs an overlay plane can take, built
+    /// on this device as they first show. Consulted only where the cursor
+    /// needs one (see [`cursor_overlay`](Self::cursor_overlay)); kept across
+    /// a CRTC switch, which keeps the device.
+    cursor_overlay: CursorPlanes,
+    /// Whether a frame has completed its flip on this CRTC since the
+    /// compositor was built, reset or given a new mode. Until one has, the
+    /// cursor is not offered an overlay ([`cursor_overlay`](Self::cursor_overlay)).
+    ///
+    /// The first frame after any of those carries the modeset, and Smithay
+    /// tests every plane against it; on `apple,dcp` that test fails
+    /// (`Asahi.md`, Test 17). Smithay then remembers the failure for as long
+    /// as the element and its position stay the same, so a pointer that did
+    /// not move after startup or a VT switch back stayed composited, and so
+    /// did the fullscreen window under it. Offering the plane only on a lit
+    /// CRTC makes the first test a real one. Cleared by
+    /// [`new`](Self::new), [`adopt_surface`](Self::adopt_surface),
+    /// [`reactivate`](Self::reactivate) and [`use_mode`](Self::use_mode); set
+    /// by [`frame_submitted`](Self::frame_submitted).
+    lit: bool,
 }
 
 /// What the scanout tranche is built from on this presenter's device:
@@ -616,6 +648,7 @@ impl ScanoutPresenter {
         let cursor_planes = planes.cursor.len();
         let overlay_planes = planes.overlay.len();
         let lost = Rc::new(LostLayouts::default());
+        let cursor_overlay = CursorPlanes::new(GbmUpload::new(gbm.clone()));
         let compositor = Self::build(
             &planes,
             surface,
@@ -641,6 +674,8 @@ impl ScanoutPresenter {
             lost,
             plane_epoch: 0,
             release_hold: ReleaseHold::default(),
+            cursor_overlay,
+            lit: false,
         })
     }
 
@@ -742,6 +777,18 @@ impl ScanoutPresenter {
     /// `pub(crate)`.
     pub(crate) fn overlay_planes(&self) -> usize {
         self.overlay_planes
+    }
+
+    /// The cursor's plane images, where the cursor can only stay out of the
+    /// composite on an overlay: the CRTC has no cursor plane and at least one
+    /// overlay (`render::cursor_plane`), and it is lit (see the `lit` field).
+    /// `None` elsewhere: with a cursor plane Smithay copies the drawn shape
+    /// into its own cursor buffer, and with no plane at all there is nothing
+    /// to ride. Read per frame by `render::draw_frame_scanout`; a few
+    /// compares.
+    pub(crate) fn cursor_overlay(&mut self) -> Option<&mut CursorPlanes> {
+        cursor_rides_overlay(self.lit, self.cursor_planes, self.overlay_planes)
+            .then_some(&mut self.cursor_overlay)
     }
 
     /// The surface being driven, for the hotplug path's connector/mode moves.
@@ -1019,6 +1066,7 @@ impl ScanoutPresenter {
             Ok(flip) => {
                 if let Some(flip) = flip {
                     self.release_hold.flip_completed(flip);
+                    self.lit = true;
                 }
                 (false, flip)
             }
@@ -1105,6 +1153,7 @@ impl ScanoutPresenter {
     /// lock. The wait stays, owned by its fallback deadline, until the
     /// post-reactivation render records a fresh flip.
     pub(super) fn reactivate(&mut self) {
+        self.lit = false;
         if let Err(error) = self.compositor.reset_state() {
             tracing::warn!(%error, "could not reset drm surface state after reactivation");
         }
@@ -1170,6 +1219,7 @@ impl ScanoutPresenter {
     pub(super) fn use_mode(&mut self, mode: Mode) -> bool {
         match self.compositor.use_mode(mode) {
             Ok(()) => {
+                self.lit = false;
                 self.invalidate_scanout();
                 true
             }
@@ -1205,6 +1255,7 @@ impl ScanoutPresenter {
                 // never be shown.
                 self.release_hold.discard_all();
                 self.compositor = compositor;
+                self.lit = false;
                 // A new CRTC may come with a different primary plane, and so
                 // a different format list: the scanout tranche rebuilds.
                 self.plane_epoch = self.plane_epoch.wrapping_add(1);
@@ -1391,6 +1442,20 @@ mod tests {
         assert!(selected.cursor.is_empty());
         // The primary is unaffected by the missing cursor plane.
         assert_eq!(selected.primary.len(), 1);
+    }
+
+    #[test]
+    fn the_cursor_is_offered_an_overlay_only_without_a_cursor_plane_and_once_lit() {
+        // apple,dcp: no cursor plane, two overlays.
+        assert!(cursor_rides_overlay(true, 0, 2));
+        assert!(cursor_rides_overlay(true, 0, 1));
+        // Not before the CRTC has shown a frame: that test runs against the
+        // modeset and fails, and Smithay would remember it.
+        assert!(!cursor_rides_overlay(false, 0, 2));
+        // A cursor plane of its own takes the cursor instead.
+        assert!(!cursor_rides_overlay(true, 1, 1));
+        // Nothing to ride.
+        assert!(!cursor_rides_overlay(true, 0, 0));
     }
 
     #[test]

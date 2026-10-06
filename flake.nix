@@ -137,7 +137,7 @@
             cargoLock = ./Cargo.lock;
             # Two dependencies come from git, both scoot-sh forks pinned by
             # rev (docs/forks.md): Smithay (crates/scoot/Cargo.toml, upstream
-            # `0ff00983` plus twenty-five commits) and wayland-backend (the root
+            # `0ff00983` plus twenty-six commits) and wayland-backend (the root
             # Cargo.toml's `[patch.crates-io]`, the 0.3.17 release plus two
             # commits). A git source carries no crates.io checksum to vendor
             # against, so each checkout hash has to be recorded here, keyed
@@ -150,8 +150,8 @@
             # it got -- it cannot drift out of sync quietly. Nothing else
             # in Cargo.lock comes from git.
             outputHashes = {
-              "git+https://github.com/scoot-sh/smithay?rev=035d447cdf6067f8db58a2964937034a2b9e760b#035d447cdf6067f8db58a2964937034a2b9e760b" =
-                "sha256-tyghQjngPRYC2yLjtpF9v/xzUW6ktMJ2gqRWwcryl10=";
+              "git+https://github.com/scoot-sh/smithay?rev=7ab72d533656acb8a2d6fb37226719a08b4444ba#7ab72d533656acb8a2d6fb37226719a08b4444ba" =
+                "sha256-jjCF7HZ4jNHeognAuAxLshFJLiIZMGpcDOjDT1oBBdA=";
               "git+https://github.com/scoot-sh/wayland-rs?rev=70f81e005179463fb4d46ac68045a7f21eb5aff2#70f81e005179463fb4d46ac68045a7f21eb5aff2" =
                 "sha256-cANItBOi9o+Jb1+u86thcBgdb6u0u2becgJoMI/v4T8=";
             };

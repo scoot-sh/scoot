@@ -9,6 +9,19 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-10-06 — a visible pointer no longer keeps a fullscreen video composited on Apple Silicon
+
+- **On a display with no cursor plane but a free overlay plane (Apple
+  Silicon's DCP), scoot's pointer now rides the overlay** under the GPU
+  scanout tier (`--tty --renderer gles`, `gpu-scanout` build). A
+  fullscreen video under a visible, still pointer is scanned out directly
+  again, and moving the pointer over the desktop no longer redraws
+  anything. On an M2 that is 13–15 jiffies of compositor CPU per 10 s
+  against 22–33 for fullscreen mpv, and 11 against 17–19 for pointer
+  motion over a desktop. Nothing to configure. `cursor_hide_after_ms`
+  still helps where the pointer cannot ride a plane: a screen edge, or a
+  client's own shared-memory cursor image.
+
 ### 2026-10-06 — a gamma client disconnecting no longer crashes `--tty`
 
 - **Killing or disconnecting a gamma client (for example `wlsunset` exiting

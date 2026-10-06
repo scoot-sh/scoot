@@ -24,7 +24,7 @@ are under [Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs).
 | [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes | **closed**: not needed, the search works (2026-09-18) |
 | Issue #48's unconfirmed connector fallback, and multi-output phase E | — | yes | **answered** (2026-09-25 + 2026-09-28): both monitors driven at once on both tiers, lock and VT verified live, and a physical DP-1 unplug/replug removed and re-added its output; #48 was closed on unit-test evidence on 2026-09-27, and its fallback onto a *different* connector has since run live on the dev VM (Virtual-1 force-off / Virtual-2 force-on: `switch_crtc` to a new CRTC, modeset committed — [record](docs/backlog/resolved/tty-hotplug-confirmation-done.md)); the GPU-tier runtime add was answered by Test 12 |
 | [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
-| [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | **ANSWERED** (2026-09-25): mpv goes direct (~60% less compositor CPU) once it hides its pointer; `apple,dcp` has no cursor plane, so a visible pointer rules out any primary attempt ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)); planes: 1 primary, 1 overlay, 0 cursor |
+| [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | **ANSWERED** (2026-09-25): mpv goes direct (~60% less compositor CPU) once it hides its pointer; `apple,dcp` has no cursor plane, so a visible pointer rules out any primary attempt ([ticket](docs/backlog/resolved/gpu-direct-blocked-by-composited-cursor-done.md), resolved by Test 17); planes: 1 primary, 1 overlay, 0 cursor |
 | [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | **ANSWERED** (2026-09-25): 162 pairs (54 formats x tiled-compressed/tiled/`LINEAR`); clients pick compressed and Mesa follows the scanout tranche to `LINEAR`; mpv `dmabuf-wayland` cannot run (no hardware decoder: AVD firmware missing) |
 | [Test 7: explicit sync on a real GPU](docs/backlog/resolved/linux-drm-syncobj-done.md) | medium | yes | **ANSWERED** (2026-09-25): offered on the display device; `vkcube` uses it |
 | [Test 8: nested dma-buf presentation](docs/backlog/resolved/nested-dmabuf-present-done.md) | medium | Part B only | **ANSWERED** (2026-09-25): nested CPU 1.8–2x lower, host 2.2–3x lower, pixels identical, niri imports scoot's compressed buffers intact |
@@ -32,6 +32,7 @@ are under [Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs).
 | Test 10: does the GPU driver keep an fd per imported plane | — | yes | **ANSWERED** (2026-09-25): yes, one (`copies_per_plane_per_output=1`). While a client runs scoot counts it exactly; after a client quits, one fd can linger until the next redraw, and one extra fd in one session is unexplained |
 | Test 11: output remove/restore, reconnected modeset and multi-head mode change on the dumb tier (the #249 runbook, for real) | — | yes | **ANSWERED** (2026-09-26): virtual-pull force-off/on of DP-1 removed and re-added its output; both windows adopted then restored in order under a fresh id, positional binds reach the returned monitor; `--mode 1280x720` drives DP-1 at that mode with eDP-1 warned onto preferred; runtime mode switch stays refused by design (read-only `wlr-output-management`) |
 | Test 12: GPU-tier runtime add, real-HPD remove/restore and multi-head mode change | — | yes | **ANSWERED** (2026-09-26): powering on a sleeping monitor adds a GPU-scanout head in ~50 ms; a real unplug adopts its window and the replug restores it under a fresh id with binds following; `--mode 1280x720` drives DP-1 at that mode on the GPU tier and a replug keeps it; adopted windows feel like they disappear ([UX ticket](docs/backlog/core/unplug-adopted-windows-invisible.md)) |
+| [Test 17: the drawn cursor on an overlay plane](docs/backlog/resolved/gpu-direct-blocked-by-composited-cursor-done.md) | medium | yes | **ANSWERED** (2026-10-06): DCP takes scoot's drawn cursor on overlay plane 45 while fullscreen mpv stays direct on the primary with the pointer visible: 13-15 jiffies per 10 s against 22-33, and pointer motion over a desktop 11 against 17-19 |
 
 ## Results so far (run 2026-09-18, `main` at `f688ac9`)
 
@@ -954,7 +955,8 @@ panel was not photographed.
   memory buffer at all (above), and its GBM exporter also rejects `wl_shm`
   buffers (`drm/exporter/gbm.rs` ~105–118). So a dma-buf-backed cursor
   element needs a change in scoot's Smithay fork. Ticket:
-  [gpu-direct-blocked-by-composited-cursor](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md).
+  [gpu-direct-blocked-by-composited-cursor](docs/backlog/resolved/gpu-direct-blocked-by-composited-cursor-done.md)
+  (resolved by Test 17: the drawn cursor rides an overlay plane).
 
 ## Test 6 — the GLES tier's dma-buf formats, and what GPU clients do with them
 
@@ -2886,6 +2888,158 @@ pins it (`a_window_moved_onto_a_hotplugged_output_hears_its_scale`,
 `a_reload_of_an_absent_outputs_entry_stores_it_and_moves_nothing`), and
 `create_output` is the one path for startup, `--outputs N` and hotplug
 alike. The pixman (dumb) tier was also not run: the GPU tier only.
+
+## Test 17 — the drawn cursor on an overlay plane, pointer visible
+
+Run 2026-10-06, 15:17-16:16 local (19:17-20:16 UTC), on the same Apple M2
+(Mac14,2 / j413), NixOS 26.11, kernel 7.1.13 (fairydust), Mesa 26.2.2, mpv
+0.41.0, DP-1 (1920x1080) and eDP-1 (2560x1600) both connected, config
+`[output] scale = 1.5` and nothing else (`cursor_hide_after_ms` unset, so
+the pointer never hides). The question is
+[the ticket](docs/backlog/resolved/gpu-direct-blocked-by-composited-cursor-done.md)'s
+option 2: with scoot's drawn cursor in a `LINEAR` dma-buf
+(`render/cursor_plane.rs`, on the fork's `UnderlyingStorage::Dmabuf`), does
+`apple,dcp` take it on an overlay plane, and does a fullscreen window under
+a visible pointer then go direct?
+
+**Builds.** Both on the machine, `cargo build --release --locked -p scoot
+--features gpu-scanout` in the flake dev shell, each from a `git archive` of
+the commit into its own directory and `CARGO_TARGET_DIR`:
+
+| build | commit | `release/scoot` sha256 |
+| --- | --- | --- |
+| before | `main` at `29579f343` | `40a4b477f8d2e4c19c87dc6f814d35589fbf399fc429647b838d0c82ea0ab180` |
+| after, first cut | `a72918aca` (no lit gate) | `a0b694841ff870cdef0fe1817b538b99ebabebb1416519a0cef08743027c7d0e` |
+| after | `267f43749` | `601090162e67ee30bf3d59f981426a332dd95e9d65e7b0fd470197589b03fc4d` |
+
+Every number below the first-cut row is from `267f43749` unless it says
+otherwise. Later commits on the branch are docs only.
+
+**Method.** VT 2 with a private seatd and a private `XDG_RUNTIME_DIR`,
+`scoot --tty --renderer gles`, `mpv --fs --cursor-autohide=no --vo=gpu
+--gpu-context=wayland --hwdec=no --loop` on a 1080p30 H.264 `testsrc2` clip
+(mpv never hides its own pointer, as in Tests 14 and 15). One session:
+`scoot msg pointer move 400 300`, then `420 320`, then 3 s settle,
+debugfs `dri/2/state` (planes 35, 40 and 45), two 10 s samples of the
+compositor's `utime + stime` from `/proc/PID/stat` (info logging), 10 s of
+pointer motion (a `scoot msg pointer move` every 30 ms, about 26 a second
+once the CLI's own start-up is counted), debugfs mid-motion, 3 s settle,
+debugfs, one more 10 s sample, a screenshot with and without the pointer.
+Sessions alternate before and after.
+
+**Plane state.** Before, in every snapshot: plane 35 on scoot's `AR24
+2560x1600` swapchain, both overlays empty. After, in every snapshot, idle
+and mid-motion: plane 35 on mpv's `XR30 2561x1601` buffer
+(`crtc-pos=2561x1601+0+0`) and plane 45 (the overlay with zpos 2) on a
+`AR24 32x32` buffer at `crtc-pos=48x48+626+479`, the 32 px padded cursor
+at scale 1.5, moving with the pointer. Plane 40 stayed free.
+
+**CPU** (jiffies per 10 s; `r1`/`r2` alternate):
+
+| run | build | idle 1 | idle 2 | under motion | idle again |
+| --- | --- | --- | --- | --- | --- |
+| r1 | before | 22 | 28 | 38 | 32 |
+| r1 | after | 15 | 14 | 24 | 14 |
+| r2 | before | 30 | 30 | 34 | 33 |
+| r2 | after | 14 | 13 | 25 | 14 |
+
+The same shape held in the earlier rounds of the day (before 29-35 idle,
+37-40 under motion; `a72918aca` 13-15 and 23-25). With the pointer visible
+and still over a fullscreen video, compositor CPU is about 55% lower, the
+same as Test 14's hidden pointer (13-14), and about 30% lower under
+motion, where the old build composited every frame.
+
+A second session shape has no fullscreen window: one tiled `foot`, the
+pointer moved over the desktop for 10 s the same way. Before: 17 and 19
+jiffies (earlier rounds 19, 20, 20, 20). After: 11 and 11 (earlier 9, 10,
+12, 12), with the cursor on plane 45 and the primary on the swapchain. Idle
+was 0 both ways. Moving the pointer no longer redraws anything.
+
+**Trace and `zero_copy`.** One session at
+`RUST_LOG=info,scoot=debug,smithay::backend::drm::compositor=trace`, with
+`WAYLAND_DEBUG=1` on mpv:
+
+```
+testing direct scan-out ... plane::Handle(35)   1499
+testing direct scan-out ... plane::Handle(45)   1506
+successfully assigned ... plane::Handle(35)     1499
+successfully assigned ... plane::Handle(45)     1506
+test already known to fail                      0
+test failed                                     2   (startup, frame level, both CRTCs)
+mpv presented flags: 9 (vsync | zero_copy) x1493, 1 (vsync) x1
+```
+
+The cursor's first `testing direct scan-out` exports a framebuffer from
+the dma-buf (`underlying storage Dmabuf(...)`), and every later frame uses
+the cached one. The one `1` frame is mpv's first.
+
+**What the lit gate fixed.** The first cut (`a72918aca`) offered the plane
+from the first frame. That frame carries the modeset, and DCP fails the
+overlay test against it. Smithay then keeps the failure for as long as the
+element and its position stay the same ("test already known to fail", 444
+lines in one session). So a pointer nobody had moved yet stayed
+composited, and the video under it with it: in the first cut's trace run
+mpv got 108 `1` frames before the first pointer move. `vt.sh`, pointer
+never moved, debugfs 5 s after mpv starts, then after `chvt 1`/`chvt 2`,
+then after one move:
+
+| build | at startup | after the VT switch back | after one move |
+| --- | --- | --- | --- |
+| `a72918aca` | `AR24` swapchain, overlays empty | `AR24` swapchain, overlays empty | mpv's `XR30`, cursor on 45 |
+| `267f43749` | mpv's `XR30`, cursor on 45 at `+1276+799` (the centre) | the same | the same, cursor moved |
+
+**Edges.** The pointer parked at eight points, 1.5 s each, debugfs at each:
+
+| pointer (logical) | cursor plane `crtc-pos` | plane 35 |
+| --- | --- | --- |
+| 800,500 | `48x48+1196+749` | mpv direct |
+| 1680,500 | `48x48+2516+749` (44 px on screen) | mpv direct |
+| 1695,500 | none: 23 px would be on screen, not offered | composited |
+| 1706,1066 | none (corner) | composited |
+| 0,0 | `48x48-5-2` (the hotspot's offset) | mpv direct |
+| 1,1066 | none: 20 px tall on screen | composited |
+| 800,0 | `48x48+1196-2` | mpv direct |
+| 800,500 | `48x48+1196+749` | mpv direct |
+
+No `test failed` past the 2 at startup. The kernel clips a plane that runs
+off the screen and refuses one smaller than 32x32 after clipping
+(`apple_plane_atomic_check`), and scoot now does not offer one that would
+end up that small. An earlier, uncommitted build without that check
+(binary sha256 `2be04ed2…`) offered them, got the refusal, and the kernel logged its
+once-per-boot `Plane operation would have crashed DCP! Rejected!` line
+once. That line refers to the rejected test, not to a crash. Nothing froze,
+and the frame composited as it should.
+
+**Captures.** A `scoot msg screenshot` taken while the cursor rode plane
+45 shows the arrow at the plane's position, and `--no-cursor` shows the
+video there. The capture re-renders the cursor's region
+(`render::capture_cursor`, which records an overlay cursor's footprint).
+
+**What this does not show.** One client (mpv), one scale (1.5), eDP-1
+only. No photo of the panel: debugfs and `zero_copy` are the evidence that
+the planes hold what is claimed, not that the panel shows it right. The
+right and bottom edges of the shape are filtered against the padding when
+scaled (headless test `scaled_the_twin_differs_only_along_the_images_right_and_bottom_edge`).
+Not looked at closely on the panel. Not tested: a client's own cursor
+image as a dma-buf (already able to ride an overlay, unchanged), DPMS
+off and on with the pointer still, DP-1, and hotplug. The cursor-element
+cost per frame is measured off hardware: 250 ns to build the drawn element
+and 302 ns to build it and swap it (pixman renderer, release, 200,000
+frames, `bench_the_swap_per_frame`).
+
+### State left behind
+
+Checked at 16:33 local, after the last session and the test-suite runs:
+`fgconsole` 1, `/run/seatd.sock` gone, no `scoot`, `seatd`, `mpv` or `foot`
+process, greetd (pid 1396068) and its greeter session on tty1 (session
+60542) as found, DP-1 and eDP-1 `connected`. greetd was never stopped; the
+VT switches in this test were `chvt 1`/`chvt 2` onto the greeter's VT and
+back. No `nh os switch`, no reboot, no config change. The test directory
+`~/fx/cursor-k7q2/` (trees, target dirs, scripts, logs) and
+`/tmp/k7q2-cargo.toml` were deleted. The scripts, the per-session `.txt`
+and debugfs files, and the xz-compressed trace and mpv logs were copied off
+the box first, into the implementing session's scratchpad
+(`cursor-m2-evidence.tar.xz`). Those copies are not in the repository.
 
 ## Keys for the 2026-09-25 runs
 

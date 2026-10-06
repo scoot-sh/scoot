@@ -20,15 +20,18 @@ existing entries are being checked against it by
 
 | Fork | Upstream | Based on | Carried commits | Pinned in scoot | Why |
 | --- | --- | --- | --- | --- | --- |
-| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/xwayland-selection-dnd) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below); then `74edbf32`: clamp the pixman source image to its edge when scaling; then `6e6fe896`: flush the XDND proxy's remap when a drag leaves an X window; then `7388af13` and `9515d7e5`: end a Wayland drop onto X once, and end an offer whose target is gone or never finishes; then `d3a4cd73`: only a real X drag gives up a pending drop onto X; then `b1ac3ca7`: an X drag enters another client's X window without waiting for types (Smithay's generic `input/dnd` gains a defaulted `DndFocus::enter_needs_metadata`); then `7e18b661`: remap the proxy only once the drag has left every X window; then `b16cd6a2`: wait for types only over the window the drag started on; then `fcf6f314` (unused, see below); then `e7130254`: apply a commit's cached buffer scale and transform on every commit that has a buffer; then `035d447c`: flush XSETTINGS writes | **yes**, `crates/scoot/Cargo.toml` rev `035d447c` (the XSETTINGS flush for scale-aware X windows; `e7130254` was the buffer-scale fix, content-identical to `6ab8b4a2` which `main` pinned from `scoot/buffer-scale-without-new-buffer` before this branch's XWayland lane merged; the same-app quick drag; `7e18b661` was the X drag first-motion fix, `b1ac3ca7` and its review fix; `d3a4cd73` was the XWayland pointer-focus X arm; `74edbf32` was PR #272; `5b575329` was PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. Without `74edbf32`, every upscaled surface fades to a semi-transparent 1-px border under the default renderer; without `6e6fe896`, an X drag that crossed an X window cannot drop on a Wayland one, so drags from X could not be let onto X windows; without `9515d7e5`, a Wayland drop onto an X target that dies or hangs before finishing stops every later X drag until scoot restarts, and without `d3a4cd73` any X client can end such a drop in flight and keep the selection; without `b1ac3ca7`, a GTK or Qt drag released on its first motion onto another X app drops nothing, and without `7e18b661` an X window mapped again under an X drag has the proxy over it, and without `b16cd6a2` a quick drag between two windows of one X app instance drops nothing; without `e7130254`, a scale-only commit keeps rendering at the old buffer scale (see below); without `035d447c`, an X app started right after XWayland is ready can read no scale over XSETTINGS and draw at half size. |
+| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/cursor-dmabuf-storage) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below); then `74edbf32`: clamp the pixman source image to its edge when scaling; then `6e6fe896`: flush the XDND proxy's remap when a drag leaves an X window; then `7388af13` and `9515d7e5`: end a Wayland drop onto X once, and end an offer whose target is gone or never finishes; then `d3a4cd73`: only a real X drag gives up a pending drop onto X; then `b1ac3ca7`: an X drag enters another client's X window without waiting for types (Smithay's generic `input/dnd` gains a defaulted `DndFocus::enter_needs_metadata`); then `7e18b661`: remap the proxy only once the drag has left every X window; then `b16cd6a2`: wait for types only over the window the drag started on; then `fcf6f314` (unused, see below); then `e7130254`: apply a commit's cached buffer scale and transform on every commit that has a buffer; then `035d447c`: flush XSETTINGS writes; then `7ab72d53`: scan out a compositor-owned dma-buf element | **yes**, `crates/scoot/Cargo.toml` rev `7ab72d53` (the drawn cursor on an overlay plane; `035d447c` was the XSETTINGS flush for scale-aware X windows; `e7130254` was the buffer-scale fix, content-identical to `6ab8b4a2` which `main` pinned from `scoot/buffer-scale-without-new-buffer` before this branch's XWayland lane merged; the same-app quick drag; `7e18b661` was the X drag first-motion fix, `b1ac3ca7` and its review fix; `d3a4cd73` was the XWayland pointer-focus X arm; `74edbf32` was PR #272; `5b575329` was PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. Without `74edbf32`, every upscaled surface fades to a semi-transparent 1-px border under the default renderer; without `6e6fe896`, an X drag that crossed an X window cannot drop on a Wayland one, so drags from X could not be let onto X windows; without `9515d7e5`, a Wayland drop onto an X target that dies or hangs before finishing stops every later X drag until scoot restarts, and without `d3a4cd73` any X client can end such a drop in flight and keep the selection; without `b1ac3ca7`, a GTK or Qt drag released on its first motion onto another X app drops nothing, and without `7e18b661` an X window mapped again under an X drag has the proxy over it, and without `b16cd6a2` a quick drag between two windows of one X app instance drops nothing; without `e7130254`, a scale-only commit keeps rendering at the old buffer scale (see below); without `035d447c`, an X app started right after XWayland is ready can read no scale over XSETTINGS and draw at half size; without `7ab72d53`, scoot's drawn cursor can never ride an overlay plane, so on a CRTC with no cursor plane (Apple's DCP) a visible pointer makes every fullscreen frame composite. |
 | [`scoot-sh/wayland-rs`](https://github.com/scoot-sh/wayland-rs/tree/scoot/server-fd-queue-cap-adaptive) | [Smithay/wayland-rs](https://github.com/Smithay/wayland-rs) | `72f7fe0d` (the wayland-backend 0.3.17 release, `v0.31.x` branch) | `a39311b8`: server side, disconnects a client leaving too many received fds unclaimed; `70f81e00`: sizes that cap at one eighth of the soft `RLIMIT_NOFILE`, 128..=1024 | **yes**, root `Cargo.toml` `[patch.crates-io]` rev `70f81e00` (PR #241) | wayland-backend queues fds a client sends with fd-less requests for the connection's life, so one idle client could fill scoot's fd table and shed every newcomer, `scoot msg` included. |
 
 ## Per fork
 
 ### `scoot-sh/smithay`
 
-- **Branch:** `scoot/xwayland-selection-dnd`, twenty-five commits on
-  `0ff00983`, the tip `035d447c` pinned; `fcf6f314`, the twenty-third, is
+- **Branch:** `scoot/cursor-dmabuf-storage`, twenty-six commits on
+  `0ff00983`, the tip `7ab72d53` pinned: `scoot/xwayland-selection-dnd`
+  (twenty-five, tip `035d447c`) plus the cursor commit, on a branch of its
+  own until the PR adding it merges, after which the lane branch can be
+  fast-forwarded to it. `fcf6f314`, the twenty-third, is
   carried unused (see below). `scoot/buffer-scale-without-new-buffer`
   (`6ab8b4a2` on `7e18b661`) was pinned briefly by the buffer-scale PR
   while this lane's XWayland commits were unmerged; nothing pins it now.
@@ -293,6 +296,58 @@ existing entries are being checked against it by
     `update` now flushes, which covers `set_xsettings`,
     `remove_xsettings` and `clear_xsettings`; it touches only
     `src/xwayland/xwm/settings.rs`.
+  - `7ab72d53` **scan out a compositor-owned dma-buf element**
+    (branch `scoot/cursor-dmabuf-storage`, on `035d447c`).
+    `UnderlyingStorage` gains `Dmabuf(&Dmabuf)`, and the DRM compositor
+    takes it down the dma-buf `wl_buffer` path: `ExportBuffer::Dmabuf`
+    (the GBM exporter imports it under the same explicit-modifier rule; the
+    dumb exporter refuses it), the element framebuffer cache keyed by its
+    `WeakDmabuf`, the scan-out buffer kept alive while on screen, the
+    y-invert flag, and the cursor-plane paths (no copy fast path; pixman
+    maps it). Until now only a client's buffer could reach a plane:
+    `Memory` storage has no export (`drm/exporter/mod.rs` and
+    `ScanoutBuffer`/`ElementFramebufferCacheBuffer::from_underlying_storage`
+    in `drm/compositor/mod.rs` all map it to `None` at `035d447c`), so
+    scoot's drawn cursor, offered an overlay on a CRTC with no cursor plane,
+    always composited, and a composited cursor denies the window under it
+    the primary plane (Smithay tries the primary only for the bottom
+    element with nothing rendered above it, `drm/compositor/mod.rs` ~1995).
+    Measured on the Apple M2 (`Asahi.md`, Test 17): fullscreen mpv with the
+    pointer visible and idle, 22-33 jiffies per 10 s composited before, 13-15
+    with the cursor on overlay plane 45 and mpv's buffer on the primary after;
+    pointer motion over a plain desktop, 17-19 against 11. Used by
+    `compositor/render/cursor_plane.rs` (scoot does not compile against a
+    rev without the variant). Touches `renderer/element/mod.rs`,
+    `drm/exporter/{mod,gbm,dumb}.rs` and `drm/compositor/mod.rs`.
+    **Alternatives considered**, each checked against `035d447c`:
+    - *A scoot-side render element wrapping the cursor in a client-shaped
+      `wl_buffer`.* `UnderlyingStorage::Wayland` takes a
+      `renderer::utils::Buffer`, which `Buffer::with_implicit` builds from
+      any `WlBuffer`, and `get_dmabuf` reads only the buffer's `Dmabuf`
+      user data (`wayland/dmabuf/mod.rs:1025`), so scoot could mint one: a
+      `WlBuffer` with `Dmabuf` data created for an in-process client on a
+      socketpair it never reads. Rejected: it works by inventing a Wayland
+      connection the scanout path then depends on. The object would be a
+      server-created `wl_buffer` its client never asked for;
+      `InnerBuffer::drop` sends `wl_buffer.release` on it
+      (`renderer/utils/wayland.rs:68-79`) into a socket nobody reads, so
+      scoot would need a drain as well; and the cursor's plane would hang on
+      a client entry that any disconnect or kill path could end. scoot's
+      per-client bounds would mostly leave it alone (they fire on requests
+      it never sends, and `wl_buffers::forget_buffer` saturates), but each
+      later one would have to be checked against it.
+    - *A scoot-side exporter wrapper* (scoot already wraps the exporter,
+      `tty/layout_exporter.rs`). Rejected: `Memory` storage never reaches
+      the exporter. `element_config` returns `Unsupported` from
+      `ExportBuffer::from_underlying_storage` first, and `ScanoutBuffer`
+      and the framebuffer cache key are private to `drm/compositor` and
+      refuse it too.
+    - *An in-tree copy of `DrmCompositor`* (4,400 lines). Rejected for its
+      size and for forking all plane assignment to change three
+      `from_underlying_storage` arms.
+    - *Hiding the pointer instead* (`[appearance] cursor_hide_after_ms`,
+      shipped). Kept, and still the answer where no overlay is free, but it
+      only helps once the pointer has sat still, and is opt-in.
 - **Evidence:** `docs/backlog/resolved/syncobj-handle-leak-done.md`, and on the
   dev VM `~/evidence/sync/master-validation/`. Upstream master `79bbed5e1`
   (2026-09-22) was built and measured: it leaks 3.5–4.1 MB per test run,
@@ -315,7 +370,9 @@ existing entries are being checked against it by
   `update_buffer` still reads `buffer_scale`/`buffer_transform` only in
   the `NewBuffer` arm. `035d447c` (checked 2026-09-28, master
   `928d4a9b`): upstream's `XSettings::update` still returns after
-  `change_property8` without a flush. No issue
+  `change_property8` without a flush. `7ab72d53` (checked 2026-10-06,
+  master `19c16d3e`): upstream's `UnderlyingStorage` and `ExportBuffer`
+  still have no dma-buf variant. No issue
   or PR exists. Nothing has been filed from here.
 - **Upstream policy note, for the maintainer's decision:** Smithay's
   `AI.md` asks contributors to disclose AI-generated code, discourages
@@ -338,7 +395,8 @@ existing entries are being checked against it by
   `compositor/output_scale/tests.rs`'s `a_scale_only_commit_rescales_the_surface`
   fails without `e7130254` (the far pixel is still window fill);
   `compositor/xwayland/tests/scale.rs` fails intermittently without
-  `035d447c` (2 runs in 20: the X app reads no scale).
+  `035d447c` (2 runs in 20: the X app reads no scale); scoot does not
+  compile against a rev without `UnderlyingStorage::Dmabuf` (`7ab72d53`).
 
 ### `scoot-sh/wayland-rs`
 

@@ -106,6 +106,25 @@ output goes primary-direct (zero-copy), decided per frame; GPU clients
 get the driver's whole import set (tiled and compressed layouts,
 multi-plane YUV included), where the CPU tier offers linear RGB only.
 
+**The pointer rides a plane when the display has one for it.** With a
+hardware cursor plane, scoot's pointer goes there. A display with no
+cursor plane but a free overlay plane (Apple Silicon's DCP has two)
+gets scoot's own pointer shapes as small `LINEAR` buffers on the topmost
+overlay instead of compositing them. So a visible pointer no longer stops
+the fullscreen window under it from going direct, and moving the pointer
+only moves the plane, with nothing redrawn. On the M2, fullscreen mpv
+with the pointer visible and still went from 22–33 to 13–15 jiffies per
+10 s, and pointer motion over a desktop from 17–19 to 11 (`Asahi.md`,
+Test 17). It falls back to compositing, frame by frame, wherever the
+plane cannot take it: a pointer so near a screen edge (in practice the
+right or bottom one) that under 32 pixels of its plane would stay on
+screen (DCP refuses planes that small), a client's own cursor
+image in shared memory, or a display with no overlay to spare. Above
+scale 1 the shape's right and bottom edges are filtered against
+transparency rather than repeated, which can soften that one-pixel edge
+slightly. Screenshots and screen capture still show the pointer exactly
+where the panel does.
+
 | Field | Type | Default | Reload | Meaning |
 |---|---|---|---|---|
 | `[renderer] backend` | `"pixman"` / `"gles"` | `"pixman"` | restart only | Which renderer composites each frame. A name this build *knows* but cannot build (`gles` with no working EGL) is a startup error; `--renderer` wins over the file either way. |

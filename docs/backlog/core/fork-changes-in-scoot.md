@@ -19,7 +19,7 @@ each fork's alternatives were recorded, and whatever it finds thin goes first he
 
 ## What is carried (`docs/forks.md` is the source of truth)
 
-`scoot-sh/smithay` (25 commits on upstream `0ff00983`, tip `035d447c`) and
+`scoot-sh/smithay` (26 commits on upstream `0ff00983`, tip `7ab72d53`) and
 `scoot-sh/wayland-rs` (2 commits on 0.3.17), grouped:
 
 | Group | What it does | Route worth checking |
@@ -32,6 +32,7 @@ each fork's alternatives were recorded, and whatever it finds thin goes first he
 | cached buffer scale and transform on commit | apply them without a new buffer | scoot's commit handler doing what the renderer does not |
 | XSETTINGS flush | scale reaches X toolkits | a flush from scoot after its own write, if the connection is reachable |
 | `set_commits_allowed` | unused; drop at the next rebase | nothing: just delete it |
+| `UnderlyingStorage::Dmabuf` | a compositor-owned dma-buf (the drawn cursor) can ride a plane | **already evaluated** in `docs/forks.md` (`7ab72d53`): a phantom-client `wl_buffer` and an exporter wrapper were ruled out |
 | wayland-rs fd-queue cap | disconnect a client leaving too many unclaimed fds | **already evaluated**: scoot-side attribution, a kill heuristic and a socket proxy were ruled out (`wayland-backend-fd-queue-done.md`); reopen only with a new idea |
 
 ## Method, per carried commit
@@ -51,7 +52,7 @@ each fork's alternatives were recorded, and whatever it finds thin goes first he
    reason), or **delete**.
 
 Verify every claim against the **pinned fork's** source
-(`~/.cargo/git/checkouts/smithay-*/035d447`), as `CLAUDE.md` requires, not from
+(`~/.cargo/git/checkouts/smithay-*/7ab72d5`), as `CLAUDE.md` requires, not from
 memory of Smithay.
 
 ## Constraints

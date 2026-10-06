@@ -144,9 +144,9 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
-# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty-five
-# commits, branch `scoot/xwayland-selection-dnd` (see `docs/forks.md` for
-# each one and why):
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty-six
+# commits, branch `scoot/cursor-dmabuf-storage` (`scoot/xwayland-selection-dnd`
+# plus the last one; see `docs/forks.md` for each one and why):
 #
 # - `43f50eb2` (also branch `scoot/syncobj-timeline-drop`) adds a `Drop` for
 #   `DrmTimelineDeviceSpecific`. Without it every
@@ -230,6 +230,14 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 #   `Gdk/WindowScalingFactor` and drew at half size at output scale 2
 #   (`compositor/xwayland/tests/scale.rs`: 2 of 20 runs failed on
 #   `e7130254`, 20 of 20 pass on `035d447c`).
+# - `7ab72d53` (branch `scoot/cursor-dmabuf-storage`, on `035d447c`) adds
+#   `UnderlyingStorage::Dmabuf`, a compositor-owned dma-buf the DRM compositor
+#   exports and scans out like a client's dma-buf `wl_buffer`. A memory
+#   buffer can never become a framebuffer, so on a CRTC with no cursor plane
+#   (Apple's DCP) the drawn cursor always composited, and a composited
+#   cursor denies a fullscreen window under it the primary plane
+#   (`compositor/render/cursor_plane.rs`; Asahi.md Test 17: 30-32 jiffies per
+#   10 s for fullscreen mpv with the pointer visible and idle, before).
 #
 # Upstream status (checked 2026-09-25; the pixman hunk re-checked 2026-09-27,
 # the XDND commits 2026-09-27):
@@ -240,7 +248,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/scoot-sh/smithay"
-rev = "035d447cdf6067f8db58a2964937034a2b9e760b"
+rev = "7ab72d533656acb8a2d6fb37226719a08b4444ba"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session

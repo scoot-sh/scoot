@@ -80,6 +80,8 @@ use super::decorations::{Appearance, Color};
 use shapes::Shape;
 use theme::{Theme, Themed};
 
+#[cfg(feature = "gpu-scanout")]
+pub mod plane;
 pub mod shapes;
 pub mod theme;
 
@@ -93,6 +95,11 @@ render_elements! {
     pub CursorElement<R> where R: ImportAll + ImportMem;
     Fallback = MemoryRenderBufferRenderElement<R>,
     Surface = WaylandSurfaceRenderElement<R>,
+    // A drawn shape with a dma-buf twin an overlay plane can scan out, where
+    // the CRTC has no cursor plane. Never built here: `render::cursor_plane`
+    // swaps it in for `Fallback` on the outputs that can use it.
+    #[cfg(feature = "gpu-scanout")]
+    Plane = plane::PlaneCursorElement<R>,
 }
 
 /// A filled right triangle `size` x `size`, point at the top-left corner

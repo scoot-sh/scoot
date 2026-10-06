@@ -1,9 +1,10 @@
 ---
 title: "GPU scanout: on a CRTC with no cursor plane, a visible pointer denies every fullscreen window a primary-direct attempt"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-06"
 ---
 
 # A composited cursor blocks primary-direct
@@ -129,3 +130,36 @@ overlays per CRTC, so option 2 need not compete with window overlays
 there. The option-2 text above, which says it competes for the one overlay,
 predates this. The ticket keeps `status: "open"` until option 2 lands or
 is ruled out.
+
+## Resolved 2026-10-06 — option 2: the drawn cursor rides an overlay
+
+On a CRTC with no cursor plane and at least one overlay, the GPU scanout
+tier swaps each drawn cursor shape (the theme's or scoot's own) for a twin
+holding the same pixels in a `LINEAR` `Argb8888` dma-buf, built once per
+image on the scanout device's GBM and cached
+(`compositor/render/cursor_plane.rs`). Smithay tests the twin on an overlay
+like any candidate and composites it if the test fails. The twin is padded
+to `apple,dcp`'s limits (at least 32x32, a 64-byte pitch). It is not
+offered when less than 32 px of it would stay on screen, which DCP refuses
+after clipping, or before the CRTC has shown a frame since it was built,
+reset or given a new mode. The modeset frame's test fails on DCP, and
+Smithay would otherwise remember that failure for as long as the pointer
+stays still.
+
+Smithay could not export a memory buffer at all, so this needed a fork
+commit: `7ab72d53` adds `UnderlyingStorage::Dmabuf` (`docs/forks.md` has
+the scoot-side alternatives and why each was rejected).
+
+Verified on the M2 (`Asahi.md`, Test 17, commit `267f43749`):
+- Fullscreen mpv with the pointer visible and still: plane 35 on mpv's
+  `XR30` buffer and plane 45 on the 32x32 cursor. 13-15 jiffies per
+  10 s, against 22-33 before.
+- Under motion: 24-25 against 34-38.
+- Pointer motion over a tiled desktop: 11 against 17-19.
+- mpv reported `zero_copy` on 1493 of its 1494 frames.
+
+Option 1 (`cursor_hide_after_ms`) stays. It still covers the cases with no
+plane to ride:
+- no free overlay;
+- the pointer at a screen edge;
+- a client's own shm cursor image.

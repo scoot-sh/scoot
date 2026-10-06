@@ -629,7 +629,9 @@ each item's own file records why it landed when it did.
   so a visible, composited pointer denies every fullscreen client a primary
   attempt. With it hidden, the buffer must still qualify (`LINEAR`, and a
   size matching the mode)
-  ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)).
+  ([ticket](docs/backlog/resolved/gpu-direct-blocked-by-composited-cursor-done.md);
+  resolved 2026-10-06: the drawn cursor now rides an overlay plane, so a
+  visible pointer no longer blocks it, `Asahi.md` Test 17).
   Its [candidates](docs/backlog/resolved/gpu-scanout-candidates-done.md)
   remainder -- scanout-tranche feedback and `zero_copy` -- landed in PR #230;
   overlay-plane candidates are split out
