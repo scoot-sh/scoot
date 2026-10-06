@@ -250,6 +250,14 @@ let
   # Whether a slot-gated bind's slot is on.
   slotOn = name: (cfg.desktop.${name}.enable or false);
 
+  # Whether the volume, brightness and mic-mute binds run through the
+  # audio slot's OSD scripts (set the control AND show the OSD) or
+  # call the tools directly (the control alone, silent): the slot on
+  # Linux, where its scripts are installed. Off Linux the binds render
+  # for the Linux box they deploy to, calling bare tool names.
+  audioRouted = (cfg.desktop.audio.enable or false) && isLinux;
+  audioScripts = cfg.desktop.audio.scripts;
+
   # A hardware bind: repeats while held and fires while locked (the
   # compositor's `[binds]` table form -- see
   # site/src/content/docs/scoot/keybindings.md#the-bind-grammar).
@@ -269,18 +277,50 @@ let
   # clipboard, notifications, capture) render only while their slot
   # is enabled; the rest render with the keymap. A `false` flag
   # leaves that combo unbound; a value the user sets in
-  # `settings.binds` wins per key (`mkDefault` below). The profile
-  # bind additionally needs the profiles daemon wanted
+  # `settings.binds` wins per key (`mkDefault` below). The volume,
+  # brightness and mic-mute binds run through the audio slot's scripts
+  # while it is on (control plus OSD), bare tools otherwise. The
+  # profile bind additionally needs the profiles daemon wanted
   # (`profiles.enable`): without it there is nothing to cycle.
   actions =
     let
       all = {
-        brightnessUp = hwBind "spawn ${brightnessCtl} -e set +5%";
-        brightnessDown = hwBind "spawn ${brightnessCtl} -e set 5%-";
-        volumeUp = hwBind "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%+";
-        volumeDown = hwBind "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%-";
-        volumeMute = hwBind "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SINK@ toggle";
-        micMute = hwBind "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+        brightnessUp = hwBind (
+          if audioRouted then
+            "spawn ${audioScripts.brightness}/bin/scoot-brightness up"
+          else
+            "spawn ${brightnessCtl} -e set +5%"
+        );
+        brightnessDown = hwBind (
+          if audioRouted then
+            "spawn ${audioScripts.brightness}/bin/scoot-brightness down"
+          else
+            "spawn ${brightnessCtl} -e set 5%-"
+        );
+        volumeUp = hwBind (
+          if audioRouted then
+            "spawn ${audioScripts.volume}/bin/scoot-volume sink-up"
+          else
+            "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+        );
+        volumeDown = hwBind (
+          if audioRouted then
+            "spawn ${audioScripts.volume}/bin/scoot-volume sink-down"
+          else
+            "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+        );
+        volumeMute = hwBind (
+          if audioRouted then
+            "spawn ${audioScripts.volume}/bin/scoot-volume sink-mute"
+          else
+            "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SINK@ toggle"
+        );
+        micMute = hwBind (
+          if audioRouted then
+            "spawn ${audioScripts.volume}/bin/scoot-volume mic-mute"
+          else
+            "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SOURCE@ toggle"
+        );
         mediaPlay = hwBind "spawn ${playerctl} play-pause";
         mediaPause = hwBind "spawn ${playerctl} pause";
         mediaStop = hwBind "spawn ${playerctl} stop";

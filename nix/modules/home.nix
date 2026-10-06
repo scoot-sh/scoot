@@ -145,7 +145,9 @@ in
   # config) and the notification daemon's user half (mako unit, its
   # config, the bar feed): options under `programs.scoot.desktop.idle`
   # and `...notifications`, declared there. Imported here (not by
-  # consumers) so the profile's user side is one import.
+  # consumers) so the profile's user side is one import. The audio
+  # slot's user half (the OSD unit, its config, the control scripts)
+  # and the capture slot's user half ride the same way.
   #
   # The shared keymap's user half (`programs.scoot.desktop.keys`):
   # the `[binds]`, its tools and its slot scripts. Same pattern.
@@ -155,6 +157,7 @@ in
     ./clipboard-home.nix
     ./launcher-home.nix
     ./capture-home.nix
+    ./audio-home.nix
     ./power-home.nix
     ./keys-home.nix
   ];
@@ -434,6 +437,7 @@ in
         || cfg.desktop.idle.enable
         || cfg.desktop.notifications.enable
         || cfg.desktop.clipboard.enable
+        || cfg.desktop.audio.enable
       )
       {
         xdg.configFile."systemd/user/scoot-session.target".source =

@@ -452,6 +452,42 @@ in
           };
         };
       };
+      # The audio slot's packages: the value shapes are in
+      # `desktop.nix` (shared with the home-manager side) and the OSD
+      # unit that runs them is that side's (`audio-home.nix`); this
+      # side installs the OSD system-wide, so a hand-written setup
+      # finds it the way it finds the launcher binary without its
+      # wrapper. The same packages as there, so either side alone
+      # names the same tools. Merged here for the same
+      # one-declaration reason as above. Linux-only: off Linux each
+      # defaults to null, which the assertions below refuse loudly.
+      # `osd` is re-merged, not replaced: a shallow `//` would drop the
+      # shared `osd.timeoutMs` from the NixOS-side declaration (the same
+      # reason the idle slot re-merges `mediaInhibit` and `lock`).
+      audio = desktop.options.audio // {
+        osd = desktop.options.audio.osd // {
+          package = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wob or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.wob or null else null";
+            description = ''
+              The on-screen display to install system-wide (wob). Null
+              installs nothing. Linux-only: null off Linux.
+            '';
+          };
+        };
+
+        dumpPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.pipewire or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.pipewire or null else null";
+          description = ''
+            The PipeWire package to install system-wide for the sink
+            helper's `pw-dump`. Null installs nothing. Linux-only:
+            null off Linux.
+          '';
+        };
+      };
     };
 
     # `pkgs.scoot` when the flake's overlay (`overlays.default`) is
@@ -775,6 +811,12 @@ in
       # below install, PipeWire runs, and the chooser config comes
       # from the home-manager side.
       programs.scoot.desktop.capture.enable = lib.mkDefault true;
+
+      # The audio slot on with the profile (still individually
+      # disable-able at plain priority): the OSD package below
+      # installs, PipeWire runs, and the unit comes from the
+      # home-manager side.
+      programs.scoot.desktop.audio.enable = lib.mkDefault true;
     })
     # The notification daemon's system half: its package on PATH. The
     # unit and the config are the home-manager side's
@@ -961,9 +1003,9 @@ in
 
       # PipeWire running for the cast (the session manager rides
       # along: `wireplumber.enable` defaults to this). Plain
-      # `mkDefault`, so an explicit value still wins -- and the future
-      # audio child defaults the same switch, which merges rather
-      # than conflicts.
+      # `mkDefault`, so an explicit value still wins -- and the audio
+      # slot defaults the same switch, which merges rather than
+      # conflicts.
       services.pipewire.enable = lib.mkDefault true;
 
       environment.systemPackages =
@@ -1237,6 +1279,48 @@ in
         '';
       }
     )
+    # The audio slot's system half: the OSD on PATH and PipeWire
+    # running for the volume binds. The unit, its config and the
+    # control scripts are the home-manager side's (`audio-home.nix`
+    # and the keymap): without it the OSD sits ready for a
+    # hand-written setup, the way a `[wallpaper]` finds scootbg on PATH
+    # without the home-manager side. `wpctl` itself arrives with the
+    # keymap's volume tool (WirePlumber's own CLI); the session
+    # manager rides along with PipeWire, so the default-sink routing
+    # the binds drive is there too.
+    (lib.mkIf cfg.desktop.audio.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.audio.osd.package != null;
+          message = ''
+            programs.scoot.desktop.audio.enable is set but
+            programs.scoot.desktop.audio.osd.package is null: set it
+            explicitly (apply the overlay, or point at a wob).
+          '';
+        }
+        {
+          assertion = cfg.desktop.audio.dumpPackage != null;
+          message = ''
+            programs.scoot.desktop.audio.enable is set but
+            programs.scoot.desktop.audio.dumpPackage is null: set it
+            explicitly (apply the overlay, or point at a pipewire).
+          '';
+        }
+      ];
+
+      # PipeWire with WirePlumber running for the binds (`wpctl` is
+      # WirePlumber's CLI: a PipeWire-only shape would leave the binds
+      # with nothing to call, for ~4.7 MiB saved -- measured, see
+      # site/src/content/docs/desktop/index.md#sound-brightness-keys-and-the-on-screen-display).
+      # Plain `mkDefault`, so an explicit value still wins -- and the
+      # capture slot defaults the same switch, which merges rather
+      # than conflicts.
+      services.pipewire.enable = lib.mkDefault true;
+
+      environment.systemPackages =
+        lib.optional (cfg.desktop.audio.osd.package != null) cfg.desktop.audio.osd.package
+        ++ lib.optional (cfg.desktop.audio.dumpPackage != null) cfg.desktop.audio.dumpPackage;
+    })
     # The idle policy's system half: its tools on PATH, the docked-lid
     # rule, and the locker's PAM service. The timers and the locker
     # config are the home-manager side's (`idle-home.nix`): without it
