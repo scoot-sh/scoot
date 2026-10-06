@@ -11319,10 +11319,11 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     echo "ok: theme settings win per key, user over Stylix over look"
 
     # 13k. Theme Qt config: the Adwaita style in the look's polarity
-    #      plus the icon theme (no faked per-look palette).
-    grep -F -x "style=adwaita" ${qtLightConf}
+    #      (capitalized exactly as the plugin registers it) plus the
+    #      icon theme (no faked per-look palette).
+    grep -F -x "style=Adwaita" ${qtLightConf}
     grep -F -x "icon_theme=Adwaita" ${qtLightConf}
-    grep -F -x "style=adwaita-dark" ${qtDarkConf}
+    grep -F -x "style=Adwaita-Dark" ${qtDarkConf}
     echo "ok: Qt config carries the look's polarity"
 
     # 13l. Theme fontconfig default: the UI face for sans-serif, the
