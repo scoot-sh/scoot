@@ -37,7 +37,9 @@
 #   output (`-m last`, which a user's own `cageArgs` overrides), ends the
 #   greeter's processes with its session (`KillUserProcesses` scoped to
 #   the greeter user through `KillOnlyUsers`, which a user's own
-#   `KillUserProcesses` overrides), leaves
+#   `KillUserProcesses` overrides and a user's own `KillOnlyUsers`
+#   replaces outright), ties the settings' identity into logind's unit
+#   (so a switch reloads, never restarts, the running logind), leaves
 #   the backdrop alone by default and renders a set one as ReGreet's
 #   `background.path`; off changes nothing (no logind change either);
 #   GDM/SDDM, an explicitly
@@ -849,6 +851,15 @@ let
     desktop.enable = true;
     desktop.power.enable = true;
   };
+  # The greeter beside the power policy in a real NixOS evaluation:
+  # both halves' logind keys present together and rendered (N3 -- the
+  # two switches compose, they do not shadow each other).
+  osRealGreeterPower = evalRealNixos {
+    enable = true;
+    desktop.enable = true;
+    desktop.power.enable = true;
+    greeter.enable = true;
+  };
   hmFlake = evalHomeWith flake.homeModule pkgs {
     enable = true;
     settings.wallpaper.color = "#1e1e2e";
@@ -1156,6 +1167,15 @@ let
     package = fakePkg;
     greeter.enable = true;
   } (greeterUser // { services.logind.settings.Login.KillUserProcesses = false; });
+  # ...with the user's own `KillOnlyUsers`: it replaces the greeter's
+  # list, it does not merge with it (plain beats `mkDefault` before any
+  # concatenation runs), so a list without `"greeter"` opts the greeter
+  # back out of the cleanup.
+  osGreeterKillOnlyUsersOverride = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    greeter.enable = true;
+  } (greeterUser // { services.logind.settings.Login.KillOnlyUsers = [ "alice" ]; });
 
   # --- desktop profile (`programs.scoot.desktop`) evaluations under test ---
   #
@@ -3398,6 +3418,14 @@ let
         assert osRealGreeter.config.services.logind.settings.Login.KillOnlyUsers == [ "greeter" ];
         assert lib.hasInfix "KillOnlyUsers=greeter"
           osRealGreeter.config.environment.etc."systemd/logind.conf".text;
+        # ...and the switch reload hook rides with it: the unit carries
+        # the settings' identity, bound to this evaluation's settings
+        # (not a constant), so a switch that changes them HUPs logind.
+        assert
+          osRealGreeter.config.systemd.services.systemd-logind.unitConfig."X-ScootLogindSettings"
+          == builtins.hashString "sha256" (
+            builtins.toJSON osRealGreeter.config.services.logind.settings.Login
+          );
         true
       )
       # The profile's idle half in a real NixOS evaluation too: the
@@ -3429,6 +3457,9 @@ let
         assert osRealPower.config.services.logind.settings.Login.HandleLidSwitch == "suspend";
         assert osRealPower.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
         assert osRealPower.config.services.logind.settings.Login.KillUserProcesses == false;
+        # ...and no reload hook without the greeter (the identity key
+        # rides with the greeter's cleanup, not with the module).
+        assert !(osRealPower.config.systemd.services.systemd-logind.unitConfig ? "X-ScootLogindSettings");
         assert osRealPower.config.systemd.services ? scoot-charge-sync;
         assert osRealPower.config.systemd.timers ? scoot-charge-sync;
         assert lib.hasInfix "charge_control_end_threshold" osRealPower.config.services.udev.extraRules;
@@ -3436,6 +3467,25 @@ let
         assert lib.any (
           p: (p.pname or "") == "power-profiles-daemon"
         ) osRealPower.config.environment.systemPackages;
+        true
+      )
+      # Greeter beside power in a real NixOS evaluation: both halves'
+      # logind keys present together (the cleanup pair plus the lid
+      # actions) and all rendered into logind.conf -- the two switches
+      # compose, neither shadows the other.
+      (
+        assert osRealGreeterPower.config.services.logind.settings.Login.KillUserProcesses == true;
+        assert osRealGreeterPower.config.services.logind.settings.Login.KillOnlyUsers == [ "greeter" ];
+        assert osRealGreeterPower.config.services.logind.settings.Login.HandleLidSwitch == "suspend";
+        assert osRealGreeterPower.config.services.logind.settings.Login.HandleLidSwitchDocked == "lock";
+        assert lib.hasInfix "KillOnlyUsers=greeter"
+          osRealGreeterPower.config.environment.etc."systemd/logind.conf".text;
+        assert lib.hasInfix "KillUserProcesses=true"
+          osRealGreeterPower.config.environment.etc."systemd/logind.conf".text;
+        assert lib.hasInfix "HandleLidSwitch=suspend"
+          osRealGreeterPower.config.environment.etc."systemd/logind.conf".text;
+        assert lib.hasInfix "HandleLidSwitchDocked=lock"
+          osRealGreeterPower.config.environment.etc."systemd/logind.conf".text;
         true
       )
       # The documented install configs (desktop/index.md) evaluate with
@@ -3847,6 +3897,50 @@ let
     )
     (
       assert osGreeterLogindOverride.config.services.logind.settings.Login.KillUserProcesses == false;
+      true
+    )
+    # ...and a user's own `KillOnlyUsers` replaces ours (no merge: the
+    # list is exactly what they wrote, so dropping `"greeter"` opts
+    # the greeter back out of the cleanup -- keep `"greeter"` in the
+    # list to keep the fix).
+    (
+      assert allAssertionsHold osGreeterKillOnlyUsersOverride.config;
+      true
+    )
+    (
+      assert
+        osGreeterKillOnlyUsersOverride.config.services.logind.settings.Login.KillOnlyUsers == [ "alice" ];
+      true
+    )
+    # ...while the switch reloads logind for the new config: the
+    # settings' identity rides in the unit (`X-ScootLogindSettings`),
+    # so a switch that only flips these keys HUPs the running logind
+    # instead of leaving it on its old in-memory config. The key is
+    # bound to the settings (not a constant)...
+    (
+      assert
+        osGreeter.config.systemd.services.systemd-logind.unitConfig."X-ScootLogindSettings"
+        == builtins.hashString "sha256" (builtins.toJSON osGreeter.config.services.logind.settings.Login);
+      true
+    )
+    # ...changes when the settings change (either key, greeter's or
+    # user's)...
+    (
+      assert
+        osGreeter.config.systemd.services.systemd-logind.unitConfig."X-ScootLogindSettings"
+        != osGreeterLogindOverride.config.systemd.services.systemd-logind.unitConfig."X-ScootLogindSettings";
+      true
+    )
+    (
+      assert
+        osGreeter.config.systemd.services.systemd-logind.unitConfig."X-ScootLogindSettings"
+        != osGreeterKillOnlyUsersOverride.config.systemd.services.systemd-logind.unitConfig."X-ScootLogindSettings";
+      true
+    )
+    # ...and is absent with the greeter off (no logind unit touch at
+    # all, like the settings pair above).
+    (
+      assert !(osGreeterOff.config.systemd.services ? systemd-logind);
       true
     )
     # Off changes nothing: no ReGreet, and (no session entry either) no

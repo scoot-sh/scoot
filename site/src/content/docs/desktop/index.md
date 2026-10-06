@@ -1240,8 +1240,17 @@ While the greeter is on, each greeter session's leftover processes
 session through logind (`KillUserProcesses` scoped to the `greeter`
 user only), so repeated logins leave no `closing` sessions behind.
 An explicit `services.logind.settings.Login.KillUserProcesses` (or
-`KillOnlyUsers`) of your own still wins; with the greeter off, logind
-is left exactly as nixpkgs ships it.
+`KillOnlyUsers`) of your own still wins, with two sharp edges. First,
+`KillUserProcesses = false` alone does not opt out: while
+`KillOnlyUsers` lists `greeter`, logind kills the greeter's processes
+without ever reading the kill switch. To restore stock behavior,
+override `KillOnlyUsers` too (e.g.
+`services.logind.settings.Login.KillOnlyUsers = [ ];`), but know that
+an empty list with the defaulted `KillUserProcesses = true` kills
+every user's processes. Second, your `KillOnlyUsers` replaces the
+greeter's list instead of merging with it, so keep `"greeter"` in
+your list to keep the fix. With the greeter off, logind is left
+exactly as nixpkgs ships it.
 
 ## XWayland, and what comes next
 

@@ -1530,6 +1530,33 @@ in
       # is a separate unit outside the session scope, so it survives.
       services.logind.settings.Login.KillUserProcesses = lib.mkDefault true;
       services.logind.settings.Login.KillOnlyUsers = lib.mkDefault [ "greeter" ];
+      # The switch must reload logind for the new config to take
+      # effect: nixpkgs marks systemd-logind `reloadIfChanged` (reload,
+      # never restart -- restarting logind breaks sessions), but that
+      # only fires when the *unit file* changes, and a `logind.conf`
+      # content change is an `environment.etc` change, not a unit
+      # change. Without this line a switch that only flips the two keys
+      # above leaves the running logind on its old in-memory config,
+      # leaking exactly as before. Tying the settings' identity into
+      # the unit (an `X-` key systemd itself ignores) makes the unit
+      # differ exactly when the settings do, which
+      # switch-to-configuration-ng resolves to a reload through the
+      # `X-ReloadIfChanged` nixpkgs already sets on this unit: checked
+      # against `compare_units` (any non-ignored `[Unit]` diff is
+      # `UnequalNeedsRestart`) and `handle_modified_unit` (which reloads
+      # on `X-ReloadIfChanged` instead of restarting) at the pinned
+      # nixpkgs -- including via the `overrides.conf` drop-in this
+      # unit's settings land in, which `parse_unit` merges before
+      # comparing. `reloadTriggers` would do the same job but trips
+      # nixpkgs' "both `reloadIfChanged` and `reloadTriggers`" eval
+      # warning on every rebuild, so it is not used. Hashing the
+      # `settings.Login` attrset (rather than the rendered file) keeps
+      # the stub evaluations in `nix/tests.nix` free of new stubs; it
+      # also reloads on any other `Login` change (lid-switch actions
+      # included), which had the same latent gap.
+      systemd.services.systemd-logind.unitConfig."X-ScootLogindSettings" = builtins.hashString "sha256" (
+        builtins.toJSON config.services.logind.settings.Login
+      );
     })
   ];
 }
