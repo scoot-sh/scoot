@@ -1036,10 +1036,10 @@ no configuration. On `--headless`/`--nested` the ramp is accepted
 and changes nothing on screen — and no error.
 
 There is deliberately no screenshot on this section: `scoot msg
-screenshot` reads the framebuffer, which is pre-LUT, so a capture
-shows the unmodified frame either way. See
+screenshot` reads the framebuffer, which is pre-LUT and pre-CTM, so a
+capture shows the unmodified frame either way. See
 [Screenshots](../msg/screenshots.md#pre-lut-captures-show-the-unmodified-frame).
-To see the ramp itself, read the CRTC gamma back (`drm_info` or
+To see the ramp itself, read the CRTC color state back (`drm_info` or
 `modetest` on the `--tty` session).
 
 Every value is an option, applied on rebuild/switch (the unit
@@ -1090,16 +1090,19 @@ Troubleshooting, by symptom:
   first hears `failed`. Turn one off (this unit, or home-manager's
   `services.wlsunset`, or a hand-started one) — whichever stays owns
   every output.
-- *A screenshot shows no warming.* Expected: captures read pre-LUT
-  ([above](#night-light)). Read the CRTC gamma back instead
-  (`drm_info`, `modetest`).
+- *A screenshot shows no warming.* Expected: captures read
+  pre-LUT/pre-CTM ([above](#night-light)). Read the CRTC color state
+  back instead (`drm_info`, `modetest`).
 - *Warms nowhere, ever, on Apple silicon.* The Apple display
   controller reports no gamma LUT (`drm_info` shows no `GAMMA_LUT`
-  and gamma size 0 on both CRTCs), so every push is refused with
-  `failed` and the daemon idles output-less — no wakeups, nothing
-  to warm. The unit still runs with the right flags (check
-  `systemctl --user status scoot-nightlight`); the hardware cannot
-  show it. On a CRTC with a real LUT the same unit warms normally.
+  and gamma size 0 on both CRTCs), but it does expose a per-CRTC
+  `CTM` color matrix, which scoot drives instead: the same unit
+  warms normally, with the ramp's white endpoints applied as a
+  diagonal matrix (exact at the default gamma). If a push is still
+  refused with `failed`, check `drm_info` for the `CTM` property —
+  without it there is nothing to drive. The unit still runs with
+  the right flags either way (check
+  `systemctl --user status scoot-nightlight`).
 - *`gammastep` exits at once.* It has nowhere to stand: without
   `latitude`/`longitude` it reaches for geoclue, which is not wired.
   Set both (or stay on `wlsunset`, whose manual schedule needs

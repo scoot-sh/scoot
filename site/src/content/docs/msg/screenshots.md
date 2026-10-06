@@ -35,12 +35,13 @@ window is on (its `output`), never the first output's. (Full rule in
 ## Pre-LUT: captures show the unmodified frame
 
 `screenshot` reads the framebuffer, which sits *before* the display's
-gamma LUT in the pipeline — so a night light (`wlsunset`, `gammastep`,
-or the desktop profile's [night light](../desktop/index.md#night-light))
-never shows in a capture. The file holds the compositor's own pixels:
+gamma LUT and color matrix in the pipeline — so a night light (`wlsunset`,
+`gammastep`, or the desktop profile's [night light](../desktop/index.md#night-light))
+never shows in a capture, whether the CRTC warms through its LUT or its
+`CTM` property. The file holds the compositor's own pixels:
 compare two screenshots across a warming boundary and they are
 byte-identical (modulo the pointer, [below](#the-pointer-in-a-screenshot)).
-To observe the ramp itself, read the CRTC gamma back on the `--tty`
+To observe the ramp itself, read the CRTC color state back on the `--tty`
 session (`drm_info`, `modetest`) instead of capturing it.
 
 ## Retry rules

@@ -2123,17 +2123,22 @@ affecting anything, while a control on any other output is untouched — and
 destroying a live control (or disconnecting with one held) restores the
 default linear ramp.
 
-- **Under `--tty`**, the ramp is pushed to the CRTC gamma LUT, so the screen
-  really warms. The advertised `gamma_size` is the CRTC's own (256 on the
-  hardware measured so far), re-read whenever a hotplug moves the session to
-  a different CRTC; a live control hears `failed` over that move either way,
-  so it re-reads `gamma_size` and re-pushes (a modeset moves planes, not LUT
-  contents). Anything the DRM device refuses retires the control with
-  `failed` and the session keeps running.
-- **Under `--headless`/`--nested`** there is no hardware LUT, so the ramp is
+- **Under `--tty`**, the ramp is pushed to the CRTC gamma LUT where one
+  exists, so the screen really warms. Where the CRTC has no LUT but a
+  `CTM` color-matrix property (Apple DCP on Asahi), the ramp's white
+  endpoints go out as a diagonal matrix instead — exact at the daemons'
+  default gamma, and equally invisible to screenshots (both transforms
+  sit after the framebuffer). The advertised `gamma_size` is the CRTC's
+  own LUT length (256 on the hardware measured so far), or 256 synthetic
+  on a LUT-less CRTC, re-read whenever a hotplug moves the session to a
+  different CRTC; a live control hears `failed` over that move either way,
+  so it re-reads `gamma_size` and re-pushes (a modeset moves planes, not
+  LUT or matrix contents). Anything the DRM device refuses retires the
+  control with `failed` and the session keeps running.
+- **Under `--headless`/`--nested`** there is no color hardware, so the ramp is
   accepted but changes nothing on screen — and a `scoot msg screenshot` reads
-  the framebuffer, which is pre-LUT, so captures show the unmodified frame
-  either way. `gamma_size` is 256 there.
+  the framebuffer, which is pre-LUT and pre-CTM, so captures show the unmodified
+  frame either way. `gamma_size` is 256 there.
 
 A `set_gamma` fd must hold exactly three ramps of `gamma_size` little-endian
 `u16` entries (red, green, blue); anything else — short, long, empty,
