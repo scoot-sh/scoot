@@ -422,9 +422,10 @@ let
   # on the system bus (a home-manager-only setup without the NixOS
   # side) the unit skips instead of restart-looping every 2 s
   # forever -- a skipped start retries nothing and wakes nothing,
-  # and `systemctl --user status` says why. Where the NixOS side
-  # runs udisks2 (or D-Bus activates it on this very call) the name
-  # answers and the daemon starts.
+  # and `systemctl --user status` says why. The name only needs to
+  # be KNOWN (active or activatable: udisks2 idles activatable on a
+  # stock NixOS, and udiskie's first call wakes it); where the NixOS
+  # side runs udisks2 the name is always there.
   busctlBin = binOr "busctl" (if isLinux then pkgs.systemd or null else null);
 
   # A null beside `enable` is the loud assertion below, not a throw
@@ -761,10 +762,10 @@ in
           StartLimitIntervalSec = 0;
         };
         Service = {
-          # Skipped (not restarted) without udisks2 on the system
-          # bus: a skipped start wakes nothing, and the status says
-          # why (see `busctlBin` above).
-          ExecCondition = "${lib.getExe' pkgs.bash "bash"} -c '${busctlBin} --system --no-pager status org.freedesktop.UDisks2 >/dev/null'";
+          # Skipped (not restarted) without udisks2 known on the
+          # system bus: a skipped start wakes nothing, and the status
+          # says why (see `busctlBin` above).
+          ExecCondition = "${lib.getExe' pkgs.bash "bash"} -c '${busctlBin} --system --no-pager list | grep -q ^org.freedesktop.UDisks2'";
           ExecStart = "${lib.getExe' automount.package "udiskie"} -a -n -T";
           Restart = "on-failure";
           RestartSec = 2;
