@@ -58,6 +58,33 @@ read TZif files and `zdump` output checked in under
 `src/modules/clock/fixtures/` (`generate.sh` there remakes them from the
 pinned nixpkgs' tzdata).
 
+No integration test reads the machine's own files either: every session
+gets a scratch directory as its `XDG_RUNTIME_DIR` and fresh
+`XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` under it, which
+every child the test starts (the compositor, the bar, `msg`) inherits. So
+the daemon never sees the `bar.toml` of the developer running the suite,
+whose layout would otherwise merge with the flags' and fail the test
+(seen live on the maintainer's machine: `clock is placed twice` where a
+flag meets the file's section, and `volume: no sound server at ...` from
+the file's volume module with nothing behind it). `tests/hermetic.rs` pins it with a conflicting
+`bar.toml` where the default lookup would find it. Nothing reads
+`XDG_STATE_HOME` or `XDG_CACHE_HOME` today; they are sandboxed anyway, so
+a future read cannot reach the real home either.
+
+No test needs a sound server on the machine either: the volume tests that
+need one run against a stub PulseAudio-protocol server the test starts
+itself (`tests/pulse/`, using the module's own `proto.rs`; the bar finds
+it through `PULSE_SERVER`), and the one unit test that wants a real server
+skips with its reason when none is there. Layouts that are not about
+volume place no volume module.
+
+A missing compositor (or `foot`, or `dbus-daemon`) skips the tests that
+need it with a message naming what is missing and the variable that would
+make it a failure instead (`SCOOTBAR_REQUIRE_SCOOT`,
+`SCOOTBAR_REQUIRE_SWAY`, `SCOOTBAR_REQUIRE_DBUS_DAEMON`): green by
+skipping is a trap, so say which. CI sets them, so there a missing
+compositor fails.
+
 ## The popup test
 
 `tests/popup.rs` drives the volume popup on headless scoot (and one case on

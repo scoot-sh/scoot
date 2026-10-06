@@ -8,6 +8,16 @@
 //! no two tests' sockets meet (nextest runs each test in its own process;
 //! `cargo test` runs them side by side).
 //!
+//! The scratch also carries the session's `XDG_CONFIG_HOME`,
+//! `XDG_STATE_HOME` and `XDG_CACHE_HOME`: every child a test starts (the
+//! compositor, the bar, `msg`) gets them, so no file outside the test's
+//! control can change a result. Without this the daemon reads the real
+//! `~/.config/scoot/bar.toml`, whose layout merges with the flags' and
+//! fails the test (seen live: `clock is placed twice` where a flag meets
+//! the file's section, and `volume: no sound server at ...` from the
+//! file's volume module with nothing behind it). `tests/hermetic.rs` pins
+//! it with a conflicting file where the default lookup would find it.
+//!
 //! The compositor binary is `$SCOOTBAR_TEST_SCOOT` if set, else the `scoot`
 //! beside this test's `scootbar` in the same target directory (a workspace
 //! build puts it there); sway is `$SCOOTBAR_TEST_SWAY`, else `sway` on
@@ -71,12 +81,13 @@ fn sway_bin() -> Option<PathBuf> {
     env_path("SCOOTBAR_TEST_SWAY").or_else(|| on_path("sway"))
 }
 
-/// Says why a test is skipped, or panics when `require` is set.
+/// Says why a test is skipped, or panics when `require` is set (so CI,
+/// which sets it, fails instead of passing without running anything).
 fn skip(require: &str, why: &str) {
     if std::env::var_os(require).is_some() {
         panic!("{require} is set but {why}");
     }
-    eprintln!("skipped -- {why}");
+    eprintln!("skipped -- {why} (set {require}=1 to make this a failure, not a skip)");
 }
 
 /// A scratch directory, removed on drop.
@@ -110,6 +121,53 @@ impl Scratch {
             fs::write(&path, testfont::build()).unwrap();
         }
         path
+    }
+
+    /// The scratch's own `XDG_CONFIG_HOME`: empty, so the daemon reads the
+    /// defaults (plus the flags) rather than the machine's `bar.toml`.
+    /// Created eagerly: the daemon must see a usable directory.
+    pub fn config_home(&self) -> PathBuf {
+        self.0.join("xdg-config")
+    }
+
+    /// The scratch's own `XDG_STATE_HOME` and `XDG_CACHE_HOME`: nothing
+    /// reads them today, but every child gets them anyway, so a future
+    /// read cannot reach the real home either.
+    pub fn state_home(&self) -> PathBuf {
+        self.0.join("xdg-state")
+    }
+
+    pub fn cache_home(&self) -> PathBuf {
+        self.0.join("xdg-cache")
+    }
+
+    /// Points `command`'s XDG base directories at this scratch (creating
+    /// them), so the child reads no file outside the test's control.
+    /// Applied after any test-given environment, so the harness always wins.
+    pub fn sandbox(&self, command: &mut Command) {
+        for dir in [self.config_home(), self.state_home(), self.cache_home()] {
+            fs::create_dir_all(&dir).unwrap();
+        }
+        command
+            .env("XDG_CONFIG_HOME", self.config_home())
+            .env("XDG_STATE_HOME", self.state_home())
+            .env("XDG_CACHE_HOME", self.cache_home());
+    }
+
+    /// `scootbar` with this scratch as its runtime and XDG home
+    /// directories, and none of the Wayland variables of the one the tests
+    /// run in. For `daemon` runs a test starts directly (no [`Session`]);
+    /// [`Session::scootbar`] is the same plus the session's display.
+    pub fn command(&self) -> Command {
+        let mut command = Command::new(scootbar_bin());
+        command
+            .env("XDG_RUNTIME_DIR", &self.0)
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("WAYLAND_SOCKET")
+            .env_remove("WAYLAND_DEBUG")
+            .stdin(Stdio::null());
+        self.sandbox(&mut command);
+        command
     }
 }
 
@@ -147,7 +205,8 @@ impl Session {
         let config_path = scratch.0.join("config.toml");
         fs::write(&config_path, config).unwrap();
         let log = fs::File::create(scratch.0.join("compositor.log")).unwrap();
-        let compositor = Command::new(&scoot)
+        let mut compositor = Command::new(&scoot);
+        compositor
             .args(["--headless", "--outputs", &outputs.to_string()])
             .args(["--width", "1600", "--height", "1000"])
             .arg("--socket")
@@ -159,7 +218,11 @@ impl Session {
             .env_remove("WAYLAND_SOCKET")
             .stdin(Stdio::null())
             .stdout(log.try_clone().unwrap())
-            .stderr(log)
+            .stderr(log);
+        // Its config is explicit, but sandbox it anyway: nothing the
+        // compositor or a client it spawns reads may come from the real home.
+        scratch.sandbox(&mut compositor);
+        let compositor = compositor
             .spawn()
             .unwrap_or_else(|e| panic!("cannot start {}: {e}", scoot.display()));
         let mut session = Self {
@@ -213,6 +276,9 @@ impl Session {
             .stdin(Stdio::null())
             .stdout(log.try_clone().unwrap())
             .stderr(log);
+        // Its config is explicit, but sandbox it anyway: nothing the
+        // compositor reads may come from the real home.
+        scratch.sandbox(&mut command);
         // Its own process group, so killing the group reaches sway under a
         // wrapper too.
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
@@ -334,16 +400,12 @@ impl Session {
         self.scratch.0.join(&self.wayland_display)
     }
 
-    /// `scootbar` with this session's environment, and none of the
+    /// `scootbar` with this session's environment (the scratch's runtime
+    /// and XDG home directories, the session's display), and none of the
     /// Wayland variables of the one the tests run in.
     pub fn scootbar(&self) -> Command {
-        let mut command = Command::new(scootbar_bin());
-        command
-            .env("XDG_RUNTIME_DIR", &self.scratch.0)
-            .env("WAYLAND_DISPLAY", &self.wayland_display)
-            .env_remove("WAYLAND_SOCKET")
-            .env_remove("WAYLAND_DEBUG")
-            .stdin(Stdio::null());
+        let mut command = self.scratch.command();
+        command.env("WAYLAND_DISPLAY", &self.wayland_display);
         command
     }
 
@@ -362,6 +424,17 @@ impl Session {
     /// [`Session::bar`] with `env` added (`WAYLAND_DEBUG=1` for a protocol
     /// trace in [`Session::bar_log`]).
     pub fn bar_with_env(&self, args: &[&str], env: &[(&str, &str)]) -> Child {
+        self.bar_impl(args, env, None)
+    }
+
+    /// [`Session::bar_with_env`] with `HOME` pointed at `home`: the XDG
+    /// sandbox stays the scratch's, so a `bar.toml` under the home must be
+    /// ignored. `tests/hermetic.rs` pins it with a conflicting one.
+    pub fn bar_with_home(&self, args: &[&str], env: &[(&str, &str)], home: &Path) -> Child {
+        self.bar_impl(args, env, Some(home))
+    }
+
+    fn bar_impl(&self, args: &[&str], env: &[(&str, &str)], home: Option<&Path>) -> Child {
         let log = fs::File::create(self.bar_log()).unwrap();
         let placed = args.iter().any(|arg| {
             ["--left", "--center", "--right"]
@@ -377,9 +450,14 @@ impl Session {
             .args(args)
             .envs(env.iter().copied())
             .stdout(Stdio::null())
-            .stderr(log)
-            .spawn()
-            .unwrap()
+            .stderr(log);
+        if let Some(home) = home {
+            command.env("HOME", home);
+        }
+        // After the test's environment: the sandbox always wins, so a test
+        // can never accidentally point the daemon at the real home.
+        self.scratch.sandbox(&mut command);
+        command.spawn().unwrap()
     }
 
     /// The test font, written into the scratch directory on first use.

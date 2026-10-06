@@ -91,7 +91,10 @@ fn socket_path_forms() {
 fn against_a_real_server_when_one_is_there() {
     let sock = super::socket_path();
     if !sock.exists() {
-        eprintln!("no sound server at {}: skipping", sock.display());
+        eprintln!(
+            "skipped -- no sound server at {} (the volume integration tests run against the stub server in tests/pulse instead, so no server is needed on the machine)",
+            sock.display()
+        );
         return;
     }
     // Read-only: the handshake runs itself and the level shows, but no
