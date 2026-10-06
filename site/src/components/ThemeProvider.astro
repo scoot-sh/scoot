@@ -1,0 +1,17 @@
+---
+---
+{/* Dark only (brand decision 2026-10-06, site/OUTLINE.md). Starlight's
+  default ThemeProvider reads the stored `starlight-theme` choice and the OS
+  `prefers-color-scheme` and writes `data-theme` accordingly; this override
+  forces `dark` instead, and drops any stale stored choice so a returning
+  visitor who once picked light never flashes or sticks on it. Inlined, as
+  the default was, so it runs in `<head>` before first paint. */}
+<script is:inline>
+  document.documentElement.dataset.theme = 'dark';
+  try {
+    localStorage.removeItem('starlight-theme');
+  } catch {
+    // Storage unavailable (blocked cookies, private mode): the forced
+    // `data-theme` above already holds, so there is nothing to clean up.
+  }
+</script>

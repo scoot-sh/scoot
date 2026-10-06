@@ -41,7 +41,7 @@ export default defineConfig({
       social: [{ label: 'GitHub', href: 'https://github.com/scoot-sh/scoot', icon: 'github' }],
       // The cat's face in a black circle, from the project logo
       // (`docs/assets/logo.png`, face box (985,235)-(1315,565)); the black
-      // surround works on either theme ground. The "scoot" title text
+      // surround melts into the dark page ground. The "scoot" title text
       // beside it is set in League Spartan 900 (see custom.css).
       logo: {
         src: './src/assets/cat-head.png',
@@ -78,6 +78,33 @@ export default defineConfig({
         },
       ],
       customCss: ['./src/styles/custom.css'],
+      // Dark only (brand decision 2026-10-06, site/OUTLINE.md): the site
+      // renders the dark theme regardless of the visitor's OS preference or
+      // any stored choice. `ThemeSelect` renders nothing (no Auto/Light/Dark
+      // picker in the header or mobile menu); `ThemeProvider` forces
+      // `data-theme="dark"` before first paint and drops any stale
+      // `starlight-theme` stored choice. Component paths resolve against the
+      // project root (verified against the pinned Starlight source:
+      // `resolveId` in `integrations/vite-virtual-modules.js` resolves
+      // `.`-relative ids against the project root).
+      components: {
+        ThemeSelect: './src/components/ThemeSelect.astro',
+        ThemeProvider: './src/components/ThemeProvider.astro',
+      },
+      // Code blocks keep only the dark theme (`starlight-dark`, the dark
+      // half of Starlight's default pair). With a single theme Expressive
+      // Code applies it unconditionally — no `data-theme` scoping, no
+      // `prefers-color-scheme` media query (verified against the pinned
+      // `@expressive-code/core` source: `getThemeStyles` emits the base
+      // theme under bare `&`, and `useDarkModeMediaQuery` defaults to false
+      // unless exactly two themes of opposite types are given).
+      // `useStarlightUiThemeColors` stays on so the frames keep Starlight's
+      // surface colors (the current dark look) rather than Night Owl's own
+      // chrome.
+      expressiveCode: {
+        themes: ['starlight-dark'],
+        useStarlightUiThemeColors: true,
+      },
       // One group per app (see site/OUTLINE.md): cross-cutting Start
       // first, the scoot desktop as the primary path, then each app
       // overview → configure → reference → troubleshooting, then agents,
