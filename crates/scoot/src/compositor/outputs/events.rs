@@ -20,14 +20,21 @@
 //! 6. the adversarial halves: an empty subscribe is refused, and a dropped
 //!    connection leaves no record;
 //! 7. resizing an output in place tells the subscriber the new mode and the
-//!    scale it keeps -- and a resize that fails fires nothing.
+//!    scale it keeps -- and a resize that fails fires nothing;
+//! 8. every add tells the subscriber, not just one that restores windows: a
+//!    first plug of a monitor never seen this session, and a replug of one
+//!    that held no windows, each send `output_added` (and nothing else) --
+//!    the dock a display-profile watcher must hear. A replug that does
+//!    restore windows sends added first, then restored (pins 1-3).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use scoot_core::{Action, OutputId, Vertical, WindowId};
-use scoot_ipc::{EventKind, OutputChanged, OutputRemoved, OutputRestored, Response, decode};
+use scoot_ipc::{
+    EventKind, OutputAdded, OutputChanged, OutputRemoved, OutputRestored, Response, decode,
+};
 
 use super::per_output::{Ack, CANVAS, Step, session};
 use crate::compositor::headless;
@@ -80,7 +87,11 @@ fn two_workspaces_on_second(harness: &mut Harness<Step, Ack>) -> (WindowId, Wind
 
 /// Subscribes `conn` to output events, answering the client's end: what a
 /// `Request::Subscribe` does once the connection loop hands it over.
-fn subscribe(harness: &mut Harness<Step, Ack>, conn: u64) -> UnixStream {
+///
+/// One reader for the whole subscription, never one per read: an add that
+/// restores windows writes two lines in one dispatch, and a reader built
+/// per event would buffer both and drop the second with itself.
+fn subscribe(harness: &mut Harness<Step, Ack>, conn: u64) -> BufReader<UnixStream> {
     let (server, client) = UnixStream::pair().expect("a socket pair");
     let response = harness
         .state
@@ -92,17 +103,47 @@ fn subscribe(harness: &mut Harness<Step, Ack>, conn: u64) -> UnixStream {
     client
         .set_read_timeout(Some(Duration::from_secs(10)))
         .expect("a read timeout, so a missing event fails instead of hanging the suite");
-    client
+    BufReader::new(client)
 }
 
 /// The next message the server sent `client`: the subscribed event, read
 /// without polling anything else first.
-fn next_event(client: &UnixStream) -> Response {
+fn next_event(client: &mut BufReader<UnixStream>) -> Response {
     let mut line = String::new();
-    BufReader::new(client)
-        .read_line(&mut line)
-        .expect("the event arrived");
+    client.read_line(&mut line).expect("the event arrived");
     decode(&line).expect("a decodable event")
+}
+
+/// Fails unless nothing more has been sent to `client`. Every emission is
+/// synchronous with the change that caused it, so whatever arrived is
+/// already queued: a non-blocking read answers at once, with no timeout to
+/// wait out either way.
+fn assert_silent(client: &mut BufReader<UnixStream>, what: &str) {
+    client
+        .get_ref()
+        .set_nonblocking(true)
+        .expect("non-blocking");
+    let mut byte = [0u8; 1];
+    match client.read(&mut byte) {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+        other => panic!("{what}, got {other:?}"),
+    }
+    client
+        .get_ref()
+        .set_nonblocking(false)
+        .expect("blocking again");
+}
+
+/// The added event `headless::add_output` sends for a `CANVAS`-sized output
+/// at scale 1, the harness's only kind.
+fn added(output: u64, name: &str) -> Response {
+    Response::OutputAdded(OutputAdded {
+        output,
+        name: name.into(),
+        width: CANVAS,
+        height: CANVAS,
+        scale: 1.0,
+    })
 }
 
 /// Pin 1+2: the removal arrives without polling, carrying the adopter, the
@@ -112,12 +153,12 @@ fn next_event(client: &UnixStream) -> Response {
 fn a_subscriber_learns_removal_and_restore_without_polling() {
     let mut harness = session(2);
     let (a, b, c) = two_workspaces_on_second(&mut harness);
-    let client = subscribe(&mut harness, 7);
+    let mut client = subscribe(&mut harness, 7);
 
     assert!(harness.state.remove_output(OutputId(2)));
     harness.settle();
     assert_eq!(
-        next_event(&client),
+        next_event(&mut client),
         Response::OutputRemoved(OutputRemoved {
             output: 2,
             name: "headless-2".into(),
@@ -153,7 +194,12 @@ fn a_subscriber_learns_removal_and_restore_without_polling() {
     harness.settle();
     assert_eq!(id, OutputId(3), "a fresh id, never the removed one");
     assert_eq!(
-        next_event(&client),
+        next_event(&mut client),
+        added(3, "headless-2"),
+        "the add comes first, restore or not"
+    );
+    assert_eq!(
+        next_event(&mut client),
         Response::OutputRestored(OutputRestored {
             output: 3,
             name: "headless-2".into(),
@@ -181,11 +227,11 @@ fn a_subscriber_learns_removal_and_restore_without_polling() {
 fn the_restore_payload_survives_a_hand_move_between_remove_and_add() {
     let mut harness = session(2);
     let (a, b, c) = two_workspaces_on_second(&mut harness);
-    let client = subscribe(&mut harness, 7);
+    let mut client = subscribe(&mut harness, 7);
 
     assert!(harness.state.remove_output(OutputId(2)));
     harness.settle();
-    let _ = next_event(&client);
+    let _ = next_event(&mut client);
     // Carry c by hand onto the panel's own first workspace, beside nothing.
     harness.state.act(Action::FocusWindowId(c));
     harness.state.act(Action::MoveWindowToWorkspaceIndex(0));
@@ -194,8 +240,9 @@ fn the_restore_payload_survives_a_hand_move_between_remove_and_add() {
     headless::add_output(&mut harness.state, "headless-2", CANVAS, CANVAS)
         .expect("the output plugged back in");
     harness.settle();
+    assert_eq!(next_event(&mut client), added(3, "headless-2"));
     assert_eq!(
-        next_event(&client),
+        next_event(&mut client),
         Response::OutputRestored(OutputRestored {
             output: 3,
             name: "headless-2".into(),
@@ -406,12 +453,12 @@ fn drain(client: &UnixStream) {
 #[test]
 fn a_subscriber_learns_about_an_in_place_resize() {
     let mut harness = session(2);
-    let client = subscribe(&mut harness, 7);
+    let mut client = subscribe(&mut harness, 7);
 
     assert!(harness.state.resize_output_of(OutputId(2), 300, 220));
     harness.settle();
     assert_eq!(
-        next_event(&client),
+        next_event(&mut client),
         Response::OutputChanged(OutputChanged {
             output: 2,
             name: "headless-2".into(),
@@ -431,15 +478,80 @@ fn a_failed_resize_fires_no_changed_event() {
 
     assert!(!harness.state.resize_output_of(OutputId(99), 300, 220));
     harness.settle();
-    // The emission is synchronous with the resize, so whatever arrived is
-    // already queued: a non-blocking read answers at once, with no timeout
-    // to wait out either way.
-    client.set_nonblocking(true).expect("non-blocking");
-    let mut byte = [0u8; 1];
-    match client.read(&mut byte) {
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-        other => panic!("a failed resize must fire no event, got {other:?}"),
+    assert_silent(&mut client, "a failed resize must fire no event");
+}
+
+/// Pin 8: a first plug of a monitor never seen this session tells the
+/// subscriber -- nothing was displaced, so no restore fires, and before the
+/// added event this was silence: the dock a display-profile watcher must
+/// hear. The event names the scale the output came up at, which is its
+/// live `output-scale` scale when one is set for that name.
+#[test]
+fn a_first_plug_tells_the_subscriber() {
+    let mut harness = session(1);
+    let mut client = subscribe(&mut harness, 7);
+
+    let id =
+        headless::add_output(&mut harness.state, "DP-1", CANVAS, CANVAS).expect("a first plug");
+    harness.settle();
+    assert_eq!(
+        next_event(&mut client),
+        added(id.0, "DP-1"),
+        "a first plug of DP-1 sends the output subscriber its add"
+    );
+    assert_silent(
+        &mut client,
+        "a first plug restores nothing, so nothing follows the add",
+    );
+
+    // A name with a live scale comes up at it, and says so.
+    harness.state.runtime_scales.insert("DP-2".into(), 2.0);
+    let id = headless::add_output(&mut harness.state, "DP-2", CANVAS, CANVAS)
+        .expect("a second first plug");
+    harness.settle();
+    assert_eq!(
+        next_event(&mut client),
+        Response::OutputAdded(OutputAdded {
+            output: id.0,
+            name: "DP-2".into(),
+            width: CANVAS,
+            height: CANVAS,
+            scale: 2.0,
+        })
+    );
+}
+
+/// Pin 8, second half: replugging a monitor that held no windows tells the
+/// subscriber. Its removal filed no record (nothing to bring back), so no
+/// restore fires -- before the added event, the replug was silent.
+#[test]
+fn replugging_an_empty_output_tells_the_subscriber() {
+    let mut harness = session(2);
+    let mut client = subscribe(&mut harness, 7);
+
+    assert!(harness.state.remove_output(OutputId(2)));
+    harness.settle();
+    match next_event(&mut client) {
+        Response::OutputRemoved(OutputRemoved {
+            output: 2,
+            adopted_count: 0,
+            ..
+        }) => {}
+        other => panic!("an empty removal still reports, got {other:?}"),
     }
+
+    let id = headless::add_output(&mut harness.state, "headless-2", CANVAS, CANVAS)
+        .expect("the output plugged back in");
+    harness.settle();
+    assert_eq!(
+        next_event(&mut client),
+        added(id.0, "headless-2"),
+        "replugging an empty headless-2 sends the output subscriber its add"
+    );
+    assert_silent(
+        &mut client,
+        "an empty replug restores nothing, so nothing follows the add",
+    );
 }
 
 /// Pin 6: an empty subscribe is refused with a reason, and files nothing.

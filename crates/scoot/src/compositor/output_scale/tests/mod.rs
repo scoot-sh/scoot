@@ -37,6 +37,7 @@ use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_ba
 
 use super::*;
 
+mod ipc;
 mod per_output;
 
 fn output_at(physical: (i32, i32), scale: Scale) -> Output {

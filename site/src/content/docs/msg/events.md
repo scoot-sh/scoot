@@ -18,6 +18,7 @@ afterwards that connection carries events until the session ends:
 $ scoot msg subscribe
 {"type":"subscribed","events":["output"]}
 {"type":"output_removed","output":2,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":0,"adopter_active":2,"origin":"DP-1"}
+{"type":"output_added","output":3,"name":"DP-1","width":3840,"height":2160,"scale":1.5}
 {"type":"output_restored","output":3,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":2,"adopter_active":0,"origin":"DP-1","moved":3}
 {"type":"output_changed","output":1,"name":"DP-1","width":2952,"height":1660,"scale":1.5}
 $ scoot msg subscribe keyboard
@@ -45,16 +46,36 @@ Three rules, matching the request/reply contract beside them:
   requests — they pipeline, so one is enough for any number of them.
 - **Filtering is by kind, not by field.** The server sends every event of
   the subscribed kinds, and the client filters or debounces further
-  itself. In particular the removal/restore pair below fires on every
-  monitor standby too (a routine unplug to scoot) — that is accepted, and
-  it is the difference from a notification pushed at the user
-  unconditionally, which is why scoot still draws and sends nothing
-  itself. `output_changed` fires only on an applied resize, never on
-  standby (the mode is unchanged then), and a refused resize fires
-  nothing.
+  itself. In particular the removal/add pair below (plus a restore when
+  the monitor held windows) fires on every monitor standby too (a
+  routine unplug to scoot) — that is accepted, and it is the difference
+  from a notification pushed at the user unconditionally, which is why
+  scoot still draws and sends nothing itself. `output_changed` fires
+  only on an applied resize, never on standby (the mode is unchanged
+  then), and a refused resize fires nothing.
 - **The same socket and the same credentials.** There is no second channel:
   a subscriber connects to the same `0600`, same-user control socket every
   other client uses.
+
+**`output_added`** — an output was added: a monitor plugged in (or back
+in) under `--tty`. It fires on **every** add — a monitor never seen this
+session, a replug of one that held no windows, and a replug that brings
+windows back, which sends `output_added` first and `output_restored`
+after it. So "the connected set changed" is `output_added` plus
+`output_removed`; `output_restored` alone misses a first plug and an
+empty monitor's replug, since neither has windows to restore. It is sent
+once the output is laid out, so an `outputs` query answered after it
+lists the output. The outputs a session starts with come before any
+subscriber can exist: read `outputs` once for the baseline, then apply
+events after it. (`--headless` adds its `--outputs N` at startup only,
+so it never sends one at runtime.)
+
+| Field | Meaning |
+| --- | --- |
+| `output` | The new output's id, as `outputs` reports it — a fresh one on every add, never a removed output's. |
+| `name` | Its connector name (`DP-1` under `--tty`, `headless-2` otherwise) — the same string `outputs` names it by. |
+| `width` / `height` | The framebuffer size in physical pixels. |
+| `scale` | The scale it came up at: its live `output-scale` scale, else the config file's. |
 
 **`output_removed`** — an output was removed and its workspaces adopted:
 
@@ -172,8 +193,12 @@ Versioning: the subscription is IPC protocol 5 — the `subscribed`,
 `output_removed` and `output_restored` tags under the 3 → 4 bump, plus the
 `output_changed` tag under 4 → 5 — the keyboard half is protocol 6: the
 `keyboard` reply and the `keyboard_changed` tag — the workspace
-occupancy event is protocol 7: the `workspaces` tag — and the lock query
-and event are protocol 8: the `locked` reply and the `lock_changed` tag. A client that
+occupancy event is protocol 7: the `workspaces` tag — the lock query
+and event are protocol 8: the `locked` reply and the `lock_changed` tag —
+and the output-added event is protocol 10: the `output_added` tag, on
+the existing `output` kind, so an `output` subscriber built against
+protocol 9 or older fails to decode it (rebuild it; `scoot msg` from the
+same build as the session is always in step). A client that
 never sends `subscribe` (or `keyboard`, or `locked`) never receives any of them. An unknown event kind
 in a `subscribe` is answered with an ordinary `error` like any unknown
 request tag, so an older server meets a newer subscriber with an error,

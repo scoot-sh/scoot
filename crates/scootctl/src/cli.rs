@@ -37,6 +37,10 @@ pub const REQUESTS_HELP: &str = "\
     output-power ID|all on|off        switch an output's panel off or on --
                                      what an idle daemon drives at idle and
                                      resume (`outputs` reports the state)
+    output-scale ID|NAME SCALE|reset  set an output's scale live (0.5 to 4),
+                                     or reset it to the config's -- runtime
+                                     state: a reload or a restart restores
+                                     the config's scale
     screenshot [--output ID] [--out FILE] [--no-cursor]
                                     the pointer is drawn in unless
                                     --no-cursor
@@ -242,6 +246,37 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                 return Err(Error::Unknown(extra));
             }
             Request::OutputPower { output, powered }
+        }
+        "output-scale" => {
+            let target = args.next().ok_or(Error::Missing("an output id or name"))?;
+            // A number is an id; anything else a connector name (`DP-1`,
+            // `headless-2`). The server refuses an unknown one of either.
+            let output = match target.parse::<u64>() {
+                Ok(id) => scoot_ipc::OutputTarget::Id(id),
+                Err(_) => scoot_ipc::OutputTarget::Name(target),
+            };
+            let raw = args.next().ok_or(Error::Missing("a scale or reset"))?;
+            let scale = if raw == "reset" {
+                None
+            } else {
+                // Finite here because the wire cannot spell nan or inf: a
+                // refusal now names the value, where a failed encode later
+                // would not. The range is the server's call (it refuses
+                // outside 0.5 to 4 with the reason).
+                match raw.parse::<f64>() {
+                    Ok(scale) if scale.is_finite() => Some(scale),
+                    _ => {
+                        return Err(Error::Invalid {
+                            what: "scale",
+                            value: raw,
+                        });
+                    }
+                }
+            };
+            if let Some(extra) = args.next() {
+                return Err(Error::Unknown(extra));
+            }
+            Request::OutputScale { output, scale }
         }
         "action" => Request::Action(action(&mut args)?),
         "screenshot" => {
@@ -776,6 +811,69 @@ mod tests {
         assert!(parse_msg_args(&["output-power", "2", "yes"]).is_err());
         assert!(parse_msg_args(&["output-power", "all", "off", "extra"]).is_err());
         assert!(parse_msg_args(&["output-power"]).is_err());
+    }
+
+    #[test]
+    fn output_scale_takes_an_id_or_a_name_and_a_finite_scale_or_reset() {
+        let request = |args: &[&str]| parse_msg_args(args).map(|msg| msg.request);
+        assert_eq!(
+            request(&["output-scale", "2", "2"]),
+            Ok(Request::OutputScale {
+                output: scoot_ipc::OutputTarget::Id(2),
+                scale: Some(2.0),
+            })
+        );
+        assert_eq!(
+            request(&["output-scale", "DP-1", "1.5"]),
+            Ok(Request::OutputScale {
+                output: scoot_ipc::OutputTarget::Name("DP-1".into()),
+                scale: Some(1.5),
+            })
+        );
+        // `reset` drops the live scale: the wire's `null`.
+        assert_eq!(
+            request(&["output-scale", "headless-2", "reset"]),
+            Ok(Request::OutputScale {
+                output: scoot_ipc::OutputTarget::Name("headless-2".into()),
+                scale: None,
+            })
+        );
+        // The target, then a scale; the scale must be finite here (the
+        // wire cannot spell nan or inf), while range is the server's call.
+        assert_eq!(
+            request(&["output-scale"]),
+            Err(Error::Missing("an output id or name"))
+        );
+        assert_eq!(
+            request(&["output-scale", "2"]),
+            Err(Error::Missing("a scale or reset"))
+        );
+        for bad in ["wide", "nan", "inf", "-inf", "Reset", ""] {
+            assert_eq!(
+                request(&["output-scale", "2", bad]),
+                Err(Error::Invalid {
+                    what: "scale",
+                    value: bad.into(),
+                }),
+                "{bad:?} must be refused as a scale"
+            );
+        }
+        assert_eq!(
+            request(&["output-scale", "2", "2.0", "extra"]),
+            Err(Error::Unknown("extra".into()))
+        );
+        // Out of range parses: the server refuses it with the reason.
+        assert!(request(&["output-scale", "2", "8.0"]).is_ok());
+    }
+
+    #[test]
+    fn usage_names_output_scale_on_its_own_line() {
+        let help = crate::help::usage("scoot msg", REQUESTS_HELP, ACTIONS_HELP, false);
+        assert!(
+            help.lines()
+                .any(|line| line.trim().starts_with("output-scale ID|NAME SCALE|reset")),
+            "--help hides the output-scale verb"
+        );
     }
 
     #[test]

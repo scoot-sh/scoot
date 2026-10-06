@@ -24,11 +24,12 @@ pub use action::{Action, Horizontal, Vertical};
 pub use client::Client;
 pub use codec::{decode, encode, read_message, read_message_buffered, write_message};
 pub use event::{
-    EventKind, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored, WorkspaceSnapshot,
+    EventKind, KeyboardLayout, OutputAdded, OutputChanged, OutputRemoved, OutputRestored,
+    WorkspaceSnapshot,
 };
 pub use help::{DOCS_URL, docs_tail, suggest};
 pub use key::{KeyCombo, Modifier, ParseKeyComboError};
-pub use request::{PointerButton, Request, SCREENSHOT_CURSOR_DEFAULT};
+pub use request::{OutputTarget, PointerButton, Request, SCREENSHOT_CURSOR_DEFAULT};
 pub use response::{
     BindRow, OutputSnapshot, Rect, Response, Screenshot, SkippedBind, WindowSnapshot,
 };
@@ -85,4 +86,10 @@ pub use socket::{SOCKET_ENV, socket_path};
 /// `Response::Binds`, under the same rule -- only a client new enough to
 /// ask ever receives one. An older server meets the new `binds` request
 /// tag with an ordinary `Error`, like any unknown tag.
-pub const PROTOCOL_VERSION: u32 = 9;
+///
+/// And again 9 → 10 for the output-added event (2026-10): one new tag,
+/// `Response::OutputAdded`, under the same rule -- only a subscriber ever
+/// receives one. It rides the existing `output` kind rather than a new one,
+/// so an older subscriber handed one fails its decode: exactly the break
+/// this constant exists to announce.
+pub const PROTOCOL_VERSION: u32 = 10;

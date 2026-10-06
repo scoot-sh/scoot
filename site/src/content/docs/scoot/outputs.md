@@ -29,6 +29,17 @@ mode = "1920x1080"
 | `[[outputs]] scale` | float | `[output] scale` | live | This output's scale, resolved like `[output] scale`. |
 | `[[outputs]] mode` | `"WxH"` | `--mode` / `--width`+`--height` | restart only | Under `--tty`, which connector mode to drive (falls back to the preferred mode with a warning); under `--headless`, that output's size. A reload refuses a changed `mode` by name. |
 
+A scale can also change without touching the file:
+`scoot msg output-scale DP-1 1.5` sets one live (by connector name or
+id), and `scoot msg output-scale DP-1 reset` drops it again. That is
+runtime state, like `output-power`: it beats the file's scale for that
+connector (a replugged monitor comes back at it), and a successful
+reload (which lists each scale it moved in its `applied`) or a restart
+goes back to the file's scales. It takes the same
+range, refusing a value outside it instead of clamping. The
+[display profiles](../desktop/index.md#displays) watcher drives scale
+this way. See [requests](../msg/requests.md).
+
 A window is told the scale of the output it is placed on, and re-told
 when it moves; popups, subsurfaces, bars and lock surfaces follow their
 own output. At a fractional scale X apps cost memory (see
