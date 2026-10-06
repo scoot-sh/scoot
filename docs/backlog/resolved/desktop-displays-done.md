@@ -1,9 +1,10 @@
 ---
 title: "Desktop: display arrangement rules (kanshi-class) on the paved path"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-06"
 ---
 
 # Desktop: display arrangement rules (kanshi-class) on the paved path
@@ -36,3 +37,20 @@ position) with `scoot msg outputs` before and after.
 ## Not in this ticket
 
 A graphical display settings app.
+
+## Resolution (PR #482, 2026-10-06)
+
+Chose **scoot-native profiles**: `desktop.displays.profiles` plus a
+`scoot-displays` watcher (home-manager user unit bound to
+`scoot-session.target`), with eval pins and a `## Displays` site
+section. Stock kanshi cannot drive scoot — its `exec` hooks run only
+after a `succeeded` reply, which scoot's read-only write half never
+sends (proven live: kanshi matched the profile, got `failed`, ran
+nothing) — and a writable protocol would be atomic-modeset surgery
+for a packaging slot. Two premises corrected: `[[outputs]]` carries
+scale and mode only (position is automatic), and make/model cannot
+key a profile (scoot's IPC reports names only). Software proof on the
+M2 (headless 2→1 outputs: scale 1.0→2.0, power off, solo 1.5, all via
+`scoot msg outputs`); kanshi idle measured at ~0 wakeups over 83 s.
+Physical DP-1 plug/unplug steps are in the PR body for the
+maintainer (no scoot session drives the real outputs right now).
