@@ -783,6 +783,27 @@ in
         '';
       };
 
+      # Whether the profiles daemon runs behind the keymap's switch.
+      # On with the policy: `Super+p` cycles through
+      # `powerprofilesctl`, and the daemon owns the bus name widgets
+      # read. Off drops the daemon and its bind entirely -- for
+      # hardware with no PPD driver (Apple silicon: the placeholder
+      # lists power-saver + balanced as no-ops) the charge limit and
+      # the lid policy below are what save battery, not profiles
+      # (see site/src/content/docs/desktop/index.md#power).
+      profiles = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          example = false;
+          description = ''
+            Run `power-profiles-daemon` behind the keymap's profile
+            switch. Off drops the daemon and its bind entirely (the
+            lid, low-battery and charge-limit policy still applies).
+          '';
+        };
+      };
+
       # Which profile an AC transition selects (udev, so it covers boot
       # coldplug too: whichever matches the state at boot applies).
       # Null holds whatever is set (PPD boots to balanced and keeps the

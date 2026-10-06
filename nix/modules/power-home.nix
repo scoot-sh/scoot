@@ -57,7 +57,10 @@ in
     (lib.mkIf power.enable {
       assertions = [
         {
-          assertion = power.profiles.package != null;
+          # Nothing to run the switch without (refused only while the
+          # profiles daemon is wanted: with `profiles.enable = false`
+          # a driverless box drops the daemon and needs no package).
+          assertion = !power.profiles.enable || power.profiles.package != null;
           message = ''
             programs.scoot.desktop.power.enable is set but
             programs.scoot.desktop.power.profiles.package is null: set
@@ -67,7 +70,9 @@ in
         }
       ];
 
-      home.packages = lib.optional (power.profiles.package != null) power.profiles.package;
+      home.packages = lib.optional (
+        power.profiles.enable && power.profiles.package != null
+      ) power.profiles.package;
     })
 
     # The charge cap rides with the policy (still individually
@@ -125,10 +130,13 @@ in
     # shows nothing until set): the charge service pushes on every
     # sync, but a fresh login would wait up to five minutes for one.
     # Beside the bar's own unit (`PartOf`, so it never lingers without
-    # the bar), calling the system-wide `scoot-charge` by bare name --
-    # the NixOS side installs it; a home-manager-only setup needs it
-    # on PATH some other way (its absence fails this oneshot loudly
-    # in `systemctl --user status`, nothing else).
+    # the bar), calling the system-wide `scoot-charge` by absolute
+    # path: systemd resolves a bare `ExecStart` name through its own
+    # compile-time search path, never the manager's PATH, so a bare
+    # name fails every login with 203/EXEC. A home-manager-only
+    # setup needs this path to exist some other way (its absence
+    # fails this oneshot loudly in `systemctl --user status`, nothing
+    # else).
     (lib.mkIf (power.enable && power.chargeLimit.enable && barBin != null) {
       systemd.user.services.scoot-charge-push = {
         Unit = {
@@ -139,7 +147,7 @@ in
         Service = {
           Type = "oneshot";
           ExecStartPre = "${lib.getExe' pkgs.coreutils "sleep"} 2";
-          ExecStart = "scoot-charge push";
+          ExecStart = "/run/current-system/sw/bin/scoot-charge push";
         };
         Install.WantedBy = [ "scootbar.service" ];
       };

@@ -973,16 +973,19 @@ What each default does for your battery, so the choice is deliberate:
 
 | Default | Battery effect |
 |---|---|
-| `balanced` profile (PPD's boot state) | none on Apple silicon — there is no PPD driver there (no `platform_profile`, no EPP; the cores already run `schedutil` with the deep idle state), so the daemon owns the bus name for widgets and changes nothing. On Intel/AMD with a driver, the middle ground between the other two |
+| `balanced` profile (PPD's boot state) | none on Apple silicon — there is no PPD driver there (no `platform_profile`, no EPP; the cores already run `schedutil` with the deep idle state), so the daemon owns the bus name for widgets and changes nothing. On Intel/AMD with a driver, the middle ground between the other two. On Apple silicon the charge cap and the lid suspend below are what save battery, not profiles |
 | lid close → `suspend` | stops all draw (s2idle on Apple silicon), at the cost of the session — including SSH — sleeping under you |
 | docked lid close → `lock` | keeps drawing for the external screen, behind the lock |
 | low battery (2%) → `suspend` | RAM stays powered on a dying battery — data safety, not savings |
 | charge cap 80% | longevity, not runtime: sitting at 100% on the charger is what wears the cell most |
 
-To stretch a flight: switch to `power-saver` (`Super+p`, below),
-dim earlier (`idle.dimTimeout = 60`), and let the lid suspend as it
-already does. To hold a charge longer on the shelf, the 80% cap is
-the whole trick — everything else is runtime.
+To stretch a flight on driver hardware: switch to `power-saver`
+(`Super+p`, below), dim earlier (`idle.dimTimeout = 60`), and let
+the lid suspend as it already does. On Apple silicon there is no
+driver for profiles to steer (below), so the charge cap and the lid
+suspend here are what save battery — everything else is runtime. To
+hold a charge longer on the shelf, the 80% cap is the whole trick —
+everything else is runtime.
 
 ### Profiles
 
@@ -1001,10 +1004,24 @@ scoot-power-profile set power-saver
 powerprofilesctl list
 ```
 
-On Apple silicon only `balanced` exists — `set` to anything else
-fails loudly with the daemon's own error, which is the hardware
-telling the truth (there is no driver to honor it), not a broken
-setup. TLP and `auto-cpufreq` stay out deliberately: both conflict
+On Apple silicon the daemon runs a placeholder driver offering
+`power-saver` + `balanced` — both no-ops there, so `set` to either
+succeeds while changing no CPU behavior, and only `performance` is
+refused (loudly, with the daemon's own error: the hardware telling
+the truth, not a broken setup). `Super+p` (`cycle`) steps only
+between the profiles the daemon lists, so the bind never fails
+silently from the keymap; `set` to an unlisted profile stays loud
+for terminal use. Where no driver honors the daemon at all, drop
+it and its bind entirely:
+
+```nix
+programs.scoot.desktop.power = {
+  enable = true;
+  profiles.enable = false;
+};
+```
+
+TLP and `auto-cpufreq` stay out deliberately: both conflict
 with the daemon (its module refuses them at eval), and neither has
 an Apple-silicon backend either.
 
@@ -1135,6 +1152,7 @@ restart; no re-login):
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `desktop.power.enable` | bool | `false` (never with the profile) | run the daemon, the lid/power-key/low-battery policy and the charge service |
+| `desktop.power.profiles.enable` | bool | `true` | run the profiles daemon behind `Super+p` (`false` drops the daemon and its bind — for driverless hardware, where the charge limit and the lid policy are what save battery) |
 | `desktop.power.profileOnAC` / `.profileOnBattery` | enum or null | `null` (hold) | profile to select on that power state (`"performance"`, `"balanced"`, `"power-saver"`) |
 | `desktop.power.lidSwitch` | logind action | `"suspend"` | lid close (`"lock"` needs the idle policy's locker) |
 | `desktop.power.lidSwitchDocked` | logind action | `"lock"` | lid close while docked or multi-output — never suspends |
@@ -1157,9 +1175,12 @@ Troubleshooting, by symptom:
   daemon: `powerprofilesctl` from a terminal — outside the session
   it still lists profiles, so a failure there names the daemon's
   own cause.
-- *`power-saver` (or `performance`) is refused on Apple silicon.*
-  Expected: no driver, only `balanced` exists. The daemon still
-  owns the bus name for widgets — it changes no CPU behavior.
+- *`performance` is refused on Apple silicon.* Expected: the
+  placeholder driver offers `power-saver` + `balanced` only, both
+  no-ops there. The daemon still owns the bus name for widgets — it
+  changes no CPU behavior. (`Super+p` steps between the two listed
+  profiles; to drop the daemon and its bind entirely, set
+  `profiles.enable = false`.)
 - *Closing the lid suspends over SSH.* That is the default doing
   its job — hold it off per session (`systemd-inhibit`, above) or
   set `lidSwitch = "lock"` (needs the idle policy's locker) or

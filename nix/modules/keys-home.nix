@@ -200,11 +200,17 @@ let
   # otherwise (off Linux, or without the overlay), with the same
   # fail-loud contract as the other slot scripts (a missing daemon
   # exits nonzero with usage, never silently). `cycle` rotates in
-  # PPD's canonical order (power-saver, balanced, performance); an
-  # unrecognized current profile (a driverless daemon, a future
-  # fourth) lands on balanced rather than erroring. `set` refuses
-  # anything but the three. Every path prints the resulting profile,
-  # so the keybind's effect is visible in a terminal too.
+  # PPD's canonical order (power-saver, balanced, performance),
+  # skipping whatever the daemon does not list: with no platform
+  # driver it offers power-saver + balanced only (its placeholder),
+  # so stepping to performance would fail there -- invisibly from
+  # the keybind, which is why the skip lives in `cycle` while `set`
+  # stays loud for terminal use. An unrecognized current profile (a
+  # future fourth) lands on balanced rather than erroring. Every path
+  # prints the resulting profile, so the keybind's effect is visible
+  # in a terminal too. Rendered (like the bind below) only while the
+  # profiles daemon is wanted (`profiles.enable`): a driverless box
+  # can drop both entirely.
   pow = cfg.desktop.power;
   ppdBin =
     if pow.profiles.package != null then lib.getExe pow.profiles.package else "powerprofilesctl";
@@ -220,12 +226,21 @@ let
         esac
         ;;
       cycle)
-        case "$("$ctl" get)" in
-          power-saver) next=balanced ;;
-          balanced) next=performance ;;
-          performance) next=power-saver ;;
-          *) next=balanced ;;
+        current="$("$ctl" get)"
+        offered="$("$ctl" list 2>/dev/null | sed -n 's/^[* ] *\(power-saver\|balanced\|performance\):.*/\1/p' | tr '\n' ' ')"
+        [ -n "$offered" ] || offered="power-saver balanced performance"
+        case "$current" in
+          power-saver) order="balanced performance power-saver" ;;
+          balanced) order="performance power-saver balanced" ;;
+          performance) order="power-saver balanced performance" ;;
+          *) order="balanced power-saver performance" ;;
         esac
+        next=balanced
+        for candidate in $order; do
+          case " $offered " in
+            *" $candidate "*) next="$candidate"; break ;;
+          esac
+        done
         "$ctl" set "$next" && "$ctl" get
         ;;
       *) usage ;;
@@ -254,7 +269,9 @@ let
   # clipboard, notifications, capture) render only while their slot
   # is enabled; the rest render with the keymap. A `false` flag
   # leaves that combo unbound; a value the user sets in
-  # `settings.binds` wins per key (`mkDefault` below).
+  # `settings.binds` wins per key (`mkDefault` below). The profile
+  # bind additionally needs the profiles daemon wanted
+  # (`profiles.enable`): without it there is nothing to cycle.
   actions =
     let
       all = {
@@ -285,6 +302,7 @@ let
         name: _:
         (keys.binds.${name}.enable or true)
         && (desktop.keymap.${name}.slot == null || slotOn desktop.keymap.${name}.slot)
+        && (name != "powerProfile" || pow.profiles.enable)
       ) all;
     in
     lib.mapAttrs' (name: action: lib.nameValuePair desktop.keymap.${name}.combo action) wanted;
@@ -309,7 +327,7 @@ let
   slotScripts =
     lib.optional (slotOn "launcher") launcherScript
     ++ lib.optional (slotOn "clipboard") clipboardPick
-    ++ lib.optional (slotOn "power") powerProfileScript
+    ++ lib.optional (slotOn "power" && pow.profiles.enable) powerProfileScript
     ++ lib.optional (slotOn "capture") captureOutput
     ++ lib.optional (slotOn "capture") captureRegion
     ++ lib.optional (slotOn "capture") captureClipboard;

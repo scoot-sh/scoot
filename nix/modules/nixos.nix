@@ -439,7 +439,7 @@ in
       # one-declaration reason as above. Linux-only: off Linux it
       # defaults to null, which the assertion below refuses loudly.
       power = desktop.options.power // {
-        profiles = {
+        profiles = desktop.options.power.profiles // {
           package = lib.mkOption {
             type = lib.types.nullOr lib.types.package;
             default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.power-profiles-daemon or null else null;
@@ -1029,37 +1029,15 @@ in
     (lib.mkIf cfg.desktop.power.enable {
       assertions = [
         {
-          assertion = cfg.desktop.power.profiles.package != null;
+          # Nothing to run the switch without (refused only while the
+          # profiles daemon is wanted: with `profiles.enable = false`
+          # a driverless box drops the daemon and needs no package).
+          assertion = !cfg.desktop.power.profiles.enable || cfg.desktop.power.profiles.package != null;
           message = ''
             programs.scoot.desktop.power.enable is set but
             programs.scoot.desktop.power.profiles.package is null: set
             it explicitly (apply the overlay, or point at a
             power-profiles-daemon).
-          '';
-        }
-        {
-          # Loud at eval, not a threshold the kernel refuses at write:
-          # `charge_control_end_threshold` takes a percent.
-          assertion =
-            !cfg.desktop.power.chargeLimit.enable
-            || (cfg.desktop.power.chargeLimit.limit >= 1 && cfg.desktop.power.chargeLimit.limit <= 100);
-          message = ''
-            programs.scoot.desktop.power.chargeLimit.limit is a charge
-            percent, 1 to 100.
-          '';
-        }
-        {
-          # Loud at eval, like `session.command`'s: the name renders
-          # into sysfs and udev paths, so an explicitly empty or
-          # whitespace-only value would address the wrong file.
-          assertion =
-            !cfg.desktop.power.chargeLimit.enable
-            || cfg.desktop.power.chargeLimit.battery == null
-            || builtins.match "^[[:space:]]*$" cfg.desktop.power.chargeLimit.battery == null;
-          message = ''
-            programs.scoot.desktop.power.chargeLimit.battery is empty
-            or blank: set the kernel's battery name (e.g. `BAT0`), or
-            leave it null to auto-detect.
           '';
         }
         {
@@ -1094,9 +1072,14 @@ in
       # battery/power widgets) -- but changes no CPU behavior. That is
       # inert, not refused: eval cannot see the machine, and refusing
       # would break one shared config across heterogeneous hardware.
-      services.power-profiles-daemon.enable = true;
+      # A `mkDefault`, like the file's siblings, so an explicit value
+      # wins: `profiles.enable = false` drops the daemon (a driverless
+      # box needs neither it nor its bind), and a user setting
+      # `services.power-profiles-daemon.enable` directly wins over
+      # both.
+      services.power-profiles-daemon.enable = lib.mkDefault cfg.desktop.power.profiles.enable;
       services.power-profiles-daemon.package = lib.mkIf (
-        cfg.desktop.power.profiles.package != null
+        cfg.desktop.power.profiles.enable && cfg.desktop.power.profiles.package != null
       ) cfg.desktop.power.profiles.package;
 
       # Low battery through UPower (which already sees the
@@ -1107,9 +1090,10 @@ in
       # would fail there instead of sleeping. `Suspend` is a UPower
       # "risky" action (RAM stays powered on a dying battery), hence
       # the flag beside it -- set only while the action needs it.
-      services.upower.enable = true;
-      services.upower.percentageAction = cfg.desktop.power.lowBattery.percentage;
-      services.upower.criticalPowerAction = cfg.desktop.power.lowBattery.action;
+      # Each a `mkDefault`, so an explicit value still wins.
+      services.upower.enable = lib.mkDefault true;
+      services.upower.percentageAction = lib.mkDefault cfg.desktop.power.lowBattery.percentage;
+      services.upower.criticalPowerAction = lib.mkDefault cfg.desktop.power.lowBattery.action;
       services.upower.allowRiskyCriticalPowerAction = lib.mkIf (
         cfg.desktop.power.lowBattery.action == "Suspend" || cfg.desktop.power.lowBattery.action == "Ignore"
       ) true;
@@ -1119,23 +1103,56 @@ in
       # `mkDefault`, so an explicit value still wins. The docked rule
       # is the twin of the idle child's (same value, same path, so
       # the two merge): a closed lid on a multi-output box locks,
-      # never suspends. `KillUserProcesses` is a bool in nixpkgs (its
+      # never suspends. `KillUserProcesses` is left to nixpkgs (its
       # own default is already false, for the tmux/mosh reason quoted
-      # there): set explicitly so the value is pinned, not inherited
-      # -- a logout (or a dropped SSH session sharing this user
-      # manager) never takes agents and multiplexers with it, which
-      # is what a remotely-driven box needs.
+      # there): pinning it here would eval-conflict with anyone
+      # setting it elsewhere, and a logout (or a dropped SSH session
+      # sharing this user manager) never takes agents and
+      # multiplexers with it either way -- which is what a
+      # remotely-driven box needs.
       services.logind.settings.Login.HandleLidSwitch = lib.mkDefault cfg.desktop.power.lidSwitch;
       services.logind.settings.Login.HandleLidSwitchDocked =
         lib.mkDefault cfg.desktop.power.lidSwitchDocked;
       services.logind.settings.Login.HandleLidSwitchExternalPower =
         lib.mkDefault cfg.desktop.power.lidSwitchExternalPower;
       services.logind.settings.Login.HandlePowerKey = lib.mkDefault cfg.desktop.power.powerKey;
-      services.logind.settings.Login.KillUserProcesses = lib.mkDefault false;
 
       environment.systemPackages =
-        lib.optional (cfg.desktop.power.profiles.package != null) cfg.desktop.power.profiles.package
+        lib.optional (
+          cfg.desktop.power.profiles.enable && cfg.desktop.power.profiles.package != null
+        ) cfg.desktop.power.profiles.package
         ++ lib.optional (cfg.desktop.power.chargeLimit.enable) scootCharge;
+    })
+    # The charge and low-battery bounds, refused here as well as on
+    # the home-manager side (same messages): a NixOS-only setup must
+    # hear about a bad limit without the user module. Kept outside
+    # `power.enable` so they still fire then, the way the idle
+    # policy's refusals sit outside its own switch.
+    (lib.mkIf cfg.desktop.power.chargeLimit.enable {
+      assertions = [
+        {
+          # Loud at eval, not a threshold the kernel refuses at write:
+          # `charge_control_end_threshold` takes a percent.
+          assertion = cfg.desktop.power.chargeLimit.limit >= 1 && cfg.desktop.power.chargeLimit.limit <= 100;
+          message = ''
+            programs.scoot.desktop.power.chargeLimit.limit is a charge
+            percent, 1 to 100.
+          '';
+        }
+        {
+          # Loud at eval, like `session.command`'s: the name renders
+          # into sysfs and udev paths, so an explicitly empty or
+          # whitespace-only value would address the wrong file.
+          assertion =
+            cfg.desktop.power.chargeLimit.battery == null
+            || builtins.match "^[[:space:]]*$" cfg.desktop.power.chargeLimit.battery == null;
+          message = ''
+            programs.scoot.desktop.power.chargeLimit.battery is empty
+            or blank: set the kernel's battery name (e.g. `BAT0`), or
+            leave it null to auto-detect.
+          '';
+        }
+      ];
     })
     # The charge-limit service itself: root re-syncs the threshold on
     # every AC change (udev, which also re-applies the group write on
@@ -1184,27 +1201,42 @@ in
     # transitions do): a manual switch mid-session stays until the
     # next plug event. A null package beside a set profile renders the
     # bare name (the refusal above still fires: eval must not throw
-    # where it should refuse).
-    (lib.mkIf (cfg.desktop.power.enable && cfg.desktop.power.profileOnAC != null) {
-      services.udev.extraRules = ''
-        SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", ENV{POWER_SUPPLY_ONLINE}=="1", RUN+="${
-          if cfg.desktop.power.profiles.package != null then
-            lib.getExe cfg.desktop.power.profiles.package
-          else
-            "powerprofilesctl"
-        } set ${cfg.desktop.power.profileOnAC}"
-      '';
-    })
-    (lib.mkIf (cfg.desktop.power.enable && cfg.desktop.power.profileOnBattery != null) {
-      services.udev.extraRules = ''
-        SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", ENV{POWER_SUPPLY_ONLINE}=="0", RUN+="${
-          if cfg.desktop.power.profiles.package != null then
-            lib.getExe cfg.desktop.power.profiles.package
-          else
-            "powerprofilesctl"
-        } set ${cfg.desktop.power.profileOnBattery}"
-      '';
-    })
+    # where it should refuse). Nothing without the profiles daemon
+    # (`profiles.enable`): without it there is nothing to select.
+    (lib.mkIf
+      (
+        cfg.desktop.power.enable
+        && cfg.desktop.power.profiles.enable
+        && cfg.desktop.power.profileOnAC != null
+      )
+      {
+        services.udev.extraRules = ''
+          SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", ENV{POWER_SUPPLY_ONLINE}=="1", RUN+="${
+            if cfg.desktop.power.profiles.package != null then
+              lib.getExe cfg.desktop.power.profiles.package
+            else
+              "powerprofilesctl"
+          } set ${cfg.desktop.power.profileOnAC}"
+        '';
+      }
+    )
+    (lib.mkIf
+      (
+        cfg.desktop.power.enable
+        && cfg.desktop.power.profiles.enable
+        && cfg.desktop.power.profileOnBattery != null
+      )
+      {
+        services.udev.extraRules = ''
+          SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", ENV{POWER_SUPPLY_ONLINE}=="0", RUN+="${
+            if cfg.desktop.power.profiles.package != null then
+              lib.getExe cfg.desktop.power.profiles.package
+            else
+              "powerprofilesctl"
+          } set ${cfg.desktop.power.profileOnBattery}"
+        '';
+      }
+    )
     # The idle policy's system half: its tools on PATH, the docked-lid
     # rule, and the locker's PAM service. The timers and the locker
     # config are the home-manager side's (`idle-home.nix`): without it
@@ -1269,8 +1301,14 @@ in
       # child's). The lock lands through logind's Lock, which the
       # policy's `lock` event listens on. The canonical
       # `settings.Login.*` path, not the renamed `lidSwitchDocked`
-      # alias. `mkDefault`, so an explicit value still wins.
-      services.logind.settings.Login.HandleLidSwitchDocked = lib.mkDefault "lock";
+      # alias. `mkDefault`, so an explicit value still wins. Defers to
+      # the power policy while it runs (nothing here then): the power
+      # child's own docked rule owns the setting, so a user-set
+      # `power.lidSwitchDocked` wins instead of eval-conflicting with
+      # this twin.
+      services.logind.settings.Login.HandleLidSwitchDocked = lib.mkIf (!cfg.desktop.power.enable) (
+        lib.mkDefault "lock"
+      );
     })
     # The locker's PAM service (password auth for the locker): without
     # it swaylock cannot validate, loud here instead of a locker that
