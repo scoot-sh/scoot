@@ -913,16 +913,12 @@ let
     greeter.enable = true;
   };
   # Standalone home-manager desktop: the page's home.nix snippet, through
-  # the legacy `homeManagerModules` spelling (the page documents both;
-  # the current `homeModules` spelling is pinned equal below). (As a
-  # NixOS module it is the same module under `home-manager.users.<name>`
-  # — see the page — so this evaluation covers both forms.)
-  hmDocsDesktop = evalHomeWith flake.homeManagerModules.scoot pkgs {
-    enable = true;
-    desktop.enable = true;
-    desktop.look = "moonrise";
-  };
-  hmDocsDesktopCurrent = evalHomeWith flake.homeModules.scoot pkgs {
+  # the flake wrapper a consumer imports (`homeModules.scoot` — the only
+  # spelling; the old `homeManagerModules` output is gone, pinned absent
+  # below). (As a NixOS module it is the same module under
+  # `home-manager.users.<name>` — see the page — so this evaluation
+  # covers both forms.)
+  hmDocsDesktop = evalHomeWith flake.homeModules.scoot pkgs {
     enable = true;
     desktop.enable = true;
     desktop.look = "moonrise";
@@ -3873,9 +3869,10 @@ let
       (
         assert allAssertionsHold hmDocsDesktop.config;
         assert hmDocsDesktop.config.programs.scoot.desktop.look == "moonrise";
-        # Both documented home-manager import spellings resolve to the
-        # same module: the current spelling evaluates identically.
-        assert hmDocsDesktopCurrent.config.programs.scoot.desktop.look == "moonrise";
+        # The old `homeManagerModules` output is gone: no alias, no shim.
+        # (Accessing it is an eval error on the flake itself; here the
+        # wiring pins its absence — `flake.nix` no longer passes it in.)
+        assert !(flake ? homeManagerModules);
         true
       )
       (

@@ -175,8 +175,7 @@ to):
 }
 ```
 
-(The legacy spelling `scoot.homeManagerModules.scoot` resolves to the
-same module.) As a NixOS module instead — home-manager inline in the
+As a NixOS module instead — home-manager inline in the
 system flake above:
 
 ```nix

@@ -175,8 +175,7 @@ in
     # `pkgs.scoot` when the flake's overlay (`overlays.default`) is
     # applied, else null: nothing is guessed, since a `scoot` from anywhere
     # else would silently install someone else's build. The flake wrapper
-    # (`homeModules.scoot`, still aliased as `homeManagerModules.scoot`, in
-    # `flake.nix`) fills this with the flake's own build via `mkDefault` on
+    # (`homeModules.scoot` in `flake.nix`) fills this with the flake's own build via `mkDefault` on
     # Linux and with null (files only) on Darwin; direct-module users
     # without the overlay set it explicitly (see the `example`), or leave
     # it null for a files-only setup -- the module manages files

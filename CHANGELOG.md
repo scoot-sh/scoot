@@ -9,6 +9,14 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-10-06 — the `homeManagerModules` flake output is gone (breaking)
+
+- **Import `scoot.homeModules.scoot`, not `scoot.homeManagerModules.scoot`.**
+  The legacy output was removed clean, with no alias: evaluating
+  `scoot.homeManagerModules` now fails. One line to fix
+  (`homeManagerModules` → `homeModules` in the importing flake's
+  `modules` list); nothing else changes.
+
 ### 2026-10-06 — a nested session stops loud instead of wedging on a silent host
 
 - **Starting `--nested` against a host that never answers stops cleanly.**
