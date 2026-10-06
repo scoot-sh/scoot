@@ -9,6 +9,18 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-10-06 — a nested session stops loud instead of wedging on a silent host
+
+- **Starting `--nested` against a host that never answers stops cleanly.**
+  If the host accepts the connection but does not answer the startup
+  handshake within 10 seconds (a restart that came back listening without
+  dispatching), the log says `could not reach the host compositor during
+  startup` and the process exits 1, instead of waiting forever with no
+  `scoot is up` and no control socket. A supervisor retries the start;
+  unsaved client state does not survive a restart, as with any compositor
+  exit. There is no new knob: ten seconds is ~170x a healthy startup.
+- **Losing the host mid-session now logs once**, not twice per death.
+
 ### 2026-10-06 — a nested session names its dead host instead of dying on calloop jargon
 
 - **Losing the host compositor stops `--nested` cleanly.** If the host
