@@ -1066,6 +1066,21 @@ in
       # the user unit comes from the home-manager side.
       programs.scoot.desktop.nightlight.enable = lib.mkDefault true;
     })
+    # System dconf for the look's dark-mode signal: the home-manager
+    # side writes `dconf.settings` (the `color-scheme` leaf in
+    # `theme-home.nix`), and home-manager's dconf activation needs the
+    # system's dconf D-Bus service to land it. Gated on the profile,
+    # not on this side's look or GTK target: those are separate copies
+    # from the home configuration's (a look set only there, or a GTK
+    # target off on one side only, would be missed), and upstream's
+    # `gtk` module writes the same leaf when it owns it. Cost: nothing
+    # started at boot (the dconf service is D-Bus-activated on a
+    # write), the `dconf` tool and one GIO module path. A default, as
+    # nixpkgs' own `programs/wayland/wayland-session.nix` sets it for
+    # sway, niri, Hyprland and the rest, so a plain `false` wins.
+    (lib.mkIf cfg.desktop.enable {
+      programs.dconf.enable = lib.mkDefault true;
+    })
     # The notification daemon's system half: its package on PATH. The
     # unit and the config are the home-manager side's
     # (`notifications-home.nix`): without it the daemon sits ready for

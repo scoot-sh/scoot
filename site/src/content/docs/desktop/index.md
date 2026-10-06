@@ -133,7 +133,7 @@ Which options live on which side:
 
 | Side | Owns |
 |---|---|
-| NixOS (`programs.scoot` in `configuration.nix`) | the package system-wide; the login-screen session entry; system-wide scootbg (so `[wallpaper]` finds it on `PATH`); the idle/lock tools system-wide, the docked-lid rule, and the locker's PAM service; the portal backends system-wide plus PipeWire running; the OSD installed system-wide; the night-light tool system-wide; the polkit authority, the agent and the keyring system-wide plus the greetd keyring-unlock PAM pair; the profiles daemon, the lid/power-key/low-battery policy and the charge service (all opt-in through `power.enable`); the greeter |
+| NixOS (`programs.scoot` in `configuration.nix`) | the package system-wide; the login-screen session entry; system-wide scootbg (so `[wallpaper]` finds it on `PATH`); the idle/lock tools system-wide, the docked-lid rule, and the locker's PAM service; the portal backends system-wide plus PipeWire running; the OSD installed system-wide; the night-light tool system-wide; the polkit authority, the agent and the keyring system-wide plus the greetd keyring-unlock PAM pair; system dconf (for the theme's dark-mode signal); the profiles daemon, the lid/power-key/low-battery policy and the charge service (all opt-in through `power.enable`); the greeter |
 | Home Manager (`programs.scoot` in the home config) | the themed config file; the portal config; the per-desktop chooser config xdpw asks through; the screenshot tools; the secrets client; the user units (idle policy, notification daemon, clipboard watchers, night light, bar feed, OSD, polkit agent) plus the `scoot-session.target` scope they start in; the volume/brightness/sink scripts beside the keymap's binds; the profile switch, the charge button's fill unit, and the tools for the user |
 
 ## Home Manager
@@ -321,6 +321,12 @@ variables only, no daemon, so the theme costs no wakeups.
 | Editor | `desktop.theme.targets.editor.enable` | bool | `true` | the look's Helix config beside its theme (`radial-burst` ships none: inert there) |
 | Monitor | `desktop.theme.targets.monitor.enable` | bool | `true` | the look's btop config beside its theme (`radial-burst` ships none, `music-desk` ships no theme: inert there) |
 | Extra GTK keys | `desktop.theme.settings` | attrs of str | `{ }` | merged over the generated `settings.ini`: a value here wins per key |
+
+On NixOS the profile also turns on `programs.dconf.enable` (as a
+default, so your own `false` wins): home-manager writes the dark-mode
+signal into dconf, and its activation needs the system's dconf service
+to do that. With the profile on only in your home config, set
+`programs.dconf.enable = true;` in the system config yourself.
 
 Set any target to `false` to keep that piece's own style while the
 rest follows the look — for example, to leave alone an app you

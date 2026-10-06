@@ -485,6 +485,14 @@ let
       type = lib.types.attrsOf lib.types.raw;
       default = { };
     };
+    # The system dconf switch the profile turns on (nixpkgs'
+    # `programs/dconf.nix` on real NixOS, a plain bool defaulting to
+    # off there too): the real-NixOS pins below check it against that
+    # module.
+    options.programs.dconf.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
     # The greetd login switch is nixpkgs' own option on real NixOS
     # (its greetd module); in the stub evaluations below it comes
     # from `regreetStubs`, which rides along in every NixOS
@@ -925,8 +933,10 @@ let
   # #416 shipped: importing the module failed, greeter or not). Only
   # options are read, so nothing is built and no root file system is
   # needed.
-  evalRealNixos =
-    cfg:
+  # `extra`: more NixOS modules beside it (the user's own settings
+  # outside `programs.scoot`).
+  evalRealNixosWith =
+    extra: cfg:
     import "${pkgs.path}/nixos/lib/eval-config.nix" {
       system = null;
       modules = [
@@ -935,8 +945,10 @@ let
           nixpkgs.hostPlatform = system;
           programs.scoot = cfg;
         }
-      ];
+      ]
+      ++ extra;
     };
+  evalRealNixos = evalRealNixosWith [ ];
   osRealImported = evalRealNixos { };
   osRealGreeter = evalRealNixos {
     enable = true;
@@ -979,6 +991,20 @@ let
     desktop.enable = true;
     greeter.enable = true;
   };
+  # System dconf for the look's dark-mode signal against nixpkgs' own
+  # `programs/dconf.nix`: on with the profile and a look, a user's
+  # plain `false` still winning, and off with scoot on but no profile.
+  osRealDconf = evalRealNixos {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+  };
+  osRealDconfOff = evalRealNixosWith [ { programs.dconf.enable = false; } ] {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+  };
+  osRealNoProfile = evalRealNixos { enable = true; };
   hmFlake = evalHomeWith flake.homeModule pkgs {
     enable = true;
     settings.wallpaper.color = "#1e1e2e";
@@ -4524,6 +4550,18 @@ let
           !(((osRealIdle.config.security.pam.services.greetd or { }).rules.auth.gnome_keyring or { }).enable
             or false
           );
+        true
+      )
+      # System dconf (nixpkgs' own module): on with the profile and a
+      # look, so home-manager's dconf activation can land the look's
+      # `color-scheme` -- the service really on the bus -- while a
+      # user's plain `false` wins, and scoot without the profile
+      # leaves it alone.
+      (
+        assert osRealDconf.config.programs.dconf.enable;
+        assert lib.any (p: (p.pname or "") == "dconf") osRealDconf.config.services.dbus.packages;
+        assert !osRealDconfOff.config.programs.dconf.enable;
+        assert !osRealNoProfile.config.programs.dconf.enable;
         true
       )
       # The documented install configs (desktop/index.md) evaluate with
