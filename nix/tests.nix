@@ -10044,10 +10044,11 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
 
     # 22e8. Sink set by name moves the default and shows its level
     #      (the confirmation on stderr: `list` owns stdout).
+    audio_setup 'Volume: 0.5' 0 0 "" '[{"id":42,"info":{"props":{"media.class":"Audio/Sink","node.description":"Dummy Output"}}},{"id":43,"info":{"props":{"media.class":"Audio/Sink","node.name":"alsa_out"}}}]' 0 ""
     audio_fifo
     cat "$XDG_RUNTIME_DIR/scoot-osd.fifo" > "$SCOOT_AUDIO_TEST_DIR/shown" &
     reader=$!
-    ${audioBehaviorSink} set alsa_out 2>"$SCOOT_AUDIO_TEST_DIR/stderr"
+    ${audioBehaviorSink} set alsa_out 2>"$SCOOT_AUDIO_TEST_DIR/stderr" || { echo "sink set failed (22e8)"; cat "$SCOOT_AUDIO_TEST_DIR/stderr"; exit 1; }
     wait "$reader"
     [ "$(cat "$SCOOT_AUDIO_TEST_DIR/shown")" = "50" ] || { echo "sink set showed '$(cat "$SCOOT_AUDIO_TEST_DIR/shown")', want '50' (22e8)" >&2; exit 1; }
     grep -q "Default sink: alsa_out" "$SCOOT_AUDIO_TEST_DIR/stderr"
