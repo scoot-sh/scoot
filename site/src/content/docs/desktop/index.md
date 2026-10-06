@@ -1512,7 +1512,7 @@ apps started after the next login):
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `desktop.apps.terminal.enable` | bool | `true` with the profile | foot on `PATH`, `TERMINAL=foot` |
+| `desktop.apps.terminal.enable` | bool | `true` with the profile | foot on `PATH` (left to home-manager's `programs.foot` when that is on: its package wins), `TERMINAL=foot` |
 | `desktop.apps.terminal.package` | package or null | foot (Linux-only: null off Linux) | the terminal to install; the compositor's `Super+Return` still names `foot`, so another terminal also needs that bind |
 | `desktop.apps.fileManager.enable` | bool | `false` | the file manager on `PATH`, directories and mounts opening in it |
 | `desktop.apps.fileManager.package` | package or null | pcmanfm (Linux-only: null off Linux) | point at another file manager |
@@ -1527,8 +1527,8 @@ its *Browse* action).
 
 Troubleshooting, by symptom:
 
-- *Activation stops on `~/.config/user-dirs.dirs` or
-  `~/.config/mimeapps.list`: "would be clobbered".* A file you (or an
+- *Activation stops: "Existing file '…/.config/user-dirs.dirs' would
+  be clobbered"* (or `mimeapps.list`). A file you (or an
   app) wrote is in the way of the one the profile manages. Move it
   aside, or set home-manager's `backupFileExtension` so activation
   moves it for you.
@@ -1549,9 +1549,11 @@ Troubleshooting, by symptom:
 
 ## WiFi and Bluetooth
 
-`Super+w` opens the WiFi picker, `Super+b` the Bluetooth one, and the
-bar's network and bluetooth modules open the same pickers, fed the
-bar's own list. Both are fuzzel menus through the
+`Super+w` opens the WiFi picker and `Super+b` the Bluetooth one. The
+bar opens the same pickers, fed its own list: a click on the network
+module, and the bluetooth module's `menu` action (`scootbar msg invoke
+bluetooth menu`, or a binding to it; that module's click toggles the
+adapter's power). Both are fuzzel menus through the
 [launcher's dmenu contract](#launcher), themed like it, and both are
 scripts over the stock CLIs (`nmcli`, `bluetoothctl`): nothing runs
 between picks.

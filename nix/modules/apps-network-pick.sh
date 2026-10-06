@@ -171,13 +171,23 @@ do_connect() {
         psk=$("$MENU" --dmenu --password --prompt-only="key for $ssid: " $THEME </dev/null) || exit 0
         [ -n "$psk" ] || exit 0
     fi
+    # Every saved profile before the join, so a failed join removes
+    # only one it created itself (nmcli reuses a profile it finds for
+    # the network, and that one is the user's to keep). No snapshot,
+    # no cleanup.
+    before=$("$NMCLI" -t -f UUID connection show 2>/dev/null) || before=""
     if ! printf '%s\n' "$psk" | nm_act --ask device wifi connect "$ssid"; then
         # A first join that failed leaves its new profile behind with
         # the wrong key in it: remove it, so the next pick asks again
         # instead of retrying that key forever.
-        stale=$(saved_wifi | WANT=$ssid "$AWK" -F'\t' '
-            substr($0, index($0, "\t") + 1) == ENVIRON["WANT"] { print $1; exit }')
-        [ -z "$stale" ] || "$NMCLI" connection delete uuid "$stale" >/dev/null 2>&1 || true
+        if [ -n "$before" ]; then
+            saved_wifi | WANT=$ssid BEFORE=$before "$AWK" -F'\t' '
+                BEGIN { n = split(ENVIRON["BEFORE"], b, "\n"); for (i = 1; i <= n; i++) old[b[i]] = 1 }
+                substr($0, index($0, "\t") + 1) == ENVIRON["WANT"] && !($1 in old) { print $1 }' |
+                while IFS= read -r stale; do
+                    "$NMCLI" connection delete uuid "$stale" >/dev/null 2>&1 || true
+                done
+        fi
         exit 1
     fi
 }

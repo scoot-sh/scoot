@@ -117,6 +117,10 @@ let
     "@THEME@" = themeFor "bluetooth";
   };
 
+  # Whether home-manager's own `programs.foot` is on (read with `or`:
+  # the option is absent without that module).
+  footOwned = (config.programs.foot or { }).enable or false;
+
   # Whether any file-opening app is managed (the terminal counts:
   # `xdg-open` answers from a terminal even with no manager).
   filesInUse = apps.terminal.enable || apps.fileManager.enable;
@@ -309,7 +313,12 @@ in
         }
       ];
 
-      home.packages = lib.optional (apps.terminal.package != null) apps.terminal.package;
+      # home-manager's own `programs.foot` installs its foot: a second
+      # foot build beside it would collide in the profile, so the slot
+      # yields there (the way the theme yields `foot.ini` to it).
+      home.packages = lib.optional (
+        apps.terminal.package != null && !(footOwned && lib.getName apps.terminal.package == "foot")
+      ) apps.terminal.package;
 
       systemd.user.sessionVariables = {
         TERMINAL = lib.mkDefault "foot";

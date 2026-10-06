@@ -2102,6 +2102,8 @@ let
         cat "$d/dev"; exit "$(cat "$d/dev-code")" ;;
       "-t -f UUID,TYPE connection show")
         cat "$d/connections"; exit 0 ;;
+      "-t -f UUID connection show")
+        cut -d: -f1 "$d/connections"; exit 0 ;;
       "-t -f connection.uuid,802-11-wireless.ssid connection show "*)
         shift 5
         while [ "$#" -ge 2 ]; do
@@ -2118,7 +2120,9 @@ let
         if [ "$ask" = 1 ]; then cat >> "$d/stdin"; fi
         code=$(cat "$d/connect-code")
         if [ "$code" != 0 ]; then
-          if [ "$ask" = 1 ]; then
+          if [ "$ask" = 1 ] && [ -s "$d/reuse-uuid" ]; then
+            printf '%s\t%s\n' "$(cat "$d/reuse-uuid")" "$4" >> "$d/ssids"
+          elif [ "$ask" = 1 ]; then
             printf 'stale-uuid:802-11-wireless\n' >> "$d/connections"
             printf 'stale-uuid\t%s\n' "$4" >> "$d/ssids"
           fi
@@ -8476,6 +8480,16 @@ let
     (
       assert lib.hasInfix "org.freedesktop.UDisks2"
         hmApps.config.systemd.user.services.scoot-automount.Service.ExecCondition;
+      true
+    )
+    # ...yielding foot to home-manager's own `programs.foot` (its
+    # package wins; two foot builds would collide in the profile)...
+    (
+      assert lib.any (p: (p.pname or "") == "foot") hmThemeUpstream.config.home.packages;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "foot") hmThemeUpstreamOn.config.home.packages);
       true
     )
     # ...and the NixOS side defaults to the same derivations (either
@@ -15079,7 +15093,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
         printf 'typedkey9' > "$A/psk"
         printf '0' > "$A/psk-code"
         printf '0' > "$A/connect-code"
-        : > "$A/calls"; : > "$A/stdin"; : > "$A/prompts"; : > "$A/menu-input"; : > "$A/pick"; : > "$A/picks"
+        : > "$A/calls"; : > "$A/stdin"; : > "$A/prompts"; : > "$A/menu-input"; : > "$A/pick"; : > "$A/picks"; : > "$A/reuse-uuid"
         printf '0' > "$A/pick-code"
       }
       connects() { grep -c "device wifi connect" "$A/calls" || true; }
@@ -15167,7 +15181,17 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       if ${appsNetPick} connect "Hotel: Lobby" 2>"$A/stderr"; then echo "silent success on a wrong key (23g3)" >&2; exit 1; fi
       grep -q "Secrets were required" "$A/stderr"
       grep -F -x -q "nmcli connection delete uuid stale-uuid" "$A/calls"
-      echo "ok: a failed first join fails loud and leaves no stale profile"
+      # ...but a profile that was already there is never deleted: here
+      # one whose SSID the first listing missed, which the join then
+      # reused (`reuse-uuid`).
+      net_setup
+      printf '4' > "$A/connect-code"
+      printf 'kept-uuid:802-11-wireless\n' >> "$A/connections"
+      printf 'kept-uuid' > "$A/reuse-uuid"
+      if ${appsNetPick} connect "Hotel: Lobby" 2>/dev/null; then echo "silent success on a wrong key (23g3)" >&2; exit 1; fi
+      if grep -q "connection delete" "$A/calls"; then echo "deleted a profile that predated the join (23g3)" >&2; exit 1; fi
+      : > "$A/reuse-uuid"
+      echo "ok: a failed first join fails loud and leaves no stale profile, and keeps older ones"
 
       # 23g4. Out of range, or enterprise: loud before any prompt.
       net_setup
