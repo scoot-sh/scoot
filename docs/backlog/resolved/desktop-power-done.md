@@ -1,9 +1,10 @@
 ---
 title: "Desktop power: profiles, lid/battery policy, charge limit"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-05"
 ---
 
 # Desktop power: profiles, lid/battery policy, charge limit
@@ -53,7 +54,7 @@ Thermals/fan curves; TLP-style deep tunables beyond profiles + limit;
 auto-suspend on metered idle past the idle child's timeouts (that child owns
 idle timing — coordinate, don't duplicate).
 
-## Resolution (PR #TBD)
+## Resolution (PR #465)
 
 Landed as `programs.scoot.desktop.power`, opt-in (never with the
 profile — lid-close suspend and the 80% cap are behavior changes, not
