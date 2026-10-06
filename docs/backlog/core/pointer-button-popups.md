@@ -23,7 +23,8 @@ libinput path) and (b) `scoot msg pointer click` / `pointer button` —
 against a probe page logging `pointerdown` with client coordinates,
 foot with SGR mouse reporting, and screenshots after every step
 (`f459-chrome*.png`, `f459-ff*.png`, `f459-foot*.png`,
-`f459-uinput*.png`, `f459-track.png` beside the f459 report).
+`f459-track.png` for the uinput press/release sequences, beside the
+f459 report).
 
 What works (so this is not "clicks are broken"):
 

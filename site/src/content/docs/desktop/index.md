@@ -820,9 +820,9 @@ Troubleshooting, by symptom:
 - *Chrome shares a black screen, or offers windows it cannot
   capture.* Chrome is on its X11 capturer: it picks the portal
   capturer only with `XDG_SESSION_TYPE=wayland` in its own
-  environment (`tr '\0' '\n' </proc/$(pidof chrome)/environ | grep
-  XDG_SESSION_TYPE` — or `echo $XDG_SESSION_TYPE` in the terminal
-  that started it). Every launcher login exports `wayland`, greeter
+  environment (`echo $XDG_SESSION_TYPE` in the terminal that
+  started it; Chrome blanks its own `/proc/PID/environ`, so reading
+  that file shows nothing either way). Every launcher login exports `wayland`, greeter
   or console; a hand-started session needs the three-var activation
   line in the entry above, and a Chrome started outside the session
   (over ssh, from another desktop's terminal) needs a restart from
