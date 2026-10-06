@@ -2078,6 +2078,14 @@ let
     desktop.enable = true;
     desktop.capture.enable = false;
   };
+  # ...both PipeWire users off: the service stops with them.
+  osCaptureAudioOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.capture.enable = false;
+    desktop.audio.enable = false;
+  };
   osCaptureStandalone = evalNixos {
     enable = true;
     package = fakePkg;
@@ -6952,8 +6960,9 @@ let
         osCapture.config.environment.etc."xdg/xdg-desktop-portal-wlr/config".text;
       true
     )
-    # ...the slot off: no portal service, no PipeWire from this
-    # slot, no backends on PATH...
+    # ...the slot off: no portal service and no backends on PATH --
+    # but PipeWire stays: the audio slot (on with the profile too)
+    # defaults the same switch, which merges rather than conflicts...
     (
       assert allAssertionsHold osCaptureOff.config;
       true
@@ -6963,7 +6972,17 @@ let
       true
     )
     (
-      assert !osCaptureOff.config.services.pipewire.enable;
+      assert osCaptureOff.config.services.pipewire.enable;
+      true
+    )
+    # ...and with the audio slot off too, PipeWire stops (the switch
+    # follows its last user)...
+    (
+      assert allAssertionsHold osCaptureAudioOff.config;
+      true
+    )
+    (
+      assert !osCaptureAudioOff.config.services.pipewire.enable;
       true
     )
     (
