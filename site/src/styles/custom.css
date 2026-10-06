@@ -6,6 +6,12 @@
  * wordmark, the logo itself as the home hero. Plain: no gradients,
  * glows, shadows or textures anywhere.
  *
+ * Dark only (maintainer, 2026-10-06): the site renders the dark theme
+ * regardless of the visitor's OS preference or any stored choice — there
+ * is no light theme, no picker (see `components/ThemeSelect.astro` and
+ * `components/ThemeProvider.astro`), and no `:root[data-theme='light']`
+ * block below.
+ *
  * Tokens:
  *   night #000000 — ground (measured: logo ground pixels are #000000;
  *     the `#010000`/`#000101` entries are quantizer dither)
@@ -14,8 +20,6 @@
  *     the lit-fur cluster, forehead box (1075,300)-(1175,380). 5.86:1 on
  *     night (AA body). Delta-E 14.1 from stock `#D97757`.
  *   ash   #8A8A8A — secondary type on night (6.08:1)
- *   ember #8A4A1E — ginger for the light theme, fur darkened to hold AA
- *     on white (6.82:1). Delta-E 25.0 from `#D97757`.
  *   seam  #2A2A2A — hairlines on night, decorative only, never text.
  *
  * Type: League Spartan 900 (OFL 1.1, The League Spartan Project
@@ -41,7 +45,8 @@
   font-display: swap;
 }
 
-/* Dark theme (the default): the logo's own black/white/ginger. */
+/* Dark theme: the logo's own black/white/ginger. (The only theme: the
+ * overrides force `data-theme="dark"`, so no light block lives here.) */
 :root {
   --sl-color-accent-low: #3a2410;
   --sl-color-accent: #cb6f34;
@@ -69,25 +74,9 @@
   --sl-text-code: var(--sl-color-accent-high);
 }
 
-/* Light theme: the brand inverted — white ground, black ink, the fur
- * darkened to ember so links still pass AA (6.82:1 on white). */
-:root[data-theme='light'] {
-  --sl-color-accent-low: #f5e9d2;
-  --sl-color-accent: #8a4a1e;
-  --sl-color-accent-high: #5e3413;
-  --sl-color-white: #000000;
-  --sl-color-gray-1: #1a1a1a;
-  --sl-color-gray-2: #333333;
-  --sl-color-gray-3: #595959;
-  --sl-color-gray-4: #8a8a8a;
-  --sl-color-gray-5: #e4ddc9;
-  --sl-color-gray-6: #f1ead8;
-  --sl-color-black: #ffffff;
-
-  --sl-color-bg: #ffffff;
-  --sl-color-bg-nav: #ffffff;
-  --sl-color-bg-sidebar: #ffffff;
-}
+/* Light theme: none. This site is dark only (see the file header);
+ * anything that was here (`:root[data-theme='light']` with the white
+ * ground, black ink and the ember accent) was removed 2026-10-06. */
 
 /* Display type: header wordmark, hero title, page title, headings.
  * Tight, like the logo. (Unlayered rules beat Starlight's
@@ -124,7 +113,7 @@
   line-height: 1.4;
 }
 
-/* Visible keyboard focus everywhere: the ginger ring on either ground. */
+/* Visible keyboard focus everywhere: the ginger ring on the dark ground. */
 :focus-visible {
   outline: 2px solid var(--sl-color-accent);
   outline-offset: 2px;
@@ -163,25 +152,18 @@ kbd {
 }
 
 /* Home hero: the logo's black band. The art carries its own pure-black
- * ground, so on the dark theme it melts into the page; on the light
- * theme the hero stays a black panel (the brand anchor) and only the
- * copy below follows the theme. Art first, then the punchline. */
+ * ground, so it melts into the page; the band's explicit black keeps that
+ * anchor even if the page ground ever changes. Art first, then the
+ * punchline. The hero inherits every accent from `:root` — the page is
+ * always dark, so nothing needs pinning here. Contrast mechanism: the
+ * primary action is Starlight's default (accent-high `#E09A5C` with black
+ * text, 8.95:1), links take the same ginger, and the focus ring stays the
+ * `--sl-color-accent` fur. */
 .hero {
   grid-template-columns: 100%;
   justify-items: center;
   background: #000000;
   padding: 2rem 1rem 3rem;
-  /* Night-theme accents on the black band in either theme. */
-  --sl-color-white: #ffffff;
-  --sl-color-gray-2: #c9c9c9;
-  /* Links and focus rings on the band take this ginger. The primary
-   * button does not: Starlight's --sl-color-text-accent resolves on
-   * :root, so in the light theme the button keeps ember (#8A4A1E, white
-   * text 6.82:1). Pointing the button at --sl-color-accent here would
-   * drop it to white on #CB6F34, 3.58:1, which fails AA. */
-  --sl-color-accent: #cb6f34;
-  --sl-color-accent-high: #e09a5c;
-  --sl-color-accent-low: #3a2410;
 }
 .hero > .hero-html {
   order: -1;

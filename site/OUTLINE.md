@@ -158,7 +158,9 @@ edit `.claude/*`, so those two are flagged for the maintainer):
 
 - `astro.config.mjs` — Starlight + `starlight-llms-txt` (pinned; see `site/README.md` "Why starlight-llms-txt"), sidebar in the per-app shape above (`Start` + `scoot` live now; `scootctl / IPC`, `scootbar`, `scootbg`, `Troubleshooting` land commented as their pages do). Slugs stay flat in phase 1 — the sidebar carries the structure — and nest under their app in the move PR.
 - `src/content/docs/` — 4 adapted (not moved) pages proving the shape: `index.md` (home), `install.md`, `first-session.md` (both `Start`), `keybindings.md` (under `scoot` in the sidebar). Originals untouched in `docs/`.
-- `src/styles/custom.css` — scoot theme from the vinyl-sunset palette (espresso `#271A1F`, cream `#F1E3C6`, sunset orange `#E59560`); system font stack (see below).
+- `src/styles/custom.css` — scoot theme in the logo's colors (true-black
+  ground `#000000`, white type, the one ginger accent `#CB6F34`; dark
+  only since 2026-10-06); system font stack (see below).
 - `src/pages/[...page].md.ts` — per-page Markdown twins at stable `/<slug>.md` URLs (the plugin covers the aggregates; this covers the per-page requirement).
 - Per-app `customSets` in the plugin config (`Start`, `scoot` today): one llms set per sidebar section that has pages, served at `/_llms-txt/<set>.txt` and linked from `llms.txt`. Paths match Starlight's extensionless page ids, so sets widen to `<app>/**` when slugs nest in the move PR.
 - `scripts/check-llms.mjs` — build gate: fails if `llms.txt` misses a page, a `.md` twin, or a linked bundle 404s (bundles and `_llms-txt/` sets alike).
@@ -185,20 +187,20 @@ reference pages stay calm and fast to read.
 - **Hero:** the project logo itself (`docs/assets/logo.png`), optimized
   to AVIF/WebP sets in `site/public/` (`hero-cat-1440.*`,
   `hero-cat-960.*`, ~50–89 KB against the 486 KB PNG it replaces). The
-  art's pure-black ground melts into the page's true-black ground; on
-  the light theme the hero stays a black panel. Tagline states what
-  scoot does in the logo's voice ("scoot knocks your windows sideways").
-  The vinyl-sunset screenshot moved to a Looks strip below the fold
-  (480-wide WebP thumbs in `site/public/looks/`), so the desktop's
-  beauty is still shown.
+  art's pure-black ground melts into the page's true-black ground.
+  Tagline states what scoot does in the logo's voice ("scoot knocks your
+  windows sideways"). The vinyl-sunset screenshot moved to a Looks strip
+  below the fold (480-wide WebP thumbs in `site/public/looks/`), so the
+  desktop's beauty is still shown.
 - **Palette:** `night` `#000000` (measured logo ground), `paper`
   `#FFFFFF`, one ginger accent `fur` `#CB6F34` (brightest readable
   member of the lit-fur cluster, forehead box (1075,300)-(1175,380);
   5.86:1 on black, AA for body text), `ash` `#8A8A8A` secondary,
-  `ember` `#8A4A1E` for the light theme (6.82:1 on white), `seam`
-  `#2A2A2A` hairlines, decorative only. No gradients, glows, shadows
-  or textures. The terminal-dot motif appears exactly once (the 404
-  chrome); motion lines nowhere.
+  `seam` `#2A2A2A` hairlines, decorative only. No gradients, glows,
+  shadows or textures. The terminal-dot motif appears exactly once (the
+  404 chrome); motion lines nowhere.
+  (2026-10-06: the retired light theme's `ember` `#8A4A1E` — fur
+  darkened to hold AA on white — went with it; see dark-only below.)
 - **Type:** League Spartan 900 for wordmark, hero, page titles and
   headings (see Fonts above); system stacks elsewhere.
 - **Header/surface:** Starlight `logo` is the cat's face in a black
@@ -209,3 +211,15 @@ reference pages stay calm and fast to read.
   and the custom 404 (`src/content/docs/404.md`); reference prose
   unchanged. "compositor", never "window manager"; "color", never
   "colour" (both enforced by `test-snippets.mjs`).
+- **Dark only (maintainer, 2026-10-06).** The site renders the dark
+  theme always: no Auto/Light/Dark picker (Starlight's `ThemeSelect`
+  overridden to render nothing), `data-theme="dark"` forced before
+  first paint with any stale `starlight-theme` stored choice dropped
+  (`ThemeProvider` override), the `:root[data-theme='light']` block
+  removed from `custom.css`, and code blocks on the dark theme alone
+  (`expressiveCode.themes: ['starlight-dark']`). Why: the brand *is* a
+  black-ground logo — a light theme could never carry it, only invert
+  it (the hero had to stay a black panel on a white page, and the ember
+  accent existed solely to hold contrast there). One theme halves every
+  visual check and drops the picker script plus the light CSS from every
+  page.
