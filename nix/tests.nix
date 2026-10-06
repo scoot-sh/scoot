@@ -5349,7 +5349,8 @@ let
     # The lock off: the policy stays (dim and screens-off), the locker
     # leaves (no config, no package, four policy tools plus mako, the
     # clipboard slot's three, its picker script, the launcher package
-    # and its script, the capture slot's four, and the keymap's three
+    # and its script, the capture slot's four, the audio slot's OSD
+    # and its four scripts, and the keymap's three
     # left).
     (
       assert allAssertionsHold hmLockOff.config;
@@ -5364,13 +5365,14 @@ let
       true
     )
     (
-      assert builtins.length hmLockOff.config.home.packages == 21;
+      assert builtins.length hmLockOff.config.home.packages == 26;
       true
     )
     # The inhibitor off: the policy without the audio hold (four
     # policy tools plus mako, the clipboard slot's three, its picker
     # script, the launcher package and its script, the capture slot's
-    # four, and the keymap's three).
+    # four, the audio slot's OSD and its four scripts, and the
+    # keymap's three).
     (
       assert allAssertionsHold hmInhibitOff.config;
       true
@@ -5380,7 +5382,7 @@ let
       true
     )
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 21;
+      assert builtins.length hmInhibitOff.config.home.packages == 26;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
