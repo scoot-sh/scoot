@@ -45,7 +45,7 @@ relogin); docs in `docs/nix.md`.
 Fingerprint/smartcard unlock; full-disk-encryption enrollment; managing
 the user's PAM stack beyond what the greeter needs.
 
-## Landed (PR #TBD, 2026-10-06)
+## Landed (PR #477, 2026-10-06)
 
 Filled the `desktop.auth` / `desktop.secrets` slots, both on with the
 profile (each still individually disable-able):
@@ -66,7 +66,7 @@ profile (each still individually disable-able):
   pick is closure. lxqt/hypr stay selectable through `daemon`.
 - Secrets: gnome-keyring 50.0 D-Bus activated (`--components=secrets`,
   no unit) with `secret-tool` (libsecret) on PATH, over KeePassXC
-  2.7.12 (412.6 MiB / 36.3 MB vs 542.4 / 177.7 MB; KeePassXC needs
+  2.7.12 (412.6 MiB / 34.6 MiB vs 542.4 / 169.5 MiB; KeePassXC needs
   its GUI app running and has no PAM unlock path). PAM pair confined
   to greetd's own service (probed: nixpkgs' `enableGnomeKeyring`
   flag is a silent no-op there since greetd sets

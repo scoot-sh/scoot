@@ -394,6 +394,13 @@ printf 'run DISPLAY=[%s] XDG_SESSION_ID=[%s]\n' "${WAYLAND_DISPLAY-unset}" "${XD
 exit 0
 EOF
 chmod +x "$FAKES/agent"
+# A long-lived agent, as the real ones are: records its pid, then waits.
+cat >"$FAKES/agent-long" <<AGENT
+#!/bin/sh
+echo \$\$ >"\$HARNESS_STATE/agent-long.pid"
+exec "$REAL_SLEEP" 600
+AGENT
+chmod +x "$FAKES/agent-long"
 
 mksock() {
     # A real unix socket at $XDG_RUNTIME_DIR/$1.
@@ -906,6 +913,32 @@ wait_blocked "T17"
 RC="$(end_session)"
 unset SCOOT_POLKIT_AGENT
 [ "$RC" = "0" ] || bad "T17: launcher exit $RC"
+
+# --- T19: ending the session stops a running agent ------------------
+# A real agent lives for the whole session. Stopping the watcher alone
+# would orphan it into the scope, still answering prompts for a session
+# that is gone (and on the `die` path, for one that never started).
+# Fail-before: the agent's pid outlives the launcher.
+new_test 19
+export SCOOT_POLKIT_AGENT="$FAKES/agent-long"
+start_launcher
+wait_log "start scoot-session.target" || { unset SCOOT_POLKIT_AGENT; bad "T19: agent login never reached the session target"; }
+i=0
+while [ "$i" -lt 100 ] && [ ! -s "$HARNESS_STATE/agent-long.pid" ]; do "$REAL_SLEEP" 0.1; i=$((i + 1)); done
+[ -s "$HARNESS_STATE/agent-long.pid" ] || { unset SCOOT_POLKIT_AGENT; bad "T19: long-lived agent never ran"; }
+agent_long_pid="$(cat "$HARNESS_STATE/agent-long.pid")"
+kill -0 "$agent_long_pid" 2>/dev/null || { unset SCOOT_POLKIT_AGENT; bad "T19: long-lived agent is not running"; }
+wait_blocked "T19"
+RC="$(end_session)"
+unset SCOOT_POLKIT_AGENT
+[ "$RC" = "0" ] || bad "T19: launcher exit $RC"
+i=0
+while [ "$i" -lt 30 ] && kill -0 "$agent_long_pid" 2>/dev/null; do "$REAL_SLEEP" 0.1; i=$((i + 1)); done
+if kill -0 "$agent_long_pid" 2>/dev/null; then
+    kill "$agent_long_pid" 2>/dev/null
+    bad "T19: the agent outlived the session (pid $agent_long_pid)"
+fi
+ok "T19: ending the session stops the running agent"
 
 # --- T18: a missing agent binary is loud, not a wedge ----------------
 # A set-but-not-executable path notes once on stderr and the login

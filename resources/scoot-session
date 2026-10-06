@@ -609,12 +609,30 @@ start_agent() {
     # until exit) must not leak into it: a second login would read
     # the lock as held-by-a-live-session and refuse. Close it in the
     # watcher -- and therefore in the agent -- before looping.
-    ( exec 9>&-; while :; do env -u XDG_SESSION_ID "$SCOOT_POLKIT_AGENT"; sleep 2; done ) &
+    # The watcher remembers the running agent and kills it when it is
+    # itself told to stop, so `stop_agent` ends the agent too rather than
+    # orphaning it into the scope. Both the agent and the backoff run in
+    # the background and are waited on, so a stop interrupts either at
+    # once instead of after the current run or the 2 s sleep.
+    (
+        exec 9>&-
+        agent_pid=""
+        trap 'if [ -n "$agent_pid" ]; then kill "$agent_pid" 2>/dev/null; fi; exit 0' TERM INT HUP
+        while :; do
+            env -u XDG_SESSION_ID "$SCOOT_POLKIT_AGENT" &
+            agent_pid=$!
+            wait "$agent_pid"
+            agent_pid=""
+            sleep 2 &
+            wait "$!"
+        done
+    ) &
     agent_watch=$!
 }
 # stop_agent: end the supervised agent, if one is configured and
-# running. A missing watcher, a dead loop and a dead agent are all
-# quiet no-ops (a logout races no teardown here).
+# running: the watcher kills the agent it is running, then exits. A
+# missing watcher, a dead loop and a dead agent are all quiet no-ops (a
+# logout races no teardown here).
 stop_agent() {
     if [ -n "${agent_watch:-}" ]; then
         kill "$agent_watch" 2>/dev/null || true

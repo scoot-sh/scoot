@@ -1241,8 +1241,9 @@ is registered for its session). The agent dying mid-prompt fails that
 one prompt (the client sees the dismissal); the leader restarts it
 in two seconds and the next prompt works — retry it.
 
-Every value is an option, applied on rebuild/switch (the entry
-re-renders into the new config; no re-login):
+Every value is an option. A rebuild/switch re-renders the session
+entry, but the running agent is the session's own child, so a change
+to the agent takes effect at the next login:
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|

@@ -147,7 +147,7 @@ in
   # and `...notifications`, declared there. Imported here (not by
   # consumers) so the profile's user side is one import. The audio
   # slot's user half (the OSD unit, its config, the control scripts),
-  # the privilege-prompt and keyring halves (the agent unit, the
+  # the privilege-prompt and keyring halves (the agent package, the
   # secrets client) and the capture slot's user half ride the same way.
   #
   # The shared keymap's user half (`programs.scoot.desktop.keys`):
