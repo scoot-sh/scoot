@@ -1153,7 +1153,7 @@ restart; no re-login):
 |---|---|---|---|
 | `desktop.power.enable` | bool | `false` (never with the profile) | run the daemon, the lid/power-key/low-battery policy and the charge service |
 | `desktop.power.profiles.enable` | bool | `true` | run the profiles daemon behind `Super+p` (`false` drops the daemon and its bind — for driverless hardware, where the charge limit and the lid policy are what save battery) |
-| `desktop.power.profileOnAC` / `.profileOnBattery` | enum or null | `null` (hold) | profile to select on that power state (`"performance"`, `"balanced"`, `"power-saver"`) |
+| `desktop.power.profileOnAC` / `.profileOnBattery` | enum or null | `null` (hold) | profile to select on that power state (`"performance"`, `"balanced"`, `"power-saver"`); needs `profiles.enable` |
 | `desktop.power.lidSwitch` | logind action | `"suspend"` | lid close (`"lock"` needs the idle policy's locker) |
 | `desktop.power.lidSwitchDocked` | logind action | `"lock"` | lid close while docked or multi-output — never suspends |
 | `desktop.power.lidSwitchExternalPower` | logind action | `"suspend"` | lid close on external power without a dock |
@@ -1171,7 +1171,8 @@ Troubleshooting, by symptom:
 
 - *`Super+p` does nothing.* The slot renders that bind only with
   `power.enable` beside the keymap (opt-in, never with the
-  profile); either off leaves the combo unbound. Then check the
+  profile), and not with `power.profiles.enable = false`; any of
+  those leaves the combo unbound. Then check the
   daemon: `powerprofilesctl` from a terminal — outside the session
   it still lists profiles, so a failure there names the daemon's
   own cause.
