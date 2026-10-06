@@ -31,8 +31,9 @@ names the loss (`lost the connection to the host compositor`) and the
 process exits 1 with the same message. A supervisor (s6, systemd)
 restarts it into a fresh session once the host is back.
 
-Starting up waits at most 10 seconds for the host to answer the initial
-handshake. A host that accepts the connection but never answers — a
+Starting up waits at most 10 seconds for the host to answer each
+handshake step: the registry, and, in a `gpu-scanout` build with a GPU
+renderer, the dma-buf feedback too, so up to 20 seconds there. A host that accepts the connection but never answers — a
 restart that came back listening without dispatching — used to wedge
 the session before `scoot is up`, with no IPC socket and nothing for a
 supervisor to act on. Now the log names it (`could not reach the host

@@ -13,7 +13,8 @@ scoot has not cut a numbered release yet; entries are dated.
 
 - **Starting `--nested` against a host that never answers stops cleanly.**
   If the host accepts the connection but does not answer the startup
-  handshake within 10 seconds (a restart that came back listening without
+  handshake within 10 seconds per step (20 at most in a `gpu-scanout`
+  build) (a restart that came back listening without
   dispatching), the log says `could not reach the host compositor during
   startup` and the process exits 1, instead of waiting forever with no
   `scoot is up` and no control socket. A supervisor retries the start;
