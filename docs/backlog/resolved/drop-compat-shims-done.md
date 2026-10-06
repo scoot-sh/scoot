@@ -1,9 +1,10 @@
 ---
 title: "Drop compatibility aliases for scoot's own old names"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-06"
 ---
 
 # Drop compatibility aliases for scoot's own old names
@@ -37,3 +38,16 @@ a test showing the old name now fails.
 Protocol-level backward compatibility with other software (old Wayland
 versions, legacy DRM, X11/XWayland) and history records (`docs/roadmap/`,
 resolved backlog, past `CHANGELOG.md` entries).
+
+## Resolution (PR #475, 2026-10-06)
+
+`homeManagerModules` was the only live shim and is gone: `homeModules` is
+the defining output in `flake.nix`, the both-spellings test pin is now an
+absence pin (`!(flake ? homeManagerModules)`), the site note and module
+comment are updated, and CHANGELOG Unreleased lists the removal. Kept
+deliberately: `desktop.greeter` alias (current passthrough), nixpkgs regreet
+aliases (third-party), `scoot msg` (current client), scootbar serde renames
+(canonical names), all history records. No downstream uses the old name
+(webtop, scoot-iso main + PR #1, ~/nixos-config all clear), so no
+downstream PRs. Evidence: `nix eval .#homeManagerModules` errors;
+`checks.aarch64-darwin.scoot-modules`, `docs-site`, `nix fmt --check` green.
