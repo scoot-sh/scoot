@@ -453,11 +453,27 @@ in
         ];
       };
     })
+    # The bluetooth module's click opens the whole picker (`pick`: the
+    # paired devices, pairing, audio output, power) in place of the
+    # module's own default, which toggles the adapter's power: one
+    # stray click would drop every Bluetooth device, a keyboard or
+    # mouse among them. A click is a launched command, so the bar
+    # never waits on it, and fuzzel's lock keeps a second click from
+    # opening a second menu. `menu-command` stays wired for the
+    # module's `menu` action (its own device list).
     (lib.mkIf (pickerWired "bluetooth" "bluetooth" && cfg.enable) {
-      programs.scootbar.settings.bluetooth.menu-command = lib.mkOptionDefault [
-        bluetoothPicker
-        "menu"
-      ];
+      programs.scootbar.settings.bluetooth = {
+        menu-command = lib.mkOptionDefault [
+          bluetoothPicker
+          "menu"
+        ];
+        on-click = lib.mkOptionDefault {
+          exec = [
+            bluetoothPicker
+            "pick"
+          ];
+        };
+      };
     })
 
     (lib.mkIf (cfg.enable && cfg.stylix.enable && stylix) {

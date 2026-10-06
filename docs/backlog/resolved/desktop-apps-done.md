@@ -70,19 +70,28 @@ media*; *WiFi and Bluetooth*).
   (menu-command/connect-command wired at `mkOptionDefault`) through fuzzel.
   WiFi joins saved networks by UUID (matched by SSID), open ones directly,
   secured ones with the keyring's key or a masked prompt, the key on
-  nmcli's stdin, a failed first join's profile removed. Bluetooth toggles
-  paired devices, pairs new ones after a bounded 10 s scan with a no-input
-  agent (PIN devices from a terminal), switches power and the audio sink.
-  Every bluetoothctl call is bounded: with no bluetoothd it waits forever
-  (measured against an empty private bus on the M2). Failures notify.
-  Neither picker takes over NetworkManager or BlueZ.
-- Automount: trayless udiskie over udisks2, its config ignoring the
-  machine's own disks (stock udiskie would try every unmounted internal
-  partition at login, an admin prompt each on a dual-boot box), safe
-  removal by `udiskie-umount -d`. udiskie ~58 MB RSS, 0 wakeups; kept over
-  a hand-rolled `udisksctl monitor` loop (~8 MB floor) for its partition,
-  LUKS and Browse handling. An empty `/etc/nvme` stops udisksd's 4 s GLib
-  retry on the missing directory (15 wakeups/min to 0, measured).
+  nmcli's stdin, a failed first join's profile removed, a refused keyring
+  key falling back to the prompt, the join in a session of its own so the
+  bar reopening its menu cannot cut it. Bluetooth toggles paired devices
+  (by alias or own name; an ambiguous name refused), pairs new ones after
+  a 10 s scan (no agent of its own: BlueZ pairs as NoInputNoOutput; PIN
+  devices from a terminal), switches power and the audio sink. Every
+  bluetoothctl call runs under coreutils' `timeout`, never bluetoothctl's
+  own `--timeout` (with it, bluez 5.87 waits out the whole bound and exits
+  0 whatever happened: measured 15 s for the menu on the M2's real
+  BlueZ); only the scan keeps it. Failures notify. The bar's bluetooth
+  click opens the picker instead of toggling the adapter. Neither picker
+  takes over NetworkManager or BlueZ.
+- Automount: trayless udiskie over udisks2 on its stock device rules,
+  which already ignore the machine's own disks and their partitions and
+  mount an encrypted USB stick's unlocked filesystem (a custom
+  `HintSystem` rule broke the latter; pinned by udiskie's own matcher),
+  yielding to home-manager's `services.udiskie`; safe removal by
+  `udiskie-umount -d`. udiskie ~58 MB RSS, 0 wakeups; kept over a
+  hand-rolled `udisksctl monitor` loop (~8 MB floor) for its partition,
+  LUKS and Browse handling. An empty `/etc/nvme` (an `environment.etc`
+  placeholder) stops udisksd's 4 s GLib retry on the missing directory
+  (15 wakeups/min to 0, measured).
 - Proven live on the M2 in a real greetd `scoot-test` login against stub
   `nmcli`/`bluetoothctl` (the M2's networking is off limits); the physical
   Bluetooth pair and a real thumb drive are the maintainer's checklist in

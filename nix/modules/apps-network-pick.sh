@@ -19,9 +19,19 @@
 # or else asks for it in a masked menu prompt, and the key travels to
 # nmcli on stdin (`--ask`), never in an argument (the process table is
 # readable by every user). A first join that fails (a wrong key) leaves
-# no saved connection behind, so the next pick asks again. A network
-# out of range, and an enterprise (802.1X) one, fail loud before any
-# prompt: a key cannot join either.
+# no saved connection behind, so the next pick asks again; a keyring
+# key the network refuses falls back to the prompt at once, so a stale
+# keyring entry never loops. A network out of range, and an enterprise
+# (802.1X) one, fail loud before any prompt: a key cannot join either.
+#
+# The join itself (nmcli, and the cleanup after a failed one) runs in a
+# session of its own (`setsid --fork --wait`, so its status still comes
+# back): the bar ends a menu it reopens, and a connect it replaces, by
+# signalling the whole process group (SIGKILL 100 ms after SIGTERM),
+# which would otherwise cut nmcli mid-join and skip the cleanup. The
+# pick and the key prompt stay in the caller's group: reopening the
+# bar's menu closes those, as it should. `_join` is that internal half
+# (its key, when it has one, on stdin).
 #
 # Nothing here touches NetworkManager's own state beyond that: no
 # rescans (the cached scan only: the bar's module scans), no radio
@@ -34,6 +44,7 @@ SECRET=@SECRET@
 NOTIFY=@NOTIFY@
 AWK=@AWK@
 TIMEOUT=@TIMEOUT@
+SETSID=@SETSID@
 # The look's menu colors as fuzzel flags (empty without a look): split
 # on purpose below, each flag one word.
 THEME=@THEME@
@@ -134,6 +145,15 @@ nm_act() {
     fi
 }
 
+# The masked key prompt (`$2` is the prompt's text); an empty or
+# cancelled one exits 0, joining nothing.
+ask_key() {
+    # shellcheck disable=SC2086
+    key=$("$MENU" --dmenu --password --prompt-only="$2" $THEME </dev/null) || exit 0
+    [ -n "$key" ] || exit 0
+    printf '%s\n' "$key"
+}
+
 do_connect() {
     ssid=$1
     if [ -z "$ssid" ]; then
@@ -144,8 +164,8 @@ do_connect() {
     uuid=$(saved_wifi | WANT=$ssid "$AWK" -F'\t' '
         substr($0, index($0, "\t") + 1) == ENVIRON["WANT"] { print $1; exit }')
     if [ -n "$uuid" ]; then
-        nm_act connection up uuid "$uuid"
-        exit 0
+        join up "$uuid" </dev/null
+        exit $?
     fi
     sec=$(scan_wifi | WANT=$ssid "$AWK" -F'\t' '
         substr($0, index($0, "\t") + 1) == ENVIRON["WANT"] { print "seen:" $1; exit }')
@@ -156,40 +176,89 @@ do_connect() {
             fail "'$ssid' is not in range (not in the last scan, and not saved)"
             ;;
         seen: | seen:-- | seen:OWE*)
-            nm_act device wifi connect "$ssid"
-            exit 0
+            join open "$ssid" </dev/null
+            exit $?
             ;;
         *802.1X*)
             fail "'$ssid' uses enterprise (802.1X) login, which a key cannot join: set it up with nmtui"
             ;;
     esac
-    # Secured: the keyring first, then a masked prompt; an empty or
-    # cancelled prompt joins nothing.
+    # Secured: the keyring first, then a masked prompt.
     psk=$("$TIMEOUT" 30 "$SECRET" lookup scoot-wifi "$ssid" 2>/dev/null) || psk=""
     if [ -z "$psk" ]; then
-        # shellcheck disable=SC2086
-        psk=$("$MENU" --dmenu --password --prompt-only="key for $ssid: " $THEME </dev/null) || exit 0
+        src=prompt
+        psk=$(ask_key "$ssid" "key for $ssid: ") || exit 0
         [ -n "$psk" ] || exit 0
+    else
+        src=keyring
     fi
-    # Every saved profile before the join, so a failed join removes
-    # only one it created itself (nmcli reuses a profile it finds for
-    # the network, and that one is the user's to keep). No snapshot,
-    # no cleanup.
-    before=$("$NMCLI" -t -f UUID connection show 2>/dev/null) || before=""
-    if ! printf '%s\n' "$psk" | nm_act --ask device wifi connect "$ssid"; then
-        # A first join that failed leaves its new profile behind with
-        # the wrong key in it: remove it, so the next pick asks again
-        # instead of retrying that key forever.
-        if [ -n "$before" ]; then
-            saved_wifi | WANT=$ssid BEFORE=$before "$AWK" -F'\t' '
-                BEGIN { n = split(ENVIRON["BEFORE"], b, "\n"); for (i = 1; i <= n; i++) old[b[i]] = 1 }
-                substr($0, index($0, "\t") + 1) == ENVIRON["WANT"] && !($1 in old) { print $1 }' |
-                while IFS= read -r stale; do
-                    "$NMCLI" connection delete uuid "$stale" >/dev/null 2>&1 || true
-                done
-        fi
-        exit 1
+    printf '%s\n' "$psk" | join "$src" "$ssid"
+    exit $?
+}
+
+# Runs `_join ARGS...` in its own session, returning its status (see
+# the header).
+join() {
+    "$SETSID" --fork --wait "$0" _join "$@"
+}
+
+# One secured join with `$2`'s key, which reaches nmcli on its stdin
+# (never an argument, never the environment): `out` holds nmcli's
+# output.
+# A failed one removes the profile it created (nmcli saves one before
+# it knows the key works, and a saved profile is joined by UUID from
+# then on: left behind, the wrong key would be retried forever). Every
+# saved profile from before the join is spared (nmcli reuses one it
+# finds for the network, and that one is the user's to keep); with no
+# snapshot at all, nothing is removed.
+join_key() {
+    before=$("$NMCLI" -t -f UUID connection show 2>/dev/null)
+    snap=$?
+    if out=$(printf '%s\n' "$2" | "$NMCLI" --ask device wifi connect "$1" 2>&1); then
+        return 0
     fi
+    if [ "$snap" -eq 0 ]; then
+        saved_wifi | WANT=$1 BEFORE=$before "$AWK" -F'\t' '
+            BEGIN { n = split(ENVIRON["BEFORE"], b, "\n"); for (i = 1; i <= n; i++) old[b[i]] = 1 }
+            substr($0, index($0, "\t") + 1) == ENVIRON["WANT"] && !($1 in old) { print $1 }' |
+            while IFS= read -r stale; do
+                "$NMCLI" connection delete uuid "$stale" >/dev/null 2>&1 || true
+            done
+    fi
+    return 1
+}
+
+# nmcli's last word, for the failure message.
+last_line() { printf '%s' "$1" | "$AWK" 'NF { line = $0 } END { print line }'; }
+
+# The join half, in its own session:
+#   _join up UUID          a saved network, by its profile
+#   _join open SSID        an open one
+#   _join keyring SSID     a secured one, the keyring's key on stdin:
+#                          refused for its secrets, it falls back to
+#                          the prompt once
+#   _join prompt SSID      a secured one, the typed key on stdin
+do_join() {
+    case "$1" in
+        up) nm_act connection up uuid "$2" ;;
+        open) nm_act device wifi connect "$2" ;;
+        keyring | prompt)
+            IFS= read -r key || [ -n "$key" ] || fail "no key for '$2'"
+            if join_key "$2" "$key"; then exit 0; fi
+            case "$1:$out" in
+                keyring:*"Secrets were required"*)
+                    key=$(ask_key "$2" "key for $2 (the keyring's was refused): ") || exit 0
+                    [ -n "$key" ] || exit 0
+                    join_key "$2" "$key" && exit 0
+                    ;;
+            esac
+            fail "$(last_line "$out")"
+            ;;
+        *)
+            say "usage: scoot-network-pick _join {up|open|keyring|prompt} <target>"
+            exit 2
+            ;;
+    esac
 }
 
 # The menu half: stdin's lines through the menu, the pick into
@@ -211,6 +280,7 @@ case "${1:-}" in
         ;;
     menu) menu_pick ;;
     connect) do_connect "${2:-}" ;;
+    _join) do_join "${2:-}" "${3:-}" ;;
     *)
         say "usage: scoot-network-pick {list|pick|menu|connect <ssid>}"
         exit 2

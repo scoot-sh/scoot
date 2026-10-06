@@ -11,7 +11,7 @@
 #   pick                    the paired devices plus "Pair a new
 #                           device", the power switch and (with the
 #                           audio slot) "Audio output" through the
-#                           menu (the bind)
+#                           menu (the bind, and the bar's click)
 #   menu                    stdin's lines through the menu: the bar's
 #                           `bluetooth.menu-command` (its rows are
 #                           names, ` (connected)` where connected)
@@ -21,16 +21,30 @@
 #   power on|off            the first controller's power
 #
 # A picked paired device toggles (connected disconnects, any other
-# connects); a picked unpaired one pairs. Pairing runs with a
-# no-input agent: what pairs with "just works" (headsets, mice, most
-# keyboards and speakers) pairs from here; a device that insists on a
-# typed PIN pairs from a terminal (`bluetoothctl`, then `pair MAC`).
+# connects); a picked unpaired one pairs. A name is the device's
+# alias, the name `bluetoothctl devices` lists (BlueZ's `Alias`: the
+# device's own name unless renamed), or else its own `Name` (what the
+# bar shows); two devices answering to one name are refused, never
+# guessed between. Pairing registers no agent of its own
+# (bluetoothctl registers none for a one-shot command): BlueZ then
+# pairs as NoInputNoOutput, or through the session's default agent
+# where one runs (blueman's, say). What pairs with "just works"
+# (headsets, mice, most keyboards and speakers) pairs from here; a
+# device that insists on a typed PIN pairs from a terminal
+# (`bluetoothctl`, then `pair MAC`).
 #
-# Every bluetoothctl call is bounded (`--timeout`): with no bluetoothd
-# on the bus, bluetoothctl waits for one forever, so an unbounded call
-# would hang the picker instead of failing. Every failure exits 1 and
-# says why, on stderr and as a notification -- a picker spawned by a
-# bind has no terminal.
+# Every bluetoothctl call runs under coreutils' `timeout`, never under
+# bluetoothctl's own `--timeout`: with that flag a finished command
+# never quits (bluez 5.87 `bt_shell_noninteractive_quit`), so every
+# call took the full N seconds and exited 0 whatever happened. Under
+# `timeout` an answered call returns at once with its real status,
+# and one BlueZ never answers (no bluetoothd on the bus: bluetoothctl
+# waits for one forever) ends at the bound. Only `scan on` keeps
+# `--timeout`, where listening for the full time is the point. stdin
+# is /dev/null throughout: a `connect` of a device BlueZ no longer
+# holds asks "Scan and connect (yes/no)" on it. Every failure exits 1
+# and says why, on stderr and as a notification -- a picker spawned by
+# a bind has no terminal.
 
 BT=@BT@
 MENU=@MENU@
@@ -51,6 +65,9 @@ OFF_ROW="Turn Bluetooth off"
 # How long a pair scan listens, in seconds: long enough for a device in
 # pairing mode to advertise, short enough to wait through.
 SCAN_SECS=10
+# The bound on a query (`show`, `devices`, `info`): BlueZ answers those
+# in milliseconds, so this only ever ends a BlueZ that is not there.
+QUERY_SECS=5
 
 say() { printf 'scoot-bluetooth-pick: %s\n' "$*" >&2; }
 notify() {
@@ -62,38 +79,79 @@ fail() {
     exit 1
 }
 
-# A query (answers in milliseconds where BlueZ runs).
-bt() { "$BT" --timeout 5 "$@"; }
+# One bluetoothctl call, bounded: `bt_run SECS ARGS...`. Past the bound
+# it is sent SIGTERM (and SIGKILL 2 s later), and the status is
+# `timeout`'s 124 (137 after the SIGKILL).
+bt_run() {
+    secs=$1
+    shift
+    "$TIMEOUT" -k 2 "$secs" "$BT" "$@" </dev/null
+}
 
-# One action, its output kept for the failure message.
+# Whether a status is the bound's, not bluetoothctl's own.
+timed_out() { [ "$1" -eq 124 ] || [ "$1" -eq 137 ]; }
+
+# The reason in a failed call's output: its `Failed to ...` (or
+# `... not available`) line, else its last line, with the colors and
+# the asynchronous `[CHG]`/`[NEW]`/`[DEL]` event lines that interleave
+# with it left out.
+reason() {
+    printf '%s\n' "$1" | "$AWK" '
+        { gsub(/\033\[[0-9;]*[A-Za-z]/, ""); gsub(/[\001\002\r]/, "") }
+        /^\[(CHG|NEW|DEL)\]/ { next }
+        NF { last = $0 }
+        /Failed to|not available|No default controller/ { why = $0 }
+        END { print (why != "") ? why : (last != "") ? last : "bluetoothctl failed with no message" }'
+}
+
+# A query, its output on stdout; a failure is loud (and, inside a
+# command substitution, exits that subshell 1 for the caller's
+# `|| exit 1`).
+bt() {
+    out=$(bt_run "$QUERY_SECS" "$@" 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        timed_out "$rc" && fail "BlueZ is not answering (is bluetooth.service running?)"
+        fail "$(reason "$out")"
+    fi
+    printf '%s\n' "$out"
+}
+
+# One action (`bt_act SECS ARGS...`): its real status, its reason on a
+# failure, and the bound named when it ran out.
 bt_act() {
     secs=$1
     shift
-    if ! out=$("$BT" --timeout "$secs" "$@" 2>&1); then
-        fail "$(printf '%s' "$out" | "$AWK" 'NF { line = $0 } END { print line ? line : "bluetoothctl gave up (BlueZ did not answer in time)" }')"
+    out=$(bt_run "$secs" "$@" 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        timed_out "$rc" && fail "$1 got no answer within $secs s (out of range, or BlueZ stopped answering)"
+        fail "$(reason "$out")"
     fi
 }
 
 # Refuses (loud) unless BlueZ answers with a controller. Sets
 # `powered` (yes/no) for the menu's power row.
 require_ctl() {
-    info=$(bt show 2>&1)
+    info=$(bt_run "$QUERY_SECS" show 2>&1)
     rc=$?
     case "$info" in
         *"No default controller"*)
             fail "no Bluetooth controller (no hardware here, or it is blocked)"
             ;;
     esac
-    if [ "$rc" -ne 0 ] || [ -z "$info" ]; then
+    if timed_out "$rc" || [ -z "$info" ]; then
         fail "BlueZ is not answering (is bluetooth.service running?)"
     fi
+    [ "$rc" -eq 0 ] || fail "$(reason "$info")"
     powered=$(printf '%s\n' "$info" | "$AWK" '$1 == "Powered:" { print $2; exit }')
 }
 
-# `MAC<TAB>name` for each device a filter selects (`Paired`,
+# `MAC<TAB>alias` for each device a filter selects (`Paired`,
 # `Connected`, or nothing for every device BlueZ knows).
 devices() {
-    bt devices "$@" 2>/dev/null | "$AWK" '
+    rows=$(bt devices "$@") || exit 1
+    printf '%s\n' "$rows" | "$AWK" '
         $1 == "Device" && $2 ~ /^([0-9A-Fa-f][0-9A-Fa-f]:){5}[0-9A-Fa-f][0-9A-Fa-f]$/ {
             mac = $2
             name = $0
@@ -102,27 +160,49 @@ devices() {
         }'
 }
 
-# The MAC for a MAC or a name, among `devices "$@"` (the first match).
+# The MAC for a MAC or a name, among `devices "$@"`: by MAC or alias
+# first, then by each device's own `Name` (one `info` each, only when
+# no alias matched: the bar shows `Name`, which a rename leaves
+# behind). Nothing for no match; loud for two.
 resolve() {
     want=$1
     shift
-    devices "$@" | WANT=$want "$AWK" -F'\t' '
-        $1 == ENVIRON["WANT"] || substr($0, index($0, "\t") + 1) == ENVIRON["WANT"] { print $1; exit }'
+    rows=$(devices "$@") || exit 1
+    hits=$(printf '%s\n' "$rows" | WANT=$want "$AWK" -F'\t' '
+        NF && ($1 == ENVIRON["WANT"] || substr($0, index($0, "\t") + 1) == ENVIRON["WANT"]) { print $1 }')
+    case "$want" in
+        ??:??:??:??:??:??) ;;
+        *) [ -n "$hits" ] || hits=$(by_name "$want" "$rows") || exit 1 ;;
+    esac
+    case "$hits" in
+        *"
+"*) fail "more than one device is named '$want': pick it by address (Super+b lists them)" ;;
+    esac
+    printf '%s\n' "$hits"
 }
 
-is_paired() { [ -n "$(resolve "$1" Paired)" ]; }
-is_connected() { [ -n "$(resolve "$1" Connected)" ]; }
+# The MACs among `rows` (as `devices` prints them) whose own `Name` is
+# `$1`: one bounded `info` each.
+by_name() {
+    for mac in $(printf '%s\n' "$2" | "$AWK" -F'\t' 'NF { print $1 }'); do
+        card=$(bt info "$mac") || exit 1
+        name=$(printf '%s\n' "$card" | "$AWK" '$1 == "Name:" { sub(/^[ \t]*Name: /, ""); print; exit }')
+        [ "$name" != "$1" ] || printf '%s\n' "$mac"
+    done
+}
 
 paired_rows() {
-    connected=$(devices Connected)
-    devices Paired | CONNECTED=$connected "$AWK" -F'\t' '
+    connected=$(devices Connected) || exit 1
+    paired=$(devices Paired) || exit 1
+    printf '%s\n' "$paired" | CONNECTED=$connected "$AWK" -F'\t' '
         BEGIN { n = split(ENVIRON["CONNECTED"], rows, "\n"); for (i = 1; i <= n; i++) { split(rows[i], f, "\t"); on[f[1]] = 1 } }
-        { printf "%s %s %s\n", ($1 in on) ? "*" : " ", $1, substr($0, index($0, "\t") + 1) }'
+        NF { printf "%s %s %s\n", ($1 in on) ? "*" : " ", $1, substr($0, index($0, "\t") + 1) }'
 }
 
 do_toggle() {
     mac=$1
-    if is_connected "$mac"; then
+    on=$(resolve "$mac" Connected) || exit 1
+    if [ -n "$on" ]; then
         bt_act 15 disconnect "$mac"
     else
         bt_act 30 connect "$mac"
@@ -130,9 +210,9 @@ do_toggle() {
 }
 
 do_pair() {
-    mac=$(resolve "$1")
+    mac=$(resolve "$1") || exit 1
     [ -n "$mac" ] || fail "no device '$1' in range (put it in pairing mode, then pick \"$PAIR_ROW\")"
-    bt_act 60 --agent NoInputNoOutput pair "$mac"
+    bt_act 60 pair "$mac"
     # Trusted, so it reconnects on its own next time.
     bt_act 10 trust "$mac"
     bt_act 30 connect "$mac"
@@ -141,12 +221,18 @@ do_pair() {
 # Listens for devices in pairing mode, then offers the new ones.
 pair_pick() {
     notify "Looking for devices in pairing mode (${SCAN_SECS} s)..."
-    # The scan runs until the bound; its exit status is the timeout's.
-    "$BT" --timeout "$SCAN_SECS" scan on >/dev/null 2>&1 || true
-    paired=$(devices Paired)
-    rows=$(devices | PAIRED=$paired "$AWK" -F'\t' '
+    # The one `--timeout`: discovery runs until it fires (exiting 0),
+    # and ends with the process. The outer bound covers a BlueZ that
+    # never answers at all.
+    scan=$("$TIMEOUT" -k 2 $((SCAN_SECS + 5)) "$BT" --timeout "$SCAN_SECS" scan on </dev/null 2>&1)
+    case "$scan" in
+        *"Failed to start discovery"*) fail "$(reason "$scan")" ;;
+    esac
+    paired=$(devices Paired) || exit 1
+    all=$(devices) || exit 1
+    rows=$(printf '%s\n' "$all" | PAIRED=$paired "$AWK" -F'\t' '
         BEGIN { n = split(ENVIRON["PAIRED"], rows, "\n"); for (i = 1; i <= n; i++) { split(rows[i], f, "\t"); old[f[1]] = 1 } }
-        !($1 in old) { print $1 " " substr($0, index($0, "\t") + 1) }')
+        NF && !($1 in old) { print $1 " " substr($0, index($0, "\t") + 1) }')
     [ -n "$rows" ] || fail "no new device found (is it in pairing mode?)"
     # shellcheck disable=SC2086
     sel=$(printf '%s\n' "$rows" | "$MENU" --dmenu --prompt='pair: ' --no-run-if-empty --only-match $THEME) || exit 0
@@ -172,7 +258,7 @@ case "${1:-}" in
         if [ "$powered" != "yes" ]; then
             rows=$ON_ROW
         else
-            rows=$(paired_rows)
+            rows=$(paired_rows) || exit 1
             rows=$(printf '%s\n%s\n' "$rows" "$PAIR_ROW")
             [ "$AUDIO" != 1 ] || rows=$(printf '%s\n%s\n' "$rows" "$AUDIO_ROW")
             rows=$(printf '%s\n%s\n' "$rows" "$OFF_ROW")
@@ -208,7 +294,7 @@ case "${1:-}" in
                 name=${name//_/:}
                 ;;
         esac
-        mac=$(resolve "$name" Paired)
+        mac=$(resolve "$name" Paired) || exit 1
         if [ -n "$mac" ]; then
             do_toggle "$mac"
         else
@@ -218,7 +304,7 @@ case "${1:-}" in
     connect | disconnect)
         [ -n "${2:-}" ] || { say "usage: scoot-bluetooth-pick $1 <mac-or-name>"; exit 2; }
         require_ctl
-        mac=$(resolve "$2" Paired)
+        mac=$(resolve "$2" Paired) || exit 1
         [ -n "$mac" ] || fail "no paired device '$2' (pair it first: scoot-bluetooth-pick pair <mac-or-name>)"
         if [ "$1" = connect ]; then bt_act 30 connect "$mac"; else bt_act 15 disconnect "$mac"; fi
         ;;

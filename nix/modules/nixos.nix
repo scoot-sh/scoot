@@ -1571,9 +1571,13 @@ in
       # minute, forever, on every box without that directory (measured
       # on the M2: 15 context switches per idle minute in udisksd's
       # main-loop thread, all `inotify_add_watch("/etc/nvme") =
-      # ENOENT`; 0 once the directory exists). An empty directory
-      # turns the poll into a plain inotify watch.
-      systemd.tmpfiles.rules = lib.optional config.services.udisks2.enable "d /etc/nvme 0755 root root -";
+      # ENOENT`; 0 once the directory exists). A directory turns the
+      # poll into a plain inotify watch: one empty placeholder file
+      # makes it, through `environment.etc` rather than tmpfiles so it
+      # also exists under an immutable `/etc` overlay (where tmpfiles
+      # cannot create it), and it composes with an
+      # `environment.etc."nvme/hostnqn"` of your own.
+      environment.etc."nvme/.keep" = lib.mkIf config.services.udisks2.enable { text = ""; };
 
       environment.systemPackages = lib.optional (
         cfg.desktop.automount.package != null

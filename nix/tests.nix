@@ -392,8 +392,18 @@ let
             type = lib.types.bool;
             default = false;
           };
+          # home-manager's own type (`strListOrSingleton` in
+          # `modules/misc/xdg/mime-apps.nix`, checked at
+          # nix-community/home-manager fae6e9e): a string coerces to a
+          # one-entry list, and two definitions at one priority
+          # concatenate -- so a profile value left at plain priority
+          # would sit beside a user's, not under it.
           defaultApplications = lib.mkOption {
-            type = lib.types.attrsOf lib.types.str;
+            type = lib.types.attrsOf (
+              lib.types.coercedTo (lib.types.either (lib.types.listOf lib.types.str) lib.types.str) lib.toList (
+                lib.types.listOf lib.types.str
+              )
+            );
             default = { };
           };
         };
@@ -2057,6 +2067,44 @@ let
     desktop.automount.enable = true;
     desktop.automount.package = null;
   };
+  # A user's own `xdg.*` values beside the profile with the file
+  # manager on: each wins outright (no conflict, no merged list).
+  hmAppsUserXdg =
+    evalHomeModules
+      [
+        {
+          xdg.userDirs.enable = false;
+          xdg.userDirs.createDirectories = false;
+          xdg.mimeApps.enable = false;
+          xdg.mimeApps.defaultApplications."inode/directory" = "thunar.desktop";
+          xdg.mimeApps.defaultApplications."inode/mount-point" = [
+            "thunar.desktop"
+            "pcmanfm.desktop"
+          ];
+        }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        desktop.apps.fileManager.enable = true;
+      };
+  # home-manager's own `services.udiskie` on beside the profile (a stub:
+  # only `enable` is read): its automounter runs, ours stays out.
+  hmAppsUdiskieOwned =
+    evalHomeModules
+      [
+        {
+          options.services.udiskie.enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+          };
+          config.services.udiskie.enable = true;
+        }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+      };
 
   # Fake picker toolchains for the picker behavior tests: stub
   # `nmcli`, `bluetoothctl`, `fuzzel` and `secret-tool`, scripted at
@@ -2070,17 +2118,30 @@ let
   # from `connections` (`UUID:TYPE` lines) with their SSIDs from
   # `ssids` (`UUID<TAB>escaped SSID`); the cached scan from `scan`
   # (`SSID:SECURITY`, escaped); `connection up`, `connection delete`
-  # and `device wifi connect` logged, the last exiting `connect-code`
-  # -- and on a failed `--ask` join leaving a stale saved profile
-  # behind (`stale-uuid`), the way NetworkManager keeps the profile a
-  # failed first join created.
-  # `bluetoothctl`: options (`--timeout N`, `--agent CAP`) stripped
-  # (and pinned: a call without `--timeout` lands in `unbounded`,
-  # which no scenario resets);
-  # `show` from `show` (exit `show-code`), `devices [Filter]` from
-  # `devices-all`/`devices-Paired`/`devices-Connected`, `scan on`
-  # appending `found` to `devices-all`, actions logged, exiting
-  # `call-code`.
+  # and `device wifi connect` logged, the last exiting the next line
+  # of `connect-codes` while it has one (one per join, for a flow
+  # through two), else `connect-code`, with `connect-msg` as its
+  # failure -- and on a failed `--ask` join leaving a stale saved
+  # profile behind (`stale-uuid`), the way NetworkManager keeps the
+  # profile a failed first join created (`connection delete` removes
+  # it again). Every join records its session id in `join-sids`, and
+  # one waits while `hold` exists (`joining` says it started), so a
+  # test can signal the caller mid-join.
+  # `bluetoothctl`, modelled on bluez 5.87 rather than on what the
+  # script hopes: with `--timeout` a finished command never quits, so
+  # such a call exits 0 whatever happened (`TIMED` in `misuse`), and
+  # `--agent` registers nothing for a one-shot command (`AGENT` in
+  # `misuse`); a `scan on` without `--timeout` would never end
+  # (`UNBOUNDED` in `misuse`); no scenario resets `misuse`. stdin's
+  # target lands in `stdins`. `show` from `show` (exit `show-code`),
+  # hanging while `hang-show` exists; `devices [Filter]` from
+  # `devices-all`/`devices-Paired`/`devices-Connected`; `info MAC` from
+  # `info-MAC`, else a card naming it as `devices-all` does, else "not
+  # available" (exit 1); `scan on` printing
+  # `scan-out` and appending `found` to `devices-all`; actions logged,
+  # hanging while `hang-ACTION` exists, exiting `call-code` (a failure
+  # printing its reason, then a colored `[CHG]` event line, as a live
+  # session interleaves them).
   # `fuzzel`: a `--password` prompt prints `psk` (exit `psk-code`),
   # its prompt in `prompts`; a menu records stdin in `menu-input` and
   # prints the next line of `picks` while it has one (one per menu, for
@@ -2095,6 +2156,7 @@ let
     #!${pkgs.runtimeShell}
     d="$SCOOT_APPS_TEST_DIR"
     printf 'nmcli %s\n' "$*" >> "$d/calls"
+    sid() { s=$(cat /proc/$$/stat); s=''${s##*) }; set -- $s; printf '%s\n' "$4"; }
     ask=0
     if [ "$1" = "--ask" ]; then ask=1; shift; fi
     case "$*" in
@@ -2114,11 +2176,26 @@ let
         exit 0 ;;
       "-t -f SSID,SECURITY device wifi list --rescan no")
         cat "$d/scan"; exit 0 ;;
-      "connection up uuid "*|"connection delete uuid "*)
+      "connection up uuid "*)
+        sid >> "$d/join-sids"
+        exit 0 ;;
+      "connection delete uuid "*)
+        grep -v "^$4:" "$d/connections" > "$d/connections.new" || true
+        mv "$d/connections.new" "$d/connections"
         exit 0 ;;
       "device wifi connect "*)
+        sid >> "$d/join-sids"
         if [ "$ask" = 1 ]; then cat >> "$d/stdin"; fi
-        code=$(cat "$d/connect-code")
+        if [ -e "$d/hold" ]; then
+          : > "$d/joining"
+          n=0
+          while [ -e "$d/hold" ] && [ "$n" -lt 400 ]; do sleep 0.05; n=$((n + 1)); done
+        fi
+        if [ -s "$d/connect-codes" ]; then
+          code=$(head -n 1 "$d/connect-codes"); sed -i 1d "$d/connect-codes"
+        else
+          code=$(cat "$d/connect-code")
+        fi
         if [ "$code" != 0 ]; then
           if [ "$ask" = 1 ] && [ -s "$d/reuse-uuid" ]; then
             printf '%s\t%s\n' "$(cat "$d/reuse-uuid")" "$4" >> "$d/ssids"
@@ -2126,7 +2203,7 @@ let
             printf 'stale-uuid:802-11-wireless\n' >> "$d/connections"
             printf 'stale-uuid\t%s\n' "$4" >> "$d/ssids"
           fi
-          echo "Error: Connection activation failed: Secrets were required, but not provided."
+          cat "$d/connect-msg"
         fi
         exit "$code" ;;
       *) echo "unexpected nmcli args: $*" >&2; exit 99 ;;
@@ -2135,27 +2212,44 @@ let
     cat > $out/bin/bluetoothctl <<'EOF'
     #!${pkgs.runtimeShell}
     d="$SCOOT_APPS_TEST_DIR"
-    bounded=0; agent=""
+    timed=""; agent=""
     while :; do
       case "$1" in
-        --timeout) bounded=$2; shift 2 ;;
+        --timeout) timed=$2; shift 2 ;;
         --agent) agent=$2; shift 2 ;;
         *) break ;;
       esac
     done
-    [ "$bounded" != 0 ] || printf 'UNBOUNDED %s\n' "$*" >> "$d/unbounded"
+    printf '%s %s\n' "$1" "$(readlink /proc/$$/fd/0)" >> "$d/stdins"
+    [ -z "$agent" ] || printf 'AGENT %s %s\n' "$agent" "$*" >> "$d/misuse"
+    if [ "$1" = scan ]; then
+      printf 'bluetoothctl scan %s timeout=%s\n' "$2" "''${timed:-none}" >> "$d/calls"
+      [ -n "$timed" ] || printf 'UNBOUNDED %s\n' "$*" >> "$d/misuse"
+      cat "$d/scan-out"
+      cat "$d/found" >> "$d/devices-all"
+      exit 0
+    fi
+    [ -z "$timed" ] || printf 'TIMED %s\n' "$*" >> "$d/misuse"
+    status() { if [ -n "$timed" ]; then exit 0; else exit "$1"; fi; }
     case "$1" in
-      show) cat "$d/show"; exit "$(cat "$d/show-code")" ;;
-      devices) cat "$d/devices-''${2:-all}"; exit 0 ;;
-      scan)
-        printf 'bluetoothctl scan %s timeout=%s\n' "$2" "$bounded" >> "$d/calls"
-        cat "$d/found" >> "$d/devices-all"
-        exit 1 ;;
+      show)
+        [ ! -e "$d/hang-show" ] || exec sleep 30
+        cat "$d/show"; status "$(cat "$d/show-code")" ;;
+      devices) cat "$d/devices-''${2:-all}"; status 0 ;;
+      info)
+        if [ -e "$d/info-$2" ]; then cat "$d/info-$2"; status 0; fi
+        name=$(awk -v m="$2" '$2 == m { sub(/^Device [^ ]+ ?/, ""); print; exit }' "$d/devices-all")
+        if [ -n "$name" ]; then printf 'Device %s\n\tName: %s\n\tAlias: %s\n' "$2" "$name" "$name"; status 0; fi
+        echo "Device $2 not available"; status 1 ;;
       connect|disconnect|power|pair|trust)
-        printf 'bluetoothctl %s%s\n' "$*" "''${agent:+ agent=$agent}" >> "$d/calls"
+        printf 'bluetoothctl %s\n' "$*" >> "$d/calls"
+        [ ! -e "$d/hang-$1" ] || exec sleep 30
         code=$(cat "$d/call-code")
-        [ "$code" = 0 ] || echo "Failed to $1: org.bluez.Error.AuthenticationFailed"
-        exit "$code" ;;
+        if [ "$code" != 0 ]; then
+          echo "Failed to $1: org.bluez.Error.AuthenticationFailed"
+          printf '\033[0;93m[CHG]\033[0m Controller AA:BB:CC:DD:EE:FF UUIDs: 0000110e\n'
+        fi
+        status "$code" ;;
       *) echo "unexpected bluetoothctl args: $*" >&2; exit 99 ;;
     esac
     EOF
@@ -2201,11 +2295,16 @@ let
   };
   appsNetPick = slotScriptBin hmAppsNetTest "scoot-network-pick";
   appsBluePick = slotScriptBin hmAppsBlueTest "scoot-bluetooth-pick";
-  # The automounter's own config file (the last word of its unit's
-  # `ExecStart`), for the content check below.
-  appsUdiskieConfig = lib.last (
-    lib.splitString " " hmApps.config.systemd.user.services.scoot-automount.Service.ExecStart
-  );
+  # The automounter's command line, for udiskie's own device matcher in
+  # the content checks below (`nix/apps-udiskie-rules.py`).
+  appsUdiskieExec = hmApps.config.systemd.user.services.scoot-automount.Service.ExecStart;
+  # The interpreter udiskie runs on, with what its matcher imports
+  # (PyGObject for `udiskie.async_`, PyYAML for its config reader), and
+  # udiskie's own modules on the path.
+  appsUdiskiePython = python3.withPackages (ps: [
+    ps.pygobject3
+    ps.pyyaml
+  ]);
   # The themed pickers (music-desk roles as fuzzel CLI colors, opaque
   # -- pinned by content below).
   appsNetPickThemed = slotScriptBin hmApps "scoot-network-pick";
@@ -8468,13 +8567,13 @@ let
         hmApps.config.systemd.user.services.scoot-automount.Unit.PartOf == [ "scoot-session.target" ];
       true
     )
+    # (on udiskie's stock device rules: no `-c`, so the matcher run in
+    # the content checks below judges what the unit runs, and a user's
+    # own `config.yml` still applies)...
     (
-      assert lib.hasInfix "/bin/udiskie -a -n -T -c /nix/store/"
-        hmApps.config.systemd.user.services.scoot-automount.Service.ExecStart;
-      true
-    )
-    (
-      assert lib.hasSuffix "-scoot-udiskie.json" appsUdiskieConfig;
+      assert
+        hmApps.config.systemd.user.services.scoot-automount.Service.ExecStart
+        == "${lib.getExe' pkgs.udiskie "udiskie"} -a -n -T";
       true
     )
     (
@@ -8538,11 +8637,61 @@ let
       true
     )
     (
-      assert hmAppsFiles.config.xdg.mimeApps.defaultApplications."inode/directory" == "pcmanfm.desktop";
+      assert
+        hmAppsFiles.config.xdg.mimeApps.defaultApplications."inode/directory" == [ "pcmanfm.desktop" ];
       true
     )
     (
-      assert hmAppsFiles.config.xdg.mimeApps.defaultApplications."inode/mount-point" == "pcmanfm.desktop";
+      assert
+        hmAppsFiles.config.xdg.mimeApps.defaultApplications."inode/mount-point" == [ "pcmanfm.desktop" ];
+      true
+    )
+    # ...a user's own `xdg.userDirs`/`xdg.mimeApps` values winning
+    # outright over the profile's (each leaf at `mkDefault`: plain
+    # priority would be an evaluation conflict for the switches and a
+    # concatenated list, in definition order, for the associations)...
+    (
+      assert allAssertionsHold hmAppsUserXdg.config;
+      true
+    )
+    (
+      assert !hmAppsUserXdg.config.xdg.userDirs.enable;
+      true
+    )
+    (
+      assert !hmAppsUserXdg.config.xdg.userDirs.createDirectories;
+      true
+    )
+    (
+      assert !hmAppsUserXdg.config.xdg.mimeApps.enable;
+      true
+    )
+    (
+      assert
+        hmAppsUserXdg.config.xdg.mimeApps.defaultApplications."inode/directory" == [ "thunar.desktop" ];
+      true
+    )
+    (
+      assert
+        hmAppsUserXdg.config.xdg.mimeApps.defaultApplications."inode/mount-point" == [
+          "thunar.desktop"
+          "pcmanfm.desktop"
+        ];
+      true
+    )
+    # ...home-manager's own `services.udiskie` winning: one automounter
+    # (two would race every insert and both ask for a passphrase), so
+    # no unit and no udiskie of ours...
+    (
+      assert allAssertionsHold hmAppsUdiskieOwned.config;
+      true
+    )
+    (
+      assert !(hmAppsUdiskieOwned.config.systemd.user.services ? scoot-automount);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "udiskie") hmAppsUdiskieOwned.config.home.packages);
       true
     )
     # ...the terminal off: no foot, no `TERMINAL`, no user dirs (the
@@ -8767,7 +8916,13 @@ let
     # inotify watch instead of GLib's 4-second retry on a missing
     # path...
     (
-      assert builtins.elem "d /etc/nvme 0755 root root -" osApps.config.systemd.tmpfiles.rules;
+      assert osApps.config.environment.etc."nvme/.keep".text == "";
+      true
+    )
+    # ...through `environment.etc`, never tmpfiles (which an immutable
+    # `/etc` overlay refuses)...
+    (
+      assert osApps.config.systemd.tmpfiles.rules == [ ];
       true
     )
     # ...while neither NetworkManager nor the Bluetooth hardware is
@@ -8809,8 +8964,7 @@ let
       true
     )
     (
-      assert
-        !(builtins.elem "d /etc/nvme 0755 root root -" osAppsAutomountOff.config.systemd.tmpfiles.rules);
+      assert !(osAppsAutomountOff.config.environment.etc ? "nvme/.keep");
       true
     )
     (
@@ -8916,6 +9070,46 @@ let
           (slotScriptBin hmDeskBar "scoot-bluetooth-pick")
           "menu"
         ];
+      true
+    )
+    # ...the bluetooth module's click opening the whole picker, not
+    # toggling the adapter's power (one stray click would drop a
+    # Bluetooth keyboard)...
+    (
+      assert
+        hmDeskBar.config.programs.scootbar.settings.bluetooth.on-click == {
+          exec = [
+            (slotScriptBin hmDeskBar "scoot-bluetooth-pick")
+            "pick"
+          ];
+        };
+      true
+    )
+    # ...a click the user binds winning whole, in any of its shapes
+    # (an action name, or a command of their own, never merged with
+    # ours)...
+    (
+      assert
+        let
+          click =
+            value:
+            (evalHomeDesktop
+              {
+                enable = true;
+                package = fakePkg;
+                wallpaper.package = fakeBg;
+                desktop.enable = true;
+                desktop.look = "music-desk";
+              }
+              {
+                package = fakeBar;
+                settings.bluetooth.on-click = value;
+              }
+            ).config.programs.scootbar.settings.bluetooth.on-click;
+        in
+        click "toggle" == "toggle"
+        && click { exec = [ "mine" ]; } == { exec = [ "mine" ]; }
+        && click { scoot = "quit"; } == { scoot = "quit"; };
       true
     )
     # ...a command the user sets winning per key (the other stays
@@ -12848,8 +13042,7 @@ let
       true
     )
     (
-      # (Only the automount slot's `/etc/nvme`, on with the profile.)
-      assert osPowerChargeOff.config.systemd.tmpfiles.rules == [ "d /etc/nvme 0755 root root -" ];
+      assert osPowerChargeOff.config.systemd.tmpfiles.rules == [ ];
       true
     )
     (
@@ -15045,8 +15238,10 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       #     roles as fuzzel CLI colors, opaque), the dmenu contract
       #     flags, the keyring and the audio row (the profile turns the
       #     audio slot on); lookless and opted out carry no themed flag
-      #     at all; the automounter's config ignores the machine's own
-      #     disks.
+      #     at all; the automounter, judged by udiskie's own matcher
+      #     under the rules its unit runs with, mounts USB drives (an
+      #     encrypted one's unlocked filesystem included) and leaves the
+      #     machine's own disks alone.
       grep -F -q -- "--background-color=FCFBFBff" ${appsNetPickThemed}
       grep -F -q -- "--text-color=1A2032ff" ${appsNetPickThemed}
       grep -F -q -- "--border-color=3D579Aff" ${appsNetPickThemed}
@@ -15065,13 +15260,10 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       grep -F -q -- "--dmenu --prompt='wifi: '" ${appsNetPickNoLook}
       if grep -q -- "--background-color=" ${appsBluePickTargetOff}; then echo "themed flag present with theming off (23)" >&2; exit 1; fi
       if grep -n '@[A-Z]*@' ${appsNetPickThemed} ${appsBluePickThemed} | grep -v -F '@NAME@'; then echo "a placeholder left unreplaced (23)" >&2; exit 1; fi
-      python3 -c '
-      import json, sys
-      got = json.load(open(sys.argv[1]))
-      want = {"device_config": [{"is_external": False, "is_loop": False, "ignore": True}]}
-      assert got == want, got
-      ' ${appsUdiskieConfig}
-      echo "ok: the pickers carry the look, the dmenu contract and their wiring; udiskie ignores internal disks"
+      GI_TYPELIB_PATH=${pkgs.glib.out}/lib/girepository-1.0:${pkgs.gobject-introspection}/lib/girepository-1.0 \
+        PYTHONPATH=${pkgs.udiskie}/${python3.sitePackages} \
+        ${appsUdiskiePython}/bin/python3 ${./apps-udiskie-rules.py} ${lib.escapeShellArg appsUdiskieExec}
+      echo "ok: the pickers carry the look, the dmenu contract and their wiring; udiskie mounts USB (encrypted too) and loop images, never the machine's own disks"
 
       # 23a-i. The WiFi picker, against stub tools (the REAL script from
       #     the module; see `appsStubs` for the files that script each
@@ -15093,10 +15285,17 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
         printf 'typedkey9' > "$A/psk"
         printf '0' > "$A/psk-code"
         printf '0' > "$A/connect-code"
+        printf 'Error: Connection activation failed: Secrets were required, but not provided.\n' > "$A/connect-msg"
         : > "$A/calls"; : > "$A/stdin"; : > "$A/prompts"; : > "$A/menu-input"; : > "$A/pick"; : > "$A/picks"; : > "$A/reuse-uuid"
+        : > "$A/connect-codes"; : > "$A/join-sids"; rm -f "$A/hold" "$A/joining"
         printf '0' > "$A/pick-code"
       }
       connects() { grep -c "device wifi connect" "$A/calls" || true; }
+      # This shell's session id: every join must run in another (see
+      # 23v).
+      my_sid() { s=$(cat /proc/$$/stat); s=''${s##*) }; set -- $s; printf '%s\n' "$4"; }
+      MY_SID=$(my_sid)
+      joins_detached() { [ -s "$A/join-sids" ] && ! grep -F -x -q "$MY_SID" "$A/join-sids"; }
 
       # 23a. List: in range and saved first (by SSID, whatever the
       #      profile is named), then the rest in range in scan order,
@@ -15134,6 +15333,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       ${appsNetPick} connect HomeNet
       grep -F -x -q "nmcli connection up uuid abc-uuid" "$A/calls"
       [ "$(connects)" = 0 ] && [ ! -s "$A/prompts" ] || { echo "saved network re-joined or prompted (23d)" >&2; exit 1; }
+      joins_detached || { echo "saved join ran in the caller's session (23d)" >&2; exit 1; }
       echo "ok: saved networks go up by UUID, matched by SSID"
 
       # 23e. An open network joins directly: no key asked, none sent.
@@ -15141,6 +15341,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       ${appsNetPick} connect OpenNet
       grep -F -x -q "nmcli device wifi connect OpenNet" "$A/calls"
       [ ! -s "$A/stdin" ] && [ ! -s "$A/prompts" ] || { echo "key asked of an open network (23e)" >&2; exit 1; }
+      joins_detached || { echo "open join ran in the caller's session (23e)" >&2; exit 1; }
       echo "ok: open networks join directly"
 
       # 23f. A secured network with a key in the keyring joins with it
@@ -15151,7 +15352,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       [ "$(cat "$A/stdin")" = hunter22 ] || { echo "keyring key not on stdin (23f)" >&2; exit 1; }
       if grep -q hunter22 "$A/calls"; then echo "key in an argument (23f)" >&2; exit 1; fi
       [ ! -s "$A/prompts" ] || { echo "prompted with a key in the keyring (23f)" >&2; exit 1; }
-      echo "ok: keyring keys travel on stdin"
+      joins_detached || { echo "secured join ran in the caller's session (23f)" >&2; exit 1; }
+      echo "ok: keyring keys travel on stdin; every join runs in a session of its own"
 
       # 23g. No key in the keyring: a masked prompt naming the network,
       #      the typed key on stdin.
@@ -15173,18 +15375,30 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       [ "$(connects)" = 0 ] || { echo "cancelled prompt joined (23g2)" >&2; exit 1; }
       echo "ok: a cancelled prompt joins nothing"
 
-      # 23g3. A wrong key: loud with nmcli's reason, and the stale
-      #       profile the failed first join left is removed (the next
-      #       pick asks again).
+      # 23g3. A wrong typed key: loud with nmcli's reason, one join (a
+      #       typed key is never asked for twice), and the stale profile
+      #       the failed first join left is removed (the next pick asks
+      #       again).
       net_setup
+      : > "$A/secret"; printf '1' > "$A/secret-code"
       printf '4' > "$A/connect-code"
       if ${appsNetPick} connect "Hotel: Lobby" 2>"$A/stderr"; then echo "silent success on a wrong key (23g3)" >&2; exit 1; fi
       grep -q "Secrets were required" "$A/stderr"
       grep -F -x -q "nmcli connection delete uuid stale-uuid" "$A/calls"
+      [ "$(connects)" = 1 ] && [ "$(wc -l < "$A/prompts")" = 1 ] || { echo "a wrong typed key re-prompted (23g3)" >&2; exit 1; }
+      # ...the same with no saved profile at all (an empty snapshot is
+      # still a snapshot: every profile after it is the join's)...
+      net_setup
+      : > "$A/secret"; printf '1' > "$A/secret-code"
+      printf '4' > "$A/connect-code"
+      : > "$A/connections"; : > "$A/ssids"
+      if ${appsNetPick} connect "Hotel: Lobby" 2>/dev/null; then echo "silent success on a wrong key (23g3)" >&2; exit 1; fi
+      grep -F -x -q "nmcli connection delete uuid stale-uuid" "$A/calls" || { echo "empty snapshot skipped the cleanup (23g3)" >&2; exit 1; }
       # ...but a profile that was already there is never deleted: here
       # one whose SSID the first listing missed, which the join then
       # reused (`reuse-uuid`).
       net_setup
+      : > "$A/secret"; printf '1' > "$A/secret-code"
       printf '4' > "$A/connect-code"
       printf 'kept-uuid:802-11-wireless\n' >> "$A/connections"
       printf 'kept-uuid' > "$A/reuse-uuid"
@@ -15192,6 +15406,32 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       if grep -q "connection delete" "$A/calls"; then echo "deleted a profile that predated the join (23g3)" >&2; exit 1; fi
       : > "$A/reuse-uuid"
       echo "ok: a failed first join fails loud and leaves no stale profile, and keeps older ones"
+
+      # 23g5. A keyring key the network refuses (a stale entry): the
+      #       prompt at once, saying so, and the typed key joins -- the
+      #       refused key's profile removed, so no pick ever retries it.
+      net_setup
+      printf '4\n0\n' > "$A/connect-codes"
+      ${appsNetPick} connect "Hotel: Lobby"
+      [ "$(cat "$A/prompts")" = "key for Hotel: Lobby (the keyring's was refused): " ] || { echo "re-prompt was '$(cat "$A/prompts")' (23g5)" >&2; exit 1; }
+      [ "$(cat "$A/stdin")" = "$(printf 'hunter22\ntypedkey9')" ] || { echo "joins got '$(cat "$A/stdin")' (23g5)" >&2; exit 1; }
+      grep -F -x -q "nmcli connection delete uuid stale-uuid" "$A/calls"
+      if grep -q "hunter22\|typedkey9" "$A/calls"; then echo "key in an argument (23g5)" >&2; exit 1; fi
+      # ...a cancelled re-prompt joins nothing more...
+      net_setup
+      printf '4' > "$A/connect-code"
+      printf '1' > "$A/psk-code"
+      ${appsNetPick} connect "Hotel: Lobby"
+      [ "$(connects)" = 1 ] || { echo "a cancelled re-prompt joined (23g5)" >&2; exit 1; }
+      # ...and a refusal that is not about the key (out of range, say)
+      # asks for nothing.
+      net_setup
+      printf '4' > "$A/connect-code"
+      printf 'Error: Connection activation failed: The Wi-Fi network could not be found.\n' > "$A/connect-msg"
+      if ${appsNetPick} connect "Hotel: Lobby" 2>"$A/stderr"; then echo "silent success (23g5)" >&2; exit 1; fi
+      grep -q "could not be found" "$A/stderr"
+      [ ! -s "$A/prompts" ] || { echo "prompted for a refusal that was not the key's (23g5)" >&2; exit 1; }
+      echo "ok: a refused keyring key falls back to the prompt once, only for its secrets"
 
       # 23g4. Out of range, or enterprise: loud before any prompt.
       net_setup
@@ -15233,6 +15473,33 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       [ ! -s "$A/calls" ] || { echo "empty feed called nmcli (23i2)" >&2; exit 1; }
       echo "ok: the bar-fed menu joins fed rows, empty stays quiet"
 
+      # 23v. The bar reopening its menu (or replacing a connect) ends the
+      #      old one's whole process group, SIGKILL 100 ms after SIGTERM
+      #      (scootbar `end_child`): a join already under way outlives
+      #      that, and its failed-join cleanup still runs. The picker is
+      #      started as the bar starts it, leading a group of its own.
+      net_setup
+      : > "$A/secret"; printf '1' > "$A/secret-code"
+      printf '4' > "$A/connect-code"
+      printf 'Hotel: Lobby' > "$A/pick"
+      printf 'Hotel: Lobby\n' > "$A/feed"
+      : > "$A/hold"
+      ${pkgs.util-linux}/bin/setsid ${appsNetPick} menu < "$A/feed" > /dev/null 2>&1 &
+      bar_child=$!
+      n=0; while [ ! -e "$A/joining" ] && [ "$n" -lt 200 ]; do sleep 0.05; n=$((n + 1)); done
+      [ -e "$A/joining" ] || { echo "the join never started (23v)" >&2; exit 1; }
+      kill -TERM -- "-$bar_child" 2>/dev/null || true
+      sleep 0.1
+      kill -KILL -- "-$bar_child" 2>/dev/null || true
+      wait "$bar_child" 2>/dev/null || true
+      rm -f "$A/hold"
+      n=0; while ! grep -F -x -q "nmcli connection delete uuid stale-uuid" "$A/calls" && [ "$n" -lt 200 ]; do sleep 0.05; n=$((n + 1)); done
+      grep -F -x -q "nmcli connection delete uuid stale-uuid" "$A/calls" || { echo "the group kill cut the join before its cleanup (23v)" >&2; exit 1; }
+      # (The detached join ends on its own; let it finish before the
+      # next scenario resets the files under it.)
+      sleep 0.3
+      echo "ok: a join outlives the bar's group kill, cleanup included"
+
       # 23j-r. The Bluetooth picker, against the same stub shape.
       blue_setup() {
         printf 'Controller AA:BB:CC:DD:EE:FF testbox [default]\n\tPowered: yes\n' > "$A/show"
@@ -15242,7 +15509,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
         printf 'Device 11:22:33:44:55:66 Headphones\n' > "$A/devices-Connected"
         printf 'Device C0:FF:EE:00:00:01 New Mouse\n' > "$A/found"
         printf '0' > "$A/call-code"
-        : > "$A/calls"; : > "$A/menu-input"; : > "$A/pick"; : > "$A/picks"
+        : > "$A/calls"; : > "$A/menu-input"; : > "$A/pick"; : > "$A/picks"; : > "$A/scan-out"
+        rm -f "$A"/info-* "$A"/hang-*
         printf '0' > "$A/pick-code"
       }
       bt_calls() { grep -c "^bluetoothctl" "$A/calls" || true; }
@@ -15255,8 +15523,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       [ "$got" = "$want" ] || { echo "list showed '$got', want '$want' (23j)" >&2; exit 1; }
       echo "ok: list stars connected devices"
 
-      # 23k. No controller, and no BlueZ at all (bluetoothctl's bounded
-      #      wait ends with nothing): each loud, naming which.
+      # 23k. No controller, and no BlueZ at all: each loud, naming
+      #      which.
       blue_setup
       printf 'No default controller available\n' > "$A/show"
       if ${appsBluePick} pick 2>"$A/stderr"; then echo "silent success with no controller (23k)" >&2; exit 1; fi
@@ -15265,7 +15533,18 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       if ${appsBluePick} list 2>"$A/stderr"; then echo "silent success with no BlueZ (23k)" >&2; exit 1; fi
       grep -q "BlueZ is not answering" "$A/stderr"
       [ ! -s "$A/menu-input" ] || { echo "menu opened with no controller (23k)" >&2; exit 1; }
-      echo "ok: no controller and no BlueZ fail loud, no menu"
+      # ...and a BlueZ that never answers (bluetoothctl waits forever
+      # for a bluetoothd that is not on the bus) is bounded: loud
+      # within the 5 s query bound (plus the 2 s SIGKILL grace), not
+      # hung.
+      blue_setup
+      : > "$A/hang-show"
+      t0=$(date +%s)
+      if ${appsBluePick} list 2>"$A/stderr"; then echo "silent success with a hung BlueZ (23k)" >&2; exit 1; fi
+      t1=$(date +%s)
+      grep -q "BlueZ is not answering" "$A/stderr"
+      [ $((t1 - t0)) -le 8 ] || { echo "a hung BlueZ held the picker $((t1 - t0)) s (23k)" >&2; exit 1; }
+      echo "ok: no controller, no BlueZ and a hung BlueZ fail loud, no menu"
 
       # 23l. Toggle from the menu: the connected row disconnects; a
       #      paired row with a spaced name connects by its MAC.
@@ -15305,26 +15584,45 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       if ${appsBluePick} power maybe 2>/dev/null; then echo "silent success on bogus power (23n)" >&2; exit 1; fi
       echo "ok: power toggles from the menu, bogus is usage"
 
-      # 23o. Pair from the keyboard: a bounded scan, then only the new
-      #      devices offered, the pick paired with the no-input agent,
-      #      trusted and connected.
+      # 23o. Pair from the keyboard: a scan for its full listen, then
+      #      only the new devices offered, the pick paired (no agent
+      #      option: bluetoothctl registers none for a one-shot
+      #      command), trusted and connected.
       blue_setup
       printf 'Pair a new device...\nC0:FF:EE:00:00:01 New Mouse\n' > "$A/picks"
       ${appsBluePick} pick
       grep -F -x -q "C0:FF:EE:00:00:01 New Mouse" "$A/menu-input" || { echo "pair menu offered '$(cat "$A/menu-input")' (23o)" >&2; exit 1; }
       if grep -q "Headphones" "$A/menu-input"; then echo "pair menu offered a paired device (23o)" >&2; exit 1; fi
-      want=$(printf 'bluetoothctl scan on timeout=10\nbluetoothctl pair C0:FF:EE:00:00:01 agent=NoInputNoOutput\nbluetoothctl trust C0:FF:EE:00:00:01\nbluetoothctl connect C0:FF:EE:00:00:01')
+      want=$(printf 'bluetoothctl scan on timeout=10\nbluetoothctl pair C0:FF:EE:00:00:01\nbluetoothctl trust C0:FF:EE:00:00:01\nbluetoothctl connect C0:FF:EE:00:00:01')
       [ "$(grep '^bluetoothctl' "$A/calls")" = "$want" ] || { echo "pair ran '$(cat "$A/calls")' (23o)" >&2; exit 1; }
-      echo "ok: a bounded scan offers only new devices; pair, trust, connect with the no-input agent"
+      # ...and a scan BlueZ refuses (an adapter not ready) says so.
+      blue_setup
+      printf 'Failed to start discovery: org.bluez.Error.NotReady\n' > "$A/scan-out"
+      printf 'Pair a new device...\n' > "$A/picks"
+      if ${appsBluePick} pick 2>"$A/stderr"; then echo "silent success on a refused scan (23o)" >&2; exit 1; fi
+      grep -q "Failed to start discovery: org.bluez.Error.NotReady" "$A/stderr"
+      echo "ok: a full-length scan offers only new devices; pair, trust, connect"
 
-      # 23p. A failed pair: loud with bluetoothctl's reason, nothing
-      #      trusted or connected.
+      # 23p. A failed pair: loud with bluetoothctl's own reason line
+      #      (not the colored event line printed after it), nothing
+      #      trusted or connected; a failed connect the same.
       blue_setup
       printf '1' > "$A/call-code"
       if ${appsBluePick} pair Speaker 2>"$A/stderr"; then echo "silent success on a failed pair (23p)" >&2; exit 1; fi
-      grep -q "AuthenticationFailed" "$A/stderr"
+      grep -F -x -q "scoot-bluetooth-pick: Failed to pair: org.bluez.Error.AuthenticationFailed" "$A/stderr" || { echo "reason was '$(cat "$A/stderr")' (23p)" >&2; exit 1; }
       [ "$(bt_calls)" = 1 ] || { echo "went on after a failed pair: '$(cat "$A/calls")' (23p)" >&2; exit 1; }
-      echo "ok: a failed pair fails loud and stops"
+      blue_setup
+      printf '1' > "$A/call-code"
+      if ${appsBluePick} connect "Sony WH-1000XM4" 2>"$A/stderr"; then echo "silent success on a failed connect (23p)" >&2; exit 1; fi
+      grep -F -q "Failed to connect" "$A/stderr"
+      # ...and an action BlueZ never answers ends at its bound, naming
+      # it.
+      blue_setup
+      : > "$A/hang-power"
+      printf 'Turn Bluetooth off' > "$A/pick"
+      if ${appsBluePick} pick 2>"$A/stderr"; then echo "silent success on a hung power call (23p)" >&2; exit 1; fi
+      grep -q "power got no answer within 10 s" "$A/stderr"
+      echo "ok: a failed or unanswered action fails loud with its reason and stops"
 
       # 23q. The bar-fed menu: a fed `Name (connected)` row toggles by
       #      name; an unpaired fed name pairs; a nameless device's
@@ -15336,17 +15634,46 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       blue_setup
       printf 'Speaker' > "$A/pick"
       printf 'Headphones (connected)\nSpeaker\n' | ${appsBluePick} menu
-      grep -F -x -q "bluetoothctl pair 01:02:03:04:05:06 agent=NoInputNoOutput" "$A/calls"
+      grep -F -x -q "bluetoothctl pair 01:02:03:04:05:06" "$A/calls"
       blue_setup
       printf 'dev_0A_0B_0C_0D_0E_0F' > "$A/pick"
       printf 'dev_0A_0B_0C_0D_0E_0F\n' | ${appsBluePick} menu
-      grep -F -x -q "bluetoothctl pair 0A:0B:0C:0D:0E:0F agent=NoInputNoOutput" "$A/calls"
+      grep -F -x -q "bluetoothctl pair 0A:0B:0C:0D:0E:0F" "$A/calls"
       echo "ok: the bar-fed menu toggles paired rows and pairs the rest"
 
-      # 23r. Every bluetoothctl call above was bounded: with no
-      #      bluetoothd an unbounded one waits forever.
-      if [ -s "$A/unbounded" ]; then echo "unbounded bluetoothctl calls: $(cat "$A/unbounded") (23r)" >&2; exit 1; fi
-      echo "ok: every bluetoothctl call is bounded"
+      # 23s. A renamed device: bluetoothctl lists its alias, the bar
+      #      shows its own `Name`; both resolve to it.
+      blue_setup
+      printf 'Device 11:22:33:44:55:66 Headphones\nDevice 77:88:99:AA:BB:CC Desk cans\n' > "$A/devices-Paired"
+      printf 'Device 11:22:33:44:55:66 Headphones\nDevice 77:88:99:AA:BB:CC Desk cans\n' > "$A/devices-all"
+      printf 'Device 11:22:33:44:55:66\n\tName: Headphones\n\tAlias: Headphones\n' > "$A/info-11:22:33:44:55:66"
+      printf 'Device 77:88:99:AA:BB:CC\n\tName: Sony WH-1000XM4\n\tAlias: Desk cans\n' > "$A/info-77:88:99:AA:BB:CC"
+      ${appsBluePick} connect "Desk cans"
+      grep -F -x -q "bluetoothctl connect 77:88:99:AA:BB:CC" "$A/calls"
+      : > "$A/calls"
+      printf 'Sony WH-1000XM4' > "$A/pick"
+      printf 'Headphones (connected)\nSony WH-1000XM4\n' | ${appsBluePick} menu
+      grep -F -x -q "bluetoothctl connect 77:88:99:AA:BB:CC" "$A/calls" || { echo "the bar's name for a renamed device ran '$(cat "$A/calls")' (23s)" >&2; exit 1; }
+      echo "ok: a device resolves by its alias or its own name"
+
+      # 23t. Two devices answering to one name: refused, never guessed.
+      blue_setup
+      printf 'Device 11:22:33:44:55:66 Speaker\nDevice 77:88:99:AA:BB:CC Speaker\n' > "$A/devices-Paired"
+      if ${appsBluePick} connect Speaker 2>"$A/stderr"; then echo "silent success on an ambiguous name (23t)" >&2; exit 1; fi
+      grep -q "more than one device is named 'Speaker'" "$A/stderr"
+      [ "$(bt_calls)" = 0 ] || { echo "an ambiguous name acted: '$(cat "$A/calls")' (23t)" >&2; exit 1; }
+      echo "ok: an ambiguous name is refused"
+
+      # 23r. Every call above, modelled on bluez 5.87: none passed
+      #      `--timeout` but the scan (with it, a finished command never
+      #      quits and exits 0 whatever happened -- a wait the length of
+      #      the bound, and a failure read as success), none passed
+      #      `--agent` (it registers nothing for a one-shot command), and
+      #      every one read /dev/null (a `connect` of a device BlueZ no
+      #      longer holds reads its "Scan and connect" answer there).
+      if [ -s "$A/misuse" ]; then echo "bluetoothctl misused: $(cat "$A/misuse") (23r)" >&2; exit 1; fi
+      if grep -v ' /dev/null$' "$A/stdins"; then echo "bluetoothctl read a stdin other than /dev/null (23r)" >&2; exit 1; fi
+      echo "ok: only the scan carries --timeout, no --agent, stdin /dev/null"
     ''}
 
   touch $out

@@ -1445,10 +1445,17 @@ unit (`scoot-automount.service`, wanted by `scoot-session.target`)
 over the udisks2 daemon the NixOS side enables. Insert a drive and it
 mounts under `/run/media/$USER/`, with a notification whose *Browse*
 action opens the mount through `xdg-open` — the file manager, when it
-is on. It never touches the machine's own disks: udisks2 marks them
-`HintSystem`, and the unit's config ignores those, so a dual-boot
-box's Windows or macOS partitions stay unmounted, with no admin
-prompt at login.
+is on. An encrypted (LUKS) drive asks for its passphrase, then mounts
+its unlocked filesystem the same way. It runs on udiskie's stock
+device rules, which leave the machine's own disks alone: udisks2
+marks an internal disk `HintSystem`, and udiskie skips it and every
+partition on it, so a dual-boot box's Windows or macOS partitions
+stay unmounted, with no admin prompt at login. A
+`~/.config/udiskie/config.yml` of your own still applies (the unit
+passes no `-c`; its `-a -n -T` flags win over the file's).
+With home-manager's own `services.udiskie` on, that one runs instead
+and this unit stays out: two automounters would race to mount every
+drive and both ask for a passphrase.
 
 **Safe removal: unmount before you unplug.** A yanked drive loses
 whatever was still buffered. One command unmounts and powers it off:
@@ -1457,10 +1464,9 @@ whatever was still buffered. One command unmounts and powers it off:
 udiskie-umount -d /run/media/$USER/LABEL
 ```
 
-Wait for the command to return, then unplug. Name the drive: run
-by hand, `udiskie-umount -a` reads udiskie's stock rules, not the
-unit's, and would reach for the machine's own mounted partitions too
-(each refused, or an admin prompt).
+Wait for the command to return, then unplug. `udiskie-umount -a`
+unmounts every drive udiskie handles at once; the machine's own disks
+are not among them.
 
 Why these, measured on the M2 (`aarch64-linux`): full closures at
 the pinned rev (`8ce4ef6`) by `nix path-info --closure-size`;
@@ -1500,11 +1506,13 @@ the device rules above, and `udiskie-umount` for safe removal. A
 scootmount on the floor's shape is the lighter path if the memory
 ever matters more than that list.
 
-The profile also creates an empty `/etc/nvme`: udisksd watches that
-directory (NVMe-oF host identity), and GLib retries a watch on a
-missing path every 4 seconds — 15 wakeups a minute, forever, measured
-on the M2 (all `inotify_add_watch("/etc/nvme") = ENOENT`), and 0 once
-the directory exists.
+The profile also creates `/etc/nvme` (an empty `/etc/nvme/.keep`,
+through `environment.etc`, so it exists under an immutable `/etc`
+too): udisksd watches that directory (NVMe-oF host identity), and
+GLib retries a watch on a missing path every 4 seconds — 15 wakeups a
+minute, forever, measured on the M2 (all
+`inotify_add_watch("/etc/nvme") = ENOENT`), and 0 once the directory
+exists.
 
 Every value is an option, applied on rebuild/switch (the unit
 restarts with the new config; a new `TERMINAL` or `BROWSER` reaches
@@ -1517,13 +1525,17 @@ apps started after the next login):
 | `desktop.apps.fileManager.enable` | bool | `false` | the file manager on `PATH`, directories and mounts opening in it |
 | `desktop.apps.fileManager.package` | package or null | pcmanfm (Linux-only: null off Linux) | point at another file manager |
 | `desktop.apps.fileManager.desktopEntry` | string | `"pcmanfm.desktop"` | the `.desktop` entry directories open through (`"thunar.desktop"` beside a thunar `package`) |
-| `desktop.automount.enable` | bool | `true` with the profile | udisks2 on the NixOS side, the trayless udiskie unit on the home-manager side |
+| `desktop.automount.enable` | bool | `true` with the profile | udisks2 on the NixOS side, the trayless udiskie unit on the home-manager side (left out while home-manager's `services.udiskie` is on: its unit runs instead) |
 | `desktop.automount.package` | package or null | udiskie (Linux-only: null off Linux) | point at your own udiskie build |
 
 A null `package` beside its switch fails evaluation naming it.
 `xdg-open`, `BROWSER` and the user dirs come on with the terminal or
 the file manager (and `xdg-open`/`BROWSER` with the automounter, for
-its *Browse* action).
+its *Browse* action). Your own `xdg.userDirs` and `xdg.mimeApps`
+values win outright over the profile's: `xdg.userDirs.enable = false`
+(no `~/Music` and friends) or a
+`xdg.mimeApps.defaultApplications."inode/directory"` of your own
+replaces the profile's, with no conflict and no merged list.
 
 Troubleshooting, by symptom:
 
@@ -1550,10 +1562,13 @@ Troubleshooting, by symptom:
 ## WiFi and Bluetooth
 
 `Super+w` opens the WiFi picker and `Super+b` the Bluetooth one. The
-bar opens the same pickers, fed its own list: a click on the network
-module, and the bluetooth module's `menu` action (`scootbar msg invoke
-bluetooth menu`, or a binding to it; that module's click toggles the
-adapter's power). Both are fuzzel menus through the
+bar opens the same pickers: a click on the network module (fed the
+bar's own scan), and a click on the bluetooth module (the whole
+`Super+b` menu; the module's own default click toggles the adapter's
+power, which would drop a Bluetooth keyboard with one stray click, so
+the profile binds the picker in its place). The bluetooth module's
+`menu` action (`scootbar msg invoke bluetooth menu`) opens the picker
+fed the bar's device list. Both are fuzzel menus through the
 [launcher's dmenu contract](#launcher), themed like it, and both are
 scripts over the stock CLIs (`nmcli`, `bluetoothctl`): nothing runs
 between picks.
@@ -1578,7 +1593,10 @@ Without them the pickers fail loud (below).
   is readable by every user), and NetworkManager keeps it after the
   first join (system-owned, in `/etc/NetworkManager/system-connections`).
 - A wrong key fails loud, and the failed join leaves no profile
-  behind, so the next pick asks again.
+  behind, so the next pick asks again. A key from the keyring that the
+  network refuses (a changed password) brings up the prompt at once,
+  saying so: the typed key joins, and NetworkManager keeps that one.
+  Update the keyring entry yourself; the picker never writes it.
 - Hidden and enterprise (802.1X) networks fail loud with no prompt: a
   key cannot join them. Join those once from a terminal (`nmtui`, or
   `nmcli device wifi connect NAME hidden yes --ask`); after that they
@@ -1586,7 +1604,10 @@ Without them the pickers fail loud (below).
 
 The picker reads the cached scan and never rescans: the bar's network
 module scans when it opens its own menu, and NetworkManager rescans
-on its own schedule.
+on its own schedule. Once you have picked a network (and typed its
+key), the join runs on its own: clicking the bar again closes an open
+menu or key prompt, but never cuts a join under way, so a failed one
+still cleans up after itself.
 
 **Bluetooth.** The menu lists paired devices, starred while
 connected; picking one connects it, or disconnects it if connected.
@@ -1598,22 +1619,35 @@ Below them:
   ![The Bluetooth picker's pair list: two devices found in pairing mode](../../../assets/picker-bluetooth-pair.png)
 
   Pick one and it pairs, is trusted (so it reconnects on its
-  own) and connects. Pairing uses a no-input agent: headsets, mice,
-  speakers and most keyboards pair this way. A device that insists on
-  a typed PIN pairs from a terminal: `bluetoothctl`, then `scan on`
-  and `pair MAC`.
+  own) and connects. The picker registers no pairing agent of its
+  own, so BlueZ pairs the "just works" way (`NoInputNoOutput`), or
+  through your session's default agent if one runs (blueman's, say):
+  headsets, mice, speakers and most keyboards pair this way. A device
+  that insists on a typed PIN pairs from a terminal: `bluetoothctl`,
+  then `scan on` and `pair MAC`.
 - *Audio output…* (with the audio slot on) switches the default sink
   through `scoot-audio-sink`: pick the headset you just connected.
 - *Turn Bluetooth off* or, while off, *Turn Bluetooth on* (the only
   row then).
 
+A device is named by the name `bluetoothctl devices` lists (its
+alias: the device's own name unless you renamed it) or by its own
+name, which is what the bar shows; two devices answering to one name
+are refused rather than guessed between (pick by address from
+`Super+b`, which lists them).
+
 Failures say why, as a notification and on stderr (the session
 journal): no Wi-Fi device (a VM, a desktop without a card) or one
 whose radio is off, NetworkManager not running (nmcli's own reason),
-no Bluetooth controller, or no BlueZ at all. That last one is bounded:
-with no `bluetoothd` on the bus, `bluetoothctl` waits forever, so
-every call carries a timeout and the picker gives up within 5
-seconds. Cancelling a menu (`Escape`) joins and pairs nothing.
+no Bluetooth controller, no BlueZ at all, or BlueZ's own reason for a
+failed connect, pair or power switch (a failed pair stops there:
+nothing is trusted or connected). Every `bluetoothctl` call is
+bounded, since with no `bluetoothd` on the bus it waits forever: a
+query (the list, a device's details) gives up after 5 seconds, a
+connect after 30, a pair after 60, each naming the bound it hit. With
+BlueZ running a call returns as soon as BlueZ answers, so `Super+b`
+opens its menu at once. Cancelling a menu (`Escape`) joins and pairs
+nothing.
 
 The same scripts run from a terminal:
 
@@ -1632,14 +1666,15 @@ re-render into `[binds]`, so `scoot msg reload` is enough):
 |---|---|---|---|
 | `desktop.apps.network.enable` | bool | `true` with the profile | `nmcli` and the picker on `PATH`, `Super+w` bound, the bar's network module opening the picker |
 | `desktop.apps.network.cliPackage` / `.menuPackage` | package or null | networkmanager / fuzzel (Linux-only: null off Linux) | point at your own builds (the menu is the launcher's fuzzel, one derivation) |
-| `desktop.apps.bluetooth.enable` | bool | `true` with the profile | `bluetoothctl` and the picker on `PATH`, `Super+b` bound, the bar's bluetooth module's `menu` action opening the picker |
+| `desktop.apps.bluetooth.enable` | bool | `true` with the profile | `bluetoothctl` and the picker on `PATH`, `Super+b` bound, a click on the bar's bluetooth module (and its `menu` action) opening the picker |
 | `desktop.apps.bluetooth.cliPackage` / `.menuPackage` | package or null | bluez / fuzzel (Linux-only: null off Linux) | same |
 | `desktop.theme.targets.network.enable` / `.bluetooth.enable` | bool | `true` | theme the picker from the look; `false` keeps fuzzel's own style |
 | `desktop.keys.binds.network.enable` / `.bluetooth.enable` | bool | `true` | bind `Super+w` / `Super+b` (`false` leaves that combo unbound) |
 
 The bar half needs the bar module imported and the module built in
-(the default build has both). A `menu-command` or `connect-command`
-you set in `programs.scootbar.settings` wins per key.
+(the default build has both). A `menu-command`, `connect-command` or
+`on-click` you set in `programs.scootbar.settings` wins per key (set
+`bluetooth.on-click = "toggle"` to have the power toggle back).
 
 Troubleshooting, by symptom:
 
@@ -1659,6 +1694,9 @@ Troubleshooting, by symptom:
 - *A device is not in the pair list.* It was not advertising during
   the 10-second listen: put it in pairing mode first, then pick *Pair
   a new device…* again.
+- *"more than one device is named …"* (from the bar, or by name from
+  a terminal). Two devices share a name: pick from `Super+b`, which
+  lists them by address.
 - *A network keeps failing with the right key.* A profile with an old
   key stays saved (one this picker did not create): `nmcli connection
   delete 'Home'`, then pick it again.

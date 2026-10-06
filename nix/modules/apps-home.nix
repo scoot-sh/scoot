@@ -73,7 +73,8 @@ let
     );
 
   # What both pickers share: awk for the parsing, coreutils' `timeout`
-  # bounding the keyring and notification calls, and `notify-send`
+  # bounding every bluetoothctl, keyring and notification call, and
+  # `notify-send`
   # saying a failure where a keyboard user looks (a picker spawned by
   # a bind has no terminal; stderr still carries every message).
   shared = {
@@ -102,6 +103,9 @@ let
     "@NMCLI@" = nmcliBin;
     "@MENU@" = networkMenu;
     "@SECRET@" = secretBin;
+    # util-linux's `setsid`: the join runs in a session of its own, out
+    # of reach of the bar's process-group kill (see the script).
+    "@SETSID@" = binOr "setsid" (if isLinux then pkgs.util-linux else null);
     "@THEME@" = themeFor "network";
   };
 
@@ -120,6 +124,10 @@ let
   # Whether home-manager's own `programs.foot` is on (read with `or`:
   # the option is absent without that module).
   footOwned = (config.programs.foot or { }).enable or false;
+  # Whether home-manager's own `services.udiskie` runs an automounter
+  # (same read): two would race to mount every insert and both ask for
+  # an encrypted drive's passphrase, so the slot yields to it.
+  udiskieOwned = (config.services.udiskie or { }).enable or false;
 
   # Whether any file-opening app is managed (the terminal counts:
   # `xdg-open` answers from a terminal even with no manager).
@@ -137,21 +145,6 @@ let
   # stock NixOS, and udiskie's first call wakes it); where the NixOS
   # side runs udisks2 the name is always there.
   busctlBin = binOr "busctl" (if isLinux then pkgs.systemd or null else null);
-
-  # The automounter's own config (JSON, which udiskie reads beside
-  # YAML): every device on the machine's own disks ignored, removable
-  # media (no `HintSystem`) and loop images handled as udiskie ships.
-  udiskieConfig = pkgs.writeText "scoot-udiskie.json" (
-    builtins.toJSON {
-      device_config = [
-        {
-          is_external = false;
-          is_loop = false;
-          ignore = true;
-        }
-      ];
-    }
-  );
 
 in
 {
@@ -370,20 +363,23 @@ in
       };
     })
     (lib.mkIf filesInUse {
+      # Every leaf at `mkDefault`: a user's own value wins outright
+      # (`xdg.userDirs.enable = false` for a setup with no `~/Music`, a
+      # thunar for directories), never a conflict or a merged list.
       xdg.userDirs = {
-        enable = true;
-        createDirectories = true;
+        enable = lib.mkDefault true;
+        createDirectories = lib.mkDefault true;
       };
 
       xdg.mimeApps = lib.mkIf apps.fileManager.enable {
-        enable = true;
+        enable = lib.mkDefault true;
         defaultApplications = {
           # Directories -- plus mount points, which the shared-mime
           # database types separately (`inode/mount-point`: /tmp, and
           # every automounted drive the Browse action opens -- without
           # this `xdg-open` on a mount falls through to the browsers).
-          "inode/directory" = apps.fileManager.desktopEntry;
-          "inode/mount-point" = apps.fileManager.desktopEntry;
+          "inode/directory" = lib.mkDefault apps.fileManager.desktopEntry;
+          "inode/mount-point" = lib.mkDefault apps.fileManager.desktopEntry;
         };
       };
     })
@@ -454,19 +450,23 @@ in
     # through `xdg-open`, `-T` keeps it off the tray: state shows in
     # the bar's modules, not an icon), wanted by `scoot-session.target`
     # -- scoot's own session scope, never the shared
-    # `graphical-session.target`. Its config ignores the machine's own
-    # disks (udisks2's `HintSystem`): udiskie's stock rules skip only an
-    # internal disk's whole-disk device, so at startup it would try to
-    # mount every unmounted internal partition -- a dual-boot box's
-    # Windows or macOS volumes -- and each try is a polkit admin prompt
-    # at login. Safe removal is `udiskie-umount -d` (beside the daemon
-    # in the same package): unmount and power the drive off before
+    # `graphical-session.target`. It runs on udiskie's stock device
+    # rules (no `-c`, so a user's own `~/.config/udiskie/config.yml`
+    # still applies): those ignore the machine's own disks and every
+    # partition on them (udisks2's `HintSystem`, judged through the
+    # parent disk), and judge an unlocked encrypted drive by the drive
+    # it came from -- its cleartext device never has a Drive, so a rule
+    # of our own on `HintSystem` alone would ignore every encrypted USB
+    # stick's (pinned by udiskie's own matcher in `nix/tests.nix`).
+    # Safe removal is `udiskie-umount -d` (beside the daemon in the
+    # same package): unmount and power the drive off before
     # unplugging, or buffered writes die with the yank (see
     # site/src/content/docs/desktop/index.md#terminal-files-and-removable-media).
-    # A null beside `enable` leaves the unit out (the loud assertion
-    # below, not a throw inside `getExe`: the same guard the bar's
-    # unit uses, since standalone evals collect assertions without
-    # enforcing them).
+    # home-manager's own `services.udiskie` wins (see `udiskieOwned`):
+    # its unit runs instead, and this one stays out. A null beside
+    # `enable` leaves the unit out (the loud assertion below, not a
+    # throw inside `getExe`: the same guard the bar's unit uses, since
+    # standalone evals collect assertions without enforcing them).
     (lib.mkIf automount.enable {
       assertions = [
         {
@@ -479,29 +479,32 @@ in
         }
       ];
 
-      home.packages = lib.optional (automount.package != null) automount.package;
+      home.packages = lib.optional (automount.package != null && !udiskieOwned) automount.package;
 
-      systemd.user.services.scoot-automount = lib.mkIf (isLinux && automount.package != null) {
-        Unit = {
-          Description = "scoot removable-media automount (trayless udiskie over udisks2)";
-          PartOf = [ "scoot-session.target" ];
-          After = [ "scoot-session.target" ];
-          # Unending retries, like the bar's unit
-          # (`StartLimitIntervalSec` lives in `[Unit]`: systemd
-          # ignores it in `[Service]`).
-          StartLimitIntervalSec = 0;
-        };
-        Service = {
-          # Skipped (not restarted) without udisks2 known on the
-          # system bus: a skipped start wakes nothing, and the status
-          # says why (see `busctlBin` above).
-          ExecCondition = "${lib.getExe' pkgs.bash "bash"} -c '${busctlBin} --system --no-pager list | ${lib.getExe' pkgs.gnugrep "grep"} -q ^org.freedesktop.UDisks2'";
-          ExecStart = "${lib.getExe' automount.package "udiskie"} -a -n -T -c ${udiskieConfig}";
-          Restart = "on-failure";
-          RestartSec = 2;
-        };
-        Install.WantedBy = [ "scoot-session.target" ];
-      };
+      systemd.user.services.scoot-automount =
+        lib.mkIf (isLinux && automount.package != null && !udiskieOwned)
+          {
+            Unit = {
+              Description = "scoot removable-media automount (trayless udiskie over udisks2)";
+              PartOf = [ "scoot-session.target" ];
+              After = [ "scoot-session.target" ];
+              # Unending retries, like every retrying profile unit (pinned
+              # across all of them in `nix/tests.nix`'s `_startLimitPins`;
+              # `StartLimitIntervalSec` lives in `[Unit]`: systemd ignores
+              # it in `[Service]`).
+              StartLimitIntervalSec = 0;
+            };
+            Service = {
+              # Skipped (not restarted) without udisks2 known on the
+              # system bus: a skipped start wakes nothing, and the status
+              # says why (see `busctlBin` above).
+              ExecCondition = "${lib.getExe' pkgs.bash "bash"} -c '${busctlBin} --system --no-pager list | ${lib.getExe' pkgs.gnugrep "grep"} -q ^org.freedesktop.UDisks2'";
+              ExecStart = "${lib.getExe' automount.package "udiskie"} -a -n -T";
+              Restart = "on-failure";
+              RestartSec = 2;
+            };
+            Install.WantedBy = [ "scoot-session.target" ];
+          };
     })
 
     # The profile turns the terminal, both pickers and the
