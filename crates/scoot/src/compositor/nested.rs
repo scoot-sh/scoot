@@ -40,10 +40,15 @@ pub(super) mod gpu;
 mod presenter;
 
 use std::error::Error;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use calloop_wayland_source::WaylandSource;
 use smithay::backend::input::{AxisRelativeDirection, AxisSource, InputTime};
 use smithay::input::pointer::AxisFrame;
+use smithay::reexports::calloop::{
+    self, EventIterator, EventSource, LoopSignal, Poll, PostAction, Readiness, Token, TokenFactory,
+};
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::wl_compositor::WlCompositor as HostCompositor;
 use wayland_client::protocol::wl_keyboard::WlKeyboard as HostKeyboard;
@@ -51,7 +56,7 @@ use wayland_client::protocol::wl_pointer::WlPointer as HostPointer;
 use wayland_client::protocol::wl_seat::WlSeat as HostSeat;
 use wayland_client::protocol::wl_shm::WlShm as HostShm;
 use wayland_client::protocol::wl_surface::WlSurface as HostSurface;
-use wayland_client::{Connection, QueueHandle};
+use wayland_client::{Connection, DispatchError, EventQueue, QueueHandle};
 use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface as HostXdgSurface;
 use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel as HostToplevel;
 use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase as HostWmBase;
@@ -62,6 +67,148 @@ use self::presenter::Presenter;
 use super::State;
 use super::input::{ScrollAxis, scroll_frame};
 use crate::cli::MAX_OUTPUT_DIMENSION;
+
+/// Whether the host connection has been lost.
+///
+/// Shared between [`HostSource`] (which marks it, on the event-loop thread)
+/// and `compositor::run` (which reads it after the loop stops and turns the
+/// clean stop into an honest failure). Same-thread either way -- the mark
+/// happens inside event dispatch and the read after `run` returns -- so the
+/// ordering is `Relaxed` and the `Arc` is only ownership, never cross-thread
+/// synchronisation.
+#[derive(Debug, Default)]
+pub struct HostLoss {
+    dead: AtomicBool,
+}
+
+impl HostLoss {
+    pub(super) fn lost(&self) -> bool {
+        self.dead.load(Ordering::Relaxed)
+    }
+
+    fn mark(&self) {
+        self.dead.store(true, Ordering::Relaxed);
+    }
+}
+
+/// The host connection as an event source that fails closed.
+///
+/// A bare [`WaylandSource`] reports a broken host connection as an error from
+/// `process_events`, which calloop wraps in `Error::OtherError` and
+/// `EventLoop::run` propagates -- so the whole session exits on what the log
+/// can only describe as "other error during loop operation", while the
+/// control socket's file is left behind with no listener and every later
+/// `scoot msg` answers `Connection refused` (see
+/// `docs/backlog/ipc/nested-ipc-socket-refuses.md`). That shape is
+/// undiagnosable: nothing names the host connection, and nothing tells a
+/// supervisor the session is gone rather than deaf.
+///
+/// This maps every host-connection failure to the same treatment a failed
+/// server-side Wayland dispatch already gets (see `State::listen`): log the
+/// cause naming the host, stop the loop cleanly, and remove the dead source.
+/// `compositor::run` reads [`HostLoss`] afterwards and exits with a message
+/// that names the host connection, so the death is loud, legible and
+/// supervisor-actionable instead of calloop-internal jargon over a stale
+/// socket.
+///
+/// Without the host there is no session to keep: nothing can present, and no
+/// input can arrive. Lingering would be worse than stopping -- a supervisor
+/// watches the process, and a live-but-displayless process never gets
+/// restarted, while a stopped one is reborn by the next start.
+struct HostSource {
+    inner: WaylandSource<State>,
+    signal: LoopSignal,
+    loss: Arc<HostLoss>,
+}
+
+impl HostSource {
+    fn new(
+        conn: Connection,
+        queue: EventQueue<State>,
+        signal: LoopSignal,
+        loss: Arc<HostLoss>,
+    ) -> Self {
+        Self {
+            inner: WaylandSource::new(conn, queue),
+            signal,
+            loss,
+        }
+    }
+
+    /// Names the loss, marks it for `compositor::run`, and stops the loop.
+    /// The caller drops the dead source: the host fd is gone, and waking
+    /// into it again would only re-report the same failure.
+    fn lost(&self, error: &calloop::Error) {
+        self.loss.mark();
+        tracing::error!(
+            %error,
+            "lost the connection to the host compositor; stopping the session"
+        );
+        self.signal.stop();
+    }
+}
+
+impl EventSource for HostSource {
+    type Event = ();
+    type Metadata = EventQueue<State>;
+    type Ret = Result<usize, DispatchError>;
+    type Error = calloop::Error;
+
+    const NEEDS_EXTRA_LIFECYCLE_EVENTS: bool = true;
+
+    fn process_events<F>(
+        &mut self,
+        readiness: Readiness,
+        token: Token,
+        callback: F,
+    ) -> Result<PostAction, Self::Error>
+    where
+        F: FnMut(Self::Event, &mut Self::Metadata) -> Self::Ret,
+    {
+        match self.inner.process_events(readiness, token, callback) {
+            Ok(action) => Ok(action),
+            Err(error) => {
+                self.lost(&error);
+                Ok(PostAction::Remove)
+            }
+        }
+    }
+
+    fn register(
+        &mut self,
+        poll: &mut Poll,
+        token_factory: &mut TokenFactory,
+    ) -> calloop::Result<()> {
+        self.inner.register(poll, token_factory)
+    }
+
+    fn reregister(
+        &mut self,
+        poll: &mut Poll,
+        token_factory: &mut TokenFactory,
+    ) -> calloop::Result<()> {
+        self.inner.reregister(poll, token_factory)
+    }
+
+    fn unregister(&mut self, poll: &mut Poll) -> calloop::Result<()> {
+        self.inner.unregister(poll)
+    }
+
+    fn before_sleep(&mut self) -> calloop::Result<Option<(Readiness, Token)>> {
+        match self.inner.before_sleep() {
+            Ok(wakeup) => Ok(wakeup),
+            // The loop is stopping either way; no wakeup to ask for.
+            Err(error) => {
+                self.lost(&error);
+                Ok(None)
+            }
+        }
+    }
+
+    fn before_handle_events(&mut self, events: EventIterator<'_>) {
+        self.inner.before_handle_events(events);
+    }
+}
 
 /// The connection presenting scoot's own framebuffer as a window in a host
 /// compositor. Everything host-Wayland-specific lives here and in
@@ -390,8 +537,17 @@ pub(super) fn init_on(
         pending_axis: PendingAxis::default(),
     });
 
-    WaylandSource::new(conn, event_queue)
-        .insert(loop_handle)
+    // The loss flag lives on `State` beside `Host` itself, so
+    // `compositor::run` can tell a host-driven stop from any other way the
+    // loop ends once it has (see `HostLoss`).
+    let loss = Arc::new(HostLoss::default());
+    state.host_loss = Some(loss.clone());
+
+    loop_handle
+        .insert_source(
+            HostSource::new(conn, event_queue, state.loop_signal.clone(), loss),
+            |_, queue, state: &mut State| queue.dispatch_pending(state),
+        )
         .map_err(|error| format!("could not register the host connection: {error}"))?;
 
     Ok(())

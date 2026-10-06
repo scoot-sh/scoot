@@ -23,6 +23,20 @@ resize it and the desktop inside resizes with it; if a size cannot be
 allocated scoot logs it, stays where it was, and the host letterboxes
 the difference. Under `--tty` monitors plug and unplug live (below).
 
+Under `--nested` scoot is a client of the host as well as a server to
+its own windows. If the host connection breaks — the host exits or
+restarts — the session cannot present anything and no input can reach
+it, so scoot stops cleanly instead of lingering displayless: the log
+names the loss (`lost the connection to the host compositor`) and the
+process exits 1 with the same message. A supervisor (s6, systemd)
+restarts it into a fresh session once the host is back.
+
+> **Symptom:** `scoot msg` says `Connection refused` right after the
+> host went away. The nested session is gone — check its log for the
+> `lost the connection` line — not deaf. Restart the session (or let
+> the supervisor do it) once the host is back; a stale `scoot.sock`
+> file from the dead session is replaced on the next start.
+
 ## Which renderer draws the frames
 
 `--renderer pixman|gles` (config: `[renderer] backend`) picks what

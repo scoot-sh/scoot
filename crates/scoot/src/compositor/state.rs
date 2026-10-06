@@ -64,7 +64,7 @@ use super::input;
 use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
 use super::layer_shell;
-use super::nested::Host;
+use super::nested::{Host, HostLoss};
 use super::output_config::OutputEntries;
 use super::output_identity::OutputIdentity;
 use super::output_management::OutputManagement;
@@ -465,6 +465,12 @@ pub struct State {
     /// framebuffer as a window in a host compositor, and forwarding that
     /// window's input back into this seat. `None` under `--headless`.
     pub host: Option<Host>,
+    /// Set only under `--nested`, beside [`State::host`]: whether the host
+    /// connection has been lost (see `nested::HostLoss`). The host event
+    /// source marks it when the host goes away and stops the loop cleanly;
+    /// `compositor::run` reads it afterwards and turns the stop into an
+    /// honest failure. `None` anywhere but a nested session.
+    pub host_loss: Option<std::sync::Arc<HostLoss>>,
     /// Set only under `--tty`: the session, DRM device/surface and dumb
     /// buffers presenting the primary framebuffer on a real display, and
     /// the libinput context feeding this seat from real input devices.
@@ -1283,6 +1289,7 @@ impl State {
             renderer,
             backends: HashMap::new(),
             host: None,
+            host_loss: None,
             tty: None,
             appearance,
             decorations: Decorations::default(),

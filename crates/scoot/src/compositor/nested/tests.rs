@@ -149,6 +149,152 @@ fn a_queue_that_comes_back_to_the_current_size_drains_to_nothing() {
 }
 
 // -------------------------------------------------------------------------
+// Host loss (`HostSource`)
+// -------------------------------------------------------------------------
+
+use std::os::unix::net::UnixStream;
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
+
+use wayland_client::Connection;
+
+use super::{HostLoss, init_on};
+use crate::compositor::decorations::Appearance;
+use crate::compositor::state::ClientState;
+use crate::compositor::test_support::{Harness, capture_logs};
+
+/// How long the test waits for the host thread at each step. Generous: a
+/// loaded CI box dispatches slowly, and only a true wedge may fail it.
+const HOST_PATIENCE: Duration = Duration::from_secs(10);
+
+/// The host: a headless scoot on its own thread, dispatching until told to
+/// die -- the in-process shape of a parent compositor going away mid-session
+/// (see `docs/backlog/ipc/nested-ipc-socket-refuses.md`). Dying means
+/// dropping the whole harness, which closes the server end of the socket
+/// pair the nested session is connected through.
+fn host(
+    server_end: UnixStream,
+    ready: Sender<()>,
+    die: Receiver<()>,
+    died: Sender<()>,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let mut host: Harness<(), ()> = Harness::headless(Appearance::default(), 64);
+        host.state
+            .display_handle
+            .insert_client(server_end, Arc::new(ClientState::default()))
+            .expect("the nested session connects");
+        // The nested side blocks in a registry round trip inside `init_on`,
+        // so this has to arrive before it can proceed.
+        ready.send(()).expect("the test waits for the host");
+        loop {
+            if die.try_recv().is_ok() {
+                break;
+            }
+            host.settle();
+        }
+        drop(host);
+        died.send(()).expect("the test waits for the death");
+    })
+}
+
+/// Losing the host stops the session without failing the loop.
+///
+/// Before `HostSource`, the dead host connection surfaced as an event-loop
+/// error (`other error during loop operation: ...Broken pipe`), which killed
+/// `EventLoop::run` and with it the session -- while the control socket's
+/// file stayed behind with no listener, so every later `scoot msg` answered
+/// `Connection refused` against a compositor that was no longer there. Now
+/// the loss is named in the log, the loop stops cleanly, and `State`
+/// carries the loss for `compositor::run` to report honestly.
+#[test]
+fn losing_the_host_stops_the_session_without_failing_the_loop() {
+    let (_, logs) = capture_logs(|| {
+        let (server_end, client_end) = UnixStream::pair().expect("a socket pair");
+        let (ready_tx, ready_rx) = channel();
+        let (die_tx, die_rx) = channel();
+        let (died_tx, died_rx) = channel();
+        let thread = host(server_end, ready_tx, die_rx, died_tx);
+        ready_rx
+            .recv_timeout(HOST_PATIENCE)
+            .expect("the host comes up");
+
+        let mut nested: Harness<(), ()> = Harness::headless(Appearance::default(), 64);
+        let conn = Connection::from_socket(client_end).expect("a host connection");
+        let handle = nested.event_loop.handle();
+        init_on(handle, &mut nested.state, conn, 64, 64).expect("the nested backend comes up");
+        assert!(
+            !nested
+                .state
+                .host_loss
+                .as_ref()
+                .expect("a nested session names its loss flag")
+                .lost(),
+            "nothing is lost while the host is alive"
+        );
+
+        // The parent goes away. Queuing a frame first makes sure there is
+        // host-bound traffic in flight, so the loss surfaces through the
+        // flush path too rather than only through the read end.
+        die_tx.send(()).expect("the host dies on request");
+        died_rx
+            .recv_timeout(HOST_PATIENCE)
+            .expect("the host stays dead");
+        thread.join().expect("the host thread ends");
+        nested.state.request_render();
+        nested.state.render();
+
+        // Every dispatch stays `Ok`: the loss is mapped, never loop-fatal.
+        // (Before the mapping, the first dispatch surfacing the dead
+        // connection returned `Err`, which is what this asserts against.)
+        let deadline = Instant::now() + HOST_PATIENCE;
+        loop {
+            let dispatched = nested
+                .event_loop
+                .dispatch(Some(Duration::from_millis(5)), &mut nested.state);
+            assert!(
+                dispatched.is_ok(),
+                "a dead host must not fail the loop: {dispatched:?}"
+            );
+            if nested
+                .state
+                .host_loss
+                .as_ref()
+                .expect("a nested session names its loss flag")
+                .lost()
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the loss never surfaced within {HOST_PATIENCE:?}"
+            );
+        }
+    });
+    assert!(
+        logs.contains("lost the connection to the host compositor"),
+        "the loss is named in the log:\n{logs}"
+    );
+    assert!(
+        !logs.contains("other error during loop operation"),
+        "no calloop-internal jargon escapes:\n{logs}"
+    );
+}
+
+/// The flag itself: unset at rest, set once marked. Same-thread either way
+/// (marked in dispatch, read after the loop), so one mark is visible
+/// immediately -- no eventual-consistency window for the loop to outrun.
+#[test]
+fn host_loss_marks_once_and_stays() {
+    let loss = HostLoss::default();
+    assert!(!loss.lost());
+    loss.mark();
+    assert!(loss.lost());
+}
+
+// -------------------------------------------------------------------------
 // Scroll buffering (`PendingAxis`)
 // -------------------------------------------------------------------------
 
