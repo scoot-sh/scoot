@@ -1,9 +1,10 @@
 ---
 title: "Theme follow-ups: upstream gtk/qt win, QT_PLUGIN_PATH composes, bar font from the look"
-status: "open"
-area: "packaging"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-06"
 ---
 
 # Theme follow-ups: upstream gtk/qt win, QT_PLUGIN_PATH composes, bar font from the look
@@ -63,3 +64,38 @@ home-manager master source (`modules/misc/gtk/gtk3.nix`, `gtk4.nix`,
 Live greeter/login proof (eval-level behaviors; no session needed);
 changing what any look looks like; per-key dconf merging beyond the
 `color-scheme` leaf.
+
+## Resolution
+
+Landed in the `fix(nix)` PR below (review findings 1-3 from #474):
+
+1. `nix/modules/theme-home.nix`: per-path `gtkOwned` / `gtkCssOwned` /
+   `gtkColorSchemeOwned` / `qtConfOwned` guards (upstream HM paths
+   verified against home-manager master). Pins: `gtk.enable` owns the
+   inis while css+dconf stay themed (`hmThemeGtk`, incl. a merged
+   third-party dconf leaf); `extraCss` owns the css (`hmThemeGtkCss`);
+   `colorScheme` owns the dconf leaf (`hmThemeGtkScheme`);
+   `qt.enable`+`qt6ctSettings` owns `qt6ct.conf` while the scheme stays
+   (`hmThemeQt`); bare `qt.enable` owns nothing (`hmThemeQtBare`).
+2. Same file: `home.sessionSearchVariables.QT_PLUGIN_PATH` carries the
+   theme plugin dirs (shells prepend them before `$QT_PLUGIN_PATH`);
+   the `mkDefault` manager-env value stands for the no-user case.
+   Pins: with a user value (both levels) and without
+   (`hmThemeUserPluginPath`, `hmThemeUserManagerPluginPath`, `hmTheme`).
+3. `nix/modules/scootbar.nix`: bar font package reads
+   `theme.fonts.uiPackage` (theme default when unset). Pins: setting
+   inequality plus shell check 13n resolving the font into a stand-in
+   override package (`hmThemeBarUiPkg`).
+4. Docs: desktop App-theme section (upstream-ownership rule,
+   `QT_PLUGIN_PATH` composition, Qt symptom) and the theming page
+   (precedence + session variables).
+
+Evidence: `nix build .#checks.aarch64-darwin.scoot-modules` (Mac),
+`nix build .#checks.aarch64-linux.scoot-modules` +
+`.#checks.aarch64-linux.scootbar-modules` + `.#docs-site` (Asahi M2),
+`nix build .#docs-site` (Mac), repo-wide `nix fmt --check`,
+`scripts/backlog check` (only the 3 known pre-existing problems).
+Failing-first: full-file eval aborts on the new gtk pin with the
+modules reverted; a minimal probe shows the qt `source` conflict and
+the missing search list pre-fix, both clean post-fix; reverting only
+`scootbar.nix` aborts on the bar-font inequality pin.

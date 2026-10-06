@@ -32,6 +32,11 @@ you download, never a committed file.)
 
 Every row is a default a value you set wins over per key, and Stylix
 wins over where present (your explicit value > Stylix > the look).
+An upstream home-manager module owns the paths it actually writes:
+`gtk.enable` owns both `settings.ini` files (its `extraCss`/theme
+the `gtk.css` files, its `colorScheme` the dconf leaf) and
+`qt.enable` with `qt6ctSettings` owns `qt6ct.conf` — the look's file
+stays out of each owned path while the rest stays themed.
 Each example is one directory with the same shape — `scoot.toml` (the
 compositor: layout, appearance, binds), `bar.toml` (the bar),
 `regreet.css` (the login screen), plus terminal and tool configs that
@@ -60,6 +65,14 @@ follow the palette:
 three targets are inert for it; `music-desk` ships a btop config with
 no theme file; `vinyl-sunset` pairs no greeter backdrop (its
 illustration cannot be committed or auto-fetched under its license).
+
+Two session variables carry the theme into apps:
+`QT_QPA_PLATFORMTHEME=qt6ct` (reads the config above) and
+`QT_PLUGIN_PATH` (the qt6ct and Adwaita-Qt plugin dirs). A value you
+set for the user session wins whole; shells compose instead — the
+theme's plugin dirs ride `home.sessionSearchVariables`, which
+home-manager prepends before your own `$QT_PLUGIN_PATH` at login —
+so put extra plugin dirs there to keep both.
 
 Per-target opt-out is Stylix-style, under one namespace, one flag per
 themed piece (every target defaults on) — see the [option
