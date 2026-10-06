@@ -9,9 +9,10 @@
     "build": "astro build",
     "preview": "astro preview",
     "check": "node ./scripts/check-llms.mjs",
+    "check-md-links": "node ./scripts/check-md-links.mjs",
     "test-snippets": "node ./scripts/test-snippets.mjs",
     "test-nix": "node ./scripts/check-nix.mjs",
-    "verify": "astro build && node ./scripts/check-llms.mjs && node ./scripts/test-snippets.mjs && node ./scripts/check-nix.mjs"
+    "verify": "astro build && node ./scripts/check-llms.mjs && node ./scripts/check-md-links.mjs && node ./scripts/test-snippets.mjs && node ./scripts/check-nix.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "0.42.5",

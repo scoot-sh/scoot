@@ -1,6 +1,13 @@
 import starlight from '@astrojs/starlight';
 import starlightLlmsTxt from 'starlight-llms-txt';
 import { defineConfig } from 'astro/config';
+import { mdLinksToPages } from './scripts/md-links.mjs';
+
+// Post-build `.md` → page rewrite and its gate: see scripts/md-links.mjs
+// and scripts/check-md-links.mjs. This must stay a post-build HTML pass,
+// not a remark/rehype plugin: the llms.txt bundles render through the same
+// markdown pipeline, and any pipeline rewrite would leak into them, where
+// agents must keep following Markdown (`.md`) links.
 
 // `site` has to be absolute: the llms.txt bundles link every page with a
 // full URL (an agent handed the file as a blob has no base to resolve
@@ -26,6 +33,7 @@ export default defineConfig({
   site,
   base,
   integrations: [
+    mdLinksToPages(),
     starlight({
       title: 'scoot',
       description:

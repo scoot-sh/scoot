@@ -2,12 +2,16 @@
 #
 # `fetchPnpmDeps` vendors the locked dependencies into the store (hash-pinned,
 # no network at build time beyond that hash); `pnpmConfigHook` installs them
-# offline; then `astro build` renders the static site and the three gate scripts
-# run inside the sandbox: `check-llms` (llms.txt covers every page, every
-# `.md` twin exists), `test-snippets` (fenced toml/sh blocks are sound) and
-# `check-nix` (`nix-instantiate --parse` over every fenced nix block, so the
-# flake/module snippets cannot rot at the syntax level; evaluation is pinned
-# in nix/tests.nix, which `nix flake check` runs).
+# offline; then `astro build` renders the static site (including the
+# `mdLinksToPages` integration, which rewrites relative `.md` links to pages
+# in `*.html` only) and the four gate scripts run inside the sandbox:
+# `check-llms` (llms.txt covers every page, every `.md` twin exists),
+# `check-md-links` (no built HTML page links a raw `.md` twin, and every
+# rewritten link resolves to a page in `dist/`), `test-snippets` (fenced
+# toml/sh blocks are sound) and `check-nix` (`nix-instantiate --parse` over
+# every fenced nix block, so the flake/module snippets cannot rot at the
+# syntax level; evaluation is pinned in nix/tests.nix, which
+# `nix flake check` runs).
 # `$out` is the static `dist/` tree, ready for GitHub Pages.
 #
 # Reproducing the `pnpmDeps.hash` below: set it to `""`, run
@@ -59,6 +63,7 @@ stdenv.mkDerivation (finalAttrs: {
 
     pnpm build
     pnpm check
+    pnpm check-md-links
     pnpm test-snippets
     pnpm test-nix
 
