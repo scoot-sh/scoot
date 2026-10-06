@@ -430,6 +430,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [`graphical-session.target` is reached before the session has a display](./resolved/graphical-session-after-display-done.md) (high) — RESOLVED 2026-10-05 in #431: the service pulled the target in at fork time, so `ConditionEnvironment=WAYLAND_DISPLAY` units (swayidle) skipped every login; a launcher-started `scoot-session.target` now gates the target on the display import
 - [Desktop profile user units start in every graphical session](./resolved/desktop-profile-units-leak-done.md) (high) — RESOLVED 2026-10-05 in #454: idle, mako, clipboard watchers and the profile-managed bar were `WantedBy` `graphical-session.target`, so they started in GNOME/KDE/niri/Hyprland too; bound to `scoot-session.target`, which the home-manager side installs itself
 - [Fourth example look: moonrise (chill)](./resolved/look-moonrise-done.md) (medium) — RESOLVED 2026-10-05 in #437: the night-sky Unsplash illustration as a registered `desktop.look` with the full example set
+- [Each greeter session leaves two dbus-daemons and a closing logind session behind](./packaging/greeter-session-leak.md) (medium, filed 2026-10-05): 85 dead greeter sessions on the M2 after 7 days; end the greeter's processes with its session, greeter user only
 - [kunifiedpush-distributor runs in minimal sessions at 15 MB PSS](./packaging/kunifiedpush-sessions.md) (low, filed 2026-10-05): the five-desktop idle benchmark; mask the Push portal out of the session portal config if no backend hard-requires it
 - [Remove the standalone scootctl client](./resolved/remove-scootctl-done.md) (medium) — RESOLVED 2026-10-05 in #464: `scoot msg` is the only client; no compatibility link
 
@@ -586,10 +587,10 @@ be revisited.
 - [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
 - [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
 - [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
-- [Pointer-button presses don't activate browser modal buttons, and virtual button hold doesn't persist across IPC calls](./core/pointer-button-popups.md)
-  — high, filed 2026-10-05 (f459 live proof): clicks reach web content
-  exactly but never fire Chrome's picker Share or Firefox's Allow, and a
-  press held across IPC calls never drags
+- [Pointer-button presses don't activate browser modal buttons, and virtual button hold doesn't persist across IPC calls](./resolved/pointer-button-popups-done.md)
+  — RESOLVED 2026-10-05, not a defect: a held press across IPC calls drags
+  and popup buttons activate (headless proof); the filing screenshots showed
+  a Share button disabled behind an open chooser and clicks aimed at the page
 - [The first pointer move after a client ends a popup grab lands at the old position](./resolved/pointer-motion-after-popup-grab-end-done.md)
   — RESOLVED 2026-10-03 in #396: `settle_popup_grab` unsets the seat pointer grab (serial-guarded), mirroring the dismiss path.
 - [A real maximize](./resolved/maximize-done.md)

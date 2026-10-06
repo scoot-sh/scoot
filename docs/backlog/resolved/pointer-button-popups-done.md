@@ -1,9 +1,10 @@
 ---
 title: "Pointer-button presses don't activate browser modal buttons, and virtual button hold doesn't persist across IPC calls"
-status: "open"
-area: "core"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-05"
 ---
 
 # Pointer-button presses don't activate browser modal buttons, and virtual button hold doesn't persist across IPC calls
@@ -83,3 +84,29 @@ What fails:
 - Chrome's first-run and Firefox's broken default profile for a fresh
   user (worked around live with keyboard and `--profile`): setup
   papercuts, not pointer bugs.
+
+## Resolution: not a defect (2026-10-05)
+
+Investigated without a code change; neither failure reproduces, and the
+filing evidence explains both without a compositor bug.
+
+- **Hold across IPC calls works.** Four separate `scoot msg` calls
+  (`pointer move`, `button left press`, `pointer move`, `button left
+  release`) in a headless scoot on the M2 delivered `enter → button
+  press → motion → button release` to foot with increasing serials
+  (`WAYLAND_DEBUG=1`), and the screenshot diff shows foot's selection
+  highlight spanning exactly the drag range.
+- **Popup buttons activate.** A `pointer click` on a button in Firefox's
+  sync panel (an `xdg_popup`) entered the popup surface and navigated.
+- **The filing screenshots were misread.** In `f459-chrome6.png`
+  Chrome's Share is greyed out because the portal chooser is still open
+  and unconfirmed above it; Tab+Return worked because it confirmed the
+  chooser first. In `f459-ff2.png` the cursor is on the page's own
+  "Share screen" button, which logged both clicks; the clicks never
+  aimed at "Allow".
+- Code path: IPC (`compositor/ipc.rs`) and `--tty` libinput buttons
+  both call `State::pointer_button`, so headless delivery is the tty
+  delivery.
+
+Reopen with a reproduction: a `WAYLAND_DEBUG=1` client log and a
+screenshot whose cursor sits on the button that failed.
