@@ -2530,6 +2530,12 @@ let
     package = fakePkg;
     desktop.audio.enable = true;
   };
+  osAudioTimeout = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.audio.osd.timeoutMs = 3000;
+  };
   osAudioNoPkg = evalNixos {
     enable = true;
     package = fakePkg;
@@ -7247,6 +7253,13 @@ let
     # ...standalone (no profile): the slot runs...
     (
       assert allAssertionsHold osAudioStandalone.config;
+      true
+    )
+    # ...and the shared `osd.timeoutMs` exists on the NixOS side too (the
+    # nested `osd` is merged, not replaced by the package option)...
+    (
+      assert allAssertionsHold osAudioTimeout.config;
+      assert osAudioTimeout.config.programs.scoot.desktop.audio.osd.timeoutMs == 3000;
       true
     )
     # Refusals: the slot with no OSD or dump tool to install (each

@@ -461,15 +461,20 @@ in
       # names the same tools. Merged here for the same
       # one-declaration reason as above. Linux-only: off Linux each
       # defaults to null, which the assertions below refuse loudly.
+      # `osd` is re-merged, not replaced: a shallow `//` would drop the
+      # shared `osd.timeoutMs` from the NixOS-side declaration (the same
+      # reason the idle slot re-merges `mediaInhibit` and `lock`).
       audio = desktop.options.audio // {
-        osd.package = lib.mkOption {
-          type = lib.types.nullOr lib.types.package;
-          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wob or null else null;
-          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.wob or null else null";
-          description = ''
-            The on-screen display to install system-wide (wob). Null
-            installs nothing. Linux-only: null off Linux.
-          '';
+        osd = desktop.options.audio.osd // {
+          package = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wob or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.wob or null else null";
+            description = ''
+              The on-screen display to install system-wide (wob). Null
+              installs nothing. Linux-only: null off Linux.
+            '';
+          };
         };
 
         dumpPackage = lib.mkOption {
