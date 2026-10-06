@@ -37,18 +37,23 @@
 //! ## Backends
 //!
 //! The ramp is accepted on every backend. It is *applied* only
-//! under `--tty`, where there is a real CRTC gamma LUT to push it to (see
-//! [`Tty::set_gamma_ramp`](super::tty::Tty::set_gamma_ramp)). Under
-//! `--headless`/`--nested` there is no hardware LUT: the request succeeds
-//! but nothing on screen changes -- and an IPC
-//! screenshot reads the framebuffer, which is pre-LUT, so it shows the
-//! unmodified frame either way. `site/src/content/docs/scoot/protocols.md` says this where a user
+//! under `--tty`, where there is real CRTC color hardware to push it to
+//! (see [`Tty::set_gamma_ramp`](super::tty::Tty::set_gamma_ramp)): the
+//! CRTC gamma LUT where one exists, else the CRTC `CTM` blob property,
+//! which carries the ramp's white endpoints as a diagonal color matrix --
+//! the Apple DCP exposes no LUT but does expose `CTM`, so the night light
+//! works there too. Under `--headless`/`--nested` there is no color
+//! hardware at all: the request succeeds but nothing on screen changes --
+//! and an IPC screenshot reads the framebuffer, which is pre-LUT and
+//! pre-CTM, so it shows the unmodified frame either way.
+//! `site/src/content/docs/scoot/protocols.md` says this where a user
 //! will find it.
 //!
 //! Any DRM failure while applying (no master after a VT switch, a driver
-//! that refuses the size) retires the control with a `failed` event and the
-//! session keeps running -- per the protocol, "setting the gamma tables
-//! failed" invalidates the object, it does not take down the compositor.
+//! that refuses the size, neither LUT nor `CTM` on the CRTC) retires the
+//! control with a `failed` event and the session keeps running -- per the
+//! protocol, "setting the gamma tables failed" invalidates the object, it
+//! does not take down the compositor.
 //!
 //! Lock-session interaction: none. Gamma is output-level hardware state, not
 //! a surface, so a control keeps working while the session is locked --
