@@ -166,6 +166,7 @@ in
     ./audio-home.nix
     ./nightlight-home.nix
     ./power-home.nix
+    ./displays-home.nix
     ./keys-home.nix
     ./theme-home.nix
   ];
@@ -446,6 +447,7 @@ in
         || cfg.desktop.clipboard.enable
         || cfg.desktop.audio.enable
         || cfg.desktop.nightlight.enable
+        || cfg.desktop.displays.enable
       )
       {
         xdg.configFile."systemd/user/scoot-session.target".source =

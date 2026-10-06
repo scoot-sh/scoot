@@ -1557,9 +1557,172 @@ in
       }) keymap;
     };
     # Output policy (scale, placement) from the connected set.
-    displays = configSlot {
-      child = "desktop-displays";
-      does = "output policy";
+    # Filled by the `desktop-displays` child: scoot-native arrangement
+    # profiles (kanshi-class matching, without kanshi: stock kanshi gates
+    # its `exec` hooks on the output-management `succeeded` reply, which
+    # scoot never sends -- its write half answers every configuration
+    # with `failed` -- so kanshi matches and then fails every profile;
+    # making the protocol writable would be atomic-modeset surgery across
+    # three backends for a packaging ticket, while subscribe/outputs/
+    # reload/output-power already give matching plus applying). Each
+    # profile names the exact connected set it answers (connector names,
+    # the same key `[[outputs]]` matches on -- make and model are not
+    # visible over scoot's IPC, so they cannot key a profile), with a
+    # scale, an optional mode and optional power-off per output. The
+    # watcher (`displays-home.nix`) re-matches on every output event and
+    # applies through the live config (scale re-applies on reload, a mode
+    # waits for the next login) plus `output-power`. Each `package`
+    # lives beside this in the side modules, which is also where its
+    # default lives; everything here is plain values, so this file
+    # stays `lib`-only.
+    #
+    # On with the profile (still individually disable-able at plain
+    # priority, the way the clipboard slot works); without it, `enable`
+    # works standalone (unthemed: there is nothing the look themes
+    # here).
+    displays = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Match the connected output set and apply the profile's scale
+          and power: the watcher behind `profiles` re-matches on every
+          output event (and once at session start) and applies through
+          the live config plus `output-power`. Without it the outputs
+          keep whatever `settings` (or the compositor defaults) say.
+        '';
+      };
+
+      # Arrangement profiles, first match wins, in list order. A profile
+      # matches when the connected connector-name set is exactly its
+      # `outputs` (no subset rule: "this monitor set means this layout",
+      # so a typo'd extra monitor falls through instead of half
+      # applying). No match clears the watcher's managed config block
+      # again (the session falls back to its static config) and leaves
+      # power alone.
+      profiles = lib.mkOption {
+        type = lib.types.listOf (
+          lib.types.submodule {
+            options = {
+              # The profile's name, as `scoot-displays status` prints it
+              # and the watcher logs it. Unique across `profiles`.
+              name = lib.mkOption {
+                type = lib.types.str;
+                example = "docked";
+                description = ''
+                  The profile's name (unique across `profiles`).
+                '';
+              };
+
+              # The exact connected set this profile answers, as
+              # connector names (`scoot msg outputs` lists them:
+              # `eDP-1`, `DP-1` on real hardware, `headless-N`
+              # headless). Non-empty, and unique across `profiles`
+              # (two profiles for one set would never reach the
+              # second).
+              outputs = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                example = [
+                  "eDP-1"
+                  "DP-1"
+                ];
+                description = ''
+                  The exact connected connector-name set this profile
+                  answers. Non-empty, and unique across `profiles`.
+                '';
+              };
+
+              # The scale each named output runs at under this profile
+              # (the `[[outputs]]` entry's `scale`, 0.5 to 4.0 like the
+              # compositor's own range). Applied live through
+              # `scoot msg reload`. Every key names an output in
+              # `outputs` (a scale for an output this profile never
+              # matches is a typo, refused here). An output with no
+              # entry keeps whatever scale it has.
+              scale = lib.mkOption {
+                type = lib.types.attrsOf lib.types.number;
+                default = { };
+                example = {
+                  "DP-1" = 1.0;
+                  "eDP-1" = 2.0;
+                };
+                description = ''
+                  The scale each named output runs at (0.5 to 4.0),
+                  applied live on reload. Every key names an output in
+                  `outputs`.
+                '';
+              };
+
+              # The mode size each named output is driven at, as `WxH`
+              # (the `[[outputs]]` entry's `mode`, e.g. `"3840x2160"`).
+              # Restart-noted, not live: a reload refuses a changed
+              # mode (the compositor never modesets a running output),
+              # so a mode set here lands at the next login -- the
+              # watcher says so in the journal when it writes one.
+              # Every key names an output in `outputs`.
+              mode = lib.mkOption {
+                type = lib.types.attrsOf lib.types.str;
+                default = { };
+                example = {
+                  "DP-1" = "3840x2160";
+                };
+                description = ''
+                  The mode size each named output is driven at, as
+                  `WxH`. Takes effect at the next login (a reload
+                  refuses modes). Every key names an output in
+                  `outputs`.
+                '';
+              };
+
+              # Outputs to power off under this profile (through
+              # `scoot msg output-power`, live). Empty disables
+              # nothing: no output ever powers off unless named here.
+              # Every entry names an output in `outputs`. Outputs in
+              # the set but not here are powered back on when the
+              # profile applies (so a stale off from another profile
+              # never lingers); with no matching profile power is
+              # left alone.
+              disabled = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+                example = [ "eDP-1" ];
+                description = ''
+                  Outputs to power off under this profile (live).
+                  Empty disables nothing. Every entry names an output
+                  in `outputs`.
+                '';
+              };
+            };
+          }
+        );
+        default = [ ];
+        example = [
+          {
+            name = "docked";
+            outputs = [
+              "eDP-1"
+              "DP-1"
+            ];
+            scale = {
+              "DP-1" = 1.0;
+              "eDP-1" = 2.0;
+            };
+            disabled = [ ];
+          }
+          {
+            name = "undocked";
+            outputs = [ "eDP-1" ];
+            scale = {
+              "eDP-1" = 2.0;
+            };
+          }
+        ];
+        description = ''
+          Arrangement profiles, first match wins in list order. Empty
+          matches nothing (the watcher stays idle: no config block, no
+          power changes).
+        '';
+      };
     };
     # Input-method wiring, off by default like everything here.
     inputMethod = configSlot {

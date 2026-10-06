@@ -2852,6 +2852,246 @@ let
     battery = null;
   };
 
+  # --- display profiles (`programs.scoot.desktop.displays`) evaluations ---
+  #
+  # The profile: the slot on (it rides with the profile), two profiles
+  # (docked with a power-off and a mode, undocked), the watcher and its
+  # profiles file installed, the unit bound to the session scope.
+  hmDisplays = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [
+          "eDP-1"
+          "DP-1"
+        ];
+        scale = {
+          "DP-1" = 1.0;
+          "eDP-1" = 2.0;
+        };
+        mode = {
+          "DP-1" = "3840x2160";
+        };
+        disabled = [ "eDP-1" ];
+      }
+      {
+        name = "undocked";
+        outputs = [ "eDP-1" ];
+        scale = {
+          "eDP-1" = 2.0;
+        };
+      }
+    ];
+  };
+  # ...the slot off (the profile turns it on; the switch back off
+  # disables just its half: no watcher, no profiles file, no unit).
+  hmDisplaysOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.displays.enable = false;
+  };
+  # ...standalone (no profile): the watcher and its (empty) profiles
+  # file, with the session scope installed for the unit.
+  hmDisplaysStandalone = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+  };
+  # ...with no profiles (accepted and idle: the watcher matches
+  # nothing, writes nothing, powers nothing).
+  hmDisplaysNoProfiles = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.displays.enable = true;
+  };
+  # Refusals: a static `[[outputs]]` beside the watcher (pinned by
+  # message in `_displaysPins`)...
+  hmDisplaysStaticOutputs = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    settings.outputs = [
+      {
+        name = "DP-1";
+        scale = 1.0;
+      }
+    ];
+  };
+  # ...a blank profile name, an empty connected set, and a blank
+  # output name...
+  hmDisplaysBlankName = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "  ";
+        outputs = [ "eDP-1" ];
+      }
+    ];
+  };
+  hmDisplaysEmptySet = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "nowhere";
+        outputs = [ ];
+      }
+    ];
+  };
+  hmDisplaysBlankOutput = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [ "" ];
+      }
+    ];
+  };
+  # ...a scale outside the compositor's range, a mode outside `WxH`,
+  # and a mode past the largest output size...
+  hmDisplaysBadScale = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [ "DP-1" ];
+        scale = {
+          "DP-1" = 8.0;
+        };
+      }
+    ];
+  };
+  hmDisplaysBadMode = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [ "DP-1" ];
+        mode = {
+          "DP-1" = "wide";
+        };
+      }
+    ];
+  };
+  hmDisplaysHugeMode = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [ "DP-1" ];
+        mode = {
+          "DP-1" = "100000x100";
+        };
+      }
+    ];
+  };
+  # ...a scale, a mode and a disable outside the profile's own set...
+  hmDisplaysScaleOutside = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [ "DP-1" ];
+        scale = {
+          "eDP-1" = 2.0;
+        };
+      }
+    ];
+  };
+  hmDisplaysModeOutside = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [ "DP-1" ];
+        mode = {
+          "eDP-1" = "1920x1080";
+        };
+      }
+    ];
+  };
+  hmDisplaysDisableOutside = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [ "DP-1" ];
+        disabled = [ "eDP-1" ];
+      }
+    ];
+  };
+  # ...two profiles alike by name, and two alike by connected set...
+  hmDisplaysDupName = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [ "DP-1" ];
+      }
+      {
+        name = "docked";
+        outputs = [ "eDP-1" ];
+      }
+    ];
+  };
+  hmDisplaysDupSet = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [ "DP-1" ];
+      }
+      {
+        name = "also-docked";
+        outputs = [ "DP-1" ];
+      }
+    ];
+  };
+  # The slot on, running the behavior fixtures below: the watcher is
+  # the real `scoot-displays` (found by derivation name like the
+  # keymap scripts), `scoot` a stub on PATH (the evaluation leaves
+  # `package` null, so the script calls the bare name).
+  hmDisplaysScriptTest = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [
+          "eDP-1"
+          "DP-1"
+        ];
+        scale = {
+          "DP-1" = 1.0;
+          "eDP-1" = 2.0;
+        };
+        mode = {
+          "DP-1" = "3840x2160";
+        };
+        disabled = [ "eDP-1" ];
+      }
+      {
+        name = "undocked";
+        outputs = [ "eDP-1" ];
+        scale = {
+          "eDP-1" = 2.0;
+        };
+      }
+    ];
+  };
+  displaysWatcher = slotScriptBin hmDisplaysScriptTest "scoot-displays";
+  displaysProfilesJson = hmDisplaysScriptTest.config.xdg.configFile."scoot/displays.json".source;
+
   # --- audio (`programs.scoot.desktop.audio`) evaluations ---
   #
   # The profile with a look: the whole slot on (the OSD and its unit,
@@ -5405,8 +5645,11 @@ let
       assert hmDesk.config.programs.scoot.desktop.keys.enable;
       true
     )
+    # ...and the output policy (a laptop moving between a desk
+    # monitor and no monitor needs its scale to follow: the watcher
+    # re-matches the connected set on every output event).
     (
-      assert !hmDesk.config.programs.scoot.desktop.displays.enable;
+      assert hmDesk.config.programs.scoot.desktop.displays.enable;
       true
     )
     (
@@ -5447,7 +5690,7 @@ let
     # policy's five tools, the notification daemon, the launcher
     # package and its script, the clipboard slot's three, its picker
     # script, the capture slot's four, the audio slot's OSD and its
-    # four scripts, the night light's tool, the agent and the
+    # four scripts, the displays watcher, the night light's tool, the agent and the
     # secrets client, and the keymap's three,
     # and the theme's seven (cursor, icon, all three faces, qt6ct and
     # its Adwaita style), all on with the profile).
@@ -5491,6 +5734,7 @@ let
           (slotScriptDrv hmDeskLookMusic "scoot-volume")
           (slotScriptDrv hmDeskLookMusic "scoot-brightness")
           (slotScriptDrv hmDeskLookMusic "scoot-audio-sink")
+          (slotScriptDrv hmDeskLookMusic "scoot-displays")
           pkgs.wlsunset
           pkgs.polkit_gnome
           pkgs.libsecret
@@ -6304,17 +6548,18 @@ let
         hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
       true
     )
-    # ...exactly the thirty-seven packages installed (swayidle, dim,
+    # ...exactly the thirty-eight packages installed (swayidle, dim,
     # off, locker, inhibitor, mako, the clipboard slot's three, its
     # picker script, the launcher package and its script, the capture
     # slot's four tools and its three scripts, the night light's
-    # tool, the OSD and its four scripts, the agent and the secrets
+    # tool, the OSD and its four scripts, the displays watcher, the
+    # agent and the secrets
     # client, the theme's seven -- no scoot package
     # set here, so nothing else -- plus the keymap's brightness,
     # volume and media tools; `brightnessctl` and `fuzzel` each serve
     # two features, so each appears twice).
     (
-      assert builtins.length hmIdle.config.home.packages == 37;
+      assert builtins.length hmIdle.config.home.packages == 38;
       true
     )
     (
@@ -6344,6 +6589,7 @@ let
           (slotScriptDrv hmIdle "scoot-volume")
           (slotScriptDrv hmIdle "scoot-brightness")
           (slotScriptDrv hmIdle "scoot-audio-sink")
+          (slotScriptDrv hmIdle "scoot-displays")
           pkgs.wlsunset
           pkgs.polkit_gnome
           pkgs.libsecret
@@ -6391,6 +6637,7 @@ let
           "mako"
           "scoot-clipboard-primary-store"
           "scoot-clipboard-store"
+          "scoot-displays"
           "scoot-nightlight"
           "scoot-notify-sync"
           "scoot-osd"
@@ -6431,6 +6678,7 @@ let
           (slotScriptDrv hmIdleOff "scoot-volume")
           (slotScriptDrv hmIdleOff "scoot-brightness")
           (slotScriptDrv hmIdleOff "scoot-audio-sink")
+          (slotScriptDrv hmIdleOff "scoot-displays")
           pkgs.wlsunset
           pkgs.polkit_gnome
           pkgs.libsecret
@@ -6444,7 +6692,7 @@ let
     # leaves (no config, no package, four policy tools plus mako, the
     # clipboard slot's three, its picker script, the launcher package
     # and its script, the capture slot's four, the audio slot's OSD
-    # and its four scripts, the night light's tool, the agent and
+    # and its four scripts, the displays watcher, the night light's tool, the agent and
     # the secrets client, and the keymap's three
     # left).
     (
@@ -6460,13 +6708,14 @@ let
       true
     )
     (
-      assert builtins.length hmLockOff.config.home.packages == 29;
+      assert builtins.length hmLockOff.config.home.packages == 30;
       true
     )
     # The inhibitor off: the policy without the audio hold (four
     # policy tools plus mako, the clipboard slot's three, its picker
     # script, the launcher package and its script, the capture slot's
-    # four, the audio slot's OSD and its four scripts, the night
+    # four, the audio slot's OSD and its four scripts, the displays
+    # watcher, the night
     # light's tool, the agent and the secrets client, and the
     # keymap's three).
     (
@@ -6478,7 +6727,7 @@ let
       true
     )
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 29;
+      assert builtins.length hmInhibitOff.config.home.packages == 30;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -10180,7 +10429,7 @@ let
     # ...beside the profile's and the policy's packages (scoot, the
     # five idle tools, mako, the clipboard slot's three, the launcher
     # package, the capture slot's four tools, the audio slot's OSD and
-    # its four scripts, the five slot scripts, the agent and the
+    # its four scripts, the displays watcher, the five slot scripts, the agent and the
     # secrets client
     # and the keymap's three)...
     (
@@ -10211,6 +10460,7 @@ let
           (slotScriptDrv hmKeys "scoot-volume")
           (slotScriptDrv hmKeys "scoot-brightness")
           (slotScriptDrv hmKeys "scoot-audio-sink")
+          (slotScriptDrv hmKeys "scoot-displays")
           pkgs.wlsunset
           pkgs.polkit_gnome
           pkgs.libsecret
@@ -10413,6 +10663,7 @@ let
           (slotScriptDrv hmKeysOff "scoot-volume")
           (slotScriptDrv hmKeysOff "scoot-brightness")
           (slotScriptDrv hmKeysOff "scoot-audio-sink")
+          (slotScriptDrv hmKeysOff "scoot-displays")
           pkgs.wlsunset
           pkgs.polkit_gnome
           pkgs.libsecret
@@ -11308,6 +11559,245 @@ let
     )
   ];
 
+  _displaysPins = lib.optionals isLinux [
+    # Home-manager: every assertion holds, with the profile,
+    # standalone, or with no profiles...
+    (
+      assert allAssertionsHold hmDisplays.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmDisplaysStandalone.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmDisplaysNoProfiles.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmDisplaysScriptTest.config;
+      true
+    )
+    # ...the slot on with the profile (still disable-able: off is
+    # just its half missing)...
+    (
+      assert hmDisplays.config.programs.scoot.desktop.displays.enable;
+      true
+    )
+    # ...the two profiles as configured...
+    (
+      assert
+        hmDisplays.config.programs.scoot.desktop.displays.profiles
+        == hmDisplaysScriptTest.config.programs.scoot.desktop.displays.profiles;
+      true
+    )
+    (
+      assert (builtins.head hmDisplays.config.programs.scoot.desktop.displays.profiles).name == "docked";
+      true
+    )
+    # ...the watcher installed, the profiles file rendered beside the
+    # unit that runs it...
+    (
+      assert lib.any (p: (p.name or "") == "scoot-displays") hmDisplays.config.home.packages;
+      true
+    )
+    (
+      assert hmDisplays.config.xdg.configFile ? "scoot/displays.json";
+      true
+    )
+    (
+      assert
+        builtins.fromJSON (builtins.readFile hmDisplays.config.xdg.configFile."scoot/displays.json".source)
+        == builtins.fromJSON (builtins.readFile displaysProfilesJson);
+      true
+    )
+    # ...the unit bound to the session scope (wanted by it, part of
+    # it, after it -- never the shared graphical target, which would
+    # start this watcher inside someone else's session), retrying
+    # like the bar's unit, restarting on new watcher or profiles...
+    (
+      assert
+        hmDisplays.config.systemd.user.services.scoot-displays.Install.WantedBy
+        == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmDisplays.config.systemd.user.services.scoot-displays.Unit.PartOf == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmDisplays.config.systemd.user.services.scoot-displays.Unit.After == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert hmDisplays.config.systemd.user.services.scoot-displays.Service.Restart == "on-failure";
+      true
+    )
+    (
+      assert
+        builtins.length hmDisplays.config.systemd.user.services.scoot-displays.Unit.X-Restart-Triggers == 2;
+      true
+    )
+    (
+      assert lib.hasSuffix "/bin/scoot-displays watch"
+        hmDisplays.config.systemd.user.services.scoot-displays.Service.ExecStart;
+      true
+    )
+    # ...standalone (no profile): the watcher and its (empty) profiles
+    # file, with the session scope installed for the unit...
+    (
+      assert hmDisplaysStandalone.config.programs.scoot.desktop.displays.enable;
+      true
+    )
+    (
+      assert hmDisplaysStandalone.config.programs.scoot.desktop.displays.profiles == [ ];
+      true
+    )
+    (
+      assert lib.any (p: (p.name or "") == "scoot-displays") hmDisplaysStandalone.config.home.packages;
+      true
+    )
+    (
+      assert hmDisplaysStandalone.config.xdg.configFile ? "scoot/displays.json";
+      true
+    )
+    (
+      assert hmDisplaysStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target";
+      true
+    )
+    # ...the slot off: no watcher, no profiles file, no unit...
+    (
+      assert allAssertionsHold hmDisplaysOff.config;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.name or "") == "scoot-displays") hmDisplaysOff.config.home.packages);
+      true
+    )
+    (
+      assert !(hmDisplaysOff.config.xdg.configFile ? "scoot/displays.json");
+      true
+    )
+    (
+      assert !(hmDisplaysOff.config.systemd.user.services ? scoot-displays);
+      true
+    )
+    # Refusals: a static `[[outputs]]` beside the watcher...
+    (
+      assert builtins.length (failing hmDisplaysStaticOutputs.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "settings has `outputs`" (
+        builtins.head (failing hmDisplaysStaticOutputs.config)
+      );
+      true
+    )
+    # ...a blank profile name, an empty connected set, and a blank
+    # output name...
+    (
+      assert builtins.length (failing hmDisplaysBlankName.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "empty or blank name" (builtins.head (failing hmDisplaysBlankName.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmDisplaysEmptySet.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "`outputs` is empty" (builtins.head (failing hmDisplaysEmptySet.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmDisplaysBlankOutput.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "empty or blank output" (builtins.head (failing hmDisplaysBlankOutput.config));
+      true
+    )
+    # ...a scale outside the compositor's range, a mode outside `WxH`,
+    # and a mode past the largest output size...
+    (
+      assert builtins.length (failing hmDisplaysBadScale.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "0.5 to 4.0" (builtins.head (failing hmDisplaysBadScale.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmDisplaysBadMode.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "outside `WxH`" (builtins.head (failing hmDisplaysBadMode.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmDisplaysHugeMode.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "65535" (builtins.head (failing hmDisplaysHugeMode.config));
+      true
+    )
+    # ...a scale, a mode and a disable outside the profile's own set...
+    (
+      assert builtins.length (failing hmDisplaysScaleOutside.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "scales an output outside" (
+        builtins.head (failing hmDisplaysScaleOutside.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmDisplaysModeOutside.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "modes an output outside" (
+        builtins.head (failing hmDisplaysModeOutside.config)
+      );
+      true
+    )
+    (
+      assert builtins.length (failing hmDisplaysDisableOutside.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "disables an output outside" (
+        builtins.head (failing hmDisplaysDisableOutside.config)
+      );
+      true
+    )
+    # ...and two profiles alike by name, and two alike by connected
+    # set.
+    (
+      assert builtins.length (failing hmDisplaysDupName.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "names two profiles" (builtins.head (failing hmDisplaysDupName.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmDisplaysDupSet.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "one connected set" (builtins.head (failing hmDisplaysDupSet.config));
+      true
+    )
+  ];
+
   # --- power policy off Linux (fail `nix flake check` at eval) ---
   #
   # The daemon package is Linux-only like the idle policy's tools: off
@@ -11372,6 +11862,7 @@ assert lib.all (x: x) _authPins;
 assert lib.all (x: x) _themePins;
 assert lib.all (x: x) _keysPins;
 assert lib.all (x: x) _powerPins;
+assert lib.all (x: x) _displaysPins;
 assert lib.all (x: x) _darwinIdlePins;
 assert lib.all (x: x) _darwinNotifPins;
 assert lib.all (x: x) _darwinClipPins;
@@ -12673,6 +13164,132 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     # ...and anything else is usage (exit 2).
     if ${chargeScript} frobnicate; then echo "bogus charge verb accepted (21e)" >&2; exit 1; fi
     echo "ok: usage refuses unknown verbs"
+
+    # 21f. Display profiles, against a stub `scoot` (the REAL watcher
+    #      from the slot; the stub answers `msg outputs` from a
+    #      fixture, records `reload` and `output-power`, and replays
+    #      one event stream for `subscribe` -- the evaluation leaves
+    #      `package` null, so the watcher calls the bare name this
+    #      stub shadows on PATH).
+    mkdir -p "$PWD/displays-test/bin" "$PWD/displays-test/home"
+    cat > "$PWD/displays-test/bin/scoot" <<'EOF'
+    #!${pkgs.runtimeShell}
+    # $SCOOT_DISPLAYS_TEST_DIR/outputs.json answers `msg outputs`;
+    # `reload` and `output-power` append to
+    # $SCOOT_DISPLAYS_TEST_DIR/calls; `subscribe` replays
+    # $SCOOT_DISPLAYS_TEST_DIR/events, then ends the stream.
+    case "$1 $2" in
+      "msg outputs") cat "$SCOOT_DISPLAYS_TEST_DIR/outputs.json" ;;
+      "msg reload") printf 'reload\n' >> "$SCOOT_DISPLAYS_TEST_DIR/calls"; printf '{"type":"reloaded","applied":[],"refused":[]}\n' ;;
+      "msg output-power") printf 'output-power %s %s\n' "$3" "$4" >> "$SCOOT_DISPLAYS_TEST_DIR/calls"; printf '{"type":"ok","locked":false}\n' ;;
+      "msg subscribe") cat "$SCOOT_DISPLAYS_TEST_DIR/events" ;;
+      *) echo "unexpected scoot args: $*" >&2; exit 99 ;;
+    esac
+    EOF
+    chmod +x "$PWD/displays-test/bin/scoot"
+    export SCOOT_DISPLAYS_TEST_DIR="$PWD/displays-test"
+    export PATH="$PWD/displays-test/bin:$PATH"
+    export XDG_CONFIG_HOME="$PWD/displays-test/home"
+    export HOME="$PWD/displays-test/home"
+    : > "$SCOOT_DISPLAYS_TEST_DIR/calls"
+    cat > "$SCOOT_DISPLAYS_TEST_DIR/outputs-docked.json" <<'EOF'
+    {"type":"outputs","outputs":[
+      {"id":1,"name":"eDP-1","rect":{"x":0,"y":0,"width":1476,"height":830},"scale":2.0,"powered":true},
+      {"id":2,"name":"DP-1","rect":{"x":1476,"y":0,"width":3840,"height":2160},"scale":1.0,"powered":true}]}
+    EOF
+    cat > "$SCOOT_DISPLAYS_TEST_DIR/outputs-undocked.json" <<'EOF'
+    {"type":"outputs","outputs":[
+      {"id":1,"name":"eDP-1","rect":{"x":0,"y":0,"width":1476,"height":830},"scale":2.0,"powered":true}]}
+    EOF
+    cat > "$SCOOT_DISPLAYS_TEST_DIR/outputs-unknown.json" <<'EOF'
+    {"type":"outputs","outputs":[
+      {"id":1,"name":"HDMI-A-1","rect":{"x":0,"y":0,"width":1920,"height":1080},"scale":1.0,"powered":true}]}
+    EOF
+    # docked matches (first match wins: the docked profile names both)...
+    cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-docked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
+    status="$(${displaysWatcher} status)"; test "$status" = 'docked (connected: ["DP-1","eDP-1"])'
+    echo "ok: status names the matched profile"
+    # ...apply writes the managed block (TOML-valid, the profile's
+    # scales and mode), reloads once, and powers the set (the disabled
+    # panel off, the other on, by live id)...
+    ${displaysWatcher} apply 2> "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    python3 -c '
+    import sys,tomllib
+    got = tomllib.load(open(sys.argv[1],"rb"))["outputs"]
+    assert got == [{"name": "eDP-1", "scale": 2.0}, {"name": "DP-1", "scale": 1.0, "mode": "3840x2160"}], got
+    ' "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
+    echo "ok: apply writes the profile block as valid TOML"
+    grep -F -x -q "# BEGIN scoot-displays (managed by scoot-displays apply; do not edit)" "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
+    grep -F -x -q "# END scoot-displays" "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
+    echo "ok: the managed block carries both markers on their own lines"
+    grep -F -q "profile 'docked' applied" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    grep -F -q "take effect at the next login" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    test "$(cat "$SCOOT_DISPLAYS_TEST_DIR/calls")" = "$(printf 'reload\noutput-power 1 off\noutput-power 2 on')"
+    echo "ok: apply reloads once and powers the set by id"
+    # ...a second apply changes nothing (no second reload; power, the
+    # idempotent call, still re-asserts)...
+    ${displaysWatcher} apply 2>/dev/null
+    test "$(grep -c -F -x reload "$SCOOT_DISPLAYS_TEST_DIR/calls")" = 1
+    test "$(grep -c -F "output-power" "$SCOOT_DISPLAYS_TEST_DIR/calls")" = 4
+    echo "ok: a repeated apply reloads nothing"
+    # ...undocked matches the other profile (the docked block is
+    # replaced, not appended)...
+    cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-undocked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
+    status="$(${displaysWatcher} status)"; test "$status" = 'undocked (connected: ["eDP-1"])'
+    ${displaysWatcher} apply 2>/dev/null
+    python3 -c '
+    import sys,tomllib
+    got = tomllib.load(open(sys.argv[1],"rb"))["outputs"]
+    assert got == [{"name": "eDP-1", "scale": 2.0}], got
+    ' "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
+    grep -q -F -x "output-power 1 on" "$SCOOT_DISPLAYS_TEST_DIR/calls"
+    echo "ok: undocked replaces the block and powers the panel back on"
+    # ...an unknown set clears the block (user settings around the
+    # markers survive) and leaves power alone...
+    cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-unknown.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
+    status="$(${displaysWatcher} status)"; test "$status" = 'none (connected: ["HDMI-A-1"])'
+    printf '[layout]\ngap = 8\n' >> "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
+    calls_before="$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")"
+    ${displaysWatcher} apply 2>/dev/null
+    python3 -c '
+    import sys,tomllib
+    got = tomllib.load(open(sys.argv[1],"rb"))
+    assert got == {"layout": {"gap": 8}}, got
+    ' "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
+    if grep -q "BEGIN scoot-displays" "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"; then echo "markers linger after clear (21f)" >&2; exit 1; fi
+    test "$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")" = "$(( calls_before + 1 ))"
+    tail -n 1 "$SCOOT_DISPLAYS_TEST_DIR/calls" | grep -q -F -x reload
+    echo "ok: no match clears the block, keeps user settings, touches no power"
+    # ...a clear on a clean config is a no-op (no markers appear, no
+    # reload fires)...
+    rm "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml" "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml.prev-displays"
+    calls_before="$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")"
+    ${displaysWatcher} apply 2>/dev/null
+    test ! -e "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
+    test "$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")" = "$calls_before"
+    echo "ok: clearing a clean config touches nothing"
+    # ...watch applies on one output event, then exits 1 when the
+    # stream ends (so the unit resubscribes instead of idling
+    # unsubscribed)...
+    cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-docked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
+    printf '%s\n' '{"type":"output_changed","output":2,"name":"DP-1","width":3840,"height":2160,"scale":1.0}' > "$SCOOT_DISPLAYS_TEST_DIR/events"
+    calls_before="$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")"
+    if ${displaysWatcher} watch 2>/dev/null; then echo "watch exited 0 on stream end (21f)" >&2; exit 1; fi
+    test "$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")" -gt "$calls_before"
+    grep -q -F -x reload "$SCOOT_DISPLAYS_TEST_DIR/calls"
+    echo "ok: watch applies per event and fails on stream end"
+    # ...with no session every verb fails loud (exit 1, naming the
+    # call)...
+    cat > "$PWD/displays-test/bin/scoot" <<'EOF'
+    #!${pkgs.runtimeShell}
+    echo "connection refused" >&2; exit 1
+    EOF
+    chmod +x "$PWD/displays-test/bin/scoot"
+    if ${displaysWatcher} status 2>/dev/null; then echo "status succeeded with no session (21f)" >&2; exit 1; fi
+    if ${displaysWatcher} apply 2>/dev/null; then echo "apply succeeded with no session (21f)" >&2; exit 1; fi
+    if ${displaysWatcher} watch 2>/dev/null; then echo "watch succeeded with no session (21f)" >&2; exit 1; fi
+    if ${displaysWatcher} frobnicate 2>/dev/null; then echo "bogus verb accepted (21f)" >&2; exit 1; fi
+    echo "ok: usage refuses unknown verbs and a missing session"
 
     # 22. Audio slot content: the wob config -- geometry, the hide
     #     timeout and the overflow clamp, the look's roles as wob
