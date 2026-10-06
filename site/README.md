@@ -47,6 +47,16 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
   misses a page, a `.md` twin is missing/empty, or a linked bundle 404s.
   Runs in the nix derivation after `astro build` and in CI. Covers the
   whole tree (`src/content/docs/**/*.md`, nested sections included).
+- `pnpm check-md-links` (`scripts/check-md-links.mjs`): fails the build
+  if any built HTML page links a raw `.md` twin (a relative `href` ending
+  in `.md` or `.md#…`), or if a rewritten page link resolves to no page
+  in `dist/`. The rewrite itself is the `mdLinksToPages` integration
+  (`scripts/md-links.mjs`, `astro:build:done`): `foo/bar.md` → `foo/bar/`,
+  `foo/index.md` → `foo/`, anchors and query strings kept, correct under
+  any `base`. It touches `*.html` only — the `.md` twins and the llms.txt
+  bundles keep their `.md` links for agents (a remark/rehype plugin cannot:
+  the bundles render through the same markdown pipeline, so the rewrite
+  would leak into them; verified 2026-10-06).
 - `pnpm test-snippets`: toml/sh soundness + the "color"/"compositor"
   wording rules, over the whole tree. Executing snippets against headless
   scoot is the recorded next step (needs the Linux binary; both runners
