@@ -326,9 +326,24 @@ let
     };
     # The theme's dark-mode signal (`dconf.settings`, same module): the
     # color-scheme libadwaita follows. Plain data the pins read; the
-    # real home-manager option writes the database at activation.
+    # real home-manager option writes the database at activation. Two
+    # levels like the real option (`attrsOf (attrsOf gvariant)`), so
+    # disjoint leaves from two modules merge and only the same leaf
+    # twice collides -- the shape the upstream-ownership pins prove.
     options.dconf.settings = lib.mkOption {
-      type = lib.types.attrsOf lib.types.raw;
+      type = lib.types.attrsOf (lib.types.attrsOf lib.types.raw);
+      default = { };
+    };
+    # The user's own shell-level variables plus the path-like search
+    # lists home-manager prepends at login (`home.sessionSearchVariables`
+    # in `modules/home-environment.nix`, via `prependToVar` in
+    # `modules/lib/shell.nix`). Plain data the QT_PLUGIN_PATH pins read.
+    options.home.sessionVariables = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+    };
+    options.home.sessionSearchVariables = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.listOf lib.types.str);
       default = { };
     };
   };
@@ -559,17 +574,19 @@ let
       default = false;
     };
   };
-  evalHome =
-    cfg:
+  evalHomeModules =
+    extra: cfg:
     lib.evalModules {
       modules = [
         ./modules/home.nix
         baseStubs
         homeStubs
         ({ config, ... }: { programs.scoot = cfg; })
-      ];
+      ]
+      ++ extra;
       specialArgs = { inherit pkgs; };
     };
+  evalHome = evalHomeModules [ ];
 
   # The things the scoot module reads of Stylix, as Stylix defines them
   # (checked by hand against nix-community/stylix at fb28acd, the rev
@@ -2989,8 +3006,13 @@ let
   # ...an upstream home-manager module owning the same path wins (its
   # file stands, ours stays out, so the two never merge-conflict).
   # Stub modules standing in for home-manager's own `programs.foot`
-  # and friends (only `enable` is read); the bar half rides along,
-  # unread.
+  # and friends (only `enable` is read), plus its top-level `gtk` and
+  # `qt` modules: `gtk.enable` always owns both `settings.ini` files,
+  # `gtk3.extraCss`/`gtk4.extraCss`/a `gtk4.theme` package owns the
+  # css, `gtk3.colorScheme` owns the dconf `color-scheme` leaf, and
+  # `qt.enable` with `qt6ctSettings` owns `qt6ct.conf` (each default
+  # below is the "unowned" shape, so the existing evaluations are
+  # unaffected); the bar half rides along, unread.
   upstreamStubs = {
     options.programs.foot.enable = lib.mkOption {
       type = lib.types.bool;
@@ -3007,6 +3029,34 @@ let
     options.programs.btop.enable = lib.mkOption {
       type = lib.types.bool;
       default = false;
+    };
+    options.gtk.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.gtk.gtk3.colorScheme = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+    };
+    options.gtk.gtk3.extraCss = lib.mkOption {
+      type = lib.types.lines;
+      default = "";
+    };
+    options.gtk.gtk4.extraCss = lib.mkOption {
+      type = lib.types.lines;
+      default = "";
+    };
+    options.gtk.gtk4.theme = lib.mkOption {
+      type = lib.types.nullOr lib.types.raw;
+      default = null;
+    };
+    options.qt.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.qt.qt6ctSettings = lib.mkOption {
+      type = lib.types.nullOr lib.types.raw;
+      default = null;
     };
   };
   hmThemeUpstream = evalHomeDesktopWith [ upstreamStubs ] {
@@ -3035,6 +3085,121 @@ let
         desktop.look = "music-desk";
       }
       { package = fakeBar; };
+  # ...an upstream GTK module owning `settings.ini` (its text stands,
+  # ours stays out) while the css and dconf it does not own stay
+  # themed -- including a dconf leaf of its own beside ours, which is
+  # what proves the two merge instead of colliding...
+  hmThemeGtk =
+    evalHomeModules
+      [
+        upstreamStubs
+        {
+          gtk.enable = true;
+          xdg.configFile."gtk-3.0/settings.ini".text = "[Settings]\nuser-gtk=1\n";
+          xdg.configFile."gtk-4.0/settings.ini".text = "[Settings]\nuser-gtk=1\n";
+          dconf.settings."org/gnome/desktop/interface".gtk-theme = "UserTheme";
+        }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+      };
+  # ...the same module also owning its css (both versions' files stay
+  # out together)...
+  hmThemeGtkCss =
+    evalHomeModules
+      [
+        upstreamStubs
+        {
+          gtk.enable = true;
+          gtk.gtk3.extraCss = "/* user css */";
+          xdg.configFile."gtk-3.0/settings.ini".text = "[Settings]\nuser-gtk=1\n";
+          xdg.configFile."gtk-4.0/settings.ini".text = "[Settings]\nuser-gtk=1\n";
+          xdg.configFile."gtk-3.0/gtk.css".text = "/* user css */";
+        }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+      };
+  # ...and owning the dconf `color-scheme` leaf (its value wins, ours
+  # stays out)...
+  hmThemeGtkScheme =
+    evalHomeModules
+      [
+        upstreamStubs
+        {
+          gtk.enable = true;
+          gtk.gtk3.colorScheme = "dark";
+          xdg.configFile."gtk-3.0/settings.ini".text = "[Settings]\nuser-gtk=1\n";
+          xdg.configFile."gtk-4.0/settings.ini".text = "[Settings]\nuser-gtk=1\n";
+          dconf.settings."org/gnome/desktop/interface".color-scheme = "prefer-dark";
+        }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+      };
+  # ...an upstream Qt module owning `qt6ct.conf` (its source stands,
+  # ours stays out, while the scheme beside it stays theme-owned)...
+  hmThemeQt =
+    evalHomeModules
+      [
+        upstreamStubs
+        {
+          qt.enable = true;
+          qt.qt6ctSettings = {
+            Appearance.style = "kvantum";
+          };
+          xdg.configFile."qt6ct/qt6ct.conf".source =
+            builtins.toFile "user-qt6ct.conf" "[Appearance]\nstyle=kvantum\n";
+        }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+      };
+  # ...Qt enabled without settings (nothing owned: our config stays)...
+  hmThemeQtBare =
+    evalHomeModules
+      [
+        upstreamStubs
+        { qt.enable = true; }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+      };
+  # ...a user's own `QT_PLUGIN_PATH` beside the theme (shells compose
+  # it with the theme's dirs; the manager default stands)...
+  hmThemeUserPluginPath =
+    evalHomeModules
+      [
+        { home.sessionVariables.QT_PLUGIN_PATH = "/user/fcitx-plugins"; }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+      };
+  # ...and a user's own manager-level value (it wins there, the way
+  # home-manager's single-string join works; the shell search list
+  # still carries the theme's dirs)...
+  hmThemeUserManagerPluginPath =
+    evalHomeModules
+      [
+        { systemd.user.sessionVariables.QT_PLUGIN_PATH = "/user/fcitx-plugins"; }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        desktop.look = "music-desk";
+      };
   # Refusals: each null tool beside its target (pinned by message in
   # `_themePins`).
   hmThemeNoCursorPkg = evalHome {
@@ -3095,6 +3260,24 @@ let
     desktop.enable = true;
     desktop.look = "music-desk";
     desktop.theme.targets.fonts.enable = false;
+  } { package = fakeBar; };
+  # A stand-in UI-face package carrying a file named for the look's
+  # bar face (`DroidSansM Nerd Font Propo`, the face every look
+  # shares): resolving the bar font through it proves a user
+  # `uiPackage` override reaches the bar's font file.
+  fakeUiPkg = pkgs.runCommand "fake-ui-font" { } ''
+    mkdir -p $out/share/fonts
+    printf 'fake font' > $out/share/fonts/DroidSansMNerdFontPropo.ttf
+  '';
+  # ...beside the bar module with that override: the bar font resolves
+  # into the override package, not the theme default.
+  hmThemeBarUiPkg = evalHomeDesktopWith [ ] {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.fonts.uiPackage = fakeUiPkg;
   } { package = fakeBar; };
 
   # --- theme-look greeter evaluations (NixOS) ---
@@ -4632,6 +4815,10 @@ let
   themeHelixConf = hmTheme.config.xdg.configFile."helix/config.toml".source;
   themeHelixTheme = hmTheme.config.xdg.configFile."helix/themes/scoot-light.toml".source;
   themeBtopConf = hmTheme.config.xdg.configFile."btop/btop.conf".source;
+  # The bar font with a user `uiPackage` override: the setting is
+  # `${derivation}/font`, so the content check resolves the symlink
+  # and proves it lands inside the override package.
+  themeBarUiPkgFont = hmThemeBarUiPkg.config.programs.scootbar.settings.bar.font;
   notifNoLookConf = hmNotifNoLook.config.xdg.configFile."mako/config".source;
   notifSettingsConf = hmNotifSettings.config.xdg.configFile."mako/config".source;
   notifTargetOffConf = hmNotifTargetOff.config.xdg.configFile."mako/config".source;
@@ -8781,6 +8968,153 @@ let
       assert !(hmThemeUpstreamOn.config.xdg.configFile ? "btop/btop.conf");
       true
     )
+    # ...an upstream GTK module owns `settings.ini` (its text stands,
+    # ours stays out) while the css and dconf it does not own stay
+    # themed -- its own dconf leaf merging beside ours...
+    (
+      assert allAssertionsHold hmThemeGtk.config;
+      true
+    )
+    (
+      assert hmThemeGtk.config.xdg.configFile."gtk-3.0/settings.ini".source == null;
+      true
+    )
+    (
+      assert hmThemeGtk.config.xdg.configFile."gtk-4.0/settings.ini".source == null;
+      true
+    )
+    (
+      assert hmThemeGtk.config.xdg.configFile."gtk-3.0/settings.ini".text == "[Settings]\nuser-gtk=1\n";
+      true
+    )
+    (
+      assert hmThemeGtk.config.xdg.configFile ? "gtk-3.0/gtk.css";
+      true
+    )
+    (
+      assert hmThemeGtk.config.xdg.configFile ? "gtk-4.0/gtk.css";
+      true
+    )
+    (
+      assert
+        hmThemeGtk.config.dconf.settings."org/gnome/desktop/interface" == {
+          gtk-theme = "UserTheme";
+          color-scheme = "prefer-light";
+        };
+      true
+    )
+    # ...its css owned too (both versions' files stay out together)...
+    (
+      assert allAssertionsHold hmThemeGtkCss.config;
+      true
+    )
+    (
+      assert hmThemeGtkCss.config.xdg.configFile."gtk-3.0/gtk.css".source == null;
+      true
+    )
+    (
+      assert hmThemeGtkCss.config.xdg.configFile."gtk-3.0/gtk.css".text == "/* user css */";
+      true
+    )
+    (
+      assert !(hmThemeGtkCss.config.xdg.configFile ? "gtk-4.0/gtk.css");
+      true
+    )
+    # ...its `color-scheme` leaf owned (its value wins, ours stays out)...
+    (
+      assert allAssertionsHold hmThemeGtkScheme.config;
+      true
+    )
+    (
+      assert
+        hmThemeGtkScheme.config.dconf.settings."org/gnome/desktop/interface" == {
+          color-scheme = "prefer-dark";
+        };
+      true
+    )
+    # ...an upstream Qt module owns `qt6ct.conf` (its source stands,
+    # ours stays out, while the scheme beside it stays theme-owned)...
+    (
+      assert allAssertionsHold hmThemeQt.config;
+      true
+    )
+    (
+      assert lib.hasSuffix "user-qt6ct.conf" (
+        toString hmThemeQt.config.xdg.configFile."qt6ct/qt6ct.conf".source
+      );
+      true
+    )
+    (
+      assert hmThemeQt.config.xdg.configFile ? "qt6ct/colors/scoot-look.conf";
+      true
+    )
+    # ...Qt enabled without settings (nothing owned: our config stays)...
+    (
+      assert allAssertionsHold hmThemeQtBare.config;
+      true
+    )
+    (
+      assert hmThemeQtBare.config.xdg.configFile ? "qt6ct/qt6ct.conf";
+      true
+    )
+    # ...a user's own `QT_PLUGIN_PATH` beside the theme: the shell
+    # search list still carries both theme plugin dirs (home-manager
+    # prepends them before `$QT_PLUGIN_PATH` at login), and the
+    # manager default stands...
+    (
+      assert allAssertionsHold hmThemeUserPluginPath.config;
+      true
+    )
+    (
+      assert builtins.length hmThemeUserPluginPath.config.home.sessionSearchVariables.QT_PLUGIN_PATH == 2;
+      true
+    )
+    (
+      assert lib.all (
+        d: lib.hasSuffix "/lib/qt-6/plugins" d
+      ) hmThemeUserPluginPath.config.home.sessionSearchVariables.QT_PLUGIN_PATH;
+      true
+    )
+    (
+      assert lib.hasInfix "qt-6/plugins"
+        hmThemeUserPluginPath.config.systemd.user.sessionVariables.QT_PLUGIN_PATH;
+      true
+    )
+    (
+      assert hmThemeUserPluginPath.config.home.sessionVariables.QT_PLUGIN_PATH == "/user/fcitx-plugins";
+      true
+    )
+    # ...and a manager-level value wins there (the single-string join
+    # has no composition: same replacement home-manager's own qt
+    # module uses), while the shell search list still carries the
+    # theme's dirs...
+    (
+      assert allAssertionsHold hmThemeUserManagerPluginPath.config;
+      true
+    )
+    (
+      assert
+        hmThemeUserManagerPluginPath.config.systemd.user.sessionVariables.QT_PLUGIN_PATH
+        == "/user/fcitx-plugins";
+      true
+    )
+    (
+      assert
+        builtins.length hmThemeUserManagerPluginPath.config.home.sessionSearchVariables.QT_PLUGIN_PATH == 2;
+      true
+    )
+    # ...with no user value at all, the search list is exactly the two
+    # theme dirs...
+    (
+      assert
+        hmTheme.config.home.sessionSearchVariables.QT_PLUGIN_PATH
+        == hmThemeQtBare.config.home.sessionSearchVariables.QT_PLUGIN_PATH;
+      true
+    )
+    (
+      assert builtins.length hmTheme.config.home.sessionSearchVariables.QT_PLUGIN_PATH == 2;
+      true
+    )
     # ...beside the bar module the look's UI face reaches the bar as
     # a file (never the icon-less DejaVu default)...
     (
@@ -8793,6 +9127,23 @@ let
     )
     (
       assert lib.hasInfix "scootbar-font" hmThemeBar.config.programs.scootbar.settings.bar.font;
+      true
+    )
+    # ...and a user `uiPackage` override reaches the bar's font file
+    # (a different derivation than the default-package one; the shell
+    # half proves it resolves into the override package)...
+    (
+      assert allAssertionsHold hmThemeBarUiPkg.config;
+      true
+    )
+    (
+      assert lib.hasInfix "scootbar-font" hmThemeBarUiPkg.config.programs.scootbar.settings.bar.font;
+      true
+    )
+    (
+      assert
+        hmThemeBarUiPkg.config.programs.scootbar.settings.bar.font
+        != hmThemeBar.config.programs.scootbar.settings.bar.font;
       true
     )
     # ...opted out of fonts, the DejaVu default stands...
@@ -11564,6 +11915,14 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q '"ui.background" = {}' ${themeHelixTheme}
     grep -F -q "theme_background = False" ${themeBtopConf}
     echo "ok: the look's app files apply from the flake"
+
+    # 13n. The bar font follows `theme.fonts.uiPackage`: with the
+    #      override, the font file resolves inside the override
+    #      package (whose file is named for the look's bar face), not
+    #      the theme default.
+    themeBarUiTarget=$(readlink ${themeBarUiPkgFont})
+    echo "$themeBarUiTarget" | grep -F -q "fake-ui-font" || { echo "bar font missed the uiPackage override: $themeBarUiTarget" >&2; exit 1; }
+    echo "ok: bar font resolves into the uiPackage override"
 
     # 14. The bar feed, against stub tools (the REAL bridge script from
     #     the module, scenario files below -- `mode`/`list` are what

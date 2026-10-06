@@ -117,9 +117,17 @@ let
   # boundary in the other direction either (a conditional set of an
   # undeclared option fails eval whatever the condition is), so this read
   # is the whole bar half of the profile. Look-derived values come
-  # through the one theme helper, never hand-mapped here.
+  # through the one theme helper, never hand-mapped here -- except the
+  # bar face's *package*, which lives in the theme's options (Linux-only
+  # defaults there), so it is read across the boundary with the same
+  # `or` fallback as everything else.
   themeLook = import ./theme-look.nix { inherit lib; };
   desktopProfile = ((config.programs.scoot or { }).desktop or { });
+  desktopThemeFonts = ((desktopProfile.theme or { }).fonts or { });
+  # Null with the scoot module absent, or where the theme leaves it
+  # null: the derivation below then falls back to the same face the
+  # theme defaults to, so the bar never renders without its icons.
+  barFacePackage = desktopThemeFonts.uiPackage or null;
   profileOn = desktopProfile.enable or false;
   # `bar.enable = false` leaves the bar entirely to the user: neither
   # enabled nor themed by the profile.
@@ -352,9 +360,12 @@ in
     # carries the module icons itself, so a themed bar never falls
     # back to the icon-less DejaVu default above. The bar keeps this
     # mono face while GTK/Qt apps and the greeter use the look's
-    # proportional `sans` (see `theme-home.nix`). Without the package
-    # that default stands. Like the look's colors, a bar the user
-    # turned off stays unthemed too.
+    # proportional `sans` (see `theme-home.nix`). The package is the
+    # theme's `fonts.uiPackage` -- the same face the theme installs,
+    # so a user override (or a future look with another face) reaches
+    # the bar's file; without it the theme's own default stands.
+    # Like the look's colors, a bar the user turned off stays
+    # unthemed too.
     (lib.mkIf
       (
         profileOn
@@ -368,7 +379,7 @@ in
           bar.font = lib.mkOptionDefault "${
             fontFile {
               name = profileLook.fonts.ui;
-              package = pkgs.nerd-fonts.droid-sans-mono;
+              package = if barFacePackage != null then barFacePackage else pkgs.nerd-fonts.droid-sans-mono;
             }
           }/font";
         };

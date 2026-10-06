@@ -333,7 +333,15 @@ programs.scoot.desktop.theme.targets.gtk.enable = false;  # my GTK is hand-tuned
 If you theme an app through its own home-manager module instead
 (`programs.foot`, `programs.starship`, `programs.helix`,
 `programs.btop`), that module owns the same file and wins: the
-look's file stays out, so the two never conflict.
+look's file stays out, so the two never conflict. The same holds for
+GTK and Qt, whose modules live at the top level rather than under
+`programs`: `gtk.enable` owns both `settings.ini` files — and only
+what it actually writes besides them (its `extraCss` or theme owns
+`gtk.css`, its `colorScheme` the dconf `color-scheme` leaf) — while
+`qt.enable` with `qt6ctSettings` owns `qt6ct.conf`. The look's file
+stays out of each owned path while the rest stays themed, so enabling
+the upstream module beside the profile evaluates cleanly with your
+file winning.
 
 **Precedence**, highest first, per key: a value you set (in
 `settings`, in `theme.settings`, or in the app's own module), then
@@ -341,6 +349,16 @@ Stylix's (Stylix stays the override path where present), then the
 look's, then the toolkit default. So `theme.settings.gtk-theme-name
 = "HighContrast"` beside `look = "music-desk"` replaces that one key
 and keeps the rest of the look.
+
+`QT_PLUGIN_PATH` composes instead of replacing: the systemd user
+session (`environment.d`) holds one string per variable, so a value
+you set there wins whole — the same replacement home-manager's own
+Qt module uses for its profile dirs. Shells get both: the theme
+publishes its plugin dirs through `home.sessionSearchVariables`,
+which home-manager prepends before your own `$QT_PLUGIN_PATH` at
+login, so an input-method path you export keeps working beside the
+theme's qt6ct and style dirs. Put extra plugin dirs in
+`home.sessionSearchVariables` to compose everywhere shells reach.
 
 > **Symptom:** a Qt app ignores the theme (default fusion look, wrong
 > colors).
@@ -352,7 +370,11 @@ and keeps the rest of the look.
 > null). A light palette inside a dark look means the scheme did not
 > apply: check `custom_palette=true` and `color_scheme_path` in
 > `~/.config/qt6ct/qt6ct.conf` point at the generated
-> `colors/scoot-look.conf`. Apps started before the switch keep the old theme —
+> `colors/scoot-look.conf`. If you export your own `QT_PLUGIN_PATH`
+> (an input method, say) and Qt apps lose the theme in some launcher
+> but not in a terminal, your manager-level value is winning whole
+> over the theme's dirs there — move it to
+> `home.sessionSearchVariables` so shells compose both. Apps started before the switch keep the old theme —
 > restart them.
 
 > **Symptom:** a libadwaita app stays light under a dark look (or dark
