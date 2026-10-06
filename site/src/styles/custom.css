@@ -283,3 +283,12 @@ kbd {
 .sl-markdown-content table td code {
   white-space: nowrap;
 }
+
+/* Starlight draws a divider after the social icons to separate them from
+ * the theme picker. The site is dark-only and the picker is gone, so the
+ * divider would separate the icons from nothing. (Starlight 0.42.5
+ * `Header.astro`: `.social-icons::after`, a scoped rule; the extra type
+ * and class here outrank it.) */
+header .right-group .social-icons::after {
+  display: none;
+}
