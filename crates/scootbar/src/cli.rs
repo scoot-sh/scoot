@@ -500,7 +500,55 @@ macro_rules! invoke_example {
     };
 }
 
-pub const USAGE: &str = concat!(
+// One `set` example line for the main and msg pages, only where the `push`
+// module is in the build: without it every `set` is refused, so neither
+// page shows an example naming one (same rule as `invoke_example!` above).
+#[cfg(feature = "push")]
+macro_rules! set_example {
+    () => {
+        "    scootbar msg set build-state '{\"text\": \"ok\"}'\n"
+    };
+}
+#[cfg(not(feature = "push"))]
+macro_rules! set_example {
+    () => {
+        ""
+    };
+}
+
+// What `msg set` takes, for this build: with the `push` feature the module
+// and its config shape, without it the refusal instead -- naming no module
+// the build lacks (see `the_help_matches_the_build`). The lines after the
+// section (what else is refused) are the same in both builds.
+#[cfg(feature = "push")]
+macro_rules! set_section {
+    () => {
+        "    set        a JSON value for the `push` module ID, which the config
+                defines (`[push.ID]`): a string (the text), an object
+                `{\"text\": ..., \"class\": ..., \"tooltip\": ..., \"icon\": ...}` or null
+                (clears it). The module needs a table and a place in a list:
+                left = [\"status\"]
+                [push.status]
+                placeholder = \"\"
+"
+    };
+}
+#[cfg(not(feature = "push"))]
+macro_rules! set_section {
+    () => {
+        "    set        a JSON value for a module ID; this build has no
+                module that takes one, so every `set` is refused
+                (`takes no set value`).
+"
+    };
+}
+
+/// Everything in [`usage`] before the SEE ALSO tail: the shape of the bar,
+/// its commands, one example per surface, the exit codes and the
+/// environment. The examples name only what this build has ([`set_example`]
+/// is empty without the `push` feature, like [`daemon_example`] and
+/// [`invoke_example`]).
+const USAGE_BODY: &str = concat!(
     "\
 scootbar -- status bar for Wayland
 
@@ -528,8 +576,9 @@ EXAMPLES:
     "\
     scootbar daemon --check
     scootbar msg query
-    scootbar msg set build-state '{\"text\": \"ok\"}'
-
+",
+    set_example!(),
+    "\
 EXIT CODES:
     0  success: the reply is on stdout (help and --version count)
     1  the run failed: a bad file, no daemon, a refused value
@@ -542,9 +591,20 @@ ENVIRONMENT:
 
 SEE ALSO:
     `scootbar help daemon`, `scootbar help msg`, `scootbar --help --json`
-    docs: https://www.scoot.sh/scootbar/cli.md (with /llms.txt)
 "
 );
+
+/// The main help page: [`USAGE_BODY`] plus the SEE ALSO tail, whose URLs
+/// render from [`scoot_ipc::DOCS_URL`] -- the one copy of the docs domain,
+/// so a move is one edit. A function rather than a `const` so the text can
+/// name that constant; a cold path (one process per `--help`), so the one
+/// small allocation costs nothing.
+pub fn usage() -> String {
+    let mut text = String::with_capacity(USAGE_BODY.len() + 128);
+    text.push_str(USAGE_BODY);
+    text.push_str(&scoot_ipc::docs_tail("scootbar/cli.md"));
+    text
+}
 
 /// Everything in [`daemon_help`] before the modules section: the usage,
 /// the outputs, the bar, the text and the `--left` options, up to the
@@ -617,6 +677,8 @@ Modules:
 
 /// Everything in [`daemon_help`] after the modules section: one help
 /// section per module that has one, then the config file and `--check`.
+/// Ends on the bare `SEE ALSO:` header; [`daemon_help`] appends the tail
+/// (rendered from the one docs constant) after it.
 const DAEMON_POST: &str = concat!(
     battery_help!(),
     workspaces_help!(),
@@ -650,21 +712,27 @@ EXIT CODES:
     2  usage error: an unknown flag or value (the error names it)
 
 SEE ALSO:
-    docs: https://www.scoot.sh/scootbar/cli.md (with /llms.txt)
 "
 );
 
 /// The daemon help page for this build's features: [`DAEMON_PRE`], the
-/// [`modules_section`] for this build's modules, and [`DAEMON_POST`].
+/// [`modules_section`] for this build's modules, [`DAEMON_POST`], and the
+/// SEE ALSO tail, whose URLs render from [`scoot_ipc::DOCS_URL`] -- the one
+/// copy of the docs domain, so a move is one edit.
 pub fn daemon_help() -> String {
-    let mut help = String::with_capacity(DAEMON_PRE.len() + DAEMON_POST.len() + 512);
+    let mut help = String::with_capacity(DAEMON_PRE.len() + DAEMON_POST.len() + 640);
     help.push_str(DAEMON_PRE);
     help.push_str(&modules_section());
     help.push_str(DAEMON_POST);
+    help.push_str(&scoot_ipc::docs_tail("scootbar/cli.md"));
     help
 }
 
-pub const MSG_HELP: &str = concat!(
+/// Everything in [`msg_help`] before the SEE ALSO tail: the `msg` commands
+/// with what each prints, the examples, the exit codes. The `set` rows name
+/// only what this build has ([`set_section`] and [`set_example`] follow the
+/// same per-build rule as the rest of the page).
+const MSG_BODY: &str = concat!(
     "\
 scootbar msg -- ask the running daemon
 
@@ -717,13 +785,9 @@ start-up and removes when it stops:
     toggle     hide if shown, show if hidden
     version    the daemon's version and protocol, as JSON
     kill       stop the daemon, once its reply is sent
-    set        a JSON value for the `push` module ID, which the config
-                defines (`[push.ID]`): a string (the text), an object
-                `{\"text\": ..., \"class\": ..., \"tooltip\": ..., \"icon\": ...}` or null
-                (clears it). The module needs a table and a place in a list:
-                left = [\"status\"]
-                [push.status]
-                placeholder = \"\"
+",
+    set_section!(),
+    "\
                 Any other module, an id that is not placed and a
                 value the module refuses are loud errors, never a silent ok
 
@@ -737,8 +801,8 @@ EXAMPLES:
     scootbar msg layout
 ",
     invoke_example!(),
+    set_example!(),
     "\
-    scootbar msg set build-state '{\"text\": \"ok\"}'
     scootbar msg subscribe module
 
 EXIT CODES:
@@ -749,9 +813,20 @@ EXIT CODES:
 SEE ALSO:
     `scootbar help msg` prints this page; `scootbar --help --json` is the
     machine-readable form
-    docs: https://www.scoot.sh/scootbar/cli.md (with /llms.txt)
 "
 );
+
+/// The msg help page: [`MSG_BODY`] plus the SEE ALSO tail, whose URLs render
+/// from [`scoot_ipc::DOCS_URL`] -- the one copy of the docs domain, so a
+/// move is one edit. A function rather than a `const` so the text can name
+/// that constant; a cold path (one process per `--help`), so the one small
+/// allocation costs nothing.
+pub fn msg_help() -> String {
+    let mut text = String::with_capacity(MSG_BODY.len() + 128);
+    text.push_str(MSG_BODY);
+    text.push_str(&scoot_ipc::docs_tail("scootbar/cli.md"));
+    text
+}
 
 /// A help page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -770,9 +845,9 @@ impl Topic {
     /// and the JSON page renders [`crate::help::json`].
     pub fn text(self) -> Cow<'static, str> {
         match self {
-            Self::Main => Cow::Borrowed(USAGE),
+            Self::Main => Cow::Owned(usage()),
             Self::Daemon => Cow::Owned(daemon_help()),
-            Self::Msg => Cow::Borrowed(MSG_HELP),
+            Self::Msg => Cow::Owned(msg_help()),
             Self::Json => Cow::Owned(crate::help::json()),
         }
     }
@@ -1145,7 +1220,7 @@ fn hinted(
     topic: &'static str,
     or: impl FnOnce(String) -> Error,
 ) -> Error {
-    match crate::help::suggest(&what, candidates.iter().copied()) {
+    match scoot_ipc::suggest(&what, candidates.iter().copied()) {
         Some(suggestion) => Error::Hint {
             command,
             what,

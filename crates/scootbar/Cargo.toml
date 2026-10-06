@@ -74,6 +74,12 @@ exec = []
 icon-image = ["dep:png"]
 
 [dependencies]
+# The typo guesser and the docs URL behind `--help`: the one copy every
+# binary shares, so the help cannot drift from the client's and a domain
+# move is one edit. (Only `suggest`, `DOCS_URL` and `docs_tail` are used;
+# none of the protocol reaches the binary: `src/scoot.rs` still writes its
+# request by hand, and a test checks it against scoot-ipc's encoding.)
+scoot-ipc.workspace = true
 # The sealed-memfd `wl_shm` buffer, scootbg's, so scootbar has no `unsafe`
 # of its own (`#![forbid(unsafe_code)]` in `src/main.rs`).
 scootbg-mem.workspace = true
@@ -108,10 +114,6 @@ png = { version = "0.18", optional = true }
 # over its IPC, sway's through a small wlr-screencopy client into a memfd.
 # Dev-only: none of it reaches the binary's dependency tree.
 [dev-dependencies]
-# Only to check that `src/scoot.rs`'s hand-written request is what scoot's
-# protocol encodes (the crate is not linked into the bar: measured +131,072
-# bytes, docs/scootbar/backlog/resolved/pointer-and-interactions-done.md).
-scoot-ipc.workspace = true
 rustix = { version = "1", default-features = false, features = ["std", "process", "fs", "pipe", "time"] }
 base64.workspace = true
 png = "0.18"

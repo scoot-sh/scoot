@@ -133,8 +133,10 @@ jobs:
   #     read of its description, as scootbg's
   #   crates/scootbg-mem/                  -> scootbar too: its shm buffer
   #                                           is scootbar's
-  #   crates/scoot-ipc/                    -> scootbar too: a dev-dependency,
-  #                                           which pins its `quit` request
+  #   crates/scoot-ipc/                    -> scootbar and scootbg too: the
+  #                                           shared help pieces (plus the
+  #                                           `quit` request scootbar's
+  #                                           tests pin)
   #   either scoot or scootbar             -> the scootbar-on-scoot
   #                                           integration job
   #
@@ -212,11 +214,13 @@ jobs:
                 crates/scoot/* | crates/scoot-core/* | crates/scootctl/* | scripts/smoke-test.sh | vm/compositor-deps.nix)
                   scoot=true
                   macos=true ;;
-                # scootbar's tests check its hand-written `quit` request
-                # against what this crate encodes (a dev-dependency).
+                # The typo guesser and docs URL behind every binary's
+                # `--help` live here: scoot and scootctl use them directly,
+                # and since help-followups so do scootbar and scootbg.
                 crates/scoot-ipc/*)
                   scoot=true
                   macos=true
+                  scootbg=true
                   scootbar=true ;;
                 # flake.nix takes the package description from this
                 # manifest, which the Linux job's `nix flake check` reads.

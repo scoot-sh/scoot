@@ -10,19 +10,19 @@
 //! row's name appears in the JSON.
 //!
 //! A cold path (one process per `--help`): the small allocations in `usage`
-//! and `json` cost nothing at runtime.
+//! and `json` cost nothing at runtime. The typo guesser behind the parsers'
+//! "did you mean" errors is not here but in [`scoot_ipc::suggest`], the one
+//! copy the client, the bar and the wallpaper daemon share; likewise
+//! [`DOCS_URL`] is that crate's, so the docs domain moves in one edit.
 
 use serde_json::{Map, Value};
+
+use scoot_ipc::DOCS_URL;
 
 /// Version of the `--help --json` document below. Bumped whenever a field is
 /// added, renamed or removed, so a script can refuse what it does not know
 /// rather than misread it.
 pub const SCHEMA_VERSION: u32 = 1;
-
-/// Where the human reference lives: the docs site, published with
-/// `/llms.txt` (one twin per page plus per-app sets; see
-/// `docs/backlog/packaging/docs-site.md` for the plan).
-pub const DOCS_URL: &str = "https://www.scoot.sh";
 
 /// One request verb: what it takes, what it does, one real invocation, and
 /// the shape of its reply.
@@ -374,50 +374,6 @@ impl Topic {
     }
 }
 
-/// The closest candidate to `input`, if it is close enough to be a typo
-/// rather than a guess. Plain Levenshtein over chars; the bar is about a
-/// quarter of the longer word (at least 1, at most 3), so `windwos` finds
-/// `windows` while `--bogus` finds nothing to guess. An exact match is never
-/// a suggestion.
-pub fn suggest<'a>(input: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
-    let mut best: Option<(&'a str, usize)> = None;
-    for candidate in candidates {
-        if candidate == input {
-            continue;
-        }
-        let distance = levenshtein(input, candidate);
-        if best.is_none_or(|(_, d)| distance < d) {
-            best = Some((candidate, distance));
-        }
-    }
-    let (candidate, distance) = best?;
-    let longest = input.chars().count().max(candidate.chars().count());
-    let allowance = (longest / 4 + 1).clamp(1, 3);
-    (distance <= allowance && distance < longest).then_some(candidate)
-}
-
-fn levenshtein(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    if a.is_empty() {
-        return b.len();
-    }
-    if b.is_empty() {
-        return a.len();
-    }
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut current = vec![0; b.len() + 1];
-    for (i, &ca) in a.iter().enumerate() {
-        current[0] = i + 1;
-        for (j, &cb) in b.iter().enumerate() {
-            let substitution = prev[j] + usize::from(ca != cb);
-            current[j + 1] = (prev[j + 1] + 1).min(current[j] + 1).min(substitution);
-        }
-        std::mem::swap(&mut prev, &mut current);
-    }
-    prev[b.len()]
-}
-
 /// The full `--help` text: the prose grammar blocks plus the sections
 /// rendered from the tables below. `binary` names the client (`scoot msg`,
 /// the one client); `version` says whether that front-end answers
@@ -460,11 +416,11 @@ pub fn usage(binary: &str, requests_help: &str, actions_help: &str, version: boo
     for (name, description) in ENVIRONMENT {
         text.push_str(&format!("    {name}  {description}\n"));
     }
-    text.push_str(&format!(
+    text.push_str(
         "\nSEE ALSO:\n\
-         \x20   `help requests`, `help actions`, `help exit-codes`, `help environment`\n\
-         \x20   docs: {DOCS_URL}/msg/ (with /llms.txt)\n"
-    ));
+         \x20   `help requests`, `help actions`, `help exit-codes`, `help environment`\n",
+    );
+    text.push_str(&scoot_ipc::docs_tail("msg/"));
     text
 }
 
@@ -762,31 +718,18 @@ mod tests {
     }
 
     #[test]
-    fn typos_find_their_verb_and_garbage_finds_nothing() {
-        let verbs: Vec<&str> = REQUESTS.iter().map(|request| request.verb).collect();
-        for (typo, verb) in [
-            ("subscrib", "subscribe"),
-            ("windwos", "windows"),
-            ("ouptuts", "outputs"),
-            ("screeshot", "screenshot"),
-            ("actoin", "action"),
-            ("keybaord", "keyboard"),
-        ] {
-            assert_eq!(suggest(typo, verbs.clone()), Some(verb), "{typo}");
-        }
-        for garbage in ["xyzzy", "", "q"] {
-            assert_eq!(suggest(garbage, verbs.clone()), None, "{garbage}");
-        }
-    }
-
-    #[test]
-    fn action_typos_find_their_action() {
-        let names: Vec<&str> = ACTIONS.iter().map(|action| action.name).collect();
-        assert_eq!(suggest("focus-colum", names.clone()), Some("focus-column"));
-        assert_eq!(
-            suggest("togle-fullscreen", names.clone()),
-            Some("toggle-fullscreen")
+    fn the_see_also_names_the_live_agent_index() {
+        // The docs site is live: the page ends on the real index, rendered
+        // from the one constant, never a hardcoded domain.
+        let text = usage(
+            "scoot msg",
+            crate::cli::REQUESTS_HELP,
+            crate::cli::ACTIONS_HELP,
+            true,
         );
-        assert_eq!(suggest("xyzzy", names), None);
+        assert!(
+            text.contains(&format!("{}/llms.txt", scoot_ipc::DOCS_URL)),
+            "SEE ALSO lost the live agent index"
+        );
     }
 }

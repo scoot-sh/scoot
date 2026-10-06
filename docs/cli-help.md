@@ -16,7 +16,7 @@ help meets one contract, pinned by tests. People read it too.
   under 100 columns, the same section order in every binary: usage,
   description, commands, options, examples, exit codes, environment
   (`XDG_*` and friends where the binary reads them), see also (with the
-  docs URL and its `/llms.txt` once the docs site lands).
+  docs URL and its live `/llms.txt`, `https://www.scoot.sh/llms.txt`).
 - **Machine-readable:** `--help --json` (or `help --json`) emits the same
   content as JSON, versioned with `schema_version` (currently `1`; a script
   should refuse what it does not know). Text and JSON render from the same
@@ -26,8 +26,10 @@ help meets one contract, pinned by tests. People read it too.
   exit code `2`. Garbage that is close to nothing stays a bare refusal.
 - **Single source:** the request/action grammar, the flag lists and the
   module registry each have one owner; help renders them, never a second
-  copy. No new dependencies for any of it (hand-rolled parsers and
-  `serde_json`, already in the tree).
+  copy. The typo guesser and the docs URL live once in `scoot-ipc`, which
+  every binary renders from, so a domain move is one edit. No new
+  dependencies for any of it beyond that (hand-rolled parsers, `serde_json`
+  and `scoot-ipc`, all already in the tree).
 
 ## Topics and JSON per binary
 

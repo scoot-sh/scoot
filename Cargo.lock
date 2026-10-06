@@ -915,6 +915,7 @@ dependencies = [
  "pic-scale-safe",
  "png",
  "rustix 1.1.4",
+ "scoot-ipc",
  "scootbg-mem",
  "serde",
  "serde_json",

@@ -1,15 +1,18 @@
 //! Single-sourced bar help: tables for the daemon flags, the `msg`
 //! commands, the exit codes and the environment; the `--help --json`
-//! document renders from them, and the prose pages (`cli::USAGE`,
-//! `cli::MSG_HELP`, [`crate::cli::daemon_help`]) are checked against them,
+//! document renders from them, and the prose pages (`cli::usage`,
+//! `cli::msg_help`, [`crate::cli::daemon_help`]) are checked against them,
 //! so neither form can drift from the other.
 //!
-//! [`suggest`] mirrors `scootctl`'s `help::suggest` (the bar takes no client
-//! dependency, so the thirty lines live here too); the test vectors below
-//! are the same, so a drift in behaviour fails here. A cold path (one
-//! process per `--help`): the small allocations cost nothing at runtime.
+//! The typo guesser is not here but in [`scoot_ipc::suggest`], the one copy
+//! every binary shares; likewise the docs URL is that crate's
+//! [`scoot_ipc::DOCS_URL`], so the domain moves in one edit. A cold path
+//! (one process per `--help`): the small allocations cost nothing at
+//! runtime.
 
 use serde_json::{Map, Value};
+
+use scoot_ipc::DOCS_URL;
 
 use crate::modules::REGISTRY;
 
@@ -17,11 +20,6 @@ use crate::modules::REGISTRY;
 /// added, renamed or removed, so a script can refuse what it does not know
 /// rather than misread it.
 pub const SCHEMA_VERSION: u32 = 1;
-
-/// Where the human reference lives: the docs site, published with
-/// `/llms.txt` (one twin per page plus per-app sets; see
-/// `docs/backlog/packaging/docs-site.md` for the plan).
-pub const DOCS_URL: &str = "https://www.scoot.sh";
 
 /// One `daemon` flag: its spelling, what follows it, its default, and what
 /// it does. Mirrors `cli::FLAGS` plus the prose -- the drift tests pin both
@@ -153,6 +151,15 @@ pub struct MsgDoc {
     pub description: &'static str,
 }
 
+/// What `msg set` takes, for this build: with the `push` feature it names
+/// the `push` module, without it no module takes a value, so the wording
+/// names none (every `set` is refused `takes no set value` there).
+#[cfg(feature = "push")]
+const SET_DESCRIPTION: &str = "a JSON value for the `push` module ID";
+#[cfg(not(feature = "push"))]
+const SET_DESCRIPTION: &str =
+    "a JSON value for a module ID (this build has no module that takes one)";
+
 /// Every `msg` command, in the order the help lists them.
 pub const MSG_COMMANDS: &[MsgDoc] = &[
     MsgDoc {
@@ -208,7 +215,7 @@ pub const MSG_COMMANDS: &[MsgDoc] = &[
     MsgDoc {
         name: "set",
         usage: "set ID JSON",
-        description: "a JSON value for the `push` module ID",
+        description: SET_DESCRIPTION,
     },
 ];
 
@@ -241,48 +248,6 @@ pub const ENVIRONMENT: &[(&str, &str)] = &[
         "where bar.toml lives (~/.config/scoot/bar.toml by default)",
     ),
 ];
-
-/// The closest candidate to `input`, if it is close enough to be a typo
-/// rather than a guess. Mirrors `scootctl`'s `help::suggest`; see that
-/// function for the bar (about a quarter of the longer word).
-pub fn suggest<'a>(input: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
-    let mut best: Option<(&'a str, usize)> = None;
-    for candidate in candidates {
-        if candidate == input {
-            continue;
-        }
-        let distance = levenshtein(input, candidate);
-        if best.is_none_or(|(_, d)| distance < d) {
-            best = Some((candidate, distance));
-        }
-    }
-    let (candidate, distance) = best?;
-    let longest = input.chars().count().max(candidate.chars().count());
-    let allowance = (longest / 4 + 1).clamp(1, 3);
-    (distance <= allowance && distance < longest).then_some(candidate)
-}
-
-fn levenshtein(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    if a.is_empty() {
-        return b.len();
-    }
-    if b.is_empty() {
-        return a.len();
-    }
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut current = vec![0; b.len() + 1];
-    for (i, &ca) in a.iter().enumerate() {
-        current[0] = i + 1;
-        for (j, &cb) in b.iter().enumerate() {
-            let substitution = prev[j] + usize::from(ca != cb);
-            current[j + 1] = (prev[j + 1] + 1).min(current[j] + 1).min(substitution);
-        }
-        std::mem::swap(&mut prev, &mut current);
-    }
-    prev[b.len()]
-}
 
 /// The `--help --json` document as a value. The modules list comes from
 /// [`REGISTRY`] -- the same registry the parser and the prose read -- so a
@@ -449,9 +414,9 @@ mod tests {
     fn every_flag_and_msg_command_is_in_the_prose_and_in_the_json() {
         let prose = format!(
             "{}{}{}",
-            crate::cli::USAGE,
+            crate::cli::usage(),
             crate::cli::daemon_help(),
-            crate::cli::MSG_HELP
+            crate::cli::msg_help()
         );
         let document = json_value();
         let flags: Vec<&str> = document["daemon_flags"]
@@ -517,13 +482,33 @@ mod tests {
     }
 
     #[test]
-    fn typos_find_their_flag_and_garbage_finds_nothing() {
-        // The same bar as the client's: about a quarter of the longer word.
-        let flags = ["--height", "--outputs", "--clock-format", "--left"];
-        assert_eq!(suggest("--heigth", flags), Some("--height"));
-        assert_eq!(suggest("--ouptuts", flags), Some("--outputs"));
-        assert_eq!(suggest("xyzzy", flags), None);
-        let verbs: Vec<&str> = MSG_COMMANDS.iter().map(|command| command.name).collect();
-        assert_eq!(suggest("qurey", verbs), Some("query"));
+    fn the_set_row_names_no_push_module_without_the_feature() {
+        // The JSON half of the build gate: the `set` row names the `push`
+        // module exactly when this build has one (the prose half is
+        // `the_help_matches_the_build` in `cli::tests`).
+        let document = json_value();
+        let commands = document["msg_commands"].as_array().unwrap();
+        let set = commands
+            .iter()
+            .find(|entry| entry["name"] == "set")
+            .expect("the `set` command has a row in every build");
+        assert_eq!(
+            set["description"].as_str().unwrap().contains("push"),
+            cfg!(feature = "push"),
+            "`set` says: {}",
+            set["description"].as_str().unwrap()
+        );
+    }
+
+    #[test]
+    fn the_json_docs_come_from_the_one_constant() {
+        // The domain lives once, in `scoot-ipc`: the document renders from
+        // it, so a move is one edit and this fails until every literal
+        // follows.
+        let document = json_value();
+        assert_eq!(
+            document["docs"].as_str().unwrap(),
+            &format!("{}/scootbar/cli.md", scoot_ipc::DOCS_URL),
+        );
     }
 }
