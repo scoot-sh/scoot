@@ -656,7 +656,12 @@ in
       xdg.mimeApps = lib.mkIf apps.fileManager.enable {
         enable = true;
         defaultApplications = {
+          # Directories -- plus mount points, which the shared-mime
+          # database types separately (`inode/mount-point`: /tmp, and
+          # every automounted drive the Browse action opens -- without
+          # this `xdg-open` on a mount falls through to the browsers).
           "inode/directory" = apps.fileManager.desktopEntry;
+          "inode/mount-point" = apps.fileManager.desktopEntry;
         };
       };
     })

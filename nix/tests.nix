@@ -8421,6 +8421,10 @@ let
       assert hmAppsFiles.config.xdg.mimeApps.defaultApplications."inode/directory" == "pcmanfm.desktop";
       true
     )
+    (
+      assert hmAppsFiles.config.xdg.mimeApps.defaultApplications."inode/mount-point" == "pcmanfm.desktop";
+      true
+    )
     # ...the terminal off: no foot, no `TERMINAL`, no user dirs (the
     # manager stays off too, so nothing opens files -- while the
     # automounter keeps `xdg-open` and `BROWSER` for its Browse
