@@ -78,7 +78,9 @@ Live on the Asahi M2 (gen 100 built with `--override-input scoot`, then
 switched back to gen 99): one pre-fix cycle left session 56001 `closing` with
 its scope `active (abandoned)` holding the session-bus daemon; with the fix
 active (logind takes the new config on SIGHUP -- verified via `busctl`, no
-restart needed), three login/logout cycles as `scoot-test` grew nothing
+restart needed; that run predates the `X-ScootLogindSettings` hook, and since
+the fix round a switch reloads logind by itself, proved live with no manual
+HUP), three login/logout cycles as `scoot-test` grew nothing
 (closing greeter sessions 2 -> 2, session-bus daemons 3 -> 3, greeter procs
 10 -> 10; each ended session logs `Removed session N`). Failed auth creates
 no session; `systemctl restart greetd` while idle fully removes the ended
