@@ -4,6 +4,7 @@ description: "Every complete reference in one place, and what each is for."
 ---
 
 The whole reference shelf, each kept beside the guide that teaches it.
+The exact shapes, no stories.
 Guides first (the task you have), references here (the exact shape of
 everything).
 

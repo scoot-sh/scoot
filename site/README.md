@@ -27,7 +27,9 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
 
 1. Write `src/content/docs/<slug>.md` — plain Markdown only, no MDX
    components (the `.md` twin serves the raw body; MDX imports would leak
-   into it).
+   into it). Small raw-HTML accents are allowed where Markdown cannot do
+   the job (the hero art, the home Looks grid, the 404 terminal chrome),
+   but they must keep the twin readable: real links, real alt text.
 2. Add it to its app's `sidebar` group in `astro.config.mjs` (new app, new
    group per `OUTLINE.md`), to `promote` if it should sort near the top
    of the bundles, and to that app's `customSets` entry (new app, new

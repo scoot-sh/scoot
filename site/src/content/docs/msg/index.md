@@ -7,7 +7,7 @@ Drive scoot from a script or an agent: the socket, the rules that keep automatio
 for agents: `scoot msg --help` (topics `requests`, `actions`,
 `exit-codes`, `environment`; `help <verb>` for one verb's row) and
 `scoot msg --help --json` for the machine-readable form — see
-[Generated CLI pages](../reference/cli.md) for the contract every binary meets. The client is `scoot msg`, documented here.
+[Generated CLI pages](../reference/cli.md) for the contract every binary meets. The client is `scoot msg`, documented here. Bring exact verbs: the socket takes what you say literally.
 
 # Driving scoot over IPC
 

@@ -7,7 +7,7 @@ scoot is the compositor: the process that draws every window, takes
 every input, and arranges windows in sideways-scrolling columns. The
 bar, the wallpaper daemon and the desktop profile are separate pieces
 that talk to it — this section is the compositor itself: launching it,
-configuring it, driving it.
+configuring it, driving it. Nothing here sits still for long.
 
 ## How scrolling columns work
 

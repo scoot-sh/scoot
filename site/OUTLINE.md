@@ -162,4 +162,47 @@ edit `.claude/*`, so those two are flagged for the maintainer):
 - `src/pages/[...page].md.ts` — per-page Markdown twins at stable `/<slug>.md` URLs (the plugin covers the aggregates; this covers the per-page requirement).
 - Per-app `customSets` in the plugin config (`Start`, `scoot` today): one llms set per sidebar section that has pages, served at `/_llms-txt/<set>.txt` and linked from `llms.txt`. Paths match Starlight's extensionless page ids, so sets widen to `<app>/**` when slugs nest in the move PR.
 - `scripts/check-llms.mjs` — build gate: fails if `llms.txt` misses a page, a `.md` twin, or a linked bundle 404s (bundles and `_llms-txt/` sets alike).
-- Fonts: **no font file is bundled.** The bar's look needs Droid Sans Mono Nerd Font Propo / FiraCode Nerd Font (glyphs + OFL licensing per face — vendoring binaries into the site is bloat and a license-attribution surface), so the site uses the system stack. Noted here so "the bar font if licensing allows" is answered: it allows (OFL), it just isn't worth it.
+- Fonts: **one display face is bundled.** Archivo Black (OFL 1.1,
+  Omnibus-Type, self-hosted latin-subset woff2,
+  `src/assets/fonts/archivo-black-latin.woff2`, 9,792 bytes) for the
+  header wordmark, the hero title and headings — the closest OFL match
+  to the logo wordmark (compared side by side against Nunito 900,
+  Baloo 2 800 and Fredoka 700; see the brand report). Body and code
+  stay on the system stacks. The bar's Nerd Fonts stay out for the
+  same reason as before.
+
+## Brand decision (2026-10-06: the site takes the logo's character)
+
+The maintainer (2026-10-05): "the character of the site and that of the
+logo are very different. Ornery cat to chill vibes." — then: the site
+takes on the cat's character; the cat is not tamed. Personality lives
+where people first land (home hero, section intros, the 404); the
+reference pages stay calm and fast to read.
+
+- **Hero:** the project logo itself (`docs/assets/logo.png`), optimized
+  to AVIF/WebP sets in `site/public/` (`hero-cat-1440.*`,
+  `hero-cat-960.*`, ~50–89 KB against the 486 KB PNG it replaces). The
+  art's pure-black ground melts into the page's true-black ground; on
+  the light theme the hero stays a black panel. Tagline states what
+  scoot does in the logo's voice ("scoot knocks your windows sideways").
+  The vinyl-sunset screenshot moved to a Looks strip below the fold
+  (480-wide WebP thumbs in `site/public/looks/`), so the desktop's
+  beauty is still shown.
+- **Palette:** `night` `#000000` (measured logo ground), `paper`
+  `#FFFFFF`, one ginger accent `fur` `#CB6F34` (brightest readable
+  member of the lit-fur cluster, forehead box (1075,300)-(1175,380);
+  5.86:1 on black, AA for body text), `ash` `#8A8A8A` secondary,
+  `ember` `#8A4A1E` for the light theme (6.82:1 on white), `seam`
+  `#2A2A2A` hairlines, decorative only. No gradients, glows, shadows
+  or textures. The terminal-dot motif appears exactly once (the 404
+  chrome); motion lines nowhere.
+- **Type:** Archivo Black for wordmark, hero and headings (see Fonts
+  above); system stacks elsewhere.
+- **Header/surface:** Starlight `logo` is the cat's face in a black
+  circle (`src/assets/cat-head.png`, face box (985,235)-(1315,565))
+  beside real-text "scoot"; favicon and social card from the same crop
+  (`cat-favicon-32.png`, `apple-touch-icon.png`, `og-cat.jpg`).
+- **Voice:** a little cheeky in the hero, the section-overview intros,
+  and the custom 404 (`src/content/docs/404.md`); reference prose
+  unchanged. "compositor", never "window manager"; "color", never
+  "colour" (both enforced by `test-snippets.mjs`).

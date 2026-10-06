@@ -1,12 +1,12 @@
 ---
-title: A compositor that scrolls
+title: scoot knocks your windows sideways
 description: "A scrolling-tiling Wayland compositor that runs without a GPU."
 template: splash
 hero:
-  title: A compositor that scrolls
-  tagline: scoot tiles your windows in sideways-scrolling columns, runs without a GPU, and answers to scripts and agents over IPC.
+  title: scoot knocks your windows sideways
+  tagline: A scrolling Wayland compositor. Windows tile in sideways-scrolling columns, it runs without a GPU, and agents can drive it over IPC.
   image:
-    html: '<img src="./vinyl-sunset-preview.png" class="hero-image" alt="scoot wearing the vinyl-sunset look — a floating translucent bar over two translucent terminal columns, the sunset illustration behind" />'
+    html: '<picture class="hero-art"><source type="image/avif" srcset="./hero-cat-960.avif 960w, ./hero-cat-1440.avif 1440w" sizes="(max-width: 1280px) 100vw, 1280px" /><source type="image/webp" srcset="./hero-cat-960.webp 960w, ./hero-cat-1440.webp 1440w" sizes="(max-width: 1280px) 100vw, 1280px" /><img src="./hero-cat-960.jpg" fetchpriority="high" decoding="async" alt="scoot — a grumpy ginger cat swats terminal windows sideways off a black background, under a huge white scoot wordmark" /></picture>'
   actions:
     - text: Get the scoot desktop
       link: desktop/
@@ -17,10 +17,21 @@ hero:
       variant: minimal
 ---
 
-Windows sit in columns; columns scroll sideways. New windows never cover old
-ones — the strip just grows, and you move along it.
+## Looks
 
-## Three ways in — pick one
+Same cat, different wallpaper. Four looks ship with the desktop — picking
+one themes the compositor, the bar and the wallpaper together:
+
+<div class="looks">
+<a href="./scoot/theming/"><img src="./looks/vinyl-sunset-480.webp" alt="The vinyl-sunset look: a floating translucent bar over two translucent terminal columns, a sunset illustration behind" loading="lazy" decoding="async" /><span>vinyl-sunset</span></a>
+<a href="./scoot/theming/"><img src="./looks/moonrise-480.webp" alt="The moonrise look: a calm amber-on-navy desktop" loading="lazy" decoding="async" /><span>moonrise</span></a>
+<a href="./scoot/theming/"><img src="./looks/music-desk-480.webp" alt="The music-desk look: a blue-on-paper desktop" loading="lazy" decoding="async" /><span>music-desk</span></a>
+<a href="./scoot/theming/"><img src="./looks/radial-burst-480.webp" alt="The radial-burst look: a blue-on-plum desktop" loading="lazy" decoding="async" /><span>radial-burst</span></a>
+</div>
+
+## Three ways in
+
+Pick one:
 
 - **[The scoot desktop](./desktop/index.md)** — the primary path. One switch
   plus a look (`programs.scoot.desktop.enable` + `look`) gets the full
@@ -34,10 +45,14 @@ ones — the strip just grows, and you move along it.
   code. The IPC socket, screenshots, `--help --json`, `llms.txt` sets for
   every section, and the webtop image for containers.
 
-New here? [Install](./start/install.md) (including **which build you need:
-GPU or CPU**) → [First session](./start/first-session.md) (run scoot, open
-a terminal, learn five keys) → [Keybindings](./scoot/keybindings.md) (the
-full default map and how to make it yours).
+## Start here, in order
+
+1. [Install](./start/install.md) — including **which build you need:
+   GPU or CPU**.
+2. [First session](./start/first-session.md) — run scoot, open a terminal,
+   learn five keys.
+3. [Keybindings](./scoot/keybindings.md) — the full default map and how to
+   make it yours.
 
 ## Why scoot
 
@@ -45,4 +60,4 @@ full default map and how to make it yours).
 - **No GPU required.** The pixman renderer draws on the CPU, so scoot runs on a webtop container, a VM, and real hardware alike. A GPU build exists for real hardware — [picking takes one command](./start/install.md#which-build-do-i-need).
 - **Scriptable to the core.** Every action in [Keybindings](./scoot/keybindings.md) is also an IPC action an agent can send — windows, screenshots, input, the lot.
 
-*Home-page art: the [vinyl-sunset look](https://github.com/scoot-sh/scoot/tree/main/docs/examples/vinyl-sunset) (screenshot; the wallpaper illustration stays under its [Pixabay license](https://pixabay.com/service/license/)).*
+*Home-page art: the project logo (`docs/assets/logo.png`). Look previews: [vinyl-sunset](https://github.com/scoot-sh/scoot/tree/main/docs/examples/vinyl-sunset) (the wallpaper illustration stays under its [Pixabay license](https://pixabay.com/service/license/)), moonrise, music-desk and radial-burst.*
