@@ -33,7 +33,7 @@ keep working unchanged.
 
 | Page (slug now → slug at move) | One-line purpose | Fed by (current sections) |
 |---|---|---|
-| `/` (home) | What scoot is, one screenshot, install hint, links into the tree | `README.md` Why/Get started (shortened); hero art `docs/assets/vinyl-sunset-preview.png` |
+| `/` (home) | What scoot is, one screenshot, install hint, links into the tree | `README.md` Why/Get started (shortened); hero art: the logo (`site/public/hero-cat-*`, from `docs/assets/logo.png`), see the brand decision below |
 | `/install` | Get a working scoot on your machine, Nix first | `docs/nix.md` Consuming the flake, Prebuilt binaries/Cachix, FlakeHub, Platform notes; `README.md` Get started |
 | `/first-session` | Run scoot nested, then full-screen on a console: first terminal, first keybindings (greeter login joins this page in phase 2) | `docs/nix.md` What a greeter login starts, The greeter (opt-in); `docs/configuration.md` Starting a session, Default keybindings (first half); `docs/tty.md` intro (which backend am I on) |
 | `/desktop` | The one-enable full desktop profile (`programs.scoot.desktop`, `look`) | `docs/backlog/packaging/desktop-paved-path.md` (the design, rewritten user-first) + each `desktop-*` child entry as its slot lands; `docs/nix.md` Home-manager/NixOS modules |
