@@ -9966,14 +9966,17 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       # the whole exchange (opening either end never blocks while the
       # other end is held): without the hold, a writer that finishes
       # before the reader's read-only open leaves that open blocking
-      # forever, hanging the check under load.
+      # forever, hanging the check under load. The reader's own
+      # status is meaningless (only the writer's is reported), and it
+      # runs under a timeout so even a stuck reader fails the
+      # assertion loudly instead of hanging the suite.
       exec 3<>"$XDG_RUNTIME_DIR/scoot-osd.fifo"
-      cat <&3 > "$SCOOT_AUDIO_TEST_DIR/shown" &
+      timeout 10 cat <&3 > "$SCOOT_AUDIO_TEST_DIR/shown" &
       reader=$!
       "$@"
       status=$?
       exec 3>&-
-      wait "$reader"
+      wait "$reader" || true
       printf '%s:' "$status"
       cat "$SCOOT_AUDIO_TEST_DIR/shown"
       echo
