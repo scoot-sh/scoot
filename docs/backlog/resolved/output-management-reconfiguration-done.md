@@ -137,3 +137,16 @@ than re-deriving it:
 No fail-first tests: there is no behavior change to pin. The six-way
 `wlr-randr` refusal table in the read-half entry remains the standing wire
 evidence that the refusal is what it claims to be.
+
+## The stopgap that leans on this refusal (2026-10-06, PR #482)
+
+`desktop-displays` shipped scoot-native display profiles because of this
+refusal: stock kanshi gates its hooks on a `succeeded` reply it never gets
+here. Its `scoot-displays` watcher sets scale and power at hotplug over
+scoot's own IPC (`output-scale`, `output-power`) and nothing else: no
+positions, no modes, no make/model matching (see
+[`desktop-displays-done.md`](./desktop-displays-done.md)). Two of the
+triggers above have since fired: multi-output support is real, and that
+watcher is concrete demand for a writable path. When this reopens, kanshi
+working as-is is the bar, and the watcher (`nix/modules/displays-home.nix`)
+is what it retires.

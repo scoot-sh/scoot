@@ -101,6 +101,11 @@ warning. A reload applies while the session is locked, except new
 autostart entries (a spawned program at lock time could disclose onto
 the locked session, so those wait for the first unlocked reload).
 
+A successful reload also drops every live `scoot msg output-scale`
+scale: the outputs go back to the file's scales (see
+[Outputs](./outputs.md)), whether or not the file changed. A reload
+that cannot load the file keeps them.
+
 > **Symptom:** a reload changed nothing and both lists are empty.
 > That means "the reload changed nothing it was asked to" — the file
 > and the session already agree. Edit first, then reload.

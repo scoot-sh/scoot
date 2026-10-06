@@ -25,6 +25,19 @@ pub enum PointerButton {
     Forward,
 }
 
+/// What [`Request::OutputScale`] names: an output id from `outputs` (a
+/// JSON number), or a connector name (a JSON string: `DP-1`,
+/// `headless-2`). Ids are stable for the session but fresh after every
+/// unplug; names are stable across both, so a script that follows one
+/// monitor names it -- and skips the `outputs` round trip whose answer a
+/// hotplug could make stale before the set lands.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OutputTarget {
+    Id(u64),
+    Name(String),
+}
+
 /// One request per line. Coordinates are global logical pixels: the same space
 /// as window rectangles, and as screenshot pixels at scale 1.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -139,6 +152,42 @@ pub enum Request {
         #[serde(skip_serializing_if = "Option::is_none")]
         output: Option<u64>,
         powered: bool,
+    },
+    /// Set an output's scale live, or drop that live scale again -- the
+    /// IPC half of what `reload` does to `[[outputs]]` scales, for
+    /// display-profile watchers and agents that must not rewrite the
+    /// user's config file to change a scale.
+    ///
+    /// `output` names the output id `outputs` reports, or its connector
+    /// name; an unknown id or name is refused with an error. `scale` is a
+    /// number, validated like the config loader's range (`0.5` to `4.0`,
+    /// finite, resolved to 120ths) but refused outside it with a reason --
+    /// never clamped silently, so a caller knows its value did not land as
+    /// written. `null` drops the output's live scale, so it goes back to
+    /// the config file's (`reset` on the command line). The field is
+    /// required either way: a request that forgot it is refused rather
+    /// than read as a reset.
+    ///
+    /// Runtime state like `OutputPower`, not config state: it moves the
+    /// live session now (re-layout, re-tell, repaint, like a reload that
+    /// changed only this output's scale) and is kept by connector name, so
+    /// a replugged monitor comes back at it -- but a successful `reload`
+    /// or a restart goes back to the config file's scales. Applies while
+    /// locked, like `reload`; refused under `--nested`, where the host owns
+    /// the scale and a reload refuses it too.
+    ///
+    /// Additive like `OutputPower`: a client that never sends this tag
+    /// decodes exactly as before, and an older server answers it with an
+    /// ordinary `Error` (unknown tag), so no `PROTOCOL_VERSION` bump for
+    /// the request half -- and the reply half is the existing
+    /// `Response::Ok`, so the version does not move at all.
+    OutputScale {
+        output: OutputTarget,
+        /// `Option::deserialize` as an explicit deserializer makes the
+        /// field required: serde's derive otherwise reads a missing
+        /// `Option` as `None`, which here would be a silent reset.
+        #[serde(deserialize_with = "Option::deserialize")]
+        scale: Option<f64>,
     },
     /// Report the seat keyboard's currently effective layout (xkb group):
     /// its index and the keymap's name for it -- see

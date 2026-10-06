@@ -1785,32 +1785,50 @@ programs.scoot.desktop.displays.profiles = [
 ];
 ```
 
-Each profile names the exact connected set it answers (connector
-names, as `scoot msg outputs` lists them — `eDP-1`, `DP-1` on real
-hardware). The watcher (`scoot-displays`, a user unit bound to
-`scoot-session.target`) re-matches on every output event and once at
-session start, first match winning in list order. With no match the
-session falls back to its static config.
+What a profile does is narrow: **scale and power, at hotplug.** It
+names the exact connected set it answers (connector names, as
+`scoot msg outputs` lists them: `eDP-1`, `DP-1` on real hardware) and,
+per output, a scale and whether the panel stays off. It does not place
+outputs (they pack left to right in connection order), does not set
+modes, and cannot match on make or model (scoot's IPC reports
+connector names only). The watcher (`scoot-displays`, a user unit
+bound to `scoot-session.target`) re-matches once at session start and
+on every output event, first match winning in list order.
+
+How a match applies, all over scoot's own IPC, with no file written:
+
+- **Scale.** Each output of the set runs at the profile's scale
+  (`scoot msg output-scale NAME SCALE`). An output the profile gives
+  no scale goes back to your config's scale
+  (`scoot msg output-scale NAME reset`), so one profile's scale never
+  lingers into the next.
+- **Power.** Each output of the set is powered on unless the
+  profile's `disabled` names it (`scoot msg output-power`), so a
+  stale off from another profile never lingers.
+- **No match.** Every connected output goes back to your config's
+  scale. Power is left alone.
+
+These are live runtime settings, not config: your config file (under
+home-manager, a read-only link into the Nix store) is never touched.
+A successful `scoot msg reload` or a restart goes back to the config's
+scales until the watcher applies again (at the next output event or
+login). A home-manager rebuild never reloads the session, so it never
+drops an applied scale. The apply reports `applied` only when every
+call succeeded. Otherwise it exits non-zero and names each failed
+call, and the unit's journal shows the line.
 
 Why a scoot-native watcher instead of kanshi: stock kanshi runs its
 hooks only after the compositor answers an output configuration with
 success, and scoot's output-management write half answers every
-configuration with failure by design — kanshi matches the profile
+configuration with failure by design. kanshi matches the profile
 through the read half and then fails it, every hotplug, applying
-nothing. The watcher speaks scoot's own IPC instead
-(`subscribe` for events, `outputs` for matching, `reload` for scale,
-`output-power` for power), waking on hotplug the same event-driven
-way kanshi does — blocking read, no polling, no idle wakeups.
-
-How a match applies: the profile's scales (and modes) render into a
-managed block in the live config file — the only lines in that file
-the watcher owns, marked so hand edits around them survive — and a
-changed block reloads the session (scale re-applies live; a mode
-waits for the next login, and the journal says so when one is
-written). Power follows the set too: every connected output of the
-matched set is on unless the profile's `disabled` names it, so a
-stale off from another profile never lingers. With no matching
-profile the block is cleared again and power is left alone.
+nothing. The watcher speaks scoot's own IPC instead (`subscribe` for
+events, `outputs` for matching, `output-scale` and `output-power` for
+applying), waking on hotplug the same event-driven way kanshi does:
+blocking read, no polling, no idle wakeups. It is a stopgap. The
+durable answer is a writable output-management protocol, which would
+let kanshi (and positions and modes) work as-is; that work is tracked
+in [the output-management reconfiguration entry](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/output-management-reconfiguration-done.md).
 
 ```sh
 scoot-displays status
@@ -1824,41 +1842,43 @@ restart the watcher, which re-applies at start):
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `desktop.displays.enable` | bool | `true` with the profile | match the connected set and apply scale and power (with no profiles the watcher stays idle: no match, no block, no power changes) |
+| `desktop.displays.enable` | bool | `true` with the profile | match the connected set and apply scale and power (with no profiles the watcher stays idle: no scale or power call at all) |
 | `desktop.displays.profiles` | list of profiles | `[]` | arrangement profiles, first match wins in list order |
 | `profiles[].name` | string (unique) | — | the profile's name, as `status` prints it |
 | `profiles[].outputs` | list of strings (non-empty, unique set) | — | the exact connected connector-name set this profile answers |
-| `profiles[].scale` | attrset of number (0.5–4.0) | `{ }` | per-output scale, applied live on reload (every key names an output in `outputs`) |
-| `profiles[].mode` | attrset of `WxH` strings (≤65535) | `{ }` | per-output mode size, e.g. `"3840x2160"` — takes effect at the next login, never live (every key names an output in `outputs`) |
+| `profiles[].scale` | attrset of number (0.5–4.0) | `{ }` | per-output scale, applied live; an output in `outputs` with no entry runs at your config's scale (every key names an output in `outputs`) |
 | `profiles[].disabled` | list of strings | `[ ]` | outputs to power off under this profile, live (empty disables nothing; every entry names an output in `outputs`) |
+
+A mode is not a profile field: a mode cannot change live, and a
+profile that sets `mode` fails evaluation. Set one per connector in
+`programs.scoot.settings.outputs` (`{ name = "DP-1"; mode =
+"3840x2160"; }`): it applies at session start, beside the watcher. A
+static `scale` there is fine too. It is what an output runs at when no
+profile scales it.
 
 Troubleshooting, by symptom:
 
 - *Nothing applies on plug.* Names first: `scoot msg outputs`
   lists the connected connectors, and the profile matches only the
-  exact set — one extra monitor (or one missing letter) falls
+  exact set. One extra monitor (or one missing letter) falls
   through. `scoot-displays status` prints the match (`none` plus
   the connected set) without changing anything.
-- *The scale is right until a rebuild, then reverts.* Rebuilding
-  rewrites the config file without the managed block; the watcher
-  re-applies at the next output event. Run `scoot-displays apply`
-  to converge now.
-- *A mode is set but nothing changed.* Modes wait for the next
-  login (a reload never modesets a running output) — the watcher
-  logs exactly that when it writes one. Scale beside it still
-  applied live.
+- *The scale reverted after a reload.* A successful reload goes back
+  to your config's scales, and no event tells the watcher about it.
+  Run `scoot-displays apply` to converge now, or wait for the next
+  plug.
+- *`apply` exits non-zero.* Its stderr (and the unit's journal) names
+  the call that failed and scoot's reason. An output unplugged
+  mid-apply is the common one; the next output event applies again.
 - *An output stays dark.* Either the matched profile disables it
   (`disabled`), or a stale off lingers from before the watcher ran:
   `status` names the profile, and a fresh `apply` powers every
-  undischarged member of the set back on. Outside any profile,
-  `scoot msg output-power <id> on` (ids come from `scoot msg
-  outputs` — stable for the session, fresh after every unplug).
+  member of the set that `disabled` does not name back on. Outside
+  any profile, `scoot msg output-power <id> on` (ids come from
+  `scoot msg outputs`, stable for the session, fresh after every
+  unplug).
 - *Two profiles could match.* The first in list order wins; two
   profiles for one set fail evaluation instead of shadowing.
-- *A static `[[outputs]]` fails evaluation.* The watcher owns
-  `[[outputs]]` while enabled — move the scales into
-  `profiles[].scale` (a static entry would silently shadow the
-  managed block).
 - *The watcher is not running.* It starts with the session scope:
   `systemctl --user status scoot-displays` (and
   `scoot-session.target` beside it). With the slot on but no
@@ -1937,7 +1957,7 @@ child, so those children fill bodies without renaming options:
 | `desktop.power.enable` | bool + package | `false` (opt-in, never with the profile — [Power](#power): profiles on `Super+p`, lid/low-battery suspend, charge limit) | power profiles, suspend, charge limit |
 | `desktop.theme.enable` | bool + package | `false` | GTK/Qt theme, dark mode |
 | `desktop.apps.terminal.enable` / `desktop.apps.fileManager.enable` | bool + package | `false` | terminal + file manager |
-| `desktop.displays.enable` (+ `profiles`) | bool (+ list) | `true` ([Displays](#displays): the watcher re-matches the connected set on every output event — scale live on reload, modes at next login, power through `output-power`) | output policy (scoot-native profiles; stock kanshi cannot drive the read-only output-management write half) |
+| `desktop.displays.enable` (+ `profiles`) | bool (+ list) | `true` ([Displays](#displays): the watcher re-matches the connected set on every output event and sets scale and power live over IPC, never writing the config) | output policy (scoot-native profiles, a stopgap: stock kanshi cannot drive the read-only output-management write half) |
 | `desktop.inputMethod.enable` | bool | `false` | input-method wiring |
 | `desktop.automount.enable` | bool + package | `false` | removable-media automount |
 

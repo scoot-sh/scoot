@@ -459,6 +459,12 @@ impl State {
     /// default every connected output overrides, is stored and reported
     /// without re-announcing anything.
     ///
+    /// Every live `output-scale` scale ([`State::runtime_scales`]) is
+    /// dropped here, file changed or not: a reload means "the file's
+    /// scales", and a reload that fails to load never gets this far, so it
+    /// keeps them. Dropping one is not a field change, so it reports
+    /// nothing; it re-lays-out like any other moved scale.
+    ///
     /// Under `--nested` every difference refuses instead: the host owns the
     /// scale there (`compositor::run` forced the live value to 1.0 with a
     /// warning and ignored every entry), so nothing is stored.
@@ -472,7 +478,14 @@ impl State {
         if nested {
             return;
         }
-        if default == ScaleReload::Agree && entries.scales.is_empty() {
+        // Live IPC scales (`output-scale`) end here: a reload goes back to
+        // the config file's scales, which is what `configured_scale` reads
+        // once the map below is empty. Remembered only to defeat the
+        // early return: with an unchanged file but a live runtime scale,
+        // there is still a move to undo.
+        let had_runtime = !self.runtime_scales.is_empty();
+        self.runtime_scales.clear();
+        if default == ScaleReload::Agree && entries.scales.is_empty() && !had_runtime {
             return;
         }
         self.default_scale = fresh.scale;

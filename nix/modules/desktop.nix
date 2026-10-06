@@ -1556,22 +1556,27 @@ in
         };
       }) keymap;
     };
-    # Output policy (scale, placement) from the connected set.
+    # Output policy (scale and power) from the connected set.
     # Filled by the `desktop-displays` child: scoot-native arrangement
     # profiles (kanshi-class matching, without kanshi: stock kanshi gates
     # its `exec` hooks on the output-management `succeeded` reply, which
     # scoot never sends -- its write half answers every configuration
     # with `failed` -- so kanshi matches and then fails every profile;
     # making the protocol writable would be atomic-modeset surgery across
-    # three backends for a packaging ticket, while subscribe/outputs/
-    # reload/output-power already give matching plus applying). Each
-    # profile names the exact connected set it answers (connector names,
-    # the same key `[[outputs]]` matches on -- make and model are not
-    # visible over scoot's IPC, so they cannot key a profile), with a
-    # scale, an optional mode and optional power-off per output. The
-    # watcher (`displays-home.nix`) re-matches on every output event and
-    # applies through the live config (scale re-applies on reload, a mode
-    # waits for the next login) plus `output-power`. Each `package`
+    # three backends for a packaging ticket -- its durable home is
+    # `docs/backlog/resolved/output-management-reconfiguration-done.md`,
+    # and this watcher is the stopgap until then -- while subscribe/
+    # outputs/output-scale/output-power already give matching plus
+    # applying). Each profile names the exact connected set it answers
+    # (connector names, the same key `[[outputs]]` matches on -- make
+    # and model are not visible over scoot's IPC, so they cannot key a
+    # profile), with a scale and optional power-off per output. No
+    # positions (outputs pack left to right in connection order) and no
+    # modes (a mode cannot change live; `settings.outputs` sets one
+    # statically). The watcher (`displays-home.nix`) re-matches on every
+    # output event and applies over IPC only (`output-scale`,
+    # `output-power`, both live runtime state), never writing the config
+    # file. Each `package`
     # lives beside this in the side modules, which is also where its
     # default lives; everything here is plain values, so this file
     # stays `lib`-only.
@@ -1587,9 +1592,10 @@ in
         description = ''
           Match the connected output set and apply the profile's scale
           and power: the watcher behind `profiles` re-matches on every
-          output event (and once at session start) and applies through
-          the live config plus `output-power`. Without it the outputs
-          keep whatever `settings` (or the compositor defaults) say.
+          output event (and once at session start) and applies live
+          over IPC (`scoot msg output-scale`, `scoot msg output-power`),
+          never writing the config file. Without it the outputs keep
+          whatever `settings` (or the compositor defaults) say.
         '';
       };
 
@@ -1597,9 +1603,9 @@ in
       # matches when the connected connector-name set is exactly its
       # `outputs` (no subset rule: "this monitor set means this layout",
       # so a typo'd extra monitor falls through instead of half
-      # applying). No match clears the watcher's managed config block
-      # again (the session falls back to its static config) and leaves
-      # power alone.
+      # applying). No match resets every connected output's scale to
+      # the static config's (`scoot msg output-scale NAME reset`) and
+      # leaves power alone.
       profiles = lib.mkOption {
         type = lib.types.listOf (
           lib.types.submodule {
@@ -1635,10 +1641,11 @@ in
               # The scale each named output runs at under this profile
               # (the `[[outputs]]` entry's `scale`, 0.5 to 4.0 like the
               # compositor's own range). Applied live through
-              # `scoot msg reload`. Every key names an output in
+              # `scoot msg output-scale`. Every key names an output in
               # `outputs` (a scale for an output this profile never
               # matches is a typo, refused here). An output with no
-              # entry keeps whatever scale it has.
+              # entry runs at the static config's scale (its live scale
+              # is reset, so another profile's never lingers).
               scale = lib.mkOption {
                 type = lib.types.attrsOf lib.types.number;
                 default = { };
@@ -1648,29 +1655,22 @@ in
                 };
                 description = ''
                   The scale each named output runs at (0.5 to 4.0),
-                  applied live on reload. Every key names an output in
-                  `outputs`.
+                  applied live. An output in `outputs` with no entry
+                  runs at the static config's scale. Every key names an
+                  output in `outputs`.
                 '';
               };
 
-              # The mode size each named output is driven at, as `WxH`
-              # (the `[[outputs]]` entry's `mode`, e.g. `"3840x2160"`).
-              # Restart-noted, not live: a reload refuses a changed
-              # mode (the compositor never modesets a running output),
-              # so a mode set here lands at the next login -- the
-              # watcher says so in the journal when it writes one.
-              # Every key names an output in `outputs`.
+              # Not a profile field: kept only so a set `mode` fails
+              # evaluation with the way out (`settings.outputs`), not
+              # as an unknown option -- see `displays-home.nix`.
               mode = lib.mkOption {
                 type = lib.types.attrsOf lib.types.str;
                 default = { };
-                example = {
-                  "DP-1" = "3840x2160";
-                };
+                visible = false;
                 description = ''
-                  The mode size each named output is driven at, as
-                  `WxH`. Takes effect at the next login (a reload
-                  refuses modes). Every key names an output in
-                  `outputs`.
+                  Not supported: a mode cannot change live. Set a
+                  static mode in `programs.scoot.settings.outputs`.
                 '';
               };
 
@@ -1719,8 +1719,9 @@ in
         ];
         description = ''
           Arrangement profiles, first match wins in list order. Empty
-          matches nothing (the watcher stays idle: no config block, no
-          power changes).
+          matches nothing (the watcher stays idle: no scale or power
+          call at all). Profiles set scale and power only: no
+          positions, no modes, no make/model matching.
         '';
       };
     };

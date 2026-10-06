@@ -426,15 +426,25 @@ pub struct State {
     /// the modes here stay the ones the session started with). Empty under
     /// `--nested`, which ignores every entry, and for a file with none.
     pub output_entries: OutputEntries,
+    /// Live per-output scales set over IPC (`output-scale`), by connector
+    /// name -- runtime state like [`Self::output_power`]'s off set, not
+    /// config state. Each entry beats [`State::configured_scale`]'s file
+    /// answer for its output (so a replugged monitor, fresh id but same
+    /// name, comes back at its runtime scale), and a successful `reload` or a
+    /// restart drops every entry (the session goes back to the config
+    /// file's scales). Keyed by name rather than id for exactly the
+    /// replug reason: ids are never reused, names do not move.
+    pub runtime_scales: HashMap<String, f64>,
     /// Whether the outputs currently run at more than one scale -- only
-    /// ever true with `[[outputs]]` entries. Gates `apply()`'s per-window
+    /// ever true with `[[outputs]]` entries or live `output-scale`
+    /// scales. Gates `apply()`'s per-window
     /// scale refresh (`output_scale.rs`'s `refresh_window_scales`): while
     /// every output agrees, a window changing outputs cannot change the
     /// scale it should be told, so the walk is skipped outright and a
     /// session without entries pays one `bool` read per `apply()`.
     /// Recomputed by `State::note_output_scales` wherever the set of
     /// outputs or their scales changes (an output added or removed, a
-    /// reload's rescale), and nowhere else.
+    /// reload's or an `output-scale` request's rescale), and nowhere else.
     pub mixed_scales: bool,
     /// Which renderer [`Self::backends`]' entries composite with, resolved once from
     /// `--renderer`/`[renderer] backend` (see `render::resolve`) and fixed
@@ -1292,6 +1302,7 @@ impl State {
             workspace_counts: Vec::new(),
             default_scale: scale,
             output_entries: OutputEntries::default(),
+            runtime_scales: HashMap::new(),
             mixed_scales: false,
             renderer,
             backends: HashMap::new(),

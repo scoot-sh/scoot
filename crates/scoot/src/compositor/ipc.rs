@@ -42,10 +42,10 @@ use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use scoot_core::{Action, WindowId};
+use scoot_core::{Action, OutputId, WindowId};
 use scoot_ipc::{
-    OutputSnapshot, PROTOCOL_VERSION, Rect as WireRect, Request, Response, WindowSnapshot, encode,
-    socket_path,
+    OutputSnapshot, OutputTarget, PROTOCOL_VERSION, Rect as WireRect, Request, Response,
+    WindowSnapshot, encode, socket_path,
 };
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, Mode};
@@ -394,6 +394,75 @@ impl State {
                 };
                 for id in ids {
                     self.set_output_powered(id, powered);
+                }
+                self.ok()
+            }
+            // Session-level like `outputs` and `output-power`: output scale
+            // is session state, not window management, so like a reload --
+            // and unlike every `Action` -- this applies while locked. Under
+            // `--nested` the host owns the scale, so this refuses like a
+            // reload's scale half does. An unknown id or name is refused (an
+            // agent must know its change landed), as is a scale outside the
+            // config loader's own range (refused, never clamped silently).
+            //
+            // Runtime state, not config state: the scale is kept by connector
+            // name (stable across unplug cycles, unlike ids) and read by
+            // `configured_scale`, so a replugged monitor comes back at it --
+            // while a successful reload or a restart drops it and goes back
+            // to the file. `None` drops it now. The outputs re-lay-out only
+            // when this output's scale actually moves, so a repeat set (or a
+            // reset of an output with none) re-tells nothing.
+            //
+            // Allocation beyond the reply: the map key (the request's own
+            // name string, moved in, or one `Output::name` copy for an id)
+            // and one `Output::name` copy per output a name lookup compares
+            // against -- Smithay's only name accessor clones (`name(&self)
+            // -> String`, verified against the pinned rev's `output.rs`),
+            // and a session has at most a handful of outputs.
+            Request::OutputScale { output, scale } => {
+                if self.host.is_some() {
+                    return Response::error(
+                        "refused: this session is nested, so the host compositor owns the \
+                         output scale; change it there instead",
+                    );
+                }
+                let scale = match scale.map(Self::resolve_ipc_scale).transpose() {
+                    Ok(scale) => scale,
+                    Err(reason) => return Response::error(reason),
+                };
+                let found = match output {
+                    OutputTarget::Id(wanted) => self
+                        .outputs
+                        .get(OutputId(wanted))
+                        .map(|live| (live.name(), super::output_scale::scale_of(live)))
+                        .ok_or_else(|| wanted.to_string()),
+                    OutputTarget::Name(wanted) => {
+                        match self.outputs.iter().find(|live| live.name() == wanted) {
+                            Some(live) => Ok((wanted, super::output_scale::scale_of(live))),
+                            None => Err(wanted),
+                        }
+                    }
+                };
+                let (name, current) = match found {
+                    Ok(found) => found,
+                    Err(wanted) => return Response::error(format!("no such output: {wanted}")),
+                };
+                // The scale this output runs at from here on: the one just
+                // set, or (dropped) the config file's.
+                let target = match scale {
+                    Some(scale) => {
+                        self.runtime_scales.insert(name, scale);
+                        scale
+                    }
+                    None => {
+                        self.runtime_scales.remove(&name);
+                        self.configured_scale(&name)
+                    }
+                };
+                if target != current {
+                    self.rescale_outputs();
+                    self.resend_output_scale();
+                    self.apply();
                 }
                 self.ok()
             }

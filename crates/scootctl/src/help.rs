@@ -93,6 +93,13 @@ pub const REQUESTS: &[RequestDoc] = &[
         reply: "`{\"type\":\"ok\",...}`",
     },
     RequestDoc {
+        verb: "output-scale",
+        syntax: "output-scale ID|NAME SCALE|reset",
+        description: "set an output's scale live (0.5 to 4), or reset it; a reload restores the config's",
+        example: "scoot msg output-scale DP-1 1.5",
+        reply: "`{\"type\":\"ok\",...}`",
+    },
+    RequestDoc {
         verb: "action",
         syntax: "action ACTION [ARGUMENT...]",
         description: "run a layout action (see `help actions`)",

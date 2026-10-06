@@ -32,10 +32,13 @@
 //!
 //! [`State::default_scale`](super::State) is resolved from `[output] scale`
 //! at startup, and `[[outputs]]` entries override it per output name (see
-//! `output_config.rs`); [`State::configured_scale`] is the one function
-//! that combines the two. An output's scale is decided when it is created
-//! (`headless.rs`'s `create_output`) and when a reload re-decides every
-//! output's (`rescale_outputs`), and from then on it lives on the `Output`
+//! `output_config.rs`); a live `scoot msg output-scale` scale
+//! ([`State::runtime_scales`](super::State)) beats both for its output
+//! until a successful reload drops it. [`State::configured_scale`] is the
+//! one function that combines the three. An output's scale is decided when
+//! it is created (`headless.rs`'s `create_output`) and when a reload or an
+//! `output-scale` request re-decides every output's (`rescale_outputs`),
+//! and from then on it lives on the `Output`
 //! itself -- [`scale_of`] reads it back, and every reader that means "the
 //! scale this is on" resolves an output and asks it, never the default.
 //!
@@ -325,10 +328,31 @@ impl FractionalScaleHandler for State {
 struct ScaleOutput(Cell<Option<OutputId>>);
 
 impl State {
-    /// The scale output `name` is configured to run at: its `[[outputs]]`
-    /// entry's, else the session default (see `output_config.rs`).
+    /// The scale output `name` is configured to run at: its live IPC
+    /// scale ([`State::runtime_scales`]) when one is set, else its
+    /// `[[outputs]]` entry's, else the session default (see
+    /// `output_config.rs`).
     pub(super) fn configured_scale(&self, name: &str) -> f64 {
+        if let Some(scale) = self.runtime_scales.get(name) {
+            return *scale;
+        }
         self.output_entries.scale_for(name, self.default_scale)
+    }
+
+    /// Validates an IPC `output-scale` value against the config loader's
+    /// own range, but refusing where the loader clamps: a non-finite scale
+    /// has no meaningful value, and an out-of-range one would land as
+    /// something other than written. Either is an error naming the range,
+    /// never a silent clamp. A valid scale then resolves through
+    /// [`clamp_scale`] itself -- the loader's one resolution to 120ths --
+    /// so an IPC scale and a config scale of the same value agree exactly.
+    pub(super) fn resolve_ipc_scale(scale: f64) -> Result<f64, String> {
+        if !scale.is_finite() || !(MIN_SCALE..=MAX_SCALE).contains(&scale) {
+            return Err(format!(
+                "refused: scale must be a number from {MIN_SCALE} to {MAX_SCALE} (the compositor's own range), not {scale}"
+            ));
+        }
+        Ok(clamp_scale(scale))
     }
 
     /// The scale of the output under the pointer, else of the primary, else
@@ -364,8 +388,9 @@ impl State {
     /// changes outputs has nothing new to hear. Its marks may go stale
     /// meanwhile, which only ever costs a silent re-tell later: a mark is
     /// set only when the window is told that output's scale, and an
-    /// output's scale moves only through a reload's rescale, which re-tells
-    /// and re-marks every window ([`State::resend_output_scale`]). A session
+    /// output's scale moves only through `rescale_outputs` (a reload or an
+    /// `output-scale` request), whose callers re-tell and re-mark every
+    /// window ([`State::resend_output_scale`]). A session
     /// that stops mixing scales (an output removed) is re-told whole by
     /// `remove_output` for the same reason.
     ///

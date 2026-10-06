@@ -3,9 +3,9 @@
 
 use scoot_ipc::{
     Action, BindRow, EventKind, Horizontal, KeyboardLayout, OutputChanged, OutputRemoved,
-    OutputRestored, OutputSnapshot, PROTOCOL_VERSION, PointerButton, Rect, Request, Response,
-    SCREENSHOT_CURSOR_DEFAULT, Screenshot, SkippedBind, WindowSnapshot, WorkspaceSnapshot, decode,
-    encode,
+    OutputRestored, OutputSnapshot, OutputTarget, PROTOCOL_VERSION, PointerButton, Rect, Request,
+    Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, SkippedBind, WindowSnapshot,
+    WorkspaceSnapshot, decode, encode,
 };
 use serde_json::{Value, json};
 fn json_of<T: serde::Serialize>(value: &T) -> Value {
@@ -558,6 +558,14 @@ fn every_request_round_trips_on_one_line() {
         },
         Request::Keyboard,
         Request::Locked,
+        Request::OutputScale {
+            output: OutputTarget::Id(2),
+            scale: Some(2.0),
+        },
+        Request::OutputScale {
+            output: OutputTarget::Name("DP-1".into()),
+            scale: None,
+        },
     ];
     for request in requests {
         let line = encode(&request).unwrap();
@@ -730,6 +738,72 @@ fn an_output_power_request_round_trips() {
         decode::<Request>(&encode(&request).unwrap()).unwrap(),
         request
     );
+}
+
+/// `output-scale` names its output by id or by connector name: a number on
+/// the wire is the id, a string is the name. `scale` is a number to set,
+/// or `null` to drop the live scale back to the config file's. An older
+/// server meets any of these with an ordinary `Error` (unknown tag), like
+/// any new request -- which, with the existing `Ok` reply, is why this
+/// ships without a `PROTOCOL_VERSION` bump.
+#[test]
+fn an_output_scale_request_round_trips_by_id_or_name() {
+    for (request, wire) in [
+        (
+            Request::OutputScale {
+                output: OutputTarget::Id(2),
+                scale: Some(2.0),
+            },
+            json!({"type":"output_scale","output":2,"scale":2.0}),
+        ),
+        (
+            Request::OutputScale {
+                output: OutputTarget::Name("DP-1".into()),
+                scale: Some(1.5),
+            },
+            json!({"type":"output_scale","output":"DP-1","scale":1.5}),
+        ),
+        (
+            Request::OutputScale {
+                output: OutputTarget::Name("DP-1".into()),
+                scale: None,
+            },
+            json!({"type":"output_scale","output":"DP-1","scale":null}),
+        ),
+    ] {
+        assert_eq!(json_of(&request), wire);
+        assert_eq!(
+            decode::<Request>(&encode(&request).unwrap()).unwrap(),
+            request
+        );
+    }
+    // An integer scale is a scale, as JSON writes it.
+    assert_eq!(
+        decode::<Request>(r#"{"type":"output_scale","output":1,"scale":2}"#).unwrap(),
+        Request::OutputScale {
+            output: OutputTarget::Id(1),
+            scale: Some(2.0),
+        }
+    );
+}
+
+/// A missing `scale` is refused, not read as `null`: serde's derive would
+/// otherwise default a missing `Option` to `None`, turning a client's
+/// forgotten field into a silent reset. Likewise an output that is
+/// neither an id nor a name (a negative or fractional number, a bool) is
+/// a decode error the server answers with an `Error`, never a guess.
+#[test]
+fn an_output_scale_request_without_a_scale_or_with_a_bad_target_is_refused() {
+    for line in [
+        r#"{"type":"output_scale","output":"DP-1"}"#,
+        r#"{"type":"output_scale","scale":2.0}"#,
+        r#"{"type":"output_scale","output":-1,"scale":2.0}"#,
+        r#"{"type":"output_scale","output":1.5,"scale":2.0}"#,
+        r#"{"type":"output_scale","output":true,"scale":2.0}"#,
+        r#"{"type":"output_scale","output":1,"scale":"2"}"#,
+    ] {
+        assert!(decode::<Request>(line).is_err(), "{line} must not decode");
+    }
 }
 
 /// Same contract for the lock flag: `{"type":"ok"}` from an older server

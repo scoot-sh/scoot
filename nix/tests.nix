@@ -2854,9 +2854,10 @@ let
 
   # --- display profiles (`programs.scoot.desktop.displays`) evaluations ---
   #
-  # The profile: the slot on (it rides with the profile), two profiles
-  # (docked with a power-off and a mode, undocked), the watcher and its
-  # profiles file installed, the unit bound to the session scope.
+  # The profile: the slot on (it rides with the profile), three
+  # profiles (docked with a power-off, undocked, presenting with one
+  # output left at the config's scale), the watcher and its profiles
+  # file installed, the unit bound to the session scope.
   hmDisplays = evalHome {
     enable = true;
     desktop.enable = true;
@@ -2871,9 +2872,6 @@ let
           "DP-1" = 1.0;
           "eDP-1" = 2.0;
         };
-        mode = {
-          "DP-1" = "3840x2160";
-        };
         disabled = [ "eDP-1" ];
       }
       {
@@ -2881,6 +2879,16 @@ let
         outputs = [ "eDP-1" ];
         scale = {
           "eDP-1" = 2.0;
+        };
+      }
+      {
+        name = "presenting";
+        outputs = [
+          "eDP-1"
+          "HDMI-A-1"
+        ];
+        scale = {
+          "eDP-1" = 1.5;
         };
       }
     ];
@@ -2898,15 +2906,16 @@ let
     enable = true;
     desktop.displays.enable = true;
   };
-  # ...with no profiles (accepted and idle: the watcher matches
-  # nothing, writes nothing, powers nothing).
+  # ...with no profiles (accepted and idle: the watcher makes no scale
+  # or power call at all).
   hmDisplaysNoProfiles = evalHome {
     enable = true;
     desktop.enable = true;
     desktop.displays.enable = true;
   };
-  # Refusals: a static `[[outputs]]` beside the watcher (pinned by
-  # message in `_displaysPins`)...
+  # ...beside a static `[[outputs]]` (accepted: its scale is the
+  # baseline a reset, a reload or a restart goes back to, and its mode
+  # is the only way to set one)...
   hmDisplaysStaticOutputs = evalHome {
     enable = true;
     desktop.displays.enable = true;
@@ -2914,6 +2923,22 @@ let
       {
         name = "DP-1";
         scale = 1.0;
+        mode = "3840x2160";
+      }
+    ];
+  };
+  # Refusals (pinned by message in `_displaysPins`): a `mode` in a
+  # profile, which cannot apply live...
+  hmDisplaysMode = evalHome {
+    enable = true;
+    desktop.displays.enable = true;
+    desktop.displays.profiles = [
+      {
+        name = "docked";
+        outputs = [ "DP-1" ];
+        mode = {
+          "DP-1" = "3840x2160";
+        };
       }
     ];
   };
@@ -2949,8 +2974,7 @@ let
       }
     ];
   };
-  # ...a scale outside the compositor's range, a mode outside `WxH`,
-  # and a mode past the largest output size...
+  # ...a scale outside the compositor's range...
   hmDisplaysBadScale = evalHome {
     enable = true;
     desktop.displays.enable = true;
@@ -2964,33 +2988,7 @@ let
       }
     ];
   };
-  hmDisplaysBadMode = evalHome {
-    enable = true;
-    desktop.displays.enable = true;
-    desktop.displays.profiles = [
-      {
-        name = "docked";
-        outputs = [ "DP-1" ];
-        mode = {
-          "DP-1" = "wide";
-        };
-      }
-    ];
-  };
-  hmDisplaysHugeMode = evalHome {
-    enable = true;
-    desktop.displays.enable = true;
-    desktop.displays.profiles = [
-      {
-        name = "docked";
-        outputs = [ "DP-1" ];
-        mode = {
-          "DP-1" = "100000x100";
-        };
-      }
-    ];
-  };
-  # ...a scale, a mode and a disable outside the profile's own set...
+  # ...a scale and a disable outside the profile's own set...
   hmDisplaysScaleOutside = evalHome {
     enable = true;
     desktop.displays.enable = true;
@@ -3000,19 +2998,6 @@ let
         outputs = [ "DP-1" ];
         scale = {
           "eDP-1" = 2.0;
-        };
-      }
-    ];
-  };
-  hmDisplaysModeOutside = evalHome {
-    enable = true;
-    desktop.displays.enable = true;
-    desktop.displays.profiles = [
-      {
-        name = "docked";
-        outputs = [ "DP-1" ];
-        mode = {
-          "eDP-1" = "1920x1080";
         };
       }
     ];
@@ -3075,9 +3060,6 @@ let
           "DP-1" = 1.0;
           "eDP-1" = 2.0;
         };
-        mode = {
-          "DP-1" = "3840x2160";
-        };
         disabled = [ "eDP-1" ];
       }
       {
@@ -3087,9 +3069,20 @@ let
           "eDP-1" = 2.0;
         };
       }
+      {
+        name = "presenting";
+        outputs = [
+          "eDP-1"
+          "HDMI-A-1"
+        ];
+        scale = {
+          "eDP-1" = 1.5;
+        };
+      }
     ];
   };
   displaysWatcher = slotScriptBin hmDisplaysScriptTest "scoot-displays";
+  displaysWatcherIdle = slotScriptBin hmDisplaysNoProfiles "scoot-displays";
   displaysProfilesJson = hmDisplaysScriptTest.config.xdg.configFile."scoot/displays.json".source;
 
   # --- audio (`programs.scoot.desktop.audio`) evaluations ---
@@ -11684,14 +11677,27 @@ let
       assert !(hmDisplaysOff.config.systemd.user.services ? scoot-displays);
       true
     )
-    # Refusals: a static `[[outputs]]` beside the watcher...
+    # ...a static `[[outputs]]` (scale and mode) beside the watcher
+    # holds: the watcher writes no file, so nothing fights it...
     (
-      assert builtins.length (failing hmDisplaysStaticOutputs.config) == 1;
+      assert allAssertionsHold hmDisplaysStaticOutputs.config;
+      true
+    )
+    # ...the profiles file carries no `mode` (not a profile field)...
+    (
+      assert lib.all (profile: !(profile ? mode)) (
+        builtins.fromJSON (builtins.readFile hmDisplays.config.xdg.configFile."scoot/displays.json".source)
+      );
+      true
+    )
+    # Refusals: a `mode` in a profile, refused with the way out...
+    (
+      assert builtins.length (failing hmDisplaysMode.config) == 1;
       true
     )
     (
-      assert lib.hasInfix "settings has `outputs`" (
-        builtins.head (failing hmDisplaysStaticOutputs.config)
+      assert lib.hasInfix "programs.scoot.settings.outputs" (
+        builtins.head (failing hmDisplaysMode.config)
       );
       true
     )
@@ -11721,8 +11727,7 @@ let
       assert lib.hasInfix "empty or blank output" (builtins.head (failing hmDisplaysBlankOutput.config));
       true
     )
-    # ...a scale outside the compositor's range, a mode outside `WxH`,
-    # and a mode past the largest output size...
+    # ...a scale outside the compositor's range...
     (
       assert builtins.length (failing hmDisplaysBadScale.config) == 1;
       true
@@ -11731,23 +11736,7 @@ let
       assert lib.hasInfix "0.5 to 4.0" (builtins.head (failing hmDisplaysBadScale.config));
       true
     )
-    (
-      assert builtins.length (failing hmDisplaysBadMode.config) == 1;
-      true
-    )
-    (
-      assert lib.hasInfix "outside `WxH`" (builtins.head (failing hmDisplaysBadMode.config));
-      true
-    )
-    (
-      assert builtins.length (failing hmDisplaysHugeMode.config) == 1;
-      true
-    )
-    (
-      assert lib.hasInfix "65535" (builtins.head (failing hmDisplaysHugeMode.config));
-      true
-    )
-    # ...a scale, a mode and a disable outside the profile's own set...
+    # ...a scale and a disable outside the profile's own set...
     (
       assert builtins.length (failing hmDisplaysScaleOutside.config) == 1;
       true
@@ -11755,16 +11744,6 @@ let
     (
       assert lib.hasInfix "scales an output outside" (
         builtins.head (failing hmDisplaysScaleOutside.config)
-      );
-      true
-    )
-    (
-      assert builtins.length (failing hmDisplaysModeOutside.config) == 1;
-      true
-    )
-    (
-      assert lib.hasInfix "modes an output outside" (
-        builtins.head (failing hmDisplaysModeOutside.config)
       );
       true
     )
@@ -13167,22 +13146,30 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
 
     # 21f. Display profiles, against a stub `scoot` (the REAL watcher
     #      from the slot; the stub answers `msg outputs` from a
-    #      fixture, records `reload` and `output-power`, and replays
-    #      one event stream for `subscribe` -- the evaluation leaves
-    #      `package` null, so the watcher calls the bare name this
-    #      stub shadows on PATH).
-    mkdir -p "$PWD/displays-test/bin" "$PWD/displays-test/home"
+    #      fixture, records `output-scale` and `output-power` -- the
+    #      only calls the watcher may make; anything else, `reload`
+    #      included, is exit 99 -- refuses the one call named in
+    #      $SCOOT_DISPLAYS_TEST_DIR/refuse the way scoot refuses (its
+    #      reason on stderr, exit 1), and replays one event stream for
+    #      `subscribe`. The evaluation leaves `package` null, so the
+    #      watcher calls the bare name this stub shadows on PATH).
+    mkdir -p "$PWD/displays-test/bin" "$PWD/displays-test/home/scoot" "$PWD/displays-test/run" "$PWD/displays-test/store"
     cat > "$PWD/displays-test/bin/scoot" <<'EOF'
     #!${pkgs.runtimeShell}
-    # $SCOOT_DISPLAYS_TEST_DIR/outputs.json answers `msg outputs`;
-    # `reload` and `output-power` append to
-    # $SCOOT_DISPLAYS_TEST_DIR/calls; `subscribe` replays
-    # $SCOOT_DISPLAYS_TEST_DIR/events, then ends the stream.
+    d="$SCOOT_DISPLAYS_TEST_DIR"
     case "$1 $2" in
-      "msg outputs") cat "$SCOOT_DISPLAYS_TEST_DIR/outputs.json" ;;
-      "msg reload") printf 'reload\n' >> "$SCOOT_DISPLAYS_TEST_DIR/calls"; printf '{"type":"reloaded","applied":[],"refused":[]}\n' ;;
-      "msg output-power") printf 'output-power %s %s\n' "$3" "$4" >> "$SCOOT_DISPLAYS_TEST_DIR/calls"; printf '{"type":"ok","locked":false}\n' ;;
-      "msg subscribe") cat "$SCOOT_DISPLAYS_TEST_DIR/events" ;;
+      "msg outputs") cat "$d/outputs.json" ;;
+      "msg output-scale" | "msg output-power")
+        # Scales recorded in their shortest form (`2`, not `2.0`), so
+        # the expectations below do not pin jq's float printing.
+        value="$4"
+        case "$value" in reset | on | off) ;; *) value="$(printf '%g' "$value")" ;; esac
+        call="$2 $3 $value"
+        if [ -f "$d/refuse" ] && [ "$call" = "$(cat "$d/refuse")" ]; then
+          echo "refused: the test refuses $call" >&2; exit 1
+        fi
+        printf '%s\n' "$call" >> "$d/calls"; printf '{"type":"ok","locked":false}\n' ;;
+      "msg subscribe") cat "$d/events" ;;
       *) echo "unexpected scoot args: $*" >&2; exit 99 ;;
     esac
     EOF
@@ -13190,7 +13177,14 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     export SCOOT_DISPLAYS_TEST_DIR="$PWD/displays-test"
     export PATH="$PWD/displays-test/bin:$PATH"
     export XDG_CONFIG_HOME="$PWD/displays-test/home"
+    export XDG_RUNTIME_DIR="$PWD/displays-test/run"
     export HOME="$PWD/displays-test/home"
+    # The config file as home-manager ships it: a symlink into a
+    # read-only "store" file. The watcher must leave both alone.
+    printf '[layout]\ngap = 8\n' > "$SCOOT_DISPLAYS_TEST_DIR/store/config.toml"
+    chmod 444 "$SCOOT_DISPLAYS_TEST_DIR/store/config.toml"
+    ln -s "$SCOOT_DISPLAYS_TEST_DIR/store/config.toml" "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
+    config_sum="$(sha256sum < "$SCOOT_DISPLAYS_TEST_DIR/store/config.toml")"
     : > "$SCOOT_DISPLAYS_TEST_DIR/calls"
     cat > "$SCOOT_DISPLAYS_TEST_DIR/outputs-docked.json" <<'EOF'
     {"type":"outputs","outputs":[
@@ -13201,83 +13195,108 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     {"type":"outputs","outputs":[
       {"id":1,"name":"eDP-1","rect":{"x":0,"y":0,"width":1476,"height":830},"scale":2.0,"powered":true}]}
     EOF
+    cat > "$SCOOT_DISPLAYS_TEST_DIR/outputs-presenting.json" <<'EOF'
+    {"type":"outputs","outputs":[
+      {"id":1,"name":"eDP-1","rect":{"x":0,"y":0,"width":1476,"height":830},"scale":2.0,"powered":true},
+      {"id":3,"name":"HDMI-A-1","rect":{"x":1476,"y":0,"width":1920,"height":1080},"scale":1.0,"powered":true}]}
+    EOF
     cat > "$SCOOT_DISPLAYS_TEST_DIR/outputs-unknown.json" <<'EOF'
     {"type":"outputs","outputs":[
-      {"id":1,"name":"HDMI-A-1","rect":{"x":0,"y":0,"width":1920,"height":1080},"scale":1.0,"powered":true}]}
+      {"id":4,"name":"DP-2","rect":{"x":0,"y":0,"width":1920,"height":1080},"scale":1.0,"powered":true}]}
     EOF
+    calls_since() { tail -n "+$(( $1 + 1 ))" "$SCOOT_DISPLAYS_TEST_DIR/calls"; }
+    ncalls() { wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls"; }
     # docked matches (first match wins: the docked profile names both)...
     cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-docked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
     status="$(${displaysWatcher} status)"; test "$status" = 'docked (connected: ["DP-1","eDP-1"])'
     echo "ok: status names the matched profile"
-    # ...apply writes the managed block (TOML-valid, the profile's
-    # scales and mode), reloads once, and powers the set (the disabled
-    # panel off, the other on, by live id)...
+    # ...apply sets each scale by connector name, then powers the set
+    # by live id (the disabled panel off, the other on), over IPC only...
     ${displaysWatcher} apply 2> "$SCOOT_DISPLAYS_TEST_DIR/stderr"
-    python3 -c '
-    import sys,tomllib
-    got = tomllib.load(open(sys.argv[1],"rb"))["outputs"]
-    assert got == [{"name": "eDP-1", "scale": 2.0}, {"name": "DP-1", "scale": 1.0, "mode": "3840x2160"}], got
-    ' "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
-    echo "ok: apply writes the profile block as valid TOML"
-    grep -F -x -q "# BEGIN scoot-displays (managed by scoot-displays apply; do not edit)" "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
-    grep -F -x -q "# END scoot-displays" "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
-    echo "ok: the managed block carries both markers on their own lines"
+    test "$(cat "$SCOOT_DISPLAYS_TEST_DIR/calls")" = "$(printf 'output-scale eDP-1 2\noutput-scale DP-1 1\noutput-power 1 off\noutput-power 2 on')"
     grep -F -q "profile 'docked' applied" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
-    grep -F -q "take effect at the next login" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
-    test "$(cat "$SCOOT_DISPLAYS_TEST_DIR/calls")" = "$(printf 'reload\noutput-power 1 off\noutput-power 2 on')"
-    echo "ok: apply reloads once and powers the set by id"
-    # ...a second apply changes nothing (no second reload; power, the
-    # idempotent call, still re-asserts)...
-    ${displaysWatcher} apply 2>/dev/null
-    test "$(grep -c -F -x reload "$SCOOT_DISPLAYS_TEST_DIR/calls")" = 1
-    test "$(grep -c -F "output-power" "$SCOOT_DISPLAYS_TEST_DIR/calls")" = 4
-    echo "ok: a repeated apply reloads nothing"
-    # ...undocked matches the other profile (the docked block is
-    # replaced, not appended)...
+    echo "ok: apply sets scales by name and power by id, over IPC only"
+    # ...and touches no file: the read-only symlinked config is still a
+    # symlink, byte-identical, with nothing written beside it...
+    test -L "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
+    test "$(sha256sum < "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml")" = "$config_sum"
+    test "$(find "$SCOOT_DISPLAYS_TEST_DIR/home" -mindepth 1 | sort)" = "$(printf '%s\n%s' "$SCOOT_DISPLAYS_TEST_DIR/home/scoot" "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml")"
+    echo "ok: apply leaves the read-only symlinked config alone"
+    # ...a second apply re-asserts the same calls (each a no-op
+    # server-side) and still reports applied...
+    before="$(ncalls)"
+    ${displaysWatcher} apply 2> "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 2\noutput-scale DP-1 1\noutput-power 1 off\noutput-power 2 on')"
+    grep -F -q "profile 'docked' applied" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    echo "ok: a repeated apply re-asserts the same calls"
+    # ...undocked matches the other profile and powers the panel back
+    # on...
     cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-undocked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
     status="$(${displaysWatcher} status)"; test "$status" = 'undocked (connected: ["eDP-1"])'
+    before="$(ncalls)"
     ${displaysWatcher} apply 2>/dev/null
-    python3 -c '
-    import sys,tomllib
-    got = tomllib.load(open(sys.argv[1],"rb"))["outputs"]
-    assert got == [{"name": "eDP-1", "scale": 2.0}], got
-    ' "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
-    grep -q -F -x "output-power 1 on" "$SCOOT_DISPLAYS_TEST_DIR/calls"
-    echo "ok: undocked replaces the block and powers the panel back on"
-    # ...an unknown set clears the block (user settings around the
-    # markers survive) and leaves power alone...
+    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 2\noutput-power 1 on')"
+    echo "ok: undocked rescales and powers the panel back on"
+    # ...an output the profile does not scale is reset to the config
+    # file's scale, so another profile's scale never lingers...
+    cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-presenting.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
+    before="$(ncalls)"
+    ${displaysWatcher} apply 2>/dev/null
+    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 1.5\noutput-scale HDMI-A-1 reset\noutput-power 1 on\noutput-power 3 on')"
+    echo "ok: an unscaled member of the set goes back to the config's scale"
+    # ...an unknown set resets every connected output's scale and
+    # leaves power alone...
     cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-unknown.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
-    status="$(${displaysWatcher} status)"; test "$status" = 'none (connected: ["HDMI-A-1"])'
-    printf '[layout]\ngap = 8\n' >> "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
-    calls_before="$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")"
-    ${displaysWatcher} apply 2>/dev/null
-    python3 -c '
-    import sys,tomllib
-    got = tomllib.load(open(sys.argv[1],"rb"))
-    assert got == {"layout": {"gap": 8}}, got
-    ' "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
-    if grep -q "BEGIN scoot-displays" "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"; then echo "markers linger after clear (21f)" >&2; exit 1; fi
-    test "$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")" = "$(( calls_before + 1 ))"
-    tail -n 1 "$SCOOT_DISPLAYS_TEST_DIR/calls" | grep -q -F -x reload
-    echo "ok: no match clears the block, keeps user settings, touches no power"
-    # ...a clear on a clean config is a no-op (no markers appear, no
-    # reload fires)...
-    rm "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml" "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml.prev-displays"
-    calls_before="$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")"
-    ${displaysWatcher} apply 2>/dev/null
-    test ! -e "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
-    test "$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")" = "$calls_before"
-    echo "ok: clearing a clean config touches nothing"
-    # ...watch applies on one output event, then exits 1 when the
-    # stream ends (so the unit resubscribes instead of idling
-    # unsubscribed)...
+    status="$(${displaysWatcher} status)"; test "$status" = 'none (connected: ["DP-2"])'
+    before="$(ncalls)"
+    ${displaysWatcher} apply 2> "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    test "$(calls_since "$before")" = "output-scale DP-2 reset"
+    grep -F -q "no profile for" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    echo "ok: no match resets scales to the config's and touches no power"
+    # ...a refused call fails the apply loud: non-zero, the call named,
+    # no "applied" -- while the other calls still run (the rest of the
+    # set still converges)...
     cp "$SCOOT_DISPLAYS_TEST_DIR/outputs-docked.json" "$SCOOT_DISPLAYS_TEST_DIR/outputs.json"
+    printf 'output-scale DP-1 1' > "$SCOOT_DISPLAYS_TEST_DIR/refuse"
+    before="$(ncalls)"
+    if ${displaysWatcher} apply 2> "$SCOOT_DISPLAYS_TEST_DIR/stderr"; then echo "apply exited 0 past a refused call (21f)" >&2; exit 1; fi
+    grep -F -q "refused: the test refuses output-scale DP-1 1" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    grep -E -q 'scoot msg output-scale DP-1 1(\.0*)?` failed' "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    grep -F -q "NOT fully applied" "$SCOOT_DISPLAYS_TEST_DIR/stderr"
+    if grep -F -q "' applied" "$SCOOT_DISPLAYS_TEST_DIR/stderr"; then echo "a failed apply claimed applied (21f)" >&2; exit 1; fi
+    test "$(calls_since "$before")" = "$(printf 'output-scale eDP-1 2\noutput-power 1 off\noutput-power 2 on')"
+    rm "$SCOOT_DISPLAYS_TEST_DIR/refuse"
+    echo "ok: a refused call exits non-zero, named, never claiming applied"
+    # ...applies are serialized: while another holder has the lock, an
+    # apply waits (here: is killed while waiting, having made no call),
+    # and runs once the lock is free...
+    exec 8>>"$XDG_RUNTIME_DIR/scoot-displays.lock"
+    ${pkgs.util-linux}/bin/flock 8
+    before="$(ncalls)"
+    if timeout 2 ${displaysWatcher} apply 2>/dev/null; then echo "apply ran past a held lock (21f)" >&2; exit 1; fi
+    test "$(ncalls)" = "$before"
+    exec 8>&-
+    ${displaysWatcher} apply 2>/dev/null
+    test "$(ncalls)" -gt "$before"
+    echo "ok: one apply at a time"
+    # ...watch applies at start and per output event, then exits 1 when
+    # the stream ends (so the unit resubscribes instead of idling
+    # unsubscribed)...
     printf '%s\n' '{"type":"output_changed","output":2,"name":"DP-1","width":3840,"height":2160,"scale":1.0}' > "$SCOOT_DISPLAYS_TEST_DIR/events"
-    calls_before="$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")"
+    before="$(ncalls)"
     if ${displaysWatcher} watch 2>/dev/null; then echo "watch exited 0 on stream end (21f)" >&2; exit 1; fi
-    test "$(wc -l < "$SCOOT_DISPLAYS_TEST_DIR/calls")" -gt "$calls_before"
-    grep -q -F -x reload "$SCOOT_DISPLAYS_TEST_DIR/calls"
-    echo "ok: watch applies per event and fails on stream end"
+    test "$(calls_since "$before" | grep -c -F -x "output-scale DP-1 1")" = 2
+    echo "ok: watch applies at start and per event, and fails on stream end"
+    # ...with no profiles the watcher makes no call at all, matched or
+    # not (scales someone else set stay theirs)...
+    before="$(ncalls)"
+    ${displaysWatcherIdle} apply 2>/dev/null
+    test "$(ncalls)" = "$before"
+    echo "ok: no profiles, no calls"
+    # ...the config is still untouched after all of the above...
+    test -L "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml"
+    test "$(sha256sum < "$SCOOT_DISPLAYS_TEST_DIR/home/scoot/config.toml")" = "$config_sum"
+    echo "ok: the config file is never written"
     # ...with no session every verb fails loud (exit 1, naming the
     # call)...
     cat > "$PWD/displays-test/bin/scoot" <<'EOF'
