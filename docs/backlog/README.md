@@ -586,7 +586,8 @@ be revisited.
   change are the [follow-up](./core/output-position-and-live-mode.md)).
 - [Cycle outputs left and right, wrapping](./resolved/output-cycle-binds-done.md)
   — RESOLVED 2026-10-03 in #400: `focus-output-left/right` + `move-window-to-output-left/right` (wrapping ring in scoot-core); defaults retargeted.
-- [Nested scoot waits forever at startup against a host that accepts but never answers](./core/nested-startup-wedge.md) (medium, filed 2026-10-06 from #467's review): bound the registry roundtrip so a supervisor can retry
+- [Nested scoot waits forever at startup against a host that accepts but never answers](./resolved/nested-startup-wedge-done.md)
+  — RESOLVED 2026-10-06 in #469: the startup handshake waits at most 10 s, then a loud host-naming error and exit 1 for the supervisor to retry.
 - [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
 - [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
 - [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
