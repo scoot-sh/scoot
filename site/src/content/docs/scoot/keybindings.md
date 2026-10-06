@@ -28,6 +28,7 @@ until your fingers learn it:
 | <kbd>Super</kbd>+<kbd>r</kbd> / <kbd>f</kbd> / <kbd>m</kbd> | cycle width / fullscreen / maximize |
 | <kbd>Super</kbd>+<kbd>Space</kbd> / +<kbd>Shift</kbd>+<kbd>Space</kbd> | focus floating vs strip / float or un-float |
 | <kbd>Super</kbd>+<kbd>Return</kbd> / <kbd>q</kbd> / <kbd>Shift</kbd>+<kbd>e</kbd> | terminal / close window / quit |
+| <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> | show the live keymap (this page, in a terminal) |
 
 ## Move around
 
@@ -72,6 +73,7 @@ means something against the list it was read from.)
 | <kbd>Super</kbd>+<kbd>Return</kbd> | Open a terminal (`foot`) | `spawn foot` |
 | <kbd>Super</kbd>+<kbd>q</kbd> | Close the focused window | `close` |
 | <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>e</kbd> | Quit scoot | `quit` |
+| <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> | Show the live keymap in a terminal pager | `show-keymap` |
 
 Quit is deliberately <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>e</kbd>, not
 <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>q</kbd>: one slipped Shift away from
@@ -91,6 +93,25 @@ and [the OSD](../desktop/index.md#sound-brightness-keys-and-the-on-screen-displa
 Under `--tty`, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F1</kbd>…<kbd>F12</kbd>
 additionally switch VTs — always winning over config binds, so the recovery
 path survives a bad config.
+
+## Show the keymap
+
+Forgot a chord? <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> opens the
+live keymap in a terminal (the same `foot`
+<kbd>Super</kbd>+<kbd>Return</kbd> opens) in a pager — every combo the
+running session binds, where each came from, and the config binds that were
+skipped with their reasons. It is the same answer `scoot msg binds` prints:
+
+```sh
+scoot msg binds
+scoot msg binds --json
+```
+
+The table is the default view, grouped the way this page groups it;
+`--json` is the same reply as JSON, for agents and scripts. Either way it
+is the live merged result — defaults, your `[binds]`, and `--tty`'s VT
+switches — never a re-read of the file. The bind itself never fires while
+the session is locked, like any other non-hardware bind.
 
 ## Change one binding
 
@@ -132,15 +153,29 @@ exactly then case-insensitively — and binds match a key's *unshifted*
 symbol, so `"A"` means plain `a`, exactly like `"a"`: write
 `"shift+a"` for the Shift chord.
 
-Two failure behaviors worth knowing, since both fail silently rather
-than as a startup error: a bind that doesn't parse is skipped with a
-warning naming just that bind (everything else still loads); and two
-combo strings resolving to the same combination (`"Super+H"` vs
-`"super+h"`) are *both* skipped — "last one wins" would be
-run-to-run-unstable, so the colliding group is dropped instead. There
-is no "unbind" action: a user bind on a combo with a default simply
-replaces it, and removing a bind from the file falls back to its
-default (or to unbound).
+Two failure behaviors worth knowing, since both degrade rather than fail
+startup: a bind that doesn't parse is skipped with a warning naming just
+that bind (everything else still loads — and `scoot msg binds` lists it
+with its reason); and two combo strings resolving to the same combination
+(`"Super+H"` vs `"super+h"`) are *both* skipped — "last one wins" would be
+run-to-run-unstable, so the colliding group is dropped instead.
+
+To remove a default outright instead of rebinding its combo, unbind it:
+
+```toml
+[binds]
+"super+h" = "none"
+```
+
+`none` is not an action — no such verb exists, so the spelling cannot
+collide with a real bind — in the string form or the table form
+(`{ action = "none" }`; flags beside one are ignored). The combo goes
+unbound: the key forwards to the client like any other unbound key, and
+the bind stops firing. Removing the line falls back to the default, as
+before. `scoot msg binds` shows the removal as
+`config (unbinds default: <old action>)`; an unbind with nothing to remove
+warns and is listed as skipped. Unbinding is purely additive — no existing
+config changes meaning.
 
 A bind can also be a table with the action under `action` plus two
 opt-ins — one entry carrying everything about one combo, rather than

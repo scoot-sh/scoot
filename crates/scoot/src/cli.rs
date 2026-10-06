@@ -488,6 +488,9 @@ pub enum Command {
     Msg {
         request: Request,
         out: Option<PathBuf>,
+        /// Whether a `binds` reply renders as JSON rather than the human
+        /// table (see `scootctl::Msg`): presentation only, never on the wire.
+        json: bool,
     },
 }
 
@@ -680,6 +683,7 @@ fn msg_alias(args: Vec<String>) -> Result<Command, Error> {
         _ => scootctl::parse_msg(args).map(|msg| Command::Msg {
             request: msg.request,
             out: msg.out,
+            json: msg.json,
         }),
     }
 }
@@ -1576,7 +1580,7 @@ mod tests {
         // these arg vectors must parse to the same request (or the same
         // error) through `scoot msg ...` as through the client library's
         // own parser directly.
-        // Success cases pin the request *and* the `--out` split; error cases
+        // Success cases pin the request *and* the `--out`/`--json` split; error cases
         // pin byte-identical failures.
         let cases: &[&[&str]] = &[
             &["version"],
@@ -1599,6 +1603,9 @@ mod tests {
             &["type", "hello", "there"],
             &["keyboard"],
             &["locked"],
+            &["binds"],
+            &["binds", "--json"],
+            &["action", "show-keymap"],
             &["subscribe"],
             &["subscribe", "output", "keyboard"],
             &["subscribe", "workspace"],
@@ -1623,9 +1630,10 @@ mod tests {
             let through_alias = parse_args(&aliased);
             let direct = scootctl::parse_msg(case.iter().map(|a| (*a).to_owned()));
             match (through_alias, direct) {
-                (Ok(Command::Msg { request, out }), Ok(msg)) => {
+                (Ok(Command::Msg { request, out, json }), Ok(msg)) => {
                     assert_eq!(request, msg.request, "{case:?}");
                     assert_eq!(out, msg.out, "{case:?}");
+                    assert_eq!(json, msg.json, "{case:?}");
                 }
                 (Err(left), Err(right)) => assert_eq!(left, right, "{case:?}"),
                 (left, right) => panic!("msg/library diverged on {case:?}: {left:?} vs {right:?}"),

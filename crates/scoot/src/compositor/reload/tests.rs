@@ -183,6 +183,41 @@ fn reload_applies_gap_appearance_and_binds_and_lists_them() {
     );
 }
 
+/// A reload that only changes which binds were skipped still reports
+/// `binds` as applied: the effective table is unchanged, but the `binds`
+/// reply (and its skipped list) changed, so silence would be a lie. The
+/// skipped list rides with the table on every swap, and an identical
+/// reload still reports nothing.
+#[test]
+fn a_reload_that_only_changes_skipped_binds_reports_binds_applied() {
+    let mut fixture = Fixture::with_config("[binds]\n\"super+notakey\" = \"close\"\n");
+    let response = fixture.reload();
+    assert!(
+        applied(&response).contains(&field::BINDS.to_owned()),
+        "a newly-skipped bind must report binds as applied: {response:?}"
+    );
+    assert_eq!(fixture.state.skipped_binds.len(), 1);
+    assert_eq!(fixture.state.skipped_binds[0].bind, "super+notakey");
+
+    // The same file again: nothing differed, so nothing reports.
+    let response = fixture.reload();
+    assert!(
+        applied(&response).is_empty() && refused(&response).is_empty(),
+        "an identical reload changed nothing it was asked to: {response:?}"
+    );
+
+    // A different broken bind: the table still matches, but the skipped
+    // list does not -- applied again, and swapped in.
+    fixture.rewrite("[binds]\n\"super+alsonotakey\" = \"close\"\n");
+    let response = fixture.reload();
+    assert!(
+        applied(&response).contains(&field::BINDS.to_owned()),
+        "a changed skipped list must report binds as applied: {response:?}"
+    );
+    assert_eq!(fixture.state.skipped_binds.len(), 1);
+    assert_eq!(fixture.state.skipped_binds[0].bind, "super+alsonotakey");
+}
+
 /// `focus_ring_inactive_width` is an `[appearance]` field like the others:
 /// applied live, reported under its own name, a redraw requested, and a
 /// second reload of the same file silent. Unsetting it again follows the
@@ -1341,7 +1376,7 @@ fn keybindings_for_keeps_the_vt_recovery_path_unstrippable() {
     // VT binds to keep).
     let mut binds = std::collections::HashMap::new();
     binds.insert("ctrl+alt+f1".to_owned(), "close".into());
-    let tty = config::keybindings_for(&binds, true);
+    let (tty, _) = config::keybindings_for(&binds, true);
     assert_eq!(
         tty.match_key(
             crate::compositor::input::keysym_named("F1").expect("a named key"),
@@ -1354,7 +1389,7 @@ fn keybindings_for_keeps_the_vt_recovery_path_unstrippable() {
         Some((Bound::ChangeVt(1), BindFlags::default())),
         "a reload must not strip --tty's VT-switch recovery binding"
     );
-    let bare = config::keybindings_for(&binds, false);
+    let (bare, _) = config::keybindings_for(&binds, false);
     assert_eq!(
         bare.match_key(
             crate::compositor::input::keysym_named("F1").expect("a named key"),

@@ -18,6 +18,7 @@
 //! workspace keeps working; renaming it would churn imports for no
 //! user-visible gain.)
 
+pub mod binds;
 pub mod cli;
 pub mod help;
 pub mod msg;

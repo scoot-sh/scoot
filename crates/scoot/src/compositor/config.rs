@@ -480,6 +480,11 @@ struct FileConfig {
 pub struct LoadedConfig {
     pub config: Config,
     pub keybindings: Keybindings,
+    /// Every `[binds]` entry that never made it into [`LoadedConfig::keybindings`],
+    /// each with its reason (see [`scoot_ipc::SkippedBind`]): what startup
+    /// warns about per entry, and what `scoot msg binds` lists beside the
+    /// live rows. Empty when every entry applied.
+    pub skipped_binds: Vec<scoot_ipc::SkippedBind>,
     pub appearance: Appearance,
     /// The resolved `[output] scale`, already clamped (or the default 1.0):
     /// the session default every output without an `[[outputs]]` entry of
@@ -571,6 +576,7 @@ impl LoadedConfig {
         Self {
             config: Config::default(),
             keybindings: Keybindings::default(),
+            skipped_binds: Vec::new(),
             appearance: Appearance::default(),
             scale: 1.0,
             outputs: OutputEntries::default(),
@@ -639,7 +645,7 @@ impl LoadedConfig {
             }
         };
         let autostart = file.autostart.unwrap_or_default().into_actions();
-        let keybindings = keybindings_for(&file.binds, vt);
+        let (keybindings, skipped_binds) = keybindings_for(&file.binds, vt);
         let (floating_modifier, invalid_floating_modifier) =
             match drag_modifier(file.floating.as_ref()) {
                 Ok(modifier) => (modifier, None),
@@ -662,6 +668,7 @@ impl LoadedConfig {
         Self {
             config,
             keybindings,
+            skipped_binds,
             appearance,
             scale,
             outputs,
@@ -753,13 +760,21 @@ impl std::error::Error for ReloadError {}
 /// land later, in `tty::init`); a reload builds with whether this session
 /// drives `--tty`, so a reload can neither strip the recovery path nor gain
 /// it on a backend that never had it.
-pub fn keybindings_for(binds: &HashMap<String, toml::Value>, vt: bool) -> Keybindings {
+///
+/// Returns the table plus every config entry that never made it in, each
+/// with its reason (see [`scoot_ipc::SkippedBind`]) -- what `scoot msg
+/// binds` lists beside the live rows.
+pub fn keybindings_for(
+    binds: &HashMap<String, toml::Value>,
+    vt: bool,
+) -> (Keybindings, Vec<scoot_ipc::SkippedBind>) {
     let mut table = Keybindings::default();
-    apply_binds(&mut table, binds);
+    let mut skipped = Vec::new();
+    apply_binds(&mut table, binds, &mut skipped);
     if vt {
         enforce_vt_binds(&mut table);
     }
-    table
+    (table, skipped)
 }
 
 /// Layers the `--tty`-only `Ctrl+Alt+F1..F12` VT-switch bindings over
@@ -1072,7 +1087,10 @@ fn hex(color: Color) -> String {
 /// beside the defaults -- the same lookup `keysym_named` resolves through,
 /// so whatever it spells is spellable back. The round-trip test pins that
 /// for every default bind.
-fn combo_string(mods: Modifiers, keysym: Keysym) -> String {
+///
+/// `pub(crate)`: the live-keymap reply (`binds.rs`) spells combos the same
+/// way, so the two cannot disagree about the canonical form.
+pub(crate) fn combo_string(mods: Modifiers, keysym: Keysym) -> String {
     let mut combo = String::new();
     if mods.super_ {
         combo.push_str("super+");
@@ -1095,7 +1113,10 @@ fn combo_string(mods: Modifiers, keysym: Keysym) -> String {
 /// `[binds]` value use, so whatever this spells loads back to the same
 /// [`Action`]. Total over every variant -- including ones the defaults hold
 /// none of -- so a future default needs no second change here.
-fn action_string(action: &Action) -> String {
+///
+/// `pub(crate)`: the live-keymap reply (`binds.rs`) spells actions the same
+/// way, so the two cannot disagree either.
+pub(crate) fn action_string(action: &Action) -> String {
     use scoot_core::{Horizontal, Vertical};
     let direction = |h: &Horizontal| match h {
         Horizontal::Left => "left",
@@ -1174,7 +1195,20 @@ fn action_string(action: &Action) -> String {
         }
         Action::CloseFocused => "close".to_owned(),
         Action::Spawn(command) => format!("spawn {}", command.join(" ")),
+        Action::ShowKeymap => "show-keymap".to_owned(),
         Action::Quit => "quit".to_owned(),
+    }
+}
+
+/// One bound target back in a readable string: an action through
+/// [`action_string`], a session-managed VT-switch bind as `change-vt N`
+/// (which has no config spelling -- see `default_config_toml`'s emission).
+/// What the live-keymap reply names a row's old action with when it says
+/// `replaces` or `unbinds`.
+pub(crate) fn bound_string(bound: &Bound) -> String {
+    match bound {
+        Bound::Action(action) => action_string(action),
+        Bound::ChangeVt(vt) => format!("change-vt {vt}"),
     }
 }
 
@@ -1507,20 +1541,29 @@ fn parse_or_defaults(text: &str, path: &Path) -> LoadedConfig {
 // One collision group in `apply_binds`: every raw bind string that
 // resolved to the same combo, with what each parsed to. Named so the map
 // below stays under clippy's `type_complexity` bound.
-type BindGroup = Vec<(String, Bound, BindFlags)>;
+type BindGroup = Vec<(String, ParsedBind, BindFlags)>;
 
-fn apply_binds(keybindings: &mut Keybindings, binds: &HashMap<String, toml::Value>) {
-    let mut parsed: Vec<(String, Modifiers, Keysym, Bound, BindFlags)> = Vec::new();
+fn apply_binds(
+    keybindings: &mut Keybindings,
+    binds: &HashMap<String, toml::Value>,
+    skipped: &mut Vec<scoot_ipc::SkippedBind>,
+) {
+    let mut parsed: Vec<(String, Modifiers, Keysym, ParsedBind, BindFlags)> = Vec::new();
     for (raw, value) in binds {
         match parse_bind(raw, value) {
-            Ok((mods, keysym, bound, flags)) => {
-                parsed.push((raw.clone(), mods, keysym, bound, flags));
+            Ok((mods, keysym, bind, flags)) => {
+                parsed.push((raw.clone(), mods, keysym, bind, flags));
             }
             Err(reason) => {
                 tracing::warn!(
                     bind = %raw, value = %value, %reason,
                     "skipping an invalid config-file bind"
                 );
+                skipped.push(scoot_ipc::SkippedBind {
+                    bind: raw.clone(),
+                    value: value.to_string(),
+                    reason,
+                });
             }
         }
     }
@@ -1529,14 +1572,14 @@ fn apply_binds(keybindings: &mut Keybindings, binds: &HashMap<String, toml::Valu
     // than the `Keysym` itself, which doesn't implement `Hash`) so
     // collisions are found regardless of `HashMap`'s iteration order.
     let mut groups: HashMap<(Modifiers, u32), BindGroup> = HashMap::new();
-    for (raw, mods, keysym, bound, flags) in parsed {
+    for (raw, mods, keysym, bind, flags) in parsed {
         groups
             .entry((mods, keysym.raw()))
             .or_default()
-            .push((raw, bound, flags));
+            .push((raw, bind, flags));
     }
 
-    for ((mods, keysym_raw), mut group) in groups {
+    for ((mods, keysym_raw), group) in groups {
         if group.len() > 1 {
             let mut names: Vec<&str> = group.iter().map(|(raw, _, _)| raw.as_str()).collect();
             names.sort_unstable();
@@ -1545,12 +1588,65 @@ fn apply_binds(keybindings: &mut Keybindings, binds: &HashMap<String, toml::Valu
                 "these config-file binds all resolve to the same key combination; \
                  none of them will be applied -- remove all but one"
             );
+            for (raw, _, _) in &group {
+                let others = names
+                    .iter()
+                    .filter(|name| **name != raw.as_str())
+                    .map(|name| format!("`{name}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                skipped.push(scoot_ipc::SkippedBind {
+                    bind: raw.clone(),
+                    value: binds
+                        .get(raw)
+                        .map(toml::Value::to_string)
+                        .unwrap_or_default(),
+                    reason: format!(
+                        "resolves to the same key combination as {others}; \
+                         none of the group applies -- remove all but one"
+                    ),
+                });
+            }
             continue;
         }
-        let (_, bound, flags) = group.pop().expect("group.len() == 1");
+        let (raw, bind, flags) = group.into_iter().next().expect("group.len() == 1");
         let keysym = Keysym::from(keysym_raw);
-        keybindings.insert(mods, keysym, bound, flags);
+        match bind {
+            ParsedBind::Bind(bound) => {
+                keybindings.insert(mods, keysym, bound, flags);
+            }
+            ParsedBind::Unbind => {
+                if keybindings.remove(mods, keysym).is_none() {
+                    let reason =
+                        "unbinds nothing: no default or config bind holds this combo".to_owned();
+                    tracing::warn!(
+                        bind = %raw,
+                        "skipping a config-file unbind that removes nothing"
+                    );
+                    skipped.push(scoot_ipc::SkippedBind {
+                        bind: raw.clone(),
+                        value: binds
+                            .get(&raw)
+                            .map(toml::Value::to_string)
+                            .unwrap_or_default(),
+                        reason,
+                    });
+                }
+            }
+        }
     }
+    // Deterministic by construction: `binds` iterates a `HashMap`, so
+    // without this the reply (and a reload's applied/refused diff) would
+    // order skipped entries run-to-run.
+    skipped.sort_by(|a, b| a.bind.cmp(&b.bind).then_with(|| a.reason.cmp(&b.reason)));
+}
+
+/// What one `[binds]` entry asks for: a binding to install, or the removal
+/// of whatever (if anything) the combo holds.
+#[derive(Clone, Debug, PartialEq)]
+enum ParsedBind {
+    Bind(Bound),
+    Unbind,
 }
 
 /// Parses one `[binds]` entry: `key` is the TOML key (`"super+h"`), `value`
@@ -1576,9 +1672,24 @@ fn apply_binds(keybindings: &mut Keybindings, binds: &HashMap<String, toml::Valu
 fn parse_bind(
     key: &str,
     value: &toml::Value,
-) -> Result<(Modifiers, Keysym, Bound, BindFlags), String> {
+) -> Result<(Modifiers, Keysym, ParsedBind, BindFlags), String> {
     let (mods, keysym) = parse_combo(key)?;
     let (action_text, mut flags) = parse_bind_value(key, value)?;
+    // The unbind: `none` is not an action (`scootctl::action` has no such
+    // verb), in either the string (`"super+h" = "none"`) or the table
+    // (`{ action = "none" }`) form, so this spelling cannot collide with a
+    // real bind. Flags beside one are meaningless -- there is no binding
+    // left to repeat or allow -- so they warn and are ignored, the way
+    // unknown table fields already do.
+    if action_text.trim() == "none" {
+        if flags.repeat || flags.allow_when_locked {
+            tracing::warn!(
+                bind = key,
+                "`none` removes a bind: `repeat`/`allow_when_locked` beside it are ignored"
+            );
+        }
+        return Ok((mods, keysym, ParsedBind::Unbind, BindFlags::default()));
+    }
     let mut tokens = action_text.split_whitespace().map(str::to_owned);
     let action = scootctl::action(&mut tokens).map_err(|error| error.to_string())?;
     if tokens.next().is_some() {
@@ -1586,14 +1697,20 @@ fn parse_bind(
     }
     let action: Action = action.into();
     // Clamped beyond parsing, loudly: holding `quit` must never end the
-    // session, and holding `close` must never work through every window --
-    // and layout, focus, close and quit keep today's lock refusal, so only
+    // session, holding `close` must never work through every window, and
+    // holding the keymap key must never stack terminals -- and layout,
+    // focus, close and quit keep today's lock refusal, so only
     // a `spawn` may name `allow_when_locked`. See `bind_repeat.rs`.
-    if flags.repeat && matches!(action, Action::Quit | Action::CloseFocused) {
+    if flags.repeat
+        && matches!(
+            action,
+            Action::Quit | Action::CloseFocused | Action::ShowKeymap
+        )
+    {
         tracing::warn!(
             bind = key,
             action = action_text,
-            "`repeat` on `quit` or `close` is ignored: those never repeat"
+            "`repeat` on `quit`, `close` or `show-keymap` is ignored: those never repeat"
         );
         flags.repeat = false;
     }
@@ -1605,7 +1722,7 @@ fn parse_bind(
         );
         flags.allow_when_locked = false;
     }
-    Ok((mods, keysym, Bound::Action(action), flags))
+    Ok((mods, keysym, ParsedBind::Bind(Bound::Action(action)), flags))
 }
 
 /// Splits one `[binds]` value into its action string and its flags (see
@@ -2214,6 +2331,115 @@ mod tests {
         );
     }
 
+    #[test]
+    fn none_removes_a_default_and_stops_it_firing() {
+        // The unbind, in both spellings: the default is gone from the
+        // table, so `match_key` (what the keypress path asks) misses and
+        // the key forwards to the client instead of firing.
+        for value in [toml::Value::from("none"), table_value("none", false, false)] {
+            let mut binds = HashMap::new();
+            binds.insert("super+h".to_owned(), value);
+            let (table, skipped) = keybindings_for(&binds, false);
+            assert_eq!(skipped, vec![]);
+            assert_eq!(
+                table.match_key(
+                    keysym_named("h").unwrap(),
+                    Modifiers {
+                        super_: true,
+                        ..Modifiers::default()
+                    }
+                ),
+                None,
+                "super+h must stop firing once unbound"
+            );
+            // And the rest of the table is untouched.
+            let mut defaults = Keybindings::default();
+            defaults.remove(
+                Modifiers {
+                    super_: true,
+                    ..Modifiers::default()
+                },
+                keysym_named("h").unwrap(),
+            );
+            assert!(table.same_bindings_as(&defaults));
+        }
+    }
+
+    #[test]
+    fn none_beside_flags_warns_and_still_unbinds() {
+        // Flags beside an unbind are meaningless -- there is no binding left
+        // to repeat or allow -- so they are ignored, loudly, and the unbind
+        // still applies.
+        let (_, _, bind, flags) = parse_bind("super+h", &table_value("none", true, true))
+            .expect("an unbind with flags still parses");
+        assert_eq!(bind, ParsedBind::Unbind);
+        assert_eq!(flags, BindFlags::default());
+        let mut binds = HashMap::new();
+        binds.insert("super+h".to_owned(), table_value("none", true, true));
+        let (table, skipped) = keybindings_for(&binds, false);
+        assert_eq!(skipped, vec![]);
+        assert_eq!(
+            table.match_key(
+                keysym_named("h").unwrap(),
+                Modifiers {
+                    super_: true,
+                    ..Modifiers::default()
+                }
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn an_unbind_with_nothing_to_remove_is_skipped_loudly() {
+        // `super+z` holds no default: the entry parses but removes nothing,
+        // so it lands in the skipped list (and the log) rather than
+        // vanishing silently -- likely a typo for a real combo.
+        let mut binds = HashMap::new();
+        binds.insert("super+z".to_owned(), toml::Value::from("none"));
+        let (table, skipped) = keybindings_for(&binds, false);
+        assert!(table.same_bindings_as(&Keybindings::default()));
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].bind, "super+z");
+        assert!(
+            skipped[0].reason.contains("unbinds nothing"),
+            "unexpected reason: {}",
+            skipped[0].reason
+        );
+    }
+
+    #[test]
+    fn an_unbind_collides_like_any_other_bind() {
+        // Two spellings of one combo where one is an unbind: the group rule
+        // holds (no well-defined winner), so both are skipped and the
+        // default stays.
+        let mut binds = HashMap::new();
+        binds.insert("super+h".to_owned(), toml::Value::from("none"));
+        binds.insert("Super+H".to_owned(), toml::Value::from("close"));
+        let (table, skipped) = keybindings_for(&binds, false);
+        assert_eq!(
+            table.match_key(
+                keysym_named("h").unwrap(),
+                Modifiers {
+                    super_: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some((
+                Bound::Action(Action::FocusColumn(Horizontal::Left)),
+                BindFlags::default()
+            )),
+            "the colliding unbind must leave the default alone"
+        );
+        assert_eq!(skipped.len(), 2, "{skipped:?}");
+        assert!(
+            skipped
+                .iter()
+                .all(|entry| entry.reason.contains("same key combination")),
+            "{skipped:?}"
+        );
+    }
+
     /// One table-form `[binds]` value, for the direct `parse_bind` tests
     /// below.
     fn table_value(action: &str, repeat: bool, allow_when_locked: bool) -> toml::Value {
@@ -2291,7 +2517,7 @@ mod tests {
         // never work through every window -- the bind still applies, firing
         // once, with the flag cleared.
         for action in ["quit", "close"] {
-            let (mods, keysym, bound, flags) =
+            let (mods, keysym, bind, flags) =
                 parse_bind("super+q", &table_value(action, true, false))
                     .expect("a valid bind with a clamped flag");
             assert_eq!(
@@ -2299,11 +2525,25 @@ mod tests {
                 parse_combo("super+q").expect("the combo parses")
             );
             assert!(matches!(
-                bound,
-                Bound::Action(Action::Quit) | Bound::Action(Action::CloseFocused)
+                bind,
+                ParsedBind::Bind(Bound::Action(Action::Quit))
+                    | ParsedBind::Bind(Bound::Action(Action::CloseFocused))
             ));
             assert!(!flags.repeat, "`repeat` on `{action}` must be cleared");
         }
+    }
+
+    #[test]
+    fn repeat_on_show_keymap_is_ignored() {
+        // Holding the keymap key must never stack terminals: the bind still
+        // applies, firing once, with the flag cleared.
+        let (_, _, bind, flags) = parse_bind("super+q", &table_value("show-keymap", true, false))
+            .expect("a valid bind with a clamped flag");
+        assert!(matches!(
+            bind,
+            ParsedBind::Bind(Bound::Action(Action::ShowKeymap))
+        ));
+        assert!(!flags.repeat, "`repeat` on `show-keymap` must be cleared");
     }
 
     #[test]
@@ -2314,10 +2554,18 @@ mod tests {
             parse_bind("super+h", &table_value("focus-column left", false, true))
                 .expect("a valid bind with a clamped flag");
         assert!(!flags.allow_when_locked);
-        let (_, _, bound, flags) = parse_bind("super+t", &table_value("spawn foot", false, true))
+        let (_, _, bind, flags) = parse_bind("super+t", &table_value("spawn foot", false, true))
             .expect("a valid spawn bind");
-        assert!(matches!(bound, Bound::Action(Action::Spawn(_))));
+        assert!(matches!(
+            bind,
+            ParsedBind::Bind(Bound::Action(Action::Spawn(_)))
+        ));
         assert!(flags.allow_when_locked, "a spawn keeps the flag");
+        // The keymap overlay must not open from behind the lock screen: like
+        // any non-spawn action, `show-keymap` loses the flag.
+        let (_, _, _, flags) = parse_bind("super+t", &table_value("show-keymap", false, true))
+            .expect("a valid keymap bind with a clamped flag");
+        assert!(!flags.allow_when_locked);
     }
 
     #[test]
@@ -2381,7 +2629,9 @@ mod tests {
         let mut binds = HashMap::new();
         binds.insert("super+t".to_owned(), toml::Value::Table(table));
         let mut keybindings = Keybindings::default();
-        apply_binds(&mut keybindings, &binds);
+        let mut skipped = Vec::new();
+        apply_binds(&mut keybindings, &binds, &mut skipped);
+        assert!(skipped.is_empty(), "{skipped:?}");
         assert_eq!(
             matched(
                 &keybindings,
@@ -4028,9 +4278,9 @@ mod tests {
             );
             binds += 1;
         }
-        // "All 44 of them" (see site/src/content/docs/scoot/keybindings.md): a dropped default
+        // "All 45 of them" (see site/src/content/docs/scoot/keybindings.md): a dropped default
         // bind must fail loudly here, not just shrink the file.
-        assert_eq!(binds, 44, "a default bind was added or lost");
+        assert_eq!(binds, 45, "a default bind was added or lost");
     }
 
     /// Commented scalar values are pinned to their live defaults, not just

@@ -29,7 +29,9 @@ pub use event::{
 pub use help::{DOCS_URL, docs_tail, suggest};
 pub use key::{KeyCombo, Modifier, ParseKeyComboError};
 pub use request::{PointerButton, Request, SCREENSHOT_CURSOR_DEFAULT};
-pub use response::{OutputSnapshot, Rect, Response, Screenshot, WindowSnapshot};
+pub use response::{
+    BindRow, OutputSnapshot, Rect, Response, Screenshot, SkippedBind, WindowSnapshot,
+};
 pub use socket::{SOCKET_ENV, socket_path};
 
 /// Bumped whenever a wire-format change would break existing clients.
@@ -78,4 +80,9 @@ pub use socket::{SOCKET_ENV, socket_path};
 /// same rule -- only a client new enough to ask or subscribe ever receives
 /// one. An older server meets the new `locked` request tag and the new
 /// `lock` subscribe kind with an ordinary `Error`, like any unknown tag.
-pub const PROTOCOL_VERSION: u32 = 8;
+///
+/// And again 8 → 9 for the live keymap query (2026-10): one new tag,
+/// `Response::Binds`, under the same rule -- only a client new enough to
+/// ask ever receives one. An older server meets the new `binds` request
+/// tag with an ordinary `Error`, like any unknown tag.
+pub const PROTOCOL_VERSION: u32 = 9;

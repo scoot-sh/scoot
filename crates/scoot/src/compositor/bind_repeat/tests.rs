@@ -198,14 +198,17 @@ fn a_bind_without_repeat_fires_once_and_arms_nothing() {
     harness.state.key(code, KeyState::Released);
 }
 
-/// `quit` and `close` never repeat, even when flagged: holding quit must
-/// never end the session, and holding close must never work through every
-/// window. `config.rs` clears the flag at load with a warning; this is the
-/// backstop for a table built any other way.
+/// `quit`, `close` and `show-keymap` never repeat, even when flagged:
+///
+/// holding quit must never end the session, holding close must never work
+/// through every window, and holding the keymap key must never stack
+/// terminals. `config.rs` clears the flag at load with a warning; this is
+/// the backstop for a table built any other way.
 #[test]
-fn quit_and_close_are_never_repeatable() {
+fn quit_close_and_show_keymap_are_never_repeatable() {
     assert!(!bind_action_repeats(&Action::Quit));
     assert!(!bind_action_repeats(&Action::CloseFocused));
+    assert!(!bind_action_repeats(&Action::ShowKeymap));
     assert!(bind_action_repeats(&Action::Spawn(vec!["true".into()])));
     assert!(bind_action_repeats(&Action::FocusColumn(
         scoot_core::Horizontal::Left

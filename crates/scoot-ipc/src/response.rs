@@ -219,6 +219,53 @@ pub struct Screenshot {
     pub png: Vec<u8>,
 }
 
+/// One row of the live keymap: what one combo does, in the canonical
+/// spelling the config file's `[binds]` would use for it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BindRow {
+    /// The combo in canonical spelling: modifiers in `super+shift+ctrl+alt`
+    /// order, then the xkb keysym name (`super+shift+slash`).
+    pub combo: String,
+    /// The action string: the same grammar `scoot msg action` takes and
+    /// `[binds]` uses (`focus-column left`, `spawn foot`, `show-keymap`;
+    /// `change-vt 3` for the session-managed VT-switch binds, which have no
+    /// config spelling).
+    pub action: String,
+    /// Where the row came from: `default` (a built-in bind, unchanged),
+    /// `config` (a combo the defaults leave unbound), `config (replaces
+    /// default: <old action>)` (a config bind over a default combo),
+    /// `config (unbinds default: <old action>)` (a config unbind -- the
+    /// `action` is what was removed, and nothing is bound there now), or
+    /// `session (VT switch)` (the `--tty` recovery binds, layered on last).
+    /// Derived by diffing the live table against the defaults on every
+    /// request, so it is always the merged result the compositor uses --
+    /// never a re-parse of the file.
+    pub source: String,
+    /// Whether the bind re-fires while its key is held. Never true on a
+    /// `default` row (no built-in default opts in); `quit`, `close` and
+    /// `show-keymap` never repeat even when flagged.
+    pub repeat: bool,
+    /// Whether a `spawn` bind fires while the session is locked. Only ever
+    /// true beside a `spawn` action.
+    pub allow_when_locked: bool,
+}
+
+/// One config `[binds]` entry that never made it into the live keymap, with
+/// why: what the compositor log warns about at load, queryable here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedBind {
+    /// The entry's combo string, as written (`Super+H`).
+    pub bind: String,
+    /// The entry's value in TOML form (`"close"` for a string, `{ action =
+    /// "close", ... }` for a table).
+    pub value: String,
+    /// Why it was skipped: a parse error (bad combo syntax, an unknown key
+    /// name, a bad action string, trailing text), a colliding group (two
+    /// combo strings resolving to the same combination -- none of the group
+    /// applies), or an unbind with nothing to remove.
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
@@ -366,6 +413,26 @@ pub enum Response {
     /// the unsubscribed interval as one change.
     LockChanged {
         locked: bool,
+    },
+    /// The answer to [`Request::Binds`](crate::Request::Binds): the live
+    /// keymap as the running compositor uses it, plus the config binds that
+    /// were skipped with their reasons.
+    ///
+    /// `bindings` holds the effective table in table order (built-ins first
+    /// in their canonical order, then config binds in load order -- which,
+    /// like the loader's `HashMap`, has no relationship to the file's line
+    /// order), followed by one row per default a config unbind removed, in
+    /// default-table order. `skipped` holds every config entry that never
+    /// made it in, sorted by combo string, each with its reason.
+    ///
+    /// A new variant, so this moves `PROTOCOL_VERSION` 8 → 9 (see that
+    /// constant's doc): an older client handed one would fail its decode,
+    /// which can only happen to a client new enough to have asked. An older
+    /// server meets the new request tag with an ordinary `Error`, like any
+    /// unknown request tag.
+    Binds {
+        bindings: Vec<BindRow>,
+        skipped: Vec<SkippedBind>,
     },
     Error {
         message: String,

@@ -2,9 +2,10 @@
 //! `PROTOCOL_VERSION` bump.
 
 use scoot_ipc::{
-    Action, EventKind, Horizontal, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored,
-    OutputSnapshot, PROTOCOL_VERSION, PointerButton, Rect, Request, Response,
-    SCREENSHOT_CURSOR_DEFAULT, Screenshot, WindowSnapshot, WorkspaceSnapshot, decode, encode,
+    Action, BindRow, EventKind, Horizontal, KeyboardLayout, OutputChanged, OutputRemoved,
+    OutputRestored, OutputSnapshot, PROTOCOL_VERSION, PointerButton, Rect, Request, Response,
+    SCREENSHOT_CURSOR_DEFAULT, Screenshot, SkippedBind, WindowSnapshot, WorkspaceSnapshot, decode,
+    encode,
 };
 use serde_json::{Value, json};
 fn json_of<T: serde::Serialize>(value: &T) -> Value {
@@ -472,14 +473,15 @@ fn a_reload_report_round_trips_with_both_lists() {
 
 /// The Phase 4-6 record: the refusal *strings* moved (restart wording, the
 /// autostart spawn delta) while the reply *shape* did not -- so this still
-/// decodes as the same two string lists. (The protocol is at 8 now for the
-/// lock query and event below; these strings are still payload, not wire.)
+/// decodes as the same two string lists. (The protocol is at 9 now for the
+/// lock query and event, and the binds query, below; these strings are still
+/// payload, not wire.)
 /// Strings are payload, not wire format: an older client parses this reply
 /// exactly as it parsed the old strings.
 #[test]
 fn reworded_reload_refusals_are_payload_not_wire_format() {
     assert_eq!(
-        PROTOCOL_VERSION, 8,
+        PROTOCOL_VERSION, 9,
         "no new reply variant or field shipped with the reload completion"
     );
     let response = Response::Reloaded {
@@ -1195,6 +1197,93 @@ fn a_locked_query_round_trips_with_the_live_state() {
             response
         );
     }
+}
+
+/// The live keymap on the wire: a bare `binds` request, answered with the
+/// effective rows plus the skipped config binds, each with its reason.
+#[test]
+fn a_binds_query_round_trips_rows_and_skipped() {
+    assert_eq!(
+        PROTOCOL_VERSION, 9,
+        "the binds reply moved the protocol 8 → 9"
+    );
+    let request = Request::Binds;
+    assert_eq!(json_of(&request), json!({ "type": "binds" }));
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+
+    let response = Response::Binds {
+        bindings: vec![
+            BindRow {
+                combo: "super+h".into(),
+                action: "focus-column left".into(),
+                source: "default".into(),
+                repeat: false,
+                allow_when_locked: false,
+            },
+            BindRow {
+                combo: "super+m".into(),
+                action: "close".into(),
+                source: "config (replaces default: toggle-maximize)".into(),
+                repeat: false,
+                allow_when_locked: false,
+            },
+            BindRow {
+                combo: "super+q".into(),
+                action: "close".into(),
+                source: "config (unbinds default: close)".into(),
+                repeat: false,
+                allow_when_locked: false,
+            },
+        ],
+        skipped: vec![SkippedBind {
+            bind: "super+notakey".into(),
+            value: "\"close\"".into(),
+            reason: "unknown key `notakey`".into(),
+        }],
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "binds",
+            "bindings": [
+                {
+                    "combo": "super+h",
+                    "action": "focus-column left",
+                    "source": "default",
+                    "repeat": false,
+                    "allow_when_locked": false
+                },
+                {
+                    "combo": "super+m",
+                    "action": "close",
+                    "source": "config (replaces default: toggle-maximize)",
+                    "repeat": false,
+                    "allow_when_locked": false
+                },
+                {
+                    "combo": "super+q",
+                    "action": "close",
+                    "source": "config (unbinds default: close)",
+                    "repeat": false,
+                    "allow_when_locked": false
+                }
+            ],
+            "skipped": [
+                {
+                    "bind": "super+notakey",
+                    "value": "\"close\"",
+                    "reason": "unknown key `notakey`"
+                }
+            ]
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
 }
 
 /// A lock subscription names its kind the same way, and the reply echoes

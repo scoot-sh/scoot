@@ -91,6 +91,7 @@ impl From<Action> for scoot_core::Action {
             },
             Action::CloseFocused => Self::CloseFocused,
             Action::Spawn { command } => Self::Spawn(command),
+            Action::ShowKeymap => Self::ShowKeymap,
             Action::Quit => Self::Quit,
         }
     }

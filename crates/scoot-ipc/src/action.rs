@@ -261,5 +261,13 @@ pub enum Action {
     Spawn {
         command: Vec<String>,
     },
+    /// Open the live keymap for the user: the shell spawns the session's
+    /// default terminal running `scoot msg binds` in a pager -- the wire
+    /// half of `scoot_core::Action::ShowKeymap`, which expands to the spawn
+    /// carrying that command. A unit like `Quit`: bound by default to
+    /// `Super+Shift+/`, rebindable to any combo, refused while locked like
+    /// any other action. Additive: a client that never sends this tag
+    /// decodes exactly as before, so no `PROTOCOL_VERSION` bump.
+    ShowKeymap,
     Quit,
 }

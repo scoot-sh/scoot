@@ -9,6 +9,7 @@ mod maximize;
 mod outputs;
 mod reconnect;
 mod reload;
+mod show_keymap;
 mod workspaces;
 
 use crate::{Config, Event, OutputId, Placement, Rect, WindowId, WindowInfo, World};

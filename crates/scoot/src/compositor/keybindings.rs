@@ -219,6 +219,21 @@ impl Default for Keybindings {
                 Keysym::Return,
                 Bound::Action(Action::Spawn(vec!["foot".into()])),
             ),
+            // The live keymap in the default terminal (`foot`, the same one
+            // `Super+Return` spawns -- the two terminals are pinned together
+            // by `show_keymap_uses_the_default_terminal` below, so changing
+            // one without the other fails loudly). `Super+h` is taken (focus
+            // column left), so this is `Super+Shift+/` (niri's hotkey-overlay
+            // chord): `slash` is the key's unshifted symbol, Shift the tracked
+            // modifier, so the chord is Shift plus the `/` key on any layout.
+            // A dedicated action rather than a `Spawn` of the pager pipeline:
+            // `sh -c` with a space-carrying script has no `[binds]`-grammar
+            // spelling that parses back (see `Action::ShowKeymap`'s doc).
+            (
+                SUPER_SHIFT,
+                Keysym::slash,
+                Bound::Action(Action::ShowKeymap),
+            ),
             // Deliberately not Super+Shift+q: that's one slipped Shift away
             // from Super+q (close-focused), and a slip shouldn't be able to
             // end the whole session.
@@ -367,6 +382,21 @@ impl Keybindings {
                     .map(|(previous, _)| (mods, keysym, previous))
             })
             .collect()
+    }
+
+    /// Removes the binding for this exact combo, if any, and returns it --
+    /// the undo half of [`Keybindings::insert`]. What a config-file unbind
+    /// (`"super+h" = "none"`, see `config.rs`) does to a default; removing
+    /// a combo nothing holds is a no-op the caller reports loudly (see
+    /// `apply_binds`), not an error here.
+    pub fn remove(&mut self, mods: Modifiers, keysym: Keysym) -> Option<(Bound, BindFlags)> {
+        self.0
+            .iter()
+            .position(|(m, k, _, _)| *m == mods && *k == keysym)
+            .map(|index| {
+                let (_, _, bound, flags) = self.0.remove(index);
+                (bound, flags)
+            })
     }
 
     /// Whether this table binds exactly what `other` binds: same combos,
@@ -719,6 +749,61 @@ mod tests {
         );
         assert!(!first.same_bindings_as(&second));
         assert!(!second.same_bindings_as(&first));
+    }
+
+    #[test]
+    fn remove_takes_the_binding_out_and_returns_it() {
+        let mut table = Keybindings::default();
+        let default_len = table.0.len();
+        assert_eq!(
+            table.remove(SUPER, Keysym::h),
+            Some((
+                Bound::Action(Action::FocusColumn(Horizontal::Left)),
+                BindFlags::default(),
+            ))
+        );
+        assert_eq!(matched(&table, Keysym::h, SUPER), None);
+        assert_eq!(table.0.len(), default_len - 1);
+    }
+
+    #[test]
+    fn remove_on_an_unbound_combo_returns_none_and_changes_nothing() {
+        let mut table = Keybindings::default();
+        let default_len = table.0.len();
+        assert_eq!(table.remove(SUPER, Keysym::x), None);
+        assert_eq!(table.0.len(), default_len);
+    }
+
+    #[test]
+    fn super_shift_slash_opens_the_keymap_by_default() {
+        // The brief's chord (`Super+?`, niri's hotkey-overlay convention):
+        // free because no default binds `slash` under any modifiers, and a
+        // dedicated action because the pager pipeline has no grammar
+        // spelling that parses back.
+        let table = Keybindings::default();
+        assert_eq!(
+            matched(&table, Keysym::slash, SUPER_SHIFT),
+            Some(Bound::Action(Action::ShowKeymap))
+        );
+    }
+
+    #[test]
+    fn show_keymap_uses_the_default_terminal() {
+        // `Super+Return` and `Super+Shift+/` must name the same terminal: a
+        // user who learns one finds the other, and the keymap overlay reads
+        // the way their terminal looks. Read off the core's live expansion,
+        // not a copied literal, so the two cannot drift apart silently.
+        let table = Keybindings::default();
+        let terminal = match matched(&table, Keysym::Return, SUPER) {
+            Some(Bound::Action(Action::Spawn(command))) => command,
+            other => panic!("Super+Return must stay a terminal spawn, got {other:?}"),
+        };
+        let mut world = scoot_core::World::new(scoot_core::Config::default());
+        let effects = world.handle_action(Action::ShowKeymap);
+        let [scoot_core::Effect::Spawn(command)] = effects.as_slice() else {
+            panic!("ShowKeymap must expand to one spawn, got {effects:?}");
+        };
+        assert_eq!(command[0], terminal[0]);
     }
 
     #[test]

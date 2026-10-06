@@ -88,13 +88,17 @@ pub(super) fn repeat_interval() -> Duration {
 }
 
 /// Whether this action may re-fire while its bind's key is held. Only the
-/// flag opts in (see `keybindings::BindFlags`), and even then `quit` and
-/// `close` never repeat: holding quit must never end the session, and
-/// holding close must never work through every window. `config.rs` warns
+/// flag opts in (see `keybindings::BindFlags`), and even then `quit`,
+/// `close` and `show-keymap` never repeat: holding quit must never end the
+/// session, holding close must never work through every window, and holding
+/// the keymap key must never stack terminals. `config.rs` warns
 /// and clears the flag on those at load; this is the backstop that holds
 /// even for a table built any other way (a test, a future caller).
 pub(super) fn bind_action_repeats(action: &Action) -> bool {
-    !matches!(action, Action::Quit | Action::CloseFocused)
+    !matches!(
+        action,
+        Action::Quit | Action::CloseFocused | Action::ShowKeymap
+    )
 }
 
 /// The in-flight bind repeat, if a `repeat` bind's key is held: what to

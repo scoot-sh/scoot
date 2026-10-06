@@ -711,8 +711,18 @@ impl State {
     /// whole. A key held across the swap neither wedges nor drops -- see
     /// the module doc.
     fn apply_binds_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
-        if !fresh.keybindings.same_bindings_as(&self.keybindings) {
+        // The skipped list rides with the table: it describes the file this
+        // table was built from, so a reload that only fixes a broken bind
+        // (no effective row changes) still reports `binds` as applied -- the
+        // `binds` reply changed, and saying otherwise would be silent.
+        // Both lists are order-stable (`apply_binds` sorts the skipped, and
+        // `same_bindings_as` compares order-insensitively), so an identical
+        // reload still reports nothing.
+        if !fresh.keybindings.same_bindings_as(&self.keybindings)
+            || fresh.skipped_binds != self.skipped_binds
+        {
             self.keybindings = fresh.keybindings.clone();
+            self.skipped_binds = fresh.skipped_binds.clone();
             // The in-flight repeat's action and flags came from the old
             // table: it ends here rather than re-firing something the file
             // no longer binds. (The held key itself neither wedges nor

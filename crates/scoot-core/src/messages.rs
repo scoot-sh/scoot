@@ -554,6 +554,17 @@ pub enum Action {
     },
     CloseFocused,
     Spawn(Vec<String>),
+    /// Open the live keymap for the user: the shell spawns the session's
+    /// default terminal running `scoot msg binds` in a pager (see the
+    /// [`Action::ShowKeymap`] arm of `World::handle_action` in `world/actions.rs`,
+    /// which expands this to the [`Effect::Spawn`] carrying that command). A directive like [`Action::Spawn`],
+    /// not arrangement: the core never spawns anything itself, it only names
+    /// what the shell runs. Kept separate from `Spawn` rather than a default
+    /// `[binds]` entry spelling one because the pager pipeline (`sh -c` with
+    /// a space-carrying script) has no grammar spelling that parses back --
+    /// see the shell's `--print-default-config` round-trip pin -- while this
+    /// spells (and parses) as one word.
+    ShowKeymap,
     Quit,
 }
 

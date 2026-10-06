@@ -369,6 +369,12 @@ impl State {
             Request::Locked => Response::Locked {
                 locked: self.session_lock.is_locked(),
             },
+            // Session-level like `outputs`: the live merged keymap plus the
+            // config binds that were skipped, read off the running table on
+            // every request (see `binds::snapshot`) -- never refused while
+            // locked. No allocation beyond the reply itself: the default
+            // table built for the diff and the rows it produces.
+            Request::Binds => super::binds::snapshot(&self.keybindings, &self.skipped_binds),
             // Session-level like `outputs`: output power is hardware
             // state, not window management, so like gamma -- and unlike
             // every `Action` -- this applies while locked. The idle cycle
