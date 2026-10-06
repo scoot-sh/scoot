@@ -11322,7 +11322,9 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     echo "ok: Qt config carries the look's polarity"
 
     # 13l. Theme fontconfig default: the UI face for sans-serif, the
-    #      terminal face for monospace.
+    #      terminal face for monospace -- and well-formed XML (a `--`
+    #      inside a comment is illegal and fontconfig refuses the file).
+    python3 -c 'import sys,xml.dom.minidom; xml.dom.minidom.parse(sys.argv[1])' ${themeFontsConf}
     grep -F "<family>DroidSansM Nerd Font Propo</family>" ${themeFontsConf}
     grep -F "<family>FiraCode Nerd Font</family>" ${themeFontsConf}
     echo "ok: fontconfig defaults to the look's faces"

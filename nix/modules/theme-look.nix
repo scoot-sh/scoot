@@ -16,7 +16,8 @@ let
 in
 {
   # The look behind `desktop.look`, or null without one.
-  lookFor = desktopCfg: if (desktopCfg.look or null) == null then null else desktop.looks.${desktopCfg.look};
+  lookFor =
+    desktopCfg: if (desktopCfg.look or null) == null then null else desktop.looks.${desktopCfg.look};
 
   # Whether a theme target applies: a look is set, and its
   # `theme.targets.<name>.enable` is on. The `or true` keeps this
