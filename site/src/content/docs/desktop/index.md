@@ -133,8 +133,8 @@ Which options live on which side:
 
 | Side | Owns |
 |---|---|
-| NixOS (`programs.scoot` in `configuration.nix`) | the package system-wide; the login-screen session entry; system-wide scootbg (so `[wallpaper]` finds it on `PATH`); the idle/lock tools system-wide, the docked-lid rule, and the locker's PAM service; the greeter |
-| Home Manager (`programs.scoot` in the home config) | the themed config file; the portal config; the user units (idle policy, notification daemon, clipboard watchers, bar feed) plus the `scoot-session.target` scope they start in; the tools for the user |
+| NixOS (`programs.scoot` in `configuration.nix`) | the package system-wide; the login-screen session entry; system-wide scootbg (so `[wallpaper]` finds it on `PATH`); the idle/lock tools system-wide, the docked-lid rule, and the locker's PAM service; the portal backends system-wide plus PipeWire running; the greeter |
+| Home Manager (`programs.scoot` in the home config) | the themed config file; the portal config; the per-desktop chooser config xdpw asks through; the screenshot tools; the user units (idle policy, notification daemon, clipboard watchers, bar feed) plus the `scoot-session.target` scope they start in; the tools for the user |
 
 ## Home Manager
 
@@ -219,7 +219,7 @@ the scope by hand once the display is known, and stop it on the way
 out:
 
 ```sh
-systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
 systemctl --user start scoot-session.target
 # ... on exit:
 systemctl --user stop scoot-session.target
@@ -718,6 +718,138 @@ Troubleshooting, by symptom:
   second launcher (another menu tool running beside this one): turn
   this one off (`launcher.enable = false`) or uninstall the other.
 
+## Screenshots and screen sharing
+
+Share your screen in a Meet call, or screenshot a region into
+`~/Pictures` — on with the profile, through the standard portals, so
+Chrome, Meet, OBS and Telegram all work with nothing extra to start.
+
+```nix
+programs.scoot.desktop = {
+  enable = true;
+  # Share without being asked which screen (kiosk: one fixed output):
+  # capture.chooser = "none";
+  # capture.outputName = "eDP-1";
+  # No screenshots or sharing at all on this box:
+  # capture.enable = false;
+};
+```
+
+What runs: the portal backends system-wide
+(`xdg-desktop-portal-wlr` 0.8.4 or later for ScreenCast and
+Screenshot, `xdg-desktop-portal-gtk` for the file chooser and the
+rest — a too-old backend fails evaluation naming the floor, never a
+cast that binds nothing), the `scoot` backend selection beside them
+(ScreenCast and Screenshot to `wlr`, everything else to `gtk`: the
+same file the home-manager side installs per user, which wins where
+both exist), PipeWire running for the cast, `grim` plus `slurp` for
+the screenshot binds, and the output chooser xdpw asks through before
+each cast. The portals start on demand over D-Bus and hold nothing
+until a cast asks — no daemon, no memory, no wakeups when you are
+not sharing.
+
+Three binds, each plain (fire once, never behind the lock screen):
+
+| Press | Does | Lands |
+|---|---|---|
+| `Print` | screenshot every output | dated files in `~/Pictures` (`scoot-20261005-143022.png`) |
+| `Shift+Print` | screenshot a picked region | dated file in `~/Pictures` |
+| `Ctrl+Print` | screenshot a picked region | straight into the clipboard (`wl-copy`) |
+
+The region picker dims the screens and draws the pick with the
+look's ring and accent (slurp's own style without a look, or with
+`theme.targets.capture.enable = false`).
+
+Before each cast, xdpw asks *which screen*: a dmenu list of every
+output through the profile's fuzzel — the same `--dmenu` contract
+the clipboard picker and the launcher speak, themed from the same
+seven look roles, so the three menus read as one. The list, not a
+click, is the default on purpose: in a Meet flow the call lives on
+one screen while the thing to share is on the other, and a menu
+names outputs from the keyboard where a click-picker needs the
+pointer on the right screen first. The alternatives are one option
+away: `chooser = "slurp"` picks by clicking a screen (xdpw's own
+shape, themed the same way), and `chooser = "none"` casts
+`outputName` — a connector name as `wayland-info` lists it, e.g.
+`"eDP-1"` — with no picker at all (leave it null and any output
+casts). Casts are capped at 30 frames per second (`maxFps`, `0`
+lifts the cap): plenty for a call, and it bounds the compositor's
+copy cost. The menu, in the moonrise look, over a call:
+
+![The output chooser over the session: a dmenu list naming each output, in moonrise navy and cream](../../../assets/screencast-chooser.png)
+
+One honest limit, stated up front: scoot captures **outputs only**.
+There is no per-window capture source, so a call's window picker
+falls back to screens — share a screen, not a window. The window
+list itself is still live (taskbars and Alt-Tab see every window),
+only its pixels are not separately capturable.
+
+If you drive scoot from an agent or a script, skip the portals:
+`scoot msg screenshot` captures an output over the privileged IPC
+socket with no portal, no picker and no clipboard involved — the
+agent path, while everything above is the human path. See
+[Screenshots](../msg/screenshots.md).
+
+Every value is an option, applied on rebuild/switch (the chooser
+file and the binds re-render; no re-login):
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `desktop.capture.enable` | bool | `true` with the profile | the backends on their bus names, PipeWire running, the tools on PATH, the chooser file written, the three binds bound |
+| `desktop.capture.chooser` | enum (`"fuzzel"`, `"slurp"`, `"none"`) | `"fuzzel"` | the output picker before each cast (dmenu list, click a screen, or no picker) |
+| `desktop.capture.outputName` | string or null | `null` (any output) | the output `chooser = "none"` casts (a connector name, e.g. `"eDP-1"`); read only with `chooser = "none"` |
+| `desktop.capture.maxFps` | int (at least 0) | `30` | most frames per second on a cast; `0` means no limit |
+| `desktop.capture.grimPackage` / `.slurpPackage` / `.menuPackage` / `.wlClipboardPackage` | package or null | grim / slurp / fuzzel / wl-clipboard (Linux-only: null off Linux) | point at your own builds; null with the switch on fails evaluation naming it (grim below 1.5.0 and the wlr backend below 0.8.4 fail the same way) |
+| `desktop.capture.portalWlrPackage` / `.portalGtkPackage` | package or null | xdg-desktop-portal-wlr / -gtk (NixOS side; Linux-only: null off Linux) | the backends themselves; null with the switch on fails evaluation naming it |
+| `desktop.theme.targets.capture.enable` | bool | `true` | theme the chooser and the region picker from the look; `false` keeps their own style |
+| `desktop.keys.binds.captureOutput.enable` / `.captureRegion.enable` / `.captureClipboard.enable` | bool | `true` | bind that screenshot (`false` leaves its combo unbound) |
+
+Troubleshooting, by symptom:
+
+- *Meet's share dialog offers nothing, or the request fails at
+  once.* Check the chain in order: the portals are up
+  (`systemctl --user status xdg-desktop-portal
+  xdg-desktop-portal-wlr` — both D-Bus activated, so a dead one
+  here means activation itself failed and the logs name it), the
+  session names scoot (`echo $XDG_CURRENT_DESKTOP` must print
+  `scoot`, and the D-Bus activation environment must carry it too —
+  the launcher imports it past the display import; a hand-started
+  session needs `dbus-update-activation-environment --systemd
+  WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE`), and PipeWire runs
+  (`wpctl status` lists sinks — no server, no cast).
+- *Chrome shares a black screen, or offers windows it cannot
+  capture.* Chrome is on its X11 capturer: it picks the portal
+  capturer only with `XDG_SESSION_TYPE=wayland` in its own
+  environment (`echo $XDG_SESSION_TYPE` in the terminal that
+  started it; Chrome blanks its own `/proc/PID/environ`, so reading
+  that file shows nothing either way). Every launcher login exports `wayland`, greeter
+  or console; a hand-started session needs the three-var activation
+  line in the entry above, and a Chrome started outside the session
+  (over ssh, from another desktop's terminal) needs a restart from
+  inside it.
+- *The share starts but shows the wrong screen, or never asks.* The
+  chooser is `none` (casts `outputName`, or any output when that is
+  null): set `chooser = "fuzzel"` for the list. With two outputs,
+  check the compositor sees both (`scoot msg outputs`).
+- *`Print` (or `Shift+Print`, `Ctrl+Print`) does nothing.* The slot
+  renders those binds only with `capture.enable` beside the keymap
+  (both on with the profile); either off leaves the combo unbound.
+  Then check the tool: `grim -o eDP-1 /tmp/t.png` from a terminal —
+  outside the session it names grim's own cause.
+- *The call's window list is empty.* Expected: outputs only (above).
+  Share a screen.
+- *A screenshot taken while locked shows the lock, not the
+  desktop.* That is the guarantee, not a bug: while locked the
+  compositor draws nothing but the lock client's own surfaces, so a
+  capture holds no locked pixels. The portal Screenshot and `grim`
+  see the same frame `scoot msg screenshot` does.
+- *Two portal configs fight.* The per-user
+  `~/.config/xdg-desktop-portal/scoot-portals.conf` (the profile's)
+  beats the system's `/etc/xdg/xdg-desktop-portal/scoot-portals.conf`
+  (also the profile's, for sessions without home-manager) — read the
+  user one first. A hand-written file in either place wins over both
+  only if it sorts earlier in the lookup; don't.
+
 ## Hardware keys and desktop actions
 
 A laptop whose brightness and volume keys do nothing is not
@@ -741,8 +873,9 @@ those tools, not to every scoot session.
 | `Super+n` | dismiss visible notifications | `notifications.enable` |
 | `Super+Shift+n` | do-not-disturb toggle | `notifications.enable` |
 | `Super+Ctrl+n` | show hidden notifications | `notifications.enable` |
-| `Print` | screenshot every output into `~/Pictures` | `capture.enable` (stub today) |
-| `Shift+Print` | screenshot a picked region into `~/Pictures` | `capture.enable` (stub today) |
+| `Print` | screenshot every output into `~/Pictures` | `capture.enable` |
+| `Shift+Print` | screenshot a picked region into `~/Pictures` | `capture.enable` |
+| `Ctrl+Print` | screenshot a picked region into the clipboard | `capture.enable` |
 
 On an Apple keyboard these are the Fn row: `F1`/`F2` brightness,
 `F7`/`F8`/`F9` previous/play/next, `F10` mute, `F11`/`F12` volume
@@ -766,7 +899,7 @@ reload (`scoot msg reload`) or re-login:
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `desktop.keys.enable` | bool | `true` with the profile | render the keymap into `[binds]` |
-| `desktop.keys.binds.<name>.enable` | bool | `true` | bind that key (`brightnessUp`, `brightnessDown`, `volumeUp`, `volumeDown`, `volumeMute`, `micMute`, `mediaPlay`, `mediaPause`, `mediaStop`, `mediaNext`, `mediaPrev`, `lock`, `launcher`, `launcherRun`, `clipboard`, `notifDismiss`, `notifDnd`, `notifHistory`, `captureOutput`, `captureRegion`); `false` leaves its combo unbound |
+| `desktop.keys.binds.<name>.enable` | bool | `true` | bind that key (`brightnessUp`, `brightnessDown`, `volumeUp`, `volumeDown`, `volumeMute`, `micMute`, `mediaPlay`, `mediaPause`, `mediaStop`, `mediaNext`, `mediaPrev`, `lock`, `launcher`, `launcherRun`, `clipboard`, `notifDismiss`, `notifDnd`, `notifHistory`, `captureOutput`, `captureRegion`, `captureClipboard`); `false` leaves its combo unbound |
 
 Each bind renders as a default a value you set in `settings.binds` wins
 over — override or remove one bind like this:
@@ -817,8 +950,8 @@ Troubleshooting, by symptom:
 - *`Super+d` opens nothing.* The launcher slot is off: that bind
   renders only with `launcher.enable` beside the keymap (both on
   with the profile), and either off leaves the combo unbound. Same
-  for `Ctrl+Alt+Space` (the run bind) and for `Print` (capture,
-  whose slot is still a stub) — while `Super+v` runs the clipboard
+  for `Ctrl+Alt+Space` (the run bind) and for the three capture
+  binds ([above](#screenshots-and-screen-sharing)) — while `Super+v` runs the clipboard
   picker ([above](#clipboard)) whenever `clipboard.enable` is on
   beside the keymap, as does the `Super+n` family (mako's own
   commands) whenever `notifications.enable` is.
@@ -870,7 +1003,7 @@ child, so those children fill bodies without renaming options:
 | Slot | Type | Default | Child |
 |---|---|---|---|
 | `desktop.launcher.enable` (+ `daemon`) | bool (+ enum, package) | `true` ([Launcher](#launcher): fuzzel on `Super+d` and `Ctrl+Alt+Space`, overlay layer, themed, nothing held when closed) | launcher (fuzzel now, scootlaunch later) |
-| `desktop.capture.enable` | bool + package | `false` | screenshots bound to keys (grim + slurp) |
+| `desktop.capture.enable` | bool + packages | `true` ([Screenshots and screen sharing](#screenshots-and-screen-sharing): portal backends, PipeWire, grim + slurp, the output chooser) |
 | `desktop.auth.enable` / `desktop.secrets.enable` | bool + package | `false` | polkit agent + keyring |
 | `desktop.audio.enable` | bool + package | `false` | audio baseline and OSD |
 | `desktop.clipboard.enable` (+ `maxItems`, `dbPath`, three packages) | bool (+ int, path, packages) | `true` ([Clipboard](#clipboard): history kept, picker bound, wiped at lock) | clipboard persistence + history (lean cliphist + wl-clipboard + fuzzel) |

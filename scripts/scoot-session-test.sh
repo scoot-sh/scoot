@@ -18,6 +18,10 @@
 #     -- the session target stopped too -- and the login proceeds;
 #   - a lock held by another launcher, or another desktop's graphical
 #     target with IPC silent, refuses without touching any unit;
+#   - the session identity rides the same import: `XDG_CURRENT_DESKTOP`
+#     defaults to `scoot` and `XDG_SESSION_TYPE` is exported as
+#     `wayland` even over a console login's inherited `tty` (the
+#     Chrome shape), and both are restored on exit;
 #   - without the dbus tool the display still reaches the user manager
 #     through `import-environment`;
 #   - the session wait blocks in `busctl wait` on the unit's
@@ -491,8 +495,8 @@ kill_launcher() {
 new_test 1
 start_launcher
 wait_log "start scoot-session.target" || bad "T1: launcher never started scoot-session.target"
-i_scoped="$(call_index 'dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP')"
-[ -n "$i_scoped" ] || bad "T1: no scoped display import before the session start"
+i_scoped="$(call_index 'dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE')"
+[ -n "$i_scoped" ] || bad "T1: no scoped session import before the session start"
 i_session="$(call_index 'start scoot-session.target')"
 [ "$i_session" -gt "$i_scoped" ] || bad "T1: session target started before the display import"
 ok "T1: session target starts after the scoped display import"
@@ -502,6 +506,9 @@ ok "T1: service starts first, session target after the import"
 [ "$(cat "$HARNESS_STATE/swayidle")" = "active" ] || bad "T1: ConditionEnvironment probe unit did not start (got $(cat "$HARNESS_STATE/swayidle"))"
 grep -q '^WAYLAND_DISPLAY=wayland-100$' "$HARNESS_STATE/env-at-graphical" || bad "T1: display missing from the manager when the graphical target was reached"
 ok "T1: ConditionEnvironment unit starts with the display in the manager"
+grep -q '^XDG_CURRENT_DESKTOP=scoot$' "$HARNESS_STATE/env-at-graphical" || bad "T1: desktop name missing from the manager when the graphical target was reached"
+grep -q '^XDG_SESSION_TYPE=wayland$' "$HARNESS_STATE/env-at-graphical" || bad "T1: session type missing from the manager when the graphical target was reached"
+ok "T1: session identity (desktop scoot, type wayland) reaches the manager with the display"
 if grep -q -F "start graphical-session.target" "$HARNESS_STATE/calls.log"; then
     bad "T1: launcher starts graphical-session.target directly (RefuseManualStart)"
 fi
@@ -514,6 +521,8 @@ RC="$(end_session)"
     || bad "T1: units leak after quit (service=$(state_of scoot.service) session=$(state_of scoot-session.target) graphical=$(state_of graphical-session.target))"
 ok "T1: quit stops service, session and graphical targets (nothing leaks)"
 env_has WAYLAND_DISPLAY && bad "T1: display leaks into the manager after quit"
+env_has XDG_CURRENT_DESKTOP && bad "T1: desktop name leaks into the manager after quit"
+env_has XDG_SESSION_TYPE && bad "T1: session type leaks into the manager after quit"
 ok "T1: manager environment restored on the way out"
 
 # --- T2: readiness deadline leaves nothing active -------------------
@@ -529,6 +538,8 @@ ok "T2: session target never started on a failed login"
 [ "$(state_of scoot.service)" = "inactive" ] || bad "T2: service left active after the deadline"
 ok "T2: deadline stops the service (nothing active)"
 env_has WAYLAND_DISPLAY && bad "T2: display leaks into the manager after the deadline"
+env_has XDG_CURRENT_DESKTOP && bad "T2: desktop name leaks into the manager after the deadline"
+env_has XDG_SESSION_TYPE && bad "T2: session type leaks into the manager after the deadline"
 ok "T2: manager environment restored after the deadline"
 
 # --- T3: stale session is healed, login proceeds --------------------
@@ -591,10 +602,12 @@ done
 export PATH="$T/nodbus"
 start_launcher
 wait_log "start scoot-session.target" || bad "T6: launcher without the dbus tool never reached the session target"
-grep -q -F "import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP" "$HARNESS_STATE/calls.log" \
+grep -q -F "import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE" "$HARNESS_STATE/calls.log" \
     || bad "T6: no manager-half import without the dbus tool"
 env_has WAYLAND_DISPLAY || bad "T6: display missing from the manager without the dbus tool"
-ok "T6: without the dbus tool the display still reaches the manager"
+env_has XDG_CURRENT_DESKTOP || bad "T6: desktop name missing from the manager without the dbus tool"
+env_has XDG_SESSION_TYPE || bad "T6: session type missing from the manager without the dbus tool"
+ok "T6: without the dbus tool the session identity still reaches the manager"
 wait_blocked "T6"
 RC="$(end_session)"
 [ "$RC" = "0" ] || bad "T6: launcher exit $RC"
@@ -796,6 +809,35 @@ t1="$("$REAL_DATE" +%s)"
 dt=$((t1 - t0))
 [ "$dt" -le 2 ] || bad "T14: session took ${dt}s to end past the outage"
 ok "T14: session ends in ${dt}s once the manager answers down (exit $RC)"
+
+# --- T15: a console login still exports a Wayland session -------------
+# The Chrome shape: `scoot-session` by hand from a VT (or over ssh)
+# inherits `XDG_SESSION_TYPE=tty` -- describing the terminal it was run
+# from, not the session being started -- and no desktop name. The
+# launcher must still export `wayland`/`scoot` to the manager and the
+# bus (the scoped import overwrites whatever the login sweep carried),
+# and on exit restore the manager's own prior value rather than
+# unsetting it. Fail-before: without the forced export the manager
+# keeps `tty` and Chrome captures through X11 even on Wayland.
+new_test 15
+printf 'XDG_SESSION_TYPE=tty\n' >"$HARNESS_STATE/env-manager"
+export XDG_SESSION_TYPE=tty
+start_launcher
+wait_log "start scoot-session.target" || { unset XDG_SESSION_TYPE; bad "T15: console login never reached the session target"; }
+unset XDG_SESSION_TYPE
+grep -q '^XDG_SESSION_TYPE=wayland$' "$HARNESS_STATE/env-manager" \
+    || bad "T15: console login kept the terminal's tty session type (got $(grep '^XDG_SESSION_TYPE=' "$HARNESS_STATE/env-manager" || printf 'nothing'))"
+ok "T15: console login exports XDG_SESSION_TYPE=wayland past an inherited tty"
+grep -q '^XDG_CURRENT_DESKTOP=scoot$' "$HARNESS_STATE/env-manager" \
+    || bad "T15: console login has no desktop name in the manager"
+ok "T15: console login defaults the desktop name to scoot"
+wait_blocked "T15"
+RC="$(end_session)"
+[ "$RC" = "0" ] || bad "T15: launcher exit $RC"
+grep -q '^XDG_SESSION_TYPE=tty$' "$HARNESS_STATE/env-manager" \
+    || bad "T15: prior session type not restored on exit"
+env_has XDG_CURRENT_DESKTOP && bad "T15: defaulted desktop name leaks into the manager after quit"
+ok "T15: exit restores the prior session type and drops the defaulted desktop name"
 
 echo "---"
 echo "$PASS/$TOTAL asserts passed"

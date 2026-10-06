@@ -93,7 +93,7 @@
 #   on, each fail eval; the shared keymap (`desktop-keys` child) runs
 #   with the profile -- the twelve hardware and lock binds, each a
 #   `mkDefault` a user `[binds]` entry wins over and each removable
-#   through `binds.<name>.enable`, the eight slot-gated binds only
+#   through `binds.<name>.enable`, the nine slot-gated binds only
 #   while their slot is on;
 #   the notification daemon (`desktop-notifications` child) runs with
 #   the profile -- mako owning `org.freedesktop.Notifications` as a
@@ -119,6 +119,20 @@
 #   exclusive keyboard, themed by the look unless
 #   `theme.targets.launcher.enable` opts out, holding nothing when
 #   closed; a null package and an unknown `daemon` each fail eval;
+#   the capture stack (`desktop-capture` child) runs with the
+#   profile -- the portal backends (`xdg-desktop-portal-wlr` 0.8.4
+#   or later for ScreenCast/Screenshot, `-gtk` for the rest, the
+#   `scoot` backend selection on both the system and the per-user
+#   config), PipeWire running for the cast, `grim` 1.5.0 or later
+#   plus `slurp` for the keymap's three screenshot binds (`Print`
+#   every output to file, `Shift+Print` a region to file,
+#   `Ctrl+Print` a region to the clipboard), and the output chooser
+#   xdpw asks before each cast (a dmenu list through fuzzel by
+#   default, click-to-pick through slurp or no picker on a fixed
+#   output, themed by the look unless
+#   `theme.targets.capture.enable` opts out); a null tool, a
+#   too-old backend or grim, a negative frame cap and an empty
+#   fixed output each fail eval;
 #   every profile unit (the idle pair, mako, the bar feed, both
 #   clipboard watchers, and the profile-managed bar -- never the
 #   standalone bar) starts in `scoot-session.target`, never the shared
@@ -297,6 +311,26 @@ let
     options.security.pam.services = lib.mkOption {
       type = lib.types.attrsOf lib.types.raw;
       default = { };
+    };
+    # The capture slot's portal service and PipeWire: the real options
+    # are nixpkgs' own (`services/xdg/portal.nix` for `xdg.portal`,
+    # `services/desktops/pipewire` for `services.pipewire`); these
+    # prove the values land, not their schemas.
+    options.xdg.portal.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.xdg.portal.extraPortals = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+    };
+    options.xdg.portal.config = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+    options.services.pipewire.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
     };
   };
 
@@ -1150,7 +1184,7 @@ let
     wallpaper.package = fakeBg;
     desktop.enable = true;
   };
-  # ...every future slot on: all nineteen binds render, the slot
+  # ...every future slot on: all twenty-one binds render, the slot
   # scripts beside them.
   hmKeysSlots = evalHome {
     enable = true;
@@ -1500,6 +1534,15 @@ let
     desktop.enable = true;
     desktop.clipboard.enable = false;
   };
+  # ...both the clipboard and the capture slots off: `wl-clipboard`
+  # leaves entirely (each slot installs the same derivation, so one
+  # slot alone keeps it).
+  hmClipCaptureOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.clipboard.enable = false;
+    desktop.capture.enable = false;
+  };
   # ...standalone (no profile): the slot runs, unthemed.
   hmClipStandalone = evalHome {
     enable = true;
@@ -1813,6 +1856,182 @@ let
     package = fakePkg;
     desktop.enable = true;
     desktop.launcher.package = null;
+  };
+
+  # --- capture (`programs.scoot.desktop.capture`) evaluations ---
+  #
+  # The profile with a look: the whole slot on (the tools on PATH,
+  # the per-desktop chooser file), the chooser themed by the look.
+  hmCapture = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  # ...without a look: the slot runs unthemed (fuzzel's and slurp's
+  # own colors -- pinned by content below).
+  hmCaptureNoLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...the slot off (the profile turns it on; the switch back off
+  # disables just its half: no tools, no chooser file, no binds).
+  hmCaptureOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.capture.enable = false;
+  };
+  # ...standalone (no profile): the tools on PATH and the chooser
+  # file written, unthemed, no binds (those need the keymap, which
+  # the profile turns on).
+  hmCaptureStandalone = evalHome {
+    enable = true;
+    desktop.capture.enable = true;
+  };
+  # ...the slurp picker instead of the menu...
+  hmCaptureSlurp = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.capture.chooser = "slurp";
+  };
+  # ...no picker at all, on a named output...
+  hmCaptureNoneNamed = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.capture.chooser = "none";
+    desktop.capture.outputName = "DP-1";
+  };
+  # ...no picker, any output...
+  hmCaptureNoneAny = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.capture.chooser = "none";
+  };
+  # ...opted out of chooser theming (the look leaves the menus
+  # alone).
+  hmCaptureTargetOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.targets.capture.enable = false;
+  };
+  # Refusals: a null beside `enable` (each pinned by message in
+  # `_capturePins`)...
+  hmCaptureNoGrim = evalHome {
+    enable = true;
+    desktop.capture.enable = true;
+    desktop.capture.grimPackage = null;
+  };
+  hmCaptureNoSlurp = evalHome {
+    enable = true;
+    desktop.capture.enable = true;
+    desktop.capture.slurpPackage = null;
+  };
+  hmCaptureNoMenu = evalHome {
+    enable = true;
+    desktop.capture.enable = true;
+    desktop.capture.menuPackage = null;
+  };
+  hmCaptureNoCopy = evalHome {
+    enable = true;
+    desktop.capture.enable = true;
+    desktop.capture.wlClipboardPackage = null;
+  };
+  # ...a too-old grim (1.4.0 speaks only the wlr screencopy protocol
+  # scoot omits on purpose)...
+  hmCaptureOldGrim = evalHome {
+    enable = true;
+    desktop.capture.enable = true;
+    desktop.capture.grimPackage = pkgs.grim.overrideAttrs (old: {
+      version = "1.4.0";
+    });
+  };
+  # ...a negative frame cap, and an empty fixed output...
+  hmCaptureNegFps = evalHome {
+    enable = true;
+    desktop.capture.enable = true;
+    desktop.capture.maxFps = -1;
+  };
+  hmCaptureEmptyOutput = evalHome {
+    enable = true;
+    desktop.capture.enable = true;
+    desktop.capture.chooser = "none";
+    desktop.capture.outputName = "";
+  };
+  # ...and an unknown chooser, which is an option type error (the
+  # `enum`'s own message names the valid values), caught here by
+  # `tryEval`.
+  hmCaptureChooserBogus =
+    builtins.tryEval
+      (evalHome {
+        enable = true;
+        desktop.capture.enable = true;
+        desktop.capture.chooser = "bogus-chooser";
+      }).config.programs.scoot.desktop.capture.chooser;
+
+  # --- capture system evaluations ---
+  osCapture = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  osCaptureOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.capture.enable = false;
+  };
+  osCaptureStandalone = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.capture.enable = true;
+  };
+  osCaptureNoWlr = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.capture.portalWlrPackage = null;
+  };
+  osCaptureNoGtk = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.capture.portalGtkPackage = null;
+  };
+  osCaptureNoGrim = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.capture.grimPackage = null;
+  };
+  osCaptureNoSlurp = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.capture.slurpPackage = null;
+  };
+  osCaptureNoMenu = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.capture.menuPackage = null;
+  };
+  # ...a 0.8.3 backend (stalls recordings) and a too-old grim...
+  osCaptureOldWlr = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.capture.portalWlrPackage = pkgs.xdg-desktop-portal-wlr.overrideAttrs (old: {
+      version = "0.8.3";
+    });
+  };
+  osCaptureOldGrim = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.capture.grimPackage = pkgs.grim.overrideAttrs (old: {
+      version = "1.4.0";
+    });
   };
 
   # Refusals: the profile without scoot, and a look without the profile
@@ -3091,6 +3310,21 @@ let
   launchTargetOff = slotScriptBin hmLaunchTargetOff "scoot-launcher";
   launchVinyl = slotScriptBin hmLaunchLookVinyl "scoot-launcher";
   launchBurst = slotScriptBin hmLaunchLookBurst "scoot-launcher";
+  # The capture slot's generated files: the per-desktop chooser file
+  # xdpw reads first -- themed (music-desk), lookless, opt-out, the
+  # slurp picker, no picker on a named output and on any output --
+  # plus the keymap's three screenshot scripts as their binds run
+  # them.
+  captureThemed = hmCapture.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
+  captureNoLook = hmCaptureNoLook.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
+  captureTargetOff = hmCaptureTargetOff.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
+  captureSlurp = hmCaptureSlurp.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
+  captureNoneNamed = hmCaptureNoneNamed.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
+  captureNoneAny = hmCaptureNoneAny.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
+  captureOutputScript = slotScriptBin hmCapture "scoot-capture-output";
+  captureRegionScript = slotScriptBin hmCapture "scoot-capture-region";
+  captureRegionNoLook = slotScriptBin hmCaptureNoLook "scoot-capture-region";
+  captureClipboardScript = slotScriptBin hmCapture "scoot-capture-clipboard";
   launchMoon = slotScriptBin hmLaunchLookMoon "scoot-launcher";
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
@@ -3353,9 +3587,26 @@ let
     # across the tree; `notifications` left this list when the
     # `desktop-notifications` child filled it, `clipboard` when the
     # `desktop-clipboard` child did, `launcher` when the
-    # `desktop-launcher` child did).
+    # `desktop-launcher` child did, `capture` when the
+    # `desktop-capture` child did).
     (
-      assert !hmDesk.config.programs.scoot.desktop.capture.enable;
+      assert hmDesk.config.programs.scoot.desktop.capture.enable;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.capture.chooser == "fuzzel";
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.capture.maxFps == 30;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.capture.outputName == null;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.theme.targets.capture.enable;
       true
     )
     (
@@ -3435,7 +3686,8 @@ let
     # ...which is what installs scootbg for it (beside the idle
     # policy's five tools, the notification daemon, the launcher
     # package and its script, the clipboard slot's three, its picker
-    # script and the keymap's three, all on with the profile).
+    # script, the capture slot's four and the keymap's three, all on
+    # with the profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
       true
@@ -3444,8 +3696,10 @@ let
       # `brightnessctl` twice is one package, not two tools: the
       # idle policy's dim tool and the keymap's brightness tool are
       # the same derivation, each declared beside its own binds (and
-      # `fuzzel` twice the same way: the clipboard picker's menu and
-      # the launcher package).
+      # `fuzzel` three times the same way: the clipboard picker's
+      # menu, the launcher package and the capture chooser's menu --
+      # and `wl-clipboard` twice: the clipboard slot's tools and the
+      # capture slot's clipboard bind).
       assert
         sorted hmDeskLookMusic.config.home.packages == sorted [
           fakePkg
@@ -3462,6 +3716,13 @@ let
           (slotScriptDrv hmDeskLookMusic "scoot-clipboard-pick")
           pkgs.fuzzel
           (slotScriptDrv hmDeskLookMusic "scoot-launcher")
+          pkgs.grim
+          pkgs.slurp
+          pkgs.fuzzel
+          pkgs.wl-clipboard
+          (slotScriptDrv hmDeskLookMusic "scoot-capture-output")
+          (slotScriptDrv hmDeskLookMusic "scoot-capture-region")
+          (slotScriptDrv hmDeskLookMusic "scoot-capture-clipboard")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -3609,6 +3870,39 @@ let
     )
     (
       assert osDesk.config.services.displayManager.defaultSession == null;
+      true
+    )
+    # ...the capture slot on with it: the portal service with both
+    # backends, the `scoot` backend selection (ScreenCast/Screenshot
+    # to `wlr`, the rest to `gtk`), PipeWire running, and the tools
+    # on PATH...
+    (
+      assert osDesk.config.programs.scoot.desktop.capture.enable;
+      true
+    )
+    (
+      assert osDesk.config.xdg.portal.enable;
+      true
+    )
+    (
+      assert
+        osDesk.config.xdg.portal.extraPortals == [
+          osDesk.config.programs.scoot.desktop.capture.portalWlrPackage
+          osDesk.config.programs.scoot.desktop.capture.portalGtkPackage
+        ];
+      true
+    )
+    (
+      assert
+        osDesk.config.xdg.portal.config.scoot == {
+          default = [ "gtk" ];
+          "org.freedesktop.impl.portal.Screenshot" = [ "wlr" ];
+          "org.freedesktop.impl.portal.ScreenCast" = [ "wlr" ];
+        };
+      true
+    )
+    (
+      assert osDesk.config.services.pipewire.enable;
       true
     )
     # ...a future slot on is accepted and inert there too...
@@ -4145,14 +4439,15 @@ let
         hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
       true
     )
-    # ...exactly the fifteen tools installed (swayidle, dim, off,
-    # locker, inhibitor, mako, the clipboard slot's three, its picker
-    # script, the launcher package and its script -- no scoot package
+    # ...exactly the twenty-two packages installed (swayidle, dim,
+    # off, locker, inhibitor, mako, the clipboard slot's three, its
+    # picker script, the launcher package and its script, the capture
+    # slot's four tools and its three scripts -- no scoot package
     # set here, so nothing else -- plus the keymap's brightness,
     # volume and media tools; `brightnessctl` and `fuzzel` each serve
     # two features, so each appears twice).
     (
-      assert builtins.length hmIdle.config.home.packages == 15;
+      assert builtins.length hmIdle.config.home.packages == 22;
       true
     )
     (
@@ -4170,6 +4465,13 @@ let
           (slotScriptDrv hmIdle "scoot-clipboard-pick")
           pkgs.fuzzel
           (slotScriptDrv hmIdle "scoot-launcher")
+          pkgs.grim
+          pkgs.slurp
+          pkgs.fuzzel
+          pkgs.wl-clipboard
+          (slotScriptDrv hmIdle "scoot-capture-output")
+          (slotScriptDrv hmIdle "scoot-capture-region")
+          (slotScriptDrv hmIdle "scoot-capture-clipboard")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -4233,6 +4535,13 @@ let
           (slotScriptDrv hmIdleOff "scoot-clipboard-pick")
           pkgs.fuzzel
           (slotScriptDrv hmIdleOff "scoot-launcher")
+          pkgs.grim
+          pkgs.slurp
+          pkgs.fuzzel
+          pkgs.wl-clipboard
+          (slotScriptDrv hmIdleOff "scoot-capture-output")
+          (slotScriptDrv hmIdleOff "scoot-capture-region")
+          (slotScriptDrv hmIdleOff "scoot-capture-clipboard")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -4242,7 +4551,8 @@ let
     # The lock off: the policy stays (dim and screens-off), the locker
     # leaves (no config, no package, four policy tools plus mako, the
     # clipboard slot's three, its picker script, the launcher package
-    # and its script, and the keymap's three left).
+    # and its script, the capture slot's four, and the keymap's three
+    # left).
     (
       assert allAssertionsHold hmLockOff.config;
       true
@@ -4256,13 +4566,13 @@ let
       true
     )
     (
-      assert builtins.length hmLockOff.config.home.packages == 14;
+      assert builtins.length hmLockOff.config.home.packages == 21;
       true
     )
     # The inhibitor off: the policy without the audio hold (four
     # policy tools plus mako, the clipboard slot's three, its picker
-    # script, the launcher package and its script, and the keymap's
-    # three).
+    # script, the launcher package and its script, the capture slot's
+    # four, and the keymap's three).
     (
       assert allAssertionsHold hmInhibitOff.config;
       true
@@ -4272,7 +4582,7 @@ let
       true
     )
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 14;
+      assert builtins.length hmInhibitOff.config.home.packages == 21;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -4379,7 +4689,8 @@ let
     )
 
     # NixOS: the profile installs the five policy tools, mako, the
-    # launcher, the clipboard slot's three and the keymap's three
+    # launcher, the clipboard slot's three, the capture slot's five
+    # and the keymap's three
     # beside scoot and scootbg, locks docked lids, and names the
     # locker's PAM service -- staying additive (no default session,
     # ever)...
@@ -4401,6 +4712,11 @@ let
           pkgs.fuzzel
           leanClip
           pkgs.wl-clipboard
+          pkgs.fuzzel
+          pkgs.xdg-desktop-portal-wlr
+          pkgs.xdg-desktop-portal-gtk
+          pkgs.grim
+          pkgs.slurp
           pkgs.fuzzel
           pkgs.brightnessctl
           pkgs.wireplumber
@@ -4448,6 +4764,11 @@ let
           leanClip
           pkgs.wl-clipboard
           pkgs.fuzzel
+          pkgs.xdg-desktop-portal-wlr
+          pkgs.xdg-desktop-portal-gtk
+          pkgs.grim
+          pkgs.slurp
+          pkgs.fuzzel
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -4479,6 +4800,11 @@ let
           pkgs.fuzzel
           leanClip
           pkgs.wl-clipboard
+          pkgs.fuzzel
+          pkgs.xdg-desktop-portal-wlr
+          pkgs.xdg-desktop-portal-gtk
+          pkgs.grim
+          pkgs.slurp
           pkgs.fuzzel
           pkgs.brightnessctl
           pkgs.wireplumber
@@ -5091,8 +5417,15 @@ let
       assert !(lib.any (p: (p.pname or "") == "cliphist") hmClipOff.config.home.packages);
       true
     )
+    # ...`wl-clipboard` stays: the capture slot (on with the profile)
+    # runs its clipboard bind from the same derivation -- and with
+    # both slots off it leaves entirely...
     (
-      assert !(lib.any (p: (p.pname or "") == "wl-clipboard") hmClipOff.config.home.packages);
+      assert lib.any (p: (p.pname or "") == "wl-clipboard") hmClipOff.config.home.packages;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "wl-clipboard") hmClipCaptureOff.config.home.packages);
       true
     )
     # ...fuzzel stays: the launcher slot (on with the profile) runs
@@ -5503,14 +5836,15 @@ let
   _darwinLaunchPins = lib.optionals (!isLinux) [
     # Home-manager: null, and the slot's assertion refusing loudly
     # (the idle policy's five plus the daemon's one plus the
-    # launcher's one plus the clipboard slot's three: the profile is
+    # launcher's one plus the clipboard slot's three plus the capture
+    # slot's four: the profile is
     # on in this evaluation, so its slot is open).
     (
       assert hmLaunch.config.programs.scoot.desktop.launcher.package == null;
       true
     )
     (
-      assert builtins.length (failing hmLaunch.config) == 10;
+      assert builtins.length (failing hmLaunch.config) == 14;
       true
     )
     (
@@ -5524,7 +5858,456 @@ let
     )
     # ...refused loudly there too.
     (
-      assert builtins.length (failing osLaunch.config) == 10;
+      assert builtins.length (failing osLaunch.config) == 15;
+      true
+    )
+  ];
+
+  # --- capture slot (fail `nix flake check` at eval) ---
+  #
+  # Linux only: the actions name absolute store paths here (the bare
+  # fallbacks are pinned in `_darwinCapturePins`). The profile turns
+  # the slot on; the portal backends, PipeWire and the tools arrive
+  # with it.
+  _capturePins = lib.optionals isLinux [
+    # Home-manager: the whole slot on (the tools beside the
+    # profile's own, the per-desktop chooser file xdpw reads first)...
+    (
+      assert allAssertionsHold hmCapture.config;
+      true
+    )
+    (
+      assert hmCapture.config.programs.scoot.desktop.capture.enable;
+      true
+    )
+    (
+      assert hmCapture.config.programs.scoot.desktop.capture.chooser == "fuzzel";
+      true
+    )
+    (
+      assert hmCapture.config.programs.scoot.desktop.capture.maxFps == 30;
+      true
+    )
+    (
+      assert hmCapture.config.programs.scoot.desktop.capture.outputName == null;
+      true
+    )
+    (
+      assert hmCapture.config.programs.scoot.desktop.theme.targets.capture.enable;
+      true
+    )
+    # ...running stock nixpkgs tools (the same derivations both sides
+    # install, so a divergent package fails here)...
+    (
+      assert hmCapture.config.programs.scoot.desktop.capture.grimPackage.drvPath == pkgs.grim.drvPath;
+      true
+    )
+    (
+      assert hmCapture.config.programs.scoot.desktop.capture.slurpPackage.drvPath == pkgs.slurp.drvPath;
+      true
+    )
+    (
+      assert hmCapture.config.programs.scoot.desktop.capture.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+      true
+    )
+    (
+      assert
+        hmCapture.config.programs.scoot.desktop.capture.menuPackage.drvPath
+        == hmCapture.config.programs.scoot.desktop.clipboard.menuPackage.drvPath;
+      true
+    )
+    (
+      assert
+        hmCapture.config.programs.scoot.desktop.capture.wlClipboardPackage.drvPath
+        == pkgs.wl-clipboard.drvPath;
+      true
+    )
+    # ...installed beside the profile's own, and the chooser file
+    # written...
+    (
+      assert lib.any (p: (p.pname or "") == "grim") hmCapture.config.home.packages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "slurp") hmCapture.config.home.packages;
+      true
+    )
+    (
+      assert hmCapture.config.xdg.configFile ? "xdg-desktop-portal-wlr/scoot";
+      true
+    )
+    # ...the slot off: no tools of its own (grim, slurp), no chooser
+    # file, and no capture binds (fuzzel and wl-clipboard stay: the
+    # launcher and clipboard slots are still on)...
+    (
+      assert allAssertionsHold hmCaptureOff.config;
+      true
+    )
+    (
+      assert !(hmCaptureOff.config.xdg.configFile ? "xdg-desktop-portal-wlr/scoot");
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "grim") hmCaptureOff.config.home.packages);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "slurp") hmCaptureOff.config.home.packages);
+      true
+    )
+    (
+      assert !(hmCaptureOff.config.programs.scoot.settings.binds ? "print");
+      true
+    )
+    (
+      assert !(hmCaptureOff.config.programs.scoot.settings.binds ? "shift+print");
+      true
+    )
+    (
+      assert !(hmCaptureOff.config.programs.scoot.settings.binds ? "ctrl+print");
+      true
+    )
+    # ...standalone (no profile): the tools and the file, unthemed...
+    (
+      assert allAssertionsHold hmCaptureStandalone.config;
+      true
+    )
+    (
+      assert hmCaptureStandalone.config.xdg.configFile ? "xdg-desktop-portal-wlr/scoot";
+      true
+    )
+    # ...the other choosers selected...
+    (
+      assert hmCaptureSlurp.config.programs.scoot.desktop.capture.chooser == "slurp";
+      true
+    )
+    (
+      assert allAssertionsHold hmCaptureSlurp.config;
+      true
+    )
+    (
+      assert hmCaptureNoneNamed.config.programs.scoot.desktop.capture.outputName == "DP-1";
+      true
+    )
+    (
+      assert allAssertionsHold hmCaptureNoneNamed.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmCaptureNoneAny.config;
+      true
+    )
+    (
+      assert allAssertionsHold hmCaptureTargetOff.config;
+      true
+    )
+    # ...and the refusals naming each tool (a null beside `enable`)...
+    (
+      assert builtins.length (failing hmCaptureNoGrim.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.grimPackage is null" m) (failing hmCaptureNoGrim.config);
+      true
+    )
+    (
+      assert builtins.length (failing hmCaptureNoSlurp.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.slurpPackage is null" m) (failing hmCaptureNoSlurp.config);
+      true
+    )
+    (
+      assert builtins.length (failing hmCaptureNoMenu.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.menuPackage is null" m) (failing hmCaptureNoMenu.config);
+      true
+    )
+    (
+      assert builtins.length (failing hmCaptureNoCopy.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.wlClipboardPackage is null" m) (
+        failing hmCaptureNoCopy.config
+      );
+      true
+    )
+    # ...a too-old grim (1.4.0 speaks only the wlr screencopy protocol
+    # scoot omits on purpose)...
+    (
+      assert builtins.length (failing hmCaptureOldGrim.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "too old" m) (failing hmCaptureOldGrim.config);
+      true
+    )
+    # ...a negative frame cap, and an empty fixed output...
+    (
+      assert builtins.length (failing hmCaptureNegFps.config) == 1;
+      true
+    )
+    (
+      assert builtins.length (failing hmCaptureEmptyOutput.config) == 1;
+      true
+    )
+    # ...and an unknown chooser, which is an option type error (the
+    # `enum`'s own message names the valid values), caught here by
+    # `tryEval`.
+    (
+      assert !hmCaptureChooserBogus.success;
+      true
+    )
+    # NixOS: the profile turns the slot on (the portal service with
+    # both backends, the `scoot` backend selection, PipeWire, the
+    # tools on PATH, the fallback chooser config)...
+    (
+      assert allAssertionsHold osCapture.config;
+      true
+    )
+    (
+      assert osCapture.config.programs.scoot.desktop.capture.enable;
+      true
+    )
+    (
+      assert osCapture.config.xdg.portal.enable;
+      true
+    )
+    (
+      assert
+        drvs osCapture.config.xdg.portal.extraPortals == drvs [
+          pkgs.xdg-desktop-portal-wlr
+          pkgs.xdg-desktop-portal-gtk
+        ];
+      true
+    )
+    (
+      assert
+        osCapture.config.xdg.portal.config.scoot == {
+          default = [ "gtk" ];
+          "org.freedesktop.impl.portal.Screenshot" = [ "wlr" ];
+          "org.freedesktop.impl.portal.ScreenCast" = [ "wlr" ];
+        };
+      true
+    )
+    (
+      assert osCapture.config.services.pipewire.enable;
+      true
+    )
+    (
+      assert lib.any (
+        p: (p.pname or "") == "xdg-desktop-portal-wlr"
+      ) osCapture.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (
+        p: (p.pname or "") == "xdg-desktop-portal-gtk"
+      ) osCapture.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "grim") osCapture.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "slurp") osCapture.config.environment.systemPackages;
+      true
+    )
+    (
+      assert osCapture.config.environment.etc ? "xdg/xdg-desktop-portal-wlr/config";
+      true
+    )
+    # ...the system fallback chooser behind it (unthemed: the look is
+    # per-user, so the themed flags live only in the per-desktop
+    # file above -- and a bare store path, for the same inih line
+    # limit)...
+    (
+      assert lib.hasInfix "chooser_cmd="
+        osCapture.config.environment.etc."xdg/xdg-desktop-portal-wlr/config".text;
+      true
+    )
+    (
+      assert lib.hasInfix "scoot-screencast-chooser"
+        osCapture.config.environment.etc."xdg/xdg-desktop-portal-wlr/config".text;
+      true
+    )
+    (
+      assert lib.hasInfix "chooser_type=dmenu"
+        osCapture.config.environment.etc."xdg/xdg-desktop-portal-wlr/config".text;
+      true
+    )
+    (
+      assert lib.hasInfix "max_fps=30"
+        osCapture.config.environment.etc."xdg/xdg-desktop-portal-wlr/config".text;
+      true
+    )
+    # ...the slot off: no portal service, no PipeWire from this
+    # slot, no backends on PATH...
+    (
+      assert allAssertionsHold osCaptureOff.config;
+      true
+    )
+    (
+      assert !osCaptureOff.config.xdg.portal.enable;
+      true
+    )
+    (
+      assert !osCaptureOff.config.services.pipewire.enable;
+      true
+    )
+    (
+      assert
+        !(lib.any (
+          p: (p.pname or "") == "xdg-desktop-portal-wlr"
+        ) osCaptureOff.config.environment.systemPackages);
+      true
+    )
+    # ...standalone (no profile): the portal service without the
+    # session entry...
+    (
+      assert allAssertionsHold osCaptureStandalone.config;
+      true
+    )
+    (
+      assert osCaptureStandalone.config.xdg.portal.enable;
+      true
+    )
+    # ...and each refusal naming its tool on this side as well...
+    (
+      assert builtins.length (failing osCaptureNoWlr.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.portalWlrPackage is null" m) (
+        failing osCaptureNoWlr.config
+      );
+      true
+    )
+    (
+      assert builtins.length (failing osCaptureNoGtk.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.portalGtkPackage is null" m) (
+        failing osCaptureNoGtk.config
+      );
+      true
+    )
+    (
+      assert builtins.length (failing osCaptureNoGrim.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.grimPackage is null" m) (failing osCaptureNoGrim.config);
+      true
+    )
+    (
+      assert builtins.length (failing osCaptureNoSlurp.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.slurpPackage is null" m) (failing osCaptureNoSlurp.config);
+      true
+    )
+    (
+      assert builtins.length (failing osCaptureNoMenu.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.menuPackage is null" m) (failing osCaptureNoMenu.config);
+      true
+    )
+    # ...a 0.8.3 backend (stalls recordings) and a too-old grim...
+    (
+      assert builtins.length (failing osCaptureOldWlr.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "too old" m) (failing osCaptureOldWlr.config);
+      true
+    )
+    (
+      assert builtins.length (failing osCaptureOldGrim.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "too old" m) (failing osCaptureOldGrim.config);
+      true
+    )
+  ];
+
+  # --- capture slot off Linux (fail `nix flake check` at eval) ---
+  #
+  # The tools above are Linux-only: off Linux each package defaults to
+  # null, which the slot's own assertions refuse loudly instead of
+  # installing nothing silently. Empty off Linux (the Linux check
+  # above is where the slot is pinned).
+  _darwinCapturePins = lib.optionals (!isLinux) [
+    # Home-manager: every tool null, nothing installed for the slot...
+    (
+      assert hmCapture.config.programs.scoot.desktop.capture.grimPackage == null;
+      true
+    )
+    (
+      assert hmCapture.config.programs.scoot.desktop.capture.slurpPackage == null;
+      true
+    )
+    (
+      assert hmCapture.config.programs.scoot.desktop.capture.menuPackage == null;
+      true
+    )
+    (
+      assert hmCapture.config.programs.scoot.desktop.capture.wlClipboardPackage == null;
+      true
+    )
+    # ...and the slot's own assertions refusing loudly, naming each
+    # tool (the idle policy's five plus the daemon's one plus the
+    # launcher's one plus the clipboard slot's three plus this slot's
+    # four: the profile is on in this evaluation).
+    (
+      assert builtins.length (failing hmCapture.config) == 14;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.grimPackage is null" m) (failing hmCapture.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.slurpPackage is null" m) (failing hmCapture.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.menuPackage is null" m) (failing hmCapture.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "capture.wlClipboardPackage is null" m) (failing hmCapture.config);
+      true
+    )
+    # Standalone (no profile): just the slot's own four.
+    (
+      assert builtins.length (failing hmCaptureStandalone.config) == 4;
+      true
+    )
+    # NixOS: the same nulls (no backends installed for the slot)...
+    (
+      assert osCapture.config.programs.scoot.desktop.capture.portalWlrPackage == null;
+      true
+    )
+    (
+      assert osCapture.config.programs.scoot.desktop.capture.portalGtkPackage == null;
+      true
+    )
+    # ...refused loudly there too (the idle policy's five plus the
+    # daemon's one plus the launcher's one plus the clipboard slot's
+    # three plus this slot's five -- gtk beside wlr).
+    (
+      assert builtins.length (failing osCapture.config) == 15;
       true
     )
   ];
@@ -5551,10 +6334,11 @@ let
     )
     # ...and the slot's own assertions refusing loudly, naming each
     # switch (the idle policy's five plus the daemon's one plus the
-    # launcher's one plus the slot's three: the profile is on in this
+    # launcher's one plus the slot's three plus the capture slot's
+    # four: the profile is on in this
     # evaluation).
     (
-      assert builtins.length (failing hmClip.config) == 10;
+      assert builtins.length (failing hmClip.config) == 14;
       true
     )
     (
@@ -5582,7 +6366,7 @@ let
     # ...refused loudly there too (one more than before: the
     # launcher's null joins the count on this side as well).
     (
-      assert builtins.length (failing osClip.config) == 10;
+      assert builtins.length (failing osClip.config) == 15;
       true
     )
   ];
@@ -5596,14 +6380,15 @@ let
   _darwinNotifPins = lib.optionals (!isLinux) [
     # Home-manager: null, and the daemon's assertion refusing loudly
     # (the idle policy's five plus the daemon's one plus the launcher's
-    # one plus the clipboard slot's three: the profile is on in this
+    # one plus the clipboard slot's three plus the capture slot's
+    # four: the profile is on in this
     # evaluation, so its slot is open).
     (
       assert hmNotif.config.programs.scoot.desktop.notifications.package == null;
       true
     )
     (
-      assert builtins.length (failing hmNotif.config) == 10;
+      assert builtins.length (failing hmNotif.config) == 14;
       true
     )
     (
@@ -5617,10 +6402,10 @@ let
     )
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
-    # three: the profile is on in this evaluation, so its slot is
-    # open).
+    # three plus the capture slot's five -- gtk beside wlr: the
+    # profile is on in this evaluation, so its slot is open).
     (
-      assert builtins.length (failing osNotif.config) == 10;
+      assert builtins.length (failing osNotif.config) == 15;
       true
     )
     (
@@ -5650,10 +6435,11 @@ let
       assert hmKeys.config.programs.scoot.desktop.keys.enable;
       true
     )
-    # ...rendering exactly the eighteen binds beside the profile (the
-    # twelve keymap-owned binds plus the three notification binds, the
-    # clipboard picker and the two launcher binds -- the daemon, the
-    # clipboard slot and the launcher slot are on with the profile, so
+    # ...rendering exactly the twenty-one binds beside the profile
+    # (the twelve keymap-owned binds plus the three notification
+    # binds, the clipboard picker, the two launcher binds and the
+    # three capture binds -- the daemon, the clipboard slot, the
+    # launcher slot and the capture slot are on with the profile, so
     # their slots are open; every other future slot is off: its binds
     # stay out)...
     (
@@ -5721,12 +6507,16 @@ let
           "super+n" = "spawn ${leanMako}/bin/makoctl dismiss";
           "super+shift+n" = "spawn ${leanMako}/bin/makoctl mode -t do-not-disturb";
           "super+ctrl+n" = "spawn ${leanMako}/bin/makoctl restore";
+          "print" = "spawn ${slotScriptBin hmKeys "scoot-capture-output"}";
+          "shift+print" = "spawn ${slotScriptBin hmKeys "scoot-capture-region"}";
+          "ctrl+print" = "spawn ${slotScriptBin hmKeys "scoot-capture-clipboard"}";
         };
       true
     )
     # ...beside the profile's and the policy's packages (scoot, the
     # five idle tools, mako, the clipboard slot's three, the launcher
-    # package, the two slot scripts and the keymap's three)...
+    # package, the capture slot's four tools, the five slot scripts
+    # and the keymap's three)...
     (
       assert
         sorted hmKeys.config.home.packages == sorted [
@@ -5743,21 +6533,28 @@ let
           pkgs.fuzzel
           (slotScriptDrv hmKeys "scoot-clipboard-pick")
           (slotScriptDrv hmKeys "scoot-launcher")
+          pkgs.grim
+          pkgs.slurp
+          pkgs.fuzzel
+          pkgs.wl-clipboard
+          (slotScriptDrv hmKeys "scoot-capture-output")
+          (slotScriptDrv hmKeys "scoot-capture-region")
+          (slotScriptDrv hmKeys "scoot-capture-clipboard")
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
         ];
       true
     )
-    # ...every other future slot on: all twenty binds (the launcher,
-    # clipboard and capture binds through the keymap's own scripts,
-    # the notification binds through mako's absolute path)...
+    # ...every other future slot on: all twenty-one binds (the
+    # launcher, clipboard and capture binds through the keymap's own
+    # scripts, the notification binds through mako's absolute path)...
     (
       assert allAssertionsHold hmKeysSlots.config;
       true
     )
     (
-      assert builtins.length (builtins.attrNames hmKeysSlots.config.programs.scoot.settings.binds) == 20;
+      assert builtins.length (builtins.attrNames hmKeysSlots.config.programs.scoot.settings.binds) == 21;
       true
     )
     (
@@ -5817,7 +6614,13 @@ let
         == "spawn ${slotScriptBin hmKeysSlots "scoot-capture-region"}";
       true
     )
-    # ...the three slot scripts installed beside the keymap's tools...
+    (
+      assert
+        hmKeysSlots.config.programs.scoot.settings.binds."ctrl+print"
+        == "spawn ${slotScriptBin hmKeysSlots "scoot-capture-clipboard"}";
+      true
+    )
+    # ...the four slot scripts installed beside the keymap's tools...
     (
       assert lib.any (p: (p.name or "") == "scoot-clipboard-pick") hmKeysSlots.config.home.packages;
       true
@@ -5830,9 +6633,13 @@ let
       assert lib.any (p: (p.name or "") == "scoot-capture-region") hmKeysSlots.config.home.packages;
       true
     )
-    # ...one bind removed: its combo unbound, the other sixteen
-    # still there (eighteen with the daemon, the clipboard slot and
-    # the launcher slot on, minus two)...
+    (
+      assert lib.any (p: (p.name or "") == "scoot-capture-clipboard") hmKeysSlots.config.home.packages;
+      true
+    )
+    # ...one bind removed: its combo unbound, the other nineteen
+    # still there (twenty-one with the daemon, the clipboard slot,
+    # the launcher slot and the capture slot on, minus two)...
     (
       assert allAssertionsHold hmKeysOmit.config;
       true
@@ -5846,7 +6653,7 @@ let
       true
     )
     (
-      assert builtins.length (builtins.attrNames hmKeysOmit.config.programs.scoot.settings.binds) == 16;
+      assert builtins.length (builtins.attrNames hmKeysOmit.config.programs.scoot.settings.binds) == 19;
       true
     )
     # ...one bind overridden: the user's own `[binds]` entry wins...
@@ -5857,7 +6664,7 @@ let
     )
     (
       assert
-        builtins.length (builtins.attrNames hmKeysOverride.config.programs.scoot.settings.binds) == 18;
+        builtins.length (builtins.attrNames hmKeysOverride.config.programs.scoot.settings.binds) == 21;
       true
     )
     # ...a slot bind overridden the same way (the slot's command
@@ -5879,8 +6686,8 @@ let
     # ...the whole keymap off: no `[binds]` from it (no other eval
     # sets binds here, so the table is absent entirely) and no slot
     # scripts either (the keymap installs those beside the binds), so
-    # the idle policy's five, mako, the launcher and the clipboard
-    # slot's tools beside scoot only...
+    # the idle policy's five, mako, the launcher, the clipboard
+    # slot's tools and the capture slot's tools beside scoot only...
     (
       assert allAssertionsHold hmKeysOff.config;
       true
@@ -5903,12 +6710,17 @@ let
           leanClip
           pkgs.wl-clipboard
           pkgs.fuzzel
+          pkgs.grim
+          pkgs.slurp
+          pkgs.fuzzel
+          pkgs.wl-clipboard
         ];
       true
     )
     # NixOS: the keymap off leaves the profile's other packages
-    # only (the five idle tools, mako, the launcher and the clipboard
-    # slot's tools beside scoot and scootbg).
+    # only (the five idle tools, mako, the launcher, the clipboard
+    # slot's tools and the capture slot's tools beside scoot and
+    # scootbg).
     (
       assert allAssertionsHold osKeysOff.config;
       true
@@ -5927,6 +6739,11 @@ let
           pkgs.fuzzel
           leanClip
           pkgs.wl-clipboard
+          pkgs.fuzzel
+          pkgs.xdg-desktop-portal-wlr
+          pkgs.xdg-desktop-portal-gtk
+          pkgs.grim
+          pkgs.slurp
           pkgs.fuzzel
         ];
       true
@@ -5972,11 +6789,12 @@ let
     # ...and the policy's own assertions refusing loudly, naming the
     # switch (one per null tool: the policy, the dim and screens-off
     # steps, the inhibitor, the locker -- plus the notification
-    # daemon's one, the launcher's one and the clipboard slot's three,
+    # daemon's one, the launcher's one, the clipboard slot's three
+    # and the capture slot's four,
     # on with the profile; order-insensitive: the daemon's module
     # contributes its refusal first).
     (
-      assert builtins.length (failing hmIdle.config) == 10;
+      assert builtins.length (failing hmIdle.config) == 14;
       true
     )
     (
@@ -6002,10 +6820,11 @@ let
     )
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
-    # three), while the docked-lid rule (plain values, no tools) still
+    # three plus this slot's five -- gtk beside wlr -- while the
+    # docked-lid rule (plain values, no tools) still
     # lands.
     (
-      assert builtins.length (failing osIdle.config) == 10;
+      assert builtins.length (failing osIdle.config) == 15;
       true
     )
     (
@@ -6044,23 +6863,27 @@ let
     # ...the keymap still on with the profile, its binds in bare
     # form (the lock action bare too: logind is Linux-only -- and the
     # notification binds bare as well: mako is Linux-only, while its
-    # slot is open with the profile -- and the clipboard picker and
-    # the launcher binds through their own scripts, whose tools are
-    # bare there too while their slots are open with the profile)...
+    # slot is open with the profile -- and the clipboard picker, the
+    # launcher binds and the capture binds through their own scripts,
+    # whose tools are bare there too while their slots are open with
+    # the profile)...
     (
       assert hmKeys.config.programs.scoot.desktop.keys.enable;
       true
     )
-    # Eighteen binds: the fifteen above plus the picker and the two
-    # launcher binds, whose store paths are unknowable in the pin (so
-    # each is matched by suffix, and the rest byte-equal without
-    # them).
+    # Twenty-one binds: the fifteen above plus the picker, the two
+    # launcher binds and the three capture binds, whose store paths
+    # are unknowable in the pin (so each is matched by suffix, and
+    # the rest byte-equal without them).
     (
       assert
         builtins.removeAttrs hmKeys.config.programs.scoot.settings.binds [
           "super+v"
           "super+d"
           "ctrl+alt+space"
+          "print"
+          "shift+print"
+          "ctrl+print"
         ] == {
           "XF86MonBrightnessUp" = {
             action = "spawn brightnessctl -e set +5%";
@@ -6138,9 +6961,24 @@ let
         hmKeys.config.programs.scoot.settings.binds."ctrl+alt+space";
       true
     )
-    # ...and the picker and both launcher binds stay plain strings:
-    # never repeat, never allowed while locked (unlike the eleven
-    # hardware tables above).
+    (
+      assert lib.hasSuffix "/bin/scoot-capture-output"
+        hmKeys.config.programs.scoot.settings.binds."print";
+      true
+    )
+    (
+      assert lib.hasSuffix "/bin/scoot-capture-region"
+        hmKeys.config.programs.scoot.settings.binds."shift+print";
+      true
+    )
+    (
+      assert lib.hasSuffix "/bin/scoot-capture-clipboard"
+        hmKeys.config.programs.scoot.settings.binds."ctrl+print";
+      true
+    )
+    # ...and the picker, both launcher binds and the three capture
+    # binds stay plain strings: never repeat, never allowed while
+    # locked (unlike the eleven hardware tables above).
     (
       assert lib.isString hmKeys.config.programs.scoot.settings.binds."super+v";
       true
@@ -6154,18 +6992,32 @@ let
       true
     )
     (
-      assert builtins.length (builtins.attrNames hmKeys.config.programs.scoot.settings.binds) == 18;
+      assert lib.isString hmKeys.config.programs.scoot.settings.binds."print";
+      true
+    )
+    (
+      assert lib.isString hmKeys.config.programs.scoot.settings.binds."shift+print";
+      true
+    )
+    (
+      assert lib.isString hmKeys.config.programs.scoot.settings.binds."ctrl+print";
+      true
+    )
+    (
+      assert builtins.length (builtins.attrNames hmKeys.config.programs.scoot.settings.binds) == 21;
       true
     )
     # ...and the keymap refuses nothing itself: the only failing
     # assertions are the idle policy's five plus the daemon's one plus
-    # the launcher's one plus the clipboard slot's three (their
+    # the launcher's one plus the clipboard slot's three plus the
+    # capture slot's four (their
     # packages are null off Linux -- the daemon's pinned in
     # `_darwinNotifPins`, the launcher's in `_darwinLaunchPins`, the
-    # slot's in `_darwinClipPins`), so bare tool names stay valid
+    # clipboard slot's in `_darwinClipPins`, the capture slot's in
+    # `_darwinCapturePins`), so bare tool names stay valid
     # config, just quiet at runtime.
     (
-      assert builtins.length (failing hmKeys.config) == 10;
+      assert builtins.length (failing hmKeys.config) == 14;
       true
     )
     (
@@ -6196,11 +7048,13 @@ assert lib.all (x: x) _idlePins;
 assert lib.all (x: x) _notifPins;
 assert lib.all (x: x) _clipPins;
 assert lib.all (x: x) _launchPins;
+assert lib.all (x: x) _capturePins;
 assert lib.all (x: x) _keysPins;
 assert lib.all (x: x) _darwinIdlePins;
 assert lib.all (x: x) _darwinNotifPins;
 assert lib.all (x: x) _darwinClipPins;
 assert lib.all (x: x) _darwinLaunchPins;
+assert lib.all (x: x) _darwinCapturePins;
 assert lib.all (x: x) _darwinKeysPins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
@@ -6737,12 +7591,13 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       echo "ok: empty DND icon stays out of the payload"
 
     # 15. Keymap content: the rendered `[binds]` carries the
-    #     eighteen profile binds with absolute tool paths (the sigils --
+    #     twenty-one profile binds with absolute tool paths (the sigils --
     #     `@...@`, `%`, `+` -- intact through TOML; the notification
     #     binds through mako's absolute path, the daemon, the clipboard
-    #     slot and the launcher slot being on with the profile -- the
-    #     picker and both launcher binds through their own scripts),
-    #     and with every slot on all twenty (slot scripts as store
+    #     slot, the launcher slot and the capture slot being on with
+    #     the profile -- the picker, both launcher binds and the three
+    #     capture binds through their own scripts),
+    #     and with every slot on all twenty-one (slot scripts as store
     #     paths). No `wofi` anywhere: the launcher child reconciled the
     #     old default. The launcher binds stay plain strings (never
     #     repeat, never allowed while locked -- unlike the hardware
@@ -6750,7 +7605,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
-    assert len(got) == 18, got.keys()
+    assert len(got) == 21, got.keys()
     assert "wofi" not in open(sys.argv[1]).read(), "wofi default left in [binds]"
     vol = got["XF86AudioRaiseVolume"]
     assert vol["action"].startswith("spawn ") and vol["action"].endswith(" set-volume @DEFAULT_AUDIO_SINK@ 5%+"), vol
@@ -6769,11 +7624,17 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     assert got["super+n"].startswith("spawn ") and got["super+n"].endswith("/bin/makoctl dismiss"), got["super+n"]
     assert got["super+shift+n"].endswith("/bin/makoctl mode -t do-not-disturb"), got["super+shift+n"]
     assert got["super+ctrl+n"].endswith("/bin/makoctl restore"), got["super+ctrl+n"]
+    assert isinstance(got["print"], str), got["print"]
+    assert "/bin/scoot-capture-output" in got["print"], got["print"]
+    assert isinstance(got["shift+print"], str), got["shift+print"]
+    assert "/bin/scoot-capture-region" in got["shift+print"], got["shift+print"]
+    assert isinstance(got["ctrl+print"], str), got["ctrl+print"]
+    assert "/bin/scoot-capture-clipboard" in got["ctrl+print"], got["ctrl+print"]
     ' ${keysToml}
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))["binds"]
-    assert len(got) == 20, got.keys()
+    assert len(got) == 21, got.keys()
     assert "wofi" not in open(sys.argv[1]).read(), "wofi default left in [binds]"
     assert "/bin/scoot-launcher" in got["super+d"] and "--list-executables-in-path" not in got["super+d"], got["super+d"]
     assert got["ctrl+alt+space"].endswith("/bin/scoot-launcher --list-executables-in-path"), got["ctrl+alt+space"]
@@ -6781,13 +7642,14 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     assert "/bin/scoot-clipboard-pick" in got["super+v"], got["super+v"]
     assert "/bin/scoot-capture-output" in got["print"], got["print"]
     assert "/bin/scoot-capture-region" in got["shift+print"], got["shift+print"]
+    assert "/bin/scoot-capture-clipboard" in got["ctrl+print"], got["ctrl+print"]
     ' ${keysSlotsToml}
     # No `wofi` default left in the modules either (a dangling default
     # that spawns nothing): `clipboard-cliphist.nix` still names it
     # once, as the rejected picker fat the lean package drops -- that
     # comment is documentation, not a default, so it is excluded here.
     if grep -rn "wofi" ${./modules} | grep -v "clipboard-cliphist.nix"; then echo "wofi default left in nix/modules" >&2; exit 1; fi
-    echo "ok: rendered [binds] carries the keymap (eighteen with the daemon and the slots, twenty with slots)"
+    echo "ok: rendered [binds] carries the keymap (twenty-one with the daemon and the slots)"
 
     # 16. Clipboard slot content: the idle policy's lock lines carry
     #     the wipe (absolute cliphist path, before the locker, on both
@@ -7028,6 +7890,97 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     if grep -q -- "--background-color=" ${launchTargetOff}; then echo "themed flag present with theming off" >&2; exit 1; fi
     grep -F -q -- "${pkgs.fuzzel}/bin/fuzzel --layer=overlay" ${launchTargetOff}
     echo "ok: opting out (or no look) leaves fuzzel unthemed but layered"
+
+    # 20. Capture slot content: the per-desktop chooser file xdpw
+    #     reads first -- a dmenu ask through a wrapper script (a bare
+    #     store path: xdpw's inih config reader cuts 200+ character
+    #     lines mid-flag, so the theme travels inside the script,
+    #     where no line limit applies), capped at 30 fps, with no
+    #     fixed output beside a picker. The script runs this
+    #     profile's fuzzel by absolute store path, themed by the look
+    #     (music-desk roles as fuzzel colors, opaque -- the same
+    #     seven leaves the launcher carries, one menu one palette).
+    grep -F -q -- "[screencast]" ${captureThemed}
+    grep -F -q -- "chooser_type=dmenu" ${captureThemed}
+    grep -F -q -- "chooser_cmd=" ${captureThemed}
+    grep -F -q -- "max_fps=30" ${captureThemed}
+    if grep -q -- "output_name" ${captureThemed}; then echo "output_name present beside a chooser" >&2; exit 1; fi
+    chooserScript=$(grep '^chooser_cmd=' ${captureThemed} | cut -d= -f2-)
+    grep -F -q -- "${pkgs.fuzzel}/bin/fuzzel --dmenu --prompt='Share: '" "''${chooserScript}"
+    grep -F -q -- "--background-color=FCFBFBff" "''${chooserScript}"
+    grep -F -q -- "--text-color=1A2032ff" "''${chooserScript}"
+    grep -F -q -- "--selection-color=3D579Aff" "''${chooserScript}"
+    echo "ok: the chooser is a themed dmenu list at 30 fps"
+
+    # 20b. Lookless (or opted out): the menu and the behavior stay,
+    #      the theme leaves -- and the slurp pickers stay unthemed
+    #      there too (no look to theme from: the region script
+    #      carries no color flags).
+    if grep -q -- "--background-color=" ${captureNoLook}; then echo "themed flag present with no look" >&2; exit 1; fi
+    grep -F -q -- "chooser_type=dmenu" ${captureNoLook}
+    chooserNoLook=$(grep '^chooser_cmd=' ${captureNoLook} | cut -d= -f2-)
+    grep -F -q -- "${pkgs.fuzzel}/bin/fuzzel --dmenu" "''${chooserNoLook}"
+    if grep -q -- "--background-color=" "''${chooserNoLook}"; then echo "themed flag present with no look" >&2; exit 1; fi
+    if grep -q -- "--background-color=" ${captureTargetOff}; then echo "themed flag present with theming off" >&2; exit 1; fi
+    grep -F -q -- "chooser_type=dmenu" ${captureTargetOff}
+    if grep -q -- " -c '" ${captureRegionNoLook}; then echo "slurp color flag present with no look" >&2; exit 1; fi
+    grep -F -q -- "${pkgs.slurp}/bin/slurp" ${captureRegionNoLook}
+    echo "ok: opting out (or no look) leaves the chooser and the region picker unthemed"
+
+    # 20c. The slurp picker instead: xdpw's own click-to-pick shape
+    #      (its man page's example line), the look on its border and
+    #      selection.
+    grep -F -q -- "chooser_type=simple" ${captureSlurp}
+    grep -F -q -- "${pkgs.slurp}/bin/slurp -f 'Monitor: %o' -or" ${captureSlurp}
+    grep -F -q -- " -c '#3D579Aff'" ${captureSlurp}
+    grep -F -q -- " -s '#3D579Aff'" ${captureSlurp}
+    echo "ok: the slurp chooser clicks a screen, themed"
+
+    # 20d. No picker: the fixed output, or any output -- and no
+    #      chooser command beside `none`.
+    grep -F -q -- "chooser_type=none" ${captureNoneNamed}
+    grep -F -q -- "output_name=DP-1" ${captureNoneNamed}
+    if grep -q -- "chooser_cmd" ${captureNoneNamed}; then echo "chooser_cmd present with chooser none" >&2; exit 1; fi
+    grep -F -q -- "chooser_type=none" ${captureNoneAny}
+    if grep -q -- "output_name" ${captureNoneAny}; then echo "output_name present for any output" >&2; exit 1; fi
+    if grep -q -- "chooser_cmd" ${captureNoneAny}; then echo "chooser_cmd present with chooser none" >&2; exit 1; fi
+    echo "ok: chooser none casts the fixed output, or any"
+
+    # 20e. The screenshot scripts run the slot's tools by absolute
+    #      store path: every output to a dated file under
+    #      `~/Pictures`, a slurp-picked region beside it (the look on
+    #      its border and selection), a picked region into the
+    #      clipboard.
+    grep -F -q -- "${pkgs.grim}/bin/grim" ${captureOutputScript}
+    grep -F -q -- '"$HOME/Pictures"' ${captureOutputScript}
+    grep -F -q -- "${pkgs.grim}/bin/grim -g" ${captureRegionScript}
+    grep -F -q -- '$(${pkgs.slurp}/bin/slurp' ${captureRegionScript}
+    grep -F -q -- " -c '#3D579Aff'" ${captureRegionScript}
+    grep -F -q -- " -s '#3D579Aff'" ${captureRegionScript}
+    grep -F -q -- "| ${pkgs.wl-clipboard}/bin/wl-copy" ${captureClipboardScript}
+    echo "ok: the screenshot scripts name the slot's tools absolutely"
+
+    # 20f. Session identity for screen sharing: every login -- greeter
+    #      or console -- exports the Wayland session type (the
+    #      launcher's harness T15 proves it past an inherited `tty`),
+    #      so Chrome picks its portal capturer instead of X11 and Meet
+    #      shares out of the box. The export (set, not defaulted: the
+    #      session being started is always Wayland), the scoped
+    #      manager+bus import, and the exit-time restore.
+    grep -F -q -- "export XDG_SESSION_TYPE=wayland" ${../resources/scoot-session}
+    grep -F -q -- "dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE" ${../resources/scoot-session}
+    grep -F -q -- "import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE" ${../resources/scoot-session}
+    grep -F -q -- "unset-environment XDG_SESSION_TYPE" ${../resources/scoot-session}
+    echo "ok: the launcher exports the Wayland session type to the manager and the bus"
+
+    # 20g. The login-screen entry is a Wayland session naming scoot:
+    #      the directory is what tells the greeter the session type
+    #      (greetd derives `XDG_SESSION_TYPE=wayland` from
+    #      `wayland-sessions`), and `DesktopNames` is what names the
+    #      desktop for the bus and the portal lookup.
+    grep -F -q -- "share/wayland-sessions/scoot.desktop" ${../nix/modules/nixos.nix}
+    grep -F -q -- "DesktopNames=scoot" ${../nix/modules/nixos.nix}
+    echo "ok: the session entry is a wayland-sessions entry for scoot"
   ''}
 
   touch $out

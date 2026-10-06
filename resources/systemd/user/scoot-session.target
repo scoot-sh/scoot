@@ -1,7 +1,7 @@
 # `scoot-session.target`: the session, reached only once it has a display.
 #
 # Started by `scoot-session` (the greeter entry command) after it waits
-# for IPC readiness and imports `WAYLAND_DISPLAY`/`XDG_CURRENT_DESKTOP`
+# for IPC readiness and imports `WAYLAND_DISPLAY`/`XDG_CURRENT_DESKTOP`/`XDG_SESSION_TYPE`
 # into the user manager and the D-Bus activation environment -- never
 # enabled directly, like `scoot-shutdown.target`. `BindsTo` pulls in
 # `graphical-session.target` (a requirement dependency, so starting this

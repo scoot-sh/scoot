@@ -2,7 +2,7 @@
 #
 # Started by `scoot-session` (the greeter entry command), never enabled
 # directly: the launcher waits for IPC readiness, imports
-# `WAYLAND_DISPLAY`/`XDG_CURRENT_DESKTOP`, and only then starts
+# `WAYLAND_DISPLAY`/`XDG_CURRENT_DESKTOP`/`XDG_SESSION_TYPE`, and only then starts
 # `scoot-session.target`, which is what pulls in
 # `graphical-session.target` -- so units ordered after the session
 # target (and `ConditionEnvironment=WAYLAND_DISPLAY` ones, which a

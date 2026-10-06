@@ -139,9 +139,15 @@ is a one-line startup error), `$SCOOT_SOCKET`, `$XDG_CONFIG_HOME`,
 exports to what it spawns: `$WAYLAND_DISPLAY`, `$SCOOT_SOCKET`,
 `$XCURSOR_THEME`, `$XCURSOR_SIZE`, `$XDG_CURRENT_DESKTOP=scoot`
 (always), `$XDG_SESSION_TYPE=wayland` and `$XDG_SESSION_DESKTOP=scoot`
-(only where unset — on a logind seat both are logind's to set), a fresh
+(where unset — on a logind seat both are logind's to set, and the
+compositor keeps logind's values), a fresh
 `$XDG_ACTIVATION_TOKEN`, and `$DISPLAY` while the session's XWayland
-server is believed live.
+server is believed live. A launcher session always carries
+`XDG_SESSION_TYPE=wayland`: `scoot-session` exports it before
+importing the login environment, so greeter and console logins alike
+deliver it to the user manager, the D-Bus activation environment, and
+every app — Chrome picks its portal screen capturer only with it, so
+without it Meet shares through X11 and stays dark.
 
 Portals need one manual step outside the compositor: D-Bus activation
 carries its own environment, so the session must export the display
@@ -150,9 +156,9 @@ without the module, it stays manual):
 
 ```sh
 # systemd session started by hand (a session script, not the launcher):
-dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
 # s6 / seat without a user manager (the webtop target):
-dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
 ```
 
 `resources/scoot-portals.conf` names which backend serves what once
