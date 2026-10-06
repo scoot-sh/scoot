@@ -311,7 +311,7 @@ variables only, no daemon, so the theme costs no wakeups.
 
 | Piece | Option | Type | Default | Notes |
 |---|---|---|---|---|
-| GTK apps | `desktop.theme.targets.gtk.enable` | bool | `true` | `settings.ini` (GTK 3 + 4) plus `GTK_THEME`: Adwaita, or Adwaita-dark for a dark look, with the look's proportional sans, cursor and dark preference — plus `gtk.css` carrying the look's accent and surfaces, so a selected row reads as the look (amber on moonrise, not Adwaita's default blue) |
+| GTK apps | `desktop.theme.targets.gtk.enable` | bool | `true` | `settings.ini` (GTK 3 + 4) plus `GTK_THEME`: Adwaita, or Adwaita-dark for a dark look, with the look's proportional sans, cursor and dark preference — plus `gtk.css` carrying the look's accent and surfaces (named colors and the `:root` vars libadwaita paints with), and dconf `color-scheme` carrying the dark-mode signal libadwaita follows |
 | Qt apps | `desktop.theme.targets.qt.enable` | bool | `true` | `qt6ct.conf` through `QT_QPA_PLATFORMTHEME=qt6ct` (plus `QT_PLUGIN_PATH` for its platformtheme and style): the Adwaita Qt style in the look's polarity, Adwaita icons, and a generated color scheme from the look's palette — dark looks get a dark palette, the light look a light one |
 | Cursor | `desktop.theme.targets.cursor.enable` | bool | `true` | Vanilla-DMZ at 24 px: the compositor cursor plus `XCURSOR_THEME`/`XCURSOR_SIZE` for X11 apps |
 | Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DejaVu Sans for sans-serif (proportional UI text in GTK/Qt apps and the greeter), FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the bar keeps its own DroidSansM Nerd Font Propo file, whose glyphs carry the module icons |
@@ -354,6 +354,19 @@ and keeps the rest of the look.
 > `~/.config/qt6ct/qt6ct.conf` point at the generated
 > `colors/scoot-look.conf`. Apps started before the switch keep the old theme —
 > restart them.
+
+> **Symptom:** a libadwaita app stays light under a dark look (or dark
+> under the light one).
+>
+> The look's dark mode reaches libadwaita through dconf
+> (`org.gnome.desktop.interface color-scheme`), not through
+> `settings.ini` alone — read it back with `dconf read
+> /org/gnome/desktop/interface/color-scheme` (dark looks say
+> `'prefer-dark'`, the light look `'prefer-light'`). If the key is
+> right and the app is still wrong, it started before the switch —
+> restart it. `gtk-application-prefer-dark-theme` in `settings.ini`
+> stays for plain GTK and older libadwaita; the pinned libadwaita only
+> warns on it.
 
 > **Symptom:** a Flatpak app ignores the theme.
 >

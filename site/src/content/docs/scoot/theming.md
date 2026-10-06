@@ -45,7 +45,8 @@ follow the palette:
 | File the profile writes | From the look | Takes effect |
 |---|---|---|
 | `~/.config/gtk-3.0/settings.ini`, `~/.config/gtk-4.0/settings.ini` | Adwaita (Adwaita-dark for a dark look), Adwaita icons, the look's proportional sans and cursor, the dark preference | newly started apps; running GTK apps re-read it where the toolkit watches |
-| `~/.config/gtk-3.0/gtk.css`, `~/.config/gtk-4.0/gtk.css` | the look's accent and surfaces as named colors (`accent_bg_color`, `window_bg_color`, `view_bg_color`, `headerbar_bg_color`, …) | GTK apps on restart |
+| `~/.config/gtk-3.0/gtk.css`, `~/.config/gtk-4.0/gtk.css` | the look's accent and surfaces as named colors (`accent_bg_color`, `window_bg_color`, `view_bg_color`, `headerbar_bg_color`, …) plus the matching `:root` vars libadwaita widgets paint with | GTK apps on restart |
+| dconf `org.gnome.desktop.interface color-scheme` | `prefer-dark` for a dark look, `prefer-light` for the light one — the dark-mode signal libadwaita follows (its `prefer-dark-theme` fallback only warns) | GTK apps on restart |
 | `~/.config/qt6ct/qt6ct.conf` (through `QT_QPA_PLATFORMTHEME=qt6ct`) | the Adwaita Qt style in the look's polarity, Adwaita icons, and `custom_palette` pointing at the scheme below | Qt apps on restart |
 | `~/.config/qt6ct/colors/scoot-look.conf` | a color scheme generated from the look's palette (dark looks get a dark palette, the light look a light one) | Qt apps on restart |
 | `~/.config/fontconfig/conf.d/10-scoot-look.conf` | the proportional sans for sans-serif, the terminal face for monospace | `fc-cache` is not needed: fontconfig reads it on next lookup |

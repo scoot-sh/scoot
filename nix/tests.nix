@@ -324,6 +324,13 @@ let
       type = lib.types.attrsOf lib.types.str;
       default = { };
     };
+    # The theme's dark-mode signal (`dconf.settings`, same module): the
+    # color-scheme libadwaita follows. Plain data the pins read; the
+    # real home-manager option writes the database at activation.
+    options.dconf.settings = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
   };
 
   nixosStubs = {
@@ -8494,6 +8501,35 @@ let
       assert hmThemeMoon.config.xdg.configFile ? "qt6ct/colors/scoot-look.conf";
       true
     )
+    # ...the dark-mode signal libadwaita follows (`prefer-dark` for a
+    # dark look, `prefer-light` for the light one)...
+    (
+      assert hmTheme.config.dconf.settings."org/gnome/desktop/interface".color-scheme == "prefer-light";
+      true
+    )
+    (
+      assert
+        hmThemeDark.config.dconf.settings."org/gnome/desktop/interface".color-scheme == "prefer-dark";
+      true
+    )
+    (
+      assert
+        hmThemeMoon.config.dconf.settings."org/gnome/desktop/interface".color-scheme == "prefer-dark";
+      true
+    )
+    # ...opted out of GTK, and without a look, no signal is written...
+    (
+      assert
+        ((hmThemeGtkOff.config.dconf.settings."org/gnome/desktop/interface" or { }).color-scheme or null)
+        == null;
+      true
+    )
+    (
+      assert
+        ((hmThemeNoLook.config.dconf.settings."org/gnome/desktop/interface" or { }).color-scheme or null)
+        == null;
+      true
+    )
     (
       assert hmTheme.config.xdg.configFile ? "fontconfig/conf.d/10-scoot-look.conf";
       true
@@ -11455,6 +11491,18 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -x "@define-color view_bg_color #2B3648;" ${gtkCssMoon}
     grep -F -x "@define-color headerbar_bg_color #2B3648;" ${gtkCssMoon}
     echo "ok: GTK named colors carry each look's accent"
+
+    # 13l2b. The `:root` vars beside the names: what libadwaita
+    #      widgets paint with (names alone rendered stock blue while
+    #      dark applied -- the vars route the look through).
+    grep -F -x "  --accent-bg-color: #FFA45C;" ${gtkCssMoon}
+    grep -F -x "  --accent-fg-color: #2B3648;" ${gtkCssMoon}
+    grep -F -x "  --window-bg-color: #2B3648;" ${gtkCssMoon}
+    grep -F -x "  --view-bg-color: #2B3648;" ${gtkCssMoon}
+    grep -F -x "  --headerbar-bg-color: #2B3648;" ${gtkCssMoon}
+    grep -F -x "  --accent-bg-color: #3D579A;" ${gtkCssLight}
+    grep -F -x "  --window-bg-color: #FCFBFB;" ${gtkCssLight}
+    echo "ok: GTK root vars carry each look's accent"
 
     # 13l3. The Qt color schemes, dark palettes for dark looks and a
     #      light one for the light look (the preview-window mismatch
