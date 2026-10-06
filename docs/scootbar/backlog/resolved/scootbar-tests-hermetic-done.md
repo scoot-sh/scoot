@@ -95,4 +95,4 @@ no sway): full `cargo nextest run -p scootbar` 1360 passed, 4 skipped,
 3 failed — the 3 failures are pre-existing unit-test environment issues
 (no D-Bus on the box: `media` bus-drop, `power` popup-connect, the module
 contract), failing identically on the base commit; `cargo test -p
-scootbar` agrees (1217 passed, same 3). CI stays green (PR #[NNN]).
+scootbar` agrees (1217 passed, same 3). CI stays green (PR #470).
