@@ -57,7 +57,7 @@ upstream's job); icon themes beyond a default pick (say the pick).
 ## Resolution (2026-10-06)
 
 Landed as `feat(nix): desktop look themes fonts, cursor, GTK/Qt, greeter
-and app files` (PR TBD — this entry resolved in the PR): `desktop.theme`
+and app files` (PR #474 — this entry resolved in the PR): `desktop.theme`
 filled from `desktop.look` (user > Stylix > look, per key) — the look's
 cursor in the compositor config, GTK `settings.ini` + `GTK_THEME`, qt6ct
 config + `QT_QPA_PLATFORMTHEME`/`QT_PLUGIN_PATH` (`Adwaita`/`Adwaita-Dark`,
