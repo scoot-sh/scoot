@@ -431,6 +431,34 @@ in
         };
       };
 
+      # The night light's tool: the shape is in `desktop.nix`
+      # (shared with the home-manager side) and the user unit that runs
+      # it is that side's (`nightlight-home.nix`); this side installs it
+      # system-wide. The same daemon-following default as there, so
+      # either side alone names the same tool. Merged here for the same
+      # one-declaration reason as above. Linux-only: off Linux it
+      # defaults to null, which the assertion below refuses loudly.
+      nightlight = desktop.options.nightlight // {
+        package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default =
+            if !pkgs.stdenv.hostPlatform.isLinux then
+              null
+            else if cfg.desktop.nightlight.daemon == "gammastep" then
+              (if pkgs ? gammastep then pkgs.gammastep else null)
+            else
+              (if pkgs ? wlsunset then pkgs.wlsunset else null);
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then (wlsunset for daemon 'wlsunset', gammastep for 'gammastep') else null";
+          description = ''
+            The night-light tool to install system-wide (the daemon's
+            own: wlsunset for `daemon = "wlsunset"`, gammastep for
+            `daemon = "gammastep"` -- the unit calls it with that
+            daemon's flags, so the two must agree). Null installs
+            nothing. Linux-only: null off Linux.
+          '';
+        };
+      };
+
       # The power policy's daemon package: the shape is in `desktop.nix`
       # (shared with the home-manager side) and the profile switch that
       # calls it is that side's (`keys-home.nix`); this side runs the
@@ -817,6 +845,11 @@ in
       # installs, PipeWire runs, and the unit comes from the
       # home-manager side.
       programs.scoot.desktop.audio.enable = lib.mkDefault true;
+
+      # The night light on with the profile (still individually
+      # disable-able at plain priority): the tool below installs, and
+      # the user unit comes from the home-manager side.
+      programs.scoot.desktop.nightlight.enable = lib.mkDefault true;
     })
     # The notification daemon's system half: its package on PATH. The
     # unit and the config are the home-manager side's
@@ -1059,6 +1092,27 @@ in
           ++ [ "max_fps=${toString cap.maxFps}" ]
         )
         + "\n";
+    })
+    # The night light's system half: its tool on PATH. The unit is the
+    # home-manager side's (`nightlight-home.nix`): without it the tool
+    # sits ready for a hand-written setup, the way a `[wallpaper]` finds
+    # scootbg on PATH without the home-manager side.
+    (lib.mkIf cfg.desktop.nightlight.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.nightlight.package != null;
+          message = ''
+            programs.scoot.desktop.nightlight.enable is set but
+            programs.scoot.desktop.nightlight.package is null: set it
+            explicitly (apply the overlay, or point at a wlsunset for
+            daemon "wlsunset" or a gammastep for "gammastep").
+          '';
+        }
+      ];
+
+      environment.systemPackages = lib.optional (
+        cfg.desktop.nightlight.package != null
+      ) cfg.desktop.nightlight.package;
     })
     # The power policy's system half: the profiles daemon, the lid and
     # power-key actions, low-battery suspend, and the charge-limit
