@@ -802,7 +802,7 @@
       # are injected here, whether or not the overlay is applied, and an
       # explicit setting still wins -- except on Darwin on the HM side
       # (see below). See site/src/content/docs/desktop/index.md.
-      homeManagerModules =
+      homeModules =
         let
           hmWrapper =
             { pkgs, ... }:
@@ -842,11 +842,9 @@
             };
         };
 
-      # Current home-manager spelling (`homeModules.*`); the legacy
-      # `homeManagerModules.*` above keeps working for existing
-      # consumers -- both names resolve to the same set.
-      homeModules = self.homeManagerModules;
-
+      # Home-manager modules (`homeModules.*`): the only spelling. There is
+      # no `homeManagerModules` alias: it was removed clean in 2026-10-06
+      # (breaking), per the sole-user-no-compat rule.
       nixosModules =
         let
           osWrapper =
@@ -894,7 +892,6 @@
                 overlays
                 packages
                 homeModules
-                homeManagerModules
                 nixosModules
                 ;
               homeModule = self.homeModules.scoot;

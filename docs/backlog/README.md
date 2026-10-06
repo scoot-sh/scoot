@@ -436,7 +436,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [Each greeter session leaves two dbus-daemons and a closing logind session behind](./resolved/greeter-session-leak-done.md) (medium) — RESOLVED 2026-10-06 in #468: logind `KillUserProcesses` scoped to the greeter user through `KillOnlyUsers`, so the greeter's leftover buses die with its session and other users' lingering processes are untouched
 - [kunifiedpush-distributor runs in minimal sessions at 15 MB PSS](./packaging/kunifiedpush-sessions.md) (low, filed 2026-10-05): the five-desktop idle benchmark; mask the Push portal out of the session portal config if no backend hard-requires it
 - [Remove the standalone scootctl client](./resolved/remove-scootctl-done.md) (medium) — RESOLVED 2026-10-05 in #464: `scoot msg` is the only client; no compatibility link
-- [Drop compatibility aliases for scoot's own old names](./packaging/drop-compat-shims.md) (medium, filed 2026-10-06): `homeManagerModules` goes away clean, no alias period
+- [Drop compatibility aliases for scoot's own old names](./resolved/drop-compat-shims-done.md) (medium) — RESOLVED 2026-10-06 in #475: `homeManagerModules` goes away clean, no alias period
 
 ### Security
 - [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev). **But see the entry below: the fd/mapping bound it documents is not the bound it has.**
