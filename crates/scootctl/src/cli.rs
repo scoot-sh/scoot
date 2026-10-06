@@ -138,7 +138,7 @@ impl std::error::Error for Error {}
 /// candidates (`help requests`, `help actions`, ...), without a binary
 /// prefix: `scoot msg` is the one client, so there is only one spelling.
 fn hinted(kind: &'static str, what: String, candidates: &[&str], topic: &'static str) -> Error {
-    match crate::help::suggest(&what, candidates.iter().copied()) {
+    match scoot_ipc::suggest(&what, candidates.iter().copied()) {
         Some(suggestion) => Error::Hinted {
             kind,
             what,
@@ -295,7 +295,7 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                     "lock" => events.push(EventKind::Lock),
                     other => {
                         return Err(
-                            match crate::help::suggest(
+                            match scoot_ipc::suggest(
                                 other,
                                 ["output", "keyboard", "workspace", "lock"],
                             ) {

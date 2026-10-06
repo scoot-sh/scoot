@@ -12,6 +12,11 @@ license.workspace = true
 # runs on a Mac, and does not build there (`scootbg-mem` says so; the
 # macOS CI job leaves it out).
 [dependencies]
+# The typo guesser and the docs URL behind `--help`: the one copy every
+# binary shares, so the help cannot drift from the client's and a domain
+# move is one edit. (Only `suggest`, `DOCS_URL` and `docs_tail` are used;
+# none of the protocol reaches the binary.)
+scoot-ipc.workspace = true
 # The only `unsafe` scootbg has: the large-allocation global allocator,
 # and the wl_shm buffer mapping (§6b, §11).
 scootbg-mem.workspace = true

@@ -37,7 +37,7 @@ OPTIONS (backends in brackets: all means --headless, --nested and --tty):
 /// The config-file topics `scoot help config` summarizes: every section
 /// `site/src/content/docs/scoot/configure.md` documents, with the one command that emits them
 /// all. The file itself stays the reference; this is the map to it.
-pub const CONFIG_HELP: &str = "\
+const CONFIG_BODY: &str = "\
 CONFIG:
     The config file ($XDG_CONFIG_HOME/scoot/config.toml) holds every option;
     a flag given replaces the file's value for its own option. Sections:
@@ -48,8 +48,19 @@ CONFIG:
     `scoot --print-default-config` prints a starting file generated from the
     compositor's own live defaults; with `--write` it places the file (never
     overwriting). `scoot msg reload` re-applies what can be re-applied live.
-    Full reference: https://www.scoot.sh/scoot/configure.md.
 ";
+
+/// The config-file map: [`CONFIG_BODY`] plus the reference URLs, rendered
+/// from [`scoot_ipc::DOCS_URL`] -- the one copy of the docs domain, so a
+/// move is one edit. A function rather than a `const` so the text can name
+/// that constant; a cold path (one process per `--help`), so the one small
+/// allocation costs nothing.
+pub fn config_help() -> String {
+    let mut text = String::with_capacity(CONFIG_BODY.len() + 128);
+    text.push_str(CONFIG_BODY);
+    text.push_str(&scoot_ipc::docs_tail("scoot/configure.md"));
+    text
+}
 
 /// One `scoot help` page.
 #[derive(Debug, PartialEq)]
@@ -58,7 +69,7 @@ pub enum HelpPage {
     Main,
     /// The machine-readable form: [`json`].
     Json,
-    /// The config-file map: [`CONFIG_HELP`].
+    /// The config-file map: [`config_help`].
     Config,
     /// The full client help (`scoot msg --help`), rendered for `scoot msg`.
     Client,
@@ -77,7 +88,7 @@ impl HelpPage {
         match self {
             Self::Main => usage(),
             Self::Json => json(),
-            Self::Config => CONFIG_HELP.to_owned(),
+            Self::Config => config_help(),
             Self::Client => scootctl::help::usage(
                 "scoot msg",
                 scootctl::cli::REQUESTS_HELP,
@@ -121,11 +132,13 @@ pub fn usage() -> String {
     for (name, description) in ENVIRONMENT {
         text.push_str(&format!("    {name}  {description}\n"));
     }
-    text.push_str(
+    text.push_str(&format!(
         "\nSEE ALSO:\n\
         \x20   `scoot help config`, `scoot msg help requests`, `scoot msg help actions`\n\
-        \x20   docs: https://www.scoot.sh/scoot/configure.md, https://www.scoot.sh/msg/\n",
-    );
+        \x20   docs: {0}/scoot/configure.md and {0}/msg/\n\
+        \x20   agents start at {0}/llms.txt\n",
+        scoot_ipc::DOCS_URL
+    ));
     text
 }
 
@@ -701,7 +714,7 @@ fn client_help_page(args: &[String]) -> Result<Command, Error> {
 /// closest candidate, or the bare [`Error::Unknown`] when nothing is close
 /// enough to be a typo.
 fn hinted(kind: &'static str, what: String, candidates: &[&str], topic: &'static str) -> Error {
-    match scootctl::help::suggest(&what, candidates.iter().copied()) {
+    match scoot_ipc::suggest(&what, candidates.iter().copied()) {
         Some(suggestion) => Error::Hinted {
             kind,
             what,

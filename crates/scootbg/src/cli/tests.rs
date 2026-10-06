@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 
-use super::{ApplyOptions, Command, DaemonOptions, Error, Topic, USAGE, parse, version_string};
+use super::{ApplyOptions, Command, DaemonOptions, Error, Topic, parse, usage, version_string};
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
 use crate::protocol::{ImageRequest, Request, Show, Source};
@@ -60,13 +60,13 @@ fn the_main_help_lists_only_what_works() {
         "--help",
     ] {
         assert!(
-            USAGE.split_whitespace().any(|word| word == listed),
+            usage().split_whitespace().any(|word| word == listed),
             "{listed} missing"
         );
     }
     for later in ["--serve", "--mode", "--fill", "--profile"] {
         assert!(
-            !USAGE.split_whitespace().any(|word| word == later),
+            !usage().split_whitespace().any(|word| word == later),
             "{later} is advertised before it exists"
         );
     }

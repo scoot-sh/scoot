@@ -13,6 +13,7 @@ mod codec;
 #[cfg(feature = "core")]
 mod convert;
 mod event;
+mod help;
 mod key;
 mod request;
 mod response;
@@ -25,6 +26,7 @@ pub use codec::{decode, encode, read_message, read_message_buffered, write_messa
 pub use event::{
     EventKind, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored, WorkspaceSnapshot,
 };
+pub use help::{DOCS_URL, docs_tail, suggest};
 pub use key::{KeyCombo, Modifier, ParseKeyComboError};
 pub use request::{PointerButton, Request, SCREENSHOT_CURSOR_DEFAULT};
 pub use response::{OutputSnapshot, Rect, Response, Screenshot, WindowSnapshot};

@@ -74,6 +74,11 @@ exec = []
 icon-image = ["dep:png"]
 
 [dependencies]
+# The typo guesser and the docs URL behind `--help`: the one copy every
+# binary shares, so the help cannot drift from the client's and a domain
+# move is one edit. (Only `suggest`, `DOCS_URL` and `docs_tail` are used;
+# none of the protocol reaches the binary.)
+scoot-ipc.workspace = true
 # The sealed-memfd `wl_shm` buffer, scootbg's, so scootbar has no `unsafe`
 # of its own (`#![forbid(unsafe_code)]` in `src/main.rs`).
 scootbg-mem.workspace = true

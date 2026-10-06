@@ -1,24 +1,21 @@
 //! Single-sourced wallpaper help: a table of the commands, the exit codes
 //! and the environment; the `--help --json` document renders from it, and
-//! the prose pages (`cli::USAGE` and friends) are checked against it, so
+//! the prose pages (`cli::usage` and friends) are checked against it, so
 //! neither form can drift from the other.
 //!
-//! [`suggest`] mirrors `scootctl`'s `help::suggest` (this binary takes no
-//! client dependency, so the thirty lines live here too); the test vectors
-//! below are the same, so a drift in behaviour fails here. A cold path (one
+//! The typo guesser is not here but in [`scoot_ipc::suggest`], the one copy
+//! every binary shares; likewise the docs URL is that crate's
+//! [`scoot_ipc::DOCS_URL`], so the domain moves in one edit. A cold path (one
 //! process per `--help`): the small allocations cost nothing at runtime.
 
 use serde_json::{Map, Value};
+
+use scoot_ipc::DOCS_URL;
 
 /// Version of the `--help --json` document below. Bumped whenever a field is
 /// added, renamed or removed, so a script can refuse what it does not know
 /// rather than misread it.
 pub const SCHEMA_VERSION: u32 = 1;
-
-/// Where the human reference lives: the docs site, published with
-/// `/llms.txt` (one twin per page plus per-app sets; see
-/// `docs/backlog/packaging/docs-site.md` for the plan).
-pub const DOCS_URL: &str = "https://www.scoot.sh";
 
 /// One command: its name, its shape, and what it does. Mirrors `cli`'s
 /// command dispatch -- the drift tests pin both directions, so a command
@@ -97,48 +94,6 @@ pub const ENVIRONMENT: &[(&str, &str)] = &[
         "where profiles are saved (~/.local/state/scootbg)",
     ),
 ];
-
-/// The closest candidate to `input`, if it is close enough to be a typo
-/// rather than a guess. Mirrors `scootctl`'s `help::suggest`; see that
-/// function for the bar (about a quarter of the longer word).
-pub fn suggest<'a>(input: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
-    let mut best: Option<(&'a str, usize)> = None;
-    for candidate in candidates {
-        if candidate == input {
-            continue;
-        }
-        let distance = levenshtein(input, candidate);
-        if best.is_none_or(|(_, d)| distance < d) {
-            best = Some((candidate, distance));
-        }
-    }
-    let (candidate, distance) = best?;
-    let longest = input.chars().count().max(candidate.chars().count());
-    let allowance = (longest / 4 + 1).clamp(1, 3);
-    (distance <= allowance && distance < longest).then_some(candidate)
-}
-
-fn levenshtein(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    if a.is_empty() {
-        return b.len();
-    }
-    if b.is_empty() {
-        return a.len();
-    }
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut current = vec![0; b.len() + 1];
-    for (i, &ca) in a.iter().enumerate() {
-        current[0] = i + 1;
-        for (j, &cb) in b.iter().enumerate() {
-            let substitution = prev[j] + usize::from(ca != cb);
-            current[j + 1] = (prev[j + 1] + 1).min(current[j] + 1).min(substitution);
-        }
-        std::mem::swap(&mut prev, &mut current);
-    }
-    prev[b.len()]
-}
 
 /// The `--help --json` document as a value.
 pub fn json_value() -> Value {
@@ -234,8 +189,8 @@ mod tests {
     fn every_command_is_in_the_prose_and_in_the_json() {
         let prose = format!(
             "{}{}{}{}{}{}{}{}",
-            crate::cli::USAGE,
-            crate::cli::DAEMON_HELP,
+            crate::cli::usage(),
+            crate::cli::daemon_help(),
             crate::cli::SET_HELP,
             crate::cli::CLEAR_HELP,
             crate::cli::QUERY_HELP,
@@ -271,13 +226,13 @@ mod tests {
         // the JSON cannot fall behind a flag the parser gained (`--sha256`
         // was the one that did).
         let pages = [
-            ("daemon", crate::cli::DAEMON_HELP),
-            ("set", crate::cli::SET_HELP),
-            ("clear", crate::cli::CLEAR_HELP),
-            ("query", crate::cli::QUERY_HELP),
-            ("version", crate::cli::VERSION_HELP),
-            ("kill", crate::cli::KILL_HELP),
-            ("apply-config", crate::cli::APPLY_CONFIG_HELP),
+            ("daemon", crate::cli::daemon_help()),
+            ("set", crate::cli::SET_HELP.to_owned()),
+            ("clear", crate::cli::CLEAR_HELP.to_owned()),
+            ("query", crate::cli::QUERY_HELP.to_owned()),
+            ("version", crate::cli::VERSION_HELP.to_owned()),
+            ("kill", crate::cli::KILL_HELP.to_owned()),
+            ("apply-config", crate::cli::APPLY_CONFIG_HELP.to_owned()),
         ];
         for (name, page) in pages {
             let row = COMMANDS
@@ -332,11 +287,30 @@ mod tests {
     }
 
     #[test]
-    fn typos_find_their_command_and_garbage_finds_nothing() {
-        let names: Vec<&str> = COMMANDS.iter().map(|command| command.name).collect();
-        assert_eq!(suggest("qurey", names.clone()), Some("query"));
-        assert_eq!(suggest("queery", names.clone()), Some("query"));
-        assert_eq!(suggest("klll", names.clone()), Some("kill"));
-        assert_eq!(suggest("xyzzy", names), None);
+    fn the_json_docs_come_from_the_one_constant() {
+        // The domain lives once, in `scoot-ipc`: the document renders from
+        // it, so a move is one edit and this fails until every literal
+        // follows.
+        let document = json_value();
+        assert_eq!(
+            document["docs"].as_str().unwrap(),
+            &format!("{}/scootbg/cli.md", scoot_ipc::DOCS_URL),
+        );
+    }
+
+    #[test]
+    fn the_main_pages_name_the_live_agent_index() {
+        // The docs site is live: both pages carrying a docs URL end on the
+        // real index, rendered from the one constant, never a hardcoded
+        // domain.
+        let index = format!("{}/llms.txt", scoot_ipc::DOCS_URL);
+        assert!(
+            crate::cli::usage().contains(&index),
+            "the main page lost the live agent index"
+        );
+        assert!(
+            crate::cli::daemon_help().contains(&index),
+            "the daemon page lost the live agent index"
+        );
     }
 }

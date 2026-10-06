@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 
 use super::{
-    Command, Error, MSG_HELP, ModulesError, Msg, MsgError, Topic, USAGE, daemon_help, parse,
+    Command, Error, ModulesError, Msg, MsgError, Topic, daemon_help, msg_help, parse, usage,
     version_string,
 };
 use crate::bar::{Bar, Edge, Layer, MAX_HEIGHT, Margin, MarginError};
@@ -67,7 +67,7 @@ fn help_and_version() {
     assert_eq!(run(&["--version"]), Ok(Command::Version));
     assert_eq!(run(&["-V"]), Ok(Command::Version));
     assert!(version_string().starts_with("scootbar "));
-    assert!(USAGE.contains("scootbar daemon"));
+    assert!(usage().contains("scootbar daemon"));
     for flag in super::FLAGS {
         assert!(daemon_help().contains(flag), "{flag} is not documented");
     }
@@ -450,8 +450,8 @@ fn the_help_matches_the_build() {
     } else {
         assert!(!daemon_help().contains("Modules: clock"));
     }
-    assert_eq!(USAGE.contains("a clock"), has_clock);
-    assert_eq!(USAGE.contains("workspaces"), has_workspaces);
+    assert_eq!(usage().contains("a clock"), has_clock);
+    assert_eq!(usage().contains("workspaces"), has_workspaces);
     assert_eq!(
         daemon_help().contains("the workspaces module"),
         has_workspaces
@@ -527,6 +527,37 @@ fn the_help_matches_the_build() {
         assert!(daemon_help().contains(flag), "{flag} is not documented");
     }
     assert!(!daemon_help().contains("wakes once a minute"));
+    // The ticket's build gate: without the `push` feature no page names a
+    // push module -- neither the main nor the daemon page ever does, and
+    // the msg page's `set` rows follow the feature. (The JSON half of the
+    // gate is `the_set_row_names_no_push_module_without_the_feature` in
+    // `help::tests`.)
+    assert!(
+        !usage().contains("push"),
+        "the main page names a push module"
+    );
+    assert!(
+        !daemon_help().contains("push"),
+        "the daemon page names a push module"
+    );
+    assert_eq!(
+        msg_help().contains("push"),
+        cfg!(feature = "push"),
+        "the msg page's `set` rows do not follow the `push` feature"
+    );
+    // Every page ends on the live agent index, rendered from the one docs
+    // constant -- never a hardcoded domain.
+    let index = format!("{}/llms.txt", scoot_ipc::DOCS_URL);
+    for (name, page) in [
+        ("main", usage()),
+        ("daemon", daemon_help()),
+        ("msg", msg_help()),
+    ] {
+        assert!(
+            page.contains(&index),
+            "{name} does not name the live agent index"
+        );
+    }
 }
 
 /// The `Modules:` line names exactly the modules this build has, in
@@ -568,8 +599,8 @@ fn msg_commands_parse() {
     assert_eq!(run(&["msg", "kill"]), Ok(Command::Msg(Msg::Kill)));
     assert_eq!(run(&["msg", "--help"]), Ok(Command::Help(Topic::Msg)));
     assert_eq!(run(&["help", "msg"]), Ok(Command::Help(Topic::Msg)));
-    assert!(USAGE.contains("msg"));
-    assert!(MSG_HELP.contains("reload"));
+    assert!(usage().contains("msg"));
+    assert!(msg_help().contains("reload"));
 }
 
 #[test]
@@ -866,7 +897,7 @@ fn visibility_commands_take_no_arguments() {
         Err(Error::Unexpected { .. })
     ));
     for word in ["hide", "show", "toggle"] {
-        assert!(super::MSG_HELP.contains(word), "{word}");
+        assert!(super::msg_help().contains(word), "{word}");
     }
 }
 
@@ -1000,14 +1031,14 @@ fn check_is_a_switch_that_takes_no_value_and_may_come_once() {
 
 #[test]
 fn the_help_names_check() {
-    assert!(USAGE.contains("scootbar daemon --check"));
+    assert!(usage().contains("scootbar daemon --check"));
     assert!(daemon_help().contains("--check validates"));
 }
 
 #[test]
 fn msg_help_does_not_promise_that_exit_0_means_the_daemon_exited() {
     // A subscriber dropped with a full socket ends on a clean newline too.
-    let help = super::MSG_HELP;
+    let help = super::msg_help();
     assert!(help.contains("does NOT mean the daemon exited"));
     assert!(help.contains("subscribe again and then query"));
     assert!(!help.contains("ends when the daemon does"));

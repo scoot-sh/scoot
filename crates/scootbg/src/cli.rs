@@ -20,7 +20,9 @@ use crate::state::{Profile, ProfileError};
 #[cfg(test)]
 mod tests;
 
-pub const USAGE: &str = "\
+/// Everything in [`usage`] before the SEE ALSO tail: the commands, the
+/// socket, one example per shape, the exit codes and the environment.
+const USAGE_BODY: &str = "\
 scootbg -- wallpaper daemon for Wayland
 
 Early days: colors and images (PNG, JPEG, WebP) work, and the daemon
@@ -66,10 +68,23 @@ ENVIRONMENT:
 
 SEE ALSO:
     `scootbg help set`, `scootbg set --help`, `scootbg --help --json`
-    docs: https://www.scoot.sh/scootbg/cli.md (with /llms.txt)
 ";
 
-pub const DAEMON_HELP: &str = "\
+/// The main help page: [`USAGE_BODY`] plus the SEE ALSO tail, whose URLs
+/// render from [`scoot_ipc::DOCS_URL`] -- the one copy of the docs domain,
+/// so a move is one edit. A function rather than a `const` so the text can
+/// name that constant; a cold path (one process per `--help`), so the one
+/// small allocation costs nothing.
+pub fn usage() -> String {
+    let mut text = String::with_capacity(USAGE_BODY.len() + 128);
+    text.push_str(USAGE_BODY);
+    text.push_str(&scoot_ipc::docs_tail("scootbg/cli.md"));
+    text
+}
+
+/// Everything in [`daemon_help`] before the SEE ALSO tail: the usage, the
+/// profiles, the flags, the example, the exit codes.
+const DAEMON_BODY: &str = "\
 scootbg daemon -- run the wallpaper daemon
 
 USAGE:
@@ -121,8 +136,19 @@ EXIT CODES:
 SEE ALSO:
     `scootbg help daemon` prints this page; `scootbg --help --json` is the
     machine-readable form
-    docs: https://www.scoot.sh/scootbg/cli.md (with /llms.txt)
 ";
+
+/// The daemon help page: [`DAEMON_BODY`] plus the SEE ALSO tail, whose URLs
+/// render from [`scoot_ipc::DOCS_URL`] -- the one copy of the docs domain,
+/// so a move is one edit. A function rather than a `const` so the text can
+/// name that constant; a cold path (one process per `--help`), so the one
+/// small allocation costs nothing.
+pub fn daemon_help() -> String {
+    let mut text = String::with_capacity(DAEMON_BODY.len() + 128);
+    text.push_str(DAEMON_BODY);
+    text.push_str(&scoot_ipc::docs_tail("scootbg/cli.md"));
+    text
+}
 
 pub const SET_HELP: &str = "\
 scootbg set -- show a color or an image on every output, or on one
@@ -372,8 +398,8 @@ pub enum Topic {
 impl Topic {
     pub fn text(self) -> Cow<'static, str> {
         match self {
-            Self::Main => Cow::Borrowed(USAGE),
-            Self::Daemon => Cow::Borrowed(DAEMON_HELP),
+            Self::Main => Cow::Owned(usage()),
+            Self::Daemon => Cow::Owned(daemon_help()),
             Self::Set => Cow::Borrowed(SET_HELP),
             Self::Clear => Cow::Borrowed(CLEAR_HELP),
             Self::Query => Cow::Borrowed(QUERY_HELP),
@@ -600,7 +626,7 @@ fn hinted(
     topic: &'static str,
     or: impl FnOnce(String) -> Error,
 ) -> Error {
-    match crate::help::suggest(&what, candidates.iter().copied()) {
+    match scoot_ipc::suggest(&what, candidates.iter().copied()) {
         Some(suggestion) => Error::Hint {
             command,
             what,
