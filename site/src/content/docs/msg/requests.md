@@ -184,12 +184,15 @@ instead of re-parsing the user's config file:
 | `repeat` | Whether the bind re-fires while its key is held. Never true on a `default` row. |
 | `allow_when_locked` | Whether a `spawn` bind fires while the session is locked. Only ever true beside a `spawn` action. |
 
-One row per effective binding in live-table order (built-ins first, then
-config binds in load order), followed by one row per default a config
-unbind removed. A second list, `skipped`, holds every config entry that
-never made it in, sorted by combo — each with its `bind` (as written), its
-`value` (in TOML form), and its `reason` (a parse error, a colliding
-group, or an unbind with nothing to remove).
+One row per effective binding — built-ins first in their canonical order,
+then config binds (fresh combos and overrides alike) sorted by combo, then
+any session-managed rows — followed by one row per default a config unbind
+removed. The config sort is what keeps `--json` stable from run to run: a
+config file loads out of a hash map, whose order has no relationship to the
+file's. A second list, `skipped`, holds every config entry that never made
+it in, sorted by combo — each with its `bind` (as written), its `value` (in
+TOML form), and its `reason` (a parse error, a colliding group, or an unbind
+with nothing to remove).
 
 ```sh
 $ scoot msg binds --json

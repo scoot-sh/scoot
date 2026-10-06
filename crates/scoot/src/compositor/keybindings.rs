@@ -219,16 +219,16 @@ impl Default for Keybindings {
                 Keysym::Return,
                 Bound::Action(Action::Spawn(vec!["foot".into()])),
             ),
-            // The live keymap in the default terminal (`foot`, the same one
-            // `Super+Return` spawns -- the two terminals are pinned together
-            // by `show_keymap_uses_the_default_terminal` below, so changing
-            // one without the other fails loudly). `Super+h` is taken (focus
-            // column left), so this is `Super+Shift+/` (niri's hotkey-overlay
-            // chord): `slash` is the key's unshifted symbol, Shift the tracked
-            // modifier, so the chord is Shift plus the `/` key on any layout.
-            // A dedicated action rather than a `Spawn` of the pager pipeline:
-            // `sh -c` with a space-carrying script has no `[binds]`-grammar
-            // spelling that parses back (see `Action::ShowKeymap`'s doc).
+            // The live keymap in the user's own terminal (`Super+Shift+/`,
+            // niri's hotkey-overlay chord): `slash` is the key's unshifted
+            // symbol, Shift the tracked modifier, so the chord is Shift plus
+            // the `/` key on any layout. A dedicated action rather than a
+            // `Spawn` of the pager pipeline: `sh -c` with a space-carrying
+            // script has no `[binds]`-grammar spelling that parses back (see
+            // `Action::ShowKeymap`'s doc). Which terminal opens is decided at
+            // fire time from the live table's `Super+Return` bind (see the
+            // `show_keymap` module) -- rebind `Super+Return` and the keymap
+            // follows it.
             (
                 SUPER_SHIFT,
                 Keysym::slash,
@@ -785,25 +785,6 @@ mod tests {
             matched(&table, Keysym::slash, SUPER_SHIFT),
             Some(Bound::Action(Action::ShowKeymap))
         );
-    }
-
-    #[test]
-    fn show_keymap_uses_the_default_terminal() {
-        // `Super+Return` and `Super+Shift+/` must name the same terminal: a
-        // user who learns one finds the other, and the keymap overlay reads
-        // the way their terminal looks. Read off the core's live expansion,
-        // not a copied literal, so the two cannot drift apart silently.
-        let table = Keybindings::default();
-        let terminal = match matched(&table, Keysym::Return, SUPER) {
-            Some(Bound::Action(Action::Spawn(command))) => command,
-            other => panic!("Super+Return must stay a terminal spawn, got {other:?}"),
-        };
-        let mut world = scoot_core::World::new(scoot_core::Config::default());
-        let effects = world.handle_action(Action::ShowKeymap);
-        let [scoot_core::Effect::Spawn(command)] = effects.as_slice() else {
-            panic!("ShowKeymap must expand to one spawn, got {effects:?}");
-        };
-        assert_eq!(command[0], terminal[0]);
     }
 
     #[test]

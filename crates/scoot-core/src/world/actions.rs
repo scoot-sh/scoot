@@ -180,14 +180,14 @@ impl World {
                     .collect();
             }
             Action::Spawn(command) => return vec![Effect::Spawn(command)],
-            // A shell directive like `Spawn`, not arrangement: the core
-            // names the command (the default terminal running the live
-            // keymap in a pager -- the same terminal the default
-            // `Super+Return` bind spawns, see the shell's default keymap),
-            // and the shell's `Effect::Spawn` handling runs it. Kept out of
+            // A shell directive like `Spawn`, not arrangement -- and a pure
+            // one: the core names no terminal, shell or pager (those live
+            // in the `scoot` crate's `show_keymap` module, built from the
+            // live table at fire time), it only says *what* to open. The
+            // shell's `Effect::ShowKeymap` handling runs it. Kept out of
             // `Spawn` because the pager pipeline has no `[binds]`-grammar
             // spelling that parses back (see `Action::ShowKeymap`'s doc).
-            Action::ShowKeymap => return vec![Effect::Spawn(show_keymap_command())],
+            Action::ShowKeymap => return vec![Effect::ShowKeymap],
             Action::Quit => return vec![Effect::Quit],
         }
         self.settle_fullscreen();
@@ -243,21 +243,4 @@ impl World {
             }
         }
     }
-}
-
-/// The command [`Action::ShowKeymap`] expands to: the session's default
-/// terminal running the live keymap in a pager.
-///
-/// `foot` is the same terminal the default `Super+Return` bind spawns (see
-/// the shell's default keymap in `scoot`'s `keybindings.rs` -- the two are
-/// pinned together there, so changing one without the other fails loudly).
-/// `foot` runs a trailing command directly with no shell of its own, so the
-/// pipe into the pager goes through an explicit `sh -c`.
-fn show_keymap_command() -> Vec<String> {
-    vec![
-        "foot".to_owned(),
-        "sh".to_owned(),
-        "-c".to_owned(),
-        "scoot msg binds | less".to_owned(),
-    ]
 }

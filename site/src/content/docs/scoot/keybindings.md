@@ -97,10 +97,9 @@ path survives a bad config.
 ## Show the keymap
 
 Forgot a chord? <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> opens the
-live keymap in a terminal (the same `foot`
-<kbd>Super</kbd>+<kbd>Return</kbd> opens) in a pager — every combo the
-running session binds, where each came from, and the config binds that were
-skipped with their reasons. It is the same answer `scoot msg binds` prints:
+live keymap in a terminal — every combo the running session binds, where
+each came from, and the config binds that were skipped with their reasons.
+It is the same answer `scoot msg binds` prints:
 
 ```sh
 scoot msg binds
@@ -108,10 +107,20 @@ scoot msg binds --json
 ```
 
 The table is the default view, grouped the way this page groups it;
-`--json` is the same reply as JSON, for agents and scripts. Either way it
+`--json` is the same reply as JSON, for agents and scripts. Config rows
+sort by combo, so the JSON order is stable from run to run. Either way it
 is the live merged result — defaults, your `[binds]`, and `--tty`'s VT
 switches — never a re-read of the file. The bind itself never fires while
 the session is locked, like any other non-hardware bind.
+
+Which terminal opens follows your setup, in this order: `xdg-terminal-exec`
+when it is on `PATH` (the desktop-level preferred terminal); otherwise the
+`Super+Return` bind's terminal when that bind is a `spawn` — rebind
+`Super+Return` to `ghostty` and the keymap opens in ghostty too, own
+arguments and all; otherwise `foot`, the default terminal. Inside, the
+keymap pages through `less` when it is installed, and prints plainly and
+waits for Enter when it is not. With no terminal to open at all, the
+compositor logs one warning naming what it tried and does nothing.
 
 ## Change one binding
 

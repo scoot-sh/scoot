@@ -14,6 +14,9 @@ use super::State;
 use super::fullscreen::{LayoutState, set_layout_states};
 use super::keyboard_focus::KeyboardFocus;
 use super::output_clip;
+use super::show_keymap::{
+    FALLBACK_TERMINAL, XDG_TERMINAL_EXEC, program_on_path, show_keymap_command,
+};
 
 #[cfg(test)]
 mod tests;
@@ -327,11 +330,45 @@ impl State {
                 // an earlier one failed, so a bad program mid-list cannot
                 // stop the entries after it.
                 Effect::Spawn(command) => accepted &= self.spawn(&command),
+                Effect::ShowKeymap => accepted &= self.show_keymap(),
                 Effect::Quit => self.loop_signal.stop(),
             }
         }
         self.apply();
         accepted
+    }
+
+    /// Opens the live keymap in a terminal: the command built at fire time
+    /// from the live table (see `show_keymap`), spawned like any other.
+    ///
+    /// The one case that runs nothing: no `xdg-terminal-exec` on `PATH`, no
+    /// usable `Super+Return` spawn to derive a terminal from, and no
+    /// fallback terminal either. Then one warning names everything that was
+    /// tried, rather than the empty terminal a bare failed spawn would show
+    /// (or nothing at all, which is what a failed spawn outside a terminal
+    /// looks like). A derived terminal that is simply absent (rebound to a
+    /// terminal that is not installed) still goes through `spawn`, whose own
+    /// warning names the command that failed.
+    fn show_keymap(&mut self) -> bool {
+        let has_xdg = program_on_path(XDG_TERMINAL_EXEC);
+        let command = show_keymap_command(&self.keybindings, has_xdg);
+        if !has_xdg
+            && command
+                .first()
+                .is_some_and(|program| program == FALLBACK_TERMINAL)
+            && !program_on_path(FALLBACK_TERMINAL)
+        {
+            let derived = super::show_keymap::super_return_terminal(&self.keybindings)
+                .map(|argv| argv.join(" "))
+                .unwrap_or_else(|| "no terminal spawn on Super+Return".to_owned());
+            tracing::warn!(
+                "show-keymap: no terminal to open the keymap in (no {XDG_TERMINAL_EXEC} \
+                 on PATH, Super+Return runs `{derived}`, and no {FALLBACK_TERMINAL} on \
+                 PATH as the fallback); doing nothing"
+            );
+            return false;
+        }
+        self.spawn(&command)
     }
 
     /// Pushes the core's arrangement onto the windows: position, size, focus.

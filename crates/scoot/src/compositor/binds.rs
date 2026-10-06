@@ -20,14 +20,21 @@ use super::keybindings::{Bound, Keybindings};
 /// Builds the [`Response::Binds`] reply for the live table plus the config
 /// entries that never made it in.
 ///
-/// Row order is the live table's own order (built-ins first in their
-/// canonical order, then config binds), followed by one row per default a
-/// config unbind removed, in default-table order. Config-added row order
-/// follows load order, which has no relationship to the file's line order
-/// (see `apply_binds`); the skipped list arrives sorted by combo string.
+/// Row order is stable run to run: default rows in table order (the
+/// hardcoded `Default` order), then config rows -- fresh combos and
+/// overrides alike -- sorted by combo, then session rows (today only
+/// `--tty`'s VT switches, already in `F1`..`F12` order) in table order,
+/// followed by one row per default a config unbind removed, in
+/// default-table order. Sorting the config rows (rather than keeping table
+/// order) is what makes `--json` stable: config binds are read out of a
+/// `HashMap` (see `apply_binds`), whose iteration order has no relationship
+/// to the file's, so table order for those rows varies run to run. The
+/// skipped list arrives sorted by combo string.
 pub fn snapshot(keybindings: &Keybindings, skipped: &[SkippedBind]) -> Response {
     let defaults = Keybindings::default();
-    let mut bindings: Vec<BindRow> = Vec::new();
+    let mut default_rows: Vec<BindRow> = Vec::new();
+    let mut config_rows: Vec<BindRow> = Vec::new();
+    let mut session_rows: Vec<BindRow> = Vec::new();
     for (mods, keysym, bound, flags) in keybindings.iter() {
         let (action, source) = match bound {
             Bound::ChangeVt(_) => (bound_string(bound), "session (VT switch)".to_owned()),
@@ -45,14 +52,27 @@ pub fn snapshot(keybindings: &Keybindings, skipped: &[SkippedBind]) -> Response 
                 }
             },
         };
-        bindings.push(BindRow {
+        let row = BindRow {
             combo: combo_string(mods, keysym),
             action,
             source,
             repeat: flags.repeat,
             allow_when_locked: flags.allow_when_locked,
-        });
+        };
+        if row.source == "default" {
+            default_rows.push(row);
+        } else if row.source.starts_with("config") {
+            config_rows.push(row);
+        } else {
+            session_rows.push(row);
+        }
     }
+    // Deterministic by construction (see above): an override keeps its
+    // mapping wherever it sorts, so two runs of the same file agree.
+    config_rows.sort_by(|a, b| a.combo.cmp(&b.combo));
+    let mut bindings = default_rows;
+    bindings.extend(config_rows);
+    bindings.extend(session_rows);
     // Defaults the live table no longer holds: exactly what a config unbind
     // removed (nothing else deletes rows -- `--tty` only replaces). The
     // `action` names what was removed, so the row reads as a removal rather
@@ -223,5 +243,72 @@ mod tests {
         let row = row_for(&bindings, "super+shift+slash");
         assert_eq!(row.action, "show-keymap");
         assert_eq!(row.source, "default");
+    }
+
+    #[test]
+    fn config_rows_sort_by_combo_so_json_is_stable() {
+        // Config binds arrive out of a `HashMap`, whose iteration order has
+        // no relationship to the file's -- so table order for fresh combos
+        // varies run to run. The snapshot must not repeat that instability:
+        // config rows (fresh and overrides alike) sort by combo, while
+        // default and session rows keep their canonical orders.
+        let mut table = Keybindings::default();
+        // Inserted last-first on purpose: table order here is reverse-alpha.
+        table.insert(
+            SUPER,
+            Keysym::z,
+            Bound::Action(Action::CloseFocused),
+            BindFlags::default(),
+        );
+        table.insert(
+            SUPER,
+            Keysym::y,
+            Bound::Action(Action::CloseFocused),
+            BindFlags::default(),
+        );
+        table.insert(
+            SUPER,
+            Keysym::m,
+            Bound::Action(Action::CloseFocused),
+            BindFlags::default(),
+        );
+        table.extend(Keybindings::vt_switch_bindings());
+        let bindings = rows(&table);
+        let config: Vec<&str> = bindings
+            .iter()
+            .filter(|row| row.source.starts_with("config"))
+            .map(|row| row.combo.as_str())
+            .collect();
+        assert_eq!(
+            config,
+            vec!["super+m", "super+y", "super+z"],
+            "config rows must sort by combo, not follow load order: {config:?}"
+        );
+        // Defaults keep their canonical table order around the sorted block
+        // (`super+m` is overridden above, so it is a config row now).
+        let defaults: Vec<&str> = bindings
+            .iter()
+            .filter(|row| row.source == "default")
+            .map(|row| row.combo.as_str())
+            .collect();
+        let canonical: Vec<String> = Keybindings::default()
+            .iter()
+            .map(|(mods, keysym, _, _)| super::super::config::combo_string(mods, keysym))
+            .filter(|combo| combo != "super+m")
+            .collect();
+        assert_eq!(
+            defaults,
+            canonical.iter().map(String::as_str).collect::<Vec<_>>(),
+            "default rows must keep table order"
+        );
+        // The session rows trail in their own order.
+        let session: Vec<&str> = bindings
+            .iter()
+            .filter(|row| row.source.starts_with("session"))
+            .map(|row| row.combo.as_str())
+            .collect();
+        assert_eq!(session.len(), 12, "{session:?}");
+        assert_eq!(session[0], "ctrl+alt+F1");
+        assert_eq!(session[11], "ctrl+alt+F12");
     }
 }

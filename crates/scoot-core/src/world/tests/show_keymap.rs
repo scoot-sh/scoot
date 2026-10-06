@@ -1,18 +1,15 @@
-//! `Action::ShowKeymap` expands to the spawn carrying the pager pipeline:
-//! the default terminal running the live keymap, not arrangement.
+//! `Action::ShowKeymap` expands to the shell directive, naming nothing:
+//! no terminal, no shell, no pager -- those are the shell's to choose (see
+//! the `scoot` crate's `show_keymap` module), keeping this crate
+//! platform-independent.
 
 use crate::{Action, Config, Effect, World};
 
 #[test]
-fn show_keymap_expands_to_the_terminal_pager_spawn() {
+fn show_keymap_expands_to_the_shell_directive() {
     let mut world = World::new(Config::default());
     assert_eq!(
         world.handle_action(Action::ShowKeymap),
-        vec![Effect::Spawn(vec![
-            "foot".to_owned(),
-            "sh".to_owned(),
-            "-c".to_owned(),
-            "scoot msg binds | less".to_owned(),
-        ])]
+        vec![Effect::ShowKeymap]
     );
 }

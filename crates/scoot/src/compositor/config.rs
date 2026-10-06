@@ -770,7 +770,7 @@ pub fn keybindings_for(
 ) -> (Keybindings, Vec<scoot_ipc::SkippedBind>) {
     let mut table = Keybindings::default();
     let mut skipped = Vec::new();
-    apply_binds(&mut table, binds, &mut skipped);
+    apply_binds(&mut table, binds, &mut skipped, vt);
     if vt {
         enforce_vt_binds(&mut table);
     }
@@ -796,6 +796,16 @@ pub fn enforce_vt_binds(table: &mut Keybindings) {
              VT-switch binding, which must always work as the recovery path"
         );
     }
+}
+
+/// Whether `(mods, keysym)` is one of `--tty`'s `Ctrl+Alt+F1..F12`
+/// VT-switch combos: what an unbind of one reports instead of "unbinds
+/// nothing" (see `apply_binds`). Twelve entries on a cold path, so a linear
+/// scan rather than a second table to keep in agreement.
+fn is_vt_combo(mods: Modifiers, keysym: Keysym) -> bool {
+    Keybindings::vt_switch_bindings()
+        .into_iter()
+        .any(|(vt_mods, vt_key, _)| vt_mods == mods && vt_key == keysym)
 }
 
 // -- `--print-default-config` -----------------------------------------------
@@ -1547,6 +1557,7 @@ fn apply_binds(
     keybindings: &mut Keybindings,
     binds: &HashMap<String, toml::Value>,
     skipped: &mut Vec<scoot_ipc::SkippedBind>,
+    vt: bool,
 ) {
     let mut parsed: Vec<(String, Modifiers, Keysym, ParsedBind, BindFlags)> = Vec::new();
     for (raw, value) in binds {
@@ -1617,8 +1628,18 @@ fn apply_binds(
             }
             ParsedBind::Unbind => {
                 if keybindings.remove(mods, keysym).is_none() {
-                    let reason =
-                        "unbinds nothing: no default or config bind holds this combo".to_owned();
+                    // Unbinding a `--tty` VT-switch combo lands here -- the
+                    // VT bindings layer on after this file's binds (see
+                    // `keybindings_for`), so at this point the combo holds
+                    // nothing. Say the recovery bind stays, rather than the
+                    // "unbinds nothing" the combo would otherwise report.
+                    let reason = if vt && is_vt_combo(mods, keysym) {
+                        "this combo is one of --tty's VT-switch bindings, which are \
+                         always enforced and cannot be unbound"
+                            .to_owned()
+                    } else {
+                        "unbinds nothing: no default or config bind holds this combo".to_owned()
+                    };
                     tracing::warn!(
                         bind = %raw,
                         "skipping a config-file unbind that removes nothing"
@@ -2409,6 +2430,46 @@ mod tests {
     }
 
     #[test]
+    fn an_unbind_of_a_vt_switch_says_the_recovery_bind_stays() {
+        // `ctrl+alt+F2` holds no default or config bind -- the VT bindings
+        // layer on after the file's (see `keybindings_for`) -- so a bare
+        // "unbinds nothing" would imply the combo is free while the session
+        // bind holds it. Under `--tty` the message says the recovery path
+        // stays enforced; without it the ordinary message applies.
+        let mut binds = HashMap::new();
+        binds.insert("ctrl+alt+F2".to_owned(), toml::Value::from("none"));
+        let (table, skipped) = keybindings_for(&binds, true);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].bind, "ctrl+alt+F2");
+        assert!(
+            skipped[0].reason.contains("VT-switch")
+                && skipped[0].reason.contains("always enforced"),
+            "unexpected reason: {}",
+            skipped[0].reason
+        );
+        assert_eq!(
+            table.match_key(
+                keysym_named("F2").unwrap(),
+                Modifiers {
+                    ctrl: true,
+                    alt: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some((Bound::ChangeVt(2), BindFlags::default())),
+            "the recovery bind must survive the unbind attempt"
+        );
+
+        let (_, skipped) = keybindings_for(&binds, false);
+        assert_eq!(skipped.len(), 1);
+        assert!(
+            skipped[0].reason.contains("unbinds nothing"),
+            "unexpected reason: {}",
+            skipped[0].reason
+        );
+    }
+
+    #[test]
     fn an_unbind_collides_like_any_other_bind() {
         // Two spellings of one combo where one is an unbind: the group rule
         // holds (no well-defined winner), so both are skipped and the
@@ -2630,7 +2691,7 @@ mod tests {
         binds.insert("super+t".to_owned(), toml::Value::Table(table));
         let mut keybindings = Keybindings::default();
         let mut skipped = Vec::new();
-        apply_binds(&mut keybindings, &binds, &mut skipped);
+        apply_binds(&mut keybindings, &binds, &mut skipped, false);
         assert!(skipped.is_empty(), "{skipped:?}");
         assert_eq!(
             matched(

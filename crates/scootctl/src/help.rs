@@ -310,7 +310,7 @@ pub const ACTIONS: &[ActionDoc] = &[
     ActionDoc {
         name: "show-keymap",
         args: "(none)",
-        description: "open the live keymap in the default terminal (a pager)",
+        description: "open the live keymap in a terminal (a pager; follows Super+Return)",
     },
     ActionDoc {
         name: "quit",

@@ -68,6 +68,7 @@ mod session_env;
 mod session_lock;
 mod shell;
 mod shm_pools;
+mod show_keymap;
 mod sighup;
 mod single_pixel_buffer;
 mod state;
