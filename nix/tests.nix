@@ -4957,8 +4957,7 @@ let
     # pins above (idle, mako, clipboard, audio), the feed and the
     # profile-managed bar ride the same scope...
     (
-      assert
-        hmAudio.config.systemd.user.services.scoot-osd.Unit.PartOf == [ "scoot-session.target" ];
+      assert hmAudio.config.systemd.user.services.scoot-osd.Unit.PartOf == [ "scoot-session.target" ];
       true
     )
     (
@@ -7113,13 +7112,13 @@ let
       true
     )
     (
-      assert hmAudio.config.systemd.user.services.scoot-osd.Install.WantedBy == [ "scoot-session.target" ];
+      assert
+        hmAudio.config.systemd.user.services.scoot-osd.Install.WantedBy == [ "scoot-session.target" ];
       true
     )
     (
-      assert
-        lib.hasSuffix "/bin/scoot-osd daemon"
-          hmAudio.config.systemd.user.services.scoot-osd.Service.ExecStart;
+      assert lib.hasSuffix "/bin/scoot-osd daemon"
+        hmAudio.config.systemd.user.services.scoot-osd.Service.ExecStart;
       true
     )
     # ...the volume, brightness and mic-mute binds through the scripts
@@ -7168,7 +7167,8 @@ let
       true
     )
     (
-      assert hmAudioStandalone.config.systemd.user.services.scoot-osd.Unit.PartOf == [ "scoot-session.target" ];
+      assert
+        hmAudioStandalone.config.systemd.user.services.scoot-osd.Unit.PartOf == [ "scoot-session.target" ];
       true
     )
     # ...retimed and opted out...
@@ -10033,8 +10033,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     # 22e7. Sink list: id plus description, sources excluded.
     audio_setup "" 0 0 "" '[{"id":42,"info":{"props":{"media.class":"Audio/Sink","node.description":"Dummy Output"}}},{"id":43,"info":{"props":{"media.class":"Audio/Sink","node.name":"alsa_out"}}},{"id":99,"info":{"props":{"media.class":"Audio/Source"}}}]' 0 ""
     got=$(${audioBehaviorSink} list)
-    [ "$got" = "42 Dummy Output
-43 alsa_out" ] || { echo "sink list showed '$got' (22e7)" >&2; exit 1; }
+    want=$(printf '42 Dummy Output\n43 alsa_out')
+    [ "$got" = "$want" ] || { echo "sink list showed '$got' (22e7)" >&2; exit 1; }
     echo "ok: sink list names id plus description"
 
     # 22e8. Sink set by name moves the default and shows its level

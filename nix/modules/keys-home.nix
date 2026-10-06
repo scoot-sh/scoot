@@ -286,22 +286,40 @@ let
     let
       all = {
         brightnessUp = hwBind (
-          if audioRouted then "spawn ${audioScripts.brightness}/bin/scoot-brightness up" else "spawn ${brightnessCtl} -e set +5%"
+          if audioRouted then
+            "spawn ${audioScripts.brightness}/bin/scoot-brightness up"
+          else
+            "spawn ${brightnessCtl} -e set +5%"
         );
         brightnessDown = hwBind (
-          if audioRouted then "spawn ${audioScripts.brightness}/bin/scoot-brightness down" else "spawn ${brightnessCtl} -e set 5%-"
+          if audioRouted then
+            "spawn ${audioScripts.brightness}/bin/scoot-brightness down"
+          else
+            "spawn ${brightnessCtl} -e set 5%-"
         );
         volumeUp = hwBind (
-          if audioRouted then "spawn ${audioScripts.volume}/bin/scoot-volume sink-up" else "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+          if audioRouted then
+            "spawn ${audioScripts.volume}/bin/scoot-volume sink-up"
+          else
+            "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%+"
         );
         volumeDown = hwBind (
-          if audioRouted then "spawn ${audioScripts.volume}/bin/scoot-volume sink-down" else "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+          if audioRouted then
+            "spawn ${audioScripts.volume}/bin/scoot-volume sink-down"
+          else
+            "spawn ${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%-"
         );
         volumeMute = hwBind (
-          if audioRouted then "spawn ${audioScripts.volume}/bin/scoot-volume sink-mute" else "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SINK@ toggle"
+          if audioRouted then
+            "spawn ${audioScripts.volume}/bin/scoot-volume sink-mute"
+          else
+            "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SINK@ toggle"
         );
         micMute = hwBind (
-          if audioRouted then "spawn ${audioScripts.volume}/bin/scoot-volume mic-mute" else "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SOURCE@ toggle"
+          if audioRouted then
+            "spawn ${audioScripts.volume}/bin/scoot-volume mic-mute"
+          else
+            "spawn ${wpctl} set-mute @DEFAULT_AUDIO_SOURCE@ toggle"
         );
         mediaPlay = hwBind "spawn ${playerctl} play-pause";
         mediaPause = hwBind "spawn ${playerctl} pause";

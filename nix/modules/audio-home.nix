@@ -136,7 +136,9 @@ let
         if [ ! -p "$fifo" ]; then
           ${mkfifoBin} -m 600 "$fifo"
         fi
-        exec ${tailBin} -f "$fifo" | exec ${if audio.osd.package != null then lib.getExe audio.osd.package else "wob"} -c ${osdIni}
+        exec ${tailBin} -f "$fifo" | exec ${
+          if audio.osd.package != null then lib.getExe audio.osd.package else "wob"
+        } -c ${osdIni}
         ;;
       *)
         echo "usage: scoot-osd {show <percent> [style]|daemon}" >&2
@@ -400,8 +402,7 @@ in
       # to and installs nothing on Darwin, the way the slot scripts
       # do).
       home.packages =
-        lib.optional (audio.osd.package != null) audio.osd.package
-        ++ lib.optionals isLinux audioScripts;
+        lib.optional (audio.osd.package != null) audio.osd.package ++ lib.optionals isLinux audioScripts;
 
       # The wob config, beside the unit that runs it. Pure text, so
       # it renders wherever the slot is on (like the swaylock config:
@@ -429,7 +430,10 @@ in
           # A new OSD script or config restarts the daemon (it starts
           # in milliseconds, and a stale fifo drains into the fresh
           # wob, which hides again after the timeout).
-          X-Restart-Triggers = [ "${scootOsd}" "${osdIni}" ];
+          X-Restart-Triggers = [
+            "${scootOsd}"
+            "${osdIni}"
+          ];
           # Unending retries, like the bar's unit (`StartLimitIntervalSec`
           # lives in `[Unit]`: systemd ignores it in `[Service]`).
           StartLimitIntervalSec = 0;
