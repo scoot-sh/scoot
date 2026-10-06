@@ -489,6 +489,18 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         "scoot is up"
     );
     event_loop.run(None, &mut state, post_dispatch)?;
+    // A host-driven stop is clean at the loop level but a failure of the
+    // session: without the host nothing presents and no input arrives, so
+    // answering `Ok` here would report success for a session that lost its
+    // display. Name the host connection rather than whatever calloop would
+    // have said about the dead fd (see `nested::HostSource`).
+    if state.host_loss.as_ref().is_some_and(|loss| loss.lost()) {
+        return Err(
+            "lost the connection to the host compositor, so the session stopped: \
+             without it scoot can neither present nor take input"
+                .into(),
+        );
+    }
     Ok(())
 }
 

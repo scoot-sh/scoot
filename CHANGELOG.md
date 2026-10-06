@@ -9,6 +9,17 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-10-06 — a nested session names its dead host instead of dying on calloop jargon
+
+- **Losing the host compositor stops `--nested` cleanly.** If the host
+  connection breaks (the host exits or restarts), the log says
+  `lost the connection to the host compositor` with the cause, and the
+  process exits 1 with the same message, instead of failing the event
+  loop on `other error during loop operation` and leaving a stale
+  `scoot.sock` that answers `Connection refused`. A supervisor
+  restarts the session once the host is back; unsaved client state
+  does not survive the restart, as with any compositor exit.
+
 ### 2026-10-03 — `Super+comma` / `Super+period` step across every monitor, wrapping
 
 - **The output binds are relative now**: `Super+comma` focuses the output

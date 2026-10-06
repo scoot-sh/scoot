@@ -277,7 +277,7 @@ falsify. Read `flexwm` there as `scoot`.
 ### IPC / computer use
 - [A side-effect-free way to ask whether the session is locked](./resolved/ipc-locked-query-done.md) — RESOLVED 2026-10-05 (PR #463): `locked` query and `lock_changed` event (protocol 7 → 8), `focus-window-id` miss keeps the click, clipboard probe moved to the query
 - [Make every --help agent-friendly](./resolved/agent-friendly-help-done.md) — RESOLVED in #436: one help contract (docs/cli-help.md) with topics, examples, `--help --json` from the same source, errors that teach (exit 2)
-- [Nested scoot in the Selkies webtop image stops accepting IPC connections after the first query](./ipc/nested-ipc-socket-refuses.md) (high, filed 2026-10-05 from nixos-webtop#30): one `scoot msg` per boot, then `Connection refused` and no listener on the socket
+- [Nested scoot in the Selkies webtop image stops accepting IPC connections after the first query](./resolved/nested-ipc-socket-refuses-done.md) — RESOLVED 2026-10-06: the nested process had exited on host-connection loss, leaving a stale `scoot.sock`; the host source now stops the session cleanly with a named error (exit 1)
 - [Help follow-ups: one suggest(), build-gated push wording, live llms.txt URL](./ipc/help-followups.md) (low, filed 2026-10-05 from #436's review)
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
 - [A coalesced `workspace` event on `subscribe`](./resolved/workspace-snapshot-event-done.md)
