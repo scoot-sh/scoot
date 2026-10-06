@@ -347,10 +347,12 @@ in
       ) profileLook.barColors;
     })
 
-    # The look's UI face as a file (there is no fontconfig), one
+    # The look's bar face as a file (there is no fontconfig), one
     # priority below Stylix's (user > Stylix > look): the Propo
     # carries the module icons itself, so a themed bar never falls
-    # back to the icon-less DejaVu default above. Without the package
+    # back to the icon-less DejaVu default above. The bar keeps this
+    # mono face while GTK/Qt apps and the greeter use the look's
+    # proportional `sans` (see `theme-home.nix`). Without the package
     # that default stands. Like the look's colors, a bar the user
     # turned off stays unthemed too.
     (lib.mkIf

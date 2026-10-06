@@ -22,7 +22,7 @@
  * explicitly.
  */
 window {
-  font-family: "DroidSansM Nerd Font Propo";
+  font-family: "DejaVu Sans";
 }
 frame.background {
   background-color: alpha(#241721, 0.84);

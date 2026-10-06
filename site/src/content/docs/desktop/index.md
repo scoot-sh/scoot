@@ -311,10 +311,10 @@ variables only, no daemon, so the theme costs no wakeups.
 
 | Piece | Option | Type | Default | Notes |
 |---|---|---|---|---|
-| GTK apps | `desktop.theme.targets.gtk.enable` | bool | `true` | `settings.ini` (GTK 3 + 4) plus `GTK_THEME`: Adwaita, or Adwaita-dark for a dark look, with the look's font, cursor and dark preference |
-| Qt apps | `desktop.theme.targets.qt.enable` | bool | `true` | `qt6ct.conf` through `QT_QPA_PLATFORMTHEME=qt6ct` (plus `QT_PLUGIN_PATH` for its platformtheme and style): the Adwaita Qt style in the look's polarity, Adwaita icons |
+| GTK apps | `desktop.theme.targets.gtk.enable` | bool | `true` | `settings.ini` (GTK 3 + 4) plus `GTK_THEME`: Adwaita, or Adwaita-dark for a dark look, with the look's proportional sans, cursor and dark preference — plus `gtk.css` carrying the look's accent and surfaces, so a selected row reads as the look (amber on moonrise, not Adwaita's default blue) |
+| Qt apps | `desktop.theme.targets.qt.enable` | bool | `true` | `qt6ct.conf` through `QT_QPA_PLATFORMTHEME=qt6ct` (plus `QT_PLUGIN_PATH` for its platformtheme and style): the Adwaita Qt style in the look's polarity, Adwaita icons, and a generated color scheme from the look's palette — dark looks get a dark palette, the light look a light one |
 | Cursor | `desktop.theme.targets.cursor.enable` | bool | `true` | Vanilla-DMZ at 24 px: the compositor cursor plus `XCURSOR_THEME`/`XCURSOR_SIZE` for X11 apps |
-| Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DroidSansM Nerd Font Propo for sans-serif, FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the bar's font file, so the bar never falls back to icon-less DejaVu |
+| Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DejaVu Sans for sans-serif (proportional UI text in GTK/Qt apps and the greeter), FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the bar keeps its own DroidSansM Nerd Font Propo file, whose glyphs carry the module icons |
 | Login screen | `desktop.theme.targets.greeter.enable` | bool | `true` | the session wallpaper behind the login card (nothing for `vinyl-sunset`: its illustration is license-barred), the dark setting, the look's ReGreet CSS and font — needs `greeter.enable` too |
 | Terminal | `desktop.theme.targets.terminal.enable` | bool | `true` | the look's `foot.ini` from the flake |
 | Prompt | `desktop.theme.targets.shell.enable` | bool | `true` | the look's `starship.toml` (`radial-burst` ships none: inert there) |
@@ -349,7 +349,10 @@ and keeps the rest of the look.
 > (`systemctl --user show-environment | grep QT_QPA`) and that
 > `qt6ct` plus `adwaita-qt6` are installed (`nix-store -q --requisites`
 > will not list them if `targets.qt` is off or its packages are
-> null). Apps started before the switch keep the old theme —
+> null). A light palette inside a dark look means the scheme did not
+> apply: check `custom_palette=true` and `color_scheme_path` in
+> `~/.config/qt6ct/qt6ct.conf` point at the generated
+> `colors/scoot-look.conf`. Apps started before the switch keep the old theme —
 > restart them.
 
 > **Symptom:** a Flatpak app ignores the theme.

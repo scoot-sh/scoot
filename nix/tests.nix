@@ -2900,6 +2900,12 @@ let
     desktop.enable = true;
     desktop.look = "radial-burst";
   };
+  # ...moonrise (amber accent, dark): the accent/polarity pins read it.
+  hmThemeMoon = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+  };
   # ...without a look: the slot is inert (no theme files, no theme
   # packages, no cursor keys in the compositor config).
   hmThemeNoLook = evalHome {
@@ -3041,6 +3047,12 @@ let
     desktop.enable = true;
     desktop.look = "music-desk";
     desktop.theme.fonts.uiPackage = null;
+  };
+  hmThemeNoSansPkg = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+    desktop.theme.fonts.sansPackage = null;
   };
   hmThemeNoMonoPkg = evalHome {
     enable = true;
@@ -4599,6 +4611,14 @@ let
   gtkStylixUserConf = hmThemeStylixUser.config.xdg.configFile."gtk-3.0/settings.ini".source;
   qtLightConf = hmTheme.config.xdg.configFile."qt6ct/qt6ct.conf".source;
   qtDarkConf = hmThemeDark.config.xdg.configFile."qt6ct/qt6ct.conf".source;
+  qtSchemeLight = hmTheme.config.xdg.configFile."qt6ct/colors/scoot-look.conf".source;
+  qtSchemeDark = hmThemeDark.config.xdg.configFile."qt6ct/colors/scoot-look.conf".source;
+  qtSchemeBurst = hmThemeBurst.config.xdg.configFile."qt6ct/colors/scoot-look.conf".source;
+  qtSchemeMoon = hmThemeMoon.config.xdg.configFile."qt6ct/colors/scoot-look.conf".source;
+  gtkCssLight = hmTheme.config.xdg.configFile."gtk-4.0/gtk.css".source;
+  gtkCssDark = hmThemeDark.config.xdg.configFile."gtk-4.0/gtk.css".source;
+  gtkCssBurst = hmThemeBurst.config.xdg.configFile."gtk-4.0/gtk.css".source;
+  gtkCssMoon = hmThemeMoon.config.xdg.configFile."gtk-4.0/gtk.css".source;
   themeFontsConf = hmTheme.config.xdg.configFile."fontconfig/conf.d/10-scoot-look.conf".source;
   themeFootConf = hmTheme.config.xdg.configFile."foot/foot.ini".source;
   themeStarshipConf = hmTheme.config.xdg.configFile."starship.toml".source;
@@ -7501,14 +7521,14 @@ let
     # (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the clipboard slot's three plus the capture
     # slot's four plus the audio slot's two plus the night light's
-    # one plus the theme's six plus the agent's one plus the keyring's
+    # one plus the theme's seven plus the agent's one plus the keyring's
     # two: the profile is on in this evaluation, so its slot is open).
     (
       assert hmLaunch.config.programs.scoot.desktop.launcher.package == null;
       true
     )
     (
-      assert builtins.length (failing hmLaunch.config) == 26;
+      assert builtins.length (failing hmLaunch.config) == 27;
       true
     )
     (
@@ -8435,6 +8455,45 @@ let
       assert hmTheme.config.xdg.configFile ? "qt6ct/qt6ct.conf";
       true
     )
+    # ...the look's named colors beside the settings (both GTK
+    # versions) and its Qt color scheme beside the qt6ct config...
+    (
+      assert hmTheme.config.xdg.configFile ? "gtk-3.0/gtk.css";
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile ? "gtk-4.0/gtk.css";
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile ? "qt6ct/colors/scoot-look.conf";
+      true
+    )
+    # ...the dark, burst and moonrise looks render their own files too...
+    (
+      assert hmThemeDark.config.xdg.configFile ? "gtk-4.0/gtk.css";
+      true
+    )
+    (
+      assert hmThemeDark.config.xdg.configFile ? "qt6ct/colors/scoot-look.conf";
+      true
+    )
+    (
+      assert hmThemeBurst.config.xdg.configFile ? "gtk-4.0/gtk.css";
+      true
+    )
+    (
+      assert hmThemeBurst.config.xdg.configFile ? "qt6ct/colors/scoot-look.conf";
+      true
+    )
+    (
+      assert hmThemeMoon.config.xdg.configFile ? "gtk-4.0/gtk.css";
+      true
+    )
+    (
+      assert hmThemeMoon.config.xdg.configFile ? "qt6ct/colors/scoot-look.conf";
+      true
+    )
     (
       assert hmTheme.config.xdg.configFile ? "fontconfig/conf.d/10-scoot-look.conf";
       true
@@ -8543,6 +8602,14 @@ let
       true
     )
     (
+      assert !(hmThemeNoLook.config.xdg.configFile ? "gtk-4.0/gtk.css");
+      true
+    )
+    (
+      assert !(hmThemeNoLook.config.xdg.configFile ? "qt6ct/colors/scoot-look.conf");
+      true
+    )
+    (
       assert !(hmThemeNoLook.config.xdg.configFile ? "fontconfig/conf.d/10-scoot-look.conf");
       true
     )
@@ -8601,11 +8668,23 @@ let
       true
     )
     (
+      assert !(hmThemeGtkOff.config.xdg.configFile ? "gtk-3.0/gtk.css");
+      true
+    )
+    (
+      assert !(hmThemeGtkOff.config.xdg.configFile ? "gtk-4.0/gtk.css");
+      true
+    )
+    (
       assert hmThemeGtkOff.config.xdg.configFile ? "qt6ct/qt6ct.conf";
       true
     )
     (
       assert !(hmThemeQtOff.config.xdg.configFile ? "qt6ct/qt6ct.conf");
+      true
+    )
+    (
+      assert !(hmThemeQtOff.config.xdg.configFile ? "qt6ct/colors/scoot-look.conf");
       true
     )
     (
@@ -8711,6 +8790,16 @@ let
       true
     )
     (
+      assert builtins.length (failing hmThemeNoSansPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "theme.fonts.sansPackage is null" (
+        builtins.head (failing hmThemeNoSansPkg.config)
+      );
+      true
+    )
+    (
       assert builtins.length (failing hmThemeNoMonoPkg.config) == 1;
       true
     )
@@ -8760,8 +8849,7 @@ let
       true
     )
     (
-      assert
-        osThemeGreeterMoon.config.services.displayManager.regreet.font.name == "DroidSansM Nerd Font Propo";
+      assert osThemeGreeterMoon.config.services.displayManager.regreet.font.name == "DejaVu Sans";
       true
     )
     (
@@ -8775,7 +8863,7 @@ let
       true
     )
     (
-      assert builtins.elem osThemeGreeterMoon.config.programs.scoot.desktop.theme.fonts.uiPackage
+      assert builtins.elem osThemeGreeterMoon.config.programs.scoot.desktop.theme.fonts.sansPackage
         osThemeGreeterMoon.config.fonts.packages;
       true
     )
@@ -8962,6 +9050,10 @@ let
       true
     )
     (
+      assert hmTheme.config.programs.scoot.desktop.theme.fonts.sansPackage == null;
+      true
+    )
+    (
       assert hmTheme.config.programs.scoot.desktop.theme.qt.package == null;
       true
     )
@@ -8981,6 +9073,10 @@ let
     )
     (
       assert lib.any (m: lib.hasInfix "theme.fonts.uiPackage is null" m) (failing hmTheme.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "theme.fonts.sansPackage is null" m) (failing hmTheme.config);
       true
     )
     (
@@ -9017,10 +9113,10 @@ let
     # tool (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the clipboard slot's three plus this slot's
     # four plus the audio slot's two plus the night light's one plus
-    # the theme's six plus the agent's one plus the keyring's two:
+    # the theme's seven plus the agent's one plus the keyring's two:
     # the profile is on in this evaluation).
     (
-      assert builtins.length (failing hmCapture.config) == 26;
+      assert builtins.length (failing hmCapture.config) == 27;
       true
     )
     (
@@ -9088,10 +9184,10 @@ let
     # switch (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the slot's three plus the capture slot's
     # four plus the audio slot's two plus the night light's one plus
-    # the theme's six plus the agent's one plus the keyring's two:
+    # the theme's seven plus the agent's one plus the keyring's two:
     # the profile is on in this evaluation).
     (
-      assert builtins.length (failing hmClip.config) == 26;
+      assert builtins.length (failing hmClip.config) == 27;
       true
     )
     (
@@ -9136,14 +9232,14 @@ let
     # (the idle policy's five plus the daemon's one plus the launcher's
     # one plus the clipboard slot's three plus the capture slot's
     # four plus the audio slot's two plus the night light's one plus
-    # the theme's six plus the agent's one plus the keyring's two:
+    # the theme's seven plus the agent's one plus the keyring's two:
     # the profile is on in this evaluation, so its slot is open).
     (
       assert hmNotif.config.programs.scoot.desktop.notifications.package == null;
       true
     )
     (
-      assert builtins.length (failing hmNotif.config) == 26;
+      assert builtins.length (failing hmNotif.config) == 27;
       true
     )
     (
@@ -9531,10 +9627,10 @@ let
     # ...refused loudly beside the profile's other twenty-five (the idle
     # policy's five, the daemon's one, the launcher's one, the
     # clipboard slot's three, the capture slot's four, the audio
-    # slot's two, the night light's one, the theme's six, the
+    # slot's two, the night light's one, the theme's seven, the
     # agent's one, the keyring's two).
     (
-      assert builtins.length (failing hmNight.config) == 26;
+      assert builtins.length (failing hmNight.config) == 27;
       true
     )
     (
@@ -9976,11 +10072,11 @@ let
     # daemon's one, the launcher's one, the clipboard slot's three,
     # the capture slot's four, the audio slot's two (the OSD and the
     # sink helper's dump tool), the night light's one, the theme's
-    # six, the agent's one plus the keyring's two,
+    # seven, the agent's one plus the keyring's two,
     # on with the profile; order-insensitive: the daemon's module
     # contributes its refusal first).
     (
-      assert builtins.length (failing hmIdle.config) == 26;
+      assert builtins.length (failing hmIdle.config) == 27;
       true
     )
     (
@@ -11293,11 +11389,12 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     echo "ok: default state icons are each one glyph in DejaVu Sans"
 
     # 13h. Theme GTK settings, music-desk (light): the Adwaita theme,
-    #      the icon theme, the look's UI face and cursor, and no
-    #      dark preference.
+    #      the icon theme, the look's proportional sans and cursor,
+    #      and no dark preference (the bar keeps the mono face; GTK
+    #      text is proportional).
     grep -F -x "gtk-theme-name=Adwaita" ${gtkLightConf}
     grep -F -x "gtk-icon-theme-name=Adwaita" ${gtkLightConf}
-    grep -F -x "gtk-font-name=DroidSansM Nerd Font Propo 11" ${gtkLightConf}
+    grep -F -x "gtk-font-name=DejaVu Sans 11" ${gtkLightConf}
     grep -F -x "gtk-cursor-theme-name=Vanilla-DMZ" ${gtkLightConf}
     grep -F -x "gtk-cursor-theme-size=24" ${gtkLightConf}
     grep -F -x "gtk-application-prefer-dark-theme=false" ${gtkLightConf}
@@ -11319,20 +11416,89 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     echo "ok: theme settings win per key, user over Stylix over look"
 
     # 13k. Theme Qt config: the Adwaita style in the look's polarity
-    #      (capitalized exactly as the plugin registers it) plus the
-    #      icon theme (no faked per-look palette).
+    #      (capitalized exactly as the plugin registers it), the icon
+    #      theme, and the generated per-look palette beside it (without
+    #      both keys the platform theme keeps its default light
+    #      palette, which showed a light preview inside dark looks).
     grep -F -x "style=Adwaita" ${qtLightConf}
     grep -F -x "icon_theme=Adwaita" ${qtLightConf}
     grep -F -x "style=Adwaita-Dark" ${qtDarkConf}
-    echo "ok: Qt config carries the look's polarity"
+    grep -F -x "custom_palette=true" ${qtLightConf}
+    grep -F -x "custom_palette=true" ${qtDarkConf}
+    grep -F -q "color_scheme_path=" ${qtLightConf}
+    grep -F -q "scoot-look.conf" ${qtLightConf}
+    echo "ok: Qt config carries the look's polarity and palette"
 
-    # 13l. Theme fontconfig default: the UI face for sans-serif, the
-    #      terminal face for monospace -- and well-formed XML (a `--`
-    #      inside a comment is illegal and fontconfig refuses the file).
+    # 13l. Theme fontconfig default: the proportional sans for
+    #      sans-serif, the terminal face for monospace -- and
+    #      well-formed XML (a `--` inside a comment is illegal and
+    #      fontconfig refuses the file).
     python3 -c 'import sys,xml.dom.minidom; xml.dom.minidom.parse(sys.argv[1])' ${themeFontsConf}
-    grep -F "<family>DroidSansM Nerd Font Propo</family>" ${themeFontsConf}
+    grep -F "<family>DejaVu Sans</family>" ${themeFontsConf}
     grep -F "<family>FiraCode Nerd Font</family>" ${themeFontsConf}
     echo "ok: fontconfig defaults to the look's faces"
+
+    # 13l2. The GTK named colors, one accent per look (measured in
+    #      13l4 for AA): amber on moonrise instead of Adwaita's
+    #      default blue, each look's own accent everywhere else.
+    grep -F -x "@define-color accent_bg_color #3D579A;" ${gtkCssLight}
+    grep -F -x "@define-color accent_color #3D579A;" ${gtkCssLight}
+    grep -F -x "@define-color window_bg_color #FCFBFB;" ${gtkCssLight}
+    grep -F -x "@define-color window_fg_color #1A2032;" ${gtkCssLight}
+    grep -F -x "@define-color accent_bg_color #E59560;" ${gtkCssDark}
+    grep -F -x "@define-color accent_fg_color #271A1F;" ${gtkCssDark}
+    grep -F -x "@define-color window_bg_color #271A1F;" ${gtkCssDark}
+    grep -F -x "@define-color accent_bg_color #31a9e5;" ${gtkCssBurst}
+    grep -F -x "@define-color window_bg_color #241721;" ${gtkCssBurst}
+    grep -F -x "@define-color accent_bg_color #FFA45C;" ${gtkCssMoon}
+    grep -F -x "@define-color accent_fg_color #2B3648;" ${gtkCssMoon}
+    grep -F -x "@define-color window_bg_color #2B3648;" ${gtkCssMoon}
+    grep -F -x "@define-color view_bg_color #2B3648;" ${gtkCssMoon}
+    grep -F -x "@define-color headerbar_bg_color #2B3648;" ${gtkCssMoon}
+    echo "ok: GTK named colors carry each look's accent"
+
+    # 13l3. The Qt color schemes, dark palettes for dark looks and a
+    #      light one for the light look (the preview-window mismatch
+    #      was a light palette inside a dark style): the window role
+    #      is the look's background, the text roles its foreground,
+    #      Highlight its accent. Role order is qt6ct 0.11's
+    #      `QPalette::ColorRole` (ButtonText=8, Base=9, Window=10 --
+    #      verified against its shipped `colors/simple.conf`).
+    grep -F -q "[ColorScheme]" ${qtSchemeMoon}
+    grep -F -q "active_colors=#fff6eedc, #ff2b3648" ${qtSchemeMoon}
+    grep -F -q "#ffffa45c, #ff2b3648" ${qtSchemeMoon}
+    grep -F -q "active_colors=#ff1a2032, #fffcfbfb" ${qtSchemeLight}
+    grep -F -q "#ff3d579a, #fffcfbfb" ${qtSchemeLight}
+    grep -F -q "active_colors=#fffdef1d, #ff241721" ${qtSchemeBurst}
+    grep -F -q "active_colors=#fff1e3c6, #ff271a1f" ${qtSchemeDark}
+    echo "ok: Qt schemes carry each look's palette and polarity"
+
+    # 13l4. Contrast, measured from the generated files (WCAG AA: text
+    #      4.5, the accent swatch 3.0): window text on window
+    #      background, accent text on the accent, and the accent
+    #      itself on the background, for every look's `gtk.css`.
+    python3 -c '
+    import re, sys
+    def lum(h):
+        r, g, b = (int(h[i:i+2], 16) / 255 for i in (0, 2, 4))
+        f = lambda c: c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+    def cr(a, b):
+        l1, l2 = lum(a), lum(b)
+        hi, lo = max(l1, l2), min(l1, l2)
+        return (hi + 0.05) / (lo + 0.05)
+    for path in sys.argv[1:]:
+        css = open(path).read()
+        got = dict(re.findall(r"@define-color (\w+) (#......);", css))
+        text = cr(got["window_fg_color"].lstrip("#"), got["window_bg_color"].lstrip("#"))
+        on_accent = cr(got["accent_fg_color"].lstrip("#"), got["accent_bg_color"].lstrip("#"))
+        accent = cr(got["accent_bg_color"].lstrip("#"), got["window_bg_color"].lstrip("#"))
+        assert text >= 4.5, (path, "window text", text)
+        assert on_accent >= 4.5, (path, "accent text", on_accent)
+        assert accent >= 3.0, (path, "accent swatch", accent)
+        print("ok: %s text=%.2f on-accent=%.2f accent=%.2f" % (path.split("/")[-1], text, on_accent, accent))
+    ' ${gtkCssLight} ${gtkCssDark} ${gtkCssBurst} ${gtkCssMoon}
+    echo "ok: every look's app colors pass AA"
 
     # 13m. The look's static app files apply from the flake (foot
     #      palette, starship prompt, Helix config beside its theme,

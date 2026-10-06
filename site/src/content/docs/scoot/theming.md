@@ -44,14 +44,16 @@ follow the palette:
 
 | File the profile writes | From the look | Takes effect |
 |---|---|---|
-| `~/.config/gtk-3.0/settings.ini`, `~/.config/gtk-4.0/settings.ini` | Adwaita (Adwaita-dark for a dark look), Adwaita icons, the look's UI face and cursor, the dark preference | newly started apps; running GTK apps re-read it where the toolkit watches |
-| `~/.config/qt6ct/qt6ct.conf` (through `QT_QPA_PLATFORMTHEME=qt6ct`) | the Adwaita Qt style in the look's polarity, Adwaita icons | Qt apps on restart |
-| `~/.config/fontconfig/conf.d/10-scoot-look.conf` | the UI face for sans-serif, the terminal face for monospace | `fc-cache` is not needed: fontconfig reads it on next lookup |
+| `~/.config/gtk-3.0/settings.ini`, `~/.config/gtk-4.0/settings.ini` | Adwaita (Adwaita-dark for a dark look), Adwaita icons, the look's proportional sans and cursor, the dark preference | newly started apps; running GTK apps re-read it where the toolkit watches |
+| `~/.config/gtk-3.0/gtk.css`, `~/.config/gtk-4.0/gtk.css` | the look's accent and surfaces as named colors (`accent_bg_color`, `window_bg_color`, `view_bg_color`, `headerbar_bg_color`, …) | GTK apps on restart |
+| `~/.config/qt6ct/qt6ct.conf` (through `QT_QPA_PLATFORMTHEME=qt6ct`) | the Adwaita Qt style in the look's polarity, Adwaita icons, and `custom_palette` pointing at the scheme below | Qt apps on restart |
+| `~/.config/qt6ct/colors/scoot-look.conf` | a color scheme generated from the look's palette (dark looks get a dark palette, the light look a light one) | Qt apps on restart |
+| `~/.config/fontconfig/conf.d/10-scoot-look.conf` | the proportional sans for sans-serif, the terminal face for monospace | `fc-cache` is not needed: fontconfig reads it on next lookup |
 | `~/.config/foot/foot.ini` | the example's own file | foot on restart |
 | `~/.config/starship.toml` | the example's own file | next prompt |
 | `~/.config/helix/config.toml` + `themes/<look>.toml` | the example's own files | Helix on restart |
 | `~/.config/btop/btop.conf` + `themes/<look>.theme` | the example's own files | btop on restart |
-| ReGreet (NixOS, needs `greeter.enable`) | the session wallpaper behind the login card, the dark setting, the look's CSS and UI face | next login |
+| ReGreet (NixOS, needs `greeter.enable`) | the session wallpaper behind the login card, the dark setting, the look's CSS and proportional sans | next login |
 
 `radial-burst` ships no shell, editor or monitor files, so those
 three targets are inert for it; `music-desk` ships a btop config with
@@ -72,18 +74,33 @@ is never a theme switch.
 ## What stays a static file, and why
 
 Generated from the look's palette where the format is mechanical:
-`settings.ini`, `qt6ct.conf`, the fontconfig snippet, the ReGreet
-dark setting, the cursor and font names. Installed as the example's
-own static file where the palette is hand-tuned: `foot.ini`,
-`starship.toml`, the Helix config and theme, the btop config and
-theme, and `regreet.css`. A terminal palette is sixteen hand-placed
-hues, not six bar roles projected wider — generating it would invent
-colors no one chose, so the flake applies the file instead of
-synthesizing one.
+`settings.ini`, `gtk.css`, `qt6ct.conf` and its color scheme, the
+fontconfig snippet, the ReGreet dark setting, the cursor and font
+names. Installed as the example's own static file where the palette
+is hand-tuned: `foot.ini`, `starship.toml`, the Helix config and
+theme, the btop config and theme, and `regreet.css`. A terminal
+palette is sixteen hand-placed hues, not six bar roles projected
+wider — generating it would invent colors no one chose, so the flake
+applies the file instead of synthesizing one.
 
-Qt follows polarity, font and icons rather than a per-look accent
-for the same reason: no custom palette is forced, so a Qt app reads
-as the look's dark or light sibling, not a stranger.
+The app accent is the bar's own accent, and the app surfaces are the
+bar's background and foreground — no new hues, so app text contrast
+equals bar text contrast (measured at AA in the module checks).
+Semantic colors (destructive, success, warning, error) stay the
+toolkit defaults: the look names no hues for them, and inventing any
+would break the same rule.
+
+One face stays mono on purpose: the bar keeps its Droid Sans Mono
+Nerd Font Propo, whose glyphs carry the module icons. Everything else
+that reads as UI text — GTK and Qt apps, the greeter, fontconfig
+sans-serif — gets the proportional DejaVu Sans. It is the only
+proportional face the profile already ships (the bar's own fallback
+file), so it adds zero closure; per look, its humanist warmth pairs
+with vinyl-sunset's espresso dusk, its bookish neutrality suits
+music-desk's paper, its sturdiness holds radial-burst's poster
+colors, and its open apertures stay legible on moonrise's
+translucent slate. The mono faces stay for terminals and editors
+only.
 
 ## Dark mode, X11 and Flatpak
 
@@ -136,7 +153,8 @@ A look is data, so new ones are cheap: one directory with the same
 shape as the four above — palette, `scoot.toml`, `bar.toml`,
 `regreet.css`, and a wallpaper (an image, or a palette color for a
 license-clean look like vinyl-sunset's flat espresso). Wire its six
-roles plus its dark/light polarity and its two font faces into the
+roles plus its dark/light polarity and its three font faces (bar,
+proportional sans, terminal mono) into the
 flake's look registry (`nix/modules/desktop.nix`), and a check
 renders every look into every target and fails on a missing role.
 

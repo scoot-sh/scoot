@@ -1607,13 +1607,22 @@ in
       # Dark or light: what the GTK/Qt theme, the dark-mode signal
       # and the greeter's dark setting follow.
       isDark = true;
-      # The two faces the theme carries everywhere text is drawn:
-      # the UI face (bar, greeter, GTK/Qt apps) and the terminal
-      # face (foot, fontconfig monospace). Names, resolved through
-      # fontconfig; the packages beside them live in the side
-      # modules (which own `pkgs`), so this file stays `lib`-only.
+      # The three faces the theme carries everywhere text is drawn:
+      # `ui` is the bar's face (Droid Sans Mono Nerd Font Propo: the
+      # module icons below need its Nerd glyphs, so the bar keeps this
+      # mono face); `sans` is the proportional UI sans for GTK/Qt
+      # apps, the greeter and fontconfig sans-serif (DejaVu Sans: the
+      # only proportional face the profile already ships -- the bar's
+      # own fallback file -- so it adds zero closure; its humanist
+      # warmth pairs with this look's espresso-and-orange vinyl dusk,
+      # and its open apertures stay legible on dark surfaces); `mono`
+      # is the terminal face (foot, fontconfig monospace). Names,
+      # resolved through fontconfig; the packages beside them live in
+      # the side modules (which own `pkgs`), so this file stays
+      # `lib`-only.
       fonts = {
         ui = "DroidSansM Nerd Font Propo";
+        sans = "DejaVu Sans";
         mono = "FiraCode Nerd Font";
       };
       # The example's own app files, applied from the flake instead of
@@ -1651,8 +1660,13 @@ in
       };
       nightTemp = 4000;
       isDark = false;
+      # `sans` is DejaVu Sans here too: bookish and paper-neutral, so
+      # the ink-blue accent carries the look while the type stays
+      # quiet -- and already shipped, so zero closure (see the
+      # vinyl-sunset note above for the `ui`/`sans`/`mono` split).
       fonts = {
         ui = "DroidSansM Nerd Font Propo";
+        sans = "DejaVu Sans";
         mono = "FiraCode Nerd Font";
       };
       appFiles = {
@@ -1684,8 +1698,14 @@ in
       };
       nightTemp = 3500;
       isDark = true;
+      # `sans` is DejaVu Sans: the sturdiest of the shipped faces at
+      # poster sizes, holding against this look's plum-and-yellow
+      # burst -- and this look already ships `dejavu_fonts` as its
+      # `mono`, so the sans adds nothing (see the vinyl-sunset note
+      # above for the `ui`/`sans`/`mono` split).
       fonts = {
         ui = "DroidSansM Nerd Font Propo";
+        sans = "DejaVu Sans";
         mono = "DejaVu Sans Mono";
       };
       appFiles = {
@@ -1718,8 +1738,13 @@ in
       };
       nightTemp = 3400;
       isDark = true;
+      # `sans` is DejaVu Sans: open apertures stay legible on this
+      # look's translucent slate, while the cream text and amber disc
+      # carry the night mood -- already shipped, so zero closure (see
+      # the vinyl-sunset note above for the `ui`/`sans`/`mono` split).
       fonts = {
         ui = "DroidSansM Nerd Font Propo";
+        sans = "DejaVu Sans";
         mono = "FiraCode Nerd Font";
       };
       appFiles = {

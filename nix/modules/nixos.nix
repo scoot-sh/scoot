@@ -656,8 +656,19 @@ in
             if pkgs.stdenv.hostPlatform.isLinux then pkgs.nerd-fonts.droid-sans-mono or null else null;
           defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.nerd-fonts.droid-sans-mono else null";
           description = ''
-            The look's UI face to install system-wide (the greeter's
-            font). Null installs nothing. Linux-only: null off Linux.
+            The look's bar face to install system-wide. Null installs
+            nothing. Linux-only: null off Linux.
+          '';
+        };
+
+        fonts.sansPackage = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.dejavu_fonts.minimal or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.dejavu_fonts.minimal else null";
+          description = ''
+            The look's proportional UI sans to install system-wide
+            (the greeter's font). Null installs nothing. Linux-only:
+            null off Linux.
           '';
         };
 
@@ -2054,12 +2065,12 @@ in
       {
         assertions = [
           {
-            assertion = cfg.desktop.theme.fonts.uiPackage != null;
+            assertion = cfg.desktop.theme.fonts.sansPackage != null;
             message = ''
               programs.scoot.desktop.look needs a greeter font but
-              programs.scoot.desktop.theme.fonts.uiPackage is null: set
+              programs.scoot.desktop.theme.fonts.sansPackage is null: set
               it explicitly (apply the overlay, or point at the look's
-              UI font).
+              UI sans).
             '';
           }
         ];
@@ -2076,24 +2087,24 @@ in
           # The dark/light half of the look (what the session's GTK
           # apps follow through `settings.ini`).
           settings.GTK.application_prefer_dark_theme = lib.mkDefault lookNix.isDark;
-          # The look's CSS and UI face (12 pt, the measured greeter
-          # size). An explicit `extraCss`/`font` wins over these.
+          # The look's CSS and proportional sans (12 pt, the measured
+          # greeter size). An explicit `extraCss`/`font` wins over these.
           extraCss = lib.mkDefault lookNix.appFiles.regreetCss;
           font = lib.mkDefault {
-            package = cfg.desktop.theme.fonts.uiPackage;
-            name = lookNix.fonts.ui;
+            package = cfg.desktop.theme.fonts.sansPackage;
+            name = lookNix.fonts.sans;
             size = 12;
           };
         };
 
-        # The greeter's lookup paths: the UI face (its `font` above),
+        # The greeter's lookup paths: the UI sans (its `font` above),
         # the icon theme its widgets expect, and the cursor. The
         # `!= null` guards keep a null out of the lists, so a missing
         # package fails with the assertion above rather than a type
         # error (the same guard the portal backends use).
         fonts.packages = lib.optional (
-          cfg.desktop.theme.fonts.uiPackage != null
-        ) cfg.desktop.theme.fonts.uiPackage;
+          cfg.desktop.theme.fonts.sansPackage != null
+        ) cfg.desktop.theme.fonts.sansPackage;
         environment.systemPackages =
           lib.optional (cfg.desktop.theme.icon.package != null) cfg.desktop.theme.icon.package
           ++ lib.optional (cfg.desktop.theme.cursor.package != null) cfg.desktop.theme.cursor.package;

@@ -33,6 +33,30 @@ in
   # A `#rrggbb` look token as opaque `RRGGBBAA` (fuzzel, wob).
   withAlpha = color: "${lib.removePrefix "#" color}ff";
 
+  # The app colors derived from a look's palette: the accent apps
+  # carry (the bar's own accent, so a selected row or slider reads as
+  # the look's -- amber on moonrise, not Adwaita's default blue) and
+  # the surfaces they sit on (the bar's background/foreground, so app
+  # text contrast equals bar text contrast, already AA -- measured in
+  # `nix/tests.nix`). `accentFg` is the background color: on all four
+  # looks the background on the accent passes AA (6.2-7.0) while the
+  # foreground on the accent fails (1.7-2.3), so dark text sits on the
+  # bright accent -- and a future look that breaks either pairing fails
+  # the AA content check loudly instead of shipping pale-on-pale text.
+  # Read by the GTK `gtk.css` and the Qt color scheme in
+  # `theme-home.nix`, never hand-mapped per target.
+  appColors = look: {
+    accent = look.barColors.accent;
+    accentFg = look.barColors.background;
+    windowBg = look.barColors.background;
+    windowFg = look.barColors.foreground;
+    viewBg = look.barColors.background;
+    viewFg = look.barColors.foreground;
+    headerbarBg = look.barColors.background;
+    headerbarFg = look.barColors.foreground;
+    dim = look.barColors.dim;
+  };
+
   # The one cursor for every look (Vanilla-DMZ: the classic X cursor,
   # 3.3 MiB unpacked against Bibata's 322 MiB -- measured on the
   # pinned rev -- so the fallback costs nothing). Same name and size
