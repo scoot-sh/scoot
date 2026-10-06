@@ -11425,8 +11425,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -x "style=Adwaita-Dark" ${qtDarkConf}
     grep -F -x "custom_palette=true" ${qtLightConf}
     grep -F -x "custom_palette=true" ${qtDarkConf}
-    grep -F -q "color_scheme_path=" ${qtLightConf}
-    grep -F -q "scoot-look.conf" ${qtLightConf}
+    grep -F -x "color_scheme_path=~/.config/qt6ct/colors/scoot-look.conf" ${qtLightConf}
     echo "ok: Qt config carries the look's polarity and palette"
 
     # 13l. Theme fontconfig default: the proportional sans for
