@@ -374,13 +374,12 @@ fn no_compositor_is_an_error_not_a_hang() {
     // so without one this would fail on a machine with no system fonts
     // before it ever reached the connection it is here to test.
     let scratch = common::Scratch::new("none");
-    let output = std::process::Command::new(common::scootbar_bin())
+    let output = scratch
+        .command()
         .arg("daemon")
         .arg("--font")
         .arg(scratch.font())
-        .env("XDG_RUNTIME_DIR", &scratch.0)
         .env("WAYLAND_DISPLAY", "wayland-none")
-        .env_remove("WAYLAND_SOCKET")
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
@@ -393,7 +392,9 @@ fn no_compositor_is_an_error_not_a_hang() {
 
 #[test]
 fn a_usage_error_is_status_2_and_starts_nothing() {
-    let output = std::process::Command::new(common::scootbar_bin())
+    let scratch = common::Scratch::new("usage");
+    let output = scratch
+        .command()
         .args(["daemon", "--height", "0"])
         .env_remove("WAYLAND_DISPLAY")
         .output()

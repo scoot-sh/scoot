@@ -1379,8 +1379,8 @@ jobs:
           SCOOTBAR_REQUIRE_SCOOT: "1"
           SCOOTBAR_REQUIRE_SWAY: "1"
         run: |
-          cargo nextest run -p scootbar --test bar --test hotplug --test clock --test icons --test popup --test tooltip --no-fail-fast
-          cargo test -p scootbar --test bar --test hotplug --test clock --test icons --test popup --test tooltip
+          cargo nextest run -p scootbar --test bar --test hotplug --test clock --test icons --test popup --test tooltip --test visibility --test workspaces --no-fail-fast
+          cargo test -p scootbar --test bar --test hotplug --test clock --test icons --test popup --test tooltip --test visibility --test workspaces
           # The PNG icon's end-to-end test is compiled only with its
           # feature, which the default build leaves out.
           cargo nextest run -p scootbar --features icon-image --test icons --no-fail-fast
