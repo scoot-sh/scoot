@@ -77,11 +77,16 @@ Quit is deliberately <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>e</kbd>, not
 <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>q</kbd>: one slipped Shift away from
 "close window", and a slip shouldn't end the whole session.
 
-The desktop profile adds two binds on top of these defaults:
+The desktop profile adds three groups on top of these defaults:
 <kbd>Super</kbd>+<kbd>d</kbd> opens the app launcher and
 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> its run mode (PATH
 executables beside the apps) — see
-[the desktop profile](../desktop/index.md#launcher).
+[the desktop profile](../desktop/index.md#launcher) — the Fn-row
+hardware keys (brightness, volume and mute, mic mute, media) plus
+`Print` screenshots and the `Super` desktop actions, and an
+on-screen display over the volume, brightness and mic-mute keys —
+see [the desktop profile](../desktop/index.md#hardware-keys-and-desktop-actions)
+and [the OSD](../desktop/index.md#sound-brightness-keys-and-the-on-screen-display).
 
 Under `--tty`, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F1</kbd>…<kbd>F12</kbd>
 additionally switch VTs — always winning over config binds, so the recovery
