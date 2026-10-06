@@ -213,7 +213,7 @@ no keyboard, so it has no hotkey of its own):
 
 ```toml
 [binds]
-"super+b" = "spawn scootbar msg toggle"
+"super+shift+b" = "spawn scootbar msg toggle"
 ```
 
 

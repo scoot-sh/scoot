@@ -14,41 +14,13 @@
 { lib }:
 
 let
-  # One boolean plus package override per slot that installs something.
-  # All default off/null: declared now so later children only fill bodies,
-  # never rename options. Enabling one today is accepted and inert (no
-  # packages installed, no units or files written); the description names
-  # the child ticket and the default tool it will wire.
-  slot =
-    {
-      child,
-      tool,
-      extra ? "",
-    }:
-    {
-      enable = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = ''
-          Reserved for the `${child}` child (${tool}). Off: enabling it
-          today is accepted and inert -- nothing is installed and nothing
-          runs yet.${extra}
-        '';
-      };
-      package = lib.mkOption {
-        type = lib.types.nullOr lib.types.package;
-        default = null;
-        description = ''
-          The package the `${child}` child installs for this slot (${tool}).
-          Null installs nothing.
-        '';
-      };
-    };
-
   # A slot that installs nothing, only config when its child lands
   # (output wiring, an input-method setup): a boolean alone.
   # (`keys` used to be one of these; it now owns the shared keymap
-  # below, so it declares its own subtree instead.)
+  # below, so it declares its own subtree instead. `slot` used to
+  # sit beside it -- one boolean plus package override per future
+  # piece -- until the last reserved piece (`desktop-apps`)
+  # landed and every slot carried its own options.)
   configSlot =
     { child, does }:
     {
@@ -180,6 +152,16 @@ let
       combo = "ctrl+print";
       slot = "capture";
       blurb = "screenshot a picked region into the clipboard (`grim` plus `slurp` plus `wl-copy`)";
+    };
+    network = {
+      combo = "super+w";
+      slot = "apps.network";
+      blurb = "WiFi picker (`scoot-network-pick` through `fuzzel`)";
+    };
+    bluetooth = {
+      combo = "super+b";
+      slot = "apps.bluetooth";
+      blurb = "Bluetooth picker (`scoot-bluetooth-pick` through `fuzzel`)";
     };
   };
   # Whether a notification state icon is shaped like the bar takes
@@ -1480,6 +1462,26 @@ in
           file).
         '';
       };
+      targets.network.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme the WiFi picker from the look (menu background
+          and text, selection and border from its palette -- the same
+          roles the launcher is themed from). Set to `false` to keep
+          fuzzel's own style.
+        '';
+      };
+      targets.bluetooth.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme the Bluetooth picker from the look (menu background
+          and text, selection and border from its palette -- the same
+          roles the launcher is themed from). Set to `false` to keep
+          fuzzel's own style.
+        '';
+      };
       targets.shell.enable = lib.mkOption {
         type = lib.types.bool;
         default = true;
@@ -1511,17 +1513,98 @@ in
         '';
       };
     };
-    # The terminal the default binds spawn, and a file manager.
-    # The manager is explicitly optional: nothing references one anywhere
-    # today.
+    # The terminal the default binds spawn, a file manager, and the
+    # network/Bluetooth pickers. The terminal is on with the profile
+    # (the compositor's built-in `Super+Return` spawns `foot`, so the
+    # profile installs what the bind names); the pickers are on with
+    # the profile too (keyboard-driven join/switch through the
+    # launcher's dmenu contract, completing what the bar's `network`
+    # and `bluetooth` modules display); the manager stays optional
+    # (nothing references one, and a graphical one costs a toolkit).
+    # Filled by the `desktop-apps` child. Each `package` lives beside
+    # this in the side modules (`apps-home.nix` installs for the
+    # user, `nixos.nix` system-wide), which is also where their
+    # defaults live; everything here is plain values, so this file
+    # stays `lib`-only.
+    #
+    # On with the profile (each still individually disable-able);
+    # without it, each `enable` works standalone (unthemed: a look
+    # needs the profile, and the menus need the home-manager side,
+    # the way the clipboard picker does).
     apps = {
-      terminal = slot {
-        child = "desktop-apps";
-        tool = "`foot` (already the default bind)";
+      # `foot` installed, the look's `foot.ini` applied through the
+      # theme child's `terminal` target, `TERMINAL` set for
+      # everything that asks, and the `Super+Return` bind true.
+      terminal = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Install the terminal: `foot` (its package beside this),
+            keeping the compositor's built-in `Super+Return` bind
+            true, with `TERMINAL` set beside it. Without it the bind
+            names a binary that is not installed.
+          '';
+        };
       };
-      fileManager = slot {
-        child = "desktop-apps";
-        tool = "a file manager (optional; nothing references one today)";
+      # A graphical file manager, explicitly optional: `xdg-open`
+      # answers directories through it while it is on (the directory
+      # association), and fails loud -- never wedged on a missing
+      # file -- without it. `xdg.userDirs` keeps Downloads, Pictures
+      # (where the capture slot writes) and the rest present while
+      # anything here opens files.
+      fileManager = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Install the file manager (its package beside this:
+            pcmanfm, the smallest closure of the maintained
+            graphical set -- see site/src/content/docs/desktop/index.md#terminal-files-and-removable-media
+            for the measured pick). Off: nothing references one.
+          '';
+        };
+      };
+      # WiFi through `nmcli`, picked through the launcher's dmenu
+      # contract (a saved connection switches at once; a new secured
+      # one reads its psk from the keyring's `scoot-wifi` entries, or
+      # says the one terminal command that joins it). On with the
+      # profile (still individually disable-able); without it,
+      # `enable` works standalone (unthemed: a look needs the
+      # profile, and the menu needs the home-manager side, the way
+      # the clipboard picker does). Never touches the networking
+      # service itself (no takeover: it only calls the CLI).
+      network = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Pick WiFi from the keyboard: the picker behind
+            `scoot-network-pick` (its packages beside this) listing
+            saved connections first, then the cached scan, joining
+            through `nmcli`. Without it the keymap's WiFi bind stays
+            unbound.
+          '';
+        };
+      };
+      # Bluetooth through `bluetoothctl`, picked the same way (paired
+      # devices connect/disconnect, power toggles, the audio sink
+      # switch delegating to the audio slot's helper). On with the
+      # profile (still individually disable-able); without it,
+      # `enable` works standalone (same unthemed shape as above).
+      # Never touches the Bluetooth service itself.
+      bluetooth = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Pick Bluetooth from the keyboard: the picker behind
+            `scoot-bluetooth-pick` (its packages beside this)
+            toggling paired devices and power, with an audio-sink
+            row through the audio slot's helper. Without it the
+            keymap's Bluetooth bind stays unbound.
+          '';
+        };
       };
     };
     # One keymap every other child registers into, each bind a `mkDefault`
@@ -1540,7 +1623,8 @@ in
           `mkDefault` a value you set in `settings.binds` wins
           over, one at a time). On with the profile. Binds gated on
           a future slot (launcher, clipboard, notifications,
-          capture) appear only while that slot is enabled too;
+          capture, the apps pickers) appear only while that slot is
+          enabled too;
           their keys stay reserved either way (see site/src/content/docs/desktop/index.md#hardware-keys-and-desktop-actions).
         '';
       };
@@ -1737,11 +1821,29 @@ in
       child = "desktop-input-method";
       does = "input-method wiring";
     };
-    # Removable-media automount. In the paved-path inventory but with no
-    # child filed yet; reserved here so the shell already covers it.
-    automount = slot {
-      child = "a future automount child (unfiled)";
-      tool = "`udiskie`";
+    # Removable-media automount over udisks2. Filled by the
+    # `desktop-apps` child: `udiskie` trayless (`-a -n -T`, browsing
+    # through `xdg-open` so the file manager association answers) as
+    # a user unit, with `udiskie-umount` for safe removal. The
+    # `package` lives beside this in the side modules
+    # (`apps-home.nix` installs for the user, `nixos.nix`
+    # system-wide with the udisks2 daemon it mounts through), which
+    # is also where its default lives; everything here is a plain
+    # value, so this file stays `lib`-only.
+    # On with the profile (still individually disable-able); without
+    # it, `enable` works standalone (the daemon needs the NixOS
+    # side's udisks2, the way the portal backends need that side).
+    automount = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Automount removable media on insert: trayless `udiskie`
+          (its package beside this) over the udisks2 daemon, with a
+          notification carrying a Browse action. Without it nothing
+          mounts on insert.
+        '';
+      };
     };
   };
 

@@ -470,6 +470,114 @@ in
         };
       };
 
+      # The apps slot's packages: the shapes are in `desktop.nix`
+      # (shared with the home-manager side) and the binds, the
+      # `xdg-open` plumbing and the picker scripts that run them are
+      # that side's (`apps-home.nix` and the keymap); this side
+      # installs them system-wide. The same packages as there, so
+      # either side alone names the same tools. Merged here for the
+      # same one-declaration reason as above. Linux-only: off Linux
+      # each defaults to null, which the assertions below refuse
+      # loudly. The WiFi/Bluetooth tools never touch their services:
+      # installing the CLI is not a takeover (no
+      # `networking.networkmanager`, no Bluetooth hardware switch --
+      # pinned in `nix/tests.nix`).
+      apps = desktop.options.apps // {
+        terminal = desktop.options.apps.terminal // {
+          package = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.foot or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.foot or null else null";
+            description = ''
+              The terminal to install system-wide (foot: what the
+              compositor's built-in `Super+Return` bind spawns). Null
+              installs nothing. Linux-only: null off Linux.
+            '';
+          };
+        };
+
+        fileManager = desktop.options.apps.fileManager // {
+          package = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.pcmanfm or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.pcmanfm or null else null";
+            description = ''
+              The file manager to install system-wide (pcmanfm).
+              Null installs nothing. Linux-only: null off Linux.
+            '';
+          };
+        };
+
+        network = desktop.options.apps.network // {
+          cliPackage = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.networkmanager or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.networkmanager or null else null";
+            description = ''
+              The WiFi tool to install system-wide (`nmcli`: the
+              picker lists and connects through it). Null installs
+              nothing. Linux-only: null off Linux.
+            '';
+          };
+
+          menuPackage = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null";
+            description = ''
+              The dmenu-style menu to install system-wide for the
+              WiFi picker (`fuzzel`). Null installs nothing.
+              Linux-only: null off Linux.
+            '';
+          };
+        };
+
+        bluetooth = desktop.options.apps.bluetooth // {
+          cliPackage = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.bluez or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.bluez or null else null";
+            description = ''
+              The Bluetooth tool to install system-wide
+              (`bluetoothctl`: the picker lists and connects through
+              it). Null installs nothing. Linux-only: null off
+              Linux.
+            '';
+          };
+
+          menuPackage = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null";
+            description = ''
+              The dmenu-style menu to install system-wide for the
+              Bluetooth picker (`fuzzel`). Null installs nothing.
+              Linux-only: null off Linux.
+            '';
+          };
+        };
+      };
+
+      # The automounter's package: the shape is in `desktop.nix`
+      # (shared with the home-manager side) and the user unit that
+      # runs it is that side's (`apps-home.nix`); this side installs
+      # it system-wide and runs the udisks2 daemon it mounts
+      # through. Merged here for the same one-declaration reason as
+      # above. Linux-only: off Linux it defaults to null, which the
+      # assertion below refuses loudly.
+      automount = desktop.options.automount // {
+        package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.udiskie or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.udiskie or null else null";
+          description = ''
+            The automounter to install system-wide (udiskie, run
+            trayless by the home-manager side's unit). Null installs
+            nothing. Linux-only: null off Linux.
+          '';
+        };
+      };
+
       # The privilege prompt's agent package: the shape is in
       # `desktop.nix` (shared with the home-manager side) and the user
       # unit that runs it is that side's (`auth-home.nix`); this side
@@ -1065,6 +1173,25 @@ in
       # disable-able at plain priority): the tool below installs, and
       # the user unit comes from the home-manager side.
       programs.scoot.desktop.nightlight.enable = lib.mkDefault true;
+
+      # The terminal on with the profile (still individually
+      # disable-able at plain priority): the package below installs,
+      # keeping the compositor's built-in `Super+Return` bind true.
+      # The file manager stays optional: nothing references one.
+      programs.scoot.desktop.apps.terminal.enable = lib.mkDefault true;
+
+      # Both pickers on with the profile (each still individually
+      # disable-able at plain priority): the tools below install,
+      # and the binds come from the home-manager side. The CLIs
+      # never touch their services (no takeover).
+      programs.scoot.desktop.apps.network.enable = lib.mkDefault true;
+      programs.scoot.desktop.apps.bluetooth.enable = lib.mkDefault true;
+
+      # The automounter on with the profile (still individually
+      # disable-able at plain priority): the daemon below runs and
+      # the package installs, and the user unit comes from the
+      # home-manager side.
+      programs.scoot.desktop.automount.enable = lib.mkDefault true;
     })
     # System dconf for the look's dark-mode signal: the home-manager
     # side writes `dconf.settings` (the `color-scheme` leaf in
@@ -1322,6 +1449,139 @@ in
           ++ [ "max_fps=${toString cap.maxFps}" ]
         )
         + "\n";
+    })
+    # The apps slot's system half: the terminal, the file manager and
+    # both pickers' tools on PATH. The binds, the `xdg-open` plumbing
+    # and the picker scripts are the home-manager side's
+    # (`apps-home.nix` and the keymap): without it the tools sit ready
+    # for a hand-written setup, the way a `[wallpaper]` finds scootbg
+    # on PATH without the home-manager side. The WiFi/Bluetooth CLIs
+    # never touch their services (no `networking.networkmanager`, no
+    # Bluetooth hardware switch anywhere in this module -- pinned in
+    # `nix/tests.nix`).
+    (lib.mkIf cfg.desktop.apps.terminal.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.apps.terminal.package != null;
+          message = ''
+            programs.scoot.desktop.apps.terminal.enable is set but
+            programs.scoot.desktop.apps.terminal.package is null: set
+            it explicitly (apply the overlay, or point at a foot).
+          '';
+        }
+      ];
+
+      environment.systemPackages = lib.optional (
+        cfg.desktop.apps.terminal.package != null
+      ) cfg.desktop.apps.terminal.package;
+    })
+    (lib.mkIf cfg.desktop.apps.fileManager.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.apps.fileManager.package != null;
+          message = ''
+            programs.scoot.desktop.apps.fileManager.enable is set but
+            programs.scoot.desktop.apps.fileManager.package is null:
+            set it explicitly (apply the overlay, or point at a file
+            manager).
+          '';
+        }
+      ];
+
+      environment.systemPackages = lib.optional (
+        cfg.desktop.apps.fileManager.package != null
+      ) cfg.desktop.apps.fileManager.package;
+    })
+    (lib.mkIf cfg.desktop.apps.network.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.apps.network.cliPackage != null;
+          message = ''
+            programs.scoot.desktop.apps.network.enable is set but
+            programs.scoot.desktop.apps.network.cliPackage is null:
+            set it explicitly (apply the overlay, or point at a
+            networkmanager).
+          '';
+        }
+        {
+          assertion = cfg.desktop.apps.network.menuPackage != null;
+          message = ''
+            programs.scoot.desktop.apps.network.enable is set but
+            programs.scoot.desktop.apps.network.menuPackage is null:
+            set it explicitly (apply the overlay, or point at a
+            fuzzel).
+          '';
+        }
+      ];
+
+      environment.systemPackages =
+        lib.optional (cfg.desktop.apps.network.cliPackage != null) cfg.desktop.apps.network.cliPackage
+        ++ lib.optional (cfg.desktop.apps.network.menuPackage != null) cfg.desktop.apps.network.menuPackage;
+    })
+    (lib.mkIf cfg.desktop.apps.bluetooth.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.apps.bluetooth.cliPackage != null;
+          message = ''
+            programs.scoot.desktop.apps.bluetooth.enable is set but
+            programs.scoot.desktop.apps.bluetooth.cliPackage is null:
+            set it explicitly (apply the overlay, or point at a
+            bluez).
+          '';
+        }
+        {
+          assertion = cfg.desktop.apps.bluetooth.menuPackage != null;
+          message = ''
+            programs.scoot.desktop.apps.bluetooth.enable is set but
+            programs.scoot.desktop.apps.bluetooth.menuPackage is null:
+            set it explicitly (apply the overlay, or point at a
+            fuzzel).
+          '';
+        }
+      ];
+
+      environment.systemPackages =
+        lib.optional (cfg.desktop.apps.bluetooth.cliPackage != null) cfg.desktop.apps.bluetooth.cliPackage
+        ++ lib.optional (
+          cfg.desktop.apps.bluetooth.menuPackage != null
+        ) cfg.desktop.apps.bluetooth.menuPackage;
+    })
+    # The automounter's system half: the udisks2 daemon it mounts
+    # through, and its own package on PATH. The trayless unit is the
+    # home-manager side's (`apps-home.nix`): without it the daemon
+    # sits ready for a hand-written setup, the way a `[wallpaper]`
+    # finds scootbg on PATH without the home-manager side.
+    (lib.mkIf cfg.desktop.automount.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.automount.package != null;
+          message = ''
+            programs.scoot.desktop.automount.enable is set but
+            programs.scoot.desktop.automount.package is null: set it
+            explicitly (apply the overlay, or point at a udiskie).
+          '';
+        }
+      ];
+
+      services.udisks2.enable = lib.mkDefault true;
+
+      # udisksd watches `/etc/nvme` (NVMe-oF host identity) through a
+      # GLib directory monitor, and GLib re-tries a watch on a missing
+      # path every 4 s for as long as it is missing: 15 wakeups a
+      # minute, forever, on every box without that directory (measured
+      # on the M2: 15 context switches per idle minute in udisksd's
+      # main-loop thread, all `inotify_add_watch("/etc/nvme") =
+      # ENOENT`; 0 once the directory exists). A directory turns the
+      # poll into a plain inotify watch: one empty placeholder file
+      # makes it, through `environment.etc` rather than tmpfiles so it
+      # also exists under an immutable `/etc` overlay (where tmpfiles
+      # cannot create it), and it composes with an
+      # `environment.etc."nvme/hostnqn"` of your own.
+      environment.etc."nvme/.keep" = lib.mkIf config.services.udisks2.enable { text = ""; };
+
+      environment.systemPackages = lib.optional (
+        cfg.desktop.automount.package != null
+      ) cfg.desktop.automount.package;
     })
     # The night light's system half: its tool on PATH. The unit is the
     # home-manager side's (`nightlight-home.nix`): without it the tool
