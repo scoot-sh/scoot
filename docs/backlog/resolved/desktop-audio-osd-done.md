@@ -48,7 +48,7 @@ a sink); docs in `docs/nix.md` + default-binds reference.
 
 EQ/effects (EasyEffects), per-app routing UI, screen-reader support.
 
-## Resolution (PR TBD)
+## Resolution (PR #471)
 
 Filled `desktop.audio` on branch `feat/nix-desktop-audio-osd`:
 
