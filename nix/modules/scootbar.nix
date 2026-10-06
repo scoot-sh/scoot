@@ -167,6 +167,28 @@ let
     // (notifProfile.bar.icons or { });
   notifPushNeeded =
     profileOn && profileManagesBar && notifOn && notifPkg != null && notifDaemon == "mako";
+
+  # The WiFi and Bluetooth pickers (`programs.scoot.desktop.apps` in
+  # the scoot modules, home-manager side: only that side builds the
+  # scripts), when those are imported beside this one. A click on
+  # either module then opens the same picker the keyboard binds open,
+  # fed the bar's own list: the network module's scan into
+  # `scoot-network-pick menu` (and its popup rows into `connect`), the
+  # bluetooth module's devices into `scoot-bluetooth-pick menu`. Wired
+  # only where the bar has the module built in: a `[network]` or
+  # `[bluetooth]` key in a build without it is refused at startup.
+  appsProfile = desktopProfile.apps or { };
+  appsScripts = appsProfile.scripts or { };
+  builtIn = feature: cfg.features == null || builtins.elem feature cfg.features;
+  pickerWired =
+    slot: feature:
+    profileOn
+    && profileManagesBar
+    && (appsProfile.${slot}.enable or false)
+    && (appsScripts.${slot} or null) != null
+    && builtIn feature;
+  networkPicker = "${appsScripts.network}/bin/scoot-network-pick";
+  bluetoothPicker = "${appsScripts.bluetooth}/bin/scoot-bluetooth-pick";
 in
 {
   options.programs.scootbar = {
@@ -413,6 +435,29 @@ in
           ];
         };
       };
+    })
+
+    # The apps pickers' bar half (see `pickerWired` above): each
+    # command a priority below the user's and Stylix's, the way the
+    # look's colors are, so a command set in `settings` wins per key.
+    # Like the look's colors, a bar the user turned off stays unwired.
+    (lib.mkIf (pickerWired "network" "network" && cfg.enable) {
+      programs.scootbar.settings.network = {
+        menu-command = lib.mkOptionDefault [
+          networkPicker
+          "menu"
+        ];
+        connect-command = lib.mkOptionDefault [
+          networkPicker
+          "connect"
+        ];
+      };
+    })
+    (lib.mkIf (pickerWired "bluetooth" "bluetooth" && cfg.enable) {
+      programs.scootbar.settings.bluetooth.menu-command = lib.mkOptionDefault [
+        bluetoothPicker
+        "menu"
+      ];
     })
 
     (lib.mkIf (cfg.enable && cfg.stylix.enable && stylix) {
