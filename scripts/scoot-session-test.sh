@@ -384,6 +384,24 @@ EOF
 chmod +x "$FAKES"/*
 SCOOT_FAKE="$FAKES/scoot"
 
+# A fake polkit agent: records each run (the display it saw, whether
+# the launcher scrubbed the inherited session id) and exits at once,
+# so the supervision loop respawns it every 2 s. An instant exit is
+# the harshest supervision test: every respawn is a fresh run.
+cat >"$FAKES/agent" <<'EOF'
+#!/bin/sh
+printf 'run DISPLAY=[%s] XDG_SESSION_ID=[%s]\n' "${WAYLAND_DISPLAY-unset}" "${XDG_SESSION_ID-unset}" >>"$HARNESS_STATE/agent-runs.log"
+exit 0
+EOF
+chmod +x "$FAKES/agent"
+# A long-lived agent, as the real ones are: records its pid, then waits.
+cat >"$FAKES/agent-long" <<AGENT
+#!/bin/sh
+echo \$\$ >"\$HARNESS_STATE/agent-long.pid"
+exec "$REAL_SLEEP" 600
+AGENT
+chmod +x "$FAKES/agent-long"
+
 mksock() {
     # A real unix socket at $XDG_RUNTIME_DIR/$1.
     python3 -c 'import socket,sys; s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$XDG_RUNTIME_DIR/$1"
@@ -838,6 +856,107 @@ grep -q '^XDG_SESSION_TYPE=tty$' "$HARNESS_STATE/env-manager" \
     || bad "T15: prior session type not restored on exit"
 env_has XDG_CURRENT_DESKTOP && bad "T15: defaulted desktop name leaks into the manager after quit"
 ok "T15: exit restores the prior session type and drops the defaulted desktop name"
+
+# --- T16: a configured agent spawns in the session, scrubbed --------
+# `SCOOT_POLKIT_AGENT` names the agent (a bare path, the NixOS module
+# renders the store path into the session entry): the launcher starts
+# it once the display is known -- a polkit agent registers against
+# its own logind session, and only the session scope has one -- with
+# the inherited `XDG_SESSION_ID` (the greeter's, or the console's)
+# scrubbed, so it can only register against its own scope.
+# Fail-before: without the spawn nothing answers prompts; with the id
+# inherited the agent registers against the wrong session.
+new_test 16
+export SCOOT_POLKIT_AGENT="$FAKES/agent"
+export XDG_SESSION_ID=greeter-session-id
+start_launcher
+wait_log "start scoot-session.target" || { unset SCOOT_POLKIT_AGENT XDG_SESSION_ID; bad "T16: agent login never reached the session target"; }
+i=0
+while [ "$i" -lt 100 ] && [ ! -f "$HARNESS_STATE/agent-runs.log" ]; do "$REAL_SLEEP" 0.1; i=$((i + 1)); done
+[ -f "$HARNESS_STATE/agent-runs.log" ] || { unset SCOOT_POLKIT_AGENT XDG_SESSION_ID; bad "T16: configured agent never ran"; }
+ok "T16: configured agent spawns once the session is up"
+grep -q '^run DISPLAY=\[wayland-100\]' "$HARNESS_STATE/agent-runs.log" \
+    || { unset SCOOT_POLKIT_AGENT XDG_SESSION_ID; bad "T16: agent ran before the display was known (got $(head -1 "$HARNESS_STATE/agent-runs.log"))"; }
+ok "T16: agent spawns after the display import, seeing the session display"
+grep -q 'XDG_SESSION_ID=\[unset\]$' "$HARNESS_STATE/agent-runs.log" \
+    || { unset SCOOT_POLKIT_AGENT XDG_SESSION_ID; bad "T16: agent inherited XDG_SESSION_ID (got $(head -1 "$HARNESS_STATE/agent-runs.log"))"; }
+ok "T16: agent runs with the inherited session id scrubbed"
+wait_blocked "T16"
+RC="$(end_session)"
+unset SCOOT_POLKIT_AGENT XDG_SESSION_ID
+[ "$RC" = "0" ] || bad "T16: launcher exit $RC"
+if grep -q -F "scoot-shutdown.target" "$HARNESS_STATE/calls.log"; then
+    ok "T16: agent login tears the session down on exit"
+else
+    bad "T16: agent login never reached the shutdown target"
+fi
+
+# --- T17: a dead agent restarts --------------------------------------
+# The fake exits at once, so the run count must grow while the
+# session stands (the harness fakes `sleep`, so this proves restart,
+# not the 2 s backoff -- that is in the loop above, by reading).
+# Fail-before: a bare `&` leaves one run and never restarts, failing
+# every later prompt silently until re-login.
+new_test 17
+export SCOOT_POLKIT_AGENT="$FAKES/agent"
+start_launcher
+wait_log "start scoot-session.target" || { unset SCOOT_POLKIT_AGENT; bad "T17: agent login never reached the session target"; }
+i=0
+while [ "$i" -lt 100 ] && [ ! -f "$HARNESS_STATE/agent-runs.log" ]; do "$REAL_SLEEP" 0.1; i=$((i + 1)); done
+[ -f "$HARNESS_STATE/agent-runs.log" ] || { unset SCOOT_POLKIT_AGENT; bad "T17: configured agent never ran"; }
+before="$(wc -l <"$HARNESS_STATE/agent-runs.log")"
+"$REAL_SLEEP" 2.5
+after="$(wc -l <"$HARNESS_STATE/agent-runs.log")"
+[ "$after" -gt "$before" ] || { unset SCOOT_POLKIT_AGENT; bad "T17: dead agent never restarted (runs stayed at $before)"; }
+ok "T17: dead agent restarts ($before -> $after runs)"
+wait_blocked "T17"
+RC="$(end_session)"
+unset SCOOT_POLKIT_AGENT
+[ "$RC" = "0" ] || bad "T17: launcher exit $RC"
+
+# --- T19: ending the session stops a running agent ------------------
+# A real agent lives for the whole session. Stopping the watcher alone
+# would orphan it into the scope, still answering prompts for a session
+# that is gone (and on the `die` path, for one that never started).
+# Fail-before: the agent's pid outlives the launcher.
+new_test 19
+export SCOOT_POLKIT_AGENT="$FAKES/agent-long"
+start_launcher
+wait_log "start scoot-session.target" || { unset SCOOT_POLKIT_AGENT; bad "T19: agent login never reached the session target"; }
+i=0
+while [ "$i" -lt 100 ] && [ ! -s "$HARNESS_STATE/agent-long.pid" ]; do "$REAL_SLEEP" 0.1; i=$((i + 1)); done
+[ -s "$HARNESS_STATE/agent-long.pid" ] || { unset SCOOT_POLKIT_AGENT; bad "T19: long-lived agent never ran"; }
+agent_long_pid="$(cat "$HARNESS_STATE/agent-long.pid")"
+kill -0 "$agent_long_pid" 2>/dev/null || { unset SCOOT_POLKIT_AGENT; bad "T19: long-lived agent is not running"; }
+wait_blocked "T19"
+RC="$(end_session)"
+unset SCOOT_POLKIT_AGENT
+[ "$RC" = "0" ] || bad "T19: launcher exit $RC"
+i=0
+while [ "$i" -lt 30 ] && kill -0 "$agent_long_pid" 2>/dev/null; do "$REAL_SLEEP" 0.1; i=$((i + 1)); done
+if kill -0 "$agent_long_pid" 2>/dev/null; then
+    kill "$agent_long_pid" 2>/dev/null
+    bad "T19: the agent outlived the session (pid $agent_long_pid)"
+fi
+ok "T19: ending the session stops the running agent"
+
+# --- T18: a missing agent binary is loud, not a wedge ----------------
+# A set-but-not-executable path notes once on stderr and the login
+# proceeds without prompts (polkit's own no-agent refusal covers
+# privileged actions from there). Fail-before: blindly executing it
+# loops a failing spawn every 2 s, spamming the greeter log.
+new_test 18
+export SCOOT_POLKIT_AGENT="$FAKES/no-such-agent"
+start_launcher
+wait_stderr "SCOOT_POLKIT_AGENT names nothing executable" || { unset SCOOT_POLKIT_AGENT; bad "T18: missing agent binary noted nothing"; }
+ok "T18: missing agent binary notes once on stderr"
+wait_log "start scoot-session.target" || { unset SCOOT_POLKIT_AGENT; bad "T18: login without an agent never reached the session target"; }
+ok "T18: login proceeds without prompts when the agent is missing"
+[ ! -f "$HARNESS_STATE/agent-runs.log" ] || { unset SCOOT_POLKIT_AGENT; bad "T18: missing agent binary ran anyway"; }
+wait_blocked "T18"
+RC="$(end_session)"
+unset SCOOT_POLKIT_AGENT
+[ "$RC" = "0" ] || bad "T18: launcher exit $RC"
 
 echo "---"
 echo "$PASS/$TOTAL asserts passed"

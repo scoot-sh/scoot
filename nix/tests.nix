@@ -151,6 +151,20 @@
 #   0..7200, a multiplier outside 0.1..10, a coordinate outside its
 #   degrees, one coordinate without the other, and gammastep with no
 #   location each fail eval;
+#   the privilege prompt and the keyring (`desktop-auth-secrets`
+#   child) run with the profile -- the polkit agent spawned in-scope
+#   by the session leader (polkit-gnome by default,
+#   lxqt-policykit-agent and hyprpolkitagent selectable through
+#   `daemon`, each rendering its own entry command; a user unit could
+#   never register, proven live), the polkit authority running
+#   beside it, and gnome-keyring D-Bus activated (no unit:
+#   `--components=secrets` on the first call) with `secret-tool`
+#   on PATH; the greetd PAM pair (an `auth` rule caching the login
+#   password beside the `login` substack, a `session` rule with
+#   `auto_start`, each ten past it -- checked against nixpkgs' own
+#   modules in a real NixOS evaluation, which also proves the
+#   `login` service keeps no keyring rule and no pair lands without
+#   greetd); a null tool and an unknown daemon each fail eval;
 #   the power policy (`desktop-power` child) is opt-in (never with
 #   the profile): PPD as the system service plus the keymap's
 #   `Super+p` switch (power-saver, balanced, performance, through
@@ -173,13 +187,13 @@
 #   dump tool, a negative hide timeout and an unknown `daemon` each
 #   fail eval;
 #   every profile unit (the idle pair, mako, the bar feed, both
-#   every profile unit (the idle pair, mako, the bar feed, both
 #   clipboard watchers, the night light, the OSD, and the
-#   profile-managed bar -- never the standalone bar) starts in `scoot-session.target`,
-#   never the shared `graphical-session.target`, so no other desktop
-#   starts them; the home-manager side installs that target itself
-#   (present exactly while a unit can want it), which is what carries
-#   a launcher-less setup too;
+#   profile-managed bar -- never the standalone bar) starts in
+#   `scoot-session.target`, never the shared
+#   `graphical-session.target`, so no other desktop starts them; the
+#   home-manager side installs that target itself (present exactly
+#   while a unit can want it), which is what carries a launcher-less
+#   setup too;
 #   every remaining future slot
 #   defaults off and inert; `enable` without scoot, a look without the
 #   profile, and an unknown look each fail eval;
@@ -406,6 +420,29 @@ let
       type = lib.types.listOf lib.types.str;
       default = [ ];
     };
+    # The privilege prompt's authority (polkitd) and the keyring's
+    # D-Bus activation files, wrapper and greetd login path: plain
+    # values the pins read, like the logind and PAM stubs above. The
+    # greetd switch is nixpkgs' own option on real NixOS (its greetd
+    # module); here it only gates the PAM pair, which the real-NixOS
+    # pins below check against the real modules.
+    options.security.polkit.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.services.dbus.packages = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+    };
+    options.security.wrappers = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+    # The greetd login switch is nixpkgs' own option on real NixOS
+    # (its greetd module); in the stub evaluations below it comes
+    # from `regreetStubs`, which rides along in every NixOS
+    # evaluation -- it only gates the PAM pair, which the real-NixOS
+    # pins check against the real modules.
   };
 
   # Stand-ins for what nixpkgs' own regreet module
@@ -880,6 +917,17 @@ let
     enable = true;
     desktop.enable = true;
     desktop.power.enable = true;
+    greeter.enable = true;
+  };
+  # The auth/secrets pair in a real NixOS evaluation: the polkit
+  # authority, the keyring's D-Bus files and wrapper, and the greetd
+  # PAM pair against nixpkgs' own modules (not the stubs) -- in
+  # particular the merged rule order beside greetd's own `login`
+  # substack. Needs the greeter: without a greetd login there is no
+  # stack to extend.
+  osRealAuth = evalRealNixos {
+    enable = true;
+    desktop.enable = true;
     greeter.enable = true;
   };
   hmFlake = evalHomeWith flake.homeModule pkgs {
@@ -2311,6 +2359,121 @@ let
     package = fakePkg;
     desktop.enable = true;
     desktop.nightlight.package = null;
+  };
+
+  # --- privilege prompt + keyring (`programs.scoot.desktop.auth`,
+  # `programs.scoot.desktop.secrets`) evaluations ---
+  #
+  # The profile: both slots on (the agent named in the entry, the
+  # secrets client on PATH; the daemon is D-Bus activated from the
+  # NixOS side, so no keyring unit here).
+  hmAuth = evalHome {
+    enable = true;
+    desktop.enable = true;
+  };
+  # ...one per remaining agent (the default rides on `hmAuth`)...
+  hmAuthLxqt = evalHome {
+    enable = true;
+    desktop.auth.enable = true;
+    desktop.auth.daemon = "lxqt";
+  };
+  hmAuthHypr = evalHome {
+    enable = true;
+    desktop.auth.enable = true;
+    desktop.auth.daemon = "hyprpolkit";
+  };
+  # ...the slots off (no agent package, no entry env, no client)...
+  hmAuthOff = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.auth.enable = false;
+    desktop.secrets.enable = false;
+  };
+  # ...standalone (no profile): the agent named in the entry, the
+  # client installs, no target file (no unit wants the scope)...
+  hmAuthStandalone = evalHome {
+    enable = true;
+    desktop.auth.enable = true;
+    desktop.secrets.enable = true;
+  };
+  # Refusals: a null beside `enable` (each pinned by message in
+  # `_authPins`)...
+  hmAuthNoPkg = evalHome {
+    enable = true;
+    desktop.auth.enable = true;
+    desktop.auth.package = null;
+  };
+  hmSecretsNoPkg = evalHome {
+    enable = true;
+    desktop.secrets.enable = true;
+    desktop.secrets.package = null;
+  };
+  hmSecretsNoClient = evalHome {
+    enable = true;
+    desktop.secrets.enable = true;
+    desktop.secrets.clientPackage = null;
+  };
+  # ...and an unknown daemon, which is an option type error (the
+  # `enum`'s own message names the valid values), caught here by
+  # `tryEval`.
+  hmAuthDaemonBogus =
+    builtins.tryEval
+      (evalHome {
+        enable = true;
+        desktop.auth.enable = true;
+        desktop.auth.daemon = "bogus-daemon";
+      }).config.programs.scoot.desktop.auth.daemon;
+
+  # --- auth/secrets system evaluations ---
+  osAuth = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  osAuthOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.auth.enable = false;
+    desktop.secrets.enable = false;
+  };
+  osAuthStandalone = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.auth.enable = true;
+    desktop.secrets.enable = true;
+  };
+  osAuthNoPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.auth.package = null;
+  };
+  osSecretsNoPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.secrets.package = null;
+  };
+  osSecretsNoClient = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.secrets.clientPackage = null;
+  };
+  # ...one per remaining agent (its command in the entry, pinned by
+  # content below)...
+  osAuthLxqt = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.auth.daemon = "lxqt";
+  };
+  osAuthHypr = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.auth.daemon = "hyprpolkit";
   };
   # --- power policy (`programs.scoot.desktop.power`) evaluations ---
   #
@@ -3849,6 +4012,53 @@ let
           osRealGreeterPower.config.environment.etc."systemd/logind.conf".text;
         true
       )
+      # The auth/secrets pair in a real NixOS evaluation beside the
+      # greeter: the authority on, the keyring's D-Bus files and
+      # wrapper present, and the unlock pair merged into greetd's own
+      # stacks beside its `login` substack (each ten past it) -- while
+      # the `login` service keeps no active keyring rule (the change
+      # is confined to greetd). (Same `allAssertionsHold` caveat as
+      # above.)
+      (
+        assert osRealAuth.config.security.polkit.enable;
+        assert osRealAuth.config.services.greetd.enable;
+        assert
+          osRealAuth.config.security.pam.services.greetd.rules.auth.gnome_keyring.control == "optional";
+        assert lib.hasInfix "pam_gnome_keyring"
+          osRealAuth.config.security.pam.services.greetd.rules.auth.gnome_keyring.modulePath;
+        assert
+          osRealAuth.config.security.pam.services.greetd.rules.auth.gnome_keyring.order
+          == osRealAuth.config.security.pam.services.greetd.rules.auth.login.order + 10;
+        assert
+          osRealAuth.config.security.pam.services.greetd.rules.session.gnome_keyring.control == "optional";
+        assert
+          osRealAuth.config.security.pam.services.greetd.rules.session.gnome_keyring.settings.auto_start
+          == true;
+        assert
+          osRealAuth.config.security.pam.services.greetd.rules.session.gnome_keyring.order
+          == osRealAuth.config.security.pam.services.greetd.rules.session.login.order + 10;
+        assert
+          !((osRealAuth.config.security.pam.services.login.rules.auth.gnome_keyring or { }).enable or false);
+        assert
+          !((osRealAuth.config.security.pam.services.login.rules.session.gnome_keyring or { }).enable or false
+          );
+        assert lib.any (p: (p.pname or "") == "polkit-gnome") osRealAuth.config.environment.systemPackages;
+        assert lib.any (p: (p.pname or "") == "gnome-keyring") osRealAuth.config.environment.systemPackages;
+        true
+      )
+      # ...and without the greeter the PAM pair stays out (no login
+      # path, no stack to extend): the idle evaluation above enables
+      # no greetd, so greetd's service owns no active keyring rule
+      # there (nixpkgs' own template carries the rule name disabled
+      # on every default-rules service -- the pin checks `enable`,
+      # not presence).
+      (
+        assert
+          !(((osRealIdle.config.security.pam.services.greetd or { }).rules.auth.gnome_keyring or { }).enable
+            or false
+          );
+        true
+      )
       # The documented install configs (desktop/index.md) evaluate with
       # the profile on: the minimal NixOS desktop, the GPU-package plus
       # opt-in-greeter variant, and standalone home-manager. A renamed
@@ -4052,6 +4262,16 @@ let
   sessionExe = hmFull.config.xdg.configFile."scoot/session.sh".executable;
   desktopPkg = builtins.head osSession.config.services.displayManager.sessionPackages;
   desktopFile = "${desktopPkg}/share/wayland-sessions/scoot.desktop";
+  # The default entry with the prompt on (its `Exec` carries the
+  # agent for the leader to spawn), off (plain launcher), and one
+  # per remaining agent -- content-pinned in the shell checks below.
+  authEntryFile = "${builtins.head osAuth.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
+  authOffEntryFile = "${builtins.head osAuthOff.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
+  authLxqtEntryFile = "${builtins.head osAuthLxqt.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
+  authHyprEntryFile = "${builtins.head osAuthHypr.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
+  # The session leader both entries run, as it ships in the tree
+  # (eval reads it as source -- the harness drives its behavior).
+  launcherScript = builtins.readFile ../resources/scoot-session;
   # The launcher's units, as the entry's configuration renders them.
   sessionServiceText = osSession.config.systemd.user.units."scoot.service".text;
   sessionServiceLines = lib.splitString "\n" sessionServiceText;
@@ -4531,12 +4751,23 @@ let
       assert hmDesk.config.programs.scoot.desktop.theme.targets.capture.enable;
       true
     )
+    # ...the privilege prompt and the keyring on with the profile
+    # (the `desktop-auth-secrets` child): the agent behind its
+    # default daemon, the keyring behind its only daemon...
     (
-      assert !hmDesk.config.programs.scoot.desktop.auth.enable;
+      assert hmDesk.config.programs.scoot.desktop.auth.enable;
       true
     )
     (
-      assert !hmDesk.config.programs.scoot.desktop.secrets.enable;
+      assert hmDesk.config.programs.scoot.desktop.auth.daemon == "gnome";
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.secrets.enable;
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.desktop.secrets.daemon == "gnome-keyring";
       true
     )
     # ...the audio slot on with the profile (the
@@ -4678,7 +4909,8 @@ let
     # policy's five tools, the notification daemon, the launcher
     # package and its script, the clipboard slot's three, its picker
     # script, the capture slot's four, the audio slot's OSD and its
-    # four scripts, the night light's tool, and the keymap's three,
+    # four scripts, the night light's tool, the agent and the
+    # secrets client, and the keymap's three,
     # all on with the profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
@@ -4721,6 +4953,8 @@ let
           (slotScriptDrv hmDeskLookMusic "scoot-brightness")
           (slotScriptDrv hmDeskLookMusic "scoot-audio-sink")
           pkgs.wlsunset
+          pkgs.polkit_gnome
+          pkgs.libsecret
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -4916,6 +5150,54 @@ let
     )
     (
       assert lib.any (p: (p.pname or "") == "wob") osDesk.config.environment.systemPackages;
+      true
+    )
+    # ...the privilege prompt on with it: the polkit authority
+    # running, the default agent on PATH...
+    (
+      assert osDesk.config.programs.scoot.desktop.auth.enable;
+      true
+    )
+    (
+      assert osDesk.config.programs.scoot.desktop.auth.daemon == "gnome";
+      true
+    )
+    (
+      assert osDesk.config.security.polkit.enable;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "polkit-gnome") osDesk.config.environment.systemPackages;
+      true
+    )
+    # ...the keyring on with it: the daemon and its client on PATH,
+    # its D-Bus activation files published, the IPC-lock wrapper
+    # beside them...
+    (
+      assert osDesk.config.programs.scoot.desktop.secrets.enable;
+      true
+    )
+    (
+      assert osDesk.config.programs.scoot.desktop.secrets.daemon == "gnome-keyring";
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "gnome-keyring") osDesk.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "libsecret") osDesk.config.environment.systemPackages;
+      true
+    )
+    (
+      assert
+        osDesk.config.services.dbus.packages == [ osDesk.config.programs.scoot.desktop.secrets.package ];
+      true
+    )
+    (
+      assert
+        osDesk.config.security.wrappers.gnome-keyring-daemon.source
+        == "${osDesk.config.programs.scoot.desktop.secrets.package}/bin/gnome-keyring-daemon";
       true
     )
     # ...a future slot on is accepted and inert there too...
@@ -5179,14 +5461,18 @@ let
       assert hmNightStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target";
       true
     )
+    (
+      assert !(hmAuthStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target");
+      true
+    )
     # ...and absent with nothing to scope (an idle target file with no
     # unit wanting it starts nothing, so none is written).
     (
       assert !(hmOff.config.xdg.configFile ? "systemd/user/scoot-session.target");
       true
     )
-    # No profile unit is left on the shared target: besides the four
-    # pins above (idle, mako, clipboard, audio), the feed and the
+    # No profile unit is left on the shared target: besides the five
+    # pins above (idle, mako, clipboard, audio, auth), the feed and the
     # profile-managed bar ride the same scope...
     (
       assert hmAudio.config.systemd.user.services.scoot-osd.Unit.PartOf == [ "scoot-session.target" ];
@@ -5365,7 +5651,7 @@ let
     ) retryUnits)
     # ...and no other profile unit smuggles either key into its
     # service section either (the sweep: every unit the profile can
-    # install, not just the retrying seven)...
+    # install, not just the retrying eight)...
     ++ (map (
       name:
       (
@@ -5466,16 +5752,17 @@ let
         hmIdle.config.systemd.user.services.scoot-idle.Service.ExecStart;
       true
     )
-    # ...exactly the twenty-three packages installed (swayidle, dim,
+    # ...exactly the thirty packages installed (swayidle, dim,
     # off, locker, inhibitor, mako, the clipboard slot's three, its
     # picker script, the launcher package and its script, the capture
-    # slot's four tools and its three scripts, the night light's tool
-    # -- no scoot package
+    # slot's four tools and its three scripts, the night light's
+    # tool, the OSD and its four scripts, the agent and the secrets
+    # client -- no scoot package
     # set here, so nothing else -- plus the keymap's brightness,
     # volume and media tools; `brightnessctl` and `fuzzel` each serve
     # two features, so each appears twice).
     (
-      assert builtins.length hmIdle.config.home.packages == 28;
+      assert builtins.length hmIdle.config.home.packages == 30;
       true
     )
     (
@@ -5506,6 +5793,8 @@ let
           (slotScriptDrv hmIdle "scoot-brightness")
           (slotScriptDrv hmIdle "scoot-audio-sink")
           pkgs.wlsunset
+          pkgs.polkit_gnome
+          pkgs.libsecret
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5584,6 +5873,8 @@ let
           (slotScriptDrv hmIdleOff "scoot-brightness")
           (slotScriptDrv hmIdleOff "scoot-audio-sink")
           pkgs.wlsunset
+          pkgs.polkit_gnome
+          pkgs.libsecret
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5594,8 +5885,8 @@ let
     # leaves (no config, no package, four policy tools plus mako, the
     # clipboard slot's three, its picker script, the launcher package
     # and its script, the capture slot's four, the audio slot's OSD
-    # and its four scripts, the night light's tool, and the keymap's
-    # three
+    # and its four scripts, the night light's tool, the agent and
+    # the secrets client, and the keymap's three
     # left).
     (
       assert allAssertionsHold hmLockOff.config;
@@ -5610,14 +5901,15 @@ let
       true
     )
     (
-      assert builtins.length hmLockOff.config.home.packages == 27;
+      assert builtins.length hmLockOff.config.home.packages == 29;
       true
     )
     # The inhibitor off: the policy without the audio hold (four
     # policy tools plus mako, the clipboard slot's three, its picker
     # script, the launcher package and its script, the capture slot's
     # four, the audio slot's OSD and its four scripts, the night
-    # light's tool, and the keymap's three).
+    # light's tool, the agent and the secrets client, and the
+    # keymap's three).
     (
       assert allAssertionsHold hmInhibitOff.config;
       true
@@ -5627,7 +5919,7 @@ let
       true
     )
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 27;
+      assert builtins.length hmInhibitOff.config.home.packages == 29;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -5734,8 +6026,9 @@ let
     )
 
     # NixOS: the profile installs the five policy tools, mako, the
-    # launcher, the clipboard slot's three, the capture slot's five
-    # and the keymap's three
+    # launcher, the clipboard slot's three, the capture slot's five,
+    # the agent, the daemon and the secrets client, and the keymap's
+    # three
     # beside scoot and scootbg, locks docked lids, and names the
     # locker's PAM service -- staying additive (no default session,
     # ever)...
@@ -5766,6 +6059,9 @@ let
           pkgs.wob
           pkgs.pipewire
           pkgs.wlsunset
+          pkgs.polkit_gnome
+          pkgs.gnome-keyring
+          pkgs.libsecret
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5820,6 +6116,9 @@ let
           pkgs.wob
           pkgs.pipewire
           pkgs.wlsunset
+          pkgs.polkit_gnome
+          pkgs.gnome-keyring
+          pkgs.libsecret
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -5860,6 +6159,9 @@ let
           pkgs.wob
           pkgs.pipewire
           pkgs.wlsunset
+          pkgs.polkit_gnome
+          pkgs.gnome-keyring
+          pkgs.libsecret
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -6892,14 +7194,14 @@ let
     # (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the clipboard slot's three plus the capture
     # slot's four plus the audio slot's two plus the night light's
-    # one: the profile is
-    # on in this evaluation, so its slot is open).
+    # one plus the agent's one plus the keyring's two: the profile
+    # is on in this evaluation, so its slot is open).
     (
       assert hmLaunch.config.programs.scoot.desktop.launcher.package == null;
       true
     )
     (
-      assert builtins.length (failing hmLaunch.config) == 17;
+      assert builtins.length (failing hmLaunch.config) == 20;
       true
     )
     (
@@ -6913,7 +7215,7 @@ let
     )
     # ...refused loudly there too.
     (
-      assert builtins.length (failing osLaunch.config) == 18;
+      assert builtins.length (failing osLaunch.config) == 21;
       true
     )
   ];
@@ -7518,6 +7820,292 @@ let
     )
   ];
 
+  # --- privilege prompt + keyring (`desktop-auth-secrets` child) ---
+  _authPins = lib.optionals isLinux [
+    # Home-manager: both slots on with the profile (the default agent
+    # beside the profile's own, its unit; the secrets client on PATH
+    # while the daemon stays a D-Bus activation)...
+    (
+      assert allAssertionsHold hmAuth.config;
+      true
+    )
+    (
+      assert hmAuth.config.programs.scoot.desktop.auth.enable;
+      true
+    )
+    (
+      assert hmAuth.config.programs.scoot.desktop.auth.daemon == "gnome";
+      true
+    )
+    # ...running stock nixpkgs polkit-gnome (the same derivation both
+    # sides install, so a divergent package fails here)...
+    (
+      assert hmAuth.config.programs.scoot.desktop.auth.package.drvPath == pkgs.polkit_gnome.drvPath;
+      true
+    )
+    (
+      assert osAuth.config.programs.scoot.desktop.auth.package.drvPath == pkgs.polkit_gnome.drvPath;
+      true
+    )
+    # ...installed beside the profile's own -- and deliberately NOT
+    # as a user unit: a polkit agent registers against its own logind
+    # session, and a user unit never joins one (proven live: the
+    # unit's agent stays connected but unregistered). The agent runs
+    # as a child of the session leader instead, named through the
+    # session entry's `SCOOT_POLKIT_AGENT` (pinned by content below) --
+    # so no unit here, on any side...
+    (
+      assert lib.any (p: (p.pname or "") == "polkit-gnome") hmAuth.config.home.packages;
+      true
+    )
+    (
+      assert !(hmAuth.config.systemd.user.services ? scoot-polkit-agent);
+      true
+    )
+    # ...while the launcher carries the spawn contract (env-gated, so
+    # bare sessions behave exactly as before; supervised, so a dead
+    # agent restarts; scrubbed, so it can only register against its
+    # own scope -- the harness `scripts/scoot-session-test.sh`
+    # T16-T18 drives the behavior, these pin the identifiers it
+    # depends on)...
+    (
+      assert lib.hasInfix "SCOOT_POLKIT_AGENT" launcherScript;
+      true
+    )
+    (
+      assert lib.hasInfix "env -u XDG_SESSION_ID" launcherScript;
+      true
+    )
+    (
+      assert lib.hasInfix "agent_watch" launcherScript;
+      true
+    )
+    # ...the keyring behind its only daemon (its package beside the
+    # profile's own, its client on PATH, no unit: D-Bus activated)...
+    (
+      assert hmAuth.config.programs.scoot.desktop.secrets.enable;
+      true
+    )
+    (
+      assert hmAuth.config.programs.scoot.desktop.secrets.daemon == "gnome-keyring";
+      true
+    )
+    (
+      assert hmAuth.config.programs.scoot.desktop.secrets.package.drvPath == pkgs.gnome-keyring.drvPath;
+      true
+    )
+    (
+      assert hmAuth.config.programs.scoot.desktop.secrets.clientPackage.drvPath == pkgs.libsecret.drvPath;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "libsecret") hmAuth.config.home.packages;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "gnome-keyring") hmAuth.config.home.packages);
+      true
+    )
+    (
+      assert !(hmAuth.config.systemd.user.services ? scoot-keyring);
+      true
+    )
+    # ...one per remaining agent (its derivation, its command)...
+    (
+      assert allAssertionsHold hmAuthLxqt.config;
+      true
+    )
+    (
+      assert
+        hmAuthLxqt.config.programs.scoot.desktop.auth.package.drvPath == pkgs.lxqt.lxqt-policykit.drvPath;
+      true
+    )
+    # ...each remaining agent's command rendering into the entry
+    # (pinned by content below: the home-manager side carries no
+    # command, only the package)...
+    (
+      assert !(hmAuthLxqt.config.systemd.user.services ? scoot-polkit-agent);
+      true
+    )
+    (
+      assert allAssertionsHold hmAuthHypr.config;
+      true
+    )
+    (
+      assert
+        hmAuthHypr.config.programs.scoot.desktop.auth.package.drvPath == pkgs.hyprpolkitagent.drvPath;
+      true
+    )
+    (
+      assert !(hmAuthHypr.config.systemd.user.services ? scoot-polkit-agent);
+      true
+    )
+    # The slots off: no agent, no unit, no client beyond the
+    # profile's own...
+    (
+      assert allAssertionsHold hmAuthOff.config;
+      true
+    )
+    (
+      assert !(hmAuthOff.config.systemd.user.services ? scoot-polkit-agent);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "polkit-gnome") hmAuthOff.config.home.packages);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "libsecret") hmAuthOff.config.home.packages);
+      true
+    )
+    # ...standalone (no profile): the agent and its unit run, the
+    # client installs, and the session scope is installed for them...
+    (
+      assert allAssertionsHold hmAuthStandalone.config;
+      true
+    )
+    (
+      assert !(hmAuthStandalone.config.systemd.user.services ? scoot-polkit-agent);
+      true
+    )
+    (
+      assert !(hmAuthStandalone.config.xdg.configFile ? "systemd/user/scoot-session.target");
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "libsecret") hmAuthStandalone.config.home.packages;
+      true
+    )
+    # ...and each refusal naming its package on this side as well...
+    (
+      assert builtins.length (failing hmAuthNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "auth.package is null" m) (failing hmAuthNoPkg.config);
+      true
+    )
+    (
+      assert builtins.length (failing hmSecretsNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "secrets.package is null" m) (failing hmSecretsNoPkg.config);
+      true
+    )
+    (
+      assert builtins.length (failing hmSecretsNoClient.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "secrets.clientPackage is null" m) (
+        failing hmSecretsNoClient.config
+      );
+      true
+    )
+    # ...and an unknown daemon, which is an option type error (the
+    # `enum`'s own message names the valid values).
+    (
+      assert !hmAuthDaemonBogus.success;
+      true
+    )
+    # NixOS: both slots on with the profile (the authority running,
+    # the agent on PATH; the daemon and its client on PATH, its
+    # D-Bus files published, its wrapper beside them)...
+    (
+      assert allAssertionsHold osAuth.config;
+      true
+    )
+    (
+      assert osAuth.config.security.polkit.enable;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "polkit-gnome") osAuth.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "gnome-keyring") osAuth.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "libsecret") osAuth.config.environment.systemPackages;
+      true
+    )
+    (
+      assert
+        osAuth.config.services.dbus.packages == [ osAuth.config.programs.scoot.desktop.secrets.package ];
+      true
+    )
+    (
+      assert osAuth.config.security.wrappers.gnome-keyring-daemon.capabilities == "cap_ipc_lock=ep";
+      true
+    )
+    # ...the slots off: no authority default, no files, no wrapper...
+    (
+      assert allAssertionsHold osAuthOff.config;
+      true
+    )
+    (
+      assert !osAuthOff.config.security.polkit.enable;
+      true
+    )
+    (
+      assert osAuthOff.config.services.dbus.packages == [ ];
+      true
+    )
+    (
+      assert osAuthOff.config.security.wrappers == { };
+      true
+    )
+    (
+      assert
+        !(lib.any (p: (p.pname or "") == "polkit-gnome") osAuthOff.config.environment.systemPackages);
+      true
+    )
+    # ...standalone (no profile): the authority and the tools without
+    # the session entry...
+    (
+      assert allAssertionsHold osAuthStandalone.config;
+      true
+    )
+    (
+      assert osAuthStandalone.config.security.polkit.enable;
+      true
+    )
+    (
+      assert osAuthStandalone.config.services.dbus.packages != [ ];
+      true
+    )
+    # ...and each refusal naming its package on this side as well...
+    (
+      assert builtins.length (failing osAuthNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "auth.package is null" m) (failing osAuthNoPkg.config);
+      true
+    )
+    (
+      assert builtins.length (failing osSecretsNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "secrets.package is null" m) (failing osSecretsNoPkg.config);
+      true
+    )
+    (
+      assert builtins.length (failing osSecretsNoClient.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "secrets.clientPackage is null" m) (
+        failing osSecretsNoClient.config
+      );
+      true
+    )
+  ];
+
   _darwinAudioPins = lib.optionals (!isLinux) [
     # Home-manager: every tool null, nothing installed for the slot...
     (
@@ -7559,6 +8147,78 @@ let
     )
   ];
 
+  # --- auth/secrets slots off Linux (fail `nix flake check` at eval) ---
+  #
+  # The tools above are Linux-only: off Linux each package defaults to
+  # null, which the slot's own assertions refuse loudly instead of
+  # installing nothing silently. Empty off Linux (the Linux check
+  # above is where the slot is pinned).
+  _darwinAuthPins = lib.optionals (!isLinux) [
+    # Home-manager: every tool null, nothing installed for the slot...
+    (
+      assert hmAuth.config.programs.scoot.desktop.auth.package == null;
+      true
+    )
+    (
+      assert hmAuth.config.programs.scoot.desktop.secrets.package == null;
+      true
+    )
+    (
+      assert hmAuth.config.programs.scoot.desktop.secrets.clientPackage == null;
+      true
+    )
+    # ...and the slot's own assertions refusing loudly (the idle
+    # policy's five plus the daemon's one plus the launcher's one
+    # plus the clipboard slot's three plus the capture slot's four
+    # plus the audio slot's two plus the night light's one plus
+    # the agent's one plus the keyring's two: the profile is on
+    # in this evaluation)...
+    (
+      assert builtins.length (failing hmAuth.config) == 20;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "auth.package is null" m) (failing hmAuth.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "secrets.package is null" m) (failing hmAuth.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "secrets.clientPackage is null" m) (failing hmAuth.config);
+      true
+    )
+    # Standalone (no profile): just the slot's own three.
+    (
+      assert builtins.length (failing hmAuthStandalone.config) == 3;
+      true
+    )
+    # NixOS: the same nulls (no agent or keyring installed for the
+    # slot)...
+    (
+      assert osAuth.config.programs.scoot.desktop.auth.package == null;
+      true
+    )
+    (
+      assert osAuth.config.programs.scoot.desktop.secrets.package == null;
+      true
+    )
+    (
+      assert osAuth.config.programs.scoot.desktop.secrets.clientPackage == null;
+      true
+    )
+    # ...refused loudly there too (the idle policy's five plus the
+    # daemon's one plus the launcher's one plus the clipboard slot's
+    # three plus the capture slot's five on this side plus the
+    # audio slot's two plus the night light's one plus the
+    # agent's one plus the keyring's two).
+    (
+      assert builtins.length (failing osAuth.config) == 21;
+      true
+    )
+  ];
+
   # --- capture slot off Linux (fail `nix flake check` at eval) ---
   #
   # The tools above are Linux-only: off Linux each package defaults to
@@ -7586,10 +8246,11 @@ let
     # ...and the slot's own assertions refusing loudly, naming each
     # tool (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the clipboard slot's three plus this slot's
-    # four plus the audio slot's two plus the night light's one:
-    # the profile is on in this evaluation).
+    # four plus the audio slot's two plus the night light's one
+    # plus the agent's one plus the keyring's two: the profile is
+    # on in this evaluation).
     (
-      assert builtins.length (failing hmCapture.config) == 17;
+      assert builtins.length (failing hmCapture.config) == 20;
       true
     )
     (
@@ -7625,9 +8286,10 @@ let
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus this slot's five -- gtk beside wlr -- plus the
-    # audio slot's two plus the night light's one).
+    # audio slot's two plus the night light's one plus the agent's
+    # one plus the keyring's two).
     (
-      assert builtins.length (failing osCapture.config) == 18;
+      assert builtins.length (failing osCapture.config) == 21;
       true
     )
   ];
@@ -7655,10 +8317,11 @@ let
     # ...and the slot's own assertions refusing loudly, naming each
     # switch (the idle policy's five plus the daemon's one plus the
     # launcher's one plus the slot's three plus the capture slot's
-    # four plus the audio slot's two plus the night light's one:
-    # the profile is on in this evaluation).
+    # four plus the audio slot's two plus the night light's one
+    # plus the agent's one plus the keyring's two: the profile is
+    # on in this evaluation).
     (
-      assert builtins.length (failing hmClip.config) == 17;
+      assert builtins.length (failing hmClip.config) == 20;
       true
     )
     (
@@ -7687,7 +8350,7 @@ let
     # launcher's null joins the count on this side as well -- plus
     # the audio slot's two plus the night light's one beside it).
     (
-      assert builtins.length (failing osClip.config) == 18;
+      assert builtins.length (failing osClip.config) == 21;
       true
     )
   ];
@@ -7702,14 +8365,15 @@ let
     # Home-manager: null, and the daemon's assertion refusing loudly
     # (the idle policy's five plus the daemon's one plus the launcher's
     # one plus the clipboard slot's three plus the capture slot's
-    # four plus the audio slot's two plus the night light's one:
-    # the profile is on in this evaluation, so its slot is open).
+    # four plus the audio slot's two plus the night light's one
+    # plus the agent's one plus the keyring's two: the profile is
+    # on in this evaluation, so its slot is open).
     (
       assert hmNotif.config.programs.scoot.desktop.notifications.package == null;
       true
     )
     (
-      assert builtins.length (failing hmNotif.config) == 17;
+      assert builtins.length (failing hmNotif.config) == 20;
       true
     )
     (
@@ -7724,10 +8388,11 @@ let
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five -- gtk beside wlr -- plus the
-    # audio slot's two plus the night light's one: the
-    # profile is on in this evaluation, so its slot is open).
+    # audio slot's two plus the night light's one plus the
+    # agent's one plus the keyring's two: the profile is on in this
+    # evaluation, so its slot is open).
     (
-      assert builtins.length (failing osNotif.config) == 18;
+      assert builtins.length (failing osNotif.config) == 21;
       true
     )
     (
@@ -8093,12 +8758,13 @@ let
       assert hmNight.config.programs.scoot.desktop.nightlight.package == null;
       true
     )
-    # ...refused loudly beside the profile's other sixteen (the idle
+    # ...refused loudly beside the profile's other nineteen (the idle
     # policy's five, the daemon's one, the launcher's one, the
     # clipboard slot's three, the capture slot's four, the audio
-    # slot's two, the night light's one).
+    # slot's two, the night light's one, the agent's one, the
+    # keyring's two).
     (
-      assert builtins.length (failing hmNight.config) == 17;
+      assert builtins.length (failing hmNight.config) == 20;
       true
     )
     (
@@ -8113,9 +8779,10 @@ let
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five -- gtk beside wlr -- plus the
-    # audio slot's two plus the night light's one).
+    # audio slot's two plus the night light's one plus the agent's
+    # one plus the keyring's two).
     (
-      assert builtins.length (failing osNight.config) == 18;
+      assert builtins.length (failing osNight.config) == 21;
       true
     )
   ];
@@ -8218,7 +8885,8 @@ let
     # ...beside the profile's and the policy's packages (scoot, the
     # five idle tools, mako, the clipboard slot's three, the launcher
     # package, the capture slot's four tools, the audio slot's OSD and
-    # its four scripts, the five slot scripts
+    # its four scripts, the five slot scripts, the agent and the
+    # secrets client
     # and the keymap's three)...
     (
       assert
@@ -8249,6 +8917,8 @@ let
           (slotScriptDrv hmKeys "scoot-brightness")
           (slotScriptDrv hmKeys "scoot-audio-sink")
           pkgs.wlsunset
+          pkgs.polkit_gnome
+          pkgs.libsecret
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -8449,13 +9119,16 @@ let
           (slotScriptDrv hmKeysOff "scoot-brightness")
           (slotScriptDrv hmKeysOff "scoot-audio-sink")
           pkgs.wlsunset
+          pkgs.polkit_gnome
+          pkgs.libsecret
         ];
       true
     )
     # NixOS: the keymap off leaves the profile's other packages
     # only (the five idle tools, mako, the launcher, the clipboard
-    # slot's tools, the capture slot's tools, the audio slot's OSD
-    # and the night light's tool beside scoot and scootbg).
+    # slot's tools, the capture slot's tools, the audio slot's OSD,
+    # the night light's tool, the agent, the daemon and the secrets
+    # client beside scoot and scootbg).
     (
       assert allAssertionsHold osKeysOff.config;
       true
@@ -8483,6 +9156,9 @@ let
           pkgs.wob
           pkgs.pipewire
           pkgs.wlsunset
+          pkgs.polkit_gnome
+          pkgs.gnome-keyring
+          pkgs.libsecret
         ];
       true
     )
@@ -8529,11 +9205,12 @@ let
     # steps, the inhibitor, the locker -- plus the notification
     # daemon's one, the launcher's one, the clipboard slot's three,
     # the capture slot's four, the audio slot's two (the OSD and the
-    # sink helper's dump tool) and the night light's one,
+    # sink helper's dump tool), the night light's one, the agent's
+    # one plus the keyring's two,
     # on with the profile; order-insensitive: the daemon's module
     # contributes its refusal first).
     (
-      assert builtins.length (failing hmIdle.config) == 17;
+      assert builtins.length (failing hmIdle.config) == 20;
       true
     )
     (
@@ -8561,11 +9238,11 @@ let
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five -- gtk beside wlr -- plus the
     # audio slot's two (the OSD and the sink helper's dump tool) plus
-    # the night light's one -- while the
-    # docked-lid rule (plain values, no tools) still
+    # the night light's one plus the agent's one plus the keyring's
+    # two -- while the docked-lid rule (plain values, no tools) still
     # lands.
     (
-      assert builtins.length (failing osIdle.config) == 18;
+      assert builtins.length (failing osIdle.config) == 21;
       true
     )
     (
@@ -8752,16 +9429,16 @@ let
     # assertions are the idle policy's five plus the daemon's one plus
     # the launcher's one plus the clipboard slot's three plus the
     # capture slot's four plus the audio slot's two plus the night
-    # light's one (their
+    # light's one plus the agent's one plus the keyring's two (their
     # packages are null off Linux -- the daemon's pinned in
     # `_darwinNotifPins`, the launcher's in `_darwinLaunchPins`, the
     # clipboard slot's in `_darwinClipPins`, the capture slot's in
     # `_darwinCapturePins`, the audio slot's in `_darwinAudioPins`,
-    # the night light's in
-    # `_darwinNightlightPins`), so bare tool names stay valid
-    # config, just quiet at runtime.
+    # the night light's in `_darwinNightlightPins`, the agent's and
+    # the keyring's in `_darwinAuthPins`), so bare tool names stay
+    # valid config, just quiet at runtime.
     (
-      assert builtins.length (failing hmKeys.config) == 17;
+      assert builtins.length (failing hmKeys.config) == 20;
       true
     )
     (
@@ -9350,12 +10027,13 @@ let
       assert hmPower.config.programs.scoot.desktop.power.profiles.package == null;
       true
     )
-    # ...refused loudly beside the profile's other seventeen (the
+    # ...refused loudly beside the profile's other twenty (the
     # idle policy's five, the daemon's one, the launcher's one, the
     # clipboard slot's three, the capture slot's four, the audio
-    # slot's two, the night light's one).
+    # slot's two, the night light's one, the agent's one, the
+    # keyring's two).
     (
-      assert builtins.length (failing hmPower.config) == 18;
+      assert builtins.length (failing hmPower.config) == 21;
       true
     )
     (
@@ -9370,10 +10048,11 @@ let
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five on this side plus the audio
-    # slot's two plus the night light's one), while the
-    # docked-lid rule (plain values, no tools) still lands.
+    # slot's two plus the night light's one plus the agent's one
+    # plus the keyring's two), while the docked-lid rule (plain
+    # values, no tools) still lands.
     (
-      assert builtins.length (failing osPower.config) == 19;
+      assert builtins.length (failing osPower.config) == 22;
       true
     )
     (
@@ -9394,6 +10073,7 @@ assert lib.all (x: x) _launchPins;
 assert lib.all (x: x) _capturePins;
 assert lib.all (x: x) _audioPins;
 assert lib.all (x: x) _nightlightPins;
+assert lib.all (x: x) _authPins;
 assert lib.all (x: x) _keysPins;
 assert lib.all (x: x) _powerPins;
 assert lib.all (x: x) _darwinIdlePins;
@@ -9403,6 +10083,7 @@ assert lib.all (x: x) _darwinLaunchPins;
 assert lib.all (x: x) _darwinCapturePins;
 assert lib.all (x: x) _darwinAudioPins;
 assert lib.all (x: x) _darwinNightlightPins;
+assert lib.all (x: x) _darwinAuthPins;
 assert lib.all (x: x) _darwinKeysPins;
 assert lib.all (x: x) _darwinPowerPins;
 assert lib.all (x: x) _flakePins;
@@ -9473,7 +10154,31 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   grep -F "Exec=${trickyCmd}" ${quotingDesktopFile}
   echo "ok: session.command with quoting-needing characters renders verbatim"
 
-  # 6f. The launcher's units: the service runs this package's binary on
+  # 6f-6g. The entries with the prompt on (Linux only: the agent
+  # packages default to null off Linux, so the entries carry no env
+  # prefix there -- those nulls are pinned in `_darwinAuthPins`).
+  ${lib.optionalString isLinux ''
+    # 6f. The default entry with the prompt on: the agent rides the
+    # `Exec` line in `SCOOT_POLKIT_AGENT` (an `env` prefix, so
+    # shell-less greeters run it too), and the line still ends at the
+    # session launcher.
+    grep -F "SCOOT_POLKIT_AGENT=${osAuth.config.programs.scoot.desktop.auth.package}/libexec/polkit-gnome-authentication-agent-1" ${authEntryFile}
+    grep -q "^Exec=.* ${fakePkg}/bin/scoot-session$" ${authEntryFile}
+    echo "ok: default entry names the agent for the leader to spawn"
+
+    # 6g. ...one per remaining agent (each entry names its own
+    # command)...
+    grep -F "SCOOT_POLKIT_AGENT=" ${authLxqtEntryFile} | grep -F -q "lxqt-policykit-agent"
+    grep -F "SCOOT_POLKIT_AGENT=" ${authHyprEntryFile} | grep -F -q "hyprpolkitagent"
+    echo "ok: each agent daemon renders its own entry command"
+  ''}
+
+  # 6h. ...and with the prompt off the entry is the plain launcher
+  # (byte-exact: no env prefix leaks in).
+  grep -F -x "Exec=${fakePkg}/bin/scoot-session" ${authOffEntryFile}
+  echo "ok: entry without the prompt runs the plain launcher"
+
+  # 6i. The launcher's units: the service runs this package's binary on
   # `--tty`, stopped with the session target it is `PartOf` (and bound
   # to no graphical target, so starting the service never reaches the
   # session early); the session target pulls the graphical target in

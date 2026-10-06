@@ -50,6 +50,20 @@
 # line, which a static `scoot.service` could not receive exactly (shell
 # word-splitting would break the quoting a session command needs).
 #
+# A polkit authentication agent, optionally, in the session scope
+# (`SCOOT_POLKIT_AGENT`, a bare executable path, no arguments -- see
+# below). A polkit agent registers against its own logind session,
+# and a systemd user unit never joins one (this kernel has no audit,
+# so the session scope is the only signal polkit has): an agent run
+# as a unit fails registration with "User of caller and user of
+# subject differs" and serves no prompt, ever. This script IS the
+# session (the greeter runs it as the session command), so a set
+# `SCOOT_POLKIT_AGENT` spawns here -- after the display is known,
+# which the agent needs -- supervised like the units (a dead agent
+# restarts after 2 s) and stopped with the session. Unset: nothing
+# runs (headless sessions fail privileged actions loud through
+# polkit's own no-agent refusal, by design).
+#
 # Shape follows niri's `niri-session` (refuse-if-active, reset-failed,
 # import, start, shutdown target, unset), reworked for the constraint
 # above -- and where it differs, deliberately: plain `start` (see
@@ -73,6 +87,11 @@ SCOOT_BIN="${SCOOT_BIN:-$(dirname "$0")/scoot}"
 
 die() {
     echo "scoot-session: $*" >&2
+    # A starting agent must not outlive a refused login (it would
+    # keep answering prompts for a session that never started):
+    # stop it before restoring the environment and exiting. Unset
+    # (no agent configured, or dying before it started) is a no-op.
+    stop_agent 2>/dev/null || true
     # Leave the manager environment as it was found: anything past the
     # pre-session capture (below) already imported the login environment
     # and possibly defaulted the desktop name. The refusal above runs
@@ -237,7 +256,9 @@ fi
 # manager, not forked from here, so nothing long-lived inherits the
 # fd -- every child this script spawns (`systemctl`, `scoot msg`, the
 # D-Bus tool) is short-lived and exits before the launcher, so
-# inheriting the fd for its own lifetime is harmless. One narrow
+# inheriting the fd for its own lifetime is harmless, and the one
+# long-lived child (the agent watcher, when configured) closes it on
+# entry (see `start_agent`). One narrow
 # exception: an in-flight child orphaned by a SIGKILL keeps its
 # inherited fd until it exits (at most ~`timeout 2`), so a login in
 # the second after the kill still refuses once and heals on retry --
@@ -253,6 +274,10 @@ have_flock=0
 # never reads an unset variable under `set -u`, whatever point of the
 # login a signal lands at.
 _scoot_waiter=""
+# The supervised agent's watcher loop (empty: no agent configured).
+# Same reason as above: `stop_agent` in `die`/`cleanup` must never
+# read it unset.
+agent_watch=""
 if command -v flock >/dev/null 2>&1; then
     have_flock=1
     exec 9>"$XDG_RUNTIME_DIR/scoot-session.lock" \
@@ -384,6 +409,9 @@ cleanup() {
     # first. Past the session wait `_scoot_waiter` is already empty (and
     # `reap_waiter` is a no-op there), so calling it here is always safe.
     reap_waiter 2>/dev/null || true
+    # The supervised agent ends with the session (the scope reaps
+    # stragglers anyway, but an explicit stop beats relying on it).
+    stop_agent 2>/dev/null || true
     # The manager may be mid-re-exec at this very moment (a re-exec
     # landing on the session wait kills the wait AND this call
     # together): retry until it answers, bounded, so one unanswered
@@ -559,6 +587,60 @@ fi
 # dependency.) A failure here leaves the service -- and nothing else
 # -- active, so the service is stopped and nothing is imported past
 # the pre-session state `die` restores.
+#
+# start_agent/stop_agent: the polkit agent in the session scope (see
+# the header). Started here -- the display is known, the bus agrees,
+# and the session is about to be declared ready, which is when
+# prompts can first arrive. Supervised: a bare `&` would leave a
+# zombie on death and never restart, failing every later prompt
+# silently until re-login; the loop restarts after 2 s (the units'
+# own backoff) and reaps each run. `XDG_SESSION_ID` is scrubbed from
+# its environment: the launcher inherits the greeter's (or the
+# console's), and a stale id would register the agent against the
+# wrong session -- the scope membership below is the only signal it
+# may use.
+start_agent() {
+    [ -n "${SCOOT_POLKIT_AGENT:-}" ] || return 0
+    if [ ! -x "$SCOOT_POLKIT_AGENT" ]; then
+        note "SCOOT_POLKIT_AGENT names nothing executable ($SCOOT_POLKIT_AGENT); no privilege prompts this session"
+        return 0
+    fi
+    # Long-lived, so the liveness lock (fd 9, held by this launcher
+    # until exit) must not leak into it: a second login would read
+    # the lock as held-by-a-live-session and refuse. Close it in the
+    # watcher -- and therefore in the agent -- before looping.
+    # The watcher remembers the running agent and kills it when it is
+    # itself told to stop, so `stop_agent` ends the agent too rather than
+    # orphaning it into the scope. Both the agent and the backoff run in
+    # the background and are waited on, so a stop interrupts either at
+    # once instead of after the current run or the 2 s sleep.
+    (
+        exec 9>&-
+        agent_pid=""
+        trap 'if [ -n "$agent_pid" ]; then kill "$agent_pid" 2>/dev/null; fi; exit 0' TERM INT HUP
+        while :; do
+            env -u XDG_SESSION_ID "$SCOOT_POLKIT_AGENT" &
+            agent_pid=$!
+            wait "$agent_pid"
+            agent_pid=""
+            sleep 2 &
+            wait "$!"
+        done
+    ) &
+    agent_watch=$!
+}
+# stop_agent: end the supervised agent, if one is configured and
+# running: the watcher kills the agent it is running, then exits. A
+# missing watcher, a dead loop and a dead agent are all quiet no-ops (a
+# logout races no teardown here).
+stop_agent() {
+    if [ -n "${agent_watch:-}" ]; then
+        kill "$agent_watch" 2>/dev/null || true
+        wait "$agent_watch" 2>/dev/null || true
+        agent_watch=""
+    fi
+}
+start_agent
 systemctl --user start "$SESSION" \
     || { stop_service || note "warning: could not stop $SERVICE; it may still be active (a later login heals or refuses it)"; die "$SESSION failed to start (see: journalctl --user)"; }
 
