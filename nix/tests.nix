@@ -8170,10 +8170,11 @@ let
     # ...and the slot's own assertions refusing loudly (the idle
     # policy's five plus the daemon's one plus the launcher's one
     # plus the clipboard slot's three plus the capture slot's four
-    # plus the audio slot's two plus the agent's one plus the keyring's two: the profile is on
+    # plus the audio slot's two plus the night light's one plus
+    # the agent's one plus the keyring's two: the profile is on
     # in this evaluation)...
     (
-      assert builtins.length (failing hmAuth.config) == 19;
+      assert builtins.length (failing hmAuth.config) == 20;
       true
     )
     (
@@ -8210,9 +8211,10 @@ let
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five on this side plus the
+    # audio slot's two plus the night light's one plus the
     # agent's one plus the keyring's two).
     (
-      assert builtins.length (failing osAuth.config) == 20;
+      assert builtins.length (failing osAuth.config) == 21;
       true
     )
   ];
@@ -8756,12 +8758,13 @@ let
       assert hmNight.config.programs.scoot.desktop.nightlight.package == null;
       true
     )
-    # ...refused loudly beside the profile's other sixteen (the idle
+    # ...refused loudly beside the profile's other nineteen (the idle
     # policy's five, the daemon's one, the launcher's one, the
     # clipboard slot's three, the capture slot's four, the audio
-    # slot's two, the night light's one).
+    # slot's two, the night light's one, the agent's one, the
+    # keyring's two).
     (
-      assert builtins.length (failing hmNight.config) == 17;
+      assert builtins.length (failing hmNight.config) == 20;
       true
     )
     (
@@ -8776,9 +8779,10 @@ let
     # ...refused loudly there too (the idle policy's five plus the
     # daemon's one plus the launcher's one plus the clipboard slot's
     # three plus the capture slot's five -- gtk beside wlr -- plus the
-    # audio slot's two plus the night light's one).
+    # audio slot's two plus the night light's one plus the agent's
+    # one plus the keyring's two).
     (
-      assert builtins.length (failing osNight.config) == 18;
+      assert builtins.length (failing osNight.config) == 21;
       true
     )
   ];
@@ -10150,19 +10154,24 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   grep -F "Exec=${trickyCmd}" ${quotingDesktopFile}
   echo "ok: session.command with quoting-needing characters renders verbatim"
 
-  # 6f. The default entry with the prompt on: the agent rides the
-  # `Exec` line in `SCOOT_POLKIT_AGENT` (an `env` prefix, so
-  # shell-less greeters run it too), and the line still ends at the
-  # session launcher.
-  grep -F "SCOOT_POLKIT_AGENT=${osAuth.config.programs.scoot.desktop.auth.package}/libexec/polkit-gnome-authentication-agent-1" ${authEntryFile}
-  grep -q "^Exec=.* ${fakePkg}/bin/scoot-session$" ${authEntryFile}
-  echo "ok: default entry names the agent for the leader to spawn"
+  # 6f-6g. The entries with the prompt on (Linux only: the agent
+  # packages default to null off Linux, so the entries carry no env
+  # prefix there -- those nulls are pinned in `_darwinAuthPins`).
+  ${lib.optionalString isLinux ''
+    # 6f. The default entry with the prompt on: the agent rides the
+    # `Exec` line in `SCOOT_POLKIT_AGENT` (an `env` prefix, so
+    # shell-less greeters run it too), and the line still ends at the
+    # session launcher.
+    grep -F "SCOOT_POLKIT_AGENT=${osAuth.config.programs.scoot.desktop.auth.package}/libexec/polkit-gnome-authentication-agent-1" ${authEntryFile}
+    grep -q "^Exec=.* ${fakePkg}/bin/scoot-session$" ${authEntryFile}
+    echo "ok: default entry names the agent for the leader to spawn"
 
-  # 6g. ...one per remaining agent (each entry names its own
-  # command)...
-  grep -F "SCOOT_POLKIT_AGENT=" ${authLxqtEntryFile} | grep -F -q "lxqt-policykit-agent"
-  grep -F "SCOOT_POLKIT_AGENT=" ${authHyprEntryFile} | grep -F -q "hyprpolkitagent"
-  echo "ok: each agent daemon renders its own entry command"
+    # 6g. ...one per remaining agent (each entry names its own
+    # command)...
+    grep -F "SCOOT_POLKIT_AGENT=" ${authLxqtEntryFile} | grep -F -q "lxqt-policykit-agent"
+    grep -F "SCOOT_POLKIT_AGENT=" ${authHyprEntryFile} | grep -F -q "hyprpolkitagent"
+    echo "ok: each agent daemon renders its own entry command"
+  ''}
 
   # 6h. ...and with the prompt off the entry is the plain launcher
   # (byte-exact: no env prefix leaks in).
