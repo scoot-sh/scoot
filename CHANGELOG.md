@@ -9,6 +9,14 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-10-06 — a gamma client disconnecting no longer crashes `--tty`
+
+- **Killing or disconnecting a gamma client (for example `wlsunset` exiting
+  or being restarted) no longer panics the compositor.** Restoring the
+  default linear ramp sliced a single ramp as three and indexed out of
+  range, taking every client's unsaved state with it. The disconnect now
+  restores the default over that output only and the session keeps running.
+
 ### 2026-10-06 — the `homeManagerModules` flake output is gone (breaking)
 
 - **Import `scoot.homeModules.scoot`, not `scoot.homeManagerModules.scoot`.**

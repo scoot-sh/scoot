@@ -40,7 +40,7 @@ use wayland_protocols_wlr::gamma_control::v1::client::{
     zwlr_gamma_control_manager_v1, zwlr_gamma_control_v1,
 };
 
-use super::FALLBACK_GAMMA_SIZE;
+use super::{FALLBACK_GAMMA_SIZE, default_ramps, linear_ramp};
 use crate::compositor::State;
 use crate::compositor::decorations::Appearance;
 use crate::compositor::headless;
@@ -581,6 +581,56 @@ fn gamma_pipe_that_never_delivers_is_refused() {
     });
     let error = harness.wait_for_disconnect(handle);
     assert_invalid_gamma(&error);
+}
+
+/// Regression for the `--tty` crash on every gamma client disconnect:
+/// `restore_default` sliced a single-size `linear_ramp(size)` buffer as
+/// three ramps (`&ramp[size..2 * size]` on a length-`size` slice), panicking
+/// with `range end index 512 out of range for slice of length 256` and
+/// taking the whole compositor down. The buffer restore slices must hold
+/// three ramps, so this performs restore's exact slicing and asserts each
+/// channel is the default linear ramp. Against the old single-ramp buffer
+/// this panics; against `default_ramps` it passes.
+#[test]
+fn restore_ramps_slice_as_three_linear_ramps() {
+    let size = FALLBACK_GAMMA_SIZE as usize;
+    // Exactly restore_default's slicing: must not panic.
+    let ramps = default_ramps(FALLBACK_GAMMA_SIZE);
+    assert_eq!(
+        ramps.len(),
+        size * 3,
+        "restore's buffer must hold three ramps of {size}, not one",
+    );
+    let (red, green, blue) = (&ramps[..size], &ramps[size..2 * size], &ramps[2 * size..]);
+    let linear = linear_ramp(FALLBACK_GAMMA_SIZE);
+    assert_eq!(red, linear.as_slice(), "red restores the linear ramp");
+    assert_eq!(green, linear.as_slice(), "green restores the linear ramp");
+    assert_eq!(blue, linear.as_slice(), "blue restores the linear ramp");
+    assert_eq!(red[0], 0, "black stays black");
+    assert_eq!(red[size - 1], 65535, "white stays white");
+}
+
+/// The same slicing at every size restore can plausibly see: the smallest
+/// ramp that holds a gradient, the fallback, and the clamp ceiling. Each
+/// must slice as three without panicking.
+#[test]
+fn restore_ramps_slice_at_every_plausible_size() {
+    for size in [2u32, 3, 256, 1024, 4096] {
+        let count = size as usize;
+        let ramps = default_ramps(size);
+        assert_eq!(ramps.len(), count * 3, "three ramps of {size}");
+        // Restore's exact slicing, per size.
+        let (red, green, blue) = (
+            &ramps[..count],
+            &ramps[count..2 * count],
+            &ramps[2 * count..],
+        );
+        assert_eq!(red.len(), count);
+        assert_eq!(green.len(), count);
+        assert_eq!(blue.len(), count);
+        assert_eq!(red[0], 0, "black stays black at size {size}");
+        assert_eq!(red[count - 1], 65535, "white stays white at size {size}");
+    }
 }
 
 #[test]
