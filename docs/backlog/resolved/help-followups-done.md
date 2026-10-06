@@ -47,12 +47,17 @@ clean, `nix build .#docs-site` pass):
   this adds both edges plus a CI classify arm (`scoot-ipc` -> scootbg),
   revisiting `crate-and-daemon-done.md`'s self-containment call (that
   weighed protocol framing; this shares the guesser with drift tests
-  pinning it). The shared copy saved no `.text` (monomorphization);
-  the win is source dedup plus single-sourcing.
+  pinning it). The same goes for scootbar's
+  `pointer-and-interactions-done.md` decision 1, which kept scoot-ipc out
+  of the bar on a measured +131,072 bytes: that was the whole client and
+  protocol, and `src/scoot.rs` still hand-writes its request. What links
+  now is only the cold-path helpers, about 1.2 KB of `.text`. The shared
+  copy saved no `.text` (monomorphization); the win is source dedup plus
+  single-sourcing.
 - A no-`push` scootbar build names no push module: the `set` row (text
   and JSON), the `msg` set section and the `set` examples follow the
   feature. Proven by revert (both new gate tests fail) and restore
   (430 pass in `--no-default-features --bin`).
-- Every SEE ALSO line ends on the live `https://www.scoot.sh/llms.txt`,
+- Every SEE ALSO docs line ends on the live `https://www.scoot.sh/llms.txt`,
   rendered from the one constant; `docs/cli-help.md` drops "once the
   docs site lands".
