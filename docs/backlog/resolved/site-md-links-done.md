@@ -1,9 +1,10 @@
 ---
 title: "Docs site HTML links to raw .md twins instead of pages"
-status: "open"
-area: "packaging"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-06"
 ---
 
 # Docs site HTML links to raw .md twins instead of pages
@@ -45,3 +46,26 @@ On the live www.scoot.sh the home page renders
 Changing the sources to extensionless links (they must stay `.md` for
 editors, GitHub and the twins); the `##` double-hash anchors found in
 several pages (valid fragments, out of scope).
+
+## Resolution
+
+Landed in PR #476 (`fix(site): link pages, not raw .md twins, in built
+HTML`). One deviation from the plan, with evidence: the rewrite is a
+post-build `astro:build:done` integration (`site/scripts/md-links.mjs`),
+not a remark/rehype plugin. Two findings forced it: (1) Astro 7.3.5's
+deprecated `markdown.remarkPlugins` never runs with Starlight in play
+(proven with a throwing probe: clean build, no error, links unchanged);
+the supported `processor: unified(…)` form does run. (2) That form
+contaminates the llms.txt bundles — `starlight-llms-txt` renders pages
+through the same markdown pipeline (`render(entry)` → HTML → Markdown,
+verified in the pinned 0.12.0 source), so bundle prose picked up rewritten
+`./scoot/keybindings/` links where agents must keep `.md` ones. Only
+`dist/**/*.html` is touched now; twins and bundles verified `.md`-clean
+in the other direction. Sidebar/`pagination` (root-absolute from slugs)
+untouched; 404 handled (root `404.html`, links `./` and
+`./scoot/keybindings/`).
+
+Evidence: gate `check-md-links` fails on main with 287 failures, passes
+after (293 links resolve); `nix build .#docs-site` green with no
+`pnpm-lock.yaml` change; three Start-here links click through to HTML
+200s; a project-pages `/scoot/` base build passes the same gate.
