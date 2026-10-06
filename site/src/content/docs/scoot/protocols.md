@@ -421,7 +421,8 @@ is scanned out directly -- shown from the client's own buffer, with no
 compositing -- provided it is opaque (an opaque-format buffer, or an opaque
 region covering it), or the background is black and no wallpaper other than
 a black single-pixel-buffer one lies under it. Anything drawn over it (an `overlay` notification, a popup
-menu, a cursor the hardware cursor plane cannot carry), a translucent
+menu, a cursor no plane can carry -- scoot's own pointer rides the
+cursor plane, or an overlay where there is none), a translucent
 window (`wp_alpha_modifier_v1`), a lock screen, or a client capturing the
 screen makes those frames composite instead; nothing changes on screen
 either way. Mechanics and where it has been seen: [tty.md](./backends.md).

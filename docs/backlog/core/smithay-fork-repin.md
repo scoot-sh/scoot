@@ -9,9 +9,10 @@ blocked: "needs an upstream Smithay rev carrying a Drop for the imported syncobj
 # Repin Smithay from the scoot-sh fork back to upstream
 
 Filed 2026-09-24 by PR #233. `crates/scoot/Cargo.toml` pins Smithay to
-`github.com/scoot-sh/smithay` rev `035d447c` (branch
-`scoot/xwayland-selection-dnd`, since XWayland Phase 4; `43f50eb2` before).
-That is upstream `0ff00983` plus twenty-five commits (it was `5b575329`, fourteen,
+`github.com/scoot-sh/smithay` rev `7ab72d53` (branch
+`scoot/cursor-dmabuf-storage`, `scoot/xwayland-selection-dnd` plus one;
+that lane since XWayland Phase 4; `43f50eb2` before).
+That is upstream `0ff00983` plus twenty-six commits (it was `5b575329`, fourteen,
 when this was filed): a `Drop` for
 `DrmTimelineDeviceSpecific`, which stops each syncobj timeline import
 leaking a kernel handle

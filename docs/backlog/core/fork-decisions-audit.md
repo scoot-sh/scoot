@@ -37,7 +37,7 @@ commits in `docs/forks.md`, read its resolved record and classify the evidence:
 3. **No alternatives recorded.** A gap; treat as unproven.
 4. **A hard constraint forces the fork** (state private to Smithay, a hook that
    runs where scoot cannot). Check that the constraint is real by reading the
-   **pinned fork's** source (`~/.cargo/git/checkouts/smithay-*/035d447`), not from
+   **pinned fork's** source (`~/.cargo/git/checkouts/smithay-*/7ab72d5`), not from
    memory.
 
 Also ask, of each: was there a **cheaper scoot-side mitigation** that was skipped

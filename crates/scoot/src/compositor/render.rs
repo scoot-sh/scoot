@@ -77,6 +77,8 @@ use gles::{GlesBackend, GlesDevice};
 use pixman::PixmanBackend;
 
 mod capture_cursor;
+#[cfg(feature = "gpu-scanout")]
+mod cursor_plane;
 mod elements;
 mod gles;
 #[cfg(feature = "gpu-scanout")]
@@ -90,6 +92,8 @@ mod scanout;
 #[cfg(feature = "gpu-scanout")]
 pub(crate) use capture_cursor::Plane;
 pub(crate) use capture_cursor::{CursorInFrame, CursorPatch};
+#[cfg(feature = "gpu-scanout")]
+pub(crate) use cursor_plane::{CursorPlanes, GbmUpload};
 #[cfg(all(test, feature = "gpu-scanout"))]
 pub(crate) use primary_direct::PrimaryDirect;
 #[cfg(feature = "gpu-scanout")]
@@ -1405,7 +1409,7 @@ fn draw_frame_scanout(
             id,
         )
     });
-    let (elements, cursor_surface, direct) = scanout_frame_elements(
+    let (mut elements, cursor_surface, direct) = scanout_frame_elements(
         state,
         renderer,
         size,
@@ -1465,6 +1469,19 @@ fn draw_frame_scanout(
             state
                 .overlay_feedback
                 .refresh(id, key, default, || presenter.scanout_formats());
+        }
+        // Where the CRTC has no cursor plane, the drawn cursor goes to an
+        // overlay as a dma-buf rather than into the composite, so a
+        // fullscreen window under a visible pointer may still take the
+        // primary plane (`cursor_plane`). After the judge and the gather:
+        // the twin has the cursor's own kind, alpha and geometry, so neither
+        // could tell the difference.
+        if let Some(planes) = presenter.cursor_overlay() {
+            let frame = (
+                output.current_scale().fractional_scale().into(),
+                size.into(),
+            );
+            planes.back(renderer, &mut elements, frame);
         }
         let drawn = presenter.render_and_queue(
             renderer,

@@ -68,6 +68,12 @@ formats, still no cursor plane). So a window and a future cursor-on-overlay
 need not fight for one plane there. Nothing in this ticket can be measured
 without implementing the marking and the capture contract.
 
+**Update 2026-10-06 (`Asahi.md`, Test 17):** the drawn cursor now rides
+an overlay on this hardware (`render/cursor_plane.rs`). It is offered the
+planes first, as the front-most element, and takes the topmost that passes
+(plane 45, zpos 2, every time it was seen), which leaves plane 40 below it
+for a window candidate.
+
 Priority stays low: the case it serves (a video in a non-fullscreen
 window) is the rarer one.
 

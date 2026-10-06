@@ -175,7 +175,10 @@ impl ExportFramebuffer<GbmBuffer> for LayoutKeepingExporter {
             ExportBuffer::Wayland(wl_buffer) => get_dmabuf(wl_buffer)
                 .ok()
                 .map(|dmabuf| dmabuf.format().modifier),
-            ExportBuffer::Allocator(_) => None,
+            // scoot's own buffers: the swapchain, and the cursor's plane
+            // images (`render::cursor_plane`), which are `LINEAR`. No client
+            // layout to keep, and none to record as lost.
+            ExportBuffer::Allocator(_) | ExportBuffer::Dmabuf(_) => None,
         };
         let framebuffer = self.inner.add_framebuffer(drm, buffer, use_opaque)?;
         Ok(framebuffer.filter(|framebuffer| {
