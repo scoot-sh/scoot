@@ -11469,12 +11469,15 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     echo "ok: Qt config carries the look's polarity and palette"
 
     # 13l. Theme fontconfig default: the proportional sans for
-    #      sans-serif, the terminal face for monospace -- and
-    #      well-formed XML (a `--` inside a comment is illegal and
+    #      sans-serif, the terminal face for monospace -- written as
+    #      `match` rules (the `alias` form parsed but registered
+    #      nothing: `fc-match` still resolved the system default) --
+    #      and well-formed XML (a `--` inside a comment is illegal and
     #      fontconfig refuses the file).
     python3 -c 'import sys,xml.dom.minidom; xml.dom.minidom.parse(sys.argv[1])' ${themeFontsConf}
-    grep -F "<family>DejaVu Sans</family>" ${themeFontsConf}
-    grep -F "<family>FiraCode Nerd Font</family>" ${themeFontsConf}
+    grep -F "<string>DejaVu Sans</string>" ${themeFontsConf}
+    grep -F "<string>FiraCode Nerd Font</string>" ${themeFontsConf}
+    grep -F 'binding="strong"' ${themeFontsConf}
     echo "ok: fontconfig defaults to the look's faces"
 
     # 13l2. The GTK named colors, one accent per look (measured in
