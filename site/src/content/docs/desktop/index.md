@@ -1452,10 +1452,14 @@ marks an internal disk `HintSystem`, and udiskie skips it and every
 partition on it, so a dual-boot box's Windows or macOS partitions
 stay unmounted, with no admin prompt at login. A
 `~/.config/udiskie/config.yml` of your own still applies (the unit
-passes no `-c`; its `-a -n -T` flags win over the file's).
+passes no `-c`; its `-a -n -T` flags win over the file's). A file
+udiskie cannot parse makes every start fail, so the unit gives up
+after 5 failed starts in a minute rather than retrying forever (see
+troubleshooting below).
 With home-manager's own `services.udiskie` on, that one runs instead
 and this unit stays out: two automounters would race to mount every
-drive and both ask for a passphrase.
+drive and both ask for a passphrase. udiskie stays installed either
+way, so `udiskie-umount` is there for safe removal.
 
 **Safe removal: unmount before you unplug.** A yanked drive loses
 whatever was still buffered. One command unmounts and powers it off:
@@ -1525,7 +1529,7 @@ apps started after the next login):
 | `desktop.apps.fileManager.enable` | bool | `false` | the file manager on `PATH`, directories and mounts opening in it |
 | `desktop.apps.fileManager.package` | package or null | pcmanfm (Linux-only: null off Linux) | point at another file manager |
 | `desktop.apps.fileManager.desktopEntry` | string | `"pcmanfm.desktop"` | the `.desktop` entry directories open through (`"thunar.desktop"` beside a thunar `package`) |
-| `desktop.automount.enable` | bool | `true` with the profile | udisks2 on the NixOS side, the trayless udiskie unit on the home-manager side (left out while home-manager's `services.udiskie` is on: its unit runs instead) |
+| `desktop.automount.enable` | bool | `true` with the profile | udisks2 on the NixOS side, udiskie and its trayless unit on the home-manager side (the unit left out while home-manager's `services.udiskie` is on: its unit runs instead) |
 | `desktop.automount.package` | package or null | udiskie (Linux-only: null off Linux) | point at your own udiskie build |
 
 A null `package` beside its switch fails evaluation naming it.
@@ -1554,7 +1558,12 @@ Troubleshooting, by symptom:
   bus — a home-manager-only setup needs `services.udisks2.enable` on
   the system. Running but nothing mounted: `udisksctl status` lists
   what udisks2 sees, and `udisksctl mount -b /dev/sdX1` names the
-  refusal.
+  refusal. *failed* with `start-limit-hit` means udiskie failed 5
+  starts in a minute: `journalctl --user -u scoot-automount` shows
+  why, most often a `~/.config/udiskie/config.yml` it cannot parse.
+  Fix (or move) the file, then
+  `systemctl --user reset-failed scoot-automount` and
+  `systemctl --user start scoot-automount`.
 - *An internal partition does not automount.* By design (above):
   mount it by hand with `udisksctl mount -b /dev/...`, which asks for
   the admin password.
@@ -1606,15 +1615,22 @@ The picker reads the cached scan and never rescans: the bar's network
 module scans when it opens its own menu, and NetworkManager rescans
 on its own schedule. Once you have picked a network (and typed its
 key), the join runs on its own: clicking the bar again closes an open
-menu or key prompt, but never cuts a join under way, so a failed one
-still cleans up after itself.
+menu or key prompt (the one after a refused keyring key too), but
+never cuts a join under way, so a failed one still cleans up after
+itself.
 
-**Bluetooth.** The menu lists paired devices, starred while
-connected; picking one connects it, or disconnects it if connected.
+**Bluetooth.** The menu opens on a state row (*Bluetooth is on (1
+connected)*), and picking that row does nothing, so a stray `Enter`
+never drops a device. Under it are the paired devices, starred while
+connected: picking one connects it, or disconnects it if connected.
+Low-energy devices (earbuds, mice) are listed too when they are not
+advertising as discoverable. `bluetoothctl` prints those rows in gray,
+and the picker lists them like any other.
 Below them:
 
 - *Pair a new device…* listens for 10 seconds, then lists the devices
-  it found:
+  it found in pairing mode. A device that advertises without being in
+  pairing mode (a neighbour's earbuds, a beacon) is left out:
 
   ![The Bluetooth picker's pair list: two devices found in pairing mode](../../../assets/picker-bluetooth-pair.png)
 
@@ -1644,7 +1660,8 @@ failed connect, pair or power switch (a failed pair stops there:
 nothing is trusted or connected). Every `bluetoothctl` call is
 bounded, since with no `bluetoothd` on the bus it waits forever: a
 query (the list, a device's details) gives up after 5 seconds, a
-connect after 30, a pair after 60, each naming the bound it hit. With
+connect after 30, a pair after 60, and the message names the bound it
+hit ("BlueZ is not answering (no reply within 5 s …)" for a query). With
 BlueZ running a call returns as soon as BlueZ answers, so `Super+b`
 opens its menu at once. Cancelling a menu (`Escape`) joins and pairs
 nothing.
@@ -1691,9 +1708,12 @@ Troubleshooting, by symptom:
   (`nmcli radio wifi on`), rfkill, or no hardware.
 - *"BlueZ is not answering".* `systemctl status bluetooth`: the
   daemon is not running, or `hardware.bluetooth.enable` is off.
-- *A device is not in the pair list.* It was not advertising during
-  the 10-second listen: put it in pairing mode first, then pick *Pair
-  a new device…* again.
+- *A device is not in the pair list.* It was not in pairing mode
+  during the 10-second listen: either it was not advertising, or it was
+  advertising without being discoverable (`bluetoothctl devices` prints
+  it in gray), which a device already paired to another computer or
+  phone often does. Put it in pairing mode first, then pick *Pair a new
+  device…* again.
 - *"more than one device is named …"* (from the bar, or by name from
   a terminal). Two devices share a name: pick from `Super+b`, which
   lists them by address.
@@ -2310,6 +2330,6 @@ child, so those children fill bodies without renaming options:
 | `desktop.inputMethod.enable` | bool | `false` | input-method wiring |
 | `desktop.automount.enable` | bool + package | `true` ([Terminal, files, and removable media](#terminal-files-and-removable-media): udiskie trayless over udisks2, internal disks ignored) | removable-media automount |
 
-A slot still marked `false` with no section of its own (`displays`,
-`inputMethod`) is accepted and does nothing yet. Changes apply on
+A slot still marked `false` with no section of its own
+(`inputMethod`) is accepted and does nothing yet. Changes apply on
 rebuild/switch.

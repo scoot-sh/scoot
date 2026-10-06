@@ -8,10 +8,11 @@
 #   list                    paired devices, `* MAC name` while
 #                           connected, `  MAC name` otherwise (stdout
 #                           is the picker's; all else stderr)
-#   pick                    the paired devices plus "Pair a new
-#                           device", the power switch and (with the
-#                           audio slot) "Audio output" through the
-#                           menu (the bind, and the bar's click)
+#   pick                    a state row (picking it does nothing),
+#                           the paired devices, "Pair a new device",
+#                           (with the audio slot) "Audio output" and
+#                           the power switch through the menu (the
+#                           bind, and the bar's click)
 #   menu                    stdin's lines through the menu: the bar's
 #                           `bluetooth.menu-command` (its rows are
 #                           names, ` (connected)` where connected)
@@ -104,6 +105,11 @@ reason() {
         END { print (why != "") ? why : (last != "") ? last : "bluetoothctl failed with no message" }'
 }
 
+# A query that ran out its bound, named.
+no_answer() {
+    fail "BlueZ is not answering (no reply within $QUERY_SECS s: is bluetooth.service running?)"
+}
+
 # A query, its output on stdout; a failure is loud (and, inside a
 # command substitution, exits that subshell 1 for the caller's
 # `|| exit 1`).
@@ -111,7 +117,7 @@ bt() {
     out=$(bt_run "$QUERY_SECS" "$@" 2>&1)
     rc=$?
     if [ "$rc" -ne 0 ]; then
-        timed_out "$rc" && fail "BlueZ is not answering (is bluetooth.service running?)"
+        timed_out "$rc" && no_answer
         fail "$(reason "$out")"
     fi
     printf '%s\n' "$out"
@@ -140,18 +146,39 @@ require_ctl() {
             fail "no Bluetooth controller (no hardware here, or it is blocked)"
             ;;
     esac
-    if timed_out "$rc" || [ -z "$info" ]; then
-        fail "BlueZ is not answering (is bluetooth.service running?)"
-    fi
+    timed_out "$rc" && no_answer
+    [ -n "$info" ] || fail "BlueZ is not answering (is bluetooth.service running?)"
     [ "$rc" -eq 0 ] || fail "$(reason "$info")"
     powered=$(printf '%s\n' "$info" | "$AWK" '$1 == "Powered:" { print $2; exit }')
 }
 
 # `MAC<TAB>alias` for each device a filter selects (`Paired`,
 # `Connected`, or nothing for every device BlueZ knows).
+#
+# bluetoothctl prints a device in bold gray, `ESC[1;30mDevice MAC
+# alias ESC[0m` -- colors and all, even into a pipe -- when its last
+# advertisement carried neither discoverable flag: advertising, but
+# not in pairing mode (bluez 5.87 `print_device`). BlueZ keeps those
+# flags on the device, so paired earbuds or a mouse can stay gray for
+# good: every list strips the colors and keeps the row. Only the pair
+# list leaves gray rows out (`devices --discoverable`, `pair_pick`'s
+# alone), on purpose: a device not in pairing mode will not pair from
+# here, and every neighbour's beacon and earbuds would flood it. A
+# device named outright (`pair X`, the bar's row) still resolves gray
+# or not: that pick is the user's, and BlueZ's refusal says why.
 devices() {
+    gray=1
+    if [ "${1:-}" = --discoverable ]; then
+        gray=0
+        shift
+    fi
     rows=$(bt devices "$@") || exit 1
-    printf '%s\n' "$rows" | "$AWK" '
+    printf '%s\n' "$rows" | "$AWK" -v gray="$gray" '
+        {
+            dim = index($0, "\033[1;30mDevice ") == 1
+            gsub(/\033\[[0-9;]*[A-Za-z]/, "")
+        }
+        dim && !gray { next }
         $1 == "Device" && $2 ~ /^([0-9A-Fa-f][0-9A-Fa-f]:){5}[0-9A-Fa-f][0-9A-Fa-f]$/ {
             mac = $2
             name = $0
@@ -182,10 +209,18 @@ resolve() {
 }
 
 # The MACs among `rows` (as `devices` prints them) whose own `Name` is
-# `$1`: one bounded `info` each.
+# `$1`: one bounded `info` each. A device whose `info` fails is not
+# that name, and is skipped: a temporary device BlueZ drops between
+# `devices` and here (30 s unseen) answers "not available". A BlueZ
+# that stops answering still fails loud, at the first bound.
 by_name() {
     for mac in $(printf '%s\n' "$2" | "$AWK" -F'\t' 'NF { print $1 }'); do
-        card=$(bt info "$mac") || exit 1
+        card=$(bt_run "$QUERY_SECS" info "$mac" 2>&1)
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            timed_out "$rc" && no_answer
+            continue
+        fi
         name=$(printf '%s\n' "$card" | "$AWK" '$1 == "Name:" { sub(/^[ \t]*Name: /, ""); print; exit }')
         [ "$name" != "$1" ] || printf '%s\n' "$mac"
     done
@@ -229,7 +264,8 @@ pair_pick() {
         *"Failed to start discovery"*) fail "$(reason "$scan")" ;;
     esac
     paired=$(devices Paired) || exit 1
-    all=$(devices) || exit 1
+    # Only devices in pairing mode (see `devices`).
+    all=$(devices --discoverable) || exit 1
     rows=$(printf '%s\n' "$all" | PAIRED=$paired "$AWK" -F'\t' '
         BEGIN { n = split(ENVIRON["PAIRED"], rows, "\n"); for (i = 1; i <= n; i++) { split(rows[i], f, "\t"); old[f[1]] = 1 } }
         NF && !($1 in old) { print $1 " " substr($0, index($0, "\t") + 1) }')
@@ -255,18 +291,23 @@ case "${1:-}" in
         ;;
     pick)
         require_ctl
+        head=""
         if [ "$powered" != "yes" ]; then
             rows=$ON_ROW
         else
             rows=$(paired_rows) || exit 1
-            rows=$(printf '%s\n%s\n' "$rows" "$PAIR_ROW")
+            # The first row is the state, and picking it does nothing:
+            # the menu opens on it, so a stray Enter toggles no device
+            # (a connected Bluetooth keyboard would drop).
+            head="Bluetooth is on ($(printf '%s\n' "$rows" | "$AWK" '$1 == "*" { n++ } END { print n + 0 }') connected)"
+            rows=$(printf '%s\n%s\n%s\n' "$head" "$rows" "$PAIR_ROW")
             [ "$AUDIO" != 1 ] || rows=$(printf '%s\n%s\n' "$rows" "$AUDIO_ROW")
             rows=$(printf '%s\n%s\n' "$rows" "$OFF_ROW")
         fi
         # shellcheck disable=SC2086
         sel=$(printf '%s\n' "$rows" | "$AWK" 'NF' | "$MENU" --dmenu --prompt='bluetooth: ' --no-run-if-empty --only-match $THEME) || exit 0
         case "$sel" in
-            "") exit 0 ;;
+            "" | "$head") exit 0 ;;
             "$ON_ROW") bt_act 10 power on ;;
             "$OFF_ROW") bt_act 10 power off ;;
             "$PAIR_ROW") pair_pick ;;

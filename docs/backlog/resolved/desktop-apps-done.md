@@ -71,11 +71,14 @@ media*; *WiFi and Bluetooth*).
   WiFi joins saved networks by UUID (matched by SSID), open ones directly,
   secured ones with the keyring's key or a masked prompt, the key on
   nmcli's stdin, a failed first join's profile removed, a refused keyring
-  key falling back to the prompt, the join in a session of its own so the
-  bar reopening its menu cannot cut it. Bluetooth toggles paired devices
-  (by alias or own name; an ambiguous name refused), pairs new ones after
-  a 10 s scan (no agent of its own: BlueZ pairs as NoInputNoOutput; PIN
-  devices from a terminal), switches power and the audio sink. Every
+  key falling back to the prompt (opened by the caller, so the bar's
+  reopen closes it), the join in a session of its own so the bar
+  reopening its menu cannot cut it. Bluetooth toggles paired devices
+  (gray, non-discoverable rows included; by alias or own name; an
+  ambiguous name refused) under an inert state row, pairs new ones in
+  pairing mode after a 10 s scan (no agent of its own: BlueZ pairs as
+  NoInputNoOutput; PIN devices from a terminal), switches power and the
+  audio sink. Every
   bluetoothctl call runs under coreutils' `timeout`, never bluetoothctl's
   own `--timeout` (with it, bluez 5.87 waits out the whole bound and exits
   0 whatever happened: measured 15 s for the menu on the M2's real
@@ -86,8 +89,9 @@ media*; *WiFi and Bluetooth*).
   which already ignore the machine's own disks and their partitions and
   mount an encrypted USB stick's unlocked filesystem (a custom
   `HintSystem` rule broke the latter; pinned by udiskie's own matcher),
-  yielding to home-manager's `services.udiskie`; safe removal by
-  `udiskie-umount -d`. udiskie ~58 MB RSS, 0 wakeups; kept over a
+  its unit yielding to home-manager's `services.udiskie` (the package
+  stays, for `udiskie-umount -d`, the safe removal), and a finite start
+  limit (5 in 60 s) so a malformed user `config.yml` stops it. udiskie ~58 MB RSS, 0 wakeups; kept over a
   hand-rolled `udisksctl monitor` loop (~8 MB floor) for its partition,
   LUKS and Browse handling. An empty `/etc/nvme` (an `environment.etc`
   placeholder) stops udisksd's 4 s GLib retry on the missing directory

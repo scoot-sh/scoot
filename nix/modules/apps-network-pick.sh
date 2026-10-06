@@ -29,9 +29,10 @@
 # back): the bar ends a menu it reopens, and a connect it replaces, by
 # signalling the whole process group (SIGKILL 100 ms after SIGTERM),
 # which would otherwise cut nmcli mid-join and skip the cleanup. The
-# pick and the key prompt stay in the caller's group: reopening the
-# bar's menu closes those, as it should. `_join` is that internal half
-# (its key, when it has one, on stdin).
+# pick and every key prompt (the re-prompt after a refused keyring key
+# too) stay in the caller's group: reopening the bar's menu closes
+# those, as it should. `_join` is that internal half (its key, when it
+# has one, on stdin).
 #
 # Nothing here touches NetworkManager's own state beyond that: no
 # rescans (the cached scan only: the bar's module scans), no radio
@@ -48,6 +49,11 @@ SETSID=@SETSID@
 # The look's menu colors as fuzzel flags (empty without a look): split
 # on purpose below, each flag one word.
 THEME=@THEME@
+
+# `_join keyring`'s status for a keyring key refused for its secrets:
+# the caller prompts (see `do_connect`). Apart from every other status
+# here (0, 1 for a failure, 2 for usage).
+KEY_REFUSED=3
 
 say() { printf 'scoot-network-pick: %s\n' "$*" >&2; }
 fail() {
@@ -193,6 +199,16 @@ do_connect() {
         src=keyring
     fi
     printf '%s\n' "$psk" | join "$src" "$ssid"
+    rc=$?
+    # A refused keyring key: its join has cleaned up and returned, and
+    # the prompt opens here, in the caller's group, where reopening the
+    # bar's menu still closes it (a prompt left open in the join's own
+    # session would hold fuzzel's lock, and every later menu and the
+    # launcher would fail to open until it was dismissed).
+    [ "$rc" -eq "$KEY_REFUSED" ] || exit "$rc"
+    psk=$(ask_key "$ssid" "key for $ssid (the keyring's was refused): ") || exit 0
+    [ -n "$psk" ] || exit 0
+    printf '%s\n' "$psk" | join prompt "$ssid"
     exit $?
 }
 
@@ -235,9 +251,11 @@ last_line() { printf '%s' "$1" | "$AWK" 'NF { line = $0 } END { print line }'; }
 #   _join up UUID          a saved network, by its profile
 #   _join open SSID        an open one
 #   _join keyring SSID     a secured one, the keyring's key on stdin:
-#                          refused for its secrets, it falls back to
-#                          the prompt once
-#   _join prompt SSID      a secured one, the typed key on stdin
+#                          refused for its secrets, it exits
+#                          `KEY_REFUSED`, quietly, for the caller to
+#                          prompt once
+#   _join prompt SSID      a secured one, the typed key on stdin (never
+#                          `KEY_REFUSED`: a typed key is not re-asked)
 do_join() {
     case "$1" in
         up) nm_act connection up uuid "$2" ;;
@@ -246,11 +264,7 @@ do_join() {
             IFS= read -r key || [ -n "$key" ] || fail "no key for '$2'"
             if join_key "$2" "$key"; then exit 0; fi
             case "$1:$out" in
-                keyring:*"Secrets were required"*)
-                    key=$(ask_key "$2" "key for $2 (the keyring's was refused): ") || exit 0
-                    [ -n "$key" ] || exit 0
-                    join_key "$2" "$key" && exit 0
-                    ;;
+                keyring:*"Secrets were required"*) exit "$KEY_REFUSED" ;;
             esac
             fail "$(last_line "$out")"
             ;;

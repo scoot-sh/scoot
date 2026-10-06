@@ -463,7 +463,12 @@ in
     # unplugging, or buffered writes die with the yank (see
     # site/src/content/docs/desktop/index.md#terminal-files-and-removable-media).
     # home-manager's own `services.udiskie` wins (see `udiskieOwned`):
-    # its unit runs instead, and this one stays out. A null beside
+    # its unit runs instead, and this one stays out. The package stays
+    # on PATH either way: home-manager's module only names it in its
+    # `ExecStart` (it adds no package), so `udiskie-umount` would
+    # otherwise go missing, and a user's own udiskie at the same store
+    # path is no collision (buildEnv skips a link to the same file). A
+    # null beside
     # `enable` leaves the unit out (the loud assertion below, not a
     # throw inside `getExe`: the same guard the bar's unit uses, since
     # standalone evals collect assertions without enforcing them).
@@ -479,7 +484,7 @@ in
         }
       ];
 
-      home.packages = lib.optional (automount.package != null && !udiskieOwned) automount.package;
+      home.packages = lib.optional (automount.package != null) automount.package;
 
       systemd.user.services.scoot-automount =
         lib.mkIf (isLinux && automount.package != null && !udiskieOwned)
@@ -488,11 +493,18 @@ in
               Description = "scoot removable-media automount (trayless udiskie over udisks2)";
               PartOf = [ "scoot-session.target" ];
               After = [ "scoot-session.target" ];
-              # Unending retries, like every retrying profile unit (pinned
-              # across all of them in `nix/tests.nix`'s `_startLimitPins`;
-              # `StartLimitIntervalSec` lives in `[Unit]`: systemd ignores
-              # it in `[Service]`).
-              StartLimitIntervalSec = 0;
+              # A finite start limit, unlike the profile's other retrying
+              # units: udiskie reads the user's own
+              # `~/.config/udiskie/config.yml`, and a malformed one exits
+              # 1 at every start, so unending retries would respawn
+              # Python every 2 s for good. 5 starts in 60 s trips after
+              # about 10 s of that (starts land `RestartSec` apart; the
+              # default 5-in-10-s never trips at that pace), and leaves
+              # room for a few real crashes. Both keys live in `[Unit]`:
+              # systemd ignores them in `[Service]` (pinned in
+              # `nix/tests.nix`'s `_startLimitPins`).
+              StartLimitIntervalSec = 60;
+              StartLimitBurst = 5;
             };
             Service = {
               # Skipped (not restarted) without udisks2 known on the

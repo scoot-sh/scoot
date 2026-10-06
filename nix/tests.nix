@@ -2135,17 +2135,24 @@ let
   # (`UNBOUNDED` in `misuse`); no scenario resets `misuse`. stdin's
   # target lands in `stdins`. `show` from `show` (exit `show-code`),
   # hanging while `hang-show` exists; `devices [Filter]` from
-  # `devices-all`/`devices-Paired`/`devices-Connected`; `info MAC` from
-  # `info-MAC`, else a card naming it as `devices-all` does, else "not
-  # available" (exit 1); `scan on` printing
+  # `devices-all`/`devices-Paired`/`devices-Connected`, verbatim (a
+  # scenario writes a non-discoverable device's row in bluez's bold
+  # gray, `ESC[1;30mDevice MAC alias ESC[0m`, the bytes
+  # `print_device` prints even into a pipe); `info MAC` from
+  # `info-MAC`, else a card naming it as `devices-all` does (colors
+  # dropped), else "not available" (exit 1), hanging while `hang-info`
+  # exists; `scan on` printing
   # `scan-out` and appending `found` to `devices-all`; actions logged,
   # hanging while `hang-ACTION` exists, exiting `call-code` (a failure
   # printing its reason, then a colored `[CHG]` event line, as a live
   # session interleaves them).
   # `fuzzel`: a `--password` prompt prints `psk` (exit `psk-code`),
-  # its prompt in `prompts`; a menu records stdin in `menu-input` and
-  # prints the next line of `picks` while it has one (one per menu, for
-  # a flow through two), else `pick` (exit `pick-code`).
+  # its prompt in `prompts` and its session id in `prompt-sids`,
+  # holding open while `hold-prompt` exists (its pid in `prompt-pid`,
+  # so a test can see a kill close it); a menu records stdin in
+  # `menu-input` and prints the next line of `picks` while it has one
+  # (one per menu, for a flow through two), else `pick` (exit
+  # `pick-code`).
   # `secret-tool lookup` prints `secret` (exit `secret-code`).
   # The scripts under test resolve every tool by absolute path into
   # this package (the evaluations below point each package option at
@@ -2237,8 +2244,9 @@ let
         cat "$d/show"; status "$(cat "$d/show-code")" ;;
       devices) cat "$d/devices-''${2:-all}"; status 0 ;;
       info)
+        [ ! -e "$d/hang-info" ] || exec sleep 30
         if [ -e "$d/info-$2" ]; then cat "$d/info-$2"; status 0; fi
-        name=$(awk -v m="$2" '$2 == m { sub(/^Device [^ ]+ ?/, ""); print; exit }' "$d/devices-all")
+        name=$(awk -v m="$2" '{ gsub(/\033\[[0-9;]*m/, "") } $2 == m { sub(/^Device [^ ]+ ?/, ""); print; exit }' "$d/devices-all")
         if [ -n "$name" ]; then printf 'Device %s\n\tName: %s\n\tAlias: %s\n' "$2" "$name" "$name"; status 0; fi
         echo "Device $2 not available"; status 1 ;;
       connect|disconnect|power|pair|trust)
@@ -2259,6 +2267,12 @@ let
     case "$*" in
       *--password*)
         for a in "$@"; do case "$a" in --prompt-only=*) printf '%s\n' "''${a#--prompt-only=}" >> "$d/prompts" ;; esac; done
+        s=$(cat /proc/$$/stat); s=''${s##*) }; set -- $s; printf '%s\n' "$4" >> "$d/prompt-sids"
+        if [ -e "$d/hold-prompt" ]; then
+          printf '%s\n' "$$" > "$d/prompt-pid"
+          n=0
+          while [ -e "$d/hold-prompt" ] && [ "$n" -lt 400 ]; do sleep 0.05; n=$((n + 1)); done
+        fi
         cat "$d/psk"; exit "$(cat "$d/psk-code")" ;;
     esac
     cat > "$d/menu-input"
@@ -7002,14 +7016,13 @@ let
   # silently keeping the default burst limit (5 starts in 10 s). Every
   # profile unit that retries unendingly names the interval here, so a
   # future unit that puts it in `[Service]` fails `nix flake check` at
-  # eval. `hmDeskBar` is the full profile beside the bar module: its
+  # eval (the automounter, the one finite limit, is pinned last). `hmDeskBar` is the full profile beside the bar module: its
   # services are every user unit the profile can install.
   _startLimitPins = lib.optionals isLinux (
     let
       hmUnits = hmDeskBar.config.systemd.user.services;
       retryUnits = [
         "mako"
-        "scoot-automount"
         "scoot-notify-sync"
         "scoot-clipboard-store"
         "scoot-clipboard-primary-store"
@@ -7084,6 +7097,33 @@ let
         true
       )
     ]
+    # ...and the automounter alone retries finitely (a malformed
+    # `~/.config/udiskie/config.yml` of the user's fails every start):
+    # both keys in `[Unit]`, and a limit that actually trips at the
+    # unit's own restart pace -- starts land `RestartSec` apart, so the
+    # burst-plus-one start must fall inside the interval (systemd's
+    # default 5-in-10-s never trips at 2 s apart).
+    ++ (
+      let
+        automount = hmUnits.scoot-automount;
+      in
+      [
+        (
+          assert automount.Unit.StartLimitIntervalSec == 60;
+          true
+        )
+        (
+          assert automount.Unit.StartLimitBurst == 5;
+          true
+        )
+        (
+          assert
+            automount.Unit.StartLimitBurst * automount.Service.RestartSec
+            < automount.Unit.StartLimitIntervalSec;
+          true
+        )
+      ]
+    )
   );
 
   # --- idle policy structural pins (fail `nix flake check` at eval) ---
@@ -8681,7 +8721,9 @@ let
     )
     # ...home-manager's own `services.udiskie` winning: one automounter
     # (two would race every insert and both ask for a passphrase), so
-    # no unit and no udiskie of ours...
+    # no unit of ours -- but udiskie stays on PATH, since home-manager's
+    # module adds no package and `udiskie-umount` is the documented safe
+    # removal...
     (
       assert allAssertionsHold hmAppsUdiskieOwned.config;
       true
@@ -8691,7 +8733,7 @@ let
       true
     )
     (
-      assert !(lib.any (p: (p.pname or "") == "udiskie") hmAppsUdiskieOwned.config.home.packages);
+      assert lib.any (p: (p.pname or "") == "udiskie") hmAppsUdiskieOwned.config.home.packages;
       true
     )
     # ...the terminal off: no foot, no `TERMINAL`, no user dirs (the
@@ -15287,7 +15329,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
         printf '0' > "$A/connect-code"
         printf 'Error: Connection activation failed: Secrets were required, but not provided.\n' > "$A/connect-msg"
         : > "$A/calls"; : > "$A/stdin"; : > "$A/prompts"; : > "$A/menu-input"; : > "$A/pick"; : > "$A/picks"; : > "$A/reuse-uuid"
-        : > "$A/connect-codes"; : > "$A/join-sids"; rm -f "$A/hold" "$A/joining"
+        : > "$A/connect-codes"; : > "$A/join-sids"; : > "$A/prompt-sids"; rm -f "$A/hold" "$A/joining" "$A/hold-prompt" "$A/prompt-pid"
         printf '0' > "$A/pick-code"
       }
       connects() { grep -c "device wifi connect" "$A/calls" || true; }
@@ -15417,6 +15459,16 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       [ "$(cat "$A/stdin")" = "$(printf 'hunter22\ntypedkey9')" ] || { echo "joins got '$(cat "$A/stdin")' (23g5)" >&2; exit 1; }
       grep -F -x -q "nmcli connection delete uuid stale-uuid" "$A/calls"
       if grep -q "hunter22\|typedkey9" "$A/calls"; then echo "key in an argument (23g5)" >&2; exit 1; fi
+      # ...the re-prompt in the caller's own session (where the bar's
+      # group kill reaches it: 23g6), both joins in another...
+      [ "$(cat "$A/prompt-sids")" = "$MY_SID" ] || { echo "the re-prompt ran in session '$(cat "$A/prompt-sids")', not the caller's $MY_SID (23g5)" >&2; exit 1; }
+      [ "$(wc -l < "$A/join-sids")" = 2 ] && joins_detached || { echo "joins ran in sessions '$(cat "$A/join-sids")' (23g5)" >&2; exit 1; }
+      # ...a re-prompted key refused in turn is not asked for again...
+      net_setup
+      printf '4\n4\n' > "$A/connect-codes"
+      if ${appsNetPick} connect "Hotel: Lobby" 2>"$A/stderr"; then echo "silent success on a refused re-prompted key (23g5)" >&2; exit 1; fi
+      grep -q "Secrets were required" "$A/stderr"
+      [ "$(connects)" = 2 ] && [ "$(wc -l < "$A/prompts")" = 1 ] || { echo "a refused re-prompted key asked again (23g5)" >&2; exit 1; }
       # ...a cancelled re-prompt joins nothing more...
       net_setup
       printf '4' > "$A/connect-code"
@@ -15432,6 +15484,38 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       grep -q "could not be found" "$A/stderr"
       [ ! -s "$A/prompts" ] || { echo "prompted for a refusal that was not the key's (23g5)" >&2; exit 1; }
       echo "ok: a refused keyring key falls back to the prompt once, only for its secrets"
+
+      # 23g6. The bar reopening its menu while that re-prompt is open
+      #       closes it, as it closes the first prompt: left open, it
+      #       would hold fuzzel's lock and every later menu (and the
+      #       launcher) would fail to open. Started as the bar starts
+      #       it, leading a group of its own; killed as `end_child`
+      #       kills it.
+      net_setup
+      printf '4' > "$A/connect-code"
+      printf 'Hotel: Lobby' > "$A/pick"
+      printf 'Hotel: Lobby\n' > "$A/feed"
+      : > "$A/hold-prompt"
+      ${pkgs.util-linux}/bin/setsid ${appsNetPick} menu < "$A/feed" > /dev/null 2>&1 &
+      bar_child=$!
+      n=0; while [ ! -s "$A/prompt-pid" ] && [ "$n" -lt 200 ]; do sleep 0.05; n=$((n + 1)); done
+      [ -s "$A/prompt-pid" ] || { echo "the re-prompt never opened (23g6)" >&2; exit 1; }
+      prompt=$(cat "$A/prompt-pid")
+      kill -TERM -- "-$bar_child" 2>/dev/null || true
+      sleep 0.1
+      kill -KILL -- "-$bar_child" 2>/dev/null || true
+      wait "$bar_child" 2>/dev/null || true
+      sleep 0.1
+      # Alive: in the process table and not a zombie (an orphan's
+      # zombie lingers until the sandbox's init reaps it).
+      alive() { s=$(cat "/proc/$1/stat" 2>/dev/null) || return 1; s=''${s##*) }; set -- $s; [ "$1" != Z ]; }
+      if alive "$prompt"; then
+        rm -f "$A/hold-prompt"
+        echo "the re-prompt outlived the bar's group kill (23g6)" >&2; exit 1
+      fi
+      rm -f "$A/hold-prompt"
+      [ "$(connects)" = 1 ] || { echo "a killed re-prompt joined (23g6)" >&2; exit 1; }
+      echo "ok: the bar's group kill closes a re-prompt too"
 
       # 23g4. Out of range, or enterprise: loud before any prompt.
       net_setup
@@ -15542,7 +15626,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       t0=$(date +%s)
       if ${appsBluePick} list 2>"$A/stderr"; then echo "silent success with a hung BlueZ (23k)" >&2; exit 1; fi
       t1=$(date +%s)
-      grep -q "BlueZ is not answering" "$A/stderr"
+      grep -q "BlueZ is not answering (no reply within 5 s" "$A/stderr" || { echo "a hung BlueZ said '$(cat "$A/stderr")', not its bound (23k)" >&2; exit 1; }
       [ $((t1 - t0)) -le 8 ] || { echo "a hung BlueZ held the picker $((t1 - t0)) s (23k)" >&2; exit 1; }
       echo "ok: no controller, no BlueZ and a hung BlueZ fail loud, no menu"
 
@@ -15556,9 +15640,15 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       printf '  77:88:99:AA:BB:CC Sony WH-1000XM4' > "$A/pick"
       ${appsBluePick} pick
       grep -F -x -q "bluetoothctl connect 77:88:99:AA:BB:CC" "$A/calls"
-      want=$(printf '* 11:22:33:44:55:66 Headphones\n  77:88:99:AA:BB:CC Sony WH-1000XM4\nPair a new device...\nTurn Bluetooth off')
+      want=$(printf 'Bluetooth is on (1 connected)\n* 11:22:33:44:55:66 Headphones\n  77:88:99:AA:BB:CC Sony WH-1000XM4\nPair a new device...\nTurn Bluetooth off')
       [ "$(cat "$A/menu-input")" = "$want" ] || { echo "menu offered '$(cat "$A/menu-input")' (23l)" >&2; exit 1; }
-      echo "ok: toggle connects and disconnects, the menu offers pair and power"
+      # ...and the menu opens on its state row, which does nothing: a
+      # stray Enter on Super+b toggles no device.
+      blue_setup
+      printf 'Bluetooth is on (1 connected)' > "$A/pick"
+      ${appsBluePick} pick || { echo "picking the state row failed (23l)" >&2; exit 1; }
+      [ "$(bt_calls)" = 0 ] || { echo "the state row acted: '$(cat "$A/calls")' (23l)" >&2; exit 1; }
+      echo "ok: toggle connects and disconnects, the menu offers pair and power, its first row is inert"
 
       # 23m. connect/disconnect by name; an unpaired one says how to pair.
       blue_setup
@@ -15663,6 +15753,63 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       grep -q "more than one device is named 'Speaker'" "$A/stderr"
       [ "$(bt_calls)" = 0 ] || { echo "an ambiguous name acted: '$(cat "$A/calls")' (23t)" >&2; exit 1; }
       echo "ok: an ambiguous name is refused"
+
+      # 23w. bluez prints a device whose last advertisement carried
+      #      neither discoverable flag in bold gray, `ESC[1;30mDevice
+      #      MAC alias ESC[0m`, even into a pipe (5.87 `print_device`),
+      #      and keeps those flags: paired earbuds can stay gray while
+      #      connected. Gray rows list, toggle and resolve like any
+      #      other, the colors gone; only the pair list leaves a gray
+      #      device out (not in pairing mode).
+      blue_setup
+      ear=$(printf '\033[1;30mDevice E4:00:00:00:00:03 Nothing Ear (3)\033[0m')
+      mouse=$(printf '\033[1;30mDevice E4:00:00:00:00:04 Gray Mouse\033[0m')
+      printf 'Device 11:22:33:44:55:66 Headphones\n%s\nDevice 77:88:99:AA:BB:CC Sony WH-1000XM4\n%s\n' "$ear" "$mouse" > "$A/devices-Paired"
+      printf 'Device 11:22:33:44:55:66 Headphones\n%s\n' "$ear" > "$A/devices-Connected"
+      cp "$A/devices-Paired" "$A/devices-all"
+      got=$(${appsBluePick} list)
+      want=$(printf '* 11:22:33:44:55:66 Headphones\n* E4:00:00:00:00:03 Nothing Ear (3)\n  77:88:99:AA:BB:CC Sony WH-1000XM4\n  E4:00:00:00:00:04 Gray Mouse')
+      [ "$got" = "$want" ] || { echo "list showed '$got', want '$want' (23w)" >&2; exit 1; }
+      # ...in the menu, where the connected gray one disconnects...
+      printf '* E4:00:00:00:00:03 Nothing Ear (3)' > "$A/pick"
+      ${appsBluePick} pick
+      [ "$(cat "$A/menu-input")" = "$(printf 'Bluetooth is on (2 connected)\n%s\nPair a new device...\nTurn Bluetooth off' "$want")" ] || { echo "menu offered '$(cat "$A/menu-input")' (23w)" >&2; exit 1; }
+      [ "$(grep '^bluetoothctl' "$A/calls")" = "bluetoothctl disconnect E4:00:00:00:00:03" ] || { echo "picking a connected gray device ran '$(cat "$A/calls")' (23w)" >&2; exit 1; }
+      # ...by name from a terminal, and from the bar's row (a toggle,
+      # never a pair)...
+      : > "$A/calls"
+      ${appsBluePick} connect "Gray Mouse"
+      [ "$(grep '^bluetoothctl' "$A/calls")" = "bluetoothctl connect E4:00:00:00:00:04" ] || { echo "connect of a gray paired device ran '$(cat "$A/calls")' (23w)" >&2; exit 1; }
+      : > "$A/calls"
+      printf 'Nothing Ear (3) (connected)' > "$A/pick"
+      printf 'Nothing Ear (3) (connected)\nGray Mouse\n' | ${appsBluePick} menu
+      [ "$(grep '^bluetoothctl' "$A/calls")" = "bluetoothctl disconnect E4:00:00:00:00:03" ] || { echo "the bar's row for a gray device ran '$(cat "$A/calls")' (23w)" >&2; exit 1; }
+      # ...while the pair list offers the device in pairing mode, not
+      # the gray one the scan also saw.
+      : > "$A/calls"
+      printf 'Device C0:FF:EE:00:00:01 New Mouse\n\033[1;30mDevice 5A:00:00:00:00:09 Neighbour Buds\033[0m\n' > "$A/found"
+      printf 'Pair a new device...\nC0:FF:EE:00:00:01 New Mouse\n' > "$A/picks"
+      ${appsBluePick} pick
+      [ "$(cat "$A/menu-input")" = "C0:FF:EE:00:00:01 New Mouse" ] || { echo "pair menu offered '$(cat "$A/menu-input")' (23w)" >&2; exit 1; }
+      grep -F -x -q "bluetoothctl pair C0:FF:EE:00:00:01" "$A/calls"
+      echo "ok: gray (non-discoverable) devices list, toggle and resolve; the pair list leaves them out"
+
+      # 23x. A device whose `info` fails mid-lookup by name (BlueZ
+      #      dropped it: "not available") is skipped, not the whole
+      #      lookup; a BlueZ that stops answering there still fails
+      #      loud at its bound.
+      blue_setup
+      printf 'Device DE:AD:00:00:00:01 Gone Soon\nDevice 77:88:99:AA:BB:CC Desk cans\n' > "$A/devices-Paired"
+      printf 'Device 77:88:99:AA:BB:CC\n\tName: Sony WH-1000XM4\n\tAlias: Desk cans\n' > "$A/info-77:88:99:AA:BB:CC"
+      ${appsBluePick} connect "Sony WH-1000XM4" 2>"$A/stderr" || { echo "one failed info sank the lookup: '$(cat "$A/stderr")' (23x)" >&2; exit 1; }
+      [ "$(grep '^bluetoothctl' "$A/calls")" = "bluetoothctl connect 77:88:99:AA:BB:CC" ] || { echo "lookup past a failed info ran '$(cat "$A/calls")' (23x)" >&2; exit 1; }
+      : > "$A/calls"
+      : > "$A/hang-info"
+      if ${appsBluePick} connect "Sony WH-1000XM4" 2>"$A/stderr"; then echo "silent success with a hung info (23x)" >&2; exit 1; fi
+      grep -q "no reply within 5 s" "$A/stderr" || { echo "a hung info said '$(cat "$A/stderr")' (23x)" >&2; exit 1; }
+      [ "$(bt_calls)" = 0 ] || { echo "a hung info acted: '$(cat "$A/calls")' (23x)" >&2; exit 1; }
+      rm -f "$A/hang-info"
+      echo "ok: a failed info skips its device; a hung one fails loud"
 
       # 23r. Every call above, modelled on bluez 5.87: none passed
       #      `--timeout` but the scan (with it, a finished command never
