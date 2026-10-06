@@ -79,6 +79,13 @@ pub const REQUESTS: &[RequestDoc] = &[
         reply: "`{\"type\":\"locked\",\"locked\":false}`",
     },
     RequestDoc {
+        verb: "binds",
+        syntax: "binds [--json]",
+        description: "the live keymap: every combo, its action, source and flags, plus skipped config binds",
+        example: "scoot msg binds",
+        reply: "an aligned table grouped by intent (or `{\"type\":\"binds\",...}` with --json)",
+    },
+    RequestDoc {
         verb: "output-power",
         syntax: "output-power ID|all on|off",
         description: "switch an output's panel off or on",
@@ -299,6 +306,11 @@ pub const ACTIONS: &[ActionDoc] = &[
         name: "spawn",
         args: "COMMAND...",
         description: "run a program (the rest of the line is the command)",
+    },
+    ActionDoc {
+        name: "show-keymap",
+        args: "(none)",
+        description: "open the live keymap in a terminal (a pager; follows Super+Return)",
     },
     ActionDoc {
         name: "quit",

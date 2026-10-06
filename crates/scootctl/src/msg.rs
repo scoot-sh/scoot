@@ -5,9 +5,13 @@ use std::path::Path;
 
 use scoot_ipc::{Client, Request, Response};
 
-use crate::output;
+use crate::{binds, output};
 
-pub fn run(request: &Request, out: Option<&Path>) -> Result<(), Box<dyn Error>> {
+/// One request, one reply: sends `request` over the IPC socket and prints
+/// the reply. `out` names where a screenshot's PNG goes (`None` means
+/// stdout); `json` renders a `binds` reply as raw JSON for agents rather
+/// than the human table (every other reply already prints as JSON).
+pub fn run(request: &Request, out: Option<&Path>, json: bool) -> Result<(), Box<dyn Error>> {
     let mut client = Client::connect_default()?;
     // A subscription is not one request and one reply: after the
     // `Subscribed` answer the connection carries events until the session
@@ -47,6 +51,10 @@ pub fn run(request: &Request, out: Option<&Path>) -> Result<(), Box<dyn Error>> 
             Ok(())
         }
         Response::Error { message } => Err(message.into()),
+        Response::Binds { bindings, skipped } if !json => {
+            output::print_line(&binds::format_binds(&bindings, &skipped))?;
+            Ok(())
+        }
         other => {
             output::print_line(&serde_json::to_string_pretty(&other)?)?;
             Ok(())

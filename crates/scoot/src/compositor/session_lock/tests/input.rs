@@ -577,3 +577,116 @@ fn ipc_spawn_actions_are_refused_while_locked() {
         "the refused spawn must not have run"
     );
 }
+
+/// `Super+Shift+/` never opens the keymap while locked: `ShowKeymap` is not
+/// a `spawn`, so the input allow-list forwards the keystroke to the lock
+/// client instead of firing -- and nothing spawns. Pressed twice per the
+/// shape below (here with the default table; the next test forces the flag
+/// on), through `press` like a real keypress.
+#[test]
+fn show_keymap_does_not_fire_while_locked() {
+    use smithay::input::keyboard::Keysym;
+
+    use crate::compositor::keybindings::{Bound, Modifiers};
+
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    // Pinned first: an unbound combo would forward too, so the test must say
+    // the press is against the real bind.
+    assert_eq!(
+        fixture.state.keybindings.match_key(
+            Keysym::slash,
+            Modifiers {
+                super_: true,
+                shift: true,
+                ..Modifiers::default()
+            }
+        ),
+        Some((
+            Bound::Action(scoot_core::Action::ShowKeymap),
+            crate::compositor::keybindings::BindFlags::default(),
+        )),
+        "super+shift+slash must be bound to show-keymap for this test"
+    );
+    let before = fixture.report();
+    let spawns = fixture.state.spawned_children.len();
+
+    let combo = KeyCombo {
+        modifiers: vec![Modifier::Super, Modifier::Shift],
+        key: "slash".into(),
+    };
+    fixture.state.press(&combo).expect("a pressed combo");
+    fixture.settle();
+
+    assert_eq!(
+        fixture.state.spawned_children.len(),
+        spawns,
+        "the keymap must not open from behind a lock screen"
+    );
+    let after = fixture.report();
+    assert!(
+        after.keys > before.keys,
+        "the refused bind's keystroke should have been forwarded to the lock client"
+    );
+    assert_eq!(
+        after.keyboard_focus,
+        Some(Which::Lock(0)),
+        "focus must not have moved"
+    );
+}
+
+/// The flag on `show-keymap` still refuses while locked: `allow_when_locked`
+/// only ever fires a `spawn` (volume, brightness and media keys), and both
+/// the input filter and `act_bind` re-check the shape -- so even a table
+/// that opts this bind in forwards the keystroke and spawns nothing.
+#[test]
+fn show_keymap_with_the_locked_flag_still_does_not_fire_while_locked() {
+    use smithay::input::keyboard::Keysym;
+
+    use crate::compositor::keybindings::{BindFlags, Bound, Modifiers};
+
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.state.keybindings.insert(
+        Modifiers {
+            super_: true,
+            shift: true,
+            ..Modifiers::default()
+        },
+        Keysym::slash,
+        Bound::Action(scoot_core::Action::ShowKeymap),
+        BindFlags {
+            repeat: false,
+            allow_when_locked: true,
+        },
+    );
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    let before = fixture.report();
+    let spawns = fixture.state.spawned_children.len();
+
+    let combo = KeyCombo {
+        modifiers: vec![Modifier::Super, Modifier::Shift],
+        key: "slash".into(),
+    };
+    fixture.state.press(&combo).expect("a pressed combo");
+    fixture.settle();
+
+    assert_eq!(
+        fixture.state.spawned_children.len(),
+        spawns,
+        "a non-spawn must not run from behind a lock screen, flag or not"
+    );
+    let after = fixture.report();
+    assert!(
+        after.keys > before.keys,
+        "the refused bind's keystroke should have been forwarded to the lock client"
+    );
+    assert_eq!(
+        after.keyboard_focus,
+        Some(Which::Lock(0)),
+        "focus must not have moved"
+    );
+}

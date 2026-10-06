@@ -1002,6 +1002,13 @@ pub struct State {
     pub interaction_serials: input::interaction::Recent,
 
     pub keybindings: Keybindings,
+    /// Every config `[binds]` entry that never made it into
+    /// [`State::keybindings`], each with its reason (see
+    /// [`scoot_ipc::SkippedBind`]): what `scoot msg binds` lists beside the
+    /// live rows. Set at startup from the loaded config and swapped on every
+    /// reload that changes the binds (see `reload.rs`), so the query always
+    /// describes the file the table was built from.
+    pub skipped_binds: Vec<scoot_ipc::SkippedBind>,
     /// Pids of children [`State::spawn`] started and the reaper has not
     /// collected yet -- the *only* pids the `SIGCHLD` drain ever `waitpid`s
     /// (see `child_reaper.rs` for why `-1` would steal the unit-test binary's
@@ -1368,6 +1375,7 @@ impl State {
             seat,
             interaction_serials: input::interaction::Recent::default(),
             keybindings,
+            skipped_binds: Vec::new(),
             spawned_children: HashSet::new(),
             #[cfg(feature = "xwayland")]
             reaped_spawns: Vec::new(),

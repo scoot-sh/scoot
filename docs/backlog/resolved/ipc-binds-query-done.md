@@ -1,9 +1,10 @@
 ---
 title: "Live keymap query (scoot msg binds), default Super+? bind, and explicit unbind"
-status: "open"
-area: "ipc"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-06"
 ---
 
 # Live keymap query (scoot msg binds), default Super+? bind, and explicit unbind
@@ -52,6 +53,42 @@ Tests (fail before, pass after): IPC `binds` reply for a known config
 (default / override / unbind / skipped-with-reasons rows); the default
 bind exists and spawns; the unbind removes the default and stops it
 firing; help single-source tests extended.
+
+## What landed (2026-10-06, PR #479)
+
+All three, on branch `feat/scoot-msg-binds`:
+
+1. `scoot msg binds` / `binds --json`: new `Request::Binds` /
+   `Response::Binds{bindings, skipped}` (protocol 8 → 9). Rows derived by
+   diffing the live table against the defaults per request (no stored
+   provenance); skipped entries collected in `apply_binds` (previously
+   log-only) and swapped on reload. Single-source help extended
+   (`REQUESTS` row, `binds [--json]` in `REQUESTS_HELP`, `verb_text`
+   works so `help binds` resolves).
+2. Default `Super+Shift+/` (`super+shift+slash`, verified free in the
+   default map and the desktop profile): a dedicated `show-keymap` action
+   (core → `Effect::Spawn(["foot", "sh", "-c", "scoot msg binds |
+   less"])`), chosen over a `Spawn` default because the pager pipeline has
+   no `[binds]`-grammar spelling that parses back past the
+   `--print-default-config` round-trip pin. Same `foot` `Super+Return`
+   spawns (pinned by test). Fires fullscreen-focused (no fullscreen gate
+   on binds, only the lock gate); never fires locked (not a `Spawn`, so
+   the allow-list refuses it; `allow_when_locked` clamped at load, repeat
+   refused by the backstop).
+3. Unbind: `"combo" = "none"` (string or `{ action = "none" }` table;
+   `none` is no action verb, so no collision). Participates in collision
+   groups; an unbind removing nothing warns and lands in skipped.
+   `nix/modules/keys-home.nix` needs nothing: it only adds fresh combos,
+   overriding no default.
+
+Evidence: `cargo nextest run --workspace` 4397 passed / 0 failed;
+`cargo test -p scoot` 2155 passed; clippy/fmt clean;
+`scripts/smoke-test.sh` rc=0; `nix build .#docs-site` green; live
+headless session verified the human table, `--json`, reload-applied
+`binds`, the default bind spawning `foot sh -c 'scoot msg binds | less'`
+plain and fullscreen-focused, the unbind holding, and the override
+firing. Fail-before proven by revert-run-restore (unbind recognition
+off: 5 fail; gutted snapshot: 10 fail).
 
 ## Not in this ticket
 

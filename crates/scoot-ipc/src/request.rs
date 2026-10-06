@@ -166,4 +166,23 @@ pub enum Request {
     /// half. (The reply half is a new `Response` variant, which is why the
     /// version still moved -- see `Response::Locked`.)
     Locked,
+    /// The live keymap: every combo the running compositor binds, in its
+    /// canonical spelling, with each row's action, where it came from
+    /// (`default`, `config`, `config (replaces default: ...)`, `config
+    /// (unbinds default: ...)` or `session`), its `repeat` and
+    /// `allow_when_locked` flags, plus the config binds that were skipped
+    /// with their reasons -- see [`Response::Binds`](crate::Response::Binds).
+    /// What `Super+Shift+/` opens in a terminal, and what an agent reads
+    /// instead of re-parsing the user's config file.
+    ///
+    /// Session-level like `outputs`: read off the live merged table on every
+    /// request, never refused while locked -- listing what keys do is not a
+    /// window-management operation (the `Super+Shift+/` bind itself never
+    /// fires while locked, exactly like any other non-allow-listed bind).
+    ///
+    /// Additive like `Reload`: a client that never sends this tag decodes
+    /// exactly as before, so no `PROTOCOL_VERSION` bump for the request
+    /// half. (The reply half is a new `Response` variant, which is why the
+    /// version still moved -- see `Response::Binds`.)
+    Binds,
 }

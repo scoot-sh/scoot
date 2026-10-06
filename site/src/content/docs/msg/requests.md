@@ -14,6 +14,7 @@ Ask the compositor questions and tell it to act: every request, `type` vs `key`,
 | `windows` | Every window: id, app id, title, icon, output, workspace, adoption, focus, popup grab. |
 | `keyboard` | The active keyboard layout's name and index — what a layout indicator shows, and which layout the next `type` will produce. |
 | `locked` | Whether the session is locked — the side-effect-free lock probe, answered locked or not (`{"type":"locked","locked":false}`). What the desktop clipboard asks before recording, and what tells an agent whether injected input would reach the lock screen instead of the desktop. |
+| `binds [--json]` | The live keymap: every combo in canonical spelling, its action string, where it came from, its `repeat`/`allow_when_locked` flags, plus the config binds that were skipped with their reasons — see [`binds`](#binds). The human view is an aligned table grouped the way the [keybindings page](../scoot/keybindings.md) groups it; `--json` is the same reply as JSON, for agents. Answered locked or not. |
 | `output-power ID\|all on\|off` | Switch an output's panel off or on — the IPC half of `zwlr_output_power_v1` (see [protocols.md](../scoot/protocols.md#screen-power)), for agents and scripts that do not speak Wayland. `all` powers every output at once; an unknown id is refused with an error. Session-level like `outputs`, not an action: it applies while locked (the idle cycle is off-after-lock, on-at-resume). On the wire an additive request tag (`{"type":"output_power","output":1,"powered":false}`, `output` omitted for `all`); `PROTOCOL_VERSION` did not change. |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
 | `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale -- the default and each `[[outputs]]` entry's, appearance, keybindings, new autostart spawn entries; an entry's `mode` is refused as `outputs.<name>.mode`, pending a restart) — see [configuration.md](../scoot/configure.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
@@ -35,6 +36,7 @@ scoot msg screenshot --out /tmp/shot.png
 scoot msg type "hello"
 scoot msg keyboard
 scoot msg locked
+scoot msg binds
 scoot msg wait-idle --quiet-ms 200
 scoot msg subscribe
 scoot msg subscribe keyboard
@@ -169,6 +171,54 @@ $ scoot msg locked
   "locked": false
 }
 ```
+
+**`binds`**, the live keymap as the running compositor uses it — what the
+default `Super+Shift+/` bind opens in a terminal, and what an agent reads
+instead of re-parsing the user's config file:
+
+| Field | Meaning |
+| --- | --- |
+| `combo` | The combo in canonical spelling: modifiers in `super+shift+ctrl+alt` order, then the xkb keysym name (`super+shift+slash`). |
+| `action` | The action string: the same grammar `scoot msg action` takes and `[binds]` uses (`focus-column left`, `spawn foot`, `show-keymap`; `change-vt 3` for the session-managed VT-switch binds, which have no config spelling). |
+| `source` | Where the row came from: `default` (a built-in bind, unchanged), `config` (a combo the defaults leave unbound), `config (replaces default: <old action>)`, `config (unbinds default: <old action>)` (a config unbind — `action` names what was removed), or `session (VT switch)` (the `--tty` recovery binds). |
+| `repeat` | Whether the bind re-fires while its key is held. Never true on a `default` row. |
+| `allow_when_locked` | Whether a `spawn` bind fires while the session is locked. Only ever true beside a `spawn` action. |
+
+One row per effective binding — built-ins first in their canonical order,
+then config binds (fresh combos and overrides alike) sorted by combo, then
+any session-managed rows — followed by one row per default a config unbind
+removed. The config sort is what keeps `--json` stable from run to run: a
+config file loads out of a hash map, whose order has no relationship to the
+file's. A second list, `skipped`, holds every config entry that never made
+it in, sorted by combo — each with its `bind` (as written), its `value` (in
+TOML form), and its `reason` (a parse error, a colliding group, or an unbind
+with nothing to remove).
+
+```sh
+$ scoot msg binds --json
+{
+  "type": "binds",
+  "bindings": [
+    {
+      "combo": "super+h",
+      "action": "focus-column left",
+      "source": "default",
+      "repeat": false,
+      "allow_when_locked": false
+    }
+  ],
+  "skipped": []
+}
+```
+
+Derived by diffing the live table against the defaults on every request,
+so it is always the merged result — never a re-read of the file. Like
+`locked`, this answers locked or not: listing what keys do is not a
+window-management operation (the `Super+Shift+/` bind itself never fires
+while locked). A new reply variant, so this moved `PROTOCOL_VERSION`
+8 → 9: an older client handed one would fail its decode, which can only
+happen to a client new enough to have asked; a `binds` sent to an older
+server answers an ordinary `error`.
 
 Every success reply also carries a **`locked` field**: the session-lock state it was
 built under. An agent typing a password over IPC learns the unlock landed

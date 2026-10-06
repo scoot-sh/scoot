@@ -8,6 +8,7 @@ mod activation;
 mod alpha_modifier;
 mod bind_budget;
 mod bind_repeat;
+mod binds;
 mod child_reaper;
 mod client_fds;
 pub(crate) mod config;
@@ -67,6 +68,7 @@ mod session_env;
 mod session_lock;
 mod shell;
 mod shm_pools;
+mod show_keymap;
 mod sighup;
 mod single_pixel_buffer;
 mod state;
@@ -190,6 +192,9 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // Which windows float when they map: what a reload diffs against too.
     state.floating_rules = loaded.floating.clone();
     state.floating_modifier = loaded.floating_modifier;
+    // Which config binds were skipped, with their reasons: what `scoot msg
+    // binds` lists beside the live rows (see `binds.rs`).
+    state.skipped_binds = loaded.skipped_binds;
     // Before any output exists: `headless::create_output` decides each
     // output's scale from these by name, the primary's included.
     state.output_entries = output_entries;

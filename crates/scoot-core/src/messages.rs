@@ -554,6 +554,18 @@ pub enum Action {
     },
     CloseFocused,
     Spawn(Vec<String>),
+    /// Open the live keymap for the user: a pure directive, not arrangement
+    /// and not a command. The core names no terminal, shell or pager here --
+    /// that is platform/deployment knowledge, and this crate stays
+    /// platform-independent for the future macOS adapter -- it only says
+    /// *what* to open. The shell's `Effect::ShowKeymap` handling builds the
+    /// actual spawn from the live keybinding table (see the `scoot` crate's
+    /// `show_keymap` module). Kept separate from `Spawn` rather than a
+    /// default `[binds]` entry spelling one because the pager pipeline
+    /// (`sh -c` with a space-carrying script) has no grammar spelling that
+    /// parses back -- see the shell's `--print-default-config` round-trip
+    /// pin -- while this spells (and parses) as one word.
+    ShowKeymap,
     Quit,
 }
 
@@ -563,5 +575,10 @@ pub enum Effect {
     /// [`Event::WindowClosed`].
     Close(WindowId),
     Spawn(Vec<String>),
+    /// Open the live keymap: what [`Action::ShowKeymap`] expands to. A pure
+    /// directive like the action -- carrying no command, so the core still
+    /// names no program -- which the shell expands into the terminal spawn
+    /// (see above). The arrangement is untouched.
+    ShowKeymap,
     Quit,
 }

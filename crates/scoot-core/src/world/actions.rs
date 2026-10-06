@@ -180,6 +180,14 @@ impl World {
                     .collect();
             }
             Action::Spawn(command) => return vec![Effect::Spawn(command)],
+            // A shell directive like `Spawn`, not arrangement -- and a pure
+            // one: the core names no terminal, shell or pager (those live
+            // in the `scoot` crate's `show_keymap` module, built from the
+            // live table at fire time), it only says *what* to open. The
+            // shell's `Effect::ShowKeymap` handling runs it. Kept out of
+            // `Spawn` because the pager pipeline has no `[binds]`-grammar
+            // spelling that parses back (see `Action::ShowKeymap`'s doc).
+            Action::ShowKeymap => return vec![Effect::ShowKeymap],
             Action::Quit => return vec![Effect::Quit],
         }
         self.settle_fullscreen();

@@ -279,7 +279,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [Make every --help agent-friendly](./resolved/agent-friendly-help-done.md) — RESOLVED in #436: one help contract (docs/cli-help.md) with topics, examples, `--help --json` from the same source, errors that teach (exit 2)
 - [Nested scoot in the Selkies webtop image stops accepting IPC connections after the first query](./resolved/nested-ipc-socket-refuses-done.md) — RESOLVED 2026-10-06: the nested process had exited on host-connection loss, leaving a stale `scoot.sock`; the host source now stops the session cleanly with a named error (exit 1)
 - [Help follow-ups: one suggest(), build-gated push wording, live llms.txt URL](./resolved/help-followups-done.md) — RESOLVED 2026-10-06 in #478: one `suggest()` in `scoot-ipc`, no-push builds name no push module, every SEE ALSO ends on the live llms.txt
-- [Live keymap query (`scoot msg binds`), default Super+? bind, and explicit unbind](./ipc/ipc-binds-query.md) (high, filed 2026-10-06)
+- [Live keymap query (`scoot msg binds`), default Super+? bind, and explicit unbind](./resolved/ipc-binds-query-done.md) — RESOLVED 2026-10-06 (PR #479)
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
 - [A coalesced `workspace` event on `subscribe`](./resolved/workspace-snapshot-event-done.md)
   — RESOLVED 2026-10-03 in #406: per-output `{active, counts[]}` snapshot (protocol 7)

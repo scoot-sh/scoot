@@ -17,6 +17,7 @@ use super::listener;
 use super::*;
 
 mod actions;
+mod binds;
 mod keyboard;
 mod lock;
 mod targeted;

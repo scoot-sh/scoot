@@ -30,6 +30,10 @@ pub const REQUESTS_HELP: &str = "\
                                     index -- what a layout indicator shows
     locked                          whether the session is locked -- the
                                     side-effect-free lock probe
+    binds [--json]                  the live keymap: every combo, its action,
+                                    where it came from, its flags, plus the
+                                    config binds that were skipped (JSON
+                                    with --json, for agents)
     output-power ID|all on|off        switch an output's panel off or on --
                                      what an idle daemon drives at idle and
                                      resume (`outputs` reports the state)
@@ -62,17 +66,19 @@ pub const ACTIONS_HELP: &str = "\
     move-window-to-output-left | move-window-to-output-right
     cycle-column-width | set-column-width N | toggle-fullscreen
     set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off
-    close | spawn COMMAND... | quit
+    close | spawn COMMAND... | show-keymap | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
 
-/// One parsed client invocation: the request to send, plus where a
-/// screenshot's PNG goes (`None` means stdout).
+/// One parsed client invocation: the request to send, where a screenshot's
+/// PNG goes (`None` means stdout), and whether a `binds` reply renders as
+/// JSON rather than the human table.
 #[derive(Debug, PartialEq)]
 pub struct Msg {
     pub request: Request,
     pub out: Option<PathBuf>,
+    pub json: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -196,6 +202,7 @@ pub fn parse_msg<I: IntoIterator<Item = String>>(args: I) -> Result<Msg, Error> 
 fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
     let verb = args.next().ok_or(Error::Missing("a request"))?;
     let mut out = None;
+    let mut json = false;
     let request = match verb.as_str() {
         "version" => Request::Version,
         "outputs" => Request::Outputs,
@@ -203,6 +210,17 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
         "reload" => Request::Reload,
         "keyboard" => Request::Keyboard,
         "locked" => Request::Locked,
+        "binds" => {
+            for flag in args.by_ref() {
+                match flag.as_str() {
+                    "--json" => json = true,
+                    other => {
+                        return Err(hinted("flag", other.to_owned(), &["--json"], "help binds"));
+                    }
+                }
+            }
+            Request::Binds
+        }
         "output-power" => {
             let target = args.next().ok_or(Error::Missing("an output id or `all`"))?;
             let output = match target.as_str() {
@@ -327,7 +345,7 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
             ));
         }
     };
-    Ok(Msg { request, out })
+    Ok(Msg { request, out, json })
 }
 
 /// Parses one action and its arguments (`"focus-column" "left"`, ...) the
@@ -485,6 +503,7 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
             }
             Action::Spawn { command }
         }
+        "show-keymap" => Action::ShowKeymap,
         "quit" => Action::Quit,
         other => {
             return Err(hinted(
@@ -649,6 +668,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Version,
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -689,6 +709,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Windows,
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -696,6 +717,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Reload,
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -703,6 +725,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Keyboard,
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -710,6 +733,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Version,
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -717,6 +741,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Locked,
                 out: None,
+                json: false,
             })
         );
     }
@@ -731,6 +756,7 @@ mod tests {
                     powered: false,
                 },
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -741,6 +767,7 @@ mod tests {
                     powered: true,
                 },
                 out: None,
+                json: false,
             })
         );
         // An id is a number, the state is on/off, nothing trails.
@@ -788,6 +815,7 @@ mod tests {
                     events: vec![EventKind::Output]
                 },
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -797,6 +825,7 @@ mod tests {
                     events: vec![EventKind::Output]
                 },
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -806,6 +835,7 @@ mod tests {
                     events: vec![EventKind::Keyboard]
                 },
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -815,6 +845,7 @@ mod tests {
                     events: vec![EventKind::Output, EventKind::Keyboard]
                 },
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -824,6 +855,7 @@ mod tests {
                     events: vec![EventKind::Workspace]
                 },
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -833,6 +865,7 @@ mod tests {
                     events: vec![EventKind::Output, EventKind::Workspace]
                 },
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -842,6 +875,7 @@ mod tests {
                     events: vec![EventKind::Lock]
                 },
                 out: None,
+                json: false,
             })
         );
         assert!(
@@ -872,6 +906,7 @@ mod tests {
                     direction: Horizontal::Left
                 }),
                 out: None,
+                json: false,
             })
         );
     }
@@ -883,6 +918,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Action(Action::FocusWorkspaceIndex { index: 2 }),
                 out: None,
+                json: false,
             })
         );
         // ...which is a number, not a direction: sharing the
@@ -902,6 +938,7 @@ mod tests {
                     index: 2
                 }),
                 out: None,
+                json: false,
             })
         );
         // A flag with no id, a non-numeric id, and anything but the flag
@@ -924,6 +961,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Action(Action::MoveWindowToWorkspaceIndex { index: 3 }),
                 out: None,
+                json: false,
             })
         );
         // A number, not a direction -- mirroring `focus-workspace-index`:
@@ -940,6 +978,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Action(Action::SetColumnWidth { index: 2 }),
                 out: None,
+                json: false,
             })
         );
         // A number, not a direction -- mirroring the workspace-index pair:
@@ -956,6 +995,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Action(Action::ToggleFullscreen),
                 out: None,
+                json: false,
             })
         );
     }
@@ -968,6 +1008,7 @@ mod tests {
                 Ok(Msg {
                     request: Request::Action(Action::SetFullscreen { id: 7, fullscreen }),
                     out: None,
+                    json: false,
                 })
             );
         }
@@ -984,6 +1025,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Action(Action::ToggleMaximize),
                 out: None,
+                json: false,
             })
         );
     }
@@ -996,6 +1038,7 @@ mod tests {
                 Ok(Msg {
                     request: Request::Action(Action::SetMaximized { id: 7, maximized }),
                     out: None,
+                    json: false,
                 })
             );
         }
@@ -1016,6 +1059,7 @@ mod tests {
                 Ok(Msg {
                     request: Request::Action(action),
                     out: None,
+                    json: false,
                 })
             );
         }
@@ -1032,6 +1076,7 @@ mod tests {
                     y: 40
                 }),
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -1043,6 +1088,7 @@ mod tests {
                     height: 480
                 }),
                 out: None,
+                json: false,
             })
         );
         for bad in [
@@ -1064,6 +1110,7 @@ mod tests {
                 Ok(Msg {
                     request: Request::Action(Action::SetFloating { id: 7, floating }),
                     out: None,
+                    json: false,
                 })
             );
         }
@@ -1083,6 +1130,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Action(Action::FocusOutput { output: 2 }),
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -1090,6 +1138,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Action(Action::MoveFocusedWindowToOutput { output: 2 }),
                 out: None,
+                json: false,
             })
         );
         assert!(parse_msg_args(&["action", "focus-output", "down"]).is_err());
@@ -1105,6 +1154,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Action(Action::FocusOutputIndex { index: 1 }),
                 out: None,
+                json: false,
             })
         );
         assert_eq!(
@@ -1112,6 +1162,7 @@ mod tests {
             Ok(Msg {
                 request: Request::Action(Action::MoveFocusedWindowToOutputIndex { index: 1 }),
                 out: None,
+                json: false,
             })
         );
         assert!(parse_msg_args(&["action", "focus-output-index", "down"]).is_err());
@@ -1154,6 +1205,7 @@ mod tests {
                 Ok(Msg {
                     request: Request::Action(action),
                     out: None,
+                    json: false,
                 }),
                 "{verb}"
             );
@@ -1201,6 +1253,7 @@ mod tests {
                     cursor: None,
                 },
                 out: Some(PathBuf::from("/tmp/shot.png")),
+                json: false,
             })
         );
     }
@@ -1217,6 +1270,7 @@ mod tests {
                     cursor: Some(false),
                 },
                 out: Some(PathBuf::from("/tmp/shot.png")),
+                json: false,
             })
         );
         assert_eq!(
@@ -1227,6 +1281,7 @@ mod tests {
                     cursor: None,
                 },
                 out: None,
+                json: false,
             })
         );
     }
@@ -1242,6 +1297,48 @@ mod tests {
                     button: PointerButton::Left
                 },
                 out: None,
+                json: false,
+            })
+        );
+    }
+
+    #[test]
+    fn binds_parses_bare_and_as_json() {
+        assert_eq!(
+            parse_msg_args(&["binds"]),
+            Ok(Msg {
+                request: Request::Binds,
+                out: None,
+                json: false,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["binds", "--json"]),
+            Ok(Msg {
+                request: Request::Binds,
+                out: None,
+                json: true,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["binds", "--jsn"]),
+            Err(Error::Hinted {
+                kind: "flag",
+                what: "--jsn".into(),
+                suggestion: "--json".into(),
+                topic: "help binds",
+            })
+        );
+    }
+
+    #[test]
+    fn show_keymap_parses_as_an_action() {
+        assert_eq!(
+            parse_msg_args(&["action", "show-keymap"]),
+            Ok(Msg {
+                request: Request::Action(Action::ShowKeymap),
+                out: None,
+                json: false,
             })
         );
     }
