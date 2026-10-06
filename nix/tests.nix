@@ -10020,7 +10020,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     # 22e5. Brightness: every backlight device steps the same amount
     #      (keyboard LEDs excluded: class `leds`), the OSD shows the
     #      rounded average.
-    audio_setup "" 0 0 "$(printf '%b' 'panel,backlight,400,40%,1000\nnext,backlight,600,60%,1000\nkbd,leds,0,0%,255\n')" "" 0 ""
+    audio_setup "" 0 0 "$(printf '%b' 'panel,backlight,400,40%,1000\ext,backlight,600,60%,1000\nkbd,leds,0,0%,255\n')" "" 0 ""
     audio_fifo
     got=$(audio_shown ${audioBehaviorBrightness} up)
     [ "$got" = "0:50" ] || { echo "brightness showed '$got', want '0:50' (22e5)" >&2; exit 1; }
