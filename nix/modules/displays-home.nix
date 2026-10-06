@@ -78,7 +78,7 @@ let
   # refusal below). Rendered once here, read
   # by absolute store path (a changed file restarts the unit, so the
   # watcher never runs stale profiles).
-  profilesFile = builtins.toFile "scoot-displays.json" (
+  profilesFile = pkgs.writeText "scoot-displays.json" (
     builtins.toJSON (map (profile: removeAttrs profile [ "mode" ]) dis.profiles)
   );
 
