@@ -61,7 +61,11 @@ pinned nixpkgs' tzdata).
 No integration test reads the machine's own files either: every session
 gets a scratch directory as its `XDG_RUNTIME_DIR` and fresh
 `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` under it, which
-every child the test starts (the compositor, the bar, `msg`) inherits. So
+the compositor, the bar and `msg` sessions inherit. (A few one-shot helpers
+spawn bare: `swaymsg`, which takes its socket from `-s`, a one-shot `msg
+subscribe`, which finds its socket from `XDG_RUNTIME_DIR` and
+`WAYLAND_DISPLAY`, and the `hw_script` refusal tests. None of them reads a
+config file.) So
 the daemon never sees the `bar.toml` of the developer running the suite,
 whose layout would otherwise merge with the flags' and fail the test
 (seen live on the maintainer's machine: `clock is placed twice` where a
@@ -82,8 +86,10 @@ A missing compositor (or `foot`, or `dbus-daemon`) skips the tests that
 need it with a message naming what is missing and the variable that would
 make it a failure instead (`SCOOTBAR_REQUIRE_SCOOT`,
 `SCOOTBAR_REQUIRE_SWAY`, `SCOOTBAR_REQUIRE_DBUS_DAEMON`): green by
-skipping is a trap, so say which. CI sets them, so there a missing
-compositor fails.
+skipping is a trap, so say which. CI's scootbar integration job sets
+`SCOOTBAR_REQUIRE_SCOOT` and `SCOOTBAR_REQUIRE_SWAY`, so a missing
+compositor fails there; the status-bar job sets
+`SCOOTBAR_REQUIRE_DBUS_DAEMON` and still skips, loudly, without a compositor.
 
 ## The popup test
 
