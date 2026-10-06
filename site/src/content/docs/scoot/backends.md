@@ -31,11 +31,27 @@ names the loss (`lost the connection to the host compositor`) and the
 process exits 1 with the same message. A supervisor (s6, systemd)
 restarts it into a fresh session once the host is back.
 
+Starting up waits at most 10 seconds for the host to answer the initial
+handshake. A host that accepts the connection but never answers — a
+restart that came back listening without dispatching — used to wedge
+the session before `scoot is up`, with no IPC socket and nothing for a
+supervisor to act on. Now the log names it (`could not reach the host
+compositor during startup`) and the process exits 1, so the supervisor
+retries. There is no knob for the wait: ten seconds is ~170x a healthy
+startup, and one bound every host meets beats a tunable nobody asked for.
+
 > **Symptom:** `scoot msg` says `Connection refused` right after the
 > host went away. The nested session is gone — check its log for the
 > `lost the connection` line — not deaf. Restart the session (or let
 > the supervisor do it) once the host is back; a stale `scoot.sock`
 > file from the dead session is replaced on the next start.
+
+> **Symptom:** nested scoot exits 1 seconds after starting, with no
+> `scoot is up` and no `scoot.sock` at all. Check its log for the
+> `could not reach the host compositor during startup` line — the host
+> accepted the connection but never answered. Restart the host (or wait
+> for the supervisor's next retry); the next start replaces the stale
+> state.
 
 ## Which renderer draws the frames
 

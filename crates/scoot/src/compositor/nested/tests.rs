@@ -152,6 +152,8 @@ fn a_queue_that_comes_back_to_the_current_size_drains_to_nothing() {
 // Host loss (`HostSource`)
 // -------------------------------------------------------------------------
 
+use std::io::Read as _;
+use std::io::Write as _;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -160,7 +162,7 @@ use std::time::{Duration, Instant};
 
 use wayland_client::Connection;
 
-use super::{HostLoss, init_on};
+use super::{HostLoss, STARTUP_TIMEOUT, init_on};
 use crate::compositor::decorations::Appearance;
 use crate::compositor::state::ClientState;
 use crate::compositor::test_support::{Harness, capture_logs};
@@ -171,7 +173,7 @@ const HOST_PATIENCE: Duration = Duration::from_secs(10);
 
 /// The host: a headless scoot on its own thread, dispatching until told to
 /// die -- the in-process shape of a parent compositor going away mid-session
-/// (see `docs/backlog/ipc/nested-ipc-socket-refuses.md`). Dying means
+/// (see `docs/backlog/resolved/nested-ipc-socket-refuses-done.md`). Dying means
 /// dropping the whole harness, which closes the server end of the socket
 /// pair the nested session is connected through.
 fn host(
@@ -290,8 +292,165 @@ fn losing_the_host_stops_the_session_without_failing_the_loop() {
 fn host_loss_marks_once_and_stays() {
     let loss = HostLoss::default();
     assert!(!loss.lost());
-    loss.mark();
+    assert!(loss.mark(), "the first mark is the one that logs");
+    assert!(!loss.mark(), "a second death must not log again");
     assert!(loss.lost());
+}
+
+// -------------------------------------------------------------------------
+// Startup bound (a host that accepts but never answers)
+// -------------------------------------------------------------------------
+
+/// Starting against a host that accepts the connection but never answers
+/// fails loud within `STARTUP_TIMEOUT` instead of wedging before `scoot is
+/// up` with no IPC socket and nothing for a supervisor to act on.
+///
+/// The silent end is a socket pair whose server half is held open but never
+/// dispatched: the registry roundtrip gets no answer, the same shape as the
+/// restarted Selkies host from the #467 review (listening without
+/// dispatching).
+///
+/// The scenario runs in a FRESH CHILD PROCESS (this test binary re-executed
+/// with `SCOOT_SILENT_CHILD` set), not a fork and not a thread: `State` is
+/// `!Send` so the scenario cannot move to a thread, and forking the
+/// shared-process `cargo test` runner duplicates every concurrently-running
+/// fixture's sockets and Smithay state into the child -- that shape broke
+/// unrelated `layer_shell` teardown tests in the same run, deterministically
+/// (see the report). A re-executed process shares nothing but the binary:
+/// the child builds its own harness single-threaded, holds its own silent
+/// server with no thread behind it, and exits with a code. The parent only
+/// manages the subprocess and bounds the pre-fix hang with its own deadline,
+/// so before the bound the test fails instead of hanging nextest.
+#[test]
+fn starting_against_a_silent_host_fails_loud_within_the_bound() {
+    /// The parent's deadline: the child's whole `STARTUP_TIMEOUT` plus
+    /// slack for a loaded box to re-exec, build a harness and time out.
+    /// Well under nextest's 60 s slow mark either way: ~10 s after the fix,
+    /// 30 s on a pre-fix wedge.
+    const SILENT_PARENT_PATIENT: Duration = Duration::from_secs(30);
+    assert!(
+        SILENT_PARENT_PATIENT > STARTUP_TIMEOUT,
+        "the parent must outwait the child's bound"
+    );
+    // libtest names tests by module path *without* the crate prefix
+    // (`compositor::nested::tests::...`, as a failure list shows), while
+    // `module_path!()` keeps it (`scoot::compositor::...`), so the crate
+    // segment is stripped for the `--exact` filter.
+    let child_path = match module_path!().split_once("::") {
+        Some((_, rest)) => format!("{rest}::silent_child_entry"),
+        None => format!("{}::silent_child_entry", module_path!()),
+    };
+    let mut child = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+        .args(["--exact", &child_path, "--nocapture"])
+        .env("SCOOT_SILENT_CHILD", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the silent-host child starts");
+    let deadline = Instant::now() + SILENT_PARENT_PATIENT;
+    let (code, stdout) = loop {
+        match child
+            .try_wait()
+            .expect("the silent-host child is waited on")
+        {
+            Some(status) => {
+                // The child's output is tiny (a libtest summary); draining
+                // it after the exit cannot deadlock.
+                let mut stdout = String::new();
+                if let Some(mut pipe) = child.stdout.take() {
+                    let _ = pipe.read_to_string(&mut stdout);
+                }
+                break (status.code(), stdout);
+            }
+            None => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!(
+                        "starting against a silent host wedged past \
+                         {SILENT_PARENT_PATIENT:?}: the startup wait is unbounded"
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    };
+    assert_eq!(
+        code,
+        Some(SILENT_CHILD_PASS),
+        "starting against a silent host must fail loud naming the host (child exit {code:?})"
+    );
+    // Guards a filter typo: `--exact` with no match runs zero tests and
+    // still exits 0, which the exit code alone would pass vacuously. (The
+    // libtest `1 passed` summary cannot serve here: the entry exits via
+    // `process::exit`, which never prints it -- so the entry prints its own
+    // marker instead.)
+    assert!(
+        stdout.contains("SILENT_CHILD_PASS"),
+        "the silent-host child ran no scenario; its filter names nothing:\n{stdout}"
+    );
+}
+
+/// What [`silent_child_entry`] exits with: the scenario behaved (loud,
+/// host-naming `Err` within the bound).
+const SILENT_CHILD_PASS: i32 = 0;
+
+/// The child's half of
+/// [`starting_against_a_silent_host_fails_loud_within_the_bound`], run only
+/// when this binary is re-executed with `SCOOT_SILENT_CHILD` set (a direct
+/// `cargo test`/`nextest` run of this test is a no-op pass: the real check
+/// is the parent above spawning it as a subprocess).
+///
+/// Single-threaded, with its own harness and its own silent server end held
+/// open but never dispatched -- no thread behind the server, so the
+/// registry roundtrip simply gets no answer. Exits with
+/// [`SILENT_CHILD_PASS`] iff `init_on` fails loud naming the host;
+/// any other outcome (including an `Ok` against a host that said nothing)
+/// exits nonzero, and a pre-fix build never exits at all (the parent kills
+/// it past its deadline).
+#[test]
+fn silent_child_entry() {
+    if std::env::var("SCOOT_SILENT_CHILD").is_err() {
+        return;
+    }
+    let (server_end, client_end) = UnixStream::pair().expect("a socket pair");
+    // Held open, never dispatched: closing every server copy would fail the
+    // client fast with EPIPE instead of the silence this pins.
+    let _held = server_end;
+    let mut nested: Harness<(), ()> = Harness::headless(Appearance::default(), 64);
+    let conn = match Connection::from_socket(client_end) {
+        Ok(conn) => conn,
+        Err(error) => {
+            eprintln!("silent child: could not wrap the host socket: {error}");
+            std::process::exit(1);
+        }
+    };
+    let handle = nested.event_loop.handle();
+    let started = Instant::now();
+    match init_on(handle, &mut nested.state, conn, 64, 64) {
+        Err(error) => {
+            let message = error.to_string();
+            if !message.contains("host") {
+                eprintln!("silent child: the startup failure does not name the host: {message}");
+                std::process::exit(1);
+            }
+            if started.elapsed() > STARTUP_TIMEOUT + Duration::from_secs(10) {
+                eprintln!("silent child: the startup bound took far longer than itself");
+                std::process::exit(1);
+            }
+            // The marker the parent's filter-typo guard looks for (libtest
+            // prints no summary past `process::exit`, so the entry says so
+            // itself; flushed -- a piped stdout is block-buffered and
+            // `process::exit` flushes nothing).
+            println!("SILENT_CHILD_PASS");
+            let _ = std::io::stdout().flush();
+            std::process::exit(SILENT_CHILD_PASS);
+        }
+        Ok(()) => {
+            eprintln!("silent child: starting against a silent host succeeded");
+            std::process::exit(1);
+        }
+    }
 }
 
 // -------------------------------------------------------------------------

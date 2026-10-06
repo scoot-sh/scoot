@@ -42,6 +42,7 @@ mod presenter;
 use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use calloop_wayland_source::WaylandSource;
 use smithay::backend::input::{AxisRelativeDirection, AxisSource, InputTime};
@@ -49,7 +50,7 @@ use smithay::input::pointer::AxisFrame;
 use smithay::reexports::calloop::{
     self, EventIterator, EventSource, LoopSignal, Poll, PostAction, Readiness, Token, TokenFactory,
 };
-use wayland_client::globals::registry_queue_init;
+use wayland_client::globals::{GlobalList, registry_queue_init};
 use wayland_client::protocol::wl_compositor::WlCompositor as HostCompositor;
 use wayland_client::protocol::wl_keyboard::WlKeyboard as HostKeyboard;
 use wayland_client::protocol::wl_pointer::WlPointer as HostPointer;
@@ -86,8 +87,12 @@ impl HostLoss {
         self.dead.load(Ordering::Relaxed)
     }
 
-    fn mark(&self) {
-        self.dead.store(true, Ordering::Relaxed);
+    /// Marks the loss, answering whether this call marked it first. Only the
+    /// first mark logs (see `HostSource::lost`): `before_sleep`'s flush
+    /// failure and the next `process_events` read failure report the same
+    /// death, and a supervisor counting the line would double-count it.
+    fn mark(&self) -> bool {
+        !self.dead.swap(true, Ordering::Relaxed)
     }
 }
 
@@ -99,7 +104,7 @@ impl HostLoss {
 /// can only describe as "other error during loop operation", while the
 /// control socket's file is left behind with no listener and every later
 /// `scoot msg` answers `Connection refused` (see
-/// `docs/backlog/ipc/nested-ipc-socket-refuses.md`). That shape is
+/// `docs/backlog/resolved/nested-ipc-socket-refuses-done.md`). That shape is
 /// undiagnosable: nothing names the host connection, and nothing tells a
 /// supervisor the session is gone rather than deaf.
 ///
@@ -137,13 +142,17 @@ impl HostSource {
 
     /// Names the loss, marks it for `compositor::run`, and stops the loop.
     /// The caller drops the dead source: the host fd is gone, and waking
-    /// into it again would only re-report the same failure.
+    /// into it again would only re-report the same failure. Only the first
+    /// mark logs: one death surfaces twice (the `before_sleep` flush, then
+    /// the `process_events` read), and logging both would double-count it
+    /// for anything alerting on the line.
     fn lost(&self, error: &calloop::Error) {
-        self.loss.mark();
-        tracing::error!(
-            %error,
-            "lost the connection to the host compositor; stopping the session"
-        );
+        if self.loss.mark() {
+            tracing::error!(
+                %error,
+                "lost the connection to the host compositor; stopping the session"
+            );
+        }
         self.signal.stop();
     }
 }
@@ -444,6 +453,61 @@ impl PendingAxis {
     }
 }
 
+/// How long the startup handshake with the host may take: the registry
+/// roundtrip below (and, in a `gpu-scanout` build, the dma-buf feedback
+/// roundtrip in `gpu.rs`), after which a silent host is declared dead and
+/// the session stops with exit 1 for the supervisor to retry -- the same
+/// contract as a mid-session loss (see `HostSource`).
+///
+/// Measured 2026-10-06 on the Asahi M2: a healthy nested startup against a
+/// headless host takes ~60 ms idle and the same under load (5.1 average
+/// while `cargo build --workspace` runs), so ten seconds is ~170x the
+/// healthy shape with room for a slow-but-answering host (a loaded VM, a
+/// cold page cache). It matches the `HOST_PATIENCE` the suites already
+/// allow the same host interaction. Deliberately no env/CLI override: one
+/// knob-free bound every host meets beats a tunable nobody asked for.
+///
+/// The wait runs on a helper thread (see `registry_queue_init_bounded`): the
+/// roundtrip blocks uninterruptibly in `poll`, so no in-thread deadline can
+/// end it, and reimplementing the registry fetch to poll with a timeout
+/// would duplicate `wayland_client` internals for no gain. On expiry the
+/// helper thread stays blocked, but the process exits 1 immediately after,
+/// so it dies with the session rather than accumulating -- under nextest
+/// each test is its own process for the same reason.
+pub(super) const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// [`registry_queue_init`] with a bound: a host that accepts the connection
+/// but never answers (the Selkies restart shape from the #467 review, where
+/// the restarted host listened without dispatching) would otherwise wedge
+/// the session before `scoot is up` and before any IPC socket exists, with
+/// nothing for a supervisor to act on.
+fn registry_queue_init_bounded(
+    conn: &Connection,
+    timeout: Duration,
+) -> Result<(GlobalList, EventQueue<State>), Box<dyn Error>> {
+    let conn = conn.clone();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done_tx.send(registry_queue_init::<State>(&conn));
+    });
+    match done_rx.recv_timeout(timeout) {
+        Ok(result) => result.map_err(|error| {
+            format!("could not fetch the host compositor's globals: {error}").into()
+        }),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "the host compositor did not answer the startup registry request \
+             within {}s; stopping the nested session",
+            timeout.as_secs()
+        )
+        .into()),
+        // The helper panicked: a bug, not a host, but the session cannot
+        // start without its globals either way.
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err("the startup registry fetch ended without answering".into())
+        }
+    }
+}
+
 pub fn init(
     loop_handle: smithay::reexports::calloop::LoopHandle<'static, State>,
     state: &mut State,
@@ -470,7 +534,36 @@ pub(super) fn init_on(
     width: i32,
     height: i32,
 ) -> Result<(), Box<dyn Error>> {
-    let (globals, event_queue) = registry_queue_init::<State>(&conn)?;
+    match registry_queue_init_bounded(&conn, STARTUP_TIMEOUT) {
+        Ok((globals, event_queue)) => init_on_bound(
+            globals,
+            event_queue,
+            loop_handle,
+            state,
+            conn,
+            width,
+            height,
+        ),
+        Err(error) => {
+            tracing::error!(%error, "could not reach the host compositor during startup");
+            Err(error)
+        }
+    }
+}
+
+/// The rest of [`init_on`] once the registry answered: binding globals,
+/// negotiating dma-bufs, creating the window and registering the host
+/// connection. Split out so the timeout's loud-exit path above stays legible
+/// at the call site rather than buried mid-function.
+fn init_on_bound(
+    globals: GlobalList,
+    event_queue: EventQueue<State>,
+    loop_handle: smithay::reexports::calloop::LoopHandle<'static, State>,
+    state: &mut State,
+    conn: Connection,
+    width: i32,
+    height: i32,
+) -> Result<(), Box<dyn Error>> {
     let qh = event_queue.handle();
 
     let compositor: HostCompositor = globals.bind(&qh, 4..=6, ())?;

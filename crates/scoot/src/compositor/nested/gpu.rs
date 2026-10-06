@@ -291,17 +291,45 @@ fn try_negotiate(
 /// blocking round trip: the same kind of wait the registry bootstrap already
 /// did against the same host, once, at startup. Nothing on `State`'s queue
 /// is dispatched meanwhile; it is only queued.
+///
+/// Bounded by `super::STARTUP_TIMEOUT` on a helper thread, like the registry
+/// fetch: a host that answered the registry but never answers this sync
+/// would otherwise wedge startup the same way. A timeout here is *not*
+/// fatal, unlike the registry's: it falls back to read-back through the
+/// existing `Refusal` path, which is safe because nothing past this point
+/// blocks on the host -- the event loop is next, and `HostSource` names a
+/// truly dead host loudly on its first dispatch. So the helper thread's
+/// leak on expiry is bounded the same way the registry's is: the session
+/// either starts (and the thread already answered) or, for a dead host,
+/// stops loudly just after.
 fn read_feedback(
     conn: &Connection,
     dmabuf: &ZwpLinuxDmabufV1,
 ) -> Result<HostFeedback, Box<dyn Error>> {
-    let mut queue = conn.new_event_queue::<Collector>();
-    let object = dmabuf.get_default_feedback(&queue.handle(), ());
-    let mut collector = Collector::default();
-    let round_trip = queue.roundtrip(&mut collector);
-    object.destroy();
-    round_trip.map_err(|error| format!("the host did not answer: {error}"))?;
-    Ok(collector.finish()?)
+    let (conn, dmabuf) = (conn.clone(), dmabuf.clone());
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut queue = conn.new_event_queue::<Collector>();
+        let object = dmabuf.get_default_feedback(&queue.handle(), ());
+        let mut collector = Collector::default();
+        let result = match queue.roundtrip(&mut collector) {
+            Err(error) => Err(format!("the host did not answer: {error}")),
+            Ok(_) => collector.finish().map_err(str::to_string),
+        };
+        object.destroy();
+        let _ = done_tx.send(result);
+    });
+    match done_rx.recv_timeout(super::STARTUP_TIMEOUT) {
+        Ok(result) => result.map_err(Into::into),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "the host did not answer dma-buf feedback within {}s",
+            super::STARTUP_TIMEOUT.as_secs()
+        )
+        .into()),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err("the dma-buf feedback fetch ended without answering".into())
+        }
+    }
 }
 
 /// GBM on the renderer's device, render node first and then the primary
