@@ -79,17 +79,31 @@ profile (each still individually disable-able):
   re-check exit 0; dummy password rejected with journal FAILED);
   SSH/agent-less sessions refuse loud ("no agent available"); agent
   kill restarts supervised (new PID re-registers and serves).
-- Keyring boundary (honest degradation, acceptance partially unmet):
-  PAM primes the unlock at auth (`gkr-pam: ... unlocked keyring` in
-  the greeter log) but the PAM-started daemon dies with the greeter
-  scope, so the session daemon starts locked and the first secrets
-  use per login unlocks once (login password); CLI refuses loud
-  until then, GUI apps show their unlock UI. A secret can therefore
-  NOT be read with zero prompts after a logout+relogin on greetd --
-  persisting the unlock would need the password to reach a surviving
-  daemon, a security boundary not crossed here. All of the slot's
-  machinery (PAM pair, activation, wrapper, client, bus names) is
-  proven working.
+- Keyring unlock at login (acceptance FULLY met, after a fix-round
+  re-test 2026-10-06): the first session's report of a locked session
+  daemon does not reproduce. Its "dies with the greeter scope" theory
+  was a misread — the scope kill in its journal was the *greeter's
+  own* daemon (`greeter` user, `session-*.scope` of class `greeter`),
+  and its later logins show no `gkr-pam` lines at all (the PAM pair
+  was never active for them). Re-tested live on the M2 (scoot-test
+  greetd login, generation 100, restored to 99 after): PAM stashes
+  at auth and unlocks at session (`unlocked keyring` in the greeter
+  log); the unlocked daemon (setuid to the login user) lands in the
+  *user's* session scope — `pam_systemd` runs inside the `login`
+  substack ahead of the keyring rule (order 10110), so the worker is
+  already moved before the daemon forks — with its control socket at
+  `/run/user/1001/keyring/control`; the first secrets use activates
+  `gnome-keyring-daemon --start`, which hands `org.freedesktop.secrets`
+  to the already-running unlocked daemon (bus owner PID equals the PAM
+  daemon; the `--start` shim exits, no second daemon serves). A secret
+  stored in login 1 reads back with no prompt in login 1 AND, after a
+  logout plus re-login, in login 2 with no store and no prompt. The
+  user scope's death at logout reaps the daemon, and the next login
+  re-primes it — no password handoff to a surviving daemon is needed,
+  so the systemd socket units upstream ships (which nixpkgs builds
+  with `-Dsystemd=disabled`) stay out: no package override, no fork.
+  CLI refuses loud only with no bus at all (pre-login state), GUI apps
+  never prompt on the greetd path.
 - Docs on the site's desktop page (Privileges prompts and the
   keyring: measured pick tables, per-option Type/Default, symptom
   troubleshooting); launcher harness T16-T18 (spawn post-display,

@@ -1154,12 +1154,14 @@ holds the unlocked keyring until the session ends), with
 `secret-tool` (from libsecret) on `PATH` for scripts and terminals:
 
 ```sh
-secret-tool store --label='wifi' ssid MyNetwork   # once unlocked...
+secret-tool store --label='wifi' ssid MyNetwork   # any login...
 secret-tool lookup ssid MyNetwork                  # ...reads back, no prompt
 ```
-The first use of each login performs the one unlock (a graphical
-app prompts; the CLI refuses loud until unlocked) -- everything
-after is seamless till logout.
+On a greetd login nothing ever prompts: the login password unlocks
+the keyring during login (below), so the first use — and every later
+one till logout — is seamless. Off the greetd path the first use of
+each login performs the one unlock (a graphical app prompts; the CLI
+refuses loud until unlocked).
 
 Why polkit-gnome, measured at the pinned rev (`8ce4ef6`,
 `aarch64-linux`: full closures by `nix path-info --closure-size`,
@@ -1195,19 +1197,26 @@ same (no activation protocol exists for agents: polkitd needs one
 registered before the prompt), so the session leader spawns it once
 the display is known -- event-driven and idle-silent, as measured.
 
-Unlocking takes one password entry per login, through the login
-password: the module adds two PAM rules confined to greetd's own
-service (an `auth` rule caching the login password beside its
-`login` substack, a `session` rule with `auto_start`, each ten past
-it), and a password login through ReGreet primes the unlock there
-(the greeter log says `gkr-pam: gnome-keyring-daemon started
-properly`). The primed daemon does not survive into the session,
-though: it starts as a child of the login worker and dies with the
-greeter scope, so the session daemon (D-Bus activated on first use)
-starts locked, and the first secrets use unlocks it once with the
-login password -- a graphical app shows its unlock dialog, `secret-tool`
-refuses loud until then. Every later use that login is seamless.
-Nixpkgs' own `enableGnomeKeyring` flag cannot do even the priming
+Unlocking takes no extra password entry on a greetd login: the
+module adds two PAM rules confined to greetd's own service (an `auth`
+rule caching the login password beside its `login` substack, a
+`session` rule with `auto_start`, each ten past it), and a password
+login through ReGreet unlocks there (the greeter log says `gkr-pam:
+gnome-keyring-daemon started properly and unlocked keyring`). The
+unlocked daemon lands in the *user's* session scope, not the
+greeter's: `pam_systemd` runs inside the `login` substack, ahead of
+the keyring rule, so the worker is already moved into the new scope
+before the daemon forks — and it stays there till logout. The first
+secrets use finds it through the control socket at its default path
+(`$XDG_RUNTIME_DIR/keyring/control`): D-Bus activation runs
+`gnome-keyring-daemon --start`, which hands the bus name to the
+already-running unlocked daemon and exits, so no second daemon ever
+serves. (An earlier session misread a greeter-scope kill of the
+*greeter's own* daemon as the user's daemon dying, and measured a
+locked session daemon on logins where the PAM pair was never active;
+re-tested live, logout plus re-login reads back with no prompt — see
+the ticket's landed notes.) Nixpkgs' own `enableGnomeKeyring` flag
+cannot do even the priming
 (probed at the pinned rev: it lives inside the default-rules block,
 and greetd's service sets `useDefaultRules = false`, so the flag is
 a silent no-op there); and the stock
@@ -1258,13 +1267,15 @@ Troubleshooting, by symptom:
   the dialog, polkitd decides: check the action's policy
   (`pkaction --verbose`), and that the user is in the right group —
   the agent is only the messenger.
-- *The keyring asks every login.* Expected everywhere: the first
-  secrets use of each login unlocks once (the login password), then
-  stays unlocked till logout. Off the greetd path (TTY, SSH,
-  autologin, another greeter) nothing even primes it. On a greetd
-  login with no priming at all (`journalctl` shows no `gkr-pam`
-  line), the PAM pair never applied: `grep gnome_keyring
-  /etc/pam.d/greetd` should show two lines.
+- *The keyring asks every login.* On a greetd login it should not
+  ask at all: the login password unlocks during login, and the
+  unlock holds till logout. If a use still prompts, the priming
+  never happened — `journalctl` shows no `gkr-pam` line for the
+  login — and the PAM pair never applied: `grep gnome_keyring
+  /etc/pam.d/greetd` should show two lines. Off the greetd path
+  (TTY, SSH, autologin, another greeter) the first secrets use of
+  each login unlocks once (the login password), then stays unlocked
+  till logout.
 - *`secret-tool lookup` says no such service.* The bus names never
   published: `secrets.enable` without the NixOS side (a
   home-manager-only setup publishes nothing — the activation files
