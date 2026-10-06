@@ -3029,12 +3029,17 @@ frames, `bench_the_swap_per_frame`).
 
 ### State left behind
 
-`fgconsole` 1, no `scoot`, `seatd` or `mpv` processes started by this test
-left, the greeter on tty1 as found. greetd was never stopped. No `nh os
-switch`, no reboot, and no config change on the box. The test directory,
-`~/fx/cursor-k7q2/` (trees, target dirs, scripts, logs), was deleted
-afterwards. The raw `.txt`, `.log` and debugfs files were copied off the box
-first.
+Checked at 16:33 local, after the last session and the test-suite runs:
+`fgconsole` 1, `/run/seatd.sock` gone, no `scoot`, `seatd`, `mpv` or `foot`
+process, greetd (pid 1396068) and its greeter session on tty1 (session
+60542) as found, DP-1 and eDP-1 `connected`. greetd was never stopped; the
+VT switches in this test were `chvt 1`/`chvt 2` onto the greeter's VT and
+back. No `nh os switch`, no reboot, no config change. The test directory
+`~/fx/cursor-k7q2/` (trees, target dirs, scripts, logs) and
+`/tmp/k7q2-cargo.toml` were deleted. The scripts, the per-session `.txt`
+and debugfs files, and the xz-compressed trace and mpv logs were copied off
+the box first, into the implementing session's scratchpad
+(`cursor-m2-evidence.tar.xz`). Those copies are not in the repository.
 
 ## Keys for the 2026-09-25 runs
 

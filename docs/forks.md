@@ -313,9 +313,9 @@ existing entries are being checked against it by
     the primary plane (Smithay tries the primary only for the bottom
     element with nothing rendered above it, `drm/compositor/mod.rs` ~1995).
     Measured on the Apple M2 (`Asahi.md`, Test 17): fullscreen mpv with the
-    pointer visible and idle, 29-32 jiffies per 10 s composited before, 13-15
+    pointer visible and idle, 22-33 jiffies per 10 s composited before, 13-15
     with the cursor on overlay plane 45 and mpv's buffer on the primary after;
-    pointer motion over a plain desktop, 19-20 against 9-10. Used by
+    pointer motion over a plain desktop, 17-19 against 11. Used by
     `compositor/render/cursor_plane.rs` (scoot does not compile against a
     rev without the variant). Touches `renderer/element/mod.rs`,
     `drm/exporter/{mod,gbm,dumb}.rs` and `drm/compositor/mod.rs`.
