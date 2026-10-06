@@ -5088,6 +5088,7 @@ let
         "scoot-clipboard-primary-store"
         "scoot-idle"
         "scoot-audio-inhibit"
+        "scoot-osd"
         "scootbar"
       ];
     in
@@ -5301,6 +5302,7 @@ let
           "scoot-clipboard-primary-store"
           "scoot-clipboard-store"
           "scoot-notify-sync"
+          "scoot-osd"
         ];
       true
     )
