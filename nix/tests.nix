@@ -14831,7 +14831,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
             if grep -q -- "--background-color=" ${appsBluePickTargetOff}; then echo "themed flag present with theming off (23)" >&2; exit 1; fi
             echo "ok: the pickers carry the look, the dmenu contract and their wiring"
 
-            # 23a-i. The WiFi picker, against stub tools (the REAL script
+                    # 23a-o. The WiFi picker, against stub tools (the REAL script
             #     from the module -- `dev`/`dev-code` how `nmcli dev`
             #     answers, `connections` the saved list, `scan` the cached
             #     scan, `secret`/`secret-code` the keyring, `pick`/`pick-code`
@@ -14859,11 +14859,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
             #      round trip as one row, the ethernet connection left out.
             net_setup 0 0
             got=$(${appsNetPick} list)
-            want="HomeNet
-        WorkNet
-        Hotel: Lobby
-        Café
-        OpenNet"
+            want="$(printf 'HomeNet\nWorkNet\nHotel: Lobby\nCafé\nOpenNet')"
             [ "$got" = "$want" ] || { echo "list showed '$got', want '$want' (23a)" >&2; exit 1; }
             echo "ok: list merges saved and scan, escapes intact"
 
@@ -14965,8 +14961,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
             #      picker, like the audio slot's sink helper).
             blue_setup 0
             got=$(${appsBluePick} list)
-            want="* 11:22:33:44:55:66 Headphones
-          77:88:99:AA:BB:CC Keyboard"
+            want="$(printf '* 11:22:33:44:55:66 Headphones\n  77:88:99:AA:BB:CC Keyboard')"
             [ "$got" = "$want" ] || { echo "list showed '$got', want '$want' (23j)" >&2; exit 1; }
             echo "ok: list marks connected devices"
 
