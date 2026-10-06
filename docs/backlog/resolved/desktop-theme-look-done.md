@@ -1,9 +1,10 @@
 ---
 title: "Desktop look: fonts, cursor, GTK/Qt theme and dark mode from the look choice"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-06"
 ---
 
 # Desktop look: fonts, cursor, GTK/Qt theme and dark mode from the look choice
@@ -52,3 +53,32 @@ docs in `docs/nix.md`.
 
 Authoring new looks (three exist); a Stylix colorscheme generator (Stylix
 upstream's job); icon themes beyond a default pick (say the pick).
+
+## Resolution (2026-10-06)
+
+Landed as `feat(nix): desktop look themes fonts, cursor, GTK/Qt, greeter
+and app files` (PR #474 — this entry resolved in the PR): `desktop.theme`
+filled from `desktop.look` (user > Stylix > look, per key) — the look's
+cursor in the compositor config, GTK `settings.ini` + `GTK_THEME`, qt6ct
+config + `QT_QPA_PLATFORMTHEME`/`QT_PLUGIN_PATH` (`Adwaita`/`Adwaita-Dark`,
+capitalized exactly as the plugin registers them), the dark-mode
+preference from the look's polarity, the fontconfig default (UI face for
+sans-serif, terminal face for monospace), the look's UI face as the bar's
+font file, and the look's own app files from the flake (foot, starship,
+Helix, btop — static where hand-tuned, generated where mechanical). The
+greeter wears the look too (backdrop pairing, dark setting, CSS, font).
+Per-target opt-outs under `theme.targets.<name>.enable`; no daemon runs
+for any of it. Picks: Vanilla-DMZ cursor (3.3 MiB vs Bibata's 322 MiB),
+Adwaita icons (the toolkit default). Docs on the site's desktop page
+(App theme) and theming page.
+
+Evidence: `nix build .#checks.aarch64-linux.scoot-modules` green on the
+Asahi M2 (eval pins for per-key precedence, Stylix-absent path, unknown
+look, every target opt-out, greeter pairing; content checks for every
+generated file), `nix build .#docs-site` green, and a real `scoot-test`
+greetd login per look (GTK file chooser, qt6ct with `Adwaita-Dark`
+selected and no warning, foot, bar font, themed greeter config;
+screenshots `theme-*.png` beside the implementer report). Two bugs the
+live proof caught and fixed: `--` inside the generated fontconfig XML
+comment (illegal; fontconfig refused the file) and the missing
+`QT_PLUGIN_PATH` (the platformtheme never loaded, style fell back).

@@ -1318,90 +1318,199 @@ in
       };
     };
     # GTK/Qt settings, dark-mode signal and a non-Stylix fallback.
-    # Stylix stays the override path where present (as for `look`).
+    # Stylix stays the override path where present (as for `look`):
+    # every value below is a default a value you set wins over per
+    # key, and Stylix wins where present (user > Stylix > look).
     # `targets` is the one per-target theme opt-out namespace
     # (Stylix-style): every themed piece gets
     # `theme.targets.<name>.enable` here (default on), so a user can
-    # keep one piece's own style while the rest follows the look. The
-    # theme-look child adds the rest; the locker's is first because it
-    # lands here.
-    theme =
-      (slot {
-        child = "desktop-theme-look";
-        tool = "the non-Stylix GTK/Qt theme derivation";
-      })
-      // {
-        targets.lock.enable = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = ''
-            Theme the locker from the look (screen and indicator colors
-            from its palette). Set to `false` to keep swaylock's own
-            style (`lock.settings` still applies).
-          '';
-        };
-        targets.notifications.enable = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = ''
-            Theme mako from the look (popup background and text, ring
-            and urgent leaves from its palette). Set to `false` to
-            keep mako's own style (`notifications.settings` still
-            applies).
-          '';
-        };
-        targets.clipboard.enable = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = ''
-            Theme the history picker from the look (menu background
-            and text, selection and border from its palette). Set to
-            `false` to keep fuzzel's own style.
-          '';
-        };
-        targets.launcher.enable = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = ''
-            Theme the launcher from the look (menu background and
-            text, selection and border from its palette -- the same
-            roles the history picker is themed from). Set to `false`
-            to keep fuzzel's own style.
-          '';
-        };
-        targets.capture.enable = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = ''
-            Theme the screencast chooser from the look (the dmenu
-            list's background and text, selection and border, and the
-            slurp picker's dim, border and selection -- the same
-            roles the launcher and the history picker are themed
-            from). Set to `false` to keep their own style.
-          '';
-        };
-        targets.osd.enable = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = ''
-            Theme the on-screen display from the look (bar
-            background and text, fill and border from its palette,
-            a washed style while muted and an urgent fill past
-            100%). Set to `false` to keep wob's own style.
-          '';
-        };
-        targets.nightlight.enable = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = ''
-            Warm to the look's own night temperature (each look's
-            `nightTemp`: the espresso look warmest, the paper look
-            brightest). Set to `false` to keep the plain `nightTemp`
-            default (or a value you set) while the rest follows the
-            look.
-          '';
-        };
+    # keep one piece's own style while the rest follows the look.
+    # Filled by the `desktop-theme-look` child; without a look behind
+    # the profile the slot is inert (there is nothing to derive
+    # from), the way every other standalone slot runs unthemed.
+    theme = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Derive the app theme (fonts, cursor, GTK/Qt settings, the
+          dark-mode signal, the look's app files) from `desktop.look`.
+          On with the profile (still individually disable-able);
+          without a look it is inert.
+        '';
       };
+      # Extra GTK `settings.ini` keys, merged over the generated
+      # ones (a value here wins per key). Rendered verbatim.
+      settings = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = { };
+        example = {
+          gtk-xft-hintstyle = "hintslight";
+        };
+        description = ''
+          Extra GTK `settings.ini` keys, merged over the look-derived
+          ones (a value here wins per key). Rendered verbatim.
+        '';
+      };
+      targets.lock.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme the locker from the look (screen and indicator colors
+          from its palette). Set to `false` to keep swaylock's own
+          style (`lock.settings` still applies).
+        '';
+      };
+      targets.notifications.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme mako from the look (popup background and text, ring
+          and urgent leaves from its palette). Set to `false` to
+          keep mako's own style (`notifications.settings` still
+          applies).
+        '';
+      };
+      targets.clipboard.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme the history picker from the look (menu background
+          and text, selection and border from its palette). Set to
+          `false` to keep fuzzel's own style.
+        '';
+      };
+      targets.launcher.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme the launcher from the look (menu background and
+          text, selection and border from its palette -- the same
+          roles the history picker is themed from). Set to `false`
+          to keep fuzzel's own style.
+        '';
+      };
+      targets.capture.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme the screencast chooser from the look (the dmenu
+          list's background and text, selection and border, and the
+          slurp picker's dim, border and selection -- the same
+          roles the launcher and the history picker are themed
+          from). Set to `false` to keep their own style.
+        '';
+      };
+      targets.osd.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme the on-screen display from the look (bar
+          background and text, fill and border from its palette,
+          a washed style while muted and an urgent fill past
+          100%). Set to `false` to keep wob's own style.
+        '';
+      };
+      targets.nightlight.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Warm to the look's own night temperature (each look's
+          `nightTemp`: the espresso look warmest, the paper look
+          brightest). Set to `false` to keep the plain `nightTemp`
+          default (or a value you set) while the rest follows the
+          look.
+        '';
+      };
+      targets.gtk.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme GTK apps from the look (Adwaita or Adwaita-dark by
+          its polarity, the look's UI font and cursor, the
+          dark-mode preference). Set to `false` to keep GTK's own
+          style (`theme.settings` still applies).
+        '';
+      };
+      targets.qt.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme Qt apps from the look (the Adwaita Qt style in the
+          look's polarity, the Adwaita icon theme, through qt6ct).
+          Set to `false` to keep Qt's own style.
+        '';
+      };
+      targets.cursor.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme the cursor from the look (Vanilla-DMZ, 24 px: the
+          compositor cursor plus `XCURSOR_THEME`/`XCURSOR_SIZE`
+          for X11 apps). Set to `false` to keep the cursor alone
+          (a value you set in `settings.appearance` still wins).
+        '';
+      };
+      targets.fonts.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Install the look's fonts and default them through
+          fontconfig (UI face for sans-serif, terminal face for
+          monospace). Set to `false` to keep your own fonts (the
+          bar then falls back to its DejaVu default font).
+        '';
+      };
+      targets.greeter.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme the login screen from the look (backdrop pairing,
+          dark/light GTK setting, the look's CSS and font). Set to
+          `false` to keep ReGreet's own style.
+        '';
+      };
+      targets.terminal.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Apply the look's foot config (`foot.ini`) from the flake.
+          Set to `false` to keep your own (enabling home-manager's
+          `programs.foot` skips it too: that module owns the same
+          file).
+        '';
+      };
+      targets.shell.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Apply the look's starship prompt from the flake. Set to
+          `false` to keep your own (enabling home-manager's
+          `programs.starship` skips it too: that module owns the
+          same file).
+        '';
+      };
+      targets.editor.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Apply the look's Helix config and theme from the flake.
+          Set to `false` to keep your own (enabling
+          home-manager's `programs.helix` skips them too: that
+          module owns the same files).
+        '';
+      };
+      targets.monitor.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Apply the look's btop config and theme from the flake.
+          Set to `false` to keep your own (enabling
+          home-manager's `programs.btop` skips them too: that
+          module owns the same file).
+        '';
+      };
+    };
     # The terminal the default binds spawn, and a file manager.
     # The manager is explicitly optional: nothing references one anywhere
     # today.
@@ -1495,6 +1604,44 @@ in
         urgent = "#C76B47";
       };
       nightTemp = 3200;
+      # Dark or light: what the GTK/Qt theme, the dark-mode signal
+      # and the greeter's dark setting follow.
+      isDark = true;
+      # The three faces the theme carries everywhere text is drawn:
+      # `ui` is the bar's face (Droid Sans Mono Nerd Font Propo: the
+      # module icons below need its Nerd glyphs, so the bar keeps this
+      # mono face); `sans` is the proportional UI sans for GTK/Qt
+      # apps, the greeter and fontconfig sans-serif (DejaVu Sans: the
+      # only proportional face the profile already ships -- the bar's
+      # own fallback file -- so it adds zero closure; its humanist
+      # warmth pairs with this look's espresso-and-orange vinyl dusk,
+      # and its open apertures stay legible on dark surfaces); `mono`
+      # is the terminal face (foot, fontconfig monospace). Names,
+      # resolved through fontconfig; the packages beside them live in
+      # the side modules (which own `pkgs`), so this file stays
+      # `lib`-only.
+      fonts = {
+        ui = "DroidSansM Nerd Font Propo";
+        sans = "DejaVu Sans";
+        mono = "FiraCode Nerd Font";
+      };
+      # The example's own app files, applied from the flake instead of
+      # copy-paste (see `theme-home.nix`): foot, starship, Helix and
+      # btop stay static files -- their palettes are hand-tuned per
+      # look, not derivable from the six bar roles without inventing
+      # colors -- while GTK/Qt/cursor/greeter settings generate from
+      # the roles above. Null where the example ships none
+      # (`radial-burst` has no shell, editor or monitor files): the
+      # target is then inert for that look.
+      appFiles = {
+        foot = ../../docs/examples/vinyl-sunset/foot.ini;
+        starship = ../../docs/examples/vinyl-sunset/starship.toml;
+        helixConfig = ../../docs/examples/vinyl-sunset/helix/config.toml;
+        helixTheme = ../../docs/examples/vinyl-sunset/helix/themes/scoot-vinyl.toml;
+        btopConf = ../../docs/examples/vinyl-sunset/btop/btop.conf;
+        btopTheme = ../../docs/examples/vinyl-sunset/btop/themes/vinyl.theme;
+        regreetCss = ../../docs/examples/vinyl-sunset/regreet.css;
+      };
       wallpaper = null;
     };
     music-desk = {
@@ -1512,6 +1659,25 @@ in
         urgent = "#EE6F5E";
       };
       nightTemp = 4000;
+      isDark = false;
+      # `sans` is DejaVu Sans here too: bookish and paper-neutral, so
+      # the ink-blue accent carries the look while the type stays
+      # quiet -- and already shipped, so zero closure (see the
+      # vinyl-sunset note above for the `ui`/`sans`/`mono` split).
+      fonts = {
+        ui = "DroidSansM Nerd Font Propo";
+        sans = "DejaVu Sans";
+        mono = "FiraCode Nerd Font";
+      };
+      appFiles = {
+        foot = ../../docs/examples/music-desk/foot.ini;
+        starship = ../../docs/examples/music-desk/starship.toml;
+        helixConfig = ../../docs/examples/music-desk/helix/config.toml;
+        helixTheme = ../../docs/examples/music-desk/helix/themes/scoot-light.toml;
+        btopConf = ../../docs/examples/music-desk/btop.conf;
+        btopTheme = null;
+        regreetCss = ../../docs/examples/music-desk/regreet.css;
+      };
       wallpaper = {
         image = ../../docs/assets/wallpapers/music-desk.png;
         mode = "fill";
@@ -1531,6 +1697,26 @@ in
         urgent = "#bf128d";
       };
       nightTemp = 3500;
+      isDark = true;
+      # `sans` is DejaVu Sans: the sturdiest of the shipped faces at
+      # poster sizes, holding against this look's plum-and-yellow
+      # burst -- and this look already ships `dejavu_fonts` as its
+      # `mono`, so the sans adds nothing (see the vinyl-sunset note
+      # above for the `ui`/`sans`/`mono` split).
+      fonts = {
+        ui = "DroidSansM Nerd Font Propo";
+        sans = "DejaVu Sans";
+        mono = "DejaVu Sans Mono";
+      };
+      appFiles = {
+        foot = ../../docs/examples/radial-burst/foot.ini;
+        starship = null;
+        helixConfig = null;
+        helixTheme = null;
+        btopConf = null;
+        btopTheme = null;
+        regreetCss = ../../docs/examples/radial-burst/regreet.css;
+      };
       wallpaper = {
         image = ../../docs/assets/wallpapers/radial-burst.png;
         mode = "fill";
@@ -1551,6 +1737,25 @@ in
         urgent = "#E87F6A";
       };
       nightTemp = 3400;
+      isDark = true;
+      # `sans` is DejaVu Sans: open apertures stay legible on this
+      # look's translucent slate, while the cream text and amber disc
+      # carry the night mood -- already shipped, so zero closure (see
+      # the vinyl-sunset note above for the `ui`/`sans`/`mono` split).
+      fonts = {
+        ui = "DroidSansM Nerd Font Propo";
+        sans = "DejaVu Sans";
+        mono = "FiraCode Nerd Font";
+      };
+      appFiles = {
+        foot = ../../docs/examples/moonrise/foot.ini;
+        starship = ../../docs/examples/moonrise/starship.toml;
+        helixConfig = ../../docs/examples/moonrise/helix/config.toml;
+        helixTheme = ../../docs/examples/moonrise/helix/themes/scoot-moonrise.toml;
+        btopConf = ../../docs/examples/moonrise/btop/btop.conf;
+        btopTheme = ../../docs/examples/moonrise/btop/themes/moonrise.theme;
+        regreetCss = ../../docs/examples/moonrise/regreet.css;
+      };
       wallpaper = {
         image = ../../docs/assets/wallpapers/moonrise.png;
         mode = "fill";

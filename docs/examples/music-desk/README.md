@@ -60,8 +60,8 @@ programs.scoot = {
 services.displayManager.regreet = {
   extraCss = ./regreet.css;
   font = {
-    package = pkgs.nerd-fonts.droid-sans-mono;
-    name = "DroidSansM Nerd Font Propo";
+    package = pkgs.dejavu_fonts.minimal;
+    name = "DejaVu Sans";
     size = 12;
   };
   settings = {

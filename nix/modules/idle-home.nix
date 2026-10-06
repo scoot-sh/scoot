@@ -14,15 +14,15 @@ let
   cfg = config.programs.scoot;
   idle = cfg.desktop.idle;
 
-  # The desktop profile's shared option subtree and look palettes (the
-  # `enum` type guarantees the name, so the lookup cannot fail).
-  desktop = import ./desktop.nix { inherit lib; };
-  look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
-  themed = look != null && (cfg.desktop.theme.targets.lock.enable or true);
+  # The desktop profile's shared option subtree and the one helper
+  # that reads look-derived values (never hand-mapped here).
+  themeLook = import ./theme-look.nix { inherit lib; };
+  look = themeLook.lookFor cfg.desktop;
+  themed = themeLook.themed cfg.desktop "lock";
 
   # A `#rrggbb` look token as swaylock's `rrggbb` (its parser also takes
   # a leading `#` and an alpha pair, but the looks are opaque hex).
-  hex = color: lib.removePrefix "#" color;
+  hex = themeLook.noHash;
 
   # The locker's themed leaves: screen and indicator from the look's
   # roles (backgrounds, ring, accent, urgent), each overridable through

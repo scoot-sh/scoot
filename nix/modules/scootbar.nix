@@ -11,11 +11,13 @@
 #      (`lib.mkDefault`, 1000);
 #   3. the desktop profile's look, when `programs.scoot.desktop` enables
 #      it (`lib.mkOptionDefault`, 1500);
-#   4. this module's plain default (`lib.mkOptionDefault`, 1500): a font,
-#      and only a font, since the bar refuses to start without one.
+#   4. this module's plain default (priority 1600): a font, and only a
+#      font, since the bar refuses to start without one.
 #
-# (3) and (4) share a priority but never share a key (`colors.*` against
-# `bar.font`), so they merge instead of conflicting.
+# (4) sits one rung below (3) on purpose: the look themes `bar.font`
+# too (the UI face as a file), so sharing `mkOptionDefault` would
+# merge-conflict on that key. Everything else the look themes
+# (`colors.*`) has no plain default, so those merge instead.
 #
 # Everything else the bar reads has its own default in the binary, so an
 # absent key is that default. Each Stylix and look value is defined at its
@@ -114,7 +116,9 @@ let
   # checks): nothing here requires it. The profile never sets across the
   # boundary in the other direction either (a conditional set of an
   # undeclared option fails eval whatever the condition is), so this read
-  # is the whole bar half of the profile.
+  # is the whole bar half of the profile. Look-derived values come
+  # through the one theme helper, never hand-mapped here.
+  themeLook = import ./theme-look.nix { inherit lib; };
   desktopProfile = ((config.programs.scoot or { }).desktop or { });
   profileOn = desktopProfile.enable or false;
   # `bar.enable = false` leaves the bar entirely to the user: neither
@@ -122,11 +126,7 @@ let
   profileManagesBar = desktopProfile.bar.enable or true;
   # Null without a look; the scoot side's `enum` type guarantees the name
   # is one of these, so the lookup cannot fail.
-  profileLook =
-    if (desktopProfile.look or null) == null then
-      null
-    else
-      (import ./desktop.nix { inherit lib; }).looks.${desktopProfile.look};
+  profileLook = themeLook.lookFor desktopProfile;
 
   # The notification daemon (`programs.scoot.desktop.notifications`
   # in the scoot modules), when those are imported beside this one.
@@ -326,8 +326,11 @@ in
 
       # A font only when something draws text; the bar refuses to start
       # for a font it cannot use and needs none for a bar with no modules.
+      # Priority 1600, one rung below the look's own font (see the
+      # precedence note up top): the look wins where themed, Stylix and
+      # the user above it.
       programs.scootbar.settings = lib.mkIf (cfg.features != [ ]) {
-        bar.font = lib.mkOptionDefault fallbackFont;
+        bar.font = lib.mkOverride 1600 fallbackFont;
       };
     })
 
@@ -343,6 +346,34 @@ in
         name: value: lib.mkOptionDefault value
       ) profileLook.barColors;
     })
+
+    # The look's bar face as a file (there is no fontconfig), one
+    # priority below Stylix's (user > Stylix > look): the Propo
+    # carries the module icons itself, so a themed bar never falls
+    # back to the icon-less DejaVu default above. The bar keeps this
+    # mono face while GTK/Qt apps and the greeter use the look's
+    # proportional `sans` (see `theme-home.nix`). Without the package
+    # that default stands. Like the look's colors, a bar the user
+    # turned off stays unthemed too.
+    (lib.mkIf
+      (
+        profileOn
+        && profileManagesBar
+        && profileLook != null
+        && (desktopProfile.theme.targets.fonts.enable or true)
+        && cfg.enable
+      )
+      {
+        programs.scootbar.settings = lib.mkIf (cfg.features != [ ]) {
+          bar.font = lib.mkOptionDefault "${
+            fontFile {
+              name = profileLook.fonts.ui;
+              package = pkgs.nerd-fonts.droid-sans-mono;
+            }
+          }/font";
+        };
+      }
+    )
 
     # The notification daemon's bar half: the `push` module its feed
     # writes (DND state and the unread count -- see

@@ -17,7 +17,7 @@
  * the button text through the button instead.
  */
 window {
-  font-family: "DroidSansM Nerd Font Propo";
+  font-family: "DejaVu Sans";
 }
 frame.background {
   background-color: alpha(#FCFBFB, 0.86);

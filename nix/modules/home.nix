@@ -9,11 +9,13 @@ let
   cfg = config.programs.scoot;
   tomlFormat = pkgs.formats.toml { };
 
-  # The desktop profile's shared option subtree and look palettes.
+  # The desktop profile's shared option subtree and the one helper
+  # that reads look-derived values (never hand-mapped here).
   desktop = import ./desktop.nix { inherit lib; };
+  themeLook = import ./theme-look.nix { inherit lib; };
   # Null without a look; the `enum` type guarantees the name is one of
   # these, so the lookup cannot fail.
-  look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
+  look = themeLook.lookFor cfg.desktop;
 
   # Stylix is not an input of this flake: its presence is
   # `config.lib.stylix` (defined by its palette module whether or not it is
@@ -148,7 +150,9 @@ in
   # consumers) so the profile's user side is one import. The audio
   # slot's user half (the OSD unit, its config, the control scripts),
   # the privilege-prompt and keyring halves (the agent package, the
-  # secrets client) and the capture slot's user half ride the same way.
+  # secrets client), the capture slot's user half, and the theme's
+  # user half (fonts, cursor, GTK/Qt settings, the dark-mode signal,
+  # the look's app files) ride the same way.
   #
   # The shared keymap's user half (`programs.scoot.desktop.keys`):
   # the `[binds]`, its tools and its slot scripts. Same pattern.
@@ -163,6 +167,7 @@ in
     ./nightlight-home.nix
     ./power-home.nix
     ./keys-home.nix
+    ./theme-home.nix
   ];
 
   options.programs.scoot = {
@@ -583,5 +588,25 @@ in
         };
       };
     })
+    # The look's cursor, one priority below Stylix's (a value you set
+    # in `settings` wins, Stylix wins where present, the look
+    # otherwise): the theme's one cursor, named here so the
+    # compositor and the apps agree. The package beside it (and the
+    # `XCURSOR_*` half for X11 apps) is `theme-home.nix`'s; read with
+    # the profile and a look, and only while its target is on.
+    (lib.mkIf (cfg.desktop.enable && look != null && (cfg.desktop.theme.targets.cursor.enable or true))
+      {
+        programs.scoot.settings = {
+          appearance = {
+            # The theme's package needs no installing here: the theme
+            # target installs it, and its `share/icons` lands on the
+            # lookup path beside it, the way Stylix's own cursor target
+            # does. This only names the theme and the size.
+            cursor_theme = lib.mkOptionDefault themeLook.cursor.name;
+            cursor_size = lib.mkOptionDefault themeLook.cursor.size;
+          };
+        };
+      }
+    )
   ];
 }

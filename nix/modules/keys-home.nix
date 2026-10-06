@@ -15,8 +15,10 @@ let
   keys = cfg.desktop.keys;
 
   # The desktop profile's shared option subtree and keymap table (the
-  # combos live there, so this file cannot disagree with them).
+  # combos live there, so this file cannot disagree with them), plus
+  # the one helper that reads look-derived values.
   desktop = import ./desktop.nix { inherit lib; };
+  themeLook = import ./theme-look.nix { inherit lib; };
 
   # A tool by absolute store path when its package is set, else by
   # bare name from PATH (off Linux, or a direct-module setup without
@@ -67,26 +69,14 @@ let
   # `fuzzel-theme.nix` so the two menus read as one. Nothing without a
   # look (or opted out): fuzzel's own style stands.
   fuzzelTheme = import ./fuzzel-theme.nix { inherit lib; };
-  clipboardThemed =
-    let
-      look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
-    in
-    look != null && (cfg.desktop.theme.targets.clipboard.enable or true);
-  clipboardThemeFlags =
-    let
-      look = desktop.looks.${cfg.desktop.look};
-    in
-    lib.optionalString clipboardThemed (fuzzelTheme look);
-  launcherThemed =
-    let
-      look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
-    in
-    look != null && (cfg.desktop.theme.targets.launcher.enable or true);
-  launcherThemeFlags =
-    let
-      look = desktop.looks.${cfg.desktop.look};
-    in
-    lib.optionalString launcherThemed (fuzzelTheme look);
+  clipboardThemed = themeLook.themed cfg.desktop "clipboard";
+  clipboardThemeFlags = lib.optionalString clipboardThemed (
+    fuzzelTheme (themeLook.lookFor cfg.desktop)
+  );
+  launcherThemed = themeLook.themed cfg.desktop "launcher";
+  launcherThemeFlags = lib.optionalString launcherThemed (
+    fuzzelTheme (themeLook.lookFor cfg.desktop)
+  );
 
   # Clipboard picker: `cliphist` history through the launcher menu
   # back into the clipboard -- lines on stdin, selection on stdout (the
@@ -168,14 +158,10 @@ let
       lib.getExe' capture.wlClipboardPackage "wl-copy"
     else
       "wl-copy";
-  captureThemed =
-    let
-      look = if cfg.desktop.look == null then null else desktop.looks.${cfg.desktop.look};
-    in
-    look != null && (cfg.desktop.theme.targets.capture.enable or true);
+  captureThemed = themeLook.themed cfg.desktop "capture";
   slurpRegionFlags =
     let
-      look = desktop.looks.${cfg.desktop.look};
+      look = themeLook.lookFor cfg.desktop;
       # Quoted: a bare `#rrggbb` would start a shell comment inside
       # the `"$(...)"` below and eat the closing paren.
       hashA = color: "'#${lib.removePrefix "#" color}ff'";
