@@ -2233,6 +2233,13 @@ let
     desktop.nightlight.dayTemp = 4000;
     desktop.nightlight.nightTemp = 5000;
   };
+  # ...equal temperatures (wlsunset refuses them and would restart-loop)...
+  hmNightEqualTemps = evalHome {
+    enable = true;
+    desktop.nightlight.enable = true;
+    desktop.nightlight.dayTemp = 5000;
+    desktop.nightlight.nightTemp = 5000;
+  };
   # ...a sunrise/sunset outside 24-hour `HH:MM`...
   hmNightBadRise = evalHome {
     enable = true;
@@ -7947,6 +7954,11 @@ let
     )
     (
       assert lib.hasInfix "warmer" (builtins.head (failing hmNightNightAboveDay.config));
+      true
+    )
+    (
+      assert builtins.length (failing hmNightEqualTemps.config) == 1;
+      assert lib.hasInfix "not below dayTemp" (builtins.head (failing hmNightEqualTemps.config));
       true
     )
     # ...a sunrise/sunset outside 24-hour `HH:MM`...

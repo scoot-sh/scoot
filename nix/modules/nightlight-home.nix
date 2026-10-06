@@ -155,11 +155,14 @@ in
           '';
         }
         {
-          assertion = night.nightTemp <= night.dayTemp;
+          # Strictly below: wlsunset exits at once when the two are equal,
+          # and Restart=on-failure would re-exec it every 2 s forever.
+          assertion = night.nightTemp < night.dayTemp;
           message = ''
-            programs.scoot.desktop.nightlight.nightTemp is ${toString night.nightTemp}
-            above dayTemp ${toString night.dayTemp}: the night is warmer
-            (lower) than the day, never bluer.
+            programs.scoot.desktop.nightlight.nightTemp is ${toString night.nightTemp},
+            not below dayTemp ${toString night.dayTemp}: the night is warmer
+            (lower) than the day. For no warming, set
+            desktop.nightlight.enable = false instead.
           '';
         }
         {

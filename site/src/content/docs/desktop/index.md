@@ -1051,7 +1051,7 @@ restarts into the new flags; no re-login):
 | `desktop.nightlight.enable` | bool | `true` with the profile | warm the screen (the daemon plus its unit) |
 | `desktop.nightlight.daemon` | enum (`"wlsunset"`, `"gammastep"`) | `"wlsunset"` | the program behind `enable` |
 | `desktop.nightlight.dayTemp` | int (Kelvin, 1000–10000) | `6500` | day color temperature (neutral: changes nothing) |
-| `desktop.nightlight.nightTemp` | int (Kelvin, 1000–10000, at or under `dayTemp`) | `3500` (or the look's, above) | night color temperature (lower is warmer) |
+| `desktop.nightlight.nightTemp` | int (Kelvin, 1000–10000, below `dayTemp`) | `3500` (or the look's, above) | night color temperature (lower is warmer) |
 | `desktop.nightlight.sunrise` / `.sunset` | string (`HH:MM`) | `"07:00"` / `"19:00"` | manual schedule (read only without `latitude`/`longitude`) |
 | `desktop.nightlight.latitude` / `.longitude` | number or null | `null` (manual schedule) | where the box is, in decimal degrees (set both for location mode; `gammastep` needs both) |
 | `desktop.nightlight.duration` | int (seconds, 0–7200) | `900` | how long the day/night transition takes (manual schedule only; `0` snaps) |
@@ -1072,8 +1072,8 @@ programs.scoot.desktop = {
 Force tonight now (wlsunset only): `systemctl --user kill -s
 USR1 scoot-nightlight.service` cycles forced-day, forced-night,
 then back to the schedule. There is no keybind for it: the cycle has
-three modes, not two, and gammastep answers no such signal, so a
-shared bind would lie on one daemon or the other.
+three modes, while gammastep's SIGUSR1 toggles it on and off, so a
+shared bind would do something different on each daemon.
 
 Troubleshooting, by symptom:
 
