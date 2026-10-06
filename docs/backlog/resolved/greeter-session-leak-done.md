@@ -1,9 +1,10 @@
 ---
 title: "Each greeter session leaves two dbus-daemons and a closing logind session behind"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-05"
 ---
 
 # Each greeter session leaves two dbus-daemons and a closing logind session behind
@@ -57,3 +58,30 @@ use leaks one pair per login and per greeter restart.
 
 - A custom greeter (planned later, on top of ReGreet).
 - Leaks in user sessions; this is the greeter user only.
+
+## What landed (PR #468)
+
+Picked the logind candidate: `services.logind.settings.Login.KillUserProcesses`
+(`mkDefault true`) scoped through `KillOnlyUsers = [ "greeter" ]` (`mkDefault`),
+set in the `cfg.greeter.enable` element of `nix/modules/nixos.nix`. Checked
+against `manager_shall_kill` in the pinned systemd source (`logind-core.c`):
+with a non-empty `KillOnlyUsers` it returns true only for `greeter`, whatever
+`KillUserProcesses` says, and the per-session caller (`logind-session.c`) stops
+the scope on session end -- otherwise the session sits `closing` indefinitely,
+exactly the observed symptom. The bus-command alternative was rejected: nixpkgs'
+regreet module bakes `dbus-run-session` into `default_session.command` at
+`mkDefault` (overriding it means reconstructing store paths), reparented
+non-bus strays (xdg-portal processes with PPID 1) would still leak, and
+`NO_AT_BRIDGE=1` blinds screen readers at the login screen.
+
+Live on the Asahi M2 (gen 100 built with `--override-input scoot`, then
+switched back to gen 99): one pre-fix cycle left session 56001 `closing` with
+its scope `active (abandoned)` holding the session-bus daemon; with the fix
+active (logind takes the new config on SIGHUP -- verified via `busctl`, no
+restart needed), three login/logout cycles as `scoot-test` grew nothing
+(closing greeter sessions 2 -> 2, session-bus daemons 3 -> 3, greeter procs
+10 -> 10; each ended session logs `Removed session N`). Failed auth creates
+no session; `systemctl restart greetd` while idle fully removes the ended
+session. steve's 9 pre-existing `closing` sessions/scopes untouched; the
+greeter's user-manager services survive. Suspend/resume skipped (remote box,
+wake unverifiable).
