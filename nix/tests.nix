@@ -10049,11 +10049,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     #      (the confirmation on stderr: `list` owns stdout).
     audio_setup 'Volume: 0.5' 0 0 "" '[{"id":42,"info":{"props":{"media.class":"Audio/Sink","node.description":"Dummy Output"}}},{"id":43,"info":{"props":{"media.class":"Audio/Sink","node.name":"alsa_out"}}}]' 0 ""
     audio_fifo
-    cat "$XDG_RUNTIME_DIR/scoot-osd.fifo" > "$SCOOT_AUDIO_TEST_DIR/shown" &
-    reader=$!
-    ${audioBehaviorSink} set alsa_out 2>"$SCOOT_AUDIO_TEST_DIR/stderr" || { echo "sink set failed (22e8)"; cat "$SCOOT_AUDIO_TEST_DIR/stderr"; exit 1; }
-    wait "$reader"
-    [ "$(cat "$SCOOT_AUDIO_TEST_DIR/shown")" = "50" ] || { echo "sink set showed '$(cat "$SCOOT_AUDIO_TEST_DIR/shown")', want '50' (22e8)" >&2; exit 1; }
+    got=$(audio_shown ${audioBehaviorSink} set alsa_out 2>"$SCOOT_AUDIO_TEST_DIR/stderr")
+    [ "$got" = "0:50" ] || { echo "sink set showed '$got', want '0:50' (22e8)" >&2; exit 1; }
     grep -q "Default sink: alsa_out" "$SCOOT_AUDIO_TEST_DIR/stderr"
     grep -q "set-default 43" "$SCOOT_AUDIO_TEST_DIR/calls"
     echo "ok: sink set moves the default and shows it"
@@ -10079,13 +10076,10 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     # ...and with a single sink it stays, saying so.
     audio_setup 'Volume: 0.5' 0 0 "" '[{"id":42,"info":{"props":{"media.class":"Audio/Sink","node.description":"Only"}}}]' 0 'id 42, type PipeWire:Interface:Node'
     audio_fifo
-    cat "$XDG_RUNTIME_DIR/scoot-osd.fifo" > "$SCOOT_AUDIO_TEST_DIR/shown" &
-    reader=$!
-    ${audioBehaviorSink} cycle 2>"$SCOOT_AUDIO_TEST_DIR/stderr"
-    wait "$reader"
+    got=$(audio_shown ${audioBehaviorSink} cycle 2>"$SCOOT_AUDIO_TEST_DIR/stderr")
     grep -q "only one sink, staying" "$SCOOT_AUDIO_TEST_DIR/stderr"
     if grep -q "set-default" "$SCOOT_AUDIO_TEST_DIR/calls"; then echo "cycle moved a single sink (22f0)" >&2; exit 1; fi
-    [ "$(cat "$SCOOT_AUDIO_TEST_DIR/shown")" = "50" ] || { echo "single-sink cycle showed '$(cat "$SCOOT_AUDIO_TEST_DIR/shown")' (22f0)" >&2; exit 1; }
+    [ "$got" = "0:50" ] || { echo "single-sink cycle showed '$got' (22f0)" >&2; exit 1; }
     echo "ok: sink cycle moves to the next sink and wraps"
 
     # 22f1. No sinks (or no server): loud.
