@@ -9962,14 +9962,17 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       mkfifo "$XDG_RUNTIME_DIR/scoot-osd.fifo"
     }
     audio_shown() {
-      # Drain one OSD line: the reader starts first (a read-only
-      # open blocks until the writer arrives), the writer's
-      # read-write open never blocks, and its exit closes the fifo
-      # so the reader ends too.
-      cat "$XDG_RUNTIME_DIR/scoot-osd.fifo" > "$SCOOT_AUDIO_TEST_DIR/shown" &
+      # Drain one OSD line. The fifo stays held open read-write for
+      # the whole exchange (opening either end never blocks while the
+      # other end is held): without the hold, a writer that finishes
+      # before the reader's read-only open leaves that open blocking
+      # forever, hanging the check under load.
+      exec 3<>"$XDG_RUNTIME_DIR/scoot-osd.fifo"
+      cat <&3 > "$SCOOT_AUDIO_TEST_DIR/shown" &
       reader=$!
       "$@"
       status=$?
+      exec 3>&-
       wait "$reader"
       printf '%s:' "$status"
       cat "$SCOOT_AUDIO_TEST_DIR/shown"
