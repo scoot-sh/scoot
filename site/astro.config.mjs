@@ -117,6 +117,7 @@ export default defineConfig({
           items: [
             { label: 'What is scoot', slug: 'index' },
             { label: 'Install', slug: 'start/install' },
+            { label: 'Use the binary cache', slug: 'start/binary-cache' },
             { label: 'First session', slug: 'start/first-session' },
           ],
         },
@@ -210,6 +211,7 @@ export default defineConfig({
           promote: [
             'index',
             'start/install',
+            'start/binary-cache',
             'start/first-session',
             'desktop',
             'scoot/keybindings',

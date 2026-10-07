@@ -62,7 +62,7 @@ merge to `main`, after both architectures' binaries reach Cachix):
 
 or `fh add scoot-sh/scoot`. `0.1.*` follows the rolling release (every
 merge to `main`); pin a full version from the flake's page to hold
-still. Either way, set up the [binary cache](../start/install.md#skip-the-compile-the-binary-cache)
+still. Either way, set up the [binary cache](../start/binary-cache.md)
 or Nix compiles Smithay and the crates locally.
 
 About `scoot.inputs.nixpkgs.follows = "nixpkgs"`: leave it **off**

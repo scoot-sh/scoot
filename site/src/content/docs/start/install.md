@@ -121,7 +121,10 @@ Every merge to `main` pushes built binaries for `x86_64-linux` and
 `aarch64-linux` to the public Cachix cache `scoot-sh` — all four `scoot`
 variants above, plus `scootbar` and `scootbg`. Without it, Nix
 compiles Smithay and scoot's crates on your machine (minutes); with it, you
-download. Opt in explicitly in your Nix configuration — NixOS
+download. Full details — home-manager, one-off and non-interactive use,
+what you are trusting, cold-versus-cached numbers, and the "it is
+compiling anyway" diagnosis — live on [Use the binary
+cache](./binary-cache.md). Opt in explicitly in your Nix configuration — NixOS
 (`configuration.nix`):
 
 ```nix
@@ -142,7 +145,8 @@ extra-trusted-public-keys = scoot-sh.cachix.org-1:QMj7CMw8uqZxrvqqm6SggdxTHz6Q4p
 
 What this trusts: binaries built by CI from reviewed merges to `main`. A
 substituter can serve any store path your Nix asks for, so this trusts CI's
-builds the way installing the flake already trusts its source.
+builds the way installing the flake already trusts its source. Key,
+trust boundary, and rotation: [Use the binary cache](./binary-cache.md).
 
 ## Packaging notes
 
