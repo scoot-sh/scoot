@@ -1,0 +1,54 @@
+# deny.toml: the dependency policy `cargo deny` enforces, and the
+# packaging CI job (`.github/workflows/packaging.yml`) fails on.
+#
+# Tool choice, per the vendoring-and-licenses ticket: cargo-deny over
+# cargo-about because the ticket needs advisories as well as licenses and
+# deny covers both in one maintained tool (Embark Studios, active
+# releases; 0.20.2 in this repo's flake.lock via nixpkgs#cargo-deny), a
+# single small binary, with the license check fully offline from
+# Cargo.lock (the advisory check fetches the RustSec DB, which is why it
+# also runs on a weekly schedule). `cargo deny list` doubles as the
+# license inventory generator: scripts/vendor-release.sh ships its output
+# as THIRD-PARTY-LICENSES in every artifact.
+#
+# Failing closed is the point: a new license or a new advisory fails the
+# check, and the fix is a reviewed edit here, not a quiet pass.
+
+# RustSec advisories (vulnerabilities, yanked versions, unmaintained
+# crates). Checked on every Cargo.lock/manifest change and weekly, so a
+# vulnerable dependency is a visible red, not a surprise.
+[advisories]
+ignore = [
+    # paste 1.0.15 (RUSTSEC-2024-0436, unmaintained): a proc-macro used by
+    # pixman, so compile-time only with no runtime exposure. Upstream is
+    # archived by its author with no safe upgrade; scoot cannot swap it
+    # without forking pixman itself. Revisit if pixman moves off it.
+    { id = "RUSTSEC-2024-0436", reason = "proc-macro (compile-time only) via pixman; archived upstream, no upgrade path without forking pixman" },
+    # ttf-parser 0.25.1 (RUSTSEC-2026-0192, unmaintained): via ab_glyph in
+    # scootbar's font stack. It parses locally installed font files, not
+    # remote input. Moving to skrifa means replacing ab_glyph, a scootbar
+    # dependency swap far beyond a version bump. Revisit on any parser
+    # CVE or when a maintained ab_glyph successor lands.
+    { id = "RUSTSEC-2026-0192", reason = "parses local fonts only, via ab_glyph; maintained successor needs a scootbar dep swap, not a bump" },
+]
+
+# Third-party licenses. scoot itself is MIT (workspace Cargo.toml).
+# Every locked dependency today is permissively licensed; the check fails
+# on anything outside this list (copyleft included: an LGPL-only or
+# GPL crate needs an explicit maintainer decision recorded here first,
+# never a silent pass). Dual-licensed crates pass on any one side being
+# allowed (e.g. rustix's Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR
+# MIT passes on MIT), so this list stays the minimal set actually relied
+# on rather than every license text a crate mentions.
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "ISC",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Zlib",
+    "Unlicense",
+    "0BSD",
+]
+confidence-threshold = 0.8

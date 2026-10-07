@@ -1,0 +1,132 @@
+# scoot packaging: the vendored-sources tarball path, the license gate
+# and the advisory gate (docs/backlog/packaging/vendoring-and-licenses.md).
+#
+# WHY THIS IS NOT IN ci.yml: the advisory check needs a weekly schedule
+# (RustSec moves without any repo change), and a schedule trigger on
+# ci.yml would run the whole compositor matrix weekly. This workflow is
+# the one place dependency policy lives instead: the vendor job proves
+# the release tarball path end to end, and the two deny jobs fail on a
+# disallowed license or a new advisory. No tags or releases are minted
+# here; the tag-triggered release job (release-artifacts.md) calls
+# scripts/vendor-release.sh itself when it lands, the same entry point
+# the vendor job below exercises.
+#
+# Path filters (the CLAUDE.md rule: CI runs only what changed): a PR or
+# a push to main runs these jobs only when the dependency graph, the
+# policy, or this workflow could have changed. The weekly schedule always
+# runs, paths aside (scheduled runs ignore path filters), so the advisory
+# DB is consulted even when the tree sits still.
+
+name: packaging (vendor + licenses + advisories)
+
+on:
+  pull_request:
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**/Cargo.toml'
+      - 'deny.toml'
+      - 'scripts/vendor-release.sh'
+      - 'nix/dev-shell.nix'
+      - 'flake.lock'
+      - 'flake.nix'
+      - '.github/workflows/packaging.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**/Cargo.toml'
+      - 'deny.toml'
+      - 'scripts/vendor-release.sh'
+      - 'nix/dev-shell.nix'
+      - 'flake.lock'
+      - 'flake.nix'
+      - '.github/workflows/packaging.yml'
+  schedule:
+    # Mondays 06:00 UTC: advisories move without repo changes.
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The release tarball path, proven the way a distro builder uses it:
+  # scripts/vendor-release.sh stages `git archive HEAD` plus `cargo
+  # vendor` (both scoot-sh git forks included) and, with
+  # --check-offline, builds the staged workspace under an empty
+  # CARGO_HOME with CARGO_NET_OFFLINE, so any network touch fails the
+  # run. The same script is what the release job will call later.
+  vendor:
+    name: Vendored tree builds offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - name: Create XDG_RUNTIME_DIR
+        run: |
+          mkdir -p -m 700 "$RUNNER_TEMP/xdg"
+          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
+
+      # Read-only, from the Linux job's entries: the Smithay build this
+      # offline check needs. Never saved (see ci.yml's save step for why
+      # only one cache line can exist under the 10 GB budget).
+      - name: Restore the cargo cache (the linux job's, read-only)
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: packaging-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+          restore-keys: |
+            linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            linux-cargo-
+
+      - name: Stage the tarball and build it offline
+        shell: nix develop --command bash -euo pipefail {0}
+        run: scripts/vendor-release.sh --out "$RUNNER_TEMP/vendor-release" --check-offline
+
+  # Third-party licenses against the allow-list in deny.toml. Fully
+  # offline from Cargo.lock (no advisory DB fetch): a crate with a
+  # license outside the list fails here, and the fix is a reviewed edit
+  # to deny.toml, not a quiet pass.
+  licenses:
+    name: License allow-list (cargo-deny)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - name: cargo deny check licenses
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo deny check licenses
+
+  # RustSec advisories (plus yanked and unmaintained). Fetches the
+  # advisory DB, so it needs the network; runs on dependency changes
+  # and on the weekly schedule above. Two accepted risks are recorded
+  # in deny.toml with reasons; anything new fails here.
+  advisories:
+    name: RustSec advisories (cargo-deny)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - name: cargo deny check advisories
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo deny check advisories
