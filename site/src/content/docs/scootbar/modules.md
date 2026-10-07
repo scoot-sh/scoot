@@ -543,10 +543,18 @@ socket is one more source in the `poll` loop), which is the
   are the names of the interaction keys, and `msg invoke` reads them as
   those.) `Activate` and `SecondaryActivate` are sent with position `(0,
   0)` (a bar has no screen coordinates to give), and a wheel action sends
-  `Scroll(n, "vertical")` with `n` the notch count clamped to 64, positive
-  for `wheel-up` and negative for `wheel-down`: the sign is KDE's (a Qt
-  wheel's), and hosts disagree (Waybar sends GTK's, up negative); no item
-  was checked against it. Bound to a key (`on-scroll-up = "wheel-up 0"`)
+  `Scroll(n, "vertical")` with `n` the notch count clamped to 64, negative
+  for `wheel-up` and positive for `wheel-down`. The sign is GTK's,
+  measured 2026-10-07 against a real item: pasystray 0.8.2
+  (libayatana-appindicator maps a positive vertical delta to scroll-down,
+  so wheel-up must send negative; verified on the wire as `Scroll(-1)`),
+  and matching Waybar (which sends −1 for up, from its source). The SNI
+  spec is silent on the sign. Plasma sends Qt's convention instead (its
+  tray forwards `+angleDelta`: up positive at 120 a notch) and kmix turns
+  the volume up on positive deltas — so KDE volume items need Qt-scale
+  deltas this bar does not send; with one unit a notch no sign satisfies
+  them, and the GTK side (the items that observably respond) decides it.
+  Bound to a key (`on-scroll-up = "wheel-up 0"`)
   the notch count of the scroll itself is what is sent.
 - **Menus.** An item's menu (`ContextMenu`, the DBusMenu protocol) opens
   in a [popup](./modules.md##popups): the bar reads it with its DBusMenu client
@@ -570,7 +578,22 @@ socket is one more source in the `poll` loop), which is the
   always in the font). Separators are blank rows between groups, disabled
   rows plain text (neither is interactive). Icons in menu items are not
   drawn in this version. Without the `popup` feature the DBusMenu half
-  is refused saying so (`ContextMenu` still goes out).
+  is refused saying so (`ContextMenu` still goes out). Real items read
+  menus the same way, checked live 2026-10-07 against CopyQ 16.0.0,
+  KeePassXC 2.7.12 and Joplin 3.6.16 (Electron): a Qt reply carries the
+  out-args bare (`u(ia{sv}av)`, not wrapped in a struct — the bar once
+  demanded the wrapped form and every real menu stayed shut); rows that
+  omit `enabled`/`visible` default to shown. A row click sends
+  `Event(id, "clicked", variant int32 0, timestamp 0)` and closes the
+  menu; the zeros drive real actions (a CopyQ row set its clipboard,
+  Joplin's Quit quit) — no item read the data or the timestamp.
+  Ayatana items (pasystray 0.8.2) expose neither `Activate` nor
+  `ContextMenu` and send no pixmap, so a left click does nothing and,
+  until themed icons land, their menus cannot open (no span to open
+  from). Electron serves its menu from a second connection of the same
+  process (replies arrive from another unique name) and answers no
+  introspection: the bar never introspects, and calls addressed to a
+  well-known name accept any sender, so both work.
 - **`query`** reports `{ "watcher": "owner" | "host", "items": [{ "id",
   "title", "status", "shown" }] }` while any item is tracked, and nothing
   while none is.
