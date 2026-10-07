@@ -14,12 +14,14 @@
 //! bounds.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use wayland_client::{Connection, QueueHandle};
 
 use super::canvas::Drew;
 use super::respond::{ChangeError, Changes};
 use super::surfaces::{LayerObjects, Objects, RoundTrip};
+use super::transition::{self, Transitions};
 use super::wayland::{Globals, State};
 use crate::choices::{Choice, Choices};
 use crate::control::ConnId;
@@ -28,19 +30,26 @@ use crate::outputs::{Entry, Output};
 use crate::paint::{self, Plan};
 use crate::print::warn;
 use crate::protocol::{OutputList, Show, Source};
+use crate::transition::Spec;
 use crate::waiters::{self, Waiters};
 use crate::wallpaper::{Image, Wallpaper};
 
 /// Makes `entry`'s surface show what `choices` says for it. Returns whether
-/// it committed. An image with no buffer rendered at the size needed is
-/// asked of the worker (`jobs`), and drawn when it lands.
+/// it committed. A running or requested transition goes through
+/// `transition::hook` first; an image with no buffer rendered at the size
+/// needed is asked of the worker (`jobs`), and drawn when it lands.
 pub fn reconcile(
     globals: &Globals,
     choices: &Choices,
     jobs: &mut Jobs<ConnId>,
+    transitions: &mut Transitions,
     entry: &mut Entry<Objects>,
     qh: &QueueHandle<State>,
+    now: Instant,
 ) -> bool {
+    if let Some(committed) = transition::hook(globals, choices, jobs, transitions, entry, qh, now) {
+        return committed;
+    }
     let info = entry.output.info();
     let wanted = choices.for_output(info.name.as_deref());
     // A render waiting for an image no longer wanted here is dropped now,
@@ -86,6 +95,9 @@ pub fn reconcile(
                 layer.destroy();
             }
             objects.canvas.clear();
+            // Any transition on it ends with its surface: its buffers go
+            // too, and the fresh surface draws the normal way.
+            transition::drop_output(transitions, entry.output.id(), &mut entry.output);
             entry.output.recreated();
             let creation = entry.output.creation();
             objects.layer = Some(LayerObjects::create(
@@ -183,6 +195,7 @@ impl Changes for Control<'_> {
         conn: ConnId,
         output: Option<&str>,
         show: Option<Show<'_>>,
+        transition: Spec,
     ) -> Result<(), ChangeError> {
         let State {
             globals,
@@ -191,6 +204,7 @@ impl Changes for Control<'_> {
             waiters,
             images,
             saved,
+            transitions,
             ..
         } = &mut *self.state;
         let targets = |entry: &Entry<Objects>| {
@@ -236,6 +250,11 @@ impl Changes for Control<'_> {
                     conn,
                     output: output.map(str::to_owned),
                 };
+                // The transition waits with the trial: the pixels landing
+                // starts it.
+                for entry in outputs.iter_mut().filter(|entry| targets(entry)) {
+                    entry.output.request_transition(transition, generation);
+                }
                 return images
                     .jobs
                     .trial(image, trial)
@@ -246,9 +265,19 @@ impl Changes for Control<'_> {
         saved.record(output, &choice, generation);
         choices.set(output, choice, generation);
         sweep(&mut images.jobs, choices, waiters);
+        let now = Instant::now();
         for entry in outputs.iter_mut().filter(|entry| targets(entry)) {
             entry.output.want(generation);
-            reconcile(globals, choices, &mut images.jobs, entry, self.qh);
+            entry.output.request_transition(transition, generation);
+            reconcile(
+                globals,
+                choices,
+                &mut images.jobs,
+                transitions,
+                entry,
+                self.qh,
+                now,
+            );
         }
         // Answered by `progress` at the top of the next loop turn, once
         // every targeted output shows it.

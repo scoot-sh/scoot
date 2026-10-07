@@ -470,3 +470,38 @@ fn a_recreated_surface_is_coming_again() {
     let _ = output.configure(3, 1920, 1080);
     assert!(output.coming(), "the same serial on a new surface is new");
 }
+
+#[test]
+fn a_requested_transition_is_consumed_once_at_its_generation() {
+    use crate::transition::{Kind, Spec};
+    let mut outputs = Outputs::<()>::default();
+    let id = settled_1080p(&mut outputs);
+    let output = &mut outputs.get_mut(id).unwrap().output;
+    assert_eq!(output.take_transition(), None);
+    assert_eq!(output.running(), None);
+    let spec = Spec {
+        kind: Kind::Fade,
+        duration_ms: 300,
+        easing: crate::transition::Easing::Linear,
+        angle_deg: 0.0,
+        pos: (0.5, 0.5),
+    };
+    // Before any request the stamp is 0: a request at generation 1 waits
+    // for its stamp, surviving takes until then.
+    output.request_transition(spec, 1);
+    assert_eq!(output.take_transition(), None, "stale: stamp is still 0");
+    output.want(1);
+    assert_eq!(output.take_transition(), Some(spec));
+    assert_eq!(output.take_transition(), None, "consumed once");
+    // A superseded request's transition waits too, until a newer request
+    // replaces it.
+    output.request_transition(spec, 2);
+    assert_eq!(output.take_transition(), None, "stamp is still 1");
+    output.want(2);
+    assert_eq!(output.take_transition(), Some(spec));
+    // The marker is independent bookkeeping for `query`.
+    output.set_running(Some(Kind::Wipe));
+    assert_eq!(output.running(), Some(Kind::Wipe));
+    output.set_running(None);
+    assert_eq!(output.running(), None);
+}

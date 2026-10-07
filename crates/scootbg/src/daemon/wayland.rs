@@ -45,7 +45,7 @@ use wayland_client::{
     ConnectError, Connection, DispatchError, EventQueue, Proxy, QueueHandle, delegate_noop,
 };
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
-use wayland_protocols::wp::single_pixel_buffer::v1::client::wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1;
+use wayland_protocols::wp::presentation_time::client::wp_presentation::WpPresentation;use wayland_protocols::wp::single_pixel_buffer::v1::client::wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1;
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_manager_v1::ZxdgOutputManagerV1;
@@ -54,6 +54,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLay
 use super::images::Images;
 use super::respond::Ready;
 use super::surfaces::{Objects, XdgOutputs};
+use super::transition::Transitions;
 use crate::choices::Choices;
 use crate::control::{ConnId, MAX_CONNECTIONS};
 use crate::jobs::MAX_TRIALS;
@@ -112,6 +113,11 @@ pub struct Globals {
     /// Read through [`Globals::fractional_scale`], which says when it can
     /// be used.
     fractional_scale: Option<WpFractionalScaleManagerV1>,
+    /// `wp_presentation`, for pacing transitions: where the compositor
+    /// offers it, each frame asks for feedback, and presented or discarded
+    /// drives the next one. Without it, frame callbacks and the timer pace
+    /// instead.
+    pub presentation: Option<WpPresentation>,
     /// How colors are drawn, from the globals above.
     pub path: Path,
 }
@@ -153,6 +159,9 @@ pub struct State {
     /// (an idle one has nothing to lose), so this holds at most one per
     /// write under way.
     pub retired: Vec<Saved>,
+    /// The transitions running on outputs (`daemon::transition`), and the
+    /// timer pacing them: empty and disarmed while idle.
+    pub transitions: Transitions,
 }
 
 pub struct Wayland {
@@ -198,6 +207,8 @@ impl Wayland {
         let viewporter: Option<WpViewporter> = optional(&mut missing, list.bind(&qh, 1..=1, ()));
         let single_pixel: Option<WpSinglePixelBufferManagerV1> =
             optional(&mut missing, list.bind(&qh, 1..=1, ()));
+        let presentation: Option<WpPresentation> =
+            optional(&mut missing, list.bind(&qh, 1..=1, ()));
         let path = Path::choose(viewporter.is_some(), single_pixel.is_some(), forced_path());
         let globals = Globals {
             display: conn.display(),
@@ -211,6 +222,7 @@ impl Wayland {
             } else {
                 optional(&mut missing, list.bind(&qh, 1..=1, ()))
             },
+            presentation,
             path,
         };
 
@@ -224,6 +236,7 @@ impl Wayland {
             ready: Vec::with_capacity(WAITERS + MAX_TRIALS),
             saved,
             retired: Vec::new(),
+            transitions: Transitions::default(),
         };
         let registry = list.registry().clone();
         list.contents().with_list(|advertised| {
@@ -353,6 +366,25 @@ delegate_noop!(State: WpViewport);
 delegate_noop!(State: WlCompositor);
 delegate_noop!(State: ZwlrLayerShellV1);
 delegate_noop!(State: WpViewporter);
+// `WpPresentation` sends `clock_id` on bind, which says nothing scootbg
+// needs (its transitions pace off the monotonic clock either way).
+impl wayland_client::Dispatch<WpPresentation, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &WpPresentation,
+        event: wayland_protocols::wp::presentation_time::client::wp_presentation::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+        match event {
+            wayland_protocols::wp::presentation_time::client::wp_presentation::Event::ClockId {
+                ..
+            } => {}
+            _ => {}
+        }
+    }
+}
 delegate_noop!(State: WpSinglePixelBufferManagerV1);
 delegate_noop!(State: WpFractionalScaleManagerV1);
 delegate_noop!(State: ZxdgOutputManagerV1);

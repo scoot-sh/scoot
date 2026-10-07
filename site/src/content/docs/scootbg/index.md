@@ -49,6 +49,11 @@ an image nobody commits. `sha256` pins the download's bytes.
 | `fill` | string (`"#rrggbb"`) | live | With an `image` only: the color around a `fit` or `center` image. |
 | `filter` | string | live | With an `image` only: `lanczos3`, `catmull-rom`, `bilinear` or `nearest`. |
 | `sha256` | string (64 hex digits) | live (re-downloads) | With a URL `image` only: the download's expected SHA-256. Anything else fails instead of showing. Refused beside a path. |
+| `transition` | string | live (re-applied) | How the next change arrives: `none` (at once), `fade`, `wipe` or `grow`. See [Transitions](./transitions.md). |
+| `duration-ms` | string (digits) | live (re-applied) | With a `transition` only: milliseconds, `0`–`60000` (default `500`). |
+| `easing` | string | live (re-applied) | With a `transition` only: `linear`, `ease-in`, `ease-out` (default), `ease-in-out` or `smooth`. |
+| `angle` | string (number) | live (re-applied) | A wipe's direction in degrees: `0` from the left, `90` from the top, `180` from the right, `270` from the bottom. |
+| `position` | string (`X,Y`) | live (re-applied) | Where a grow starts, as fractions (`0.5,0.5` is the center). |
 | `output."NAME"` | table | live | The same keys for one output, by connector name (as `scootbg query` lists them). Each output table stands alone: an output's `image` does not take the top level's `mode`. An empty table is nothing on that output. |
 | `command` | string | live | The `scootbg` to run. Default `"scootbg"` on `PATH`; the Nix modules set it to the installed package's store path. |
 

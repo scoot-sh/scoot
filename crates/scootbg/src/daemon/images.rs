@@ -32,6 +32,7 @@
 use std::io;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use wayland_client::QueueHandle;
 
@@ -152,6 +153,7 @@ fn share(state: &mut State, qh: &QueueHandle<State>) {
         outputs,
         choices,
         images,
+        transitions,
         ..
     } = &mut *state;
     let served = images.jobs.satisfy(|image, target| {
@@ -177,8 +179,17 @@ fn share(state: &mut State, qh: &QueueHandle<State>) {
     });
     if served {
         // Idempotent: an output with nothing to change sends nothing.
+        let now = Instant::now();
         for entry in outputs.iter_mut() {
-            reconcile(globals, choices, &mut images.jobs, entry, qh);
+            reconcile(
+                globals,
+                choices,
+                &mut images.jobs,
+                transitions,
+                entry,
+                qh,
+                now,
+            );
         }
     }
 }
@@ -193,6 +204,7 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
         images,
         ready,
         saved,
+        transitions,
         ..
     } = &mut *state;
     let Some(job) = images.jobs.finished() else {
@@ -214,7 +226,15 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
                 );
                 for target in &job.targets {
                     if let Some(entry) = outputs.get_mut(target.output) {
-                        reconcile(globals, choices, &mut images.jobs, entry, qh);
+                        reconcile(
+                            globals,
+                            choices,
+                            &mut images.jobs,
+                            transitions,
+                            entry,
+                            qh,
+                            Instant::now(),
+                        );
                     }
                 }
             }
@@ -300,8 +320,17 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
         &job.targets,
         rendered,
     );
+    let now = Instant::now();
     for entry in outputs.iter_mut().filter(|entry| applies(entry)) {
-        reconcile(globals, choices, &mut images.jobs, entry, qh);
+        reconcile(
+            globals,
+            choices,
+            &mut images.jobs,
+            transitions,
+            entry,
+            qh,
+            now,
+        );
     }
     waiters.push(trial.conn, generation);
 }

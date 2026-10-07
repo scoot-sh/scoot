@@ -154,11 +154,14 @@ pub const SET_HELP: &str = "\
 scootbg set -- show a color or an image on every output, or on one
 
 USAGE:
-    scootbg set '#rrggbb' [--output NAME]
+    scootbg set '#rrggbb' [--output NAME] [--transition KIND ...]
     scootbg set PATH [--output NAME] [--mode MODE] [--fill '#rrggbb']
-                     [--filter FILTER]
+                     [--filter FILTER] [--transition KIND ...]
     scootbg set URL [--output NAME] [--mode MODE] [--fill '#rrggbb']
-                    [--filter FILTER] [--sha256 HEX]
+                    [--filter FILTER] [--sha256 HEX] [--transition KIND ...]
+
+    KIND ... is [--duration-ms MS] [--easing EASING] [--angle DEGREES]
+               [--position X,Y]
 
 An argument starting with '#' is a color: '#' and six hex digits, either
 case, such as '#1e1e2e'; quote it, since the shell reads '#' as a comment.
@@ -197,6 +200,22 @@ PNG's eXIf chunk).
                      bilinear or nearest (hard pixels, for pixel art)
     --sha256 HEX     pin a URL's bytes (64 hex digits, as `sha256sum`
                      prints): anything else fails instead of showing
+    --transition KIND
+                     how the new wallpaper arrives: none (the default: it
+                     lands at once), fade, wipe or grow. With a kind, the
+                     change animates from what is on screen now; a newer
+                     `set` mid-transition starts from the frame showing
+                     then, never queued behind it
+    --duration-ms MS how long the transition takes, in milliseconds
+                     (default 500; 0 lands at once; at most 60000)
+    --easing EASING  how it moves through the time: linear, ease-in,
+                     ease-out (the default), ease-in-out or smooth
+    --angle DEGREES  a wipe's direction in degrees, clockwise from the
+                     positive x-axis: 0 (the default) wipes in from the
+                     left edge, 90 from the top, 180 from the right, 270
+                     from the bottom
+    --position X,Y   where a grow starts, as fractions of the width and
+                     height (default 0.5,0.5, the center)
 
 Without --output, every output shows it, including outputs plugged in
 later, and any choice made for a single output is replaced. With --output
@@ -205,7 +224,9 @@ does, and it keeps it when it is unplugged and plugged back in. A name that
 no output has now is an error, and nothing is changed.
 
 Returns once every targeted output shows it and the compositor has
-processed it, so a screenshot taken straight after shows it. An image that
+processed it, so a screenshot taken straight after shows it. With a
+transition, that means once the animation has finished: the reply waits
+for the last frame, not the first. An image that
 cannot be shown (no such file, not an image, too large, truncated or
 corrupt) is an error, and every output keeps what it showed. An output
 unplugged meanwhile is left out of that wait; an output whose surface is
@@ -230,6 +251,8 @@ EXAMPLES:
     scootbg set '#1e1e2e'
     scootbg set ~/wallpapers/sunset.jpg --mode fill
     scootbg set ~/wallpapers/grid.png --mode tile --output DP-1
+    scootbg set '#101014' --transition fade --duration-ms 800
+    scootbg set ~/wallpapers/city.png --transition wipe --angle 90
 
 SEE ALSO:
     `scootbg help set` prints this page; `scootbg --help --json` is the
@@ -245,7 +268,9 @@ USAGE:
 
 Takes the wallpaper off every output (without --output, including any
 choice made for a single output), or off the output named NAME, so the
-compositor's own background shows. The daemon keeps running. An output
+compositor's own background shows. The daemon keeps running. A `clear`
+lands at once and takes no transition: there is no wallpaper to blend
+from or to. An output
 plugged in later shows nothing until the next `scootbg set`, unless a
 color was set for it by name.
 
@@ -411,7 +436,7 @@ impl Topic {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Help(Topic),
     /// `--version`: this binary, answered locally.
@@ -424,10 +449,11 @@ pub enum Command {
 }
 
 /// `scootbg apply-config`'s arguments.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ApplyOptions {
     pub profile: Profile,
-    pub section: Section,
+    /// Boxed: the section is by far the largest variant.
+    pub section: Box<Section>,
     /// `--serve` (internal): this process is the detached daemon an
     /// `apply-config` started.
     pub serve: bool,
@@ -482,6 +508,8 @@ pub enum Error {
         flag: &'static str,
         value: String,
     },
+    /// A transition flag without `--transition`.
+    TransitionOnly(&'static str),
     /// `--mode`, `--fill` or `--filter` with a color.
     ImageOnly(&'static str),
     /// `--sha256` that is not 64 hex digits.
@@ -546,14 +574,28 @@ impl fmt::Display for Error {
             Self::BadValue { flag, value } => {
                 let takes = if *flag == MODE {
                     "fill, fit, stretch, center or tile"
-                } else {
+                } else if *flag == FILTER {
                     "lanczos3, catmull-rom, bilinear or nearest"
+                } else if *flag == TRANSITION {
+                    "none, fade, wipe or grow"
+                } else if *flag == DURATION_MS {
+                    "milliseconds as digits, 0 to 60000"
+                } else if *flag == EASING {
+                    "linear, ease-in, ease-out, ease-in-out or smooth"
+                } else if *flag == ANGLE {
+                    "degrees as a number"
+                } else {
+                    "two fractions of the width and height as `X,Y`"
                 };
                 write!(
                     f,
                     "`{flag}` takes {takes}, not `{value}` (try `scootbg set --help`)"
                 )
             }
+            Self::TransitionOnly(flag) => write!(
+                f,
+                "`{flag}` needs `--transition` (try `scootbg set --help`)"
+            ),
             Self::ImageOnly(flag) => write!(
                 f,
                 "`{flag}` applies to an image, not a color (try `scootbg set --help`)"
@@ -920,7 +962,7 @@ fn apply_config<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Resu
     let section = Section::parse(json.as_bytes()).map_err(Error::Section)?;
     Ok(Command::ApplyConfig(ApplyOptions {
         profile,
-        section,
+        section: Box::new(section),
         serve,
     }))
 }
@@ -930,6 +972,11 @@ const MODE: &str = "--mode";
 const FILL: &str = "--fill";
 const FILTER: &str = "--filter";
 const SHA256: &str = "--sha256";
+const TRANSITION: &str = "--transition";
+const DURATION_MS: &str = "--duration-ms";
+const EASING: &str = "--easing";
+const ANGLE: &str = "--angle";
+const POSITION: &str = "--position";
 
 /// `set COLOR|PATH|URL [--output NAME] [--mode M] [--fill C] [--filter F]
 /// [--sha256 HEX]` and `clear [--output NAME]`, flags in any order after
@@ -941,7 +988,18 @@ fn change<I: Iterator<Item = Result<String, String>>>(
     mut args: I,
 ) -> Result<Command, Error> {
     let flags: &[&'static str] = if command == "set" {
-        &[OUTPUT, MODE, FILL, FILTER, SHA256]
+        &[
+            OUTPUT,
+            MODE,
+            FILL,
+            FILTER,
+            SHA256,
+            TRANSITION,
+            DURATION_MS,
+            EASING,
+            ANGLE,
+            POSITION,
+        ]
     } else {
         &[OUTPUT]
     };
@@ -960,7 +1018,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
     };
     let mut target: Option<String> = None;
     // Indexed as `flags`.
-    let mut values: [Option<String>; 5] = Default::default();
+    let mut values: [Option<String>; 10] = Default::default();
     let mut first = true;
     while let Some(arg) = args.next() {
         let arg = match arg {
@@ -1002,12 +1060,24 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         }
         first = false;
     }
-    let [output, mode, fill, filter, sha256] = values;
+    let [
+        output,
+        mode,
+        fill,
+        filter,
+        sha256,
+        transition,
+        duration_ms,
+        easing,
+        angle,
+        position,
+    ] = values;
     let output = output.map(Cow::Owned);
     if command == "clear" {
         return Ok(Command::Client(Request::Clear { output }));
     }
     let argument = target.ok_or(Error::MissingTarget)?;
+    let transition = parse_transition(transition, duration_ms, easing, angle, position)?;
     if argument.starts_with('#') {
         for (flag, given) in [
             (MODE, &mode),
@@ -1023,6 +1093,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             Ok(color) => Ok(Command::Client(Request::Set {
                 show: Show::Color(color),
                 output,
+                transition,
             })),
             Err(error) => Err(Error::Color { argument, error }),
         };
@@ -1071,7 +1142,68 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             filter,
         }),
         output,
+        transition,
     }))
+}
+
+/// The five transition flags as one [`Spec`](crate::transition::Spec):
+/// parsed strictly and together (`crate::transition::assemble`), so a
+/// stray `--duration-ms` teaches rather than being ignored.
+fn parse_transition(
+    transition: Option<String>,
+    duration_ms: Option<String>,
+    easing: Option<String>,
+    angle: Option<String>,
+    position: Option<String>,
+) -> Result<crate::transition::Spec, Error> {
+    use crate::transition::{self, Kind};
+    let kind = transition
+        .map(|value| {
+            Kind::parse(&value).map_err(|_| Error::BadValue {
+                flag: TRANSITION,
+                value,
+            })
+        })
+        .transpose()?;
+    transition::assemble(
+        kind,
+        duration_ms.as_deref(),
+        easing.as_deref(),
+        angle.as_deref(),
+        position.as_deref(),
+        |key| format!("--{key}"),
+    )
+    .map_err(|error| {
+        use crate::transition::ParseError;
+        match error {
+            ParseError::Orphan(flag) => {
+                let flag = match flag.as_str() {
+                    "--duration-ms" => DURATION_MS,
+                    "--easing" => EASING,
+                    "--angle" => ANGLE,
+                    _ => POSITION,
+                };
+                Error::TransitionOnly(flag)
+            }
+            ParseError::UnknownKind(value) => Error::BadValue {
+                flag: TRANSITION,
+                value,
+            },
+            ParseError::UnknownEasing(value) => Error::BadValue {
+                flag: EASING,
+                value,
+            },
+            ParseError::BadDuration(value) => Error::BadValue {
+                flag: DURATION_MS,
+                value,
+            },
+            ParseError::BadAngle(value) => Error::BadValue { flag: ANGLE, value },
+            ParseError::BadPosition(value) => Error::BadValue {
+                flag: POSITION,
+                value,
+            },
+        }
+    })
 }
 
 /// `path` made absolute against the working directory, without touching

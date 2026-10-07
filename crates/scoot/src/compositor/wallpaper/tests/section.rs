@@ -358,7 +358,7 @@ fn unknown_keys_are_refused_by_name() {
     let got = problem("[wallpaper.output.\"DP-2\"]\ncommand = \"x\"\n");
     assert!(
         got.contains("unknown key `wallpaper.output.DP-2.command`"),
-        "an output's table takes the five keys only: {got}"
+        "an output's table takes the eleven keys only: {got}"
     );
     let got = problem("[wallpaper.output.\"a b\"]\nzoom = 2\n");
     assert!(got.contains("`wallpaper.output.\"a b\".zoom`"), "{got}");
@@ -698,4 +698,49 @@ fn a_date_is_named_as_one_and_never_by_tomls_private_key() {
         assert!(got.contains(needle), "{toml:?}: {got}");
         assert!(!got.contains("toml_private"), "{toml:?}: {got}");
     }
+}
+
+#[test]
+fn transition_keys_reach_the_json_untouched() {
+    // scoot checks keys and types only; the values' meaning is scootbg's
+    // strict parse to refuse (one parser, not two that can disagree).
+    let got = json(
+        r##"
+[wallpaper]
+color = "#1e1e2e"
+transition = "fade"
+duration-ms = "800"
+easing = "linear"
+
+[wallpaper.output."DP-2"]
+image = "/srv/city.png"
+transition = "wipe"
+angle = "90"
+position = "0,0"
+"##,
+    );
+    assert_eq!(
+        got,
+        json!({
+            "color": "#1e1e2e",
+            "transition": "fade",
+            "duration-ms": "800",
+            "easing": "linear",
+            "output": {
+                "DP-2": {
+                    "image": "/srv/city.png",
+                    "transition": "wipe",
+                    "angle": "90",
+                    "position": "0,0"
+                }
+            }
+        }),
+        "transition keys pass through like the wallpaper keys"
+    );
+    // A non-string transition value is refused by name, like any other.
+    let got = problem("[wallpaper]\ntransition = 3\n");
+    assert!(
+        got.contains("`wallpaper.transition` must be a string, not a number"),
+        "{got}"
+    );
 }

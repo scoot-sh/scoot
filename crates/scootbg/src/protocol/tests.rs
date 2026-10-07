@@ -28,10 +28,12 @@ fn each_request_parses() {
         Request::Set {
             show: Show::Color(red()),
             output: None,
+            transition: crate::transition::Spec::none(),
         },
         Request::Set {
             show: Show::Color(red()),
             output: Some("DP-1".into()),
+            transition: crate::transition::Spec::none(),
         },
         Request::Set {
             show: Show::Image(ImageRequest {
@@ -41,6 +43,7 @@ fn each_request_parses() {
                 filter: Filter::Nearest,
             }),
             output: Some("DP-1".into()),
+            transition: crate::transition::Spec::none(),
         },
         Request::Clear { output: None },
         Request::Clear {
@@ -59,6 +62,7 @@ fn set_and_clear_lines_are_what_the_docs_say() {
     let set = Request::Set {
         show: Show::Color(Color::parse("#1E1E2E").unwrap()),
         output: Some("DP-1".into()),
+        transition: crate::transition::Spec::none(),
     };
     assert_eq!(
         set.line(),
@@ -121,7 +125,8 @@ fn a_set_needs_a_valid_color() {
         parse(br##"{"protocol":1,"type":"set","color":"#C03020"}"##).unwrap(),
         Request::Set {
             show: Show::Color(red()),
-            output: None
+            output: None,
+            transition: crate::transition::Spec::none(),
         }
     );
     // Image options do not go with a color.
@@ -148,6 +153,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
                 filter: Filter::Lanczos3,
             }),
             output: None,
+            transition: crate::transition::Spec::none(),
         }
     );
     let full = br##"{"protocol":1,"type":"set","image":"/p/a.png","mode":"center","fill":"#ABCDEF","filter":"bilinear","output":"X"}"##;
@@ -161,6 +167,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
                 filter: Filter::Bilinear,
             }),
             output: Some("X".into()),
+            transition: crate::transition::Spec::none(),
         }
     );
     // The documented line.
@@ -172,6 +179,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
             filter: Filter::Lanczos3,
         }),
         output: None,
+        transition: crate::transition::Spec::none(),
     }
     .line();
     assert_eq!(
@@ -333,6 +341,7 @@ fn output_entries_have_a_fixed_shape() {
         draw_failed: false,
         draw_error: None,
         shows: Some(super::Shows(&color)),
+        transition: Some("fade"),
     };
     let unknown = OutputEntry {
         name: None,
@@ -350,6 +359,7 @@ fn output_entries_have_a_fixed_shape() {
         draw_failed: true,
         draw_error: Some("a \"reason\"\nover two lines"),
         shows: None,
+        transition: None,
     };
     let line = reply_string(&Reply::Outputs {
         outputs: &[known, unknown],
@@ -377,6 +387,7 @@ fn output_entries_have_a_fixed_shape() {
                 "draw_failed": false,
                 "draw_error": null,
                 "shows": {"color": "#c03020"},
+                "transition": "fade",
             },
             {
                 "name": null,
@@ -389,6 +400,7 @@ fn output_entries_have_a_fixed_shape() {
                 "draw_failed": true,
                 "draw_error": "a \"reason\"\nover two lines",
                 "shows": null,
+                "transition": null,
             },
         ], "saving": false, "profile": "scoot"})
     );
@@ -469,7 +481,9 @@ fn section(json: &str) -> crate::section::Section {
 fn apply_config_round_trips() {
     let request = Request::ApplyConfig {
         profile: crate::state::Profile::parse("scoot").unwrap(),
-        section: section(r##"{"image":"/a b.png","output":{"DP-2":{"color":"#101014"}}}"##),
+        section: Box::new(section(
+            r##"{"image":"/a b.png","output":{"DP-2":{"color":"#101014"}}}"##,
+        )),
     };
     let line = request.line();
     assert!(line.ends_with('\n'));
@@ -549,7 +563,7 @@ fn a_url_set_parses_and_round_trips() {
           \"sha256\":\"{sha}\",\"mode\":\"fit\"}}"
     );
     let request = parse(line.as_bytes()).unwrap();
-    let Request::Set { show, output } = &request else {
+    let Request::Set { show, output, .. } = &request else {
         panic!("not a set");
     };
     assert_eq!(output, &None);
@@ -610,4 +624,119 @@ fn url_and_hash_misuse_is_refused() {
         "{:?}",
         parse(nul)
     );
+}
+
+#[test]
+fn a_set_carries_a_transition() {
+    use crate::transition::{Easing, Kind, Spec};
+    // Absent: none.
+    assert_eq!(
+        parse(br##"{"protocol":1,"type":"set","color":"#000000"}"##).unwrap(),
+        Request::Set {
+            show: Show::Color(Color::parse("#000000").unwrap()),
+            output: None,
+            transition: Spec::none(),
+        }
+    );
+    // An explicit `none` ignores the rest too.
+    assert_eq!(
+        parse(
+            br##"{"protocol":1,"type":"set","color":"#000000","transition":"none","angle":"90"}"##
+        )
+        .unwrap(),
+        Request::Set {
+            show: Show::Color(Color::parse("#000000").unwrap()),
+            output: None,
+            transition: Spec::none(),
+        }
+    );
+    // Full: everything parses, with defaults for what is absent.
+    assert_eq!(
+        parse(
+            br##"{"protocol":1,"type":"set","color":"#000000","transition":"wipe","angle":"90"}"##
+        )
+        .unwrap(),
+        Request::Set {
+            show: Show::Color(Color::parse("#000000").unwrap()),
+            output: None,
+            transition: Spec {
+                kind: Kind::Wipe,
+                duration_ms: 500,
+                easing: Easing::EaseOut,
+                angle_deg: 90.0,
+                pos: (0.5, 0.5),
+            },
+        }
+    );
+    // The line carries a transition, and it round-trips.
+    let request = Request::Set {
+        show: Show::Color(Color::parse("#101014").unwrap()),
+        output: Some("DP-1".into()),
+        transition: Spec {
+            kind: Kind::Grow,
+            duration_ms: 800,
+            easing: Easing::Linear,
+            angle_deg: 0.0,
+            pos: (0.0, 0.0),
+        },
+    };
+    let line = request.line();
+    assert_eq!(
+        line,
+        "{\"protocol\":1,\"type\":\"set\",\"color\":\"#101014\",\"output\":\"DP-1\",\
+         \"transition\":\"grow\",\"duration-ms\":\"800\",\"easing\":\"linear\",\
+         \"angle\":\"0\",\"position\":\"0,0\"}\n"
+    );
+    assert_eq!(parse(line.trim_end().as_bytes()).unwrap(), request);
+    // A `set` with no transition carries no transition fields.
+    let plain = Request::Set {
+        show: Show::Color(Color::parse("#101014").unwrap()),
+        output: None,
+        transition: Spec::none(),
+    };
+    assert_eq!(
+        plain.line(),
+        "{\"protocol\":1,\"type\":\"set\",\"color\":\"#101014\"}\n"
+    );
+    // Refusals say what each takes.
+    for (line, what) in [
+        (
+            &br##"{"protocol":1,"type":"set","color":"#000000","transition":"dissolve"}"##[..],
+            "unknown transition",
+        ),
+        (
+            br##"{"protocol":1,"type":"set","color":"#000000","transition":"fade","duration-ms":"-1"}"##,
+            "bad duration",
+        ),
+        (
+            br##"{"protocol":1,"type":"set","color":"#000000","transition":"fade","easing":"bounce"}"##,
+            "unknown easing",
+        ),
+        (
+            br##"{"protocol":1,"type":"set","color":"#000000","transition":"wipe","angle":"NaN"}"##,
+            "bad angle",
+        ),
+        (
+            br##"{"protocol":1,"type":"set","color":"#000000","transition":"grow","position":"2,0"}"##,
+            "bad position",
+        ),
+        (
+            br##"{"protocol":1,"type":"set","color":"#000000","duration-ms":"5"}"##,
+            "applies to a transition",
+        ),
+    ] {
+        match parse(line) {
+            Err(RequestError::BadTransition(error)) => {
+                assert!(error.to_string().contains(what), "{error}")
+            }
+            other => panic!("{line:?}: {other:?}"),
+        }
+    }
+    // A `clear` with transition fields is refused, saying why.
+    match parse(br##"{"protocol":1,"type":"clear","transition":"fade"}"##) {
+        Err(RequestError::TransitionWithClear) => {}
+        other => panic!("{other:?}"),
+    }
+    let message = RequestError::TransitionWithClear.to_string();
+    assert!(message.contains("nothing to blend"), "{message}");
 }

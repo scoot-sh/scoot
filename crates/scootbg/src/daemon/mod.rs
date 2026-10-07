@@ -45,6 +45,7 @@ mod listen;
 mod respond;
 mod restore;
 mod surfaces;
+mod transition;
 mod wayland;
 mod worker;
 
@@ -53,6 +54,7 @@ mod tests;
 
 use std::fmt;
 use std::io;
+use std::os::fd::AsFd;
 use std::time::{Duration, Instant};
 
 use rustix::event::{PollFd, PollFlags, poll};
@@ -67,6 +69,7 @@ use change::Control;
 use images::Images;
 use listen::Listening;
 use respond::{Responder, write_ready};
+use transition::drive_due;
 use wayland::{Wayland, WaylandError};
 
 pub use config::Start;
@@ -214,7 +217,8 @@ struct Daemon {
 const WAYLAND: usize = 0;
 const LISTENER: usize = 1;
 const WORKER: usize = 2;
-const CLIENTS: usize = 3;
+const TRANSITION: usize = 3;
+const CLIENTS: usize = 4;
 
 impl Daemon {
     fn run(&mut self, claim: &Claim) -> Result<(), Error> {
@@ -245,6 +249,21 @@ impl Daemon {
                 // before the loop sleeps.
                 continue;
             }
+            // Transitions whose frame is due: the timer woke the loop for
+            // them, or a turn passed. Cheap when idle (no outputs
+            // transition: nothing renders).
+            {
+                let state = &mut self.wayland.state;
+                drive_due(
+                    &state.globals,
+                    &state.choices,
+                    &mut state.images.jobs,
+                    &mut state.outputs,
+                    &mut state.transitions,
+                    &self.wayland.qh,
+                    Instant::now(),
+                );
+            }
             self.flush_wayland()?;
             let Some(guard) = self.wayland.queue.prepare_read() else {
                 // Events arrived for our queue meanwhile: dispatch them.
@@ -271,6 +290,15 @@ impl Daemon {
             // Readable only once a job's result waits: no wakeups when idle.
             let worker_fd = self.wayland.state.images.worker.fd();
             fds.push(PollFd::new(&worker_fd, PollFlags::IN));
+            // Readable while a transition runs: the timer paces its frames.
+            // The slot stays (with nothing asked for) when idle, so the
+            // indices below stay fixed.
+            let timer = self.wayland.state.transitions.timer_fd();
+            let (timer, events) = match timer {
+                Some(timer) => (timer, PollFlags::IN),
+                None => (wayland_fd.as_fd(), PollFlags::empty()),
+            };
+            fds.push(PollFd::new(&timer, events));
             for conn in self.server.conns() {
                 fds.push(PollFd::new(conn.stream(), conn.interest()));
             }
@@ -324,6 +352,16 @@ impl Daemon {
                 if let Some(done) = self.wayland.state.images.worker.take() {
                     images::land(&mut self.wayland.state, done, &self.wayland.qh);
                 }
+            }
+
+            // The transition timer fired: clear its expirations (else it
+            // polls ready forever). The next turn's drive renders.
+            if self
+                .revents
+                .get(TRANSITION)
+                .is_some_and(|r| r.intersects(PollFlags::IN))
+            {
+                self.wayland.state.transitions.drain_timer();
             }
 
             // Clients before accepting, so indices still match the poll set

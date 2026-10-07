@@ -172,6 +172,7 @@ export default defineConfig({
             { label: 'Outputs', slug: 'scootbg/outputs' },
             { label: 'Wallpaper from a link', slug: 'scootbg/from-url' },
             { label: 'Restore', slug: 'scootbg/restore' },
+            { label: 'Transitions', slug: 'scootbg/transitions' },
             { label: 'CLI reference', slug: 'scootbg/cli' },
             { label: 'Troubleshooting', slug: 'scootbg/troubleshooting' },
           ],

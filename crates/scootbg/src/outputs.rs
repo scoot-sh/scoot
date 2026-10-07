@@ -47,6 +47,7 @@ mod tests;
 
 use crate::density::{Buffer, Preferred, Scale};
 use crate::paint::{Drawn, Plan};
+use crate::transition::{Kind, Spec};
 use crate::waiters::Progress;
 use crate::wallpaper::Wallpaper;
 
@@ -287,6 +288,15 @@ pub struct Output {
     /// The generation of the last `set` or `clear` that targeted this
     /// output, 0 before any (see `crate::waiters`).
     stamp: u64,
+    /// The transition the next change through this output arrives with, at
+    /// the requesting generation: set by every request (`None` in effect
+    /// means instant), consumed by the draw whose stamp matches. Anything
+    /// else stays until a newer request replaces it, so an image still
+    /// decoding keeps its transition across earlier reconciles.
+    pending: Option<(Spec, u64)>,
+    /// The transition running on the surface now, for `query` (`None`
+    /// while idle: `none` lands at once and is never reported).
+    running: Option<Kind>,
     /// Why drawing what it should show failed, if it did (`query`'s
     /// `draw_error`); not retried until a new request targets it or the
     /// compositor reconfigures it, so a failure (a buffer too large for
@@ -544,6 +554,11 @@ impl Output {
         }
     }
 
+    /// Whether the live surface is configured (sized by the compositor).
+    pub fn surface_configured(&self) -> bool {
+        matches!(self.surface, Surface::Configured { .. })
+    }
+
     /// The serial of the `configure` the live surface was last given, while
     /// it is configured.
     pub fn configured_serial(&self) -> Option<u32> {
@@ -572,6 +587,39 @@ impl Output {
     /// The generation of the last request that targeted it.
     pub fn stamp(&self) -> u64 {
         self.stamp
+    }
+
+    /// The transition the next change through this output arrives with:
+    /// every request sets it (`Spec::none()` for instant), and the draw
+    /// consumes it. A generation that no longer matches the stamp was
+    /// superseded: dropped unread.
+    pub fn request_transition(&mut self, spec: Spec, generation: u64) {
+        self.pending = Some((spec, generation));
+    }
+
+    /// Takes the requested transition when it is for the latest request.
+    /// Anything else stays until a newer request replaces it: an image
+    /// still decoding keeps its transition across reconciles that run
+    /// before its pixels land.
+    pub fn take_transition(&mut self) -> Option<Spec> {
+        match self.pending {
+            Some((spec, generation)) if generation == self.stamp => {
+                self.pending = None;
+                Some(spec)
+            }
+            _ => None,
+        }
+    }
+
+    /// Marks the transition running on the surface now (`None` when idle),
+    /// for `query`.
+    pub fn set_running(&mut self, kind: Option<Kind>) {
+        self.running = kind;
+    }
+
+    /// The transition running on the surface now, if any.
+    pub fn running(&self) -> Option<Kind> {
+        self.running
     }
 
     /// The surface was committed with `drawn`.
@@ -807,6 +855,8 @@ impl<O> Outputs<O> {
                 surface: Surface::Waiting,
                 closed_once: false,
                 stamp: 0,
+                pending: None,
+                running: None,
                 failed: None,
                 preferred: Preferred::default(),
                 creation: 0,

@@ -35,6 +35,16 @@ description: "Wallpaper symptoms and their fixes — images, links, outputs, res
   `scootbg daemon` refuses while one runs, and a socket left by a dead
   one is replaced. Signals leave the socket file; the next daemon
   replaces it.
+- *The change lands at once, no animation.* No `--transition` on the
+  request (the default is `none`), a zero `--duration-ms`, or a `clear`
+  (always instant). With a `[wallpaper]` section, the keys are strings
+  and the table you mean carries them; an older scootbg refuses the
+  section outright. See [Transitions](./transitions.md).
+- *`set` refuses the transition.* A value outside the lists in
+  [Transitions](./transitions.md) (durations are digits in milliseconds,
+  angles plain numbers, positions two fractions with a comma), a
+  transition flag without `--transition`, or any of them on a `clear`:
+  exit 2, nothing changed.
 - *Nothing applied from scoot.* Check the `[wallpaper]` section
   ([The `[wallpaper]` section](./index.md#the-wallpaper-section)): an
   unknown key or wrong-typed value refuses the section (the rest of the

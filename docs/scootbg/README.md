@@ -58,8 +58,13 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 - **Scriptable.** A small CLI over a control socket with JSON replies, like
   `scoot msg`, so an agent or a script can set, query and clear wallpapers.
 
-Transitions (fade, wipe, grow) and animated images (GIF, APNG, animated
-WebP) are the next milestone, not v1. They are the features people move to
+Transitions (fade, wipe with an angle, grow from a point, and `none`,
+with a duration and an easing curve) work: `scootbg set ... --transition
+fade`, the five `[wallpaper]` keys, and the control protocol's transition
+fields ([below](#the-control-protocol),
+[Transitions](https://www.scoot.sh/scootbg/transitions/)). Animated
+images (GIF, APNG, animated WebP) are the next milestone, not v1. They are
+the features people move to
 awww for, and they are also a steady CPU cost under a software renderer,
 so they arrive once the static path is measured and they can be held to a
 per-frame budget.
@@ -282,12 +287,15 @@ scootbg apply-config --profile scoot '{}'     # the section is gone: clear
 | `image` | an absolute path (scoot resolves `~/` and relative paths against its config file first), or an `http(s)` URL (downloaded once and cached: [cli.md](cli.md#a-wallpaper-from-a-link)) |
 | `color` | `#rrggbb`; `image` or `color`, never both; neither is nothing (the compositor's own background) |
 | `mode`, `fill`, `filter` | with an `image` only, as `scootbg set` takes them: `fill`/`fit`/`stretch`/`center`/`tile`, `#rrggbb`, `lanczos3`/`catmull-rom`/`bilinear`/`nearest` |
+| `transition`, `duration-ms`, `easing`, `angle`, `position` | how the next change arrives, as `scootbg set` takes them: `none`/`fade`/`wipe`/`grow`, milliseconds as digits, an easing curve, a wipe's degrees, a grow's `X,Y`; without a `transition` refused, with an explicit `none` ignored |
 | `sha256` | with a URL `image` only: 64 hex digits pinning the download's bytes |
 | `output` | per-output tables by connector name, each with the six keys above and nothing else; an empty table is nothing on that output |
 | `command` | scoot's (where to find `scootbg`): accepted, ignored, and never part of the fingerprint |
 
 - **Each table stands alone**, as a `scootbg set` does: an output's own
-  `image` does not take the top level's `mode`.
+  `image` does not take the top level's `mode`, and an output's change
+  does not take the top level's `transition` (an output with no table of
+  its own follows the top level, as for the wallpaper itself).
 - **Strict.** Refused, as a usage error (exit 2) that starts and changes
   nothing, so a typo is never a setting silently not applied: an unknown
   key at either level, a key given twice, `null` or a value of the wrong
@@ -432,6 +440,8 @@ object per line each way, each request naming the protocol it speaks.
 {"protocol":1,"type":"set","image":"/abs/a.jpg"}              -> {"type":"ok"}
 {"protocol":1,"type":"set","image":"/abs/a.jpg","mode":"fit","fill":"#101014","filter":"lanczos3","output":"DP-1"}
                                                               -> {"type":"ok"}
+{"protocol":1,"type":"set","color":"#101014","transition":"fade","duration-ms":"800","easing":"ease-out"}
+                                                              -> {"type":"ok"}
 {"protocol":1,"type":"set","image":"https://example.com/a.jpg","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}
                                                               -> {"type":"ok"}
 {"protocol":1,"type":"clear"}                                 -> {"type":"ok"}
@@ -476,6 +486,19 @@ anything wrong                                                -> {"type":"error"
   (`#rrggbb`) and `filter` (`lanczos3`, `catmull-rom`, `bilinear`,
   `nearest`) may be left out, for `fill`, `#000000` and `lanczos3`, and
   are refused with a `color`.
+- `set` may also carry a transition: `transition` (`none`, `fade`,
+  `wipe`, `grow`), and for any kind but `none`, `duration-ms`
+  (milliseconds as digits, at most 60000), `easing` (`linear`, `ease-in`,
+  `ease-out`, `ease-in-out`, `smooth`), `angle` (a wipe's degrees) and
+  `position` (a grow's `X,Y`), each a string, each defaulted when absent
+  (`none`, 500 ms, `ease-out`, 0 degrees, the center). Parameters without
+  a `transition` are refused; with an explicit `none` they are ignored; a
+  `set` with no transition carries no transition fields, so a daemon that
+  predates transitions reads it unchanged, and one with a transition
+  reads it as an instant `set`. A `clear` with any of them is refused. The
+  reply waits for the last frame; a newer request mid-transition starts
+  from what is on screen. While one runs, that output's `query` entry
+  reports it (`"transition":"fade"`, else `null`).
 - **An image changes nothing until it has been decoded.** One that cannot
   be shown gets an error reply saying why (no such file, not a regular
   file, not an image scootbg reads, image too large, truncated or
@@ -510,7 +533,9 @@ anything wrong                                                -> {"type":"error"
 - `query`'s `shows` is `{"color":"#rrggbb"}` (lowercase),
   `{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
   or `null`. Every key of an entry is always present; keys may be added
-  within protocol 1, none removed or changed.
+  within protocol 1, none removed or changed. `query`'s `transition` is
+  the animation running on the output now (`"fade"`, `"wipe"` or `"grow"`,
+  else `null`).
 - A choice for every output is kept for outputs plugged in later; a choice
   for one output is kept by its name, across unplugging it, and across a
   daemon restart ([Restore](#restore)).

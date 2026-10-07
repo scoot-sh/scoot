@@ -64,6 +64,7 @@ use wayland_client::QueueHandle;
 use wayland_client::protocol::wl_buffer::WlBuffer;
 use wayland_client::protocol::wl_shm;
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
+use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
 use scootbg_mem::{ShmBuffer, ShmError};
@@ -122,6 +123,9 @@ pub enum Content {
     Color(Color),
     /// The image of this serial (`crate::wallpaper::Image`).
     Image(u64),
+    /// A transition frame (`daemon::transition`): never shared between
+    /// outputs and never mistaken for an endpoint, so it matches neither.
+    Frame,
 }
 
 /// The memory behind one or more outputs' buffers: the mapping, and the
@@ -142,6 +146,18 @@ impl Drop for Memory {
     }
 }
 
+impl Memory {
+    /// The pixels, shared, for a transition snapshot to copy.
+    pub(crate) fn bytes(&self) -> &[u8] {
+        self.shm.pixels()
+    }
+
+    /// The pixels, to blend a transition frame into.
+    pub(crate) fn bytes_mut(&mut self) -> &mut [u8] {
+        self.shm.pixels_mut()
+    }
+}
+
 /// Pixels to show, shared by every output of one size showing one image
 /// (`crate::share`).
 pub type Pixels = Rc<Shared<Memory>>;
@@ -149,7 +165,7 @@ pub type Pixels = Rc<Shared<Memory>>;
 /// Hands `shm`, whose pixels hold `content`, to the compositor: a pool
 /// over its memfd, which is then closed. Fails only for a buffer whose fd
 /// is closed already, which every caller's fresh buffer is not.
-pub fn pixels(
+pub(crate) fn pixels(
     globals: &Globals,
     qh: &QueueHandle<State>,
     mut shm: ShmBuffer,
@@ -178,10 +194,10 @@ pub fn pixels(
 }
 
 /// One output's buffer over [`Pixels`].
-type ShmSlot = Slot<WlBuffer, Memory>;
+pub(crate) type ShmSlot = Slot<WlBuffer, Memory>;
 
 /// A `wl_buffer` for this output over `pixels`, not attached yet.
-fn buffer_over(pixels: Pixels, qh: &QueueHandle<State>, id: OutputId) -> ShmSlot {
+pub(crate) fn buffer_over(pixels: Pixels, qh: &QueueHandle<State>, id: OutputId) -> ShmSlot {
     let memory = pixels.memory();
     let geometry = memory.shm.geometry();
     let buffer = memory.pool.create_buffer(
@@ -215,8 +231,50 @@ fn color_buffer(
 /// wl_buffer protocol allows destroying it before its release as long as
 /// the storage is not written again, and it never is (`crate::share`
 /// freezes it for anyone still showing it).
-fn destroy(slot: ShmSlot) {
+pub(crate) fn destroy(slot: ShmSlot) {
     slot.retire().destroy();
+}
+
+/// Brings the surface's persistent, double-buffered state to a buffer of
+/// `scale` under `size`: the buffer scale, the viewport destination (when
+/// the buffer is not the surface's size at its scale, or the surface
+/// already has a viewport) and the opaque region (the whole surface).
+/// Each is sent only when it differs from what the surface has, as they
+/// persist. A transition frame commits through this for the same tail its
+/// static draw uses.
+pub(crate) fn sync_surface(
+    globals: &Globals,
+    layer: &mut LayerObjects,
+    surface: &WlSurface,
+    qh: &QueueHandle<State>,
+    scale: u32,
+    size: Size,
+    viewported: bool,
+) -> Result<(), DrawError> {
+    if layer.buffer_scale != scale {
+        surface.set_buffer_scale(clamp(scale));
+        layer.buffer_scale = scale;
+    }
+    if (viewported || layer.viewport.is_some()) && layer.destination != Some(size) {
+        let viewporter = globals
+            .viewporter
+            .as_ref()
+            .ok_or(DrawError::Missing("wp_viewporter"))?;
+        let viewport = layer
+            .viewport
+            .get_or_insert_with(|| viewporter.get_viewport(surface, qh, ()));
+        viewport.set_destination(clamp(size.width), clamp(size.height));
+        layer.destination = Some(size);
+    }
+    if layer.opaque != Some(size) {
+        // Opaque everywhere: the compositor need draw nothing beneath it.
+        let region = globals.compositor.create_region(qh, ());
+        region.add(0, 0, clamp(size.width), clamp(size.height));
+        surface.set_opaque_region(Some(&region));
+        region.destroy();
+        layer.opaque = Some(size);
+    }
+    Ok(())
 }
 
 impl paint::Slot for ShmSlot {
@@ -440,65 +498,55 @@ impl Canvas {
             }
         }
         // Persistent, double-buffered state: sent only when it differs
-        // from what the surface has.
-        if layer.buffer_scale != buffer.scale {
-            surface.set_buffer_scale(clamp(buffer.scale));
-            layer.buffer_scale = buffer.scale;
-            if !attached {
-                // The same buffer at a new buffer scale (a scale and a mode
-                // that change together keep its size, or an integer scale
-                // becomes the same fractional one). The protocol applies
-                // the scale at the commit either way, but Smithay-based
-                // compositors (scoot's pinned fork included) read it only
-                // with a newly attached buffer and would keep showing the
-                // old scale; attaching the buffer on screen again costs
-                // nothing and is right everywhere. A new viewport
-                // destination alone needs no such help: Smithay works the
-                // surface's view out again at every commit
-                // (`RendererSurfaceState::update_buffer`), and
-                // `tests/scale.rs` checks it by screenshot.
-                //
-                // Attached again, the buffer is the compositor's again until
-                // its next release, even if it had been released (wlroots
-                // releases an shm buffer once uploaded): marked held, so no
-                // later draw writes into it meanwhile.
-                let current = self
-                    .current
-                    .and_then(|i| self.slots.get_mut(i))
-                    .and_then(Option::as_mut);
-                if let Some(slot) = current {
-                    surface.attach(Some(slot.buffer()), 0, 0);
-                    slot.attached();
-                } else if let Some((buffer, _)) = &self.pixel {
-                    surface.attach(Some(buffer), 0, 0);
-                }
+        // from what the surface has. A transition frame commits through
+        // `sync_surface` below for the same tail; this keeps the
+        // scale-only re-attach, which only this path needs (a frame always
+        // attaches).
+        let viewported = !buffer.fits(target.size);
+        let scale_changed = layer.buffer_scale != buffer.scale;
+        sync_surface(
+            globals,
+            layer,
+            &surface,
+            qh,
+            buffer.scale,
+            target.size,
+            viewported,
+        )?;
+        if scale_changed && !attached {
+            // The same buffer at a new buffer scale (a scale and a mode
+            // that change together keep its size, or an integer scale
+            // becomes the same fractional one). The protocol applies
+            // the scale at the commit either way, but Smithay-based
+            // compositors (scoot's pinned fork included) read it only
+            // with a newly attached buffer and would keep showing the
+            // old scale; attaching the buffer on screen again costs
+            // nothing and is right everywhere. A new viewport
+            // destination alone needs no such help: Smithay works the
+            // surface's view out again at every commit
+            // (`RendererSurfaceState::update_buffer`), and
+            // `tests/scale.rs` checks it by screenshot.
+            //
+            // Attached again, the buffer is the compositor's again until
+            // its next release, even if it had been released (wlroots
+            // releases an shm buffer once uploaded): marked held, so no
+            // later draw writes into it meanwhile.
+            let current = self
+                .current
+                .and_then(|i| self.slots.get_mut(i))
+                .and_then(Option::as_mut);
+            if let Some(slot) = current {
+                surface.attach(Some(slot.buffer()), 0, 0);
+                slot.attached();
+            } else if let Some((buffer, _)) = &self.pixel {
+                surface.attach(Some(buffer), 0, 0);
             }
         }
         // A buffer that is not the surface's size at its buffer scale (a 1×1
         // color, a fractional-scale buffer) is sized by the viewport;
         // anything drawn on a surface that has one keeps its destination
         // the surface size, so the buffer is shown at the size it was drawn
-        // for.
-        let viewported = !buffer.fits(target.size);
-        if (viewported || layer.viewport.is_some()) && layer.destination != Some(target.size) {
-            let viewporter = globals
-                .viewporter
-                .as_ref()
-                .ok_or(DrawError::Missing("wp_viewporter"))?;
-            let viewport = layer
-                .viewport
-                .get_or_insert_with(|| viewporter.get_viewport(&surface, qh, ()));
-            viewport.set_destination(clamp(target.size.width), clamp(target.size.height));
-            layer.destination = Some(target.size);
-        }
-        if layer.opaque != Some(target.size) {
-            // Opaque everywhere: the compositor need draw nothing beneath it.
-            let region = globals.compositor.create_region(qh, ());
-            region.add(0, 0, clamp(target.size.width), clamp(target.size.height));
-            surface.set_opaque_region(Some(&region));
-            region.destroy();
-            layer.opaque = Some(target.size);
-        }
+        // for. (Sent by `sync_surface` above.)
         // All of it, every time: a draw is rare, and a new buffer scale or
         // viewport with the same buffer changes every pixel on screen too.
         surface.damage_buffer(0, 0, clamp(dims.0), clamp(dims.1));

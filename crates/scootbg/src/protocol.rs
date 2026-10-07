@@ -37,6 +37,7 @@ use crate::image::{Filter, Mode};
 use crate::outputs::Size;
 use crate::section::Section;
 use crate::state::{Profile, ProfileError};
+use crate::transition::{self, Kind, Spec};
 use crate::wallpaper::Wallpaper;
 
 #[cfg(test)]
@@ -59,11 +60,26 @@ pub const MAX_REQUEST_LINE: usize = 64 * 1024;
 /// {"protocol":1,"type":"set","color":"#1e1e2e"}
 /// {"protocol":1,"type":"set","color":"#1e1e2e","output":"DP-1"}
 /// {"protocol":1,"type":"set","image":"/abs/a.jpg","mode":"fit","fill":"#101014","filter":"lanczos3"}
+/// {"protocol":1,"type":"set","color":"#101014","transition":"fade","duration-ms":"500","easing":"ease-out"}
 /// {"protocol":1,"type":"clear"}
 /// {"protocol":1,"type":"clear","output":"DP-1"}
 /// {"protocol":1,"type":"apply-config","profile":"scoot","config":{"color":"#1e1e2e"}}
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// A `set` may carry a transition (`crate::transition`): `transition`
+/// (one of `none`, `fade`, `wipe`, `grow`), and, for any kind but `none`,
+/// `duration-ms` (milliseconds as digits), `easing` (`linear`, `ease-in`,
+/// `ease-out`, `ease-in-out`, `smooth`), `angle` (a wipe's degrees) and
+/// `position` (a grow's `X,Y`). Each is a string, parsed strictly; anything
+/// absent is the default (`none`, 500 ms, `ease-out`, 0 degrees, the
+/// center). Parameters without a `transition` are refused; with an explicit
+/// `none` they are ignored. A `set` with no transition carries no
+/// transition fields, so an older daemon that predates transitions reads it
+/// unchanged, and one with a transition reads it as an instant `set`: it
+/// shows the same wallpaper, without the animation.
+/// A `clear` with any of them is refused: clearing shows the compositor's
+/// own background at once, which there is nothing to blend from or to.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Request<'a> {
     /// What each output shows.
     Query,
@@ -71,18 +87,24 @@ pub enum Request<'a> {
     Kill,
     /// The daemon's version and protocol.
     Version,
-    /// Show `show` on every output, or on the outputs named `output`.
+    /// Show `show` on every output, or on the outputs named `output`,
+    /// arriving through `transition`.
     Set {
         show: Show<'a>,
         output: Option<Cow<'a, str>>,
+        transition: Spec,
     },
     /// Show nothing (the compositor's own background) on every output, or
     /// on the outputs named `output`.
     Clear { output: Option<Cow<'a, str>> },
     /// A `[wallpaper]` section from scoot's config, for `profile`
     /// (`crate::section`, `daemon::config`): adopt the profile, and apply
-    /// the section if it changed since it was last applied.
-    ApplyConfig { profile: Profile, section: Section },
+    /// the section if it changed since it was last applied. Boxed: the
+    /// section is the request's largest variant by far.
+    ApplyConfig {
+        profile: Profile,
+        section: Box<Section>,
+    },
 }
 
 /// What a `set` shows.
@@ -136,7 +158,9 @@ impl Request<'_> {
     }
 
     /// The request line a client sends, newline included. Strings are
-    /// JSON-escaped, so any output name or path round-trips.
+    /// JSON-escaped, so any output name or path round-trips. A `set` with
+    /// no transition (`Spec::none`) carries no transition fields, so an
+    /// older daemon reads it unchanged.
     pub fn line(&self) -> String {
         if let Self::ApplyConfig { profile, section } = self {
             return section.request_line(profile);
@@ -160,6 +184,16 @@ impl Request<'_> {
             filter: Option<Filter>,
             #[serde(skip_serializing_if = "Option::is_none")]
             output: Option<&'r str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            transition: Option<&'static str>,
+            #[serde(skip_serializing_if = "Option::is_none", rename = "duration-ms")]
+            duration_ms: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            easing: Option<&'static str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            angle: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            position: Option<String>,
         }
         let mut line = Line {
             protocol: PROTOCOL_VERSION,
@@ -171,10 +205,26 @@ impl Request<'_> {
             fill: None,
             filter: None,
             output: None,
+            transition: None,
+            duration_ms: None,
+            easing: None,
+            angle: None,
+            position: None,
         };
         match self {
-            Self::Set { show, output } => {
+            Self::Set {
+                show,
+                output,
+                transition,
+            } => {
                 line.output = output.as_deref();
+                if transition.kind != Kind::None {
+                    line.transition = Some(transition.kind.name());
+                    line.duration_ms = Some(transition.duration_ms.to_string());
+                    line.easing = Some(transition.easing.name());
+                    line.angle = Some(transition.angle_deg.to_string());
+                    line.position = Some(format!("{},{}", transition.pos.0, transition.pos.1));
+                }
                 match show {
                     Show::Color(color) => line.color = Some(*color),
                     Show::Image(image) => {
@@ -253,6 +303,12 @@ pub enum RequestError {
     BadProfile(ProfileError),
     /// `apply-config` without a `config`.
     NoConfig,
+    /// A transition that is not one (`crate::transition` says what each
+    /// takes).
+    BadTransition(transition::ParseError),
+    /// A `clear` with transition fields: clearing shows the compositor's
+    /// own background at once, which there is nothing to blend from or to.
+    TransitionWithClear,
 }
 
 impl fmt::Display for RequestError {
@@ -306,6 +362,12 @@ impl fmt::Display for RequestError {
                 f,
                 "`apply-config` needs a `config` object (`{{}}` when the section is absent)"
             ),
+            Self::BadTransition(error) => write!(f, "{error}"),
+            Self::TransitionWithClear => write!(
+                f,
+                "`clear` shows the compositor's own background at once: there is nothing to \
+                 blend from or to, so it takes no transition"
+            ),
         }
     }
 }
@@ -331,6 +393,16 @@ struct Envelope<'a> {
     filter: Option<Cow<'a, str>>,
     #[serde(borrow)]
     output: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    transition: Option<Cow<'a, str>>,
+    #[serde(borrow, rename = "duration-ms")]
+    duration_ms: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    easing: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    angle: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    position: Option<Cow<'a, str>>,
 }
 
 /// Parses one request line (without its newline).
@@ -371,14 +443,32 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
                 envelope.fill,
                 envelope.filter,
             )?;
+            let transition = transition(
+                envelope.transition,
+                envelope.duration_ms,
+                envelope.easing,
+                envelope.angle,
+                envelope.position,
+            )?;
             Ok(Request::Set {
                 show,
                 output: envelope.output,
+                transition,
             })
         }
-        "clear" => Ok(Request::Clear {
-            output: envelope.output,
-        }),
+        "clear" => {
+            if envelope.transition.is_some()
+                || envelope.duration_ms.is_some()
+                || envelope.easing.is_some()
+                || envelope.angle.is_some()
+                || envelope.position.is_some()
+            {
+                return Err(RequestError::TransitionWithClear);
+            }
+            Ok(Request::Clear {
+                output: envelope.output,
+            })
+        }
         "apply-config" => apply_config(line),
         _ => Err(RequestError::Unknown(kind.into_owned())),
     }
@@ -399,7 +489,10 @@ fn apply_config(line: &[u8]) -> Result<Request<'static>, RequestError> {
     let profile = apply.profile.ok_or(RequestError::NoProfile)?;
     let profile = Profile::parse(&profile).map_err(RequestError::BadProfile)?;
     let section = apply.config.ok_or(RequestError::NoConfig)?;
-    Ok(Request::ApplyConfig { profile, section })
+    Ok(Request::ApplyConfig {
+        profile,
+        section: Box::new(section),
+    })
 }
 
 /// What a `set` asks to show, from its fields.
@@ -480,6 +573,30 @@ fn show<'a>(
     }
 }
 
+/// What a `set` transitions through, from its fields: parsed strictly
+/// (`crate::transition::assemble`), so parameters without a `transition`
+/// are refused rather than silently not applied.
+fn transition(
+    kind: Option<Cow<'_, str>>,
+    duration_ms: Option<Cow<'_, str>>,
+    easing: Option<Cow<'_, str>>,
+    angle: Option<Cow<'_, str>>,
+    position: Option<Cow<'_, str>>,
+) -> Result<Spec, RequestError> {
+    let kind = kind
+        .map(|name| Kind::parse(&name))
+        .transpose()
+        .map_err(RequestError::BadTransition)?;
+    transition::assemble(
+        kind,
+        duration_ms.as_deref(),
+        easing.as_deref(),
+        angle.as_deref(),
+        position.as_deref(),
+        str::to_owned,
+    )
+    .map_err(RequestError::BadTransition)
+}
 /// One output in a `query` reply, borrowed from the daemon's state so a
 /// reply allocates nothing beyond the connection's output buffer:
 ///
@@ -530,6 +647,10 @@ pub struct OutputEntry<'a> {
     /// or `null` for nothing (the compositor's own background, or no
     /// surface yet).
     pub shows: Option<Shows<'a>>,
+    /// The transition running on the output now (`none` is never reported:
+    /// it lands at once): `fade`, `wipe` or `grow`, else `null`. Added for
+    /// transitions within protocol 1; older clients ignore it.
+    pub transition: Option<&'a str>,
 }
 
 /// What an output shows, when it shows something: an object, which may

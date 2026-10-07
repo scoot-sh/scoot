@@ -514,3 +514,117 @@ fn url_values_are_checked() {
     let message = refused("{\"image\":\"https://example.com/a\\u0000b\"}");
     assert!(message.contains("NUL"), "{message}");
 }
+
+#[test]
+fn transition_keys_parse_stand_alone_and_order_canonically() {
+    use crate::transition::{Easing, Kind, Spec};
+    // Absent: none, everywhere.
+    let plain = parse(r##"{"color":"#1e1e2e"}"##).unwrap();
+    assert_eq!(plain.transition(None), Spec::none());
+    assert_eq!(plain.transition(Some("DP-1")), Spec::none());
+    // A transition parses, with defaults for what is absent.
+    let section = parse(
+        r##"{"color":"#1e1e2e","transition":"fade","duration-ms":"800",
+            "output":{"DP-1":{"image":"/a.png","transition":"wipe","angle":"90"}}}"##,
+    )
+    .unwrap();
+    assert_eq!(
+        section.transition(None),
+        Spec {
+            kind: Kind::Fade,
+            duration_ms: 800,
+            easing: Easing::EaseOut,
+            angle_deg: 0.0,
+            pos: (0.5, 0.5),
+        }
+    );
+    assert_eq!(
+        section.transition(Some("DP-1")),
+        Spec {
+            kind: Kind::Wipe,
+            duration_ms: 500,
+            easing: Easing::EaseOut,
+            angle_deg: 90.0,
+            pos: (0.5, 0.5),
+        }
+    );
+    // Each table stands alone for its own keys, but an output with no
+    // table follows the top level, as for the wallpaper itself.
+    assert_eq!(
+        section.transition(Some("DP-2")),
+        Spec {
+            kind: Kind::Fade,
+            duration_ms: 800,
+            easing: Easing::EaseOut,
+            angle_deg: 0.0,
+            pos: (0.5, 0.5),
+        }
+    );
+    // Canonical order is byte order, with the new keys among the old.
+    assert_eq!(
+        section.canonical(),
+        r##"{"color":"#1e1e2e","duration-ms":"800","transition":"fade","output":{"DP-1":{"angle":"90","image":"/a.png","transition":"wipe"}}}"##
+    );
+    // The fingerprint moves with a transition change, as with any value.
+    assert_ne!(
+        section.fingerprint(),
+        parse(r##"{"color":"#1e1e2e","transition":"fade","duration-ms":"801"}"##)
+            .unwrap()
+            .fingerprint()
+    );
+    // An explicit `none` ignores the rest.
+    let none = parse(r##"{"color":"#000000","transition":"none","angle":"90"}"##).unwrap();
+    assert_eq!(none.transition(None), Spec::none());
+    assert_eq!(
+        none.canonical(),
+        r##"{"angle":"90","color":"#000000","transition":"none"}"##
+    );
+}
+
+#[test]
+fn transition_keys_are_refused_strictly() {
+    for (json, what) in [
+        (
+            r##"{"color":"#000000","transition":"dissolve"}"##,
+            "unknown transition",
+        ),
+        (
+            r##"{"color":"#000000","transition":"fade","easing":"bounce"}"##,
+            "unknown easing",
+        ),
+        (
+            r##"{"color":"#000000","transition":"fade","duration-ms":"-1"}"##,
+            "bad duration-ms",
+        ),
+        (
+            r##"{"color":"#000000","transition":"wipe","angle":"NaN"}"##,
+            "bad angle",
+        ),
+        (
+            r##"{"color":"#000000","transition":"grow","position":"2,0"}"##,
+            "bad position",
+        ),
+        (
+            r##"{"color":"#000000","duration-ms":"800"}"##,
+            "applies to a transition",
+        ),
+        (
+            r##"{"output":{"DP-1":{"easing":"linear"}}}"##,
+            "applies to a transition",
+        ),
+    ] {
+        let error = parse(json).unwrap_err();
+        assert!(error.to_string().contains(what), "{json}: {error}");
+    }
+}
+
+#[test]
+fn a_named_table_without_a_transition_key_animates_nothing() {
+    use crate::transition::Spec;
+    let section = parse(
+        r##"{"color":"#1e1e2e","transition":"fade",
+            "output":{"DP-1":{"color":"#000000"}}}"##,
+    )
+    .unwrap();
+    assert_eq!(section.transition(Some("DP-1")), Spec::none());
+}
