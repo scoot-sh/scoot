@@ -393,7 +393,17 @@ fn the_section_animates_reloads() {
         return;
     };
     let config_path = session.runtime_dir().join("config.toml");
-    // At start-up scoot ran `apply-config`, which started the daemon.
+    // At start-up scoot runs `apply-config`, which starts the daemon:
+    // wait for it before querying, the way `daemon()` does.
+    let deadline = Instant::now() + PATIENCE;
+    while !common::answers(&session.socket()) {
+        assert!(
+            Instant::now() < deadline,
+            "apply-config never started a daemon"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // The section is showing.
     session.query_until("the section at start-up", |o| {
         o.len() == 1 && o[0]["shows"] == color(RED)
     });
