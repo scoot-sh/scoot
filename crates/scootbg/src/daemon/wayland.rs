@@ -45,7 +45,10 @@ use wayland_client::{
     ConnectError, Connection, DispatchError, EventQueue, Proxy, QueueHandle, delegate_noop,
 };
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
-use wayland_protocols::wp::presentation_time::client::wp_presentation::WpPresentation;use wayland_protocols::wp::single_pixel_buffer::v1::client::wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1;
+use wayland_protocols::wp::presentation_time::client::wp_presentation::{
+    Event as PresentationEvent, WpPresentation,
+};
+use wayland_protocols::wp::single_pixel_buffer::v1::client::wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1;
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_manager_v1::ZxdgOutputManagerV1;
@@ -372,16 +375,15 @@ impl wayland_client::Dispatch<WpPresentation, ()> for State {
     fn event(
         _: &mut Self,
         _: &WpPresentation,
-        event: wayland_protocols::wp::presentation_time::client::wp_presentation::Event,
+        event: PresentationEvent,
         _: &(),
         _: &wayland_client::Connection,
         _: &wayland_client::QueueHandle<Self>,
     ) {
-        match event {
-            wayland_protocols::wp::presentation_time::client::wp_presentation::Event::ClockId {
-                ..
-            } => {}
-            _ => {}
+        // `clock_id`, sent on bind: the presentation clock's domain, which
+        // says nothing transitions need (they pace off the monotonic
+        // clock either way). Anything else is ignored the same way.
+        if let PresentationEvent::ClockId { .. } = event {
         }
     }
 }

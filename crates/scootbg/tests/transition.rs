@@ -305,6 +305,21 @@ fn a_new_request_mid_transition_replaces_it() {
         assert_eq!(shown, color(GREEN), "{name}");
         assert_eq!(transition, Value::Null, "{name}");
     }
+    // An instant request mid-transition aborts it and lands at once.
+    let mut fading = session
+        .scootbg()
+        .args(["set", BLUE, "--transition", "fade", "--duration-ms", "5000"])
+        .spawn()
+        .unwrap();
+    session.query_until("fading again", |o| {
+        o.iter().all(|o| o["transition"] == "fade")
+    });
+    ok(&session, &["set", RED]);
+    assert!(fading.wait().unwrap().success());
+    for (name, shown, transition) in shows(&session) {
+        assert_eq!(shown, color(RED), "{name}");
+        assert_eq!(transition, Value::Null, "{name}");
+    }
     stop(&session, &mut daemon);
 }
 
@@ -332,7 +347,8 @@ fn an_image_fades_in_from_a_color() {
 /// Refusals change nothing: a bad kind, a bad value, and a transition on
 /// a `clear` are usage errors, and the wallpaper stays.
 #[test]
-fn bad_transitions_change_nothing() {    let Some(session) = Session::start("trans-bad") else {
+fn bad_transitions_change_nothing() {
+    let Some(session) = Session::start("trans-bad") else {
         return;
     };
     let mut daemon = session.daemon();
