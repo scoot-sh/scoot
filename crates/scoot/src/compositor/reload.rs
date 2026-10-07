@@ -408,6 +408,13 @@ impl State {
                 appearance.cursor_color,
                 appearance.cursor_theme.as_deref(),
             );
+            // The overlay-plane twins are keyed by the old images' ids: drop
+            // them now rather than leaving stale dma-bufs cached per output
+            // until the bound turns over (see `render::cursor_plane`).
+            #[cfg(feature = "gpu-scanout")]
+            if let Some(tty) = self.tty.as_mut() {
+                tty.clear_cursor_overlays();
+            }
             if cursor_size {
                 report.applied.push(field::CURSOR_SIZE.to_owned());
             }

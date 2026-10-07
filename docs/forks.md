@@ -348,6 +348,11 @@ existing entries are being checked against it by
     - *Hiding the pointer instead* (`[appearance] cursor_hide_after_ms`,
       shipped). Kept, and still the answer where no overlay is free, but it
       only helps once the pointer has sat still, and is opt-in.
+    - *Rebase note (from #485's review):* `drm/compositor/mod.rs:162`
+      imports `ImportDma` but uses it only under `renderer_pixman` -- without
+      pixman the import is unused. Scoot-side fix is impossible (the import
+      lives in the fork); clean it at the next fork rebase rather than
+      carrying a commit for a warning.
   - `fdf424d` **return a lost-session error instead of panicking when the
     seat is gone** (branch `scoot/cursor-dmabuf-storage`, on `7ab72d53`).
     `LibSeatSessionNotifier::process_events` called `unwrap` on

@@ -2994,10 +2994,10 @@ then after one move:
 | --- | --- | --- |
 | 800,500 | `48x48+1196+749` | mpv direct |
 | 1680,500 | `48x48+2516+749` (44 px on screen) | mpv direct |
-| 1695,500 | none: 23 px would be on screen, not offered | composited |
+| 1695,500 | none: 22 px would be on screen, not offered | composited |
 | 1706,1066 | none (corner) | composited |
 | 0,0 | `48x48-5-2` (the hotspot's offset) | mpv direct |
-| 1,1066 | none: 20 px tall on screen | composited |
+| 1,1066 | none: 2 px tall on screen | composited |
 | 800,0 | `48x48+1196-2` | mpv direct |
 | 800,500 | `48x48+1196+749` | mpv direct |
 
