@@ -13762,6 +13762,35 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   printf '%s' '${sessionShutdownText}' | grep -F -x -q 'Conflicts=scoot-session.target graphical-session.target graphical-session-pre.target'
   echo "ok: session user units reach the session target past the display import"
 
+  # 6j. The compositor survives a switch and takes the session down
+  # with it when it ends (gh-461): the switcher reads the `X-` keys
+  # from the `[Service]` section only (its own generated units carry
+  # them there; under `[Unit]` they are silently ignored), so both
+  # live there and neither under `[Unit]`; leaving the active state
+  # either way (clean quit enters `inactive`, a crash `failed`) starts
+  # the shutdown target, which is what stops the session targets past
+  # the display going away.
+  printf '%s' '${sessionServiceText}' | python3 -c '
+  import sys
+  sections, current = {}, None
+  for line in sys.stdin.read().splitlines():
+      line = line.strip()
+      if line.startswith("[") and line.endswith("]"):
+          current = line[1:-1]
+          sections.setdefault(current, {})
+      elif line and not line.startswith("#") and current is not None:
+          k, _, v = line.partition("=")
+          sections[current][k.strip()] = v.strip()
+  unit, service = sections.get("Unit", {}), sections.get("Service", {})
+  assert service.get("X-RestartIfChanged") == "false", service
+  assert service.get("X-StopIfChanged") == "false", service
+  assert "X-RestartIfChanged" not in unit, unit
+  assert "X-StopIfChanged" not in unit, unit
+  assert unit.get("OnSuccess") == "scoot-shutdown.target", unit
+  assert unit.get("OnFailure") == "scoot-shutdown.target", unit
+  '
+  echo "ok: a switch leaves the compositor alone, and its exit ends the session"
+
   # 7. A representable-but-wrong scoot type renders as TOML (it is the
   #    loader, at session start, that refuses it -- fail-safe).
   grep -q '^gap = "wide"$' ${wrongTypeToml}
