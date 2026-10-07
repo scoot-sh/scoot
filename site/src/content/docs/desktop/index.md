@@ -139,7 +139,9 @@ against the still-running compositor; the display socket never moves,
 so they reattach to the same session. If the compositor itself exits
 instead — quitting, crashing, or being stopped — the session targets
 stop with it, so nothing is left restart-looping on a missing display;
-log back in for a fresh session on the new build.
+log back in for a fresh session on the new build. That includes
+`systemctl --user restart scoot.service`: restarting the compositor ends
+the session, so use it only when you mean to log out.
 
 > **Symptom:** after a switch the bar logs "cannot connect to the
 > Wayland compositor" over and over while the session targets stay
