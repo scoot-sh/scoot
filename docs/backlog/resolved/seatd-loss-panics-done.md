@@ -4,7 +4,7 @@ status: "resolved"
 area: "resolved"
 priority: null
 blocked: null
-resolved: "2026-10-06"
+resolved: "2026-10-07"
 ---
 
 # scoot panics when seatd dies under a running session (libseat unwrap on ENOTCONN)

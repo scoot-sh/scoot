@@ -418,8 +418,8 @@ existing entries are being checked against it by
   `928d4a9b`): upstream's `XSettings::update` still returns after
   `change_property8` without a flush. `7ab72d53` (checked 2026-10-06,
   master `19c16d3e`): upstream's `UnderlyingStorage` and `ExportBuffer`
-  still have no dma-buf variant. `fdf424d` (checked 2026-10-07, current
-  master): upstream's `backend/session/libseat.rs` still calls `unwrap`
+  still have no dma-buf variant. `fdf424d` (checked 2026-10-07, upstream master
+  `libseat.rs` blob `8a47aaa5`, unchanged from the base): upstream's `backend/session/libseat.rs` still calls `unwrap`
   on the `dispatch` result in `new` and `process_events` and on the
   `disable` result, with no seat-lost error variant. No issue
   or PR exists. Nothing has been filed from here.
