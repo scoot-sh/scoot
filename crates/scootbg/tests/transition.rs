@@ -227,10 +227,15 @@ fn a_wipe_is_visible_mid_flight() {
     let red = rgb(RED);
     let blue = rgb(BLUE);
     // A hard edge: both endpoints on screen at once.
-    wait_shot(&session, id, "a wipe", |shot| {
+    let first = wait_shot(&session, id, "a wipe", |shot| {
         let colors = shot.colors();
         colors.contains(&red) && colors.contains(&blue)
     });
+    // And it moves: a later frame differs from this one.
+    let second = wait_shot(&session, id, "a moving wipe", |shot| {
+        shot.pixels() != first.pixels()
+    });
+    assert_ne!(first.pixels(), second.pixels());
     assert!(changing.wait().unwrap().success());
     wait_still(&session, "settled");
     stop(&session, &mut daemon);

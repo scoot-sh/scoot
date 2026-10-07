@@ -38,15 +38,17 @@
 //!
 //! ## Memory bound
 //!
-//! A transition holds at most one extra full-size buffer per output (the
-//! frame being drawn: [`frame_bytes`], 33,177,600 B at 3840×2160), plus, on
-//! a mid-transition restart only, one snapshot of what is on screen (the
-//! memcpy the restart starts from). The old and new endpoints are shared
-//! references to pixels that already exist, never copies. Everything extra
-//! is freed when the transition finishes, so an idle daemon costs what a
-//! static wallpaper costs. An allocation that fails ends the transition at
-//! once (the final wallpaper is shown the normal way), never wedged and
-//! never worse than the OOM abort `scaler-oom-abort.md` knows.
+//! A transition holds at most two extra full-size buffers per output (the
+//! frames being drawn, each [`frame_bytes`]: 33,177,600 B at 3840×2160;
+//! the second only where the compositor releases lazily, so one buffer
+//! is enough elsewhere), plus, on a mid-transition restart only, one
+//! snapshot of what is on screen (the memcpy the restart starts from).
+//! The old and new endpoints are shared references to pixels that already
+//! exist, never copies. Everything extra is freed when the transition
+//! finishes, so an idle daemon costs what a static wallpaper costs. An
+//! allocation that fails ends the transition at once (the final wallpaper
+//! is shown the normal way), never wedged and never worse than the OOM
+//! abort `scaler-oom-abort.md` knows.
 //!
 //! ## No per-frame allocation
 //!

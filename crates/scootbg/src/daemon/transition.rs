@@ -12,17 +12,21 @@
 //! ## Frames
 //!
 //! One frame blends the two endpoints (`Endpoint`: a solid color, or
-//! shared pixels that already exist) into one full-size buffer at the
-//! transition's size, which is attached, damaged with only what changed
-//! (`crate::transition::damage`) and committed. The buffer is allocated
-//! once per transition and rewritten in place; a mid-transition restart
-//! snapshots what is on screen with one memcpy into a second buffer and
-//! starts the new transition from there, so it never queues behind the
-//! old one. Both are freed when the transition finishes: an idle daemon
-//! costs what a static wallpaper costs. At most one extra buffer runs
-//! steadily, two transiently across a restart (see `crate::transition`'s
-//! memory bound); an allocation that fails ends the transition at once,
-//! showing the final wallpaper the normal way.
+//! shared pixels that already exist) into a full-size frame buffer, which
+//! is attached, damaged with only what changed
+//! (`crate::transition::damage`) and committed. The first buffer is
+//! allocated once per transition and rewritten in place; where the
+//! compositor holds it until another attaches (release-on-replace), a
+//! second is allocated lazily and the two alternate, so a held buffer
+//! never stalls the animation. A mid-transition restart snapshots what
+//! is on screen with one memcpy into a further buffer and starts the new
+//! transition from there, so it never queues behind the old one. All of
+//! them are freed when the transition finishes: an idle daemon costs
+//! what a static wallpaper costs. At most two frame buffers run (plus the
+//! snapshot across a restart), against the old and new endpoints they
+//! blend: see `crate::transition`'s memory bound. An allocation that fails
+//! ends the transition at once, showing the final wallpaper the normal
+//! way.
 //!
 //! ## Pacing
 //!
@@ -101,9 +105,14 @@ struct Active {
     last_eased: f64,
     /// A frame went out: a restart snapshots from it.
     committed: bool,
-    /// The frame buffer, rewritten in place while the compositor holds no
-    /// frame: a held buffer skips its frame instead.
-    frame: canvas::ShmSlot,
+    /// The frame buffers, rewritten in place. One is enough where the
+    /// compositor releases a buffer soon after it is replaced; where it
+    /// holds one until another attaches (release-on-replace), a second is
+    /// allocated lazily, and the two alternate, so a held buffer skips
+    /// nothing. At most two, freed with the transition.
+    frames: [Option<canvas::ShmSlot>; 2],
+    /// The frame on screen, for release matching and restart snapshots.
+    current: Option<usize>,
     /// What is on screen at a restart, copied once from the last frame.
     /// `None` until the first restart needs it.
     snap: Option<Pixels>,
@@ -349,7 +358,8 @@ fn start(
             last_step: step,
             last_eased: transition::progress(&spec, 0),
             committed: false,
-            frame,
+            frames: [Some(frame), None],
+            current: None,
             snap: None,
             from_row,
             to_row,
@@ -413,8 +423,15 @@ fn restart(
     if committed {
         // Snapshot what is on screen: one memcpy of the last frame into
         // the snapshot buffer.
+        let current = transitions.active[position].1.current;
         let active = &mut transitions.active[position].1;
-        let frame_bytes = active.frame.memory().bytes();
+        let frame_bytes = match current.and_then(|index| active.frames[index].as_ref()) {
+            Some(slot) => slot.memory().bytes(),
+            None => {
+                drop_active(transitions, entry, position);
+                return false;
+            }
+        };
         // Reuse the snapshot only when nothing still reads it (a previous
         // restart's `from` may hold it); else a fresh buffer, so shared
         // pixels are never written.
@@ -607,7 +624,48 @@ fn drive(
     ))
 }
 
-/// Renders and commits the frame at `eased`, or skips it when the frame
+/// A writable frame buffer's index: the first free one, if any.
+fn writable_frame(transitions: &Transitions, position: usize) -> Option<usize> {
+    transitions.active[position]
+        .1
+        .frames
+        .iter()
+        .position(|slot| slot.as_ref().is_some_and(|slot| slot.is_writable()))
+}
+
+/// Allocates the second frame buffer, for a compositor holding the first.
+/// At most one extra allocation per transition; an allocation that fails
+/// skips the frame (the clock still advances).
+fn alloc_frame(
+    globals: &Globals,
+    transitions: &mut Transitions,
+    entry: &Entry<Objects>,
+    qh: &QueueHandle<State>,
+    position: usize,
+    dims: (u32, u32),
+) -> Option<usize> {
+    let empty = transitions.active[position]
+        .1
+        .frames
+        .iter()
+        .position(|slot| slot.is_none())?;
+    match frame_buffer(globals, qh, entry.output.id(), dims) {
+        Ok(slot) => {
+            transitions.active[position].1.frames[empty] = Some(slot);
+            Some(empty)
+        }
+        Err(error) => {
+            warn(format_args!(
+                "scootbg: cannot allocate a second transition frame on {} ({error}); \
+                 holding time with one",
+                entry.output.label()
+            ));
+            None
+        }
+    }
+}
+
+/// Renders and commits the frame at `eased`, or skips it when every frame
 /// buffer is still with the compositor (its time advances anyway: the
 /// clock drops the frame rather than falling behind).
 #[allow(clippy::too_many_arguments)]
@@ -624,10 +682,20 @@ fn render_frame(
     let id = entry.output.id();
     let dims = transitions.active[position].1.dims;
     let spec = transitions.active[position].1.spec;
-    if !transitions.active[position].1.frame.is_writable() {
-        transitions.active[position].1.last_step = step;
-        return false;
-    }
+    // A writable frame buffer: the first, else the second (allocated here
+    // on first need), else this frame waits for a release. Either way the
+    // clock advances: a held buffer never holds up time.
+    let index = writable_frame(transitions, position);
+    let index = match index {
+        Some(index) => index,
+        None => match alloc_frame(globals, transitions, entry, qh, position, dims) {
+            Some(index) => index,
+            None => {
+                transitions.active[position].1.last_step = step;
+                return false;
+            }
+        },
+    };
     let started = Instant::now();
     let sweep = transition::Sweep::new(&spec, eased, dims);
     let row_len = dims.0 as usize * 4;
@@ -635,7 +703,11 @@ fn render_frame(
     // tuple, so the rows come out of a helper scope each row.
     {
         let active = &mut transitions.active[position].1;
-        let Some(memory) = active.frame.memory_mut() else {
+        let Some(slot) = active.frames[index].as_mut() else {
+            active.last_step = step;
+            return false;
+        };
+        let Some(memory) = slot.memory_mut() else {
             active.last_step = step;
             return false;
         };
@@ -686,13 +758,30 @@ fn render_frame(
         }
     };
     let active = &mut transitions.active[position].1;
+    if active.frames[index].as_ref().is_none() {
+        // Selected writable above but gone now: single-threaded, so this
+        // is unreachable; skip the frame rather than panic.
+        active.last_step = step;
+        return false;
+    }
+    if entry.objects.layer.is_none() {
+        drop_active(transitions, entry, position);
+        return false;
+    }
     let Some(layer) = entry.objects.layer.as_mut() else {
         drop_active(transitions, entry, position);
         return false;
     };
     let surface = layer.surface.clone();
-    surface.attach(Some(active.frame.buffer()), 0, 0);
-    active.frame.attached();
+    {
+        let Some(slot) = active.frames[index].as_mut() else {
+            active.last_step = step;
+            return false;
+        };
+        surface.attach(Some(slot.buffer()), 0, 0);
+        slot.attached();
+    }
+    active.current = Some(index);
     if canvas::sync_surface(
         globals,
         layer,
@@ -798,7 +887,9 @@ fn finish(
 /// the surface is gone).
 fn drop_active(transitions: &mut Transitions, entry: &mut Entry<Objects>, position: usize) {
     let (_, active) = transitions.active.remove(position);
-    canvas::destroy(active.frame);
+    for slot in active.frames.into_iter().flatten() {
+        canvas::destroy(slot);
+    }
     entry.output.set_running(None);
     transitions.idle_timer();
 }
@@ -812,7 +903,9 @@ pub fn drop_output(
 ) {
     if let Some(position) = transitions.active.iter().position(|(at, _)| *at == id) {
         let (_, active) = transitions.active.remove(position);
-        canvas::destroy(active.frame);
+        for slot in active.frames.into_iter().flatten() {
+            canvas::destroy(slot);
+        }
         output.set_running(None);
         transitions.idle_timer();
     }
@@ -821,13 +914,17 @@ pub fn drop_output(
 /// A `wl_buffer.release` for a transition frame: it may be rewritten.
 /// Returns whether it was one (the caller then reconciles, which drives).
 pub fn frame_released(transitions: &mut Transitions, id: OutputId, buffer: &WlBuffer) -> bool {
-    match transitions.active.iter_mut().find(|(at, _)| *at == id) {
-        Some((_, active)) if active.frame.buffer() == buffer => {
-            active.frame.released();
-            true
+    let Some((_, active)) = transitions.active.iter_mut().find(|(at, _)| *at == id) else {
+        return false;
+    };
+    let mut released = false;
+    for slot in active.frames.iter_mut().flatten() {
+        if slot.buffer() == buffer {
+            slot.released();
+            released = true;
         }
-        _ => false,
     }
+    released
 }
 
 /// A frame callback came back for `(id, seq)`: the compositor sets the

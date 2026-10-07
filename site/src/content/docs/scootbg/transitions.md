@@ -5,7 +5,8 @@ description: "Animate a wallpaper change on scootbg — fade, wipe, grow, durati
 
 Animate the change from one wallpaper to the next, instead of landing
 at once: a fade, a wipe, or a grow, with a duration and an easing
-curve. It costs one extra buffer while it runs and nothing after.
+curve. It costs at most two extra buffers while it runs (one, where
+the compositor releases promptly) and nothing after.
 
 ```sh
 scootbg set '#101014' --transition fade --duration-ms 800
@@ -98,8 +99,9 @@ exactly — no stray line of either side at either end.
 
 CPU only, into `wl_shm`, one frame at a time: each frame blends the two
 endpoint buffers (shared references to pixels that already exist, never
-copies) into one full-size buffer — the third buffer the ticket budgets,
-33 MB at 4K — and commits it with damage limited to what changed (the
+copies) into a full-size frame buffer — the third buffer the ticket
+budgets, 33 MB at 4K, with a second where the compositor releases
+lazily — and commits it with damage limited to what changed (the
 whole buffer for a fade, the sweeping band for a wipe, the disc's box
 for a grow). Frames are paced by frame callbacks, with presentation
 feedback where the compositor offers `wp_presentation` (a discarded

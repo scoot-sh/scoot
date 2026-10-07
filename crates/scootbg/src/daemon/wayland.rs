@@ -383,8 +383,7 @@ impl wayland_client::Dispatch<WpPresentation, ()> for State {
         // `clock_id`, sent on bind: the presentation clock's domain, which
         // says nothing transitions need (they pace off the monotonic
         // clock either way). Anything else is ignored the same way.
-        if let PresentationEvent::ClockId { .. } = event {
-        }
+        if let PresentationEvent::ClockId { .. } = event {}
     }
 }
 delegate_noop!(State: WpSinglePixelBufferManagerV1);
