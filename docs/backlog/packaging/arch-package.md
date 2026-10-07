@@ -3,7 +3,7 @@ title: "Arch Linux packages: PKGBUILDs (release and `-git`), AUR, built and lint
 status: "open"
 area: "packaging"
 priority: "low"
-blocked: "independent-versioning, release-artifacts"
+blocked: "release-artifacts"
 ---
 
 # Arch Linux packages
@@ -14,7 +14,7 @@ target (a PKGBUILD is one file), so it goes first of the three.
 ## What to build
 
 - **Split packages**, matching the independent versions
-  ([independent-versioning](independent-versioning.md)): `scoot`, `scootctl`,
+  ([independent-versioning](../resolved/independent-versioning-done.md)): `scoot`, `scootctl`,
   `scootbg`, `scootbar`, later `scootnotify`, `scootlaunch`. The coupled pair
   (`scoot` and `scootbg`) declares the compatible range.
 - A **release** PKGBUILD per package (from the tagged tarball) and a `-git`

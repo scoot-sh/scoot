@@ -112,6 +112,18 @@ jobs:
   #                                           on the catch-all (it tests far
   #                                           more than the session), which
   #                                           runs this job too.
+  #   scripts/version, scripts/test_version.py
+  #                                        -> version=true (version job: the
+  #                                           manifest check plus the tool's
+  #                                           own tests, python only, no nix).
+  #                                           Any per-package manifest move runs
+  #                                           it too (a first-match arm beside
+  #                                           whatever that change already
+  #                                           runs): the check reads every
+  #                                           manifest -- trio lockstep,
+  #                                           semver, own versions,
+  #                                           publish = false -- so a drift
+  #                                           anywhere fails here.
   #   site/*, EXCEPT site content that is also matched above (nothing is:
   #   `*.md | docs/*` does not match `site/`, whose pages live in the tree
   #   since the move)                         -> docs-site=true (docs-site job:
@@ -164,6 +176,7 @@ jobs:
       backlog: ${{ steps.classify.outputs.backlog }}
       docs-site: ${{ steps.classify.outputs.docs-site }}
       session: ${{ steps.classify.outputs.session }}
+      version: ${{ steps.classify.outputs.version }}
     steps:
       # Depth 2: a pull_request run checks out the merge commit, whose first
       # parent is the base branch tip, so `HEAD^1..HEAD` is exactly the PR.
@@ -182,6 +195,7 @@ jobs:
           backlog=true
           docs_site=true
           session=true
+          version=true
           if [ "$EVENT" = pull_request ] && changed=$(git diff --name-only --no-renames HEAD^1 HEAD) && [ -n "$changed" ]; then
             printf 'Changed:\n%s\n' "$changed"
             scoot=false
@@ -191,6 +205,7 @@ jobs:
             backlog=false
             docs_site=false
             session=false
+            version=false
             while IFS= read -r path; do
               case "$path" in
                 # Before `*.md`: the site's own pages are Markdown, and a
@@ -198,6 +213,28 @@ jobs:
                 site/*)
                   docs_site=true ;;
                 *.md | docs/*) ;;
+                # The version tool and its tests: only the version jobs.
+                scripts/version | scripts/test_version.py)
+                  version=true ;;
+                # Per-package manifests: whatever the change already runs,
+                # plus the version check -- it reads every manifest
+                # (lockstep, semver, own versions, publish = false), so any
+                # manifest move runs it. First match wins, so these sit
+                # before the code arms with the same outputs plus version.
+                crates/scoot/Cargo.toml | crates/scootctl/Cargo.toml | crates/scoot-core/Cargo.toml)
+                  scoot=true
+                  macos=true
+                  version=true ;;
+                crates/scoot-ipc/Cargo.toml)
+                  scoot=true
+                  macos=true
+                  scootbg=true
+                  scootbar=true
+                  version=true ;;
+                crates/scootbg-mem/Cargo.toml)
+                  scootbg=true
+                  scootbar=true
+                  version=true ;;
                 # Needs a real `systemd --user`, which CI has none of: run by hand
                 # (docs/scootbar/testing.md), so a change to it alone runs nothing.
                 # The same for the Stylix run (fetches two flakes and builds
@@ -226,7 +263,8 @@ jobs:
                 # manifest, which the Linux job's `nix flake check` reads.
                 crates/scootbg/Cargo.toml)
                   scoot=true
-                  scootbg=true ;;
+                  scootbg=true
+                  version=true ;;
                 crates/scootbg/*)
                   scootbg=true ;;
                 crates/scootbg-mem/*)
@@ -236,7 +274,8 @@ jobs:
                 # package description), as scootbg's.
                 crates/scootbar/Cargo.toml)
                   scoot=true
-                  scootbar=true ;;
+                  scootbar=true
+                  version=true ;;
                 crates/scootbar/*)
                   scootbar=true ;;
                 # scootbar's benchmark harness; its unit tests run in the
@@ -256,11 +295,12 @@ jobs:
                   scootbar=true
                   backlog=true
                   docs_site=true
-                  session=true ;;
+                  session=true
+                  version=true ;;
               esac
             done <<<"$changed"
           fi
-          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar backlog=$backlog docs_site=$docs_site session=$session"
+          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar backlog=$backlog docs_site=$docs_site session=$session version=$version"
           {
             echo "scoot=$scoot"
             echo "macos=$macos"
@@ -269,6 +309,7 @@ jobs:
             echo "backlog=$backlog"
             echo "docs_site=$docs_site"
             echo "session=$session"
+            echo "version=$version"
           } >>"$GITHUB_OUTPUT"
 
   # scripts/backlog is the swarm's claim tool and pushes to main, so its tests
@@ -285,6 +326,32 @@ jobs:
       - uses: actions/checkout@v7
       - name: scripts/backlog tests
         run: python3 scripts/test_backlog.py
+
+  # scripts/version is the per-package version tool (independent versioning):
+  # `check` fails when a manifest disagrees with the declared policy (trio
+  # lockstep, semver, own versions, publish = false), and `test_version.py`
+  # pins the bump rules against fixture histories. Both are stdlib python
+  # over a git checkout -- no seat, no nix -- and run whenever the tool,
+  # its tests or any manifest changes, on the catch-all, and on every push
+  # to main; fail open like the other jobs (only an explicit `false`
+  # skips). `plan` never runs in CI: it is the maintainer's dry run for
+  # cutting a release, and it creates nothing.
+  version:
+    name: Version policy and tool tests
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.version != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # `check` reads tags (its "no tag ahead of the manifest" rule); it never
+      # reads history, so tags without depth is all it needs.
+      - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
+      - name: scripts/version check
+        run: python3 scripts/version check
+      - name: scripts/version tests
+        run: python3 scripts/test_version.py
 
   # The session launcher harness (scripts/scoot-session-test.sh): the proof
   # that the greeter-started session orders the display import before

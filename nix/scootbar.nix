@@ -30,7 +30,7 @@
 # through `cargoExtraArgs`.
 {
   lib,
-  # From flake.nix, shared with the other packages: the one workspace
+  # From flake.nix, shared with the other packages: that package's own
   # version, the fileset source, the lockfile and the git-checkout hashes,
   # the strict-deps/test settings, and the dependency artifact this builds
   # over.

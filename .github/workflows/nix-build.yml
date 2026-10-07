@@ -181,6 +181,18 @@ jobs:
           ./result-scoot-gpu-xwayland/bin/scoot --version
           ./result-scoot/bin/scoot msg --help
           ./result-scootbg/bin/scootbg --version
+          # Each packaged binary prints its own crate's version (independent
+          # versioning: the flake reads it from that crate's Cargo.toml, and
+          # `scripts/version check` keeps the trio in lockstep). The
+          # protocol numbers move on their own, so only the version prefix
+          # is pinned here.
+          scoot_ver=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/scoot/Cargo.toml)
+          ./result-scoot/bin/scoot --version | grep -qF "scoot $scoot_ver (ipc protocol "
+          ./result-scoot-gpu/bin/scoot --version | grep -qF "scoot $scoot_ver (ipc protocol "
+          ./result-scoot-xwayland/bin/scoot --version | grep -qF "scoot $scoot_ver (ipc protocol "
+          ./result-scoot-gpu-xwayland/bin/scoot --version | grep -qF "scoot $scoot_ver (ipc protocol "
+          scootbg_ver=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/scootbg/Cargo.toml)
+          ./result-scootbg/bin/scootbg --version | grep -qF "scootbg $scootbg_ver (protocol "
 
       - name: nix build .#scootbar .#scootbar-demo, what it links, its closure, a feature override
         run: |
@@ -188,6 +200,10 @@ jobs:
           nix build .#scootbar-demo --out-link result-scootbar-demo --print-out-paths
           ./result-scootbar/bin/scootbar --version
           ./result-scootbar-demo/bin/scootbar --version
+          # The bar prints its own crate's version, independent of the trio's.
+          scootbar_ver=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/scootbar/Cargo.toml)
+          ./result-scootbar/bin/scootbar --version | grep -qF "scootbar $scootbar_ver"
+          ./result-scootbar-demo/bin/scootbar --version | grep -qF "scootbar $scootbar_ver"
           bin=result-scootbar/bin/scootbar
           echo "binary: $(stat -L -c %s "$bin") bytes (stripped)"
           ldd "$bin"

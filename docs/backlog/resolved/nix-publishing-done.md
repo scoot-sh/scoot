@@ -52,7 +52,7 @@ eventually do cachix and flakehub (without their flakehub cache)."
   Auth is GitHub OIDC (`permissions: id-token: write`), no secret.
 - `include-output-paths: false` (that is the FlakeHub Cache feature, not used).
 - **The flake has one version, but the packages version independently**
-  ([independent-versioning](independent-versioning.md)): start with
+  ([independent-versioning](../resolved/independent-versioning-done.md)): start with
   `rolling: true` (every merge to `main` is `0.1.<commit count>`), and add
   tagged releases on the compositor train's tags once versioning lands.
   Decide and document what a flake version promises.

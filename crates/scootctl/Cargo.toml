@@ -1,7 +1,8 @@
 [package]
 name = "scootctl"
 description = "Client library behind `scoot msg`, the remote-control client for the scoot scrolling-tiling Wayland compositor"
-version.workspace = true
+# Independent versioning: lockstep with scoot and scootbg (see crates/scoot/Cargo.toml).
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

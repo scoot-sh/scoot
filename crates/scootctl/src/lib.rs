@@ -24,5 +24,5 @@ pub mod help;
 pub mod msg;
 pub mod output;
 
-pub use cli::{Error, Msg, action, parse_msg, version_string};
+pub use cli::{Error, Msg, action, parse_msg, version_string, version_string_for};
 pub use msg::run;

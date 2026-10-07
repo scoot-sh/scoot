@@ -2,6 +2,9 @@
 name = "scoot-ipc"
 description = "Wire protocol and client for controlling scoot"
 version.workspace = true
+# Internal library, never published: it versions with its consumer. The wire
+# contract it carries is versioned separately, by PROTOCOL_VERSION.
+publish = false
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
