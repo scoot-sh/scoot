@@ -1321,6 +1321,20 @@ impl Tty {
         }
     }
 
+    /// Drops every GPU scanout presenter's cursor overlay-plane image cache.
+    /// Called after [`Cursor::rebuild`](super::cursor::Cursor::rebuild) on a
+    /// cursor config reload: the new images arrive under new ids, and without
+    /// this the old ones sit in each output's cache until the bound turns it
+    /// over. Dumb-tier heads hold no such cache.
+    #[cfg(feature = "gpu-scanout")]
+    pub(crate) fn clear_cursor_overlays(&mut self) {
+        for head in &mut self.heads {
+            if let Presenter::Gpu(gpu) = &mut head.presenter {
+                gpu.clear_cursor_overlay();
+            }
+        }
+    }
+
     /// The immutable half of [`scanout_mut`](Self::scanout_mut): what
     /// `render::draw_frame_scanout` reads *before* gathering the frame --
     /// whether a capture armed a forced composite (which suppresses the

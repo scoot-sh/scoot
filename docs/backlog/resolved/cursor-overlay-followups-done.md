@@ -1,9 +1,10 @@
 ---
 title: "Cursor overlay plane follow-ups from #485's review"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-07"
 ---
 
 # Cursor overlay plane follow-ups from #485's review
@@ -59,3 +60,41 @@ as it was before #485. The full review is in the #485 thread.
 - A test or a live repro that fails before the fix, for items 1–3.
 - For item 2, scoot's RSS before and after a burst of `cursor_size` reloads
   on two outputs.
+
+## Resolution (2026-10-07, PR #492)
+
+Items 1–3 landed with fail-before tests; item 5's nits and item 4's rebase
+note are in the same PR; item 6 did not reproduce (below).
+
+- **Item 1** (`tty/scanout.rs`): new `lit_floor` records `next_flip` at
+  every lit reset (build, `adopt_surface`, `reactivate`, `use_mode`); new
+  pure `lights_lit` gates `frame_submitted` on completed flip >= floor.
+  Test `only_a_flip_at_or_past_the_reset_lights_the_crtc` fails on the old
+  body (`is_some()`) and passes on the new one. Live `use_mode` repro not
+  run (no safe mode trigger on the box); the `reactivate` half was
+  exercised by VT cycles, which instead surfaced a pre-existing DRM-master
+  EPERM on return (greeter/logind keeps master; fails before any lit logic
+  runs) — reported to the coordinator, box restored.
+- **Item 2** (`render/cursor_plane.rs`, `reload.rs`, `tty/mod.rs`):
+  `back` skips zero-overlap elements before any build (`overlaps`
+  helper); `Cursor::rebuild` clears every output's twin cache via
+  `Tty::clear_cursor_overlays`. Tests `a_cursor_on_another_output_...`
+  (no upload, no cache entry off-output), `overlap_is_any_visible_pixel`,
+  `clearing_drops_stale_images_after_a_rebuild` fail/pass as above. Live
+  RSS (release, two outputs, 20 alternating `cursor_size` reloads):
+  95888 → 96048 kB.
+- **Item 3** (`cursor_rides_overlay` + `render.rs` call site): takes a
+  window-candidate flag; single-overlay CRTCs yield to a marked window,
+  two-overlay behavior unchanged (pinned by the extended existing test).
+  Test `a_marked_window_keeps_the_only_overlay` fails/passes as above.
+  `gpu-overlay-window-candidates.md:74` corrected to match.
+- **Item 4**: no fork change; `docs/forks.md` records the pixman-only
+  `ImportDma` for the next rebase (scoot-side fix impossible).
+- **Item 5**: Asahi.md 23 px → 22 px, 20 px tall → 2 px; `render.rs`
+  twin comment corrected.
+- **Item 6**: not reproduced, no new entry. Fixed build, two 210-burst
+  `background_color` reload runs: fds 72 → 77 → 75 (noise, not monotonic),
+  KMS plane fb refs 3 → 3; the background path shares no code with #485.
+- Live regression figure (release `--tty`, fullscreen mpv, pointer
+  visible): 13 and 14 jiffies/10 s, inside the 13–15 band; cursor twin on
+  overlay plane 45, mpv on the primary.

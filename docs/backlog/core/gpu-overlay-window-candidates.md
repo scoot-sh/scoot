@@ -72,7 +72,11 @@ without implementing the marking and the capture contract.
 an overlay on this hardware (`render/cursor_plane.rs`). It is offered the
 planes first, as the front-most element, and takes the topmost that passes
 (plane 45, zpos 2, every time it was seen), which leaves plane 40 below it
-for a window candidate.
+for a window candidate. On a CRTC with a single overlay the cursor yields
+to a marked window candidate instead (`cursor_rides_overlay` gates on
+`overlay_planes >= 2` or no candidate): the cursor would otherwise take the
+only overlay ahead of the window, and a tiled video that rode it before
+would composite.
 
 Priority stays low: the case it serves (a video in a non-fullscreen
 window) is the rarer one.

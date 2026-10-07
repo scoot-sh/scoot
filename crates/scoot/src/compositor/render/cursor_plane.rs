@@ -195,6 +195,17 @@ impl<U: Upload> CursorPlanes<U> {
             let Elements::Cursor(CursorElement::Fallback(element)) = &*slot else {
                 continue;
             };
+            let (scale, size) = frame;
+            // Off-output first, before the image is built: every output's
+            // frame carries the cursor element wherever the pointer is, and
+            // building (allocating, uploading and caching a dma-buf twin)
+            // for a cursor that is not on this output fills each idle
+            // output's cache with images it never shows. Zero overlap skips;
+            // any overlap falls through to the exact twin check after the
+            // build. Costs one geometry call per cursor element per frame.
+            if !overlaps(element.geometry(scale), size) {
+                continue;
+            }
             // The rounded origin is where the memory element draws (its
             // geometry's location is the location it was built at, rounded),
             // so the twin draws on the same pixels.
@@ -257,6 +268,14 @@ impl<U: Upload> CursorPlanes<U> {
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.images.len()
+    }
+
+    /// Drops every cached image, built or refused. Called on a cursor config
+    /// reload ([`Cursor::rebuild`]): the new images arrive under new ids, so
+    /// without this the old ones sit in the cache until the bound turns it
+    /// over -- up to [`MAX_IMAGES`] stale dma-bufs per output.
+    pub(crate) fn clear(&mut self) {
+        self.images.clear();
     }
 }
 
@@ -321,6 +340,21 @@ fn fits(geometry: Rectangle<i32, Physical>, output: Size<i32, Physical>) -> bool
     };
     visible(geometry.loc.x, geometry.size.w, output.w) >= MIN_SIDE
         && visible(geometry.loc.y, geometry.size.h, output.h) >= MIN_SIDE
+}
+
+/// Whether `geometry` (the source cursor's, at the output's scale) shows any
+/// pixel on an output of `output` physical pixels: the pre-build gate in
+/// [`CursorPlanes::back`]. Saturating, like [`fits`]: absurd positions from
+/// a corrupt client must read as off-output, never panic.
+fn overlaps(geometry: Rectangle<i32, Physical>, output: Size<i32, Physical>) -> bool {
+    let visible = |start: i32, length: i32, limit: i32| {
+        start
+            .saturating_add(length)
+            .min(limit)
+            .saturating_sub(start.max(0))
+    };
+    visible(geometry.loc.x, geometry.size.w, output.w) > 0
+        && visible(geometry.loc.y, geometry.size.h, output.h) > 0
 }
 
 /// The padded plane size for a `width` x `height` image: at least

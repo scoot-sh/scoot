@@ -261,10 +261,28 @@ const fn composite_only(flags: FrameFlags) -> FrameFlags {
 
 /// Whether the drawn cursor may be offered an overlay this frame: the CRTC has
 /// no cursor plane of its own, has an overlay, and has shown a frame since it
-/// was last (re)configured (`ScanoutPresenter`'s `lit` field says why). Pure,
+/// was last (re)configured (`ScanoutPresenter`'s `lit` field says why). On a
+/// CRTC with a single overlay the cursor yields to a marked window candidate
+/// (see `render::overlay_candidate`): the cursor takes the only overlay ahead
+/// of the window, so a tiled video that rode it before now composites. Pure,
 /// so every row is pinnable without a DRM device.
-fn cursor_rides_overlay(lit: bool, cursor_planes: usize, overlay_planes: usize) -> bool {
-    lit && cursor_planes == 0 && overlay_planes > 0
+fn cursor_rides_overlay(
+    lit: bool,
+    cursor_planes: usize,
+    overlay_planes: usize,
+    window_candidate: bool,
+) -> bool {
+    lit && cursor_planes == 0 && overlay_planes > 0 && (overlay_planes >= 2 || !window_candidate)
+}
+
+/// Whether a completed flip lights the CRTC: only a flip queued at or past
+/// the last (re)configuration's floor counts. A stale completion for a flip
+/// queued before a mode change (or reactivation, or CRTC switch) must not
+/// set the gate: the post-reset modeset frame has not shown yet, and lighting
+/// on the stale vblank re-arms the exact cached-failure harm the gate
+/// exists to close. Pure, so it is pinnable without a DRM device.
+fn lights_lit(completed: Option<u64>, floor: u64) -> bool {
+    completed.is_some_and(|flip| flip >= floor)
 }
 
 /// Whether any element Smithay assigned to an overlay plane (`overlay`, off
@@ -595,8 +613,19 @@ pub(crate) struct ScanoutPresenter {
     /// CRTC makes the first test a real one. Cleared by
     /// [`new`](Self::new), [`adopt_surface`](Self::adopt_surface),
     /// [`reactivate`](Self::reactivate) and [`use_mode`](Self::use_mode); set
-    /// by [`frame_submitted`](Self::frame_submitted).
+    /// by [`frame_submitted`](Self::frame_submitted) only for a flip queued
+    /// at or past the last reset (see [`lights_lit`] and `lit_floor`: a stale
+    /// vblank for a pre-reset flip must not light it again before the
+    /// modeset frame shows).
     lit: bool,
+    /// The flip number the next queued frame will take, as of the last reset
+    /// ([`new`](Self::new), [`adopt_surface`](Self::adopt_surface),
+    /// [`reactivate`](Self::reactivate), [`use_mode`](Self::use_mode)).
+    /// [`frame_submitted`](Self::frame_submitted) lights [`lit`](Self::lit)
+    /// only for a completed flip at or past this floor (see [`lights_lit`]).
+    /// `next_flip` is monotonic for the process's life, so a stale completion
+    /// queued before the reset reads below the floor and is ignored.
+    lit_floor: u64,
 }
 
 /// What the scanout tranche is built from on this presenter's device:
@@ -676,6 +705,7 @@ impl ScanoutPresenter {
             release_hold: ReleaseHold::default(),
             cursor_overlay,
             lit: false,
+            lit_floor: 0,
         })
     }
 
@@ -782,13 +812,29 @@ impl ScanoutPresenter {
     /// The cursor's plane images, where the cursor can only stay out of the
     /// composite on an overlay: the CRTC has no cursor plane and at least one
     /// overlay (`render::cursor_plane`), and it is lit (see the `lit` field).
-    /// `None` elsewhere: with a cursor plane Smithay copies the drawn shape
-    /// into its own cursor buffer, and with no plane at all there is nothing
-    /// to ride. Read per frame by `render::draw_frame_scanout`; a few
-    /// compares.
-    pub(crate) fn cursor_overlay(&mut self) -> Option<&mut CursorPlanes> {
-        cursor_rides_overlay(self.lit, self.cursor_planes, self.overlay_planes)
-            .then_some(&mut self.cursor_overlay)
+    /// On a single-overlay CRTC a marked window candidate keeps the plane:
+    /// the cursor takes it ahead of the window, so a tiled video that rode
+    /// it before would composite. `window_candidate` is whether this frame
+    /// marked one (see `render::draw_frame_scanout`). `None` elsewhere: with
+    /// a cursor plane Smithay copies the drawn shape into its own cursor
+    /// buffer, and with no plane at all there is nothing to ride. Read per
+    /// frame by `render::draw_frame_scanout`; a few compares.
+    pub(crate) fn cursor_overlay(&mut self, window_candidate: bool) -> Option<&mut CursorPlanes> {
+        cursor_rides_overlay(
+            self.lit,
+            self.cursor_planes,
+            self.overlay_planes,
+            window_candidate,
+        )
+        .then_some(&mut self.cursor_overlay)
+    }
+
+    /// Clears the cursor overlay-plane image cache (see
+    /// `render::cursor_plane`): called on a cursor config reload, whose new
+    /// images arrive under new ids while the old ones would otherwise sit in
+    /// the cache until the bound turns it over.
+    pub(crate) fn clear_cursor_overlay(&mut self) {
+        self.cursor_overlay.clear();
     }
 
     /// The surface being driven, for the hotplug path's connector/mode moves.
@@ -1066,7 +1112,9 @@ impl ScanoutPresenter {
             Ok(flip) => {
                 if let Some(flip) = flip {
                     self.release_hold.flip_completed(flip);
-                    self.lit = true;
+                    if lights_lit(Some(flip), self.lit_floor) {
+                        self.lit = true;
+                    }
                 }
                 (false, flip)
             }
@@ -1154,6 +1202,7 @@ impl ScanoutPresenter {
     /// post-reactivation render records a fresh flip.
     pub(super) fn reactivate(&mut self) {
         self.lit = false;
+        self.lit_floor = self.next_flip;
         if let Err(error) = self.compositor.reset_state() {
             tracing::warn!(%error, "could not reset drm surface state after reactivation");
         }
@@ -1220,6 +1269,7 @@ impl ScanoutPresenter {
         match self.compositor.use_mode(mode) {
             Ok(()) => {
                 self.lit = false;
+                self.lit_floor = self.next_flip;
                 self.invalidate_scanout();
                 true
             }
@@ -1256,6 +1306,7 @@ impl ScanoutPresenter {
                 self.release_hold.discard_all();
                 self.compositor = compositor;
                 self.lit = false;
+                self.lit_floor = self.next_flip;
                 // A new CRTC may come with a different primary plane, and so
                 // a different format list: the scanout tranche rebuilds.
                 self.plane_epoch = self.plane_epoch.wrapping_add(1);
@@ -1447,15 +1498,40 @@ mod tests {
     #[test]
     fn the_cursor_is_offered_an_overlay_only_without_a_cursor_plane_and_once_lit() {
         // apple,dcp: no cursor plane, two overlays.
-        assert!(cursor_rides_overlay(true, 0, 2));
-        assert!(cursor_rides_overlay(true, 0, 1));
+        assert!(cursor_rides_overlay(true, 0, 2, false));
+        assert!(cursor_rides_overlay(true, 0, 2, true));
+        assert!(cursor_rides_overlay(true, 0, 1, false));
         // Not before the CRTC has shown a frame: that test runs against the
         // modeset and fails, and Smithay would remember it.
-        assert!(!cursor_rides_overlay(false, 0, 2));
+        assert!(!cursor_rides_overlay(false, 0, 2, false));
         // A cursor plane of its own takes the cursor instead.
-        assert!(!cursor_rides_overlay(true, 1, 1));
+        assert!(!cursor_rides_overlay(true, 1, 1, false));
         // Nothing to ride.
-        assert!(!cursor_rides_overlay(true, 0, 0));
+        assert!(!cursor_rides_overlay(true, 0, 0, false));
+    }
+
+    #[test]
+    fn a_marked_window_keeps_the_only_overlay() {
+        // One overlay: the cursor yields to a marked window candidate, so a
+        // tiled video that rode it before keeps riding it. Two overlays have
+        // room for both, so the candidate changes nothing there.
+        assert!(!cursor_rides_overlay(true, 0, 1, true));
+        assert!(cursor_rides_overlay(true, 0, 2, true));
+        assert!(cursor_rides_overlay(true, 0, 3, true));
+    }
+
+    #[test]
+    fn only_a_flip_at_or_past_the_reset_lights_the_crtc() {
+        // The mode-change harm: flips 7 and 8 queued before `use_mode`
+        // moved the floor to 9 must not light it; the stale vblank for one
+        // of them arriving before the modeset frame would otherwise re-arm
+        // the cached-failure path the gate exists to close.
+        assert!(!lights_lit(None, 9));
+        assert!(!lights_lit(Some(8), 9));
+        assert!(lights_lit(Some(9), 9));
+        assert!(lights_lit(Some(10), 9));
+        // Startup: the floor is the first flip.
+        assert!(lights_lit(Some(0), 0));
     }
 
     #[test]

@@ -1474,9 +1474,11 @@ fn draw_frame_scanout(
         // overlay as a dma-buf rather than into the composite, so a
         // fullscreen window under a visible pointer may still take the
         // primary plane (`cursor_plane`). After the judge and the gather:
-        // the twin has the cursor's own kind, alpha and geometry, so neither
-        // could tell the difference.
-        if let Some(planes) = presenter.cursor_overlay() {
+        // the twin is padded (32x32 minimum) and re-exports the same pixels,
+        // not the cursor's own buffer, so only its kind and alpha match --
+        // the overlay test is what decides whether it rides. On a
+        // single-overlay CRTC a marked window candidate keeps the plane.
+        if let Some(planes) = presenter.cursor_overlay(candidate.is_some()) {
             let frame = (
                 output.current_scale().fractional_scale().into(),
                 size.into(),

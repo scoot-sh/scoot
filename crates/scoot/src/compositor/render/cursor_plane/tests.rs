@@ -492,9 +492,9 @@ fn a_plane_inside_the_output_fits() {
 fn a_plane_clipped_to_32_or_more_fits_and_under_32_does_not() {
     let output = Size::from((2560, 1600));
     // Measured on apple,dcp (Asahi.md Test 17): 44 px left at the right
-    // edge rode the overlay, 23.5 did not.
+    // edge rode the overlay, 22 did not.
     assert!(fits(rect(2516, 749, 48, 48), output));
-    assert!(!fits(rect(2537, 749, 48, 48), output));
+    assert!(!fits(rect(2538, 749, 48, 48), output));
     assert!(fits(rect(2528, 749, 48, 48), output));
     assert!(!fits(rect(2529, 749, 48, 48), output));
     // The top-left: a centred hotspot puts the origin above or left of it.
@@ -539,6 +539,57 @@ fn a_cursor_at_the_edge_stays_composited_and_rides_again_away_from_it() {
         1,
         "the image is built once, edge or not"
     );
+}
+
+#[test]
+fn a_cursor_on_another_output_builds_uploads_and_caches_nothing() {
+    // Two outputs, one pointer: the idle output's frame carries the same
+    // cursor element at a position nowhere near its own panel, and that
+    // frame must not allocate, upload or cache a dma-buf twin for it.
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let buffer = square();
+    let (mut planes, seen) = planes(false);
+    let mut elements = vec![drawn(&mut renderer, &buffer, Point::from((3000.0, 700.0)))];
+    planes.back(&mut renderer, &mut elements, panel());
+    assert!(matches!(
+        elements[0],
+        Elements::Cursor(CursorElement::Fallback(_))
+    ));
+    assert!(seen.borrow().calls.is_empty(), "no upload off-output");
+    assert_eq!(planes.len(), 0, "no cache entry off-output");
+    // The same image on the live output still rides afterwards.
+    let mut elements = vec![drawn(&mut renderer, &buffer, Point::from((10.0, 10.0)))];
+    planes.back(&mut renderer, &mut elements, panel());
+    assert!(matches!(
+        elements[0],
+        Elements::Cursor(CursorElement::Plane(_))
+    ));
+    assert_eq!(seen.borrow().calls.len(), 1);
+}
+
+#[test]
+fn overlap_is_any_visible_pixel() {
+    let output = Size::from((2560, 1600));
+    assert!(overlaps(rect(10, 10, 24, 24), output));
+    assert!(overlaps(rect(2540, 700, 24, 24), output));
+    assert!(!overlaps(rect(3000, 700, 24, 24), output));
+    assert!(!overlaps(rect(-100, 100, 24, 24), output));
+    assert!(!overlaps(rect(2560, 0, 24, 24), output));
+    assert!(!overlaps(rect(0, 0, 24, 24), Size::from((0, 0))));
+}
+
+#[test]
+fn clearing_drops_stale_images_after_a_rebuild() {
+    // A config reload replaces the image set under new ids; without a clear
+    // the old twins sit cached until the bound turns over.
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let buffer = square();
+    let (mut planes, _) = planes(false);
+    let mut elements = vec![drawn(&mut renderer, &buffer, Point::from((10.0, 10.0)))];
+    planes.back(&mut renderer, &mut elements, panel());
+    assert_eq!(planes.len(), 1);
+    planes.clear();
+    assert_eq!(planes.len(), 0);
 }
 
 // -------------------------------------------------------------------------
