@@ -67,10 +67,14 @@ mod bench;
 pub const FRAME_STEP_MS: u64 = 16;
 
 /// The CPU time one frame may cost, in milliseconds. A frame past it skips
-/// the next one. Measured under pixman at 4K on the Asahi M2, release
-/// build (see `transition::bench`): a 1080p fade blends in ~1 ms, a 4K
-/// fade in ~4 ms, a 4K wipe in ~6 ms; 8 ms leaves headroom for a loaded
-/// machine while staying inside one 60 Hz interval.
+/// the next one. Measured under pixman on the Asahi M2, release build
+/// (see `transition::bench`, three runs, medians of 30 frames): at
+/// 1920×1080 a fade blends in 5.4 ms, a wipe in 3.0 ms, a grow in
+/// 2.4 ms; at 3840×2160 a fade in 21.6 ms, a wipe in 12.1 ms, a grow in
+/// 10.0 ms. So 1080p holds its 60 Hz cadence outright, while 4K degrades
+/// to fewer steps (about 20 fps for a fade, 30 for a wipe or grow); 8 ms
+/// leaves 1080p headroom on a loaded machine while staying inside one
+/// 60 Hz interval.
 pub const FRAME_BUDGET_MS: u64 = 8;
 
 /// The duration a request gets when it names none, in milliseconds.
@@ -509,10 +513,12 @@ pub struct Sweep {
     dx: f64,
     dy: f64,
     edge: f64,
-    /// Grow: the center in pixels and the radius.
+    /// Grow: the center in pixels, the radius, and the squared radius
+    /// (compared without a square root per pixel).
     cx: f64,
     cy: f64,
     radius: f64,
+    radius_squared: f64,
 }
 
 impl Sweep {
@@ -524,24 +530,27 @@ impl Sweep {
         let (dx, dy) = direction(spec.angle_deg);
         let (_, _, min, span) = wipe_range(dx, dy, dims);
         let (cx, cy, maxr) = grow_range(spec.pos, dims);
+        // Inset one pixel past each end so `t = 0` is all old and
+        // `t = 1` all new, exactly.
+        let radius = eased * (maxr + 2.0) - 1.0;
         Self {
             kind: spec.kind,
             eased,
             w: dims.0,
             dx,
             dy,
-            // Inset one pixel past each end so `t = 0` is all old and
-            // `t = 1` all new, exactly.
             edge: min - 1.0 + eased * (span + 2.0),
             cx,
             cy,
-            radius: eased * (maxr + 2.0) - 1.0,
+            radius,
+            radius_squared: radius * radius,
         }
     }
 
     /// The new wallpaper's weight at pixel `(x, y)`: `0` is old, `1` new.
     /// A fade is uniform; a wipe and a grow are hard edges (no antialias:
-    /// the damage stays exactly computable).
+    /// the damage stays exactly computable, and the blend copies whole
+    /// pixels instead of lerping).
     #[inline]
     pub fn weight(&self, x: u32, y: u32) -> f64 {
         match self.kind {
@@ -555,9 +564,14 @@ impl Sweep {
                 }
             }
             Kind::Grow => {
+                // A negative radius (before the start) is all old, which
+                // the squared comparison alone would get wrong.
+                if self.radius < 0.0 {
+                    return 0.0;
+                }
                 let dx = f64::from(x) - self.cx;
                 let dy = f64::from(y) - self.cy;
-                if dx.hypot(dy) <= self.radius {
+                if dx.mul_add(dx, dy * dy) <= self.radius_squared {
                     1.0
                 } else {
                     0.0
@@ -596,36 +610,40 @@ fn grow_range(pos: (f64, f64), dims: (u32, u32)) -> (f64, f64, f64) {
     (cx, cy, maxr)
 }
 
-/// Blends one row: `out[i] = old[i] + (new[i] - old[i]) * weight` per
-/// channel, with the unused byte set opaque. Rows are `w * 4` bytes of
-/// `XRGB8888` (`old`, `new`, `out`); the fade reads no geometry per pixel.
-/// Values stay in `[0, 255]` by construction (a lerp of two bytes);
-/// rounding picks the nearest byte, and the endpoints are exact.
+/// Blends one row: a fade lerps in fixed point, a wipe and a grow copy
+/// whole pixels by the hard edge. Rows are `w * 4` bytes of `XRGB8888`
+/// (`old`, `new`, `out`); the unused byte is set opaque. Endpoints are
+/// exact (a lerp of two bytes at weight 0 or 1 is the byte itself), and
+/// midpoints round to nearest, as the float lerp would.
 pub fn blend_row(sweep: &Sweep, y: u32, old: &[u8], new: &[u8], out: &mut [u8]) {
     let w = sweep.w as usize;
     debug_assert!(old.len() >= w * 4 && new.len() >= w * 4 && out.len() >= w * 4);
     if sweep.kind == Kind::Fade {
-        let weight = sweep.eased;
+        // 16.16 fixed point: exact at both ends, nearest in between, and
+        // no float rounding or clamping per channel (a lerp of two bytes
+        // at a weight in `[0, 1]` cannot leave `[0, 255]`, and the `as`
+        // conversion saturates if it ever did).
+        let weight = (sweep.eased * 65536.0).round() as u32;
+        let inverse = 65536 - weight;
         for x in 0..w {
             let o = x * 4;
             for c in 0..3 {
-                let value = f64::from(old[o + c])
-                    + (f64::from(new[o + c]) - f64::from(old[o + c])) * weight;
-                out[o + c] = value.round().clamp(0.0, 255.0) as u8;
+                let value =
+                    u32::from(old[o + c]) * inverse + u32::from(new[o + c]) * weight + 32768;
+                out[o + c] = (value >> 16) as u8;
             }
             out[o + 3] = 0xff;
         }
         return;
     }
     for x in 0..w {
-        let weight = sweep.weight(x as u32, y);
         let o = x * 4;
-        for c in 0..3 {
-            let value =
-                f64::from(old[o + c]) + (f64::from(new[o + c]) - f64::from(old[o + c])) * weight;
-            out[o + c] = value.round().clamp(0.0, 255.0) as u8;
-        }
-        out[o + 3] = 0xff;
+        let from = if sweep.weight(x as u32, y) == 1.0 {
+            &new[o..o + 4]
+        } else {
+            &old[o..o + 4]
+        };
+        out[o..o + 4].copy_from_slice(from);
     }
 }
 

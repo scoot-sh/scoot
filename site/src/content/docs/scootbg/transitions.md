@@ -65,9 +65,10 @@ without the animation.
 
 ## The kinds
 
-**Fade** lerps every pixel from old to new. The cheapest kind (about
-4 ms a frame at 4K, 1 ms at 1080p, measured) and the one to reach for
-first:
+**Fade** lerps every pixel from old to new — the simplest kind, and the
+most expensive per frame (about 5.4 ms at 1080p, 21.6 ms at 4K,
+measured; at 4K it holds time with fewer steps, see
+[below](#how-it-works)):
 
 ```sh
 scootbg set '#101014' --transition fade --duration-ms 800 --easing smooth
@@ -105,7 +106,10 @@ feedback where the compositor offers `wp_presentation` (a discarded
 frame just jumps the clock ahead) and a 60 Hz timer covering the rest;
 the eased progress always comes from the clock, so a slow frame drops
 frames rather than falling behind, and a frame past its 8 ms budget
-skips the next one. A restart snapshots what is on screen with one
+skips the next one. At 1080p every kind holds 60 fps outright (2.4–5.4
+ms a frame, measured); at 4K a fade blends in 21.6 ms, a wipe in
+12.1 ms, a grow in 10.0 ms, so 4K transitions keep time with fewer
+steps instead of lagging. A restart snapshots what is on screen with one
 memcpy and starts from there. When the last frame lands, the final
 wallpaper goes on through the normal draw and every extra buffer is
 freed: an idle daemon costs what a static wallpaper costs (zero
