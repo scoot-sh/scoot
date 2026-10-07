@@ -844,7 +844,11 @@ fn an_icon_name_only_item_draws_once_the_theme_resolves_it() {
         "/Item".to_owned(),
         "org.example.Pasystray".to_owned(),
     );
-    assert!(super::item::fill_with(&mut item, &bytes, &[root.clone()]));
+    assert!(super::item::fill_with(
+        &mut item,
+        &bytes,
+        std::slice::from_ref(&root)
+    ));
     assert!(item.shown(), "the themed name resolves to a drawn icon");
     assert_eq!(item.icons.len(), 1);
     assert_eq!(item.icons[0].side(), 4);
@@ -874,7 +878,7 @@ fn an_icon_name_only_item_draws_once_the_theme_resolves_it() {
     assert!(super::item::fill_with(
         &mut missing,
         &bytes,
-        &[root.clone()]
+        std::slice::from_ref(&root)
     ));
     assert!(!missing.shown());
     assert!(missing.icons.is_empty());
@@ -930,13 +934,13 @@ fn an_attention_name_wins_while_needs_attention() {
     assert!(super::item::fill_with(
         &mut item,
         &answer("Active"),
-        &[root.clone()]
+        std::slice::from_ref(&root)
     ));
     let calm = item.icons[0].id();
     assert!(super::item::fill_with(
         &mut item,
         &answer("NeedsAttention"),
-        &[root.clone()]
+        std::slice::from_ref(&root)
     ));
     assert_ne!(
         item.icons[0].id(),
