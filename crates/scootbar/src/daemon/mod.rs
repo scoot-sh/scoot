@@ -324,13 +324,15 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         wayland.state.spawner.sources(&mut fds, &mut len);
         let polled = fds.get_mut(..len).unwrap_or_default();
         // Asleep no longer than the soonest of: the listener's rest, a
-        // scroll held to its frame, a child on a kernel with no pidfds.
+        // scroll held to its frame, a child on a kernel with no pidfds, a
+        // stalled control peer's deadline.
         let timeout = [
             timeout,
             wayland.state.scroll_timeout(&mut now),
             wayland.state.tooltip_wait(&mut now),
             wayland.state.events_timeout(&mut now),
             wayland.state.spawner.poll_timeout(),
+            server.stall_timeout(&mut now),
         ]
         .into_iter()
         .flatten()
@@ -397,6 +399,15 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
                 claim.release();
                 return Ok(());
             }
+        }
+        // Peers that stopped reading: dropped past the write-stall
+        // deadline, so a client that never reads holds its slot and its
+        // queued replies no longer than that.
+        let stalled = server.sweep(Instant::now());
+        if stalled > 0 {
+            warn(format_args!(
+                "scootbar: dropped {stalled} control connection(s) stalled past the write deadline"
+            ));
         }
         // Whatever the clients asked of the bars' visibility: once, with
         // the net result of the whole batch.

@@ -5,7 +5,10 @@
 //! sends and never reads stops being served instead of making the daemon
 //! buffer for it, and handling stops early once [`OUT_SOFT_LIMIT`] bytes
 //! are queued, so one read's worth of tiny requests cannot queue more than
-//! about that much either.
+//! about that much either. What is still queued past [`STALL_DEADLINE`]
+//! with nothing delivered drops the connection (the server sweeps once a
+//! turn), so a peer that stopped reading holds its slot no longer than
+//! that; a peer making even slow progress starts its deadline over.
 //!
 //! Every request is answered at once (no request waits on the compositor),
 //! so unlike scootbg's connection there is nothing deferred: [`Handler`]
@@ -25,6 +28,7 @@
 
 use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
+use std::time::{Duration, Instant};
 
 use rustix::event::PollFlags;
 
@@ -34,6 +38,14 @@ use super::protocol::{DROPPED, EventKind, MAX_REQUEST_LINE, Reply, write_reply};
 /// Stop handling requests once this much output is queued; resume when the
 /// client has read it.
 pub const OUT_SOFT_LIMIT: usize = 4096;
+
+/// How long a peer that stopped reading is held: past it the connection is
+/// dropped ([`Conn::stalled`], swept by the server once a turn). Generous
+/// next to the soft limit above (a slow reader on a loaded machine drains a
+/// few kilobytes in much less), short next to forever: without it a client
+/// that never reads holds its slot and its queued replies for the daemon's
+/// whole life.
+pub const STALL_DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -94,6 +106,10 @@ pub struct Conn {
     phase: Phase,
     /// A subscribed client sent a line past the limit: framing is lost.
     too_long: bool,
+    /// When the queued output first stopped moving (or last moved): a peer
+    /// that delivers nothing past [`STALL_DEADLINE`] is dropped. `None`
+    /// while nothing is queued behind it.
+    stalled_since: Option<Instant>,
 }
 
 impl Conn {
@@ -105,6 +121,7 @@ impl Conn {
             sent: 0,
             phase: Phase::Open,
             too_long: false,
+            stalled_since: None,
         }
     }
 
@@ -227,6 +244,25 @@ impl Conn {
         }
     }
 
+    /// Whether the peer stopped reading past [`STALL_DEADLINE`]: output
+    /// has been queued since `stalled_since` with nothing delivered.
+    /// Subscribed connections never queue, so this never holds for them
+    /// (they are dropped on the spot instead: [`Conn::send_event`]).
+    pub fn stalled(&self, now: Instant) -> bool {
+        self.stalled_since
+            .is_some_and(|at| now.saturating_duration_since(at) >= STALL_DEADLINE)
+    }
+
+    /// How long until [`Conn::stalled`] holds for this connection, if its
+    /// peer stays quiet: `None` while nothing is queued behind it.
+    pub fn stall_in(&self, now: Instant) -> Option<Duration> {
+        self.stalled_since.map(|at| {
+            STALL_DEADLINE
+                .checked_sub(now.saturating_duration_since(at))
+                .unwrap_or(Duration::ZERO)
+        })
+    }
+
     /// Tells a subscriber it is being dropped, if it can be told without
     /// waiting: one nonblocking write of [`DROPPED`], and whatever
     /// the socket does with it is the end of it. A subscriber is always at a
@@ -274,19 +310,35 @@ impl Conn {
 
     /// Writes queued output. `Some` when the caller must stop: the socket
     /// is full (`Keep`, wait for POLLOUT) or broken (`Close`). `None` once
-    /// everything is sent, with the buffer emptied for reuse.
+    /// everything is sent, with the buffer emptied for reuse. Stamps when
+    /// the output stops moving, refreshes the stamp on any delivery, and
+    /// clears it once drained, for [`Conn::stalled`].
     fn flush(&mut self) -> Option<Status> {
+        // Whether this call delivered anything: a peer making even slow
+        // progress has not stopped, and its deadline starts over.
+        let mut moved = false;
         while let Some(pending) = self.out.get(self.sent..).filter(|p| !p.is_empty()) {
             match self.stream.write(pending) {
                 Ok(0) => return Some(Status::Close),
-                Ok(n) => self.sent += n,
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Some(Status::Keep),
+                Ok(n) => {
+                    self.sent += n;
+                    moved = true;
+                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    if moved {
+                        self.stalled_since = Some(Instant::now());
+                    } else {
+                        self.stalled_since.get_or_insert_with(Instant::now);
+                    }
+                    return Some(Status::Keep);
+                }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(_) => return Some(Status::Close),
             }
         }
         self.out.clear();
         self.sent = 0;
+        self.stalled_since = None;
         None
     }
 
