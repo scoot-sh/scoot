@@ -22,14 +22,26 @@ unset WAYLAND_DISPLAY WAYLAND_SOCKET SCOOT_SOCKET
     --socket "$scratch/run/scoot.sock" --config "$scratch/empty.toml" \
     > "$scratch/scoot.log" 2>&1 &
 scoot=$!
-for i in $(seq 1 100); do [ -S "$scratch/run/scoot.sock" ] && break; sleep 0.1; done
+for i in $(seq 1 100); do
+    if [ -S "$scratch/run/scoot.sock" ]; then
+        break
+    fi
+    sleep 0.1
+done
+# The compositor names its Wayland socket; the daemon needs it.
+for i in $(seq 1 100); do
+    WAYLAND_DISPLAY="$(ls "$scratch/run" | grep '^wayland-' | head -1)"
+    if [ -n "$WAYLAND_DISPLAY" ]; then
+        break
+    fi
+    sleep 0.1
+done
 export WAYLAND_DISPLAY
-WAYLAND_DISPLAY="$(ls "$scratch/run" | grep '^wayland-' | head -1)"
 
 "$SCOOTBG" daemon --profile bench > "$scratch/scootbg.log" 2>&1 &
 daemon=$!
 for i in $(seq 1 100); do "$SCOOTBG" query > /dev/null 2>&1 && break; sleep 0.1; done
-pid() { pgrep -f "scootbg daemon" | head -1; }
+pid() { echo "$daemon"; }
 
 rss_kb() { awk '/^VmRSS:/{print $2}' "/proc/$(pid)/status"; }
 pss_kb() { awk '/^Pss:/{print $2}' "/proc/$(pid)/smaps" 2>/dev/null | awk '{s+=$1} END {print s}'; }

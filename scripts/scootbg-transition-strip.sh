@@ -31,9 +31,20 @@ unset WAYLAND_DISPLAY WAYLAND_SOCKET SCOOT_SOCKET
 scoot=$!
 : > "$scratch/empty.toml"
 for i in $(seq 1 100); do
-    [ -S "$scratch/run/scoot.sock" ] && break
+    if [ -S "$scratch/run/scoot.sock" ]; then
+        break
+    fi
     sleep 0.1
 done
+# The compositor names its Wayland socket; the daemon and `msg` need it.
+for i in $(seq 1 100); do
+    WAYLAND_DISPLAY="$(ls "$scratch/run" | grep '^wayland-' | head -1)"
+    if [ -n "$WAYLAND_DISPLAY" ]; then
+        break
+    fi
+    sleep 0.1
+done
+export WAYLAND_DISPLAY
 
 shot() {
     "$SCOOT_BIN" msg screenshot --output 1 --no-cursor --out "$scratch/$1.png"
