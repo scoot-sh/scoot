@@ -54,7 +54,7 @@ struct State {
     /// Item service to its `GetAll` body (the `a{sv}` bytes).
     props: HashMap<String, Vec<u8>>,
     /// (service, menu path, `GetLayout` parent) to its reply body (the
-    /// `(u(ia{sv}av))` bytes).
+    /// `u(ia{sv}av)` bytes).
     menus: HashMap<(String, String, i32), Vec<u8>>,
     /// `GetLayout` calls per menu, answered or not.
     layouts: HashMap<(String, String, i32), usize>,
@@ -173,7 +173,7 @@ impl Fake {
     }
 
     /// Scripts an item's menu: `GetLayout` on `path` is answered with
-    /// `layout` (the `(u(ia{sv}av))` body bytes; see `layout_reply`),
+    /// `layout` (the `u(ia{sv}av)` body bytes; see `layout_reply`),
     /// `AboutToShow` and `Event` are recorded like activations. The
     /// whole tree (parent 0); [`Fake::add_menu_at`] scripts one lazy
     /// submenu's answer.
@@ -494,7 +494,7 @@ impl Fake {
             *self.state.layouts.entry(key.clone()).or_default() += 1;
             self.state.layout_calls.push(key.clone());
             if let Some(layout) = self.state.menus.get(&key).cloned() {
-                return self.reply(message.serial, serial, "(u(ia{sv}av))", &layout);
+                return self.reply(message.serial, serial, "u(ia{sv}av)", &layout);
             }
             return self.error(
                 message.serial,
@@ -984,14 +984,13 @@ fn entry(body: &mut Writer, key: &str, sig: &str, write: &dyn Fn(&mut Writer)) {
 }
 
 /// Builds a `GetLayout` reply body: `revision` and the root node `write`
-/// writes (id 0, through [`layout_node`]).
+/// writes (id 0, through [`layout_node`]). The out-args ride bare, as a
+/// real item sends them: a `u32` revision, then the root node.
 #[cfg(feature = "popup")]
 pub fn layout_reply(revision: u32, write: &dyn Fn(&mut Writer)) -> Vec<u8> {
     let mut body = Writer::new();
-    body.open_struct();
     body.u32(revision);
     write(&mut body);
-    body.close_struct();
     body.take_body().unwrap_or_default()
 }
 

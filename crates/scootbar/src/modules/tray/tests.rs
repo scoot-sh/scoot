@@ -322,8 +322,10 @@ fn a_click_activates_and_a_scroll_scrolls() {
         .find(|call| call.member == "Scroll")
         .expect("no Scroll call");
     assert_eq!(scroll.signature, "is");
+    // Up is negative, down positive: what GTK/Ayatana items read (a
+    // positive vertical delta is a scroll down to them), as Waybar sends.
     let mut reader = crate::dbus::proto::Reader::le(&scroll.body);
-    assert_eq!(reader.i32().unwrap(), 64);
+    assert_eq!(reader.i32().unwrap(), -64);
     assert_eq!(reader.str().unwrap(), "vertical");
 
     // Down is the other sign, not the same call again.
@@ -341,7 +343,7 @@ fn a_click_activates_and_a_scroll_scrolls() {
         .expect("no Scroll call");
     assert_eq!(
         crate::dbus::proto::Reader::le(&scroll.body).i32().unwrap(),
-        -3
+        3
     );
 
     // The menu opens (its layout is still in flight: the fake bus was

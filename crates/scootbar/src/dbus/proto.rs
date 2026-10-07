@@ -1225,8 +1225,10 @@ pub struct MenuItem<'a> {
     pub children: Vec<MenuItem<'a>>,
 }
 
-/// Reads a `GetLayout` reply (`(u(ia{sv}av))`): the revision and the
-/// root's children. Typed like [`read_item_props`]: a known property with
+/// Reads a `GetLayout` reply (`u(ia{sv}av)`): the revision and the
+/// root's children. The out-args ride bare on the wire, not wrapped in
+/// a struct (a real Qt reply arrives as `u(ia{sv}av)`); typed like
+/// [`read_item_props`]: a known property with
 /// a wrong type is skipped (the default holds), every other one is
 /// skipped by its signature, and anything misshapen refuses the whole
 /// answer — the caller keeps the menu's last state. This is the one
@@ -1235,15 +1237,13 @@ pub fn read_menu_layout<'a>(
     signature: &str,
     body: &'a [u8],
 ) -> Result<(u32, Vec<MenuItem<'a>>), ()> {
-    if signature != "(u(ia{sv}av))" {
+    if signature != "u(ia{sv}av)" {
         return Err(());
     }
     let mut reader = Reader::le(body);
-    reader.enter_struct()?;
     let revision = reader.u32()?;
     let mut roots = Vec::new();
     parse_menu_node(&mut reader, 0, &mut 0, &mut roots)?;
-    reader.leave_struct();
     if !reader.exhausted() {
         return Err(());
     }

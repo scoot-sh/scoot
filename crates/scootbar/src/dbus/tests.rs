@@ -452,14 +452,13 @@ fn dict(count: usize, key: &str, sig: &str, write: impl Fn(&mut Writer)) -> Vec<
 }
 
 /// A `GetLayout` reply body: `revision` and the root node `write` writes
-/// (id 0 below, through [`menu_node`]).
+/// (id 0 below, through [`menu_node`]). The out-args ride bare, exactly
+/// as a real item sends them: a `u32` revision, then the root node.
 fn menu_reply(revision: u32, write: impl Fn(&mut Writer)) -> (String, Vec<u8>) {
     let mut body = Writer::new();
-    assert!(body.open_struct());
     body.u32(revision);
     write(&mut body);
-    body.close_struct();
-    ("(u(ia{sv}av))".to_owned(), body.take_body().unwrap())
+    ("u(ia{sv}av)".to_owned(), body.take_body().unwrap())
 }
 
 /// One `(ia{sv}av)` node: `props` writes the `a{sv}` entries (each an
@@ -601,8 +600,8 @@ fn a_menu_layout_is_read_typed_and_refused_whole_when_hostile() {
     }
     // Root is depth 0: past `MAX_MENU_DEPTH` levels of children nests
     // one too many.
-    assert!(read_menu_layout("(u(ia{sv}av))", &nest(MAX_MENU_DEPTH + 1).1).is_err());
-    assert!(read_menu_layout("(u(ia{sv}av))", &nest(MAX_MENU_DEPTH).1).is_ok());
+    assert!(read_menu_layout("u(ia{sv}av)", &nest(MAX_MENU_DEPTH + 1).1).is_err());
+    assert!(read_menu_layout("u(ia{sv}av)", &nest(MAX_MENU_DEPTH).1).is_ok());
 
     // Past the item cap is refused, at it is read (the root counts one).
     fn wide(kids: usize) -> (String, Vec<u8>) {
@@ -621,8 +620,8 @@ fn a_menu_layout_is_read_typed_and_refused_whole_when_hostile() {
             );
         })
     }
-    assert!(read_menu_layout("(u(ia{sv}av))", &wide(MAX_MENU_ITEMS - 1).1).is_ok());
-    assert!(read_menu_layout("(u(ia{sv}av))", &wide(MAX_MENU_ITEMS).1).is_err());
+    assert!(read_menu_layout("u(ia{sv}av)", &wide(MAX_MENU_ITEMS - 1).1).is_ok());
+    assert!(read_menu_layout("u(ia{sv}av)", &wide(MAX_MENU_ITEMS).1).is_err());
 
     // Wrong shapes refuse: another signature, trailing bytes, a cut body.
     assert!(read_menu_layout("a{sv}", &body).is_err());
@@ -643,6 +642,80 @@ fn a_menu_layout_is_read_typed_and_refused_whole_when_hostile() {
     let bytes = both.take_body().unwrap();
     assert_eq!(read_layout_updated("ui", &bytes), Ok(9));
     assert!(read_layout_updated("s", &bytes).is_err());
+}
+
+#[test]
+fn a_real_qt_layout_parses_bare_out_args() {
+    use super::proto::read_menu_layout;
+    // CopyQ 16.0.0's first `GetLayout` answer, shape for shape: the root
+    // carries only `children-display`, rows only what Qt sets (an
+    // invisible separator, a label-only status line, separators and
+    // mnemonic labels), and the out-args ride bare (`u(ia{sv}av)`), not
+    // wrapped in a struct. Refusing the bare form closed every real menu.
+    let (sig, body) = menu_reply(11, |w| {
+        menu_node(
+            w,
+            0,
+            |w| menu_prop(w, "children-display", "s", |w| w.str("submenu")),
+            |w| {
+                menu_kid(w, |w| {
+                    menu_node(
+                        w,
+                        1,
+                        |w| {
+                            menu_prop(w, "type", "s", |w| w.str("separator"));
+                            menu_prop(w, "visible", "b", |w| w.boolean(false));
+                        },
+                        |_| {},
+                    );
+                });
+                menu_kid(w, |w| {
+                    menu_node(
+                        w,
+                        9,
+                        |w| menu_prop(w, "label", "s", |w| w.str("_Clipboard: <EMPTY>")),
+                        |_| {},
+                    );
+                });
+                menu_kid(w, |w| {
+                    menu_node(
+                        w,
+                        2,
+                        |w| menu_prop(w, "type", "s", |w| w.str("separator")),
+                        |_| {},
+                    );
+                });
+                menu_kid(w, |w| {
+                    menu_node(
+                        w,
+                        3,
+                        |w| menu_prop(w, "label", "s", |w| w.str("_Show/Hide")),
+                        |_| {},
+                    );
+                });
+                menu_kid(w, |w| {
+                    menu_node(
+                        w,
+                        7,
+                        |w| menu_prop(w, "label", "s", |w| w.str("E_xit")),
+                        |_| {},
+                    );
+                });
+            },
+        );
+    });
+    assert_eq!(sig, "u(ia{sv}av)");
+    let (revision, items) = read_menu_layout(&sig, &body).unwrap();
+    assert_eq!(revision, 11);
+    assert_eq!(items.len(), 5);
+    // The invisible separator is kept here (the menu layer drops it);
+    // omitted `enabled` and `visible` default to shown.
+    assert!(items[0].separator && !items[0].visible);
+    assert_eq!(items[1].label, Some("_Clipboard: <EMPTY>"));
+    assert!(items[1].enabled && items[1].visible && !items[1].separator);
+    assert!(items[2].separator);
+    assert_eq!(items[3].label, Some("_Show/Hide"));
+    assert_eq!(items[4].label, Some("E_xit"));
 }
 
 #[test]

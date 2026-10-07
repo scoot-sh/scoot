@@ -501,10 +501,12 @@ impl Module for Tray {
                     return Ok(Update::Unchanged);
                 }
                 // The step count, clamped: a touchpad flood is one bounded
-                // call. Up is positive, down negative, as the spec's
-                // `Scroll(delta, orientation)`.
+                // call. Up is negative, down positive, as GTK/Ayatana
+                // items read it (a positive vertical delta is a scroll
+                // down to them) and as Waybar sends it; the SNI spec is
+                // silent on the sign, and Plasma/Qt use the opposite.
                 let delta = steps.min(MAX_SCROLL_DELTA) as i32;
-                body.i32(if name == "wheel-up" { delta } else { -delta });
+                body.i32(if name == "wheel-up" { -delta } else { delta });
                 body.str("vertical");
                 ("Scroll", "is")
             }

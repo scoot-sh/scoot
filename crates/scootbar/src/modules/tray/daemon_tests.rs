@@ -133,7 +133,7 @@ impl Item {
                     } else if path == "/Menu" && member == "GetLayout" {
                         if let Some(layout) = self.layout.clone() {
                             self.conn
-                                .reply_return(&sender, serial, "(u(ia{sv}av))", &layout);
+                                .reply_return(&sender, serial, "u(ia{sv}av)", &layout);
                         }
                     } else if path == "/Menu" && member == "AboutToShow" {
                         self.abouts += 1;
