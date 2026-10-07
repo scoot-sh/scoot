@@ -64,20 +64,36 @@ pub const MAX_THEME_SIDE: u32 = 512;
 /// The most pixels a decoded theme icon has (as `image`'s).
 pub const MAX_THEME_PIXELS: u64 = 1024 * 1024;
 
-/// Size directories probed under each base's `hicolor`, in order: the
-/// bar's slots are tens of device pixels, so small sizes come first and
-/// the stored entry scales from the nearest kept one like a pixmap.
-const SIZE_DIRS: &[&str] = &[
-    "22x22/apps",
-    "24x24/apps",
-    "16x16/apps",
-    "32x32/apps",
-    "48x48/apps",
-    "64x64/apps",
-    "128x128/apps",
-    "256x256/apps",
-    "scalable/apps",
+/// Stored themed bytes at most, across every item: one icon each
+/// (see [`fill`](super::item::fill)), at most
+/// [`MAX_ITEMS`](super::MAX_ITEMS) items, each stored at most
+/// [`MAX_STORED_SIDE`](super::MAX_STORED_SIDE) a side (larger decodes
+/// are downscaled to it on the bus turn, once per icon version).
+pub const MAX_THEME_TOTAL_BYTES: usize =
+    super::MAX_ITEMS * super::MAX_STORED_SIDE as usize * super::MAX_STORED_SIDE as usize * 4;
+
+/// The size the lookup targets when no output size is known (the bus
+/// turn has none): 24 device pixels, the middle of the 14-48 tray range
+/// (the default font's 14 at scale 1 to a large font at scale 2), where
+/// the 22 and 24 dirs real themes ship bracket it.
+pub const LOOKUP_SIDE: u32 = 24;
+
+/// Fixed size directories probed under each base's `hicolor`, with the
+/// nominal side each holds: probed closest to the drawn size first (see
+/// [`probe`]), so the stored entry scales from the closest kept size.
+/// `scalable` and the base itself are probed after every fixed dir.
+const SIZE_DIRS: &[(&str, u32)] = &[
+    ("22x22/apps", 22),
+    ("24x24/apps", 24),
+    ("16x16/apps", 16),
+    ("32x32/apps", 32),
+    ("48x48/apps", 48),
+    ("64x64/apps", 64),
+    ("128x128/apps", 128),
+    ("256x256/apps", 256),
 ];
+/// The scalable dir, probed after every fixed size dir.
+const SCALABLE_DIR: &str = "scalable/apps";
 
 /// Whether `name` is a usable icon name: 1 to [`MAX_NAME_LEN`] bytes, no
 /// `/`, no backslash, no NUL, not starting with a dot (no traversal, no
@@ -152,11 +168,25 @@ fn data_dirs() -> Vec<PathBuf> {
 /// (the item's `IconThemePath`) first, then `bases`. `None` when the name
 /// is hostile, nothing usable is installed, or the file does not decode:
 /// the caller keeps the item tracked-but-hidden, as before.
+///
+/// The size dir closest to [`LOOKUP_SIDE`] wins (see [`load_for_side`]).
 pub fn load(
     item_id: &str,
     name: &str,
     theme_path: Option<&str>,
     bases: &[PathBuf],
+) -> Option<TrayIcon> {
+    load_for_side(item_id, name, theme_path, bases, LOOKUP_SIDE)
+}
+
+/// [`load`], against the size dir closest to `side` device pixels: the
+/// tests' fixture sizes, instead of the default lookup size.
+pub fn load_for_side(
+    item_id: &str,
+    name: &str,
+    theme_path: Option<&str>,
+    bases: &[PathBuf],
+    side: u32,
 ) -> Option<TrayIcon> {
     if !is_valid_name(name) {
         return None;
@@ -173,23 +203,28 @@ pub fn load(
         let Ok(canonical) = std::fs::canonicalize(root) else {
             continue;
         };
-        if let Some(icon) = probe(item_id, &canonical, &file) {
+        if let Some(icon) = probe(item_id, &canonical, &file, side) {
             return Some(icon);
         }
     }
     None
 }
 
-/// Probes one canonical base for `file`: the `hicolor` size dirs, then
-/// the base itself (an `IconThemePath` root or `pixmaps` holds files
-/// directly). The first file that resolves inside the base and decodes
-/// wins.
-fn probe(item_id: &str, base: &Path, file: &str) -> Option<TrayIcon> {
-    for size in SIZE_DIRS {
-        let candidate = base.join("hicolor").join(size).join(file);
+/// Probes one canonical base for `file`: the `hicolor` size dirs
+/// closest to `side` first, then `scalable`, then the base itself (an
+/// `IconThemePath` root or `pixmaps` holds files directly). The first
+/// file that resolves inside the base and decodes wins.
+fn probe(item_id: &str, base: &Path, file: &str, side: u32) -> Option<TrayIcon> {
+    let _ = side;
+    for &(dir, _) in SIZE_DIRS {
+        let candidate = base.join("hicolor").join(dir).join(file);
         if let Some(icon) = read_if_inside(item_id, base, &candidate) {
             return Some(icon);
         }
+    }
+    let candidate = base.join("hicolor").join(SCALABLE_DIR).join(file);
+    if let Some(icon) = read_if_inside(item_id, base, &candidate) {
+        return Some(icon);
     }
     read_if_inside(item_id, base, &base.join(file))
 }
@@ -202,17 +237,20 @@ fn read_if_inside(item_id: &str, base: &Path, candidate: &PathBuf) -> Option<Tra
     if !canonical.starts_with(base) {
         return None;
     }
-    let size = canonical.metadata().ok()?.len();
-    if size == 0 || size > MAX_FILE {
-        return None;
-    }
-    let mut bytes = Vec::with_capacity(size.min(MAX_FILE) as usize);
-    std::fs::File::open(&canonical)
+    read_file(item_id, &canonical)
+}
+
+/// Reads the resolved `path` and decodes it: oversized files are
+/// skipped, never fatal. The open and the size check are split so the
+/// hardening (regular-file `fstat`, `O_NONBLOCK`/`O_NOFOLLOW`) lands here.
+fn read_file(item_id: &str, path: &Path) -> Option<TrayIcon> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
         .ok()?
         .take(MAX_FILE + 1)
         .read_to_end(&mut bytes)
         .ok()?;
-    if bytes.len() as u64 > MAX_FILE {
+    if bytes.is_empty() || bytes.len() as u64 > MAX_FILE {
         return None;
     }
     decode(item_id, &bytes)
