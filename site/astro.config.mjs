@@ -191,6 +191,7 @@ export default defineConfig({
           label: 'Reference',
           items: [
             { label: 'Reference hub', slug: 'reference' },
+            { label: 'Package scoot offline', slug: 'reference/packaging' },
             { label: 'Generated CLI pages', slug: 'reference/cli' },
           ],
         },

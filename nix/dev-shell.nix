@@ -20,6 +20,9 @@ rec {
     pkgs.rustfmt
     # Part of the documented verification set (see `CLAUDE.md`).
     pkgs.cargo-nextest
+    # Enforces deny.toml (licenses + RustSec advisories): the packaging
+    # workflow's deny jobs and scripts/vendor-release.sh's inventory step.
+    pkgs.cargo-deny
     pkgs.pkg-config
   ];
 
