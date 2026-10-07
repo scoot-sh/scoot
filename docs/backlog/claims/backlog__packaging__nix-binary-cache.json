@@ -1,6 +1,6 @@
 {
-  "agent": "cache-oc",
-  "claimed": "2026-10-07T10:08:49Z",
+  "agent": "steveyackey",
+  "claimed": "2026-10-07T10:15:14Z",
   "entry": "docs/backlog/packaging/nix-binary-cache.md",
   "ttl_hours": 24.0,
   "uuid": "cfdb8b70-3896-446a-9f8d-1ad242af2b4b"
