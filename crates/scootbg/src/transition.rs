@@ -640,12 +640,12 @@ pub fn blend_row(sweep: &Sweep, y: u32, old: &[u8], new: &[u8], out: &mut [u8]) 
     }
     for x in 0..w {
         let o = x * 4;
-        let from = if sweep.weight(x as u32, y) == 1.0 {
-            &new[o..o + 4]
+        if sweep.weight(x as u32, y) == 1.0 {
+            out[o..o + 3].copy_from_slice(&new[o..o + 3]);
         } else {
-            &old[o..o + 4]
-        };
-        out[o..o + 4].copy_from_slice(from);
+            out[o..o + 3].copy_from_slice(&old[o..o + 3]);
+        }
+        out[o + 3] = 0xff;
     }
 }
 
