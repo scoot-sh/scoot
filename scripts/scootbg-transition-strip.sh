@@ -15,6 +15,7 @@ set -eu
 OUT="${1:-site/src/content/../assets/scootbg-transition-strip.png}"
 SCOOT_BIN="${SCOOT_BIN:-target/debug/scoot}"
 SCOOTBG_BIN="${SCOOTBG_BIN:-target/debug/scootbg}"
+PYTHON3="${PYTHON3:-python3}"
 RED="#c03020"
 BLUE="#101014"
 
@@ -81,7 +82,7 @@ done
 "$SCOOTBG_BIN" kill
 wait "$bgd" 2>/dev/null || true
 
-python3 - "$scratch" "$OUT" << 'PYEOF'
+"$PYTHON3" - "$scratch" "$OUT" << 'PYEOF'
 import struct, sys, zlib
 
 scratch, out = sys.argv[1], sys.argv[2]
