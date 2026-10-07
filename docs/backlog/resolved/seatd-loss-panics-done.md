@@ -62,7 +62,8 @@ code. Check both.
   connection...`, no panic. A scoot-side guard was tried first (a
   `catch_unwind` `EventSource` wrapper, spiked and reverted): the exit
   was clean but the panic hook still prints, and it could not cover the
-  `register` sites — full evidence in `docs/forks.md`.
+  `register` sites — full evidence in `docs/forks.md`. Shipped as PR
+  #489.
 - **Proof:** recorded live repros on the M2, same steps both times
   (private seatd + `openvt`, `--tty`, kill seatd once up): before, panic
   + exit 101; after, `Lost the seat connection` + exit 1. No headless

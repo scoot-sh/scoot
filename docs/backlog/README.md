@@ -598,7 +598,7 @@ be revisited.
 - [output_power test set_mode_off_reaches_every_holder races under load](./core/output-power-test-race.md) (medium, filed 2026-10-06 from #482): fixed roundtrip budget, unsynchronized clients
 - [Cursor overlay plane follow-ups](./core/cursor-overlay-followups.md) (medium, filed 2026-10-06 from #485's review): stale-flip gate, off-output twins, one-overlay CRTCs
 - [scoot panics when seatd dies under a running session](./resolved/seatd-loss-panics-done.md)
-  — RESOLVED 2026-10-07: fork commit `fdf424d` (repinned) returns `ConnectionLost` instead of panicking; the session shuts down cleanly with exit 1.
+  — RESOLVED 2026-10-07 in #489: fork commit `fdf424d` (repinned) returns `ConnectionLost` instead of panicking; the session shuts down cleanly with exit 1.
 - [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
 - [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
 - [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
