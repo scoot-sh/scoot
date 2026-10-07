@@ -797,6 +797,155 @@ fn a_getall_marshalled_by_sd_bus_is_read_whole() {
     assert_eq!(sides, [1, 2]);
 }
 
+/// An item that sends only `IconName` (no `IconPixmap`) draws once the
+/// theme lookup resolves it: this is the pasystray case, invisible
+/// before the lookup landed. The fixture theme lives in a tmp dir, so
+/// no machine theme is touched.
+#[test]
+fn an_icon_name_only_item_draws_once_the_theme_resolves_it() {
+    use crate::dbus::proto::Writer;
+    let root = std::env::temp_dir().join(format!("scootbar-tray-fill-{}", std::process::id()));
+    let dir = root.join("hicolor/22x22/apps");
+    std::fs::create_dir_all(&dir).unwrap();
+    {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 4, 4);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer
+                .write_image_data(&[200u8, 30, 30, 255].repeat(16))
+                .unwrap();
+        }
+        std::fs::write(dir.join("pasystray.png"), &bytes).unwrap();
+    }
+    // Status + Title + IconName, no IconPixmap: the previously invisible
+    // shape. On the old code `fill` ignored the name and the item stayed
+    // hidden; with the lookup it shows one icon.
+    let mut body = Writer::new();
+    let cookie = body.open_array(8).unwrap();
+    for (key, sig, value) in [
+        ("Status", "s", "Active"),
+        ("Title", "s", "pasystray"),
+        ("IconName", "s", "pasystray"),
+    ] {
+        assert!(body.open_struct());
+        body.str(key);
+        body.variant(sig);
+        body.str(value);
+        body.close_struct();
+    }
+    body.close_array(cookie);
+    let bytes = body.take_body().unwrap();
+    let mut item = super::Item::new(
+        "org.example.Pasystray/Item".to_owned(),
+        "org.example.Pasystray".to_owned(),
+        "/Item".to_owned(),
+        "org.example.Pasystray".to_owned(),
+    );
+    assert!(super::item::fill_with(&mut item, &bytes, &[root.clone()]));
+    assert!(item.shown(), "the themed name resolves to a drawn icon");
+    assert_eq!(item.icons.len(), 1);
+    assert_eq!(item.icons[0].side(), 4);
+    // A name with nothing installed stays tracked-but-hidden, as
+    // before: never a panic, never a blank slot.
+    let mut body = Writer::new();
+    let cookie = body.open_array(8).unwrap();
+    for (key, sig, value) in [
+        ("Status", "s", "Active"),
+        ("Title", "s", "ghost"),
+        ("IconName", "s", "no-such-icon"),
+    ] {
+        assert!(body.open_struct());
+        body.str(key);
+        body.variant(sig);
+        body.str(value);
+        body.close_struct();
+    }
+    body.close_array(cookie);
+    let bytes = body.take_body().unwrap();
+    let mut missing = super::Item::new(
+        "org.example.Ghost/Item".to_owned(),
+        "org.example.Ghost".to_owned(),
+        "/Item".to_owned(),
+        "org.example.Ghost".to_owned(),
+    );
+    assert!(super::item::fill_with(
+        &mut missing,
+        &bytes,
+        &[root.clone()]
+    ));
+    assert!(!missing.shown());
+    assert!(missing.icons.is_empty());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// `NeedsAttention` prefers the attention name: the same item draws its
+/// alarm icon while alarmed and its main one otherwise.
+#[test]
+fn an_attention_name_wins_while_needs_attention() {
+    use crate::dbus::proto::Writer;
+    let root = std::env::temp_dir().join(format!("scootbar-tray-attention-{}", std::process::id()));
+    let dir = root.join("hicolor/22x22/apps");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, pixel) in [
+        ("main", [30u8, 30, 200, 255]),
+        ("alarm", [200, 30, 30, 255]),
+    ] {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 2, 2);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&pixel.repeat(4)).unwrap();
+        }
+        std::fs::write(dir.join(format!("{name}.png")), &bytes).unwrap();
+    }
+    let answer = |status: &str| {
+        let mut body = Writer::new();
+        let cookie = body.open_array(8).unwrap();
+        for (key, sig, value) in [
+            ("Status", "s", status),
+            ("Title", "s", "item"),
+            ("IconName", "s", "main"),
+            ("AttentionIconName", "s", "alarm"),
+        ] {
+            assert!(body.open_struct());
+            body.str(key);
+            body.variant(sig);
+            body.str(value);
+            body.close_struct();
+        }
+        body.close_array(cookie);
+        body.take_body().unwrap()
+    };
+    let mut item = super::Item::new(
+        "org.example.Alarm/Item".to_owned(),
+        "org.example.Alarm".to_owned(),
+        "/Item".to_owned(),
+        "org.example.Alarm".to_owned(),
+    );
+    assert!(super::item::fill_with(
+        &mut item,
+        &answer("Active"),
+        &[root.clone()]
+    ));
+    let calm = item.icons[0].id();
+    assert!(super::item::fill_with(
+        &mut item,
+        &answer("NeedsAttention"),
+        &[root.clone()]
+    ));
+    assert_ne!(
+        item.icons[0].id(),
+        calm,
+        "the alarm icon replaces the main one"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// Turns of the loop with no condition: lets every queued answer land.
 fn settle(harness: &mut Harness, fake: &mut Fake) {
     for _ in 0..6 {

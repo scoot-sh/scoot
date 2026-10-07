@@ -1127,6 +1127,17 @@ pub struct ItemProps<'a> {
     /// walked for shape and dropped: no tooltip icon is drawn yet).
     pub tooltip: Option<(&'a str, &'a str)>,
     pub pixmaps: Option<Vec<Pixmap<'a>>>,
+    /// The themed icon names: drawn through the icon-theme lookup (see
+    /// the tray's `theme` module), when no pixmap was sent. `IconThemePath`
+    /// is one extra base directory searched first.
+    pub icon_name: Option<&'a str>,
+    pub icon_theme_path: Option<&'a str>,
+    /// The attention icon's name: drawn instead of the main one while the
+    /// status is `NeedsAttention`. The overlay icon's name is walked for
+    /// shape and dropped (compositing it would be a second scaled draw
+    /// per frame for a badge real items rarely send).
+    pub attention_icon_name: Option<&'a str>,
+    pub overlay_icon_name: Option<&'a str>,
 }
 
 /// Reads an item's `GetAll` body (`a{sv}`): the properties the bar uses
@@ -1165,6 +1176,10 @@ pub fn read_item_props(body: &[u8]) -> Result<ItemProps<'_>, ()> {
             ("IconPixmap", "a(iiay)") => {
                 props.pixmaps = Some(read_pixmaps(entries.array_raw(8)?)?);
             }
+            ("IconName", "s") => props.icon_name = Some(entries.str()?),
+            ("IconThemePath", "s") => props.icon_theme_path = Some(entries.str()?),
+            ("AttentionIconName", "s") => props.attention_icon_name = Some(entries.str()?),
+            ("OverlayIconName", "s") => props.overlay_icon_name = Some(entries.str()?),
             _ => entries.skip(sig)?,
         }
         entries.leave_struct();
