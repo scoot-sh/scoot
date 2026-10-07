@@ -3,7 +3,7 @@ title: "Debian and Ubuntu packages: `.deb`s and a signed apt repository"
 status: "open"
 area: "packaging"
 priority: "low"
-blocked: "independent-versioning, vendoring-and-licenses, release-artifacts"
+blocked: "independent-versioning, release-artifacts"
 ---
 
 # Debian and Ubuntu packages
@@ -19,7 +19,7 @@ Filed 2026-09-29. Serves **daily-drive**.
    `dpkg-shlibdeps` (`$auto`), so the list is derived, not remembered.
 2. **A full `debian/` directory** only if inclusion in the Debian or Ubuntu
    archive is ever wanted: it needs offline builds from vendored sources
-   ([vendoring-and-licenses](vendoring-and-licenses.md)) and follows Debian
+   ([vendoring-and-licenses](../resolved/vendoring-and-licenses-done.md)) and follows Debian
    Policy for the git-fork dependencies, which is real work. Not before there is
    demand.
 

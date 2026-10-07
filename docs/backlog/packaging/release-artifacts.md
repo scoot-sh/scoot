@@ -16,7 +16,7 @@ releases; installs are from source or Nix.
 - A **release workflow triggered by a package tag** (`scootbar-v0.2.0`),
   no manual uploads, with a dry-run mode. It builds only that package.
 - **Per release**: a source tarball with vendored dependencies
-  ([vendoring-and-licenses](vendoring-and-licenses.md)); prebuilt binaries for
+  ([vendoring-and-licenses](../resolved/vendoring-and-licenses-done.md)); prebuilt binaries for
   `x86_64-linux` and `aarch64-linux`; `SHA256SUMS`; signatures (options: minisign,
   GPG, or keyless signing and build-provenance attestation through GitHub;
   decide by who can verify and key-management cost); an SBOM

@@ -3,7 +3,7 @@ title: "RPM packages: Fedora and openSUSE-style `.rpm`s, and a COPR-style reposi
 status: "open"
 area: "packaging"
 priority: "low"
-blocked: "independent-versioning, vendoring-and-licenses, release-artifacts"
+blocked: "independent-versioning, release-artifacts"
 ---
 
 # RPM packages
@@ -21,7 +21,7 @@ Filed 2026-09-29. Serves **daily-drive**.
 2. **A distro-grade spec** (vendored sources, `%check`, Fedora's Rust packaging
    conventions) only if inclusion in a distribution is ever wanted; the git-fork
    dependencies make it real work
-   ([vendoring-and-licenses](vendoring-and-licenses.md)).
+   ([vendoring-and-licenses](../resolved/vendoring-and-licenses-done.md)).
 
 ## Details
 

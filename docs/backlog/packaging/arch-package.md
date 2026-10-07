@@ -3,7 +3,7 @@ title: "Arch Linux packages: PKGBUILDs (release and `-git`), AUR, built and lint
 status: "open"
 area: "packaging"
 priority: "low"
-blocked: "independent-versioning, vendoring-and-licenses, release-artifacts"
+blocked: "independent-versioning, release-artifacts"
 ---
 
 # Arch Linux packages
