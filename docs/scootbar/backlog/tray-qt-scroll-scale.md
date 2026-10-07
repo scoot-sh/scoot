@@ -9,7 +9,7 @@ milestone: "M6"
 
 # Tray: Qt-scale scroll deltas for KDE items
 
-Filed 2026-10-07, split out of [tray-real-apps](tray-real-apps.md)
+Filed 2026-10-07, split out of [tray-real-apps](resolved/tray-real-apps-done.md)
 when its sign question closed with a measured answer (GTK sign, up
 negative). Serves **daily-drive**: KDE volume items scroll the wrong
 way, or not at all, under that choice.
@@ -45,5 +45,5 @@ way, or not at all, under that choice.
 
 ## Not in this ticket
 
-The sign itself (closed in [tray-real-apps](tray-real-apps.md));
+The sign itself (closed in [tray-real-apps](resolved/tray-real-apps-done.md));
 themed icons ([tray-icon-themes](tray-icon-themes.md)).
