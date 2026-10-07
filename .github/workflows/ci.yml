@@ -433,6 +433,17 @@ jobs:
       - name: nix flake check
         run: nix flake check -L
 
+      # FlakeHub publishes the flake by evaluating every system, and
+      # `nix flake check` above is not that: it only evals this
+      # runner's system. An eval-time read of a platform-specific
+      # derivation (gh #486: `builtins.readFile` of the generated
+      # displays.json) passes check here and still breaks the publish
+      # on a host that cannot build that platform. This step is that
+      # publish-time eval, JSON form, nothing built: it fails before
+      # merge exactly where FlakeHub failed after it.
+      - name: nix flake show --all-systems (FlakeHub eval gate)
+        run: nix flake show --all-systems --json --no-write-lock-file > /dev/null
+
       # Also a superset of the documented `-p scoot --all-targets`, for the
       # same reason: their dependencies are built here anyway.
       - name: cargo clippy
