@@ -16,9 +16,11 @@ what scootbg and scoot bound (`docs/scootbg/README.md`, `docs/ipc.md#resource-bo
 
 ## Bounds to build in from the first PR that adds the surface
 
-- **Control socket**: connection cap with a refusal that says why; line and
-  message size caps; a write-stall deadline that drops a peer that stopped
-  reading; `EMFILE` on accept sheds instead of spinning the loop.
+- **Control socket** (*built*; the write-stall deadline landed in #493, 30 s
+  for a request peer that stops reading, refreshed on any delivery): connection
+  cap with a refusal that says why; line and message size caps; a write-stall
+  deadline that drops a peer that stopped reading; `EMFILE` on accept sheds
+  instead of spinning the loop.
 - **`exec` modules** (*built*, with
   [exec-push-button-modules](resolved/exec-push-button-modules-done.md): at most
   8 placed, lines past 4096 bytes dropped whole, one 4 KiB read per 16 ms frame
