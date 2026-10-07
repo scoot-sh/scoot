@@ -418,7 +418,7 @@ falsify. Read `flexwm` there as `scoot`.
 Project-wide, not tied to one binary; the bar's own Nix package is
 [scootbar's `nix-package`](../scootbar/backlog/resolved/nix-package-done.md).
 
-- [Independent versions per shipped binary](./resolved/independent-versioning-done.md) — RESOLVED 2026-10-07 in #TODO: per-crate versions (trio lockstep, bar independent), `scripts/version` plan/check/changelog, per-package flake versions, version CI job, contributor `docs/versioning.md` and user `reference/versions.md`
+- [Independent versions per shipped binary](./resolved/independent-versioning-done.md) — RESOLVED 2026-10-07 in #495: per-crate versions (trio lockstep, bar independent), `scripts/version` plan/check/changelog, per-package flake versions, version CI job, contributor `docs/versioning.md` and user `reference/versions.md`
 - [Vendored sources, third-party licenses, advisories](./resolved/vendoring-and-licenses-done.md) — medium: what every distro package needs first (two git-fork dependencies vendor and resolve offline) — RESOLVED 2026-10-07 in #491
 - [Release artifacts](./packaging/release-artifacts.md) — medium: tag-triggered builds, checksums, signatures, SBOM, changelogs, both architectures
 - [A Nix binary cache for users](./packaging/nix-binary-cache.md) — medium: `nix run` without a cold Smithay compile; distinct from CI's recorded no-store-cache decision

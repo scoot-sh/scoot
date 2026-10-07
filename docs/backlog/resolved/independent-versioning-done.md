@@ -65,7 +65,7 @@ Each binary reports its own version, a tag names exactly one package, the flake
 builds each with its own version, and the compatibility statement per pair is
 documented and enforced where a mismatch would misbehave.
 
-## Resolved 2026-10-07 (PR #TODO)
+## Resolved 2026-10-07 (PR #495)
 
 What landed, item by item:
 
