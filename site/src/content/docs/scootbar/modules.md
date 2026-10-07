@@ -525,7 +525,10 @@ socket is one more source in the `poll` loop), which is the
   re-reads nothing. An item that sends only an icon *name* is resolved
   through the `hicolor` icon theme instead (`$XDG_DATA_DIRS`, the item's
   `IconThemePath` first): PNG files, decoded once per icon version
-  through the same cache, at the output's device pixels like a pixmap.
+  (downscaled to at most 64 a side, the pixmap bound) through the same
+  cache, at the output's device pixels like a pixmap. The size dir
+  closest to the drawn size wins; a trailing `.png` on the name is
+  accepted, `.svg`/`.xpm` stay hidden.
   While `NeedsAttention` the attention name is drawn instead of the
   main one. An item whose `Status` is `Passive` (the spec's "hide
   me"), or whose name resolves to nothing (missing theme, SVG-only,
@@ -626,12 +629,18 @@ socket is one more source in the `poll` loop), which is the
   is discarded, one turn reads at most 256 KiB more (the poll is woken
   for the rest), so a sender that outruns the reader holds one turn,
   not the bar. Titles are cut to 128 bytes
-  with controls stripped; themed names past 128 bytes, with a `/` or
+  with controls stripped; themed names past 128 bytes (after one
+  accepted trailing `.png` is stripped), with a `/` or
   starting with a dot, are refused without touching the disk, and an
   `IconThemePath` that is not absolute or holds `..` is ignored; a
   theme file is read only when it resolves inside its base
-  (symlink escapes refused), at most 8 MiB, decoded under a 16 MiB
-  budget and a 512-pixel, 1 M-pixel header check; at most 32 items, 8 from one service or one registrant, 8 pixmap
+  (symlink escapes refused), opened `O_NONBLOCK`/`O_NOFOLLOW` and taken
+  only when the opened fd is a regular file under the cap (a path
+  swapped to a FIFO, device or symlink mid-lookup can never block the
+  bus turn), at most 8 MiB, decoded under a 16 MiB
+  budget and a 512-pixel, 1 M-pixel header check, then stored at most
+  64 a side (larger decodes are downscaled once: 512 KiB over the whole
+  tray at most); at most 32 items, 8 from one service or one registrant, 8 pixmap
   entries each; one `GetAll` in flight per item however many signals it
   sends; a menu's layout is read bounded the same way (at most 8 levels,
   64 nodes including the root — 63 drawable rows — one `GetLayout` in flight, re-read no oftener than every

@@ -24,17 +24,31 @@
 //! real items no longer need first. A name with only an SVG or XPM beside
 //! it stays tracked-but-hidden, as before.
 //!
+//! The fixed size dir closest to the drawn size wins (the freedesktop
+//! closest-size rule among the sizes present; ties prefer the larger),
+//! then `scalable`, then the base itself: the shared cache scales the
+//! stored entry to the output's device pixels like a pixmap.
+//!
 //! ## Bounds (a hostile item names the file)
 //!
-//! The name is at most 128 bytes with no `/`, no NUL and no leading dot:
-//! no traversal, no absolute path, no hidden file. `IconThemePath` must
+//! The name, after one accepted trailing `.png` is stripped, is at most
+//! 128 bytes with no `/`, no NUL and no leading dot: no traversal, no
+//! absolute path, no hidden file. `.svg`/`.xpm` names stay
+//! hidden, as does any other unresolvable name. `IconThemePath` must
 //! be an absolute path with no `..` component. Every candidate is
 //! resolved with `canonicalize` (a symlink loop is the kernel's `ELOOP`)
 //! and must stay under its base's canonical form, else it is skipped.
-//! The file is at most 8 MiB, the decoder's budget 16 MiB, the header's
-//! size checked before any pixel buffer exists (at most 512 a side, 1 M
-//! pixels: a decompression bomb declaring a huge image is refused after
-//! a few dozen bytes). Only the first frame of an animated PNG is used.
+//! The open itself is `O_NONBLOCK`/`O_NOFOLLOW` and the opened fd is
+//! checked for a regular file under the size cap, so a path swapped to
+//! a FIFO, device or symlink between the resolve and the open can never
+//! block the bus turn. The file is at most 8 MiB, the decoder's budget
+//! 16 MiB, the header's size checked before any pixel buffer exists (at
+//! most 512 a side, 1 M pixels: a decompression bomb declaring a huge
+//! image is refused after a few dozen bytes). The stored entry is at
+//! most 64 a side, the pixmap path's bound (larger decodes are
+//! downscaled once, on the bus turn): one icon per item and 32 items at
+//! most, so themed icons hold at most 512 KiB in all. Only the first
+//! frame of an animated PNG is used.
 //!
 //! ## Laziness (the bar's no-polling rule)
 //!
@@ -64,20 +78,36 @@ pub const MAX_THEME_SIDE: u32 = 512;
 /// The most pixels a decoded theme icon has (as `image`'s).
 pub const MAX_THEME_PIXELS: u64 = 1024 * 1024;
 
-/// Size directories probed under each base's `hicolor`, in order: the
-/// bar's slots are tens of device pixels, so small sizes come first and
-/// the stored entry scales from the nearest kept one like a pixmap.
-const SIZE_DIRS: &[&str] = &[
-    "22x22/apps",
-    "24x24/apps",
-    "16x16/apps",
-    "32x32/apps",
-    "48x48/apps",
-    "64x64/apps",
-    "128x128/apps",
-    "256x256/apps",
-    "scalable/apps",
+/// Stored themed bytes at most, across every item: one icon each
+/// (see [`fill`](super::item::fill)), at most
+/// [`MAX_ITEMS`](super::MAX_ITEMS) items, each stored at most
+/// [`MAX_STORED_SIDE`](super::MAX_STORED_SIDE) a side (larger decodes
+/// are downscaled to it on the bus turn, once per icon version).
+pub const MAX_THEME_TOTAL_BYTES: usize =
+    super::MAX_ITEMS * super::MAX_STORED_SIDE as usize * super::MAX_STORED_SIDE as usize * 4;
+
+/// The size the lookup targets when no output size is known (the bus
+/// turn has none): 24 device pixels, the middle of the 14-48 tray range
+/// (the default font's 14 at scale 1 to a large font at scale 2), where
+/// the 22 and 24 dirs real themes ship bracket it.
+pub const LOOKUP_SIDE: u32 = 24;
+
+/// Fixed size directories probed under each base's `hicolor`, with the
+/// nominal side each holds: probed closest to the drawn size first (see
+/// [`probe`]), so the stored entry scales from the closest kept size.
+/// `scalable` and the base itself are probed after every fixed dir.
+const SIZE_DIRS: &[(&str, u32)] = &[
+    ("22x22/apps", 22),
+    ("24x24/apps", 24),
+    ("16x16/apps", 16),
+    ("32x32/apps", 32),
+    ("48x48/apps", 48),
+    ("64x64/apps", 64),
+    ("128x128/apps", 128),
+    ("256x256/apps", 256),
 ];
+/// The scalable dir, probed after every fixed size dir.
+const SCALABLE_DIR: &str = "scalable/apps";
 
 /// Whether `name` is a usable icon name: 1 to [`MAX_NAME_LEN`] bytes, no
 /// `/`, no backslash, no NUL, not starting with a dot (no traversal, no
@@ -152,16 +182,38 @@ fn data_dirs() -> Vec<PathBuf> {
 /// (the item's `IconThemePath`) first, then `bases`. `None` when the name
 /// is hostile, nothing usable is installed, or the file does not decode:
 /// the caller keeps the item tracked-but-hidden, as before.
+///
+/// The size dir closest to [`LOOKUP_SIDE`] wins (see [`load_for_side`]).
 pub fn load(
     item_id: &str,
     name: &str,
     theme_path: Option<&str>,
     bases: &[PathBuf],
 ) -> Option<TrayIcon> {
-    if !is_valid_name(name) {
+    load_for_side(item_id, name, theme_path, bases, LOOKUP_SIDE)
+}
+
+/// [`load`], against the size dir closest to `side` device pixels: the
+/// tests' fixture sizes, instead of the default lookup size.
+pub fn load_for_side(
+    item_id: &str,
+    name: &str,
+    theme_path: Option<&str>,
+    bases: &[PathBuf],
+    side: u32,
+) -> Option<TrayIcon> {
+    // An `IconName` is a name without extension, but many apps send one
+    // with: one trailing `.png` names the file it decodes to, while
+    // `.svg`/`.xpm` name formats the bar never decodes, so they stay
+    // hidden like any other unresolvable name.
+    if name.ends_with(".svg") || name.ends_with(".xpm") {
         return None;
     }
-    let file = format!("{name}.png");
+    let stem = name.strip_suffix(".png").unwrap_or(name);
+    if stem.ends_with(".svg") || stem.ends_with(".xpm") || !is_valid_name(stem) {
+        return None;
+    }
+    let file = format!("{stem}.png");
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Some(path) = theme_path {
         if is_valid_theme_path(path) {
@@ -173,25 +225,54 @@ pub fn load(
         let Ok(canonical) = std::fs::canonicalize(root) else {
             continue;
         };
-        if let Some(icon) = probe(item_id, &canonical, &file) {
+        if let Some(icon) = probe(item_id, &canonical, &file, side) {
             return Some(icon);
         }
     }
     None
 }
 
-/// Probes one canonical base for `file`: the `hicolor` size dirs, then
-/// the base itself (an `IconThemePath` root or `pixmaps` holds files
-/// directly). The first file that resolves inside the base and decodes
-/// wins.
-fn probe(item_id: &str, base: &Path, file: &str) -> Option<TrayIcon> {
-    for size in SIZE_DIRS {
-        let candidate = base.join("hicolor").join(size).join(file);
+/// Probes one canonical base for `file`: the `hicolor` size dirs
+/// closest to `side` first, then `scalable`, then the base itself (an
+/// `IconThemePath` root or `pixmaps` holds files directly). The first
+/// file that resolves inside the base and decodes wins.
+fn probe(item_id: &str, base: &Path, file: &str, side: u32) -> Option<TrayIcon> {
+    for dir in closest_order(side) {
+        let candidate = base.join("hicolor").join(dir).join(file);
         if let Some(icon) = read_if_inside(item_id, base, &candidate) {
             return Some(icon);
         }
     }
+    let candidate = base.join("hicolor").join(SCALABLE_DIR).join(file);
+    if let Some(icon) = read_if_inside(item_id, base, &candidate) {
+        return Some(icon);
+    }
     read_if_inside(item_id, base, &base.join(file))
+}
+
+/// The fixed size dirs, closest to `side` first: the freedesktop
+/// closest-size rule among the sizes present (minimal distance to the
+/// drawn size; ties prefer the larger, which downscales sharper than
+/// the smaller stretches). Stack-sorted: this runs once per lookup on
+/// the bus turn, never per frame, and allocates nothing.
+fn closest_order(side: u32) -> [&'static str; 8] {
+    let mut order: [(u32, u32, &'static str); 8] = [(u32::MAX, u32::MAX, ""); 8];
+    for (i, &(dir, size)) in SIZE_DIRS.iter().enumerate() {
+        order[i] = (size.abs_diff(side), u32::MAX - size, dir);
+    }
+    // Insertion sort: eight entries, no allocation.
+    for i in 1..order.len() {
+        let mut j = i;
+        while j > 0 && order[j] < order[j - 1] {
+            order.swap(j, j - 1);
+            j -= 1;
+        }
+    }
+    let mut dirs = [""; 8];
+    for (i, &(_, _, dir)) in order.iter().enumerate() {
+        dirs[i] = dir;
+    }
+    dirs
 }
 
 /// Reads `candidate` when it resolves to a file inside `base`, and
@@ -202,16 +283,41 @@ fn read_if_inside(item_id: &str, base: &Path, candidate: &PathBuf) -> Option<Tra
     if !canonical.starts_with(base) {
         return None;
     }
-    let size = canonical.metadata().ok()?.len();
+    read_file(item_id, &canonical)
+}
+
+/// Reads the resolved `path` and decodes it: symlink escapes, loops
+/// and oversized files are skipped, never fatal.
+///
+/// The open never blocks the bus turn: `O_NONBLOCK` means a FIFO or
+/// socket opened here (a path swapped between the `canonicalize` above
+/// and this open) returns at once instead of waiting for a writer, and
+/// the `fstat` below refuses anything but a regular file before a byte
+/// is read. `O_NOFOLLOW` refuses a trailing symlink the same way (the
+/// canonical path has none: only a racy replacement trips it, and a
+/// miss stays tracked-but-hidden). The size cap is re-checked on the
+/// opened fd's own metadata, and the read is bounded by the cap, so a
+/// file growing during the read is refused rather than over-read.
+fn read_file(item_id: &str, path: &Path) -> Option<TrayIcon> {
+    use rustix::fs::{Mode, OFlags};
+    use std::os::fd::OwnedFd;
+    let fd: OwnedFd = rustix::fs::open(
+        path,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .ok()?;
+    let file = std::fs::File::from(fd);
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    let size = meta.len();
     if size == 0 || size > MAX_FILE {
         return None;
     }
     let mut bytes = Vec::with_capacity(size.min(MAX_FILE) as usize);
-    std::fs::File::open(&canonical)
-        .ok()?
-        .take(MAX_FILE + 1)
-        .read_to_end(&mut bytes)
-        .ok()?;
+    file.take(MAX_FILE + 1).read_to_end(&mut bytes).ok()?;
     if bytes.len() as u64 > MAX_FILE {
         return None;
     }
@@ -274,6 +380,24 @@ fn decode(item_id: &str, bytes: &[u8]) -> Option<TrayIcon> {
         let premultiply = |c: u8| ((u32::from(c) * u32::from(a) + 127) / 255) as u8;
         out.copy_from_slice(&[premultiply(b), premultiply(g), premultiply(r), a]);
     }
+    // The stored entry is the pixmap path's bound (real theme icons are
+    // 16-48 px; the cache scales it to the output's device pixels like a
+    // pixmap): a larger decode is downscaled once, here on the bus turn,
+    // through the same filter the cache draws with.
+    let bound = super::MAX_STORED_SIDE;
+    let (width, height, pixels) = if width.max(height) > bound {
+        let mut out = vec![0u8; bound as usize * bound as usize * 4];
+        crate::icon::sample::scale_into(&pixels, width as usize, height as usize, bound, &mut out);
+        (bound, bound, out.into_boxed_slice())
+    } else {
+        (width, height, pixels)
+    };
+    // One icon's share of the total themed budget: the downscale above
+    // holds it, and this pins the two together if either changes.
+    debug_assert!(
+        width as usize * height as usize * 4 <= MAX_THEME_TOTAL_BYTES / super::MAX_ITEMS,
+        "a stored themed icon exceeds its share of the total budget"
+    );
     let id = fnv_payload(item_id, width, height, &pixels);
     TrayIcon::from_premultiplied(id, width, height, pixels)
 }

@@ -3,6 +3,7 @@
 //! passes explicit bases.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use super::{is_valid_name, is_valid_theme_path, load};
 
@@ -54,6 +55,24 @@ fn write_hicolor_size(root: &Path, size: &str, name: &str) -> PathBuf {
     let path = dir.join(format!("{name}.png"));
     std::fs::write(&path, encode_png(4, 4, [200, 30, 30, 255])).unwrap();
     path
+}
+
+/// Writes `width × height` `pixel` PNG bytes to
+/// `root/hicolor/<size>/<name>.png`, parents made.
+fn write_png_size(root: &Path, size: &str, name: &str, width: u32, height: u32, pixel: [u8; 4]) {
+    let dir = root.join("hicolor").join(size);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer
+            .write_image_data(&pixel.repeat(width as usize * height as usize))
+            .unwrap();
+    }
+    std::fs::write(dir.join(format!("{name}.png")), &bytes).unwrap();
 }
 
 #[test]
@@ -189,5 +208,125 @@ fn an_oversized_file_is_skipped() {
     std::fs::write(dir.join("big.png"), &big).unwrap();
     let bases = [root.clone()];
     assert!(load("item-id", "big", None, &bases).is_none());
+    cleanup(&root);
+}
+
+#[test]
+fn a_fifo_is_refused_without_blocking() {
+    // The post-open type check, directly: a FIFO where the icon file
+    // would be (as after a swap between the metadata check and the
+    // open). The read runs on a worker behind a 10 s watchdog: without
+    // the `O_NONBLOCK` open plus the regular-file `fstat`, the open
+    // blocks and the watchdog fires.
+    let root = scratch("fifo");
+    let fifo = root.join("fifo.png");
+    rustix::fs::mkfifoat(
+        rustix::fs::CWD,
+        &fifo,
+        rustix::fs::Mode::from_bits_truncate(0o600),
+    )
+    .unwrap();
+    let path = fifo.clone();
+    let (done, waited) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(super::read_file("item-id", &path));
+    });
+    match waited.recv_timeout(Duration::from_secs(10)) {
+        Ok(None) => {}
+        Ok(Some(_)) => panic!("a FIFO decoded into an icon"),
+        Err(_) => panic!("blocked opening a FIFO for 10 s"),
+    }
+    cleanup(&root);
+}
+
+#[test]
+fn a_large_icon_is_stored_at_the_bound() {
+    // A 128 px icon still draws (real themes ship 128 and 256 px sizes
+    // for launchers), but the stored entry is the pixmap path's bound,
+    // not the decoded size.
+    let bytes = encode_png(128, 128, [10, 200, 10, 255]);
+    let icon = super::decode("item-id", &bytes).expect("a large icon still draws");
+    assert!(
+        icon.side() <= super::super::MAX_STORED_SIDE,
+        "stored side {} past the bound",
+        icon.side()
+    );
+}
+
+#[test]
+fn thirty_two_large_icons_fit_the_total_budget() {
+    // One 128 px icon per item, the whole tray of them: 32 x 64 KiB
+    // without the stored cap is 2 MiB over the 512 KiB total budget.
+    let root = scratch("total");
+    let bases = [root.clone()];
+    let mut total = 0usize;
+    for n in 0..super::super::MAX_ITEMS {
+        let name = format!("icon{n}");
+        write_png_size(
+            &root,
+            "128x128/apps",
+            &name,
+            128,
+            128,
+            [n as u8, 200, 30, 255],
+        );
+        let icon = super::load("item", &name, None, &bases).expect("the fixture icon");
+        total += icon.side() as usize * icon.side() as usize * 4;
+    }
+    assert!(
+        total <= super::MAX_THEME_TOTAL_BYTES,
+        "{total} stored bytes over the {} budget",
+        super::MAX_THEME_TOTAL_BYTES
+    );
+    cleanup(&root);
+}
+
+#[test]
+fn the_closest_size_wins() {
+    // The same name in 22x22 (red) and 48x48 (green): drawn at 24 the
+    // 22 px entry wins, drawn at 48 the 48 px one does (the freedesktop
+    // closest-size rule among the sizes present, not first-match).
+    let root = scratch("closest");
+    write_png_size(&root, "22x22/apps", "both", 22, 22, [200, 30, 30, 255]);
+    write_png_size(&root, "48x48/apps", "both", 48, 48, [30, 200, 30, 255]);
+    write_png_size(&root, "22x22/apps", "red", 22, 22, [200, 30, 30, 255]);
+    write_png_size(&root, "48x48/apps", "green", 48, 48, [30, 200, 30, 255]);
+    let bases = [root.clone()];
+    let red = super::load_for_side("id", "red", None, &bases, 24).expect("the red icon");
+    let green = super::load_for_side("id", "green", None, &bases, 48).expect("the green icon");
+    let near = super::load_for_side("id", "both", None, &bases, 24).expect("drawn at 24");
+    assert_eq!(
+        near.id(),
+        red.id(),
+        "drawn 24 resolves past the 22x22 entry"
+    );
+    let far = super::load_for_side("id", "both", None, &bases, 48).expect("drawn at 48");
+    assert_eq!(
+        far.id(),
+        green.id(),
+        "drawn 48 resolves past the 48x48 entry"
+    );
+    cleanup(&root);
+}
+
+#[test]
+fn a_name_with_an_extension_resolves_like_the_bare_name() {
+    // An `IconName` is a name without extension, but many apps send one
+    // with: one trailing `.png` is accepted. `.svg`/`.xpm` name no PNG
+    // the bar decodes, so they stay hidden like any unresolvable name.
+    let root = scratch("ext");
+    write_hicolor(&root, "app");
+    let bases = [root.clone()];
+    let bare = load("id", "app", None, &bases).expect("the bare name");
+    let suffixed = load("id", "app.png", None, &bases).expect("the name with .png");
+    assert_eq!(bare.id(), suffixed.id());
+    std::fs::write(
+        root.join("hicolor/22x22/apps/vec.svg"),
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>",
+    )
+    .unwrap();
+    assert!(load("id", "vec.svg", None, &bases).is_none());
+    std::fs::write(root.join("hicolor/22x22/apps/legacy.xpm"), "/* XPM */").unwrap();
+    assert!(load("id", "legacy.xpm", None, &bases).is_none());
     cleanup(&root);
 }
