@@ -133,6 +133,18 @@ exits, the session targets stop and the display variables are restored.
 > --value scoot.service` names the state, not the exit code) and clear it
 > with `systemctl --user stop scoot.service scoot-session.target`.
 
+Without a user manager at all the launcher execs a bare `scoot
+--tty` instead — a session with no session integration, not a
+failure. When that login is a `user-light` session (TTY autologin
+never starts `user@UID.service`) the launcher names the cause and the
+one-line fix (`users.users."you".linger = true`, or the greeter
+instead) and mirrors the diagnosis into the system journal
+(`journalctl -b -t scoot-session`), since the compositor takes over
+the console on startup and buries stderr. See [Without a greeter
+(TTY
+autologin)](../desktop/index.md#without-a-greeter-tty-autologin)
+for the whole setup.
+
 Environment scoot reads: `$XDG_RUNTIME_DIR` (required — a missing one
 is a one-line startup error), `$SCOOT_SOCKET`, `$XDG_CONFIG_HOME`,
 `$XCURSOR_THEME`, and the session locale for typing. Environment scoot

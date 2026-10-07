@@ -1112,6 +1112,42 @@ in
         }
       ];
 
+      # TTY autologin without lingering starts no user manager: recent
+      # systemd gives those logins the `user-light` class, which never
+      # starts `user@UID.service` -- so a `scoot-session` login from
+      # that console falls back to a bare `scoot --tty` with no bar,
+      # notifications, clipboard, portal or session target (gh-462;
+      # the launcher names the cause on stderr and in the journal, and
+      # the desktop page documents the setup). A warning, not an
+      # assertion: the autologin user may not be the scoot user (another
+      # VT, another person), and the bare fallback is a supported shape
+      # elsewhere (s6, a seat with no manager, the webtop target) --
+      # failing evaluation would strand setups the profile never
+      # breaks. And never defaulted: lingering keeps the whole user
+      # manager (every user service, not just scoot's) alive past
+      # logout and starts it at boot, a lifecycle change beyond this
+      # profile that stays opt-in. Never guessed: only the explicitly
+      # configured autologin user is named, and a display-manager
+      # autologin (`services.displayManager.autoLogin`, class `user`
+      # through the login screen) never warns.
+      warnings =
+        let
+          loginUser = config.services.getty.autologinUser;
+          # One `or` default per select: a second `or` in the same
+          # select chain misparses (a loud error at best, a wrong
+          # value at worst), so each fallback gets its own binding.
+          # And `or` covers only a missing attribute, never a null
+          # value: real `linger` is `nullOr bool` defaulting to null
+          # (unmanaged), so the test below compares against `true`
+          # instead of defaulting with `or`.
+          lingerUsers = config.users.users or { };
+          lingerEntry = lingerUsers.${loginUser} or { };
+          lingerEnabled = (lingerEntry.linger or null) == true;
+        in
+        lib.optional (loginUser != null && !lingerEnabled) ''
+          programs.scoot.desktop.enable is set and the console logs in automatically as "${loginUser}" (services.getty.autologinUser), but users.users."${loginUser}".linger is not enabled. Recent systemd gives TTY autologin sessions the "user-light" class, which never starts user@UID.service -- so a scoot-session login from that console falls back to a bare `scoot --tty` with no bar, notifications, clipboard, portal or session target. Set users.users."${loginUser}".linger = true (the manager then starts at boot, independent of the login's class), or log in through the greeter instead. The launcher's own diagnosis survives the login in the system journal: journalctl -b -t scoot-session.
+        '';
+
       programs.scoot.session.enable = lib.mkDefault true;
       programs.scoot.wallpaper.enable = lib.mkDefault true;
 

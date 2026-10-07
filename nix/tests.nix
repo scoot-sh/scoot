@@ -239,6 +239,15 @@
 #   profile and the policy are Linux-only: off Linux each tool defaults
 #   to null, `lock.command` to its bare form, and the policy's own
 #   assertions refuse loudly -- pinned, not skipped.
+# - TTY autologin without lingering (gh-462): `desktop.enable` beside
+#   `services.getty.autologinUser` warns exactly once, naming the
+#   autologin user and the one-line `users.users.<name>.linger = true`
+#   fix (a `user-light` login never starts `user@UID.service`, so the
+#   launcher would fall back to a bare `scoot --tty`); an autologin
+#   user the config never declares warns too, while lingering, no
+#   autologin, and a display-manager autologin (class `user`, whose
+#   manager starts) stay quiet -- the warning itself also pinned
+#   against a real NixOS evaluation.
 # - the documented install configs (site/src/content/docs/desktop/index.md,
 #   "Set up the flake" / NixOS / Home Manager): the minimal NixOS desktop,
 #   the GPU-package plus opt-in-greeter variant, and standalone
@@ -437,6 +446,23 @@ let
     options.services.displayManager.sddm.enable = lib.mkOption {
       type = lib.types.bool;
       default = false;
+    };
+    # The console autologin the desktop profile's linger warning reads
+    # (`services.getty.autologinUser`, null by default like the real
+    # getty module), plus the display-manager autologin it must NOT
+    # fire for (a login-screen autologin is class `user`, whose manager
+    # starts -- pinned by osDeskDmAutologin below).
+    options.services.getty.autologinUser = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+    };
+    options.services.displayManager.autoLogin.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.services.displayManager.autoLogin.user = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
     };
     # The launcher's user units (`scoot.service`, `scoot-shutdown.target`).
     # An attrs-of-lineshape, like the real `systemd.user.units`: the pins
@@ -1043,6 +1069,21 @@ let
     enable = true;
     desktop.enable = true;
   };
+  # The linger warning against real nixpkgs modules (gh-462): a getty
+  # autologin user with no `linger` warns, proving the stub
+  # evaluations above agree with the real option shapes.
+  osRealAutologin =
+    evalRealNixosWith
+      [
+        {
+          services.getty.autologinUser = "alice";
+          users.users.alice.isNormalUser = true;
+        }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+      };
   # The power policy in a real NixOS evaluation: the daemon, UPower,
   # logind and the charge units against nixpkgs' own modules (not the
   # stubs) -- in particular PPD's real service, UPower's real
@@ -4279,6 +4320,90 @@ let
     package = fakePkg;
     desktop.look = "radial-burst";
   };
+  # TTY autologin (gh-462): the console logs in as "alice". Without
+  # `linger` her user manager never starts, so the profile warns,
+  # naming her and the one-line fix; with it (or with no autologin, or
+  # with a display-manager autologin, which is class `user`) it stays
+  # quiet. linger=false, linger=null (the real default: unmanaged) and
+  # a missing user all warn: an unknown linger state must not read as
+  # enabled, and only the explicitly configured autologin user is ever
+  # named.
+  autologinAlice = linger: {
+    services.getty.autologinUser = "alice";
+    users.users.alice = {
+      linger = linger;
+    };
+  };
+  osDeskAutologinNoLinger =
+    evalNixosWith
+      [
+        ./modules/nixos.nix
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        (autologinAlice false)
+      ]
+      pkgs
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+      };
+  osDeskAutologinLinger =
+    evalNixosWith
+      [
+        ./modules/nixos.nix
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        (autologinAlice true)
+      ]
+      pkgs
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+      };
+  osDeskAutologinNoUser =
+    evalNixosWith
+      [
+        ./modules/nixos.nix
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        { services.getty.autologinUser = "alice"; }
+      ]
+      pkgs
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+      };
+  # ...an explicitly unmanaged `linger` (null, the real default)
+  # warns too: unmanaged means the manager does not start at boot.
+  osDeskAutologinLingerNull =
+    evalNixosWith
+      [
+        ./modules/nixos.nix
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        (autologinAlice null)
+      ]
+      pkgs
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+      };
+  osDeskDmAutologin =
+    evalNixosWith
+      [
+        ./modules/nixos.nix
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        {
+          services.displayManager.autoLogin.enable = true;
+          services.displayManager.autoLogin.user = "alice";
+        }
+      ]
+      pkgs
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+      };
   # The shared keymap off: the profile's other packages only.
   osKeysOff = evalNixos {
     enable = true;
@@ -6517,6 +6642,72 @@ let
     )
     (
       assert osDesk.config.services.displayManager.defaultSession == null;
+      true
+    )
+    # ...and stays quiet with no autologin (no warning is the default:
+    # greeter logins need no linger)...
+    (
+      assert osDesk.config.warnings == [ ];
+      true
+    )
+    # ...TTY autologin without linger (gh-462): exactly one warning,
+    # naming the one-line fix for the autologin user...
+    (
+      assert allAssertionsHold osDeskAutologinNoLinger.config;
+      true
+    )
+    (
+      assert builtins.length osDeskAutologinNoLinger.config.warnings == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "users.users.\"alice\".linger = true" (
+        builtins.head osDeskAutologinNoLinger.config.warnings
+      );
+      true
+    )
+    # ...an autologin user the config never declares warns too (an
+    # unknown linger state never reads as enabled, and only the
+    # explicitly configured user is ever named)...
+    (
+      assert builtins.length osDeskAutologinNoUser.config.warnings == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "users.users.\"alice\".linger = true" (
+        builtins.head osDeskAutologinNoUser.config.warnings
+      );
+      true
+    )
+    # ...an explicitly unmanaged `linger` (null, the real default)
+    # warns too: unmanaged means the manager does not start at boot...
+    (
+      assert builtins.length osDeskAutologinLingerNull.config.warnings == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "users.users.\"alice\".linger = true" (
+        builtins.head osDeskAutologinLingerNull.config.warnings
+      );
+      true
+    )
+    # ...while lingering, and a display-manager autologin (class
+    # `user`, whose manager starts), both stay quiet...
+    (
+      assert osDeskAutologinLinger.config.warnings == [ ];
+      true
+    )
+    (
+      assert osDeskDmAutologin.config.warnings == [ ];
+      true
+    )
+    # ...and the real-nixpkgs evaluation agrees (the stubs match the
+    # real option shapes; only the linger warning is pinned there,
+    # since real nixpkgs may warn about its own business too)...
+    (
+      assert lib.any (
+        w: lib.hasInfix "users.users.\"alice\".linger = true" w
+      ) osRealAutologin.config.warnings;
       true
     )
     # ...the capture slot on with it: the portal service with both
