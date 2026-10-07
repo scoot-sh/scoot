@@ -44,7 +44,10 @@
 //! (at most one kept), at most eight entries an item, each converted to
 //! premultiplied once per icon version and drawn from the shared icon
 //! cache at the output's real size — icons at exact device pixels,
-//! without a per-frame allocation. A malformed or hostile item loses
+//! without a per-frame allocation. An item that sends only a themed
+//! `IconName` is resolved through the `hicolor` theme lookup instead
+//! (PNG only, hostile names and oversized files refused; see [`theme`]),
+//! once per answer and likewise cached. A malformed or hostile item loses
 //! itself (its reply is dropped, its entry skipped), never the bar.
 
 use std::fmt::Write;
@@ -64,6 +67,7 @@ use crate::text::Text;
 
 mod item;
 mod menu;
+pub(super) mod theme;
 mod watcher;
 
 #[cfg(test)]

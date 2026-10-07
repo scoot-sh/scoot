@@ -522,12 +522,20 @@ socket is one more source in the `poll` loop), which is the
 - **What is drawn.** An item's `IconPixmap` (raw `ARGB32` over the bus),
   picked at the output's device size from the entries sent and scaled
   only when none matches, from the shared icon cache: a steady bar
-  re-reads nothing. An item whose `Status` is `Passive` (the spec's "hide
-  me"), or that sends only an icon *name* (themed icons need an icon-theme
-  lookup and an image decoder, which this build does not have), is tracked
-  and reachable by index but takes no room. Attention and overlay icons,
-  tooltip icons and `IconThemePath` are read for shape and not drawn. The
-  tooltip over the module lists the shown items' titles.
+  re-reads nothing. An item that sends only an icon *name* is resolved
+  through the `hicolor` icon theme instead (`$XDG_DATA_DIRS`, the item's
+  `IconThemePath` first): PNG files, decoded once per icon version
+  through the same cache, at the output's device pixels like a pixmap.
+  While `NeedsAttention` the attention name is drawn instead of the
+  main one. An item whose `Status` is `Passive` (the spec's "hide
+  me"), or whose name resolves to nothing (missing theme, SVG-only,
+  hostile name), is tracked and reachable by index but takes no room.
+  Overlay icons are read for shape and not drawn (compositing a badge
+  is a second scaled draw a frame for something real items rarely
+  send), and tooltip icons are not drawn. A theme installed or changed
+  is picked up on the item's next update, or on restart: nothing polls
+  the theme directories. The tooltip over the module lists the shown
+  items' titles.
 - **Clicks, with no binding at all**: a left click is `activate`, a middle
   click `secondary` (the spec's `SecondaryActivate`), a scroll `wheel-up`
   or `wheel-down`, each on the item under the pointer. A right click opens
@@ -618,7 +626,12 @@ socket is one more source in the `poll` loop), which is the
   is discarded, one turn reads at most 256 KiB more (the poll is woken
   for the rest), so a sender that outruns the reader holds one turn,
   not the bar. Titles are cut to 128 bytes
-  with controls stripped; at most 32 items, 8 from one service or one registrant, 8 pixmap
+  with controls stripped; themed names past 128 bytes, with a `/` or
+  starting with a dot, are refused without touching the disk, and an
+  `IconThemePath` that is not absolute or holds `..` is ignored; a
+  theme file is read only when it resolves inside its base
+  (symlink escapes refused), at most 8 MiB, decoded under a 16 MiB
+  budget and a 512-pixel, 1 M-pixel header check; at most 32 items, 8 from one service or one registrant, 8 pixmap
   entries each; one `GetAll` in flight per item however many signals it
   sends; a menu's layout is read bounded the same way (at most 8 levels,
   64 nodes including the root — 63 drawable rows — one `GetLayout` in flight, re-read no oftener than every

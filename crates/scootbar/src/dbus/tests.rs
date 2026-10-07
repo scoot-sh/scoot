@@ -755,6 +755,41 @@ fn an_item_answer_is_read_typed_and_refused_whole_when_hostile() {
     assert_eq!(read_item_props(&big).unwrap().pixmaps.unwrap().len(), 0);
 }
 
+#[test]
+fn themed_names_ride_typed_and_a_wrong_type_is_skipped() {
+    use super::proto::Writer;
+    use super::proto::read_item_props;
+    // IconName, IconThemePath and the attention/overlay names parse;
+    // the overlay name is carried for shape (the tray does not draw it).
+    let mut body = Writer::new();
+    let cookie = body.open_array(8).unwrap();
+    for (key, value) in [
+        ("Status", "Active"),
+        ("IconName", "pasystray"),
+        ("IconThemePath", "/usr/share/pasystray"),
+        ("AttentionIconName", "pasystray-attention"),
+        ("OverlayIconName", "pasystray-overlay"),
+    ] {
+        assert!(body.open_struct());
+        body.str(key);
+        body.variant("s");
+        body.str(value);
+        body.close_struct();
+    }
+    body.close_array(cookie);
+    let bytes = body.take_body().unwrap();
+    let props = read_item_props(&bytes).unwrap();
+    assert_eq!(props.icon_name, Some("pasystray"));
+    assert_eq!(props.icon_theme_path, Some("/usr/share/pasystray"));
+    assert_eq!(props.attention_icon_name, Some("pasystray-attention"));
+    assert_eq!(props.overlay_icon_name, Some("pasystray-overlay"));
+    // The same keys with another type are unknown properties: skipped,
+    // and the rest of the answer still reads.
+    let wrong = dict(2, "IconName", "u", |w| w.u32(7));
+    let props = read_item_props(&wrong).unwrap();
+    assert_eq!(props.icon_name, None);
+}
+
 // A valid message past the size this client reads, and floods: neither
 // may cost the connection (which was an item's `GetAll` with a 512 by 512
 // pixmap turning the tray off for the session).

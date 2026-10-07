@@ -47,8 +47,11 @@ battery = []
 popup = []
 # The system tray: StatusNotifierItem watcher and host over the shared
 # hand-rolled D-Bus client, pixmap icons first
-# (docs/scootbar/backlog/tray.md).
-tray = []
+# (docs/scootbar/backlog/tray.md). Themed icon names reuse the `png`
+# decoder the `icon-image` feature carries (same version, same lock
+# entry, MIT OR Apache-2.0): PNG files from the icon theme, no SVG
+# renderer, no new package in the tree.
+tray = ["dep:png"]
 # What the players on the session bus are playing, and play/pause, next and
 # previous, over MPRIS: a client of the shared D-Bus client, signals only
 # (docs/scootbar/backlog/resolved/media-module-done.md).

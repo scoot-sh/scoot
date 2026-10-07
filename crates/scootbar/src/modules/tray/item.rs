@@ -9,6 +9,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::theme;
 use super::{ITEM_KDE, MAX_ITEM_TEXT, MAX_STORED_ICONS, MAX_STORED_SIDE};
 use crate::dbus::proto::{Pixmap, Writer, check_path, read_item_props};
 use crate::icon::tray::TrayIcon;
@@ -111,10 +112,10 @@ impl Item {
     }
 
     /// Whether the bar draws this item: its status is not `Passive` (the
-    /// spec's "hide me") and it sent a pixmap to draw. An item with only
-    /// a themed icon name is tracked and clickable by index, but takes no
-    /// room: there is no icon-theme lookup yet, and a blank slot is worse
-    /// than none.
+    /// spec's "hide me") and it sent a pixmap to draw or named a theme
+    /// icon the lookup resolved. An item with only an unresolvable name
+    /// is tracked and clickable by index, but takes no room: a blank slot
+    /// is worse than none.
     pub(super) fn shown(&self) -> bool {
         self.status != Status::Passive && !self.icons.is_empty()
     }
@@ -183,6 +184,12 @@ pub(super) fn is_item_name(name: &str) -> bool {
 /// icons, from [`read_item_props`] (the walk the fuzz target runs).
 /// `false` drops the answer (the item keeps its last state).
 pub(super) fn fill(item: &mut Item, body: &[u8]) -> bool {
+    fill_with(item, body, &theme::default_bases())
+}
+
+/// [`fill`], with the theme search bases of the caller's choosing: the
+/// tests' fixture themes, instead of the machine's icon directories.
+pub(super) fn fill_with(item: &mut Item, body: &[u8], bases: &[std::path::PathBuf]) -> bool {
     let Ok(props) = read_item_props(body) else {
         return false;
     };
@@ -206,8 +213,37 @@ pub(super) fn fill(item: &mut Item, body: &[u8]) -> bool {
     if let Some(item_is_menu) = props.item_is_menu {
         item.item_is_menu = item_is_menu;
     }
+    let mut from_pixmap = false;
     if let Some(pixmaps) = props.pixmaps {
         item.icons = convert(&item.id, &pixmaps);
+        // A sent pixmap wins; an absent one keeps whatever the theme
+        // path below recomputes (re-resolved per answer, so a changed
+        // theme is picked up on the next update, never per frame).
+        from_pixmap = !item.icons.is_empty();
+    }
+    if !from_pixmap {
+        // No pixmap sent (or none survived the bounds): resolve the
+        // themed name through the icon-theme lookup, once per answer
+        // (per icon version, never per frame). `NeedsAttention` prefers
+        // the attention name; the overlay name is not composited (see
+        // `theme`). A missing or hostile name leaves the item
+        // tracked-but-hidden, as before: never a panic, never a read on
+        // the render path (this runs on the bus turn, and the result is
+        // cached in `icons` for every frame after).
+        let needs_attention = item.status == Status::NeedsAttention;
+        let name = if needs_attention {
+            props.attention_icon_name.or(props.icon_name)
+        } else {
+            props.icon_name
+        };
+        if let Some(name) = name {
+            // The name was sent: recompute, like the pixmap path. A name
+            // that no longer resolves clears the icons (tracked-but-hidden,
+            // as before), so a deleted theme never shows a stale icon.
+            item.icons = theme::load(&item.id, name, props.icon_theme_path, bases)
+                .map(|icon| vec![Arc::new(icon)])
+                .unwrap_or_default();
+        }
     }
     true
 }

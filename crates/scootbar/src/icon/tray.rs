@@ -57,6 +57,24 @@ impl TrayIcon {
         self.id
     }
 
+    /// Takes already-premultiplied `b, g, r, a` pixels (rows packed, as
+    /// [`TrayIcon::take`] holds them): what the icon-theme PNG decoder
+    /// hands over. `None` for a zero or past-bound size, or short bytes.
+    pub fn from_premultiplied(id: u64, width: u32, height: u32, pixels: Box<[u8]>) -> Option<Self> {
+        if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
+            return None;
+        }
+        if pixels.len() != width as usize * height as usize * 4 {
+            return None;
+        }
+        Some(Self {
+            id,
+            width,
+            height,
+            pixels,
+        })
+    }
+
     /// The longer side, in pixels: what the tray picks entries by.
     pub fn side(&self) -> u32 {
         self.width.max(self.height)
