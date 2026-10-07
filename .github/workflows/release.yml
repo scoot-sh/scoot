@@ -38,8 +38,9 @@
 #
 # DRY RUN: `workflow_dispatch` with `dry_run: true` (the default) runs
 # resolve, vendor, both arch builds, SBOM, checksums and the changelog,
-# then prints what it would publish and stops. A dry run attests and
-# uploads nothing and creates no release. New workflows cannot be
+# then prints what it would publish and stops. A dry run attests nothing
+# and creates no release; it still uploads the run's own build artifacts
+# (7-day retention). New workflows cannot be
 # dispatched until they are on main, so the first dry run happens after
 # merge; until then the lint job below plus local runs are the proof.
 #
@@ -169,7 +170,8 @@ jobs:
           # (v4.4+ drops dot-files by default; the vendor tree has .cargo/).
           steps = re.split(r"(?m)^\s*-\s+(?=name:|uses:)", text)
           for st in steps:
-              if "actions/upload-artifact@" in st and "include-hidden-files: true" not in st:
+              code = re.sub(r"(?m)\s*#.*$", "", st)  # a comment must not satisfy the check
+              if "actions/upload-artifact@" in st and "include-hidden-files: true" not in code:
                   print("::error title=Hidden files::every upload-artifact step in release.yml needs include-hidden-files: true.")
                   sys.exit(1)
           print("guards ok: single-path uploads, hidden files included, no inline github/inputs/steps in run")
@@ -517,7 +519,7 @@ jobs:
           if [ '${{ needs.resolve.outputs.dry_run }}' = true ]; then
             echo "dry run: would publish '${{ needs.resolve.outputs.tag }}' with these files:"
             (cd dist && sha256sum -- *)
-            echo "dry run: no release created, nothing uploaded, nothing attested."
+            echo "dry run: no release created, nothing attested (the run's own artifacts were uploaded)."
             exit 0
           fi
           tag='${{ needs.resolve.outputs.tag }}'
