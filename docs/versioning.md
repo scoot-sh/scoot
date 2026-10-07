@@ -117,6 +117,12 @@ The tool never tags; the maintainer does the first release by hand:
    bumps, whatever its scope, so the release commit itself moves nothing),
    then tag each moving package (`scoot-v0.2.0`, `scootbg-v0.2.0`, ...).
 4. Push the commit and the tags. The tag-triggered release workflow
-   (blocked on this ticket) takes it from there: per-package changelog
+   (`.github/workflows/release.yml`) takes it from there: per-package changelog
    from `scripts/version changelog <package>`, vendored tarball,
-   checksums, signatures.
+   portable binaries for both architectures (built with Rust 1.97.0,
+   the workflow's rustup pin; the workspace `rust-version` floor
+   predates the let-chains the tree uses), SBOM (union of the shipped
+   binaries' dependencies for trio releases), checksums, keyless
+   provenance. The full maintainer procedure -- dry runs, recovery --
+   is on the site's [cut a release](https://www.scoot.sh/reference/cut-a-release/)
+   page; what users do with a release is on [releases](https://www.scoot.sh/reference/releases/).

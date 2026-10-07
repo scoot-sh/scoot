@@ -3,7 +3,7 @@ title: "Debian and Ubuntu packages: `.deb`s and a signed apt repository"
 status: "open"
 area: "packaging"
 priority: "low"
-blocked: "release-artifacts"
+blocked: null
 ---
 
 # Debian and Ubuntu packages
@@ -14,7 +14,7 @@ Filed 2026-09-29. Serves **daily-drive**.
 
 1. **Repo-hosted `.deb`s** built with `cargo-deb` (metadata in each crate's
    `Cargo.toml`), attached to the release
-   ([release-artifacts](release-artifacts.md)) and published in a **signed apt
+   ([release-artifacts](../resolved/release-artifacts-done.md)) and published in a **signed apt
    repository** (`reprepro` or `aptly`). Dependencies come from
    `dpkg-shlibdeps` (`$auto`), so the list is derived, not remembered.
 2. **A full `debian/` directory** only if inclusion in the Debian or Ubuntu

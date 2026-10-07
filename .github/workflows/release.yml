@@ -1,0 +1,531 @@
+# scoot releases: the tag-triggered per-package release job
+# (docs/backlog/packaging/release-artifacts.md).
+#
+# WHAT IT DOES: pushing a package tag (`scoot-v0.2.0`, `scootbar-v0.3.0`;
+# a trio tag releases the trio's binaries) builds that package only and
+# publishes a GitHub Release holding, per release: the vendored source
+# tarball (`scripts/vendor-release.sh`), portable glibc binaries for
+# `x86_64-linux` and `aarch64-linux`, an SBOM (CycloneDX, cargo-cyclonedx),
+# `SHA256SUMS`, a keyless build-provenance attestation, and the
+# per-package changelog (`scripts/version changelog`) as the notes. No
+# manual uploads, no long-lived signing keys, no extra secrets: release
+# creation and attestation run on `GITHUB_TOKEN` alone.
+#
+# WHY THE BINARIES COME FROM CARGO IN A DISTRO CONTAINER, NOT `nix
+# build`: a `nix build` binary carries a `/nix/store/...` interpreter and
+# RUNPATH, so it runs only where that store exists (measured: the
+# packaged `scootbar` fails on plain bookworm with "no such file or
+# directory", while the container build prints its `--version` on
+# bookworm, trixie and fedora 43 alike; see the ticket's record). The
+# release binary must run on a stock distro, so it is built with cargo
+# `--locked --offline` from the vendored tree inside
+# `debian:bookworm-slim` (glibc floor 2.36, stated and asserted below),
+# with the stock toolchain of that base plus a pinned rustup toolchain
+# (the workspace `rust-version` floor predates the let-chains the tree
+# uses; the builder pins a toolchain new enough to compile it). Nix
+# stays the reproducible path for Nix users: every tag is on main, and
+# main's binaries are already on Cachix with the flake on FlakeHub
+# (`.github/workflows/nix-build.yml`).
+#
+# GATES (all in `scripts/release-resolve`, unit-tested in
+# `scripts/test_release_resolve.py`, plus `scripts/version check`): the
+# tag is `<package>-vX.Y.Z` for a shipped package; its version equals
+# the manifest(s) (trio tags need all three: lockstep); the tag exists
+# and its commit is on `origin/main`; a release holding every expected
+# asset refuses a re-publish, while an incomplete one resumes, so a
+# re-run of a failed run converges instead of duplicating. Dispatch
+# takes the same gates: `tag` must exist and point at main.
+#
+# DRY RUN: `workflow_dispatch` with `dry_run: true` (the default) runs
+# resolve, vendor, both arch builds, SBOM, checksums and the changelog,
+# then prints what it would publish and stops. A dry run attests nothing
+# and creates no release; it still uploads the run's own build artifacts
+# (7-day retention). New workflows cannot be
+# dispatched until they are on main, so the first dry run happens after
+# merge; until then the lint job below plus local runs are the proof.
+#
+# RECOVERY: re-run the failed workflow run (same tag): the gates resume
+# an incomplete release and refuse a complete one. If a published
+# release is wrong, the maintainer deletes the release and the tag and
+# re-cuts (`docs/versioning.md` plus the site's "cut a release" page).
+#
+# TRIGGERS (the CLAUDE.md rule: no always-run job; docs-only pushes
+# start nothing): tag pushes run the pipeline; `pull_request` runs only
+# the lint job and only when this file or the resolve tool changes; a
+# push to main never reaches this workflow (no `branches: [main]`
+# trigger), and tag pushes always contain the release commit, so no
+# paths filter is needed on the tag trigger.
+#
+# PINS: every third-party action is pinned by commit SHA (tag in a
+# trailing comment), the publishing-workflow convention (`nix-build.yml`
+# says why: these runs mint the artifacts users trust). The distro base
+# (`debian:bookworm-slim`) and the rustup toolchain (`1.97.0`) are
+# pinned by tag and version in the build steps; the glibc they produce
+# is asserted, not assumed. `nix shell --inputs-from .` tools
+# (cargo-cyclonedx, actionlint) resolve through this repo's own
+# `flake.lock`.
+#
+# PERMISSIONS: top-level `read`; `contents: write` (release create and
+# upload), `id-token: write` plus `attestations: write` (provenance)
+# only on the publish job.
+
+name: release (tag-triggered, per package)
+
+on:
+  push:
+    tags:
+      - 'scoot-v*'
+      - 'scootctl-v*'
+      - 'scootbg-v*'
+      - 'scootbar-v*'
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/release-resolve'
+      - 'scripts/test_release_resolve.py'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Package tag to release (e.g. scootbar-v0.2.0). Must exist and point at main.'
+        required: true
+      dry_run:
+        description: 'Build everything, publish nothing.'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+# A publish must never be cancelled halfway (half-uploaded assets read
+# as complete by nothing: the gates resume them, but do not leave them).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The workflow's own CI: actionlint over this file plus the resolve
+  # tool's unit tests. Runs on pull requests that touch the release
+  # tooling, and nowhere else.
+  lint:
+    name: Release tooling (actionlint + resolve tests)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+
+      - name: actionlint (pinned through this repo's flake.lock)
+        run: nix shell --inputs-from . nixpkgs#actionlint --command actionlint .github/workflows/release.yml
+
+      - name: Release workflow guards (single-path artifacts, no inline context)
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+          path = ".github/workflows/release.yml"
+          text = open(path).read()
+          # 1. No multi-path upload: every upload-artifact path must be a single path
+          # (multiple path entries restore under their least common ancestor,
+          # so consumers cannot predict the layout; see the review of #498).
+          if re.search(r"(?m)^\s*path:\s*\|", text):
+              print("::error title=Multi-path upload::release.yml must not contain a block path (upload one staged directory per artifact).")
+              sys.exit(1)
+          # 2. No direct github/inputs/steps interpolation inside run blocks
+          # (pass values through env instead; needs/matrix/runner remain allowed).
+          # Whitespace-tolerant and covering every `run:` scalar style (`|`,
+          # `|-`, `>`, and a single-line value). Built without a literal
+          # expression opener so this guard does not trip itself.
+          opener = chr(36) + chr(123) + chr(123)
+          forbidden = re.compile(re.escape(opener) + r"\s*(steps|github|inputs)\.")
+          lines = text.splitlines()
+          in_run = False
+          run_indent = None
+          bad = []
+          for i, line in enumerate(lines, 1):
+              m = re.match(r"^(\s*)(?:-\s*)?run:\s*(.*)$", line)
+              if m:
+                  rest = m.group(2).strip()
+                  run_indent = len(m.group(1)) + (2 if line.lstrip().startswith("- ") else 0)
+                  if rest and rest[0] not in "|>":
+                      if forbidden.search(rest):
+                          bad.append(f"{i}: inline run value: {line.strip()}")
+                      in_run = False
+                  else:
+                      in_run = True
+                  continue
+              if in_run:
+                  if line.strip() == "" or len(line) - len(line.lstrip()) > run_indent:
+                      if forbidden.search(line):
+                          bad.append(f"{i}: in run block: {line.strip()}")
+                  else:
+                      in_run = False
+          if bad:
+              print("::error title=Inline context in run::pass github/inputs/steps values through env instead.")
+              for b in bad:
+                  print(b)
+              sys.exit(1)
+          # 3. Every upload-artifact step must say include-hidden-files: true
+          # (v4.4+ drops dot-files by default; the vendor tree has .cargo/).
+          steps = re.split(r"(?m)^\s*-\s+(?=name:|uses:)", text)
+          for st in steps:
+              code = re.sub(r"(?m)\s*#.*$", "", st)  # a comment must not satisfy the check
+              if "actions/upload-artifact@" in st and "include-hidden-files: true" not in code:
+                  print("::error title=Hidden files::every upload-artifact step in release.yml needs include-hidden-files: true.")
+                  sys.exit(1)
+          print("guards ok: single-path uploads, hidden files included, no inline github/inputs/steps in run")
+          EOF
+
+      - name: scripts/release-resolve tests
+        run: python3 scripts/test_release_resolve.py
+
+  # Parse the tag and run every refusal gate. Its outputs drive the rest
+  # of the pipeline; a refusal fails the run before anything builds.
+  resolve:
+    name: Resolve and gate the tag
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      package: ${{ steps.resolve.outputs.package }}
+      version: ${{ steps.resolve.outputs.version }}
+      binaries: ${{ steps.resolve.outputs.binaries }}
+      assets: ${{ steps.resolve.outputs.assets }}
+      dry_run: ${{ steps.resolve.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: The tag under test
+        id: tag
+        env:
+          PUSH_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          INPUT_TAG: ${{ inputs.tag || '' }}
+        run: |
+          tag="${PUSH_TAG:-$INPUT_TAG}"
+          test -n "$tag" || { echo "::error title=No tag to release::dispatch needs the 'tag' input."; exit 1; }
+          echo "value=$tag" >>"$GITHUB_OUTPUT"
+
+      # The versioning policy (trio lockstep, semver, own versions,
+      # publish = false); the tag-vs-manifest equality itself is the
+      # resolve script's, below.
+      - name: scripts/version check
+        run: python3 scripts/version check
+
+      - name: scripts/release-resolve (every refusal gate)
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_TO_RESOLVE: ${{ steps.tag.outputs.value }}
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+        run: |
+          plan=$(scripts/release-resolve --json "$TAG_TO_RESOLVE")
+          echo "$plan"
+          {
+            echo "tag=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag"])')"
+            echo "package=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["package"])')"
+            echo "version=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+            echo "binaries=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["binaries"]))')"
+            echo "assets=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["assets"]))')"
+            if [ "$EVENT_NAME" = push ]; then echo "dry_run=false"; else echo "dry_run=$DRY_RUN_INPUT"; fi
+          } >>"$GITHUB_OUTPUT"
+
+  # The vendored source tarball plus the SBOM: arch-independent, staged
+  # once from the tag. The portable builds below compile this exact
+  # tree, so the tarball users unpack is the tree the binaries came
+  # from. (The staging compile check `--check-offline` does not run
+  # here: both arch builds below already build this tree offline, which
+  # is the same proof without a third compile.)
+  vendor:
+    name: Vendored tarball + SBOM
+    needs: resolve
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+
+      - name: Stage the tarball
+        run: |
+          scripts/vendor-release.sh --out "$RUNNER_TEMP/vendor-release"
+          ls -l "$RUNNER_TEMP/vendor-release"
+
+      - name: SBOM (CycloneDX from the lockfile, cargo-cyclonedx)
+        env:
+          RESOLVE_PACKAGE: ${{ needs.resolve.outputs.package }}
+          RESOLVE_VERSION: ${{ needs.resolve.outputs.version }}
+          RESOLVE_BINARIES: ${{ needs.resolve.outputs.binaries }}
+        run: |
+          # Union SBOM over every shipped binary. A trio tag ships scoot and
+          # scootbg, but a single-package SBOM would omit the other binary's
+          # dependencies (e.g. scootbg's image-webp/zune-*/byteorder-lite
+          # decoders). cargo-cyclonedx emits crates/*/sbom.json in one run;
+          # merge the shipped binaries' (plus the trigger package's)
+          # components, deduplicated by bom-ref, into one file.
+          nix shell --inputs-from . nixpkgs#cargo-cyclonedx --command \
+            cargo cyclonedx -f json --override-filename sbom \
+              --manifest-path "crates/$RESOLVE_PACKAGE/Cargo.toml"
+          python3 - <<'EOF'
+          import json, os
+          package = os.environ["RESOLVE_PACKAGE"]
+          version = os.environ["RESOLVE_VERSION"]
+          binaries = os.environ["RESOLVE_BINARIES"].split()
+          wanted = []
+          for name in [package] + binaries:
+              if name not in wanted:
+                  wanted.append(name)
+          merged = {}
+          base = None
+          for name in wanted:
+              path = f"crates/{name}/sbom.json"
+              try:
+                  with open(path) as f:
+                      data = json.load(f)
+              except FileNotFoundError:
+                  continue
+              if base is None:
+                  base = data
+              for comp in data.get("components", []):
+                  key = comp.get("bom-ref") or (comp.get("name", ""), comp.get("version", ""))
+                  if isinstance(key, tuple):
+                      key = f"{key[0]}@{key[1]}"
+                  merged[key] = comp
+          assert base is not None, f"no SBOM found for {wanted}"
+          base["components"] = [merged[k] for k in sorted(merged)]
+          runner_temp = os.environ["RUNNER_TEMP"]
+          out = f"{runner_temp}/sbom-{package}-{version}.cyclonedx.json"
+          with open(out, "w") as f:
+              json.dump(base, f, indent=2)
+          print(base.get("bomFormat"), base.get("specVersion"), len(base["components"]), "components", f"from {wanted}")
+          EOF
+          rm -f crates/*/sbom.json
+          ls -l "$RUNNER_TEMP"/sbom-*.cyclonedx.json
+
+      - name: Stage the vendor artifact (single directory)
+        run: |
+          STAGE="$RUNNER_TEMP/stage-vendor"
+          mkdir -p "$STAGE"
+          cp -a "$RUNNER_TEMP"/vendor-release/scoot-*-vendored/source "$STAGE/source"
+          test -f "$STAGE/source/.cargo/config.toml" || { echo "::error title=Staged source has no .cargo/config.toml::vendor-release.sh did not stage intact."; exit 1; }
+          cp "$RUNNER_TEMP"/vendor-release/*.tar.gz "$STAGE/"
+          cp "$RUNNER_TEMP"/sbom-*.cyclonedx.json "$STAGE/"
+          ls -l "$STAGE"
+
+      - name: Upload the staged source, tarball and SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vendor
+          path: ${{ runner.temp }}/stage-vendor
+          # The staged tree carries `source/.cargo/config.toml`, and
+          # upload-artifact v4.4+ drops hidden files unless told otherwise
+          # (the build's intact check would then fail on every run).
+          include-hidden-files: true
+          retention-days: 7
+
+  # One portable glibc build per architecture, on that architecture's
+  # native runner (no cross, no emulation): cargo `--locked --offline`
+  # from the staged source inside `debian:bookworm-slim`, so the glibc
+  # floor is the base's (2.36), stated, not accidental.
+  build:
+    name: Portable binaries (${{ matrix.arch }})
+    needs: [resolve, vendor]
+    if: github.event_name != 'pull_request'
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64-linux
+          # Free for public repos; the same runner the packaged
+          # aarch64 builds already use (nix-build.yml).
+          - runner: ubuntu-24.04-arm
+            arch: aarch64-linux
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      # Pinned together: the base sets the glibc floor, the toolchain
+      # must be new enough for the tree (let-chains need >= 1.88; the
+      # workspace floor predates them, so this pin is load-bearing).
+      DISTRO_IMAGE: debian:bookworm-slim
+      RUST_TOOLCHAIN: 1.97.0
+    steps:
+      - name: Download the staged source
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: vendor
+          path: ${{ runner.temp }}/vendor
+
+      - name: Build --release --locked --offline in the distro container
+        run: |
+          src="$RUNNER_TEMP/vendor/source"
+          test -f "$src/.cargo/config.toml" || { echo "::error title=Staged source has no .cargo/config.toml::the vendor artifact did not download intact."; exit 1; }
+          docker run --rm \
+            -v "$src:/src:ro" -v "$RUNNER_TEMP/dist:/out" \
+            -e CARGO_NET_OFFLINE=true -e CARGO_TARGET_DIR=/tmp/target \
+            "$DISTRO_IMAGE" bash -euo pipefail -c '
+              apt-get update -qq
+              apt-get install -y -qq curl ca-certificates build-essential pkg-config \
+                libseat-dev libinput-dev libxkbcommon-dev libudev-dev \
+                libpixman-1-dev libwayland-dev wayland-protocols
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs \
+                | sh -s -- -y --default-toolchain "$0" --profile minimal
+              export PATH="$HOME/.cargo/bin:$PATH"
+              echo "--- toolchain and glibc floor ---"
+              rustc --version
+              ldd --version | head -1
+              cd /src
+              # Unquoted on purpose: the resolve output is allowlist-safe
+              # (scoot/scootbg/scootbar from scripts/release-resolve).
+              for bin in ${{ needs.resolve.outputs.binaries }}; do
+                cargo build --release --locked --offline -p "$bin"
+                cp "/tmp/target/release/$bin" \
+                  "/out/${bin}-${{ needs.resolve.outputs.version }}-${{ matrix.arch }}"
+              done
+              ls -l /out/
+            ' "$RUST_TOOLCHAIN"
+
+      # The floor the release promises: every binary runs on the base
+      # it was built on (bookworm, glibc 2.36) with only runtime
+      # libraries installed -- no toolchain, no -dev packages -- so a
+      # user installing the documented dependencies gets a binary that
+      # starts. scoot needs its five system libraries (the ldd-derived
+      # list in the site packaging page); the others must start bare
+      # (scoot-[0-9]* names only the compositor, as the old scoot-* did:
+      # shell globs need the literal `scoot-`, so scootbg-* and
+      # scootbar-* also start with scoot but must run with nothing installed).
+      - name: The binaries start on the bare base
+        run: |
+          ls -l "$RUNNER_TEMP/dist"
+          docker run --rm -v "$RUNNER_TEMP/dist:/dist:ro" "$DISTRO_IMAGE" bash -euo pipefail -c '
+            apt-get update -qq
+            for bin in /dist/*; do
+              case "$(basename "$bin")" in
+                scoot-[0-9]*) apt-get install -y -qq libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0 >/dev/null ;;
+              esac
+              "$bin" --version
+            done
+          '
+
+      - name: Checksums and stage (single directory)
+        run: |
+          (cd "$RUNNER_TEMP/dist" && sha256sum -- * > "SHA256SUMS-${{ matrix.arch }}")
+          cat "$RUNNER_TEMP/dist/SHA256SUMS-${{ matrix.arch }}"
+          mkdir -p "$RUNNER_TEMP/stage-dist"
+          cp -a "$RUNNER_TEMP/dist/." "$RUNNER_TEMP/stage-dist/"
+          ls -l "$RUNNER_TEMP/stage-dist"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: binaries-${{ matrix.arch }}
+          path: ${{ runner.temp }}/stage-dist
+          include-hidden-files: true
+          retention-days: 7
+
+  # Assemble, attest and publish (or print the dry-run summary). Runs
+  # after both arch builds and the vendor job, so a red build never
+  # reaches a release.
+  publish:
+    name: Publish the GitHub Release (or dry-run it)
+    needs: [resolve, vendor, build]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Download every artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: vendor
+          path: ${{ runner.temp }}/rel/vendor
+
+      - name: Download the x86_64 binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries-x86_64-linux
+          path: ${{ runner.temp }}/rel/x86_64
+
+      - name: Download the aarch64 binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries-aarch64-linux
+          path: ${{ runner.temp }}/rel/aarch64
+
+      # Every file the resolve planned must be present exactly once, and
+      # every binary must still match the checksum its own arch build
+      # recorded. Only then is SHA256SUMS written (sorted: deterministic).
+      - name: Assemble and verify the file set
+        run: |
+          mkdir -p dist
+          cp "${{ runner.temp }}/rel/vendor/"*.tar.gz dist/
+          cp "${{ runner.temp }}/rel/vendor/"*.cyclonedx.json dist/
+          cp "${{ runner.temp }}/rel/x86_64/"scoot* "${{ runner.temp }}/rel/aarch64/"scoot* dist/
+          for asset in ${{ needs.resolve.outputs.assets }}; do
+            test -f "dist/$asset" || { echo "::error title=Missing release asset::$asset was planned but not assembled."; exit 1; }
+          done
+          (cd dist && sha256sum -c "${{ runner.temp }}/rel/x86_64/SHA256SUMS-x86_64-linux")
+          (cd dist && sha256sum -c "${{ runner.temp }}/rel/aarch64/SHA256SUMS-aarch64-linux")
+          (cd dist && sha256sum -- * | LC_ALL=C sort -k2 > SHA256SUMS && sha256sum -c SHA256SUMS)
+          ls -l dist/
+
+      - name: Release notes (per-package changelog)
+        run: |
+          {
+            echo "## ${{ needs.resolve.outputs.package }} ${{ needs.resolve.outputs.version }}"
+            echo
+            scripts/version changelog '${{ needs.resolve.outputs.package }}'
+            echo
+            echo "Built from \`$(
+              git rev-parse --short '${{ needs.resolve.outputs.tag }}^{commit}')\` on main;"
+            echo "verify a download on the site's [releases page](https://www.scoot.sh/reference/releases/)."
+          } >"$RUNNER_TEMP/NOTES.md"
+          cat "$RUNNER_TEMP/NOTES.md"
+
+      # Keyless build provenance over every file (no signing key in
+      # secrets, nothing for the maintainer to rotate): users check it
+      # with `gh attestation verify <file> --owner scoot-sh
+      # --signer-workflow scoot-sh/scoot/.github/workflows/release.yml`.
+      # Pinning the signer workflow matters: --owner alone accepts a
+      # provenance attestation minted by any workflow in the org.
+      # Skipped in dry runs (an attestation is a public claim; a dry run makes
+      # none).
+      - name: Attest the file set
+        if: needs.resolve.outputs.dry_run != 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'dist/*'
+
+      - name: Publish (or print the dry-run summary)
+        run: |
+          if [ '${{ needs.resolve.outputs.dry_run }}' = true ]; then
+            echo "dry run: would publish '${{ needs.resolve.outputs.tag }}' with these files:"
+            (cd dist && sha256sum -- *)
+            echo "dry run: no release created, nothing attested (the run's own artifacts were uploaded)."
+            exit 0
+          fi
+          tag='${{ needs.resolve.outputs.tag }}'
+          if ! gh release view "$tag" --json name >/dev/null 2>&1; then
+            gh release create "$tag" --draft --title "$tag" --notes-file "$RUNNER_TEMP/NOTES.md"
+          fi
+          gh release upload "$tag" dist/* --clobber
+          gh release edit "$tag" --draft=false
+          gh release view "$tag" --json tagName,assets --jq '{tag: .tagName, assets: [.assets[].name]}'
