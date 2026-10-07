@@ -35,6 +35,11 @@ pub struct Shot {
 }
 
 impl Shot {
+    /// Every pixel, row by row: for comparing two frames.
+    pub fn pixels(&self) -> &[[u8; 3]] {
+        &self.rgb
+    }
+
     pub fn at(&self, x: u32, y: u32) -> [u8; 3] {
         assert!(
             x < self.width && y < self.height,

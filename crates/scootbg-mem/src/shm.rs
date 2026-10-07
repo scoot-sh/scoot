@@ -229,6 +229,15 @@ impl ShmBuffer {
         unsafe { std::slice::from_raw_parts_mut(self.map.ptr.as_ptr(), self.map.len) }
     }
 
+    /// The pixels, shared: what a transition snapshot copies. Reading is
+    /// always this process's own mapping; only writes go through
+    /// [`ShmBuffer::pixels_mut`], so a shared copy never aliases a live
+    /// `&mut` from it.
+    pub fn pixels(&self) -> &[u8] {
+        // SAFETY: as for `pixels_mut`, for reads.
+        unsafe { std::slice::from_raw_parts(self.map.ptr.as_ptr(), self.map.len) }
+    }
+
     /// The validated size, stride and length, for `create_pool` and
     /// `create_buffer`.
     pub fn geometry(&self) -> Geometry {

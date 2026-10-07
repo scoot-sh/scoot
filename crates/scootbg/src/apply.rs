@@ -100,7 +100,7 @@ pub fn run(options: ApplyOptions) -> u8 {
         serve: serving,
     } = options;
     if serving {
-        return serve(profile, section);
+        return serve(profile, *section);
     }
     match deliver(&profile, &section, MayStart::Once).map_err(Undelivered::message) {
         Ok(()) => 0,

@@ -9,6 +9,7 @@ use crate::protocol::{
 };
 use crate::section::Section;
 use crate::state::Profile;
+use crate::transition::Spec;
 use crate::waiters::Outcome;
 
 /// What the handler needs from the daemon's state: the outputs, for
@@ -34,14 +35,16 @@ pub trait Changes {
     ) -> Result<(), String>;
 
     /// Makes every output (`output` is `None`), or the outputs named
-    /// `output`, show `show` (nothing when `None`), and registers `conn` to
-    /// be answered once they do, or, for an image that cannot be shown,
-    /// with why. `Err` changes nothing.
+    /// `output`, show `show` (nothing when `None`), arriving through
+    /// `transition` (`Spec::none()` for `clear`, which lands at once), and
+    /// registers `conn` to be answered once they do, or, for an image that
+    /// cannot be shown, with why. `Err` changes nothing.
     fn change(
         &mut self,
         conn: ConnId,
         output: Option<&str>,
         show: Option<Show<'_>>,
+        transition: Spec,
     ) -> Result<(), ChangeError>;
 }
 
@@ -125,7 +128,7 @@ pub fn write_ready(out: &mut Vec<u8>, ready: &Ready) {
 
 impl Handler for Responder<'_> {
     fn handle(&mut self, conn: ConnId, line: &[u8], out: &mut Vec<u8>) -> Answer {
-        let (output, show) = match protocol::parse(line) {
+        let (output, show, transition) = match protocol::parse(line) {
             Ok(Request::Query) => {
                 protocol::write_reply(
                     out,
@@ -152,8 +155,12 @@ impl Handler for Responder<'_> {
                 protocol::write_reply(out, &Reply::Ok);
                 return Answer::Now;
             }
-            Ok(Request::Set { show, output }) => (output, Some(show)),
-            Ok(Request::Clear { output }) => (output, None),
+            Ok(Request::Set {
+                show,
+                output,
+                transition,
+            }) => (output, Some(show), transition),
+            Ok(Request::Clear { output }) => (output, None, Spec::none()),
             Ok(Request::ApplyConfig { profile, section }) => {
                 return match self.wallpaper.apply_config(conn, profile, &section) {
                     Ok(()) => Answer::Later,
@@ -168,7 +175,10 @@ impl Handler for Responder<'_> {
                 return Answer::Now;
             }
         };
-        match self.wallpaper.change(conn, output.as_deref(), show) {
+        match self
+            .wallpaper
+            .change(conn, output.as_deref(), show, transition)
+        {
             Ok(()) => Answer::Later,
             Err(error) => {
                 let refused = Refused {
@@ -207,6 +217,7 @@ impl<O> OutputList for Outputs<O> {
                 draw_failed: output.has_failed(),
                 draw_error: output.failure(),
                 shows: output.shows().map(Shows),
+                transition: output.running().map(|kind| kind.name()),
             });
         }
     }

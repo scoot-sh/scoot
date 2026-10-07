@@ -60,6 +60,8 @@
 //! it serves anyone and before any output is configured ([`start`]), so it
 //! never shows the saved state first and then the section.
 
+use std::time::Instant;
+
 use wayland_client::QueueHandle;
 
 use super::change::{reconcile, sweep};
@@ -112,6 +114,7 @@ pub fn apply(
     section: &Section,
 ) -> Result<(), String> {
     let fingerprint = section.fingerprint();
+    let changed = state.saved.fingerprint() != Some(fingerprint.as_str());
     let adopted = (*state.saved.profile() != profile).then(|| adopt(state, profile));
     let problems = if state.saved.fingerprint() == Some(fingerprint.as_str()) {
         if let Some(record) = adopted {
@@ -127,15 +130,32 @@ pub fn apply(
         choices,
         waiters,
         images,
+        transitions,
         ..
     } = state;
     // Image `set`s still queued that this made moot are never decoded.
     sweep(&mut images.jobs, choices, waiters);
     // Newer than every choice just made: every output is waited for.
     let generation = waiters.next_generation();
+    // A changed section animates through its transitions; an unchanged
+    // one never replays them.
+    let now = Instant::now();
     for entry in outputs.iter_mut() {
         entry.output.want(generation);
-        reconcile(globals, choices, &mut images.jobs, entry, qh);
+        if changed {
+            let name = entry.output.info().name.clone();
+            let spec = section.transition(name.as_deref());
+            entry.output.request_transition(spec, generation);
+        }
+        reconcile(
+            globals,
+            choices,
+            &mut images.jobs,
+            transitions,
+            entry,
+            qh,
+            now,
+        );
     }
     if problems.is_empty() {
         waiters.push(conn, generation);

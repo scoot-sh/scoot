@@ -15,7 +15,7 @@ use scoot_ipc::DOCS_URL;
 /// Version of the `--help --json` document below. Bumped whenever a field is
 /// added, renamed or removed, so a script can refuse what it does not know
 /// rather than misread it.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// One command: its name, its shape, and what it does. Mirrors `cli`'s
 /// command dispatch -- the drift tests pin both directions, so a command
@@ -35,7 +35,7 @@ pub const COMMANDS: &[CommandDoc] = &[
     },
     CommandDoc {
         name: "set",
-        usage: "set COLOR|PATH|URL [--output NAME] [--mode MODE] [--fill COLOR] [--filter FILTER] [--sha256 HEX]",
+        usage: "set COLOR|PATH|URL [--output NAME] [--mode MODE] [--fill COLOR] [--filter FILTER] [--sha256 HEX] [--transition KIND] [--duration-ms MS] [--easing EASING] [--angle DEGREES] [--position X,Y]",
         description: "show a color or an image on every output, or on one",
     },
     CommandDoc {
@@ -123,6 +123,11 @@ pub fn json_value() -> Value {
             values_entry(
                 "filter",
                 &["lanczos3", "catmull-rom", "bilinear", "nearest"],
+            ),
+            values_entry("transition", &["none", "fade", "wipe", "grow"]),
+            values_entry(
+                "easing",
+                &["linear", "ease-in", "ease-out", "ease-in-out", "smooth"],
             ),
         ]),
     );
@@ -272,6 +277,19 @@ mod tests {
         for filter in filters.as_array().unwrap() {
             let name = filter.as_str().unwrap();
             assert!(crate::image::Filter::from_name(name).is_some(), "{name}");
+        }
+        let transitions = &sets[2]["values"];
+        for transition in transitions.as_array().unwrap() {
+            let name = transition.as_str().unwrap();
+            assert!(crate::transition::Kind::from_name(name).is_some(), "{name}");
+        }
+        let easings = &sets[3]["values"];
+        for easing in easings.as_array().unwrap() {
+            let name = easing.as_str().unwrap();
+            assert!(
+                crate::transition::Easing::from_name(name).is_some(),
+                "{name}"
+            );
         }
     }
 

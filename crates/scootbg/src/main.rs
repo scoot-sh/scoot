@@ -30,6 +30,7 @@ mod section;
 mod sha256;
 mod share;
 mod state;
+mod transition;
 mod waiters;
 mod wallpaper;
 

@@ -40,7 +40,7 @@ const NO_OUTPUTS: &[OutputEntry<'static>; 0] = &[];
 /// Records the changes asked for, or refuses them all with `refuse`.
 struct Fake<'a> {
     outputs: &'a dyn OutputList,
-    changes: Vec<(u64, Option<String>, Choice)>,
+    changes: Vec<(u64, Option<String>, Choice, crate::transition::Spec)>,
     refuse: Option<ChangeError>,
     applied: Vec<(u64, Profile, Section)>,
     refuse_apply: Option<String>,
@@ -90,13 +90,14 @@ impl Changes for Fake<'_> {
         conn: ConnId,
         output: Option<&str>,
         show: Option<Show<'_>>,
+        transition: crate::transition::Spec,
     ) -> Result<(), ChangeError> {
         if let Some(error) = self.refuse.clone() {
             return Err(error);
         }
         let id = if conn == ConnId::for_test(1) { 1 } else { 0 };
         self.changes
-            .push((id, output.map(str::to_owned), show.map(owned)));
+            .push((id, output.map(str::to_owned), show.map(owned), transition));
         Ok(())
     }
 }
@@ -188,14 +189,17 @@ fn set_and_clear_change_the_wallpaper_and_answer_later() {
         Request::Set {
             show: Show::Color(red),
             output: None,
+            transition: crate::transition::Spec::none(),
         },
         Request::Set {
             show: Show::Color(red),
             output: Some("DP-2".into()),
+            transition: crate::transition::Spec::none(),
         },
         Request::Set {
             show: image.clone(),
             output: None,
+            transition: crate::transition::Spec::none(),
         },
         Request::Clear { output: None },
         Request::Clear {
@@ -211,7 +215,7 @@ fn set_and_clear_change_the_wallpaper_and_answer_later() {
     let changes: Vec<_> = fake
         .changes
         .iter()
-        .map(|(_, o, c)| (o.clone(), c.clone()))
+        .map(|(_, o, c, _)| (o.clone(), c.clone()))
         .collect();
     assert_eq!(
         changes,
@@ -237,6 +241,7 @@ fn a_refused_change_is_an_error_now_naming_the_output() {
     let line = Request::Set {
         show: Show::Color(Color::parse("#c03020").unwrap()),
         output: Some("HDMI-A-9".into()),
+        transition: crate::transition::Spec::none(),
     }
     .line();
     let reply = ask(&mut responder, line.trim_end());
@@ -494,6 +499,7 @@ fn query_reports_each_output_and_its_surface() {
                 "draw_failed": true,
                 "draw_error": "shared memory: out of it",
                 "shows": null,
+                "transition": null,
             },
             {
                 "name": "HEADLESS-2",
@@ -506,6 +512,7 @@ fn query_reports_each_output_and_its_surface() {
                 "draw_failed": false,
                 "draw_error": null,
                 "shows": null,
+                "transition": null,
             },
             {
                 "name": null,
@@ -518,6 +525,7 @@ fn query_reports_each_output_and_its_surface() {
                 "draw_failed": false,
                 "draw_error": null,
                 "shows": null,
+                "transition": null,
             },
         ], "saving": true, "profile": "default"})
     );
@@ -651,4 +659,49 @@ fn a_bad_apply_config_changes_nothing() {
         assert_eq!(reply["type"], "error", "{line}");
     }
     assert!(fake.applied.is_empty());
+}
+
+#[test]
+fn a_set_hands_its_transition_over_and_answers_later() {
+    use crate::transition::{Easing, Kind, Spec};
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
+    let transition = Spec {
+        kind: Kind::Fade,
+        duration_ms: 800,
+        easing: Easing::Linear,
+        angle_deg: 0.0,
+        pos: (0.5, 0.5),
+    };
+    let line = Request::Set {
+        show: Show::Color(Color::parse("#c03020").unwrap()),
+        output: None,
+        transition,
+    }
+    .line();
+    let mut out = Vec::new();
+    let answer = responder.handle(ConnId::for_test(1), line.trim_end().as_bytes(), &mut out);
+    assert_eq!(answer, Answer::Later);
+    assert!(out.is_empty(), "nothing written yet");
+    assert_eq!(fake.changes.len(), 1);
+    assert_eq!(fake.changes[0].3, transition);
+}
+
+#[test]
+fn a_clear_with_a_transition_is_an_error_now() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
+    let reply = ask(
+        &mut responder,
+        r#"{"protocol":1,"type":"clear","transition":"fade"}"#,
+    );
+    assert_eq!(reply["type"], "error");
+    assert!(
+        reply["message"]
+            .as_str()
+            .unwrap()
+            .contains("nothing to blend"),
+        "{reply}"
+    );
+    assert!(fake.changes.is_empty());
 }

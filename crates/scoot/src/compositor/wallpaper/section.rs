@@ -34,8 +34,9 @@
 //! # What scoot checks, and what it leaves to scootbg
 //!
 //! scoot checks what it owns: the keys (`image`, `color`, `mode`, `fill`,
-//! `filter`, `sha256`, `output` and `command`; each output table the first
-//! six), that each value is a string (the output list a table of tables),
+//! `filter`, `sha256`, `transition`, `duration-ms`, `easing`, `angle`,
+//! `position`, `output` and `command`; each output table the first
+//! eleven), that each value is a string (the output list a table of tables),
 //! and the paths it resolves: an `image` with a `scheme://` is a link and
 //! passes through untouched. It does not check the values' meaning (a
 //! color's syntax, a mode's name, a URL's scheme, a hash's shape): scootbg
@@ -98,6 +99,24 @@ pub struct Table {
     pub filter: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+    /// How the next change through the table arrives (`none`, `fade`,
+    /// `wipe` or `grow`): passed through untouched; scootbg validates it
+    /// strictly and refuses the section with exit status 2 when it is not
+    /// one (see that side's `section`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transition: Option<String>,
+    /// How long the transition takes, in milliseconds as digits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<String>,
+    /// How the transition moves through the time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub easing: Option<String>,
+    /// A wipe's direction in degrees as a number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub angle: Option<String>,
+    /// Where a grow starts, as `X,Y` fractions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position: Option<String>,
 }
 
 /// `[wallpaper]` as the file has it. Never fails to deserialize: see the
@@ -188,6 +207,11 @@ impl WallpaperConfig {
             fill: top.fill.as_deref(),
             filter: top.filter.as_deref(),
             sha256: top.sha256.as_deref(),
+            transition: top.transition.as_deref(),
+            duration_ms: top.duration_ms.as_deref(),
+            easing: top.easing.as_deref(),
+            angle: top.angle.as_deref(),
+            position: top.position.as_deref(),
             output: output.as_ref(),
         })
         .map_err(|error| format!("the [wallpaper] section cannot be encoded as JSON: {error}"))?;
@@ -217,6 +241,16 @@ struct Json<'a> {
     filter: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sha256: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transition: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "duration-ms")]
+    duration_ms: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    easing: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    angle: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    position: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     output: Option<&'a BTreeMap<String, Table>>,
 }
@@ -382,7 +416,8 @@ impl<'de> Visitor<'de> for SectionVisitor {
                         map.next_value_seed(Drain::TOP)?;
                         config.problems.push(format!(
                             "unknown key `wallpaper.{}` (expected image, color, mode, fill, \
-                             filter, sha256, output or command)",
+                             filter, sha256, transition, duration-ms, easing, angle, position, \
+                             output or command)",
                             quoted(&key)
                         ));
                     }
@@ -443,6 +478,11 @@ fn read_table_key<'de, A: MapAccess<'de>>(
         "fill" => &mut table.fill,
         "filter" => &mut table.filter,
         "sha256" => &mut table.sha256,
+        "transition" => &mut table.transition,
+        "duration-ms" => &mut table.duration_ms,
+        "easing" => &mut table.easing,
+        "angle" => &mut table.angle,
+        "position" => &mut table.position,
         _ => return Ok(false),
     };
     let value = map.next_value::<Text>()?;
@@ -654,7 +694,7 @@ impl<'de> Visitor<'de> for OutputSeed<'_> {
                 map.next_value_seed(Drain::TOP)?;
                 self.problems.push(format!(
                     "unknown key `{}.{}` (an output's table takes image, color, mode, fill, \
-                     filter and sha256)",
+                     filter, sha256, transition, duration-ms, easing, angle and position)",
                     self.at,
                     quoted(&key)
                 ));

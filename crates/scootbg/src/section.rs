@@ -13,11 +13,17 @@
 //! cached: `crate::fetch`) or `color` (`#rrggbb`), never both, with `mode`,
 //! `fill` and `filter` for an image only, as `scootbg set` takes them, and
 //! `sha256` (64 hex digits, pinning a download's bytes) for a URL image
-//! only. Neither is nothing: the compositor's own background. `output` is
-//! an object of per-output tables, by connector name, each the same six
+//! only. Neither is nothing: the compositor's own background. `transition`
+//! (`none`, `fade`, `wipe` or `grow`), with `duration-ms` (milliseconds as
+//! digits), `easing`, `angle` and `position` for any kind but `none`, says
+//! how the next change through the table arrives, as `scootbg set` takes
+//! them; without a `transition` the rest are refused, with an explicit
+//! `none` they are ignored. `output` is
+//! an object of per-output tables, by connector name, each the same eleven
 //! keys and nothing else; an empty one means nothing on that output.
 //! **Each table stands alone**, as a `scootbg set` does: an output's image
-//! does not take the top level's `mode`. `command` is scoot's (where to
+//! does not take the top level's `mode`, and an output's change does not
+//! take the top level's `transition`. `command` is scoot's (where to
 //! find the binary): accepted, and ignored.
 //!
 //! **Strict.** Anything else is refused, so a typo is an error rather than a
@@ -53,6 +59,7 @@ use crate::image::{Filter, Mode};
 use crate::protocol::{DEFAULT_FILL, MAX_REQUEST_LINE, PROTOCOL_VERSION};
 use crate::state::Profile;
 use crate::state::format::{MAX_OUTPUTS, Pick, Record};
+use crate::transition::{self, Kind, Spec};
 
 #[cfg(test)]
 mod tests;
@@ -67,7 +74,7 @@ pub const MAX_SECTION: usize = MAX_REQUEST_LINE - 1024;
 pub const MAX_PATH: usize = 4095;
 
 /// A validated section.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Section {
     all: Table,
     /// `None` when the section has no `output` key; sorted by name.
@@ -76,10 +83,11 @@ pub struct Section {
 
 /// One table: the strings as given, for the canonical encoding, and what
 /// they mean.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct Table {
     raw: Raw,
     pick: Chosen,
+    transition: Spec,
 }
 
 /// What one table chooses, validated but not yet resolved: a URL becomes
@@ -136,7 +144,13 @@ impl Chosen {
 #[serde(deny_unknown_fields)]
 struct Raw {
     #[serde(default, deserialize_with = "present")]
+    angle: Option<String>,
+    #[serde(default, deserialize_with = "present")]
     color: Option<String>,
+    #[serde(default, deserialize_with = "present", rename = "duration-ms")]
+    duration_ms: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    easing: Option<String>,
     #[serde(default, deserialize_with = "present")]
     fill: Option<String>,
     #[serde(default, deserialize_with = "present")]
@@ -146,7 +160,11 @@ struct Raw {
     #[serde(default, deserialize_with = "present")]
     mode: Option<String>,
     #[serde(default, deserialize_with = "present")]
+    position: Option<String>,
+    #[serde(default, deserialize_with = "present")]
     sha256: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    transition: Option<String>,
 }
 
 /// The top level as given: a table's keys, `output` and `command`.
@@ -156,7 +174,13 @@ struct Raw {
 #[serde(deny_unknown_fields)]
 struct RawSection {
     #[serde(default, deserialize_with = "present")]
+    angle: Option<String>,
+    #[serde(default, deserialize_with = "present")]
     color: Option<String>,
+    #[serde(default, deserialize_with = "present", rename = "duration-ms")]
+    duration_ms: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    easing: Option<String>,
     #[serde(default, deserialize_with = "present")]
     fill: Option<String>,
     #[serde(default, deserialize_with = "present")]
@@ -166,7 +190,11 @@ struct RawSection {
     #[serde(default, deserialize_with = "present")]
     mode: Option<String>,
     #[serde(default, deserialize_with = "present")]
+    position: Option<String>,
+    #[serde(default, deserialize_with = "present")]
     sha256: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    transition: Option<String>,
     #[serde(default, deserialize_with = "outputs")]
     output: Option<Vec<(String, Raw)>>,
     /// scoot's; accepted and ignored (never part of the fingerprint).
@@ -262,6 +290,19 @@ pub enum SectionError {
     Filter(At, String),
     /// A `sha256` that is not 64 hex digits.
     Sha(At, String),
+    /// A `transition` that is not one.
+    TransitionKind(At, String),
+    /// An `easing` that is not one.
+    TransitionEasing(At, String),
+    /// A `duration-ms` that is not milliseconds as digits.
+    TransitionDuration(At, String),
+    /// An `angle` that is not degrees as a number.
+    TransitionAngle(At, String),
+    /// A `position` that is not two fractions as `X,Y`.
+    TransitionPosition(At, String),
+    /// A transition parameter (`duration-ms`, `easing`, `angle` or
+    /// `position`) without a `transition`.
+    TransitionOnly(At, String),
     /// A `sha256` with a file: it pins a download. (With a color it is
     /// the generic image-only refusal, like `mode`.)
     ShaImageOnly(At),
@@ -326,6 +367,30 @@ impl fmt::Display for SectionError {
                 f,
                 "{at}: the sha256 {text:?} is not 64 hex digits (as `sha256sum` prints)"
             ),
+            Self::TransitionKind(at, text) => write!(
+                f,
+                "{at}: unknown transition {text:?}: none, fade, wipe or grow"
+            ),
+            Self::TransitionEasing(at, text) => write!(
+                f,
+                "{at}: unknown easing {text:?}: linear, ease-in, ease-out, ease-in-out or smooth"
+            ),
+            Self::TransitionDuration(at, text) => write!(
+                f,
+                "{at}: bad duration-ms {text:?}: milliseconds as digits, 0 to {}",
+                transition::MAX_DURATION_MS
+            ),
+            Self::TransitionAngle(at, text) => {
+                write!(f, "{at}: bad angle {text:?}: degrees as a number")
+            }
+            Self::TransitionPosition(at, text) => write!(
+                f,
+                "{at}: bad position {text:?}: two fractions of the width and height as `X,Y`"
+            ),
+            Self::TransitionOnly(at, key) => write!(
+                f,
+                "{at}: `{key}` applies to a transition, and there is none"
+            ),
             Self::ShaImageOnly(at) => write!(
                 f,
                 "{at}: `sha256` pins a downloaded image, and this one is not a URL"
@@ -369,12 +434,17 @@ impl Section {
 
     fn validate(raw: RawSection) -> Result<Self, SectionError> {
         let table = Raw {
+            angle: raw.angle,
             color: raw.color,
+            duration_ms: raw.duration_ms,
+            easing: raw.easing,
             fill: raw.fill,
             filter: raw.filter,
             image: raw.image,
             mode: raw.mode,
+            position: raw.position,
             sha256: raw.sha256,
+            transition: raw.transition,
         };
         let all = Table::validate(table, At(None))?;
         let outputs = match raw.output {
@@ -426,6 +496,23 @@ impl Section {
         self.all.pick == Chosen::Clear && self.outputs.as_ref().is_none_or(Vec::is_empty)
     }
 
+    /// The transition the table for `output` asks the next change through
+    /// it to arrive with (the top level's for `None`): `none` when it names
+    /// none. An output with no table of its own follows the top level, as
+    /// for the wallpaper itself; a table with no transition key animates
+    /// nothing, even when the top level names one.
+    pub fn transition(&self, output: Option<&str>) -> Spec {
+        match output {
+            None => self.all.transition,
+            Some(name) => self
+                .outputs
+                .as_ref()
+                .and_then(|tables| tables.iter().find(|(n, _)| n == name))
+                .map(|(_, table)| table.transition)
+                .unwrap_or(self.all.transition),
+        }
+    }
+
     /// What it chooses, as the state file would record it: the choice for
     /// every output (nothing, when it names none), then each output's.
     /// `cache` turns a URL into its file; a file choice needs no cache.
@@ -466,6 +553,7 @@ impl<'de> Deserialize<'de> for Section {
 
 impl Table {
     fn validate(raw: Raw, at: At) -> Result<Self, SectionError> {
+        let transition = parse_transition(&raw, &at)?;
         let pick = match (&raw.image, &raw.color) {
             (Some(_), Some(_)) => return Err(SectionError::Both(at)),
             (None, color) => {
@@ -525,7 +613,11 @@ impl Table {
                 Chosen::Image { source, look }
             }
         };
-        Ok(Self { raw, pick })
+        Ok(Self {
+            raw,
+            pick,
+            transition,
+        })
     }
 }
 
@@ -534,12 +626,17 @@ impl Raw {
     /// comma unless `first`.
     fn encode(&self, out: &mut String, first: &mut bool) {
         for (name, value) in [
+            ("angle", &self.angle),
             ("color", &self.color),
+            ("duration-ms", &self.duration_ms),
+            ("easing", &self.easing),
             ("fill", &self.fill),
             ("filter", &self.filter),
             ("image", &self.image),
             ("mode", &self.mode),
+            ("position", &self.position),
             ("sha256", &self.sha256),
+            ("transition", &self.transition),
         ] {
             if let Some(value) = value {
                 key(out, first, name);
@@ -547,6 +644,35 @@ impl Raw {
             }
         }
     }
+}
+
+/// `transition`, `duration-ms`, `easing`, `angle` and `position` as a
+/// [`Spec`]: what the next change through the table arrives with.
+fn parse_transition(raw: &Raw, at: &At) -> Result<Spec, SectionError> {
+    use crate::transition::ParseError;
+    let kind = match &raw.transition {
+        None => None,
+        Some(name) => Some(
+            Kind::from_name(name)
+                .ok_or_else(|| SectionError::TransitionKind(at.clone(), name.clone()))?,
+        ),
+    };
+    transition::assemble(
+        kind,
+        raw.duration_ms.as_deref(),
+        raw.easing.as_deref(),
+        raw.angle.as_deref(),
+        raw.position.as_deref(),
+        str::to_owned,
+    )
+    .map_err(|error| match error {
+        ParseError::Orphan(key) => SectionError::TransitionOnly(at.clone(), key),
+        ParseError::UnknownKind(text) => SectionError::TransitionKind(at.clone(), text),
+        ParseError::UnknownEasing(text) => SectionError::TransitionEasing(at.clone(), text),
+        ParseError::BadDuration(text) => SectionError::TransitionDuration(at.clone(), text),
+        ParseError::BadAngle(text) => SectionError::TransitionAngle(at.clone(), text),
+        ParseError::BadPosition(text) => SectionError::TransitionPosition(at.clone(), text),
+    })
 }
 
 /// `mode`, `fill` and `filter` as a [`Look`].

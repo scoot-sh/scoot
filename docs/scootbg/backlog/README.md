@@ -132,7 +132,7 @@ full per-feature cycle.
 
 ## Milestone 2: motion
 
-- [Transitions between wallpapers](transitions.md)
+- [Transitions between wallpapers](resolved/transitions-done.md) — RESOLVED 2026-10-07: fade/wipe/grow/none + duration/easing, CPU into wl_shm, frame callbacks + presentation + timer pacing, damage-limited, mid-transition restart, 8 ms budget with degrade, zero idle cost (PR #501)
 - [Animated wallpapers: GIF, APNG, animated WebP](animated-images.md)
 
 ## Milestone 3: extras

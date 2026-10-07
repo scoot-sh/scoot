@@ -29,6 +29,8 @@
 //! ([`RoundTrip::Redraw`]); what the scales mean for the buffer is
 //! `crate::density`'s.
 
+use std::time::Instant;
+
 use wayland_client::protocol::wl_buffer::{self, WlBuffer};
 use wayland_client::protocol::wl_callback::{self, WlCallback};
 use wayland_client::protocol::wl_output::{self, WlOutput};
@@ -46,11 +48,15 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{
     self, WpFractionalScaleV1,
 };
+use wayland_protocols::wp::presentation_time::client::wp_presentation_feedback::{
+    self, WpPresentationFeedback,
+};
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
 use super::canvas::{Canvas, destroy_viewport};
 use super::change::reconcile;
 use super::respond::Ready;
+use super::transition::{self, Feedback};
 use super::wayland::{Globals, State};
 use crate::outputs::{Effect, Entry, OutputId, Surface, Transform};
 use crate::print::warn;
@@ -258,6 +264,10 @@ pub enum RoundTrip {
     /// turn waited for (numbered by `crate::waiters`): the compositor has
     /// processed them, so their connections get their replies.
     Replies(u64),
+    /// A frame callback on a transitioning output's surface (`seq`): the
+    /// compositor sets the transition's cadence. Stale generations (from
+    /// before a restart) are ignored.
+    Frame(OutputId, u64),
 }
 
 impl State {
@@ -301,7 +311,15 @@ impl State {
     /// state it was in.
     pub fn global_remove(&mut self, name: u32) {
         match self.outputs.remove_global(name) {
-            Some(entry) => entry.objects.destroy(),
+            Some(mut entry) => {
+                // Any transition on it ends with it: its buffers go too.
+                transition::drop_output(
+                    &mut self.transitions,
+                    entry.output.id(),
+                    &mut entry.output,
+                );
+                entry.objects.destroy();
+            }
             None => self.xdg.removed(name),
         }
     }
@@ -458,7 +476,13 @@ impl Dispatch<ZwlrLayerSurfaceV1, OutputId> for State {
             zwlr_layer_surface_v1::Event::Closed => entry.output.closed(),
             _ => Effect::None,
         };
-        Self::apply(&state.globals, entry, effect, conn, qh);
+        Self::apply(&state.globals, &mut *entry, effect, conn, qh);
+        // A closed surface ends any transition on it: the animation has
+        // nothing to commit to, and the re-created surface draws the final
+        // wallpaper the normal way.
+        if matches!(effect, Effect::DestroyAndRetry | Effect::DestroyAndGiveUp) {
+            transition::drop_output(&mut state.transitions, *id, &mut entry.output);
+        }
         if let Effect::Ack(serial) = effect {
             conn.display()
                 .sync(qh, RoundTrip::Configured(entry.output.id(), serial));
@@ -481,14 +505,19 @@ impl Dispatch<WlBuffer, OutputId> for State {
         let Some(entry) = state.outputs.get_mut(*id) else {
             return;
         };
-        // Single-pixel buffers are released too; only shm slots care.
-        if entry.objects.canvas.released(buffer) {
+        // Single-pixel buffers are released too; only shm slots care. A
+        // transition frame released may be rewritten: reconcile drives it.
+        if entry.objects.canvas.released(buffer)
+            || transition::frame_released(&mut state.transitions, *id, buffer)
+        {
             reconcile(
                 &state.globals,
                 &state.choices,
                 &mut state.images.jobs,
+                &mut state.transitions,
                 entry,
                 qh,
+                Instant::now(),
             );
         }
     }
@@ -509,14 +538,35 @@ impl Dispatch<WlCallback, RoundTrip> for State {
         let (id, retry) = match *round_trip {
             RoundTrip::Settle(id) => (id, false),
             RoundTrip::Retry(id) => (id, true),
+            RoundTrip::Frame(id, seq) => {
+                // A transition's cadence: drive it if this callback is
+                // still its generation.
+                if !transition::frame_done(&mut state.transitions, id, seq) {
+                    return;
+                }
+                if let Some(entry) = state.outputs.get_mut(id) {
+                    reconcile(
+                        &state.globals,
+                        &state.choices,
+                        &mut state.images.jobs,
+                        &mut state.transitions,
+                        entry,
+                        qh,
+                        Instant::now(),
+                    );
+                }
+                return;
+            }
             RoundTrip::Redraw(id) => {
                 if let Some(entry) = state.outputs.get_mut(id) {
                     reconcile(
                         &state.globals,
                         &state.choices,
                         &mut state.images.jobs,
+                        &mut state.transitions,
                         entry,
                         qh,
+                        Instant::now(),
                     );
                 }
                 return;
@@ -538,8 +588,10 @@ impl Dispatch<WlCallback, RoundTrip> for State {
                     &state.globals,
                     &state.choices,
                     &mut state.images.jobs,
+                    &mut state.transitions,
                     entry,
                     qh,
+                    Instant::now(),
                 );
                 if !committed && entry.output.shows().is_some() {
                     if let Some(layer) = &entry.objects.layer {
@@ -590,6 +642,43 @@ impl Dispatch<WlCallback, RoundTrip> for State {
             }
         };
         Self::apply(&state.globals, entry, effect, conn, qh);
+    }
+}
+
+impl Dispatch<WpPresentationFeedback, Feedback> for State {
+    fn event(
+        state: &mut Self,
+        _: &WpPresentationFeedback,
+        event: wp_presentation_feedback::Event,
+        frame: &Feedback,
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wp_presentation_feedback::Event::Presented { .. }
+            | wp_presentation_feedback::Event::Discarded => {
+                // One frame answered: presented, or discarded (replaced
+                // before it showed, whose time the clock already jumped
+                // past: the drop). Either drives the next frame. The
+                // object destroys itself with the event; nothing is sent.
+                if !transition::feedback_done(&mut state.transitions, frame.id, frame.seq) {
+                    return;
+                }
+                let Some(entry) = state.outputs.get_mut(frame.id) else {
+                    return;
+                };
+                reconcile(
+                    &state.globals,
+                    &state.choices,
+                    &mut state.images.jobs,
+                    &mut state.transitions,
+                    entry,
+                    qh,
+                    Instant::now(),
+                );
+            }
+            _ => {}
+        }
     }
 }
 

@@ -27,6 +27,9 @@ scootbg set https://example.com/hills.jpg --sha256 9f86d081884c7d659a2feaa0c55ad
 scootbg set ./#draft.png              # a file whose name starts with '#'
 scootbg set city.png --output DP-2 --mode fit --fill '#101014'
 scootbg set tile.png --mode tile --filter nearest
+scootbg set '#101014' --transition fade --duration-ms 800
+scootbg set city.png --transition wipe --angle 90
+scootbg set grid.png --transition grow --position 0,0 --output DP-1
 scootbg clear                         # back to the compositor's own background
 scootbg clear --output DP-2           # ... on one output
 scootbg query                         # each output, its surface and what it shows, one JSON line
@@ -50,14 +53,21 @@ and filters, exit codes and environment — see
 **`set` and `clear` return once it is on screen:** every targeted output
 shows the change and the compositor has processed it (a `wl_display.sync`
 round trip after the commits), so a screenshot taken straight after shows
-it. An output unplugged meanwhile is left out of that wait; one whose
+it. With `--transition`, that means once the animation has finished: the
+reply waits for the last frame, not the first. A newer `set`
+mid-transition starts from the frame showing then (no queue), and the
+earlier reply arrives once what replaced it is on screen. An output unplugged meanwhile is left out of that wait; one whose
 surface is not configured yet is waited for, but only until a round trip
 after scootbg made that surface: one the compositor has not configured
 by then no longer holds up the reply (the daemon says so on stderr) and
 is drawn when it is; one scootbg has given up on
 (`gave-up` in `query`, said on stderr) is left out and shows nothing, and
 `set` still exits 0. They print nothing on
-success. **An image that cannot be shown** (no such file, not a regular
+success. **A transition flag without `--transition` is refused** (exit
+2), as is a `--transition` outside `none`/`fade`/`wipe`/`grow`, a
+`--duration-ms` past `60000`, a non-number `--angle`, a `--position`
+outside `X,Y` fractions — and a `clear` with any of them. How a change
+animates is [Transitions](./transitions.md). **An image that cannot be shown** (no such file, not a regular
 file, not a PNG/JPEG/WebP, too large, truncated or corrupt — or, for a
 link, no `curl`, no network, an HTTP error, an error page, a file past
 32 MiB, or a `sha256` mismatch: see
@@ -69,8 +79,8 @@ and returns 0 once the newer one is on screen, as a replaced color's `set`
 does. Exit status: 0 done; 1 no daemon running,
 unknown output, image that cannot be shown, or drawing failed
 (`scootbg query`'s `draw_error` says why, as the daemon's stderr does);
-2 usage error, a malformed color or an unknown
-`--mode`/`--filter` included.
+2 usage error, a malformed color, an unknown
+`--mode`/`--filter`, or a refused transition included.
 
 
 
@@ -139,7 +149,8 @@ simply waits. `scootbg query` answers, on one line (wrapped here):
  "logical":{"width":2560,"height":1440},
  "surface":{"state":"configured","size":{"width":2560,"height":1440},
             "scale":1.5,"pixels":{"width":3840,"height":2160}},
- "draw_failed":false,"draw_error":null,"shows":{"color":"#1e1e2e"}}],
+ "draw_failed":false,"draw_error":null,"shows":{"color":"#1e1e2e"},
+ "transition":null}],
  "saving":true,"profile":"default"}
 ```
 
@@ -171,7 +182,9 @@ be decoded, a buffer too large, a link that would not download), which tells tha
 `draw_error` says why while `draw_failed` is `true` (the error the
 daemon's stderr gives, such as `"no such file"` or `"shared memory:
 Cannot allocate memory (os error 12)"`), and is `null` otherwise; it is
-for a person or an agent to read, and its wording may change. `saving`
+for a person or an agent to read, and its wording may change. `transition`
+is the animation running on the output now (`"fade"`, `"wipe"` or
+`"grow"`, else `null`; `none` lands at once and is never reported). `saving`
 (after the list) is `false` while `set` and `clear` are not saved for
 the next start (see [Restore](./restore.md#restore)), and `profile` is the profile
 whose state is restored and saved. New keys

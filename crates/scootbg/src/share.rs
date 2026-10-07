@@ -64,6 +64,17 @@ impl<M> Shared<M> {
         &self.memory
     }
 
+    /// The memory to write: `None` while frozen. (Sole ownership is the
+    /// caller's: through `Rc::get_mut`, which a share held anywhere else
+    /// fails. Transition snapshots use this: never in a slot, so never
+    /// frozen, but the check stays.)
+    pub fn memory_mut(&mut self) -> Option<&mut M> {
+        if self.frozen.get() {
+            return None;
+        }
+        Some(&mut self.memory)
+    }
+
     pub fn is_frozen(&self) -> bool {
         self.frozen.get()
     }

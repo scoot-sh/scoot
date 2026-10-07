@@ -232,6 +232,7 @@ fn set(color: &str, output: Option<&str>) -> Result<Command, Error> {
     Ok(Command::Client(Request::Set {
         show: Show::Color(Color::parse(color).unwrap()),
         output: output.map(|o| o.to_owned().into()),
+        transition: crate::transition::Spec::none(),
     }))
 }
 
@@ -250,6 +251,7 @@ fn image(
             filter,
         }),
         output: output.map(|o| o.to_owned().into()),
+        transition: crate::transition::Spec::none(),
     }))
 }
 
@@ -272,6 +274,7 @@ fn download(
             filter,
         }),
         output: output.map(|o| o.to_owned().into()),
+        transition: crate::transition::Spec::none(),
     }))
 }
 
@@ -700,7 +703,7 @@ fn a_non_utf8_daemon_argument_is_an_error_not_a_panic() {
 fn apply(profile: &str, json: &str, serve: bool) -> Result<Command, Error> {
     Ok(Command::ApplyConfig(ApplyOptions {
         profile: Profile::parse(profile).unwrap(),
-        section: Section::parse(json.as_bytes()).unwrap(),
+        section: Box::new(Section::parse(json.as_bytes()).unwrap()),
         serve,
     }))
 }
@@ -786,4 +789,176 @@ fn a_non_utf8_section_is_an_error_not_a_panic() {
     let raw = OsString::from_vec(b"{\"image\":\"/\xff\"}".to_vec());
     let parsed = parse([OsString::from("apply-config"), raw]);
     assert_eq!(parsed, Err(Error::SectionNotUtf8));
+}
+
+#[test]
+fn set_takes_a_transition() {
+    use crate::transition::{Easing, Kind, Spec};
+    let with = |transition: Spec| {
+        Ok(Command::Client(Request::Set {
+            show: Show::Color(Color::parse("#c03020").unwrap()),
+            output: None,
+            transition,
+        }))
+    };
+    // Defaults: none, so the change lands at once.
+    assert_eq!(args(&["set", "#c03020"]), with(Spec::none()));
+    assert_eq!(
+        args(&["set", "#c03020", "--transition", "none"]),
+        with(Spec::none())
+    );
+    // An explicit `none` ignores the rest, as on the wire.
+    assert_eq!(
+        args(&[
+            "set",
+            "#c03020",
+            "--transition",
+            "none",
+            "--duration-ms",
+            "5"
+        ]),
+        with(Spec::none())
+    );
+    assert_eq!(
+        args(&[
+            "set",
+            "#c03020",
+            "--transition",
+            "fade",
+            "--duration-ms",
+            "800",
+            "--easing",
+            "linear",
+        ]),
+        with(Spec {
+            kind: Kind::Fade,
+            duration_ms: 800,
+            easing: Easing::Linear,
+            angle_deg: 0.0,
+            pos: (0.5, 0.5),
+        })
+    );
+    assert_eq!(
+        args(&[
+            "set",
+            "#c03020",
+            "--transition=wipe",
+            "--angle=90",
+            "--duration-ms=0",
+        ]),
+        with(Spec {
+            kind: Kind::Wipe,
+            duration_ms: 0,
+            easing: Easing::EaseOut,
+            angle_deg: 90.0,
+            pos: (0.5, 0.5),
+        })
+    );
+    assert_eq!(
+        args(&[
+            "set",
+            "#c03020",
+            "--transition",
+            "grow",
+            "--position",
+            "0,0",
+            "--easing",
+            "smooth",
+        ]),
+        with(Spec {
+            kind: Kind::Grow,
+            duration_ms: 500,
+            easing: Easing::Smooth,
+            angle_deg: 0.0,
+            pos: (0.0, 0.0),
+        })
+    );
+    // Angles normalize; flags take `=` too, in any order.
+    assert_eq!(
+        args(&[
+            "set",
+            "--angle=-90",
+            "--transition",
+            "wipe",
+            "#c03020",
+            "--duration-ms",
+            "250"
+        ]),
+        with(Spec {
+            kind: Kind::Wipe,
+            duration_ms: 250,
+            easing: Easing::EaseOut,
+            angle_deg: 270.0,
+            pos: (0.5, 0.5),
+        })
+    );
+}
+
+#[test]
+fn set_refuses_bad_transitions_plainly() {
+    for value in ["dissolve", "FADE", ""] {
+        let error = args(&["set", "#c03020", "--transition", value]).unwrap_err();
+        assert!(
+            matches!(error, Error::BadValue { .. }),
+            "--transition {value}: {error:?}"
+        );
+        assert!(error.to_string().contains("--transition"), "{error}");
+        assert!(error.to_string().contains("scootbg set --help"), "{error}");
+    }
+    for (flag, value) in [
+        ("--duration-ms", "-1"),
+        ("--duration-ms", "60001"),
+        ("--duration-ms", "half"),
+        ("--easing", "bounce"),
+        ("--angle", "NaN"),
+        ("--angle", "ninety"),
+        ("--position", "0.5"),
+        ("--position", "2,0.5"),
+        ("--position", "left,top"),
+    ] {
+        let error = args(&["set", "#c03020", "--transition", "fade", flag, value]).unwrap_err();
+        assert!(
+            matches!(error, Error::BadValue { .. }),
+            "{flag} {value}: {error:?}"
+        );
+        assert!(error.to_string().contains(flag), "{error}");
+        assert!(error.to_string().contains("scootbg set --help"), "{error}");
+    }
+    // A transition flag without `--transition` teaches rather than being
+    // ignored.
+    for flag in ["--duration-ms", "--easing", "--angle", "--position"] {
+        let value = if flag == "--position" { "0,0" } else { "1" };
+        assert_eq!(
+            args(&["set", "#c03020", flag, value]),
+            Err(Error::TransitionOnly(flag))
+        );
+    }
+    assert_eq!(
+        args(&["set", "#c03020", "--transition"]).unwrap_err(),
+        Error::MissingValue {
+            command: "set",
+            flag: "--transition"
+        }
+    );
+    assert_eq!(
+        args(&[
+            "set",
+            "#c03020",
+            "--transition",
+            "fade",
+            "--transition",
+            "wipe"
+        ])
+        .unwrap_err(),
+        Error::Repeated {
+            command: "set",
+            flag: "--transition"
+        }
+    );
+    // `clear` takes no transition: the generic refusal names the help that
+    // says why.
+    match args(&["clear", "--transition", "fade"]) {
+        Err(Error::Unexpected { argument, .. }) => assert_eq!(argument, "--transition"),
+        other => panic!("{other:?}"),
+    }
 }
