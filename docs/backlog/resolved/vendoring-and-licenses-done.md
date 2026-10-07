@@ -18,7 +18,7 @@ license inventory, and to know what is forked.
 
 - **Vendored release tarball**: `cargo vendor` output plus the source
   replacement snippet, produced by the release job
-  ([release-artifacts](release-artifacts.md)), so a build needs no network.
+  ([release-artifacts](release-artifacts-done.md)), so a build needs no network.
   The two git dependencies, the Smithay fork and the `wayland-backend` fork
   (`[patch.crates-io]` in `Cargo.toml`), must vendor and resolve correctly:
   that is the part most likely to break, so test an offline build from the

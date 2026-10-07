@@ -3,7 +3,7 @@ title: "RPM packages: Fedora and openSUSE-style `.rpm`s, and a COPR-style reposi
 status: "open"
 area: "packaging"
 priority: "low"
-blocked: "release-artifacts"
+blocked: null
 ---
 
 # RPM packages
@@ -13,7 +13,7 @@ Filed 2026-09-29. Serves **daily-drive**.
 ## Two levels, start with the first
 
 1. **Repo-hosted RPMs** via `cargo-generate-rpm` (or a minimal spec file),
-   attached to the release ([release-artifacts](release-artifacts.md)) and
+   attached to the release ([release-artifacts](../resolved/release-artifacts-done.md)) and
    published through a hosted build service or a signed repository (Fedora's
    COPR is the obvious host; check its terms, chroots and architecture
    coverage rather than assume them). Requires are auto-generated from the

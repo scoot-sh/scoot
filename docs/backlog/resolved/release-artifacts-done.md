@@ -1,9 +1,10 @@
 ---
 title: "Release artifacts: tag-triggered builds, checksums, signatures, SBOM, changelogs"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-07"
 ---
 
 # Release artifacts
@@ -40,3 +41,31 @@ releases; installs are from source or Nix.
 Pushing a tag produces a verifiable release for that package on both
 architectures, the checksums and signature verify, and nothing is uploaded by
 hand.
+
+## Resolved (PR #498, 2026-10-07)
+
+`.github/workflows/release.yml`: a tag push (`scoot-v0.2.0`,
+`scootbar-v0.3.0`; a trio tag releases the trio's binaries) builds that
+package only and publishes a GitHub Release -- vendored tarball
+(`scripts/vendor-release.sh`), portable glibc binaries for
+`x86_64-linux` (ubuntu-latest) and `aarch64-linux` (ubuntu-24.04-arm,
+native, no emulation, no dependency on the maintainer's box),
+`SHA256SUMS`, keyless build-provenance attestation (chosen over
+minisign/GPG/cosign: verifiable with `gh attestation verify`, no
+long-lived key in secrets), CycloneDX SBOM (cargo-cyclonedx 0.5.9 via
+the flake's nixpkgs pin), per-package changelog as the notes -- plus a
+`workflow_dispatch` dry run that builds everything and publishes
+nothing. Gates (`scripts/release-resolve`, 13 unit tests in
+`scripts/test_release_resolve.py`): tag shape, manifest match (trio
+lockstep), tag on main, re-publish refused while incomplete releases
+resume, so retries converge. Actions pinned by SHA, minimal per-job
+permissions, no new secrets. Decisions with evidence: binaries come
+from cargo in a `debian:bookworm-slim` container (glibc floor 2.36,
+asserted) because the nix binary's `/nix/store` interpreter does not
+run on a stock distro (portable build prints `--version` on bookworm,
+trixie and fedora 43; the nix build fails there). The distro packages
+(arch, deb, rpm) build from the source tarball instead, and are now
+unblocked. Users verify on the site's releases page; maintainers cut
+on the cut-a-release page. First dry run happens after merge (new
+workflows cannot dispatch before they are on main); no tag was
+created or pushed and no release published here.
