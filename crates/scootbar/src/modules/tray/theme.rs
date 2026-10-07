@@ -31,9 +31,9 @@
 //!
 //! ## Bounds (a hostile item names the file)
 //!
-//! The name is at most 128 bytes with no `/`, no NUL and no leading dot:
-//! no traversal, no absolute path, no hidden file. One trailing `.png`
-//! is accepted (many apps send the extension); `.svg`/`.xpm` names stay
+//! The name, after one accepted trailing `.png` is stripped, is at most
+//! 128 bytes with no `/`, no NUL and no leading dot: no traversal, no
+//! absolute path, no hidden file. `.svg`/`.xpm` names stay
 //! hidden, as does any other unresolvable name. `IconThemePath` must
 //! be an absolute path with no `..` component. Every candidate is
 //! resolved with `canonicalize` (a symlink loop is the kernel's `ELOOP`)
@@ -392,6 +392,12 @@ fn decode(item_id: &str, bytes: &[u8]) -> Option<TrayIcon> {
     } else {
         (width, height, pixels)
     };
+    // One icon's share of the total themed budget: the downscale above
+    // holds it, and this pins the two together if either changes.
+    debug_assert!(
+        width as usize * height as usize * 4 <= MAX_THEME_TOTAL_BYTES / super::MAX_ITEMS,
+        "a stored themed icon exceeds its share of the total budget"
+    );
     let id = fnv_payload(item_id, width, height, &pixels);
     TrayIcon::from_premultiplied(id, width, height, pixels)
 }

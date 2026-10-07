@@ -629,7 +629,8 @@ socket is one more source in the `poll` loop), which is the
   is discarded, one turn reads at most 256 KiB more (the poll is woken
   for the rest), so a sender that outruns the reader holds one turn,
   not the bar. Titles are cut to 128 bytes
-  with controls stripped; themed names past 128 bytes, with a `/` or
+  with controls stripped; themed names past 128 bytes (after one
+  accepted trailing `.png` is stripped), with a `/` or
   starting with a dot, are refused without touching the disk, and an
   `IconThemePath` that is not absolute or holds `..` is ignored; a
   theme file is read only when it resolves inside its base
