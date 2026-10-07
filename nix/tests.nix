@@ -13183,12 +13183,6 @@ let
       assert hmDisplays.config.xdg.configFile ? "scoot/displays.json";
       true
     )
-    (
-      assert
-        builtins.fromJSON (builtins.readFile hmDisplays.config.xdg.configFile."scoot/displays.json".source)
-        == builtins.fromJSON (builtins.readFile displaysProfilesJson);
-      true
-    )
     # ...the unit bound to the session scope (wanted by it, part of
     # it, after it -- never the shared graphical target, which would
     # start this watcher inside someone else's session), retrying
@@ -13266,13 +13260,6 @@ let
     # holds: the watcher writes no file, so nothing fights it...
     (
       assert allAssertionsHold hmDisplaysStaticOutputs.config;
-      true
-    )
-    # ...the profiles file carries no `mode` (not a profile field)...
-    (
-      assert lib.all (profile: !(profile ? mode)) (
-        builtins.fromJSON (builtins.readFile hmDisplays.config.xdg.configFile."scoot/displays.json".source)
-      );
       true
     )
     # Refusals: a `mode` in a profile, refused with the way out...
@@ -13474,6 +13461,11 @@ assert lib.all (x: x) _darwinPowerPins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   set -euo pipefail
+
+  ${lib.optionalString isLinux ''
+    python3 -c 'import json, sys; actual = json.load(open(sys.argv[1])); expected = json.load(open(sys.argv[2])); assert actual == expected; assert all("mode" not in profile for profile in actual)' \
+      "${hmDisplays.config.xdg.configFile."scoot/displays.json".source}" "${displaysProfilesJson}"
+  ''}
 
   # 1. Empty settings: valid TOML, parses to {} -- a minimal file the
   #    compositor runs as pure defaults.
