@@ -2302,6 +2302,62 @@ greeter's list instead of merging with it, so keep `"greeter"` in
 your list to keep the fix. With the greeter off, logind is left
 exactly as nixpkgs ships it.
 
+## Without a greeter (TTY autologin)
+
+No login screen: the console logs itself in and the shell profile
+starts the session. Enable the profile as usual, then name who logs
+in and let their user manager start at boot:
+
+```nix
+programs.scoot.desktop = {
+  enable = true;
+};
+```
+
+```nix
+services.getty.autologinUser = "alice";
+users.users."alice".linger = true;
+```
+
+On `tty1` that is the whole setup — the shell profile execs the
+session on that console only, so SSH logins keep a shell:
+
+```sh
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ "${XDG_VTNR:-}" = 1 ]; then
+  exec scoot-session
+fi
+```
+
+With the profile on and a console autologin without lingering, the
+rebuild warns naming the user and the fix (a display-manager
+autologin never warns: that path registers a full login, whose
+manager starts).
+
+Why lingering is the step: recent systemd gives TTY autologin
+sessions the `user-light` class, which never starts
+`user@UID.service` — so without it `scoot-session` finds no user
+manager and falls back to a bare `scoot --tty` with no bar, no
+notifications, no clipboard history, no portal and no session target.
+The launcher names that cause on stderr and mirrors it into the
+system journal (the compositor takes over the console on startup,
+burying stderr), so the diagnosis survives the login. An autologin
+is also one of the logins the keyring cannot prime from the login
+password ([above](#privilege-prompts-and-the-keyring)): the first
+secrets use of each login unlocks once, then stays unlocked till
+logout.
+
+> **Symptom:** the session starts with no bar, no popups, no
+> clipboard history — but the compositor itself runs.
+>
+> The session fell back to a bare `scoot --tty`: the user manager
+> never started. Check the class (`loginctl show-session
+> "$XDG_SESSION_ID" -p Class --value` prints `user-light` on an
+> affected login) and the manager (`systemctl --user list-units`
+> fails there), read the launcher's diagnosis (`journalctl -b -t
+> scoot-session`), and set the autologin user's `linger` above.
+> Logging in through the greeter instead starts the full session
+> with no lingering.
+
 ## XWayland, and what comes next
 
 **XWayland** is a knob plus your existing package choice: the profile's

@@ -32,6 +32,7 @@ right one.
 - *Bar missing on the second monitor* → [scootbar troubleshooting](../scootbar/troubleshooting.md): `--outputs` naming, exclusive zones, and the `--check` diagnosis.
 - *Replug reaches the wrong screen* → [Outputs](../scoot/outputs.md#moving-across-outputs): ids are never reused — `scoot msg outputs` lists the fresh ones; stepping binds never name an id.
 - *Screens never dim / locker rejects the password* → [Desktop idle and lock](../desktop/index.md#idle-and-lock): unit running? PAM configured? Caps Lock?
+- *Session starts with no bar, no popups, no clipboard history* → [Without a greeter](../desktop/index.md#without-a-greeter-tty-autologin): a TTY autologin without lingering never starts the user manager — `journalctl -b -t scoot-session` names the fix.
 
 ## Agents and IPC
 
