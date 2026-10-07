@@ -41,6 +41,12 @@
 #     within ~2 s);
 #   - without `timeout(1)` the wait runs bare (no 5-minute stall bound)
 #     and the session still works;
+#   - with no user manager at all the launcher execs bare `scoot --tty`
+#     with its generic note -- and under a `user-light` login (TTY
+#     autologin, which never starts `user@UID.service`) it names that
+#     cause and the one-line linger fix, mirrored into the journal past
+#     the tty takeover; any other class, or no `loginctl` to ask, keeps
+#     the generic note alone (no linger advice, no journal write);
 #   - the healed login over an already-active graphical target does not
 #     re-run its bound units (systemd fires Wants only on the
 #     inactive-to-active transition), so they keep the old session's
@@ -115,6 +121,13 @@ if [ -f "$S/manager-down" ]; then
         list-units|show|show-environment|set-environment|unset-environment|import-environment|start|stop|reset-failed)
             exit 1 ;;
     esac
+fi
+# No manager at all (gh-462: a `user-light` login never starts
+# `user@UID.service`): `list-units` fails and the launcher takes its
+# bare-`scoot --tty` fallback. Only `list-units` needs to fail -- the
+# fallback execs before any other manager call.
+if [ -f "$S/no-manager" ] && [ "${1:-}" = "list-units" ]; then
+    exit 1
 fi
 state_of() { f="$S/active/$1"; [ -f "$f" ] && cat "$f" || printf 'inactive'; }
 set_state() { printf '%s' "$2" >"$S/active/$1"; }
@@ -323,6 +336,39 @@ fi
 exit 1
 EOF
 
+# logind: only the session-class probe the launcher's no-manager
+# fallback makes (`show-session ID -p Class --value`). Answers
+# $HARNESS_STATE/session-class, and fails without it -- an unanswerable
+# query, like a session id logind never saw.
+cat >"$FAKES/loginctl" <<'EOF'
+#!/bin/sh
+set -u
+S="$HARNESS_STATE"
+n=0
+if [ -f "$S/calls-seq" ]; then n=$(cat "$S/calls-seq"); fi
+n=$((n + 1)); printf '%s' "$n" >"$S/calls-seq"
+printf '%s: loginctl' "$n" >>"$S/calls.log"
+for a in "$@"; do printf ' %s' "$a" >>"$S/calls.log"; done
+printf '\n' >>"$S/calls.log"
+if [ -f "$S/session-class" ]; then cat "$S/session-class"; exit 0; fi
+exit 1
+EOF
+
+# The system journal: records stdin to $HARNESS_STATE/journal.log (the
+# surviving copy of the launcher's user-light diagnosis).
+cat >"$FAKES/systemd-cat" <<'EOF'
+#!/bin/sh
+set -u
+S="$HARNESS_STATE"
+n=0
+if [ -f "$S/calls-seq" ]; then n=$(cat "$S/calls-seq"); fi
+n=$((n + 1)); printf '%s' "$n" >"$S/calls-seq"
+printf '%s: systemd-cat' "$n" >>"$S/calls.log"
+for a in "$@"; do printf ' %s' "$a" >>"$S/calls.log"; done
+printf '\n' >>"$S/calls.log"
+cat >>"$S/journal.log"
+EOF
+
 # The compositor: `scoot msg version` answers once $ANSWER_AFTER calls
 # happened, creating the session's new socket as it comes up.
 cat >"$FAKES/scoot" <<'EOF'
@@ -419,7 +465,10 @@ new_test() {
     rm -f "$HARNESS_STATE/calls-seq" "$HARNESS_STATE/version-calls" \
         "$HARNESS_STATE/fake-now" "$HARNESS_STATE/socket-made" \
         "$HARNESS_STATE/env-at-graphical" "$HARNESS_STATE/manager-down" \
-        "$HARNESS_STATE/bus-call-fail" "$HARNESS_STATE/wait-ready"
+        "$HARNESS_STATE/bus-call-fail" "$HARNESS_STATE/wait-ready" \
+        "$HARNESS_STATE/no-manager" "$HARNESS_STATE/session-class" \
+        "$HARNESS_STATE/journal.log"
+    unset XDG_SESSION_ID
     export ANSWER_AFTER=3 DBUS_FAIL=0
     mksock wayland-99
     export SCOOT_BIN="$SCOOT_FAKE"
@@ -957,6 +1006,79 @@ wait_blocked "T18"
 RC="$(end_session)"
 unset SCOOT_POLKIT_AGENT
 [ "$RC" = "0" ] || bad "T18: launcher exit $RC"
+
+# --- T20: no manager under a user-light login names the fix ---------
+# The gh-462 shape: a getty autologin never starts `user@UID.service`,
+# so `list-units` fails while logind reports the session `user-light`.
+# The launcher still execs bare `scoot --tty` (the fake compositor
+# refuses it, hence the nonzero exit), but first it names the cause
+# and the one-line linger fix, mirrored into the journal past the tty
+# takeover. Fail-before: only the generic note, no cause, no journal.
+new_test 20
+: >"$HARNESS_STATE/no-manager"
+printf 'user-light\n' >"$HARNESS_STATE/session-class"
+export XDG_SESSION_ID=test-session-20
+"$LAUNCHER" >"$T/stdout.log" 2>"$T/stderr.log"
+RC="$?"
+unset XDG_SESSION_ID
+[ "$RC" != "0" ] || bad "T20: fallback launcher exited 0 (the fake compositor refuses --tty)"
+grep -q -F "no systemd user manager" "$T/stderr.log" \
+    || bad "T20: fallback lost its generic note"
+ok "T20: no manager still notes the bare fallback first"
+grep -q -F "user-light" "$T/stderr.log" \
+    || bad "T20: user-light login names no cause"
+grep -q -F "linger = true" "$T/stderr.log" \
+    || bad "T20: user-light login names no fix"
+ok "T20: user-light login names the cause and the one-line linger fix"
+grep -q -F "journalctl -b -t scoot-session" "$T/stderr.log" \
+    || bad "T20: user-light login names no surviving copy"
+grep -q -F "user-light" "$HARNESS_STATE/journal.log" \
+    || bad "T20: diagnosis never reached the journal"
+ok "T20: the diagnosis is mirrored into the journal past the tty takeover"
+
+# --- T21: no manager outside user-light keeps the generic note ------
+# Class `user` with no manager (s6, a seat with no manager, the webtop
+# target): lingering would fix nothing, so no cause, no fix, and no
+# journal write -- the generic note alone. Fail-before: identical
+# output, so this pins the negative (no advice where none applies).
+new_test 21
+: >"$HARNESS_STATE/no-manager"
+printf 'user\n' >"$HARNESS_STATE/session-class"
+export XDG_SESSION_ID=test-session-21
+"$LAUNCHER" >"$T/stdout.log" 2>"$T/stderr.log"
+unset XDG_SESSION_ID
+grep -q -F "no systemd user manager" "$T/stderr.log" \
+    || bad "T21: fallback lost its generic note"
+if grep -q -F "user-light" "$T/stderr.log"; then bad "T21: class user diagnosed as user-light"; fi
+ok "T21: class user keeps the generic note (no linger advice)"
+[ ! -f "$HARNESS_STATE/journal.log" ] || bad "T21: generic fallback wrote to the journal"
+ok "T21: generic fallback touches no journal"
+
+# --- T22: no loginctl to ask keeps the generic note -----------------
+# A closed PATH without `loginctl` (nothing to report the class):
+# best-effort means the generic note alone, never a loud failure.
+# Fail-before: identical output, pinning the graceful degradation.
+new_test 22
+mkdir -p "$T/nologinctl"
+for f in "$FAKES"/*; do
+    [ "${f##*/}" = "loginctl" ] || ln -s "$f" "$T/nologinctl/${f##*/}"
+done
+for t in cat cp cut date dirname env grep head id mkdir mv python3 rm sed sleep stat; do
+    [ -e "$T/nologinctl/$t" ] || {
+        p="$(PATH="$BASE_PATH" command -v "$t")" && ln -s "$p" "$T/nologinctl/$t"
+    }
+done
+export PATH="$T/nologinctl"
+: >"$HARNESS_STATE/no-manager"
+export XDG_SESSION_ID=test-session-22
+"$LAUNCHER" >"$T/stdout.log" 2>"$T/stderr.log"
+unset XDG_SESSION_ID
+grep -q -F "no systemd user manager" "$T/stderr.log" \
+    || bad "T22: fallback lost its generic note"
+if grep -q -F "user-light" "$T/stderr.log"; then bad "T22: unasked session diagnosed as user-light"; fi
+ok "T22: without loginctl the fallback stays generic, never loud"
+[ ! -f "$HARNESS_STATE/journal.log" ] || bad "T22: generic fallback wrote to the journal"
+ok "T22: generic fallback touches no journal"
 
 echo "---"
 echo "$PASS/$TOTAL asserts passed"

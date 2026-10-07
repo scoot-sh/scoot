@@ -43,7 +43,11 @@
 #
 # Without a systemd user manager (s6, a seat with no manager, the webtop
 # target) this degrades to `exec scoot --tty` with a note on stderr: a
-# session with no session integration, not a failure.
+# session with no session integration, not a failure. When the missing
+# manager is a `user-light` login (TTY autologin never starts
+# `user@UID.service`) the note names that cause and its one-line fix,
+# and mirrors the diagnosis into the system journal (the compositor
+# takes over the tty on exec, burying stderr).
 #
 # Takes no arguments. Startup programs belong in scoot's `[autostart]`
 # (config), which runs inside the wired session -- not on this command
@@ -141,6 +145,31 @@ fi
 # No user manager: a session with no integration, not a failure.
 if ! systemctl --user list-units >/dev/null 2>&1; then
     note "no systemd user manager; running $SCOOT_BIN --tty directly with no session integration (no $GRAPHICAL, no D-Bus activation import)"
+    # Name the cause when it is known: a `user-light` login (TTY
+    # autologin) never starts `user@UID.service`, so the manager is
+    # absent by session design rather than merely unreachable -- and
+    # the fix is one line (lingering for this user). Anything else
+    # keeps the generic note above: a missing manager elsewhere (s6,
+    # a seat with no manager, the webtop target) wants no linger.
+    # Best-effort throughout: no loginctl, no session id, or an
+    # unanswerable query all keep the generic note.
+    _scoot_class=""
+    if [ -n "${XDG_SESSION_ID:-}" ] && command -v loginctl >/dev/null 2>&1; then
+        _scoot_class=$(loginctl show-session "$XDG_SESSION_ID" -p Class --value 2>/dev/null) || _scoot_class=""
+    fi
+    if [ "$_scoot_class" = "user-light" ]; then
+        _scoot_who=$(id -un 2>/dev/null || printf '%s' "${USER:-<user>}")
+        _scoot_why="this login is a 'user-light' session (TTY autologin never starts user@UID.service); for the full session set users.users.\"$_scoot_who\".linger = true and log back in, or log in through the greeter"
+        note "$_scoot_why"
+        # The compositor takes over this tty on the exec below, burying
+        # both notes: mirror the diagnosis into the system journal
+        # (best-effort), so it survives the login (`journalctl -b -t
+        # scoot-session` from the session's own terminal).
+        if command -v systemd-cat >/dev/null 2>&1; then
+            printf '%s\n' "$_scoot_why" | systemd-cat -t scoot-session -p warning 2>/dev/null || true
+            note "this diagnosis is also in the system journal: journalctl -b -t scoot-session"
+        fi
+    fi
     exec "$SCOOT_BIN" --tty
 fi
 
