@@ -275,18 +275,29 @@ impl Dispatch<ext_session_lock_v1::ExtSessionLockV1, ()> for Client {
 wayland_client::delegate_noop!(Client: ignore wl_output::WlOutput);
 
 /// Rounds the client's queue until `ready` sees what the test is waiting for.
+///
+/// Wall-clock deadline, not a roundtrip count: under CPU contention each
+/// roundtrip returns fast with nothing new while the event the test waits
+/// for (e.g. another client's `set_mode`) has not been sent yet, so a
+/// fixed count burns out before it arrives. Generous: a debug build on a
+/// loaded box.
+const WAIT_FOR_EVENT: Duration = Duration::from_secs(10);
+
 fn wait_for_event(
     conn: &mut ClientConn,
     what: &str,
     mut ready: impl FnMut(&Client) -> bool,
 ) -> Result<(), String> {
-    for _ in 0..50 {
+    let deadline = Instant::now() + WAIT_FOR_EVENT;
+    loop {
         conn.roundtrip()?;
         if ready(&conn.client) {
             return Ok(());
         }
+        if Instant::now() >= deadline {
+            return Err(format!("the compositor never sent {what}"));
+        }
     }
-    Err(format!("the compositor never sent {what}"))
 }
 
 /// Binds the manager and the first output, or says which one is missing.
@@ -478,9 +489,13 @@ fn removing_the_output_fails_its_controls_and_forgets_the_state() {
             .manager
             .clone()
             .ok_or("no zwlr_output_power_manager_v1")?;
-        for _ in 0..50 {
+        // The second output arrives over the registry after connect; wait
+        // on a wall-clock deadline for the same reason `wait_for_event`
+        // does (a fixed roundtrip count burns out under load).
+        let deadline = Instant::now() + WAIT_FOR_EVENT;
+        while conn.client.outputs.len() < 2 {
             conn.roundtrip()?;
-            if conn.client.outputs.len() >= 2 {
+            if Instant::now() >= deadline {
                 break;
             }
         }
