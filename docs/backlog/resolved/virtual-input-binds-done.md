@@ -1,9 +1,10 @@
 ---
 title: "Opt-in keybindings for virtual keyboards"
-status: "open"
-area: "protocols"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-07"
 ---
 
 # Opt-in keybindings for virtual keyboards
@@ -21,3 +22,23 @@ Add explicit opt-in, default off, `[virtual_input] binds = true`: virtual-keyboa
 ## Not in this ticket
 
 Per-client allow-list (`docs/backlog/protocols/virtual-input-allow-list.md`); virtual-pointer binds (pointers have none); live reload of the flag.
+
+## Resolution (2026-10-07, PR #494)
+
+Landed as `[virtual_input] binds` (default off, restart-only with `enabled`).
+`crates/scoot/src/compositor/virtual_input.rs`: bind-aware `input_from_source`
+filter (seat-keysym matching, fire-once, absolute lock gate), separate
+`State::virtual_suppressed` set, press-time `held` mirror per device, teardown
+synthesizes releases through the filter when on and `release_source` when off.
+`config.rs`/`state.rs`/`mod.rs`/`reload.rs`: the knob, the live bool, startup
+wiring, restart-only refusal as `virtual_input.binds`.
+
+Evidence: 10 new headless protocol tests (binds on/off, de-keymap Alt+Return
+and Super+z/y, locked-neither, destroy/lock sweep swallowing, exactly-once,
+no-repeat) + reload refusal test + config parse/emission tests -- the firing
+tests fail under a forward-only revert (proven); `cargo nextest run
+--workspace` 4454 passed, `cargo test -p scoot` 2199+4 passed, clippy/fmt
+clean, `scripts/smoke-test.sh` rc=0, `nix build .#docs-site` exit 0. Live on
+the M2 (headless scoot + wayvnc 0.10.2 + scripted RFB Super+Return): binds on
+opens foot, binds off opens nothing with the compositor alive. Docs:
+`remote-desktop.md`, `configure.md`, `troubleshooting.md`, CHANGELOG.
