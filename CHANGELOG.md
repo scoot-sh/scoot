@@ -9,6 +9,15 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-10-07 — a dead seat daemon shuts the session down instead of panicking
+
+- **Killing seatd under a running `--tty` session (or a logind restart)
+  no longer panics the compositor.** The seat connection is gone and
+  cannot reconnect, so the session stops cleanly: the log names the loss
+  (`Lost the seat connection`) and the process exits 1 with the same
+  message. Restart the seat, then the session (or let your supervisor do
+  both). See [Backends](site/src/content/docs/scoot/backends.md#hotplug-vt-switching-captures).
+
 ### 2026-10-06 — display profiles, live per-output scale, and an output-added event (IPC protocol 10, breaking)
 
 - **Display profiles in the NixOS/home-manager desktop profile.**

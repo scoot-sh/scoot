@@ -181,6 +181,20 @@ recovery path, so it cannot silently lose to a typo. They keep working
 under fullscreen grabs and the session lock, and a reload cannot strip
 them.
 
+**Losing the seat.** If the seat daemon dies under a running session
+(seatd killed, logind restarted — both reach scoot through libseat), the
+session can neither present nor take input, and no resume is possible
+(the seat cannot reconnect), so scoot stops cleanly instead of
+panicking: the log names the loss (`Lost the seat connection`) and the
+process exits 1 with the same message. A supervisor (s6, systemd)
+restarts it into a fresh session once the seat is back.
+
+> **Symptom:** `--tty` scoot exits 1 after the seat daemon went away.
+> The session is gone — check its log for the `Lost the seat
+> connection` line — not wedged. Bring the seat back (restart seatd,
+> or wait out the logind restart), then restart the session (or let
+> the supervisor do it).
+
 ### Captures and the pointer
 
 Screenshots and screen capture read the
