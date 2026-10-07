@@ -4,9 +4,10 @@ use std::borrow::Cow;
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use super::claim::Claim;
-use super::conn::{Conn, Handler, Status};
+use super::conn::{Conn, Handler, STALL_DEADLINE, Status};
 use super::paths::{self, PathError, Paths};
 use super::protocol::{self, PROTOCOL_VERSION, Request};
 use super::{MAX_CONNECTIONS, Server};
@@ -513,4 +514,147 @@ fn the_dropped_line_is_json_of_that_type() {
     let value: serde_json::Value = serde_json::from_slice(super::protocol::DROPPED).unwrap();
     assert_eq!(value, serde_json::json!({"type": "dropped"}));
     assert_eq!(super::protocol::DROPPED.last(), Some(&b'\n'));
+}
+
+// ---- the write-stall deadline ----
+
+/// A handler answering every request with one `bytes`-long reply.
+struct BigHandler {
+    bytes: usize,
+}
+
+impl Handler for BigHandler {
+    fn handle(&mut self, _line: &[u8], out: &mut Vec<u8>) {
+        out.resize(out.len() + self.bytes, b'x');
+        out.push(b'\n');
+    }
+}
+
+/// A server with one request peer stalled on a megabyte reply: small
+/// buffers both ways, so a single answer fills them at once, and a client
+/// that never reads again. Returns the server, the client end, and the
+/// handler (kept alive by the caller for further turns).
+fn stalled_server() -> (Server, UnixStream, BigHandler) {
+    use rustix::event::PollFlags;
+    let (mut client, server) = UnixStream::pair().unwrap();
+    rustix::net::sockopt::set_socket_recv_buffer_size(&client, 4096).unwrap();
+    rustix::net::sockopt::set_socket_send_buffer_size(&server, 4096).unwrap();
+    client.set_nonblocking(true).unwrap();
+    let mut server_obj = Server::with_spare(None);
+    server_obj.admit(server);
+    client
+        .write_all(b"{\"protocol\":1,\"type\":\"version\"}\n")
+        .unwrap();
+    let mut handler = BigHandler { bytes: 1 << 20 };
+    // One turn answers the megabyte and blocks on the full socket: kept,
+    // not dropped, and nothing more is read from the peer.
+    assert!(server_obj.service(0, PollFlags::IN, &mut handler));
+    assert_eq!(server_obj.conns().len(), 1);
+    (server_obj, client, handler)
+}
+
+/// Whether the peer closed: everything queued before the close reads
+/// first; only the end of the stream counts. Returns what was queued.
+/// A momentarily empty socket is polled briefly rather than failed at
+/// once (one run in dozens saw `WouldBlock` here under full-suite load,
+/// with the close already done and the data still arriving through the
+/// loopback buffers): a peer that never closes still fails, after the
+/// bound, since nothing ever becomes readable.
+fn peer_drained(client: &mut UnixStream) -> (bool, usize) {
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+    let mut buf = [0u8; 4096];
+    let mut drained = 0usize;
+    let start = Instant::now();
+    let bound = Duration::from_secs(5);
+    loop {
+        match client.read(&mut buf) {
+            Ok(0) => return (true, drained),
+            Ok(n) => drained += n,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if start.elapsed() >= bound {
+                    return (false, drained);
+                }
+                let mut fds = [PollFd::new(&*client, PollFlags::IN)];
+                let wait = Timespec {
+                    tv_sec: 0,
+                    tv_nsec: 10_000_000,
+                };
+                let _ = poll(&mut fds, Some(&wait));
+            }
+            Err(_) => return (false, drained),
+        }
+    }
+}
+
+#[test]
+fn a_request_peer_stalled_past_the_deadline_is_dropped() {
+    let (mut server, mut client, _) = stalled_server();
+    // Freshly stalled: the sweep keeps it, and the loop would sleep until
+    // the deadline for it.
+    assert_eq!(server.sweep(Instant::now()), 0);
+    assert_eq!(server.conns().len(), 1);
+    let mut now = None;
+    assert!(
+        server
+            .stall_timeout(&mut now)
+            .is_some_and(|wait| wait <= STALL_DEADLINE),
+        "no wakeup armed for the stall"
+    );
+    // Past the deadline with nothing delivered: dropped, and the peer sees
+    // the end of the stream.
+    let late = Instant::now() + STALL_DEADLINE + Duration::from_secs(1);
+    // Already due: the loop would not sleep at all, but wake and sweep.
+    let mut due = Some(late);
+    assert_eq!(server.stall_timeout(&mut due), Some(Duration::ZERO));
+    assert_eq!(server.sweep(late), 1);
+    assert!(server.conns().is_empty());
+    let (closed, drained) = peer_drained(&mut client);
+    assert!(closed, "the stalled peer was not closed");
+    assert!(drained > 0, "nothing was delivered before the drop");
+}
+
+#[test]
+fn a_request_peer_that_drains_is_not_swept() {
+    use rustix::event::PollFlags;
+    let (mut server, mut client, mut handler) = stalled_server();
+    // The client reads everything, turn by turn: each turn delivers about
+    // the buffers' worth, so hundreds of turns drain the megabyte for
+    // sure, with no sleeps. Every turn keeps the connection, and the last
+    // one clears the stall: a sweep far past the old deadline then keeps
+    // it, with no wakeup armed.
+    let mut buf = [0u8; 65536];
+    let mut read_total = 0usize;
+    for _ in 0..300 {
+        assert!(server.service(0, PollFlags::OUT, &mut handler));
+        for _ in 0..100 {
+            match client.read(&mut buf) {
+                Ok(n) => read_total += n,
+                Err(_) => break,
+            }
+        }
+    }
+    assert!(server.service(0, PollFlags::OUT, &mut handler));
+    assert!(
+        read_total >= (1 << 20),
+        "only {read_total} of the megabyte arrived"
+    );
+    let late = Instant::now() + STALL_DEADLINE + Duration::from_secs(1);
+    assert_eq!(server.sweep(late), 0);
+    assert_eq!(server.conns().len(), 1);
+    let mut now = None;
+    assert_eq!(server.stall_timeout(&mut now), None);
+}
+
+#[test]
+fn a_slow_reader_gets_a_fresh_deadline_while_it_moves() {
+    use rustix::event::PollFlags;
+    let (mut server, mut client, mut handler) = stalled_server();
+    // One byte delivered is progress: the deadline starts over, so a sweep
+    // just short of a full deadline past the first stall keeps the peer.
+    let mut byte = [0u8; 1];
+    assert!(matches!(client.read(&mut byte), Ok(1)));
+    assert!(server.service(0, PollFlags::OUT, &mut handler));
+    let almost = Instant::now() + STALL_DEADLINE - Duration::from_secs(1);
+    assert_eq!(server.sweep(almost), 0);
+    assert_eq!(server.conns().len(), 1);
 }

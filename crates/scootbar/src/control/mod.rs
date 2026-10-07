@@ -6,7 +6,11 @@
 //! connect and never send (or never read) cannot lock out a `scootbar msg
 //! kill`, and the daemon needs no timers to find them; a subscription is
 //! not aged out by a flood of connects (there are at most
-//! [`MAX_SUBSCRIBERS`] of them, a fixed few of the cap).
+//! [`MAX_SUBSCRIBERS`] of them, a fixed few of the cap). A client whose
+//! replies stop moving is dropped past [`STALL_DEADLINE`]
+//! ([`Server::sweep`]), so one that never reads holds its slot and its
+//! queued replies no longer than that: the one timer the socket needs, armed
+//! only while output is actually stuck.
 //!
 //! **The listener is always polled.** It is level-triggered, so a
 //! connection that cannot be accepted keeps it readable, and the loop must
@@ -47,6 +51,7 @@ mod tests;
 use std::io;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixListener;
+use std::time::{Duration, Instant};
 
 use rustix::event::PollFlags;
 use rustix::io::Errno;
@@ -234,6 +239,32 @@ impl Server {
         };
         self.recount();
         kept
+    }
+
+    /// Drops every connection whose peer stopped reading past
+    /// [`STALL_DEADLINE`], returning how many went. The daemon calls this
+    /// once a turn, so a client that never reads holds its slot and its
+    /// queued replies no longer than the deadline. Subscribed connections
+    /// never queue and are never swept (a slow subscriber is dropped on the
+    /// spot instead).
+    pub fn sweep(&mut self, now: Instant) -> usize {
+        let before = self.conns.len();
+        self.conns.retain(|conn| !conn.stalled(now));
+        let dropped = before - self.conns.len();
+        if dropped > 0 {
+            self.recount();
+        }
+        dropped
+    }
+
+    /// How long the loop may sleep before the next stalled connection is
+    /// due: `None` while none is stalled, so the socket adds no idle
+    /// wakeups. Zero once one is due, so the loop wakes and sweeps it
+    /// instead of sleeping past it (an idle bar would otherwise hold it
+    /// until some unrelated event).
+    pub fn stall_timeout(&self, now: &mut Option<Instant>) -> Option<Duration> {
+        let at = *now.get_or_insert_with(Instant::now);
+        self.conns.iter().filter_map(|conn| conn.stall_in(at)).min()
     }
 
     /// Shutdown: one non-blocking attempt to send what each client is

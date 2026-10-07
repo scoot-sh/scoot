@@ -302,7 +302,10 @@ modules, the font — after fully validating it first; a bad file is
 refused and the running bar stands. `hide`, `show` and `toggle` are
 [below](./modules.md##hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
 `toggle` print the reply; `kill`, `set` and `invoke` print nothing on success,
-and `subscribe` prints what the daemon sends until it closes (below). `set`
+and `subscribe` prints what the daemon sends until it closes (below). A request
+peer that stops reading is dropped past 30 seconds with nothing delivered:
+while its reply is queued the daemon answers nothing more on that connection,
+and past the deadline the connection just ends. `set`
 writes to a [`push` module](./modules.md##button-push-and-exec-modules): an id that is not
 placed, a module that takes no value (every one but `push`) and a value it
 refuses are each a loud error naming why, never a silent ok. Without a
