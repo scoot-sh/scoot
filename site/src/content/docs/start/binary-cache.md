@@ -53,9 +53,13 @@ Answer once, or pass the flag:
 nix run --accept-flake-config github:scoot-sh/scoot#scootbar -- --version
 ```
 
-The flake's `nixConfig` applies only to trusted users; the
-`nix.settings` / `nix.conf` lines above work for everyone, which is why
-this page leads with them.
+The flake's `nixConfig` applies only to trusted users. The system-level
+`nix.settings` lines above are the reliable path. A per-user `nix.conf` is
+**not** enough on a multi-user (daemon) install: Nix ignores
+`trusted-public-keys` from an untrusted user ("ignoring the client-specified
+setting ... you are not a trusted user"), so add the key to the system
+config (or make yourself a `trusted-users` entry), whichever you prefer
+to trust.
 
 ## What you are trusting
 
@@ -69,7 +73,11 @@ curl -s https://app.cachix.org/api/v1/cache/scoot-sh
 The `publicSigningKeys` it reports must equal the key in the config
 above (`scoot-sh.cachix.org-1:QMj7CMw8uqZxrvqqm6SggdxTHz6Q4prt30ydDcXJXCo=`).
 A substituter can serve any store path your Nix asks for, so this trusts
-CI's builds the way installing the flake already trusts its source.
+CI's builds the way installing the flake already trusts its source. The
+signing key is what stops a cache-only compromise from doing more than serve
+stale or signed paths or go away; whoever holds the key can make your Nix
+accept arbitrary binaries, which is why the key lives only in CI secrets and
+the rotation runbook below exists.
 Only `trusted-users` (root, and NixOS's `trusted-users` list) may add
 substituters through the flake's `nixConfig`; everyone else opts in
 through the system config above, which is the auditable path.
@@ -92,7 +100,7 @@ Not cached, by decision: the docs site (built where it deploys, never
 installed), the dev shell (contributors realise it from nixpkgs plus the
 toolchain), and macOS builds (macOS CI is check-only, so the Darwin
 client is never pushed — install it from source or take the Linux
-binaries). The bar's own closure stays small: five paths, 48.5 MB total
+binaries). The bar's own closure stays small: seven paths, 48.5 MB total
 on `x86_64-linux`, with no font inside (only `scootbar-demo` carries
 one).
 
