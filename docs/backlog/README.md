@@ -595,7 +595,8 @@ be revisited.
   — RESOLVED 2026-10-06 in #469: the startup handshake waits at most 10 s, then a loud host-naming error and exit 1 for the supervisor to retry.
 - [Night light on outputs with no gamma LUT (Apple DCP): warm the image in scoot's renderer](./resolved/nightlight-without-lut-done.md)
   — RESOLVED 2026-10-06 in #473: no LUT, but the DCP exposes per-CRTC `CTM`, so the ramp's white endpoints go out as a diagonal S31.32 matrix (exact at default gamma, zero per-frame cost).
-- [output_power test set_mode_off_reaches_every_holder races under load](./core/output-power-test-race.md) (medium, filed 2026-10-06 from #482): fixed roundtrip budget, unsynchronized clients
+- [output_power test set_mode_off_reaches_every_holder races under load](./resolved/output-power-test-race-done.md)
+  — RESOLVED 2026-10-07: test-quality fix, `wait_for_event` and the second-output registry wait use a 10 s wall-clock deadline instead of a fixed roundtrip budget.
 - [Cursor overlay plane follow-ups](./core/cursor-overlay-followups.md) (medium, filed 2026-10-06 from #485's review): stale-flip gate, off-output twins, one-overlay CRTCs
 - [scoot panics when seatd dies under a running session](./core/seatd-loss-panics.md) (high, filed 2026-10-06 from #485): libseat `unwrap` on ENOTCONN
 - [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
