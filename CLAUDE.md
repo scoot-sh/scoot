@@ -373,8 +373,10 @@ backlog changes.
   `scoot-ipc`, `scootbg-mem`, `scootui`). A change spanning packages lists them,
   comma-separated, or is split. Non-package work uses `nix`, `ci`, `docs`,
   `backlog`, `deps` or `claude` (`CLAUDE.md` and `.claude/`).
-- **Why**: per-package semver is built from this history later
-  ([independent versioning](docs/backlog/packaging/independent-versioning.md)):
+- **Why**: per-package semver is built from this history by
+  `scripts/version`
+  ([independent versioning](docs/backlog/resolved/independent-versioning-done.md),
+  contributor rules in [versioning](docs/versioning.md)):
   a `feat` is a minor bump and a `fix` a patch for the package(s) in its scope, a
   breaking change a major. So the scope must be accurate, and "breaking" for a
   binary means its CLI, config schema or control-socket/IPC protocol.

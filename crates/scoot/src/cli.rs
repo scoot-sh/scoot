@@ -937,13 +937,16 @@ mod tests {
 
     #[test]
     fn version_line_names_this_binarys_version_and_the_protocol() {
-        // Both binaries print the one shared helper, so their lines agree
-        // by construction -- this pins the other half: the helper names
-        // *this* binary's `CARGO_PKG_VERSION` (the same `env!` the IPC
-        // `version` reply reads) and the live `PROTOCOL_VERSION`, so a
-        // workspace version split or a protocol bump without the string
-        // fails here rather than shipping a line that lies.
-        let line = scootctl::version_string();
+        // `scoot --version` names *this* binary's `CARGO_PKG_VERSION` (the
+        // same `env!` the IPC `version` reply reads) and the live
+        // `PROTOCOL_VERSION`, so a protocol bump without the string fails
+        // here rather than shipping a line that lies. It must not go
+        // through `scootctl::version_string()`: that names scootctl's own
+        // version, which agrees with this binary's only while the lockstep
+        // trio holds (independent versioning) -- `main` passes this
+        // crate's version explicitly, and this pins that the helper honors
+        // what it is given rather than reading its own.
+        let line = scootctl::version_string_for(env!("CARGO_PKG_VERSION"));
         assert!(
             line.contains(env!("CARGO_PKG_VERSION")),
             "version line does not name this build: {line}"
@@ -952,6 +955,9 @@ mod tests {
             line.contains(&format!("(ipc protocol {})", scoot_ipc::PROTOCOL_VERSION)),
             "version line does not track PROTOCOL_VERSION: {line}"
         );
+        // And the two agree today: the trio is lockstep, so scootctl's own
+        // line still names this same version (scripts/version enforces it).
+        assert_eq!(line, scootctl::version_string());
     }
 
     #[test]

@@ -3,7 +3,7 @@ title: "Release artifacts: tag-triggered builds, checksums, signatures, SBOM, ch
 status: "open"
 area: "packaging"
 priority: "medium"
-blocked: "independent-versioning"
+blocked: null
 ---
 
 # Release artifacts

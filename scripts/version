@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+"""Per-package versions from Conventional Commits (independent versioning).
+
+Each shipped binary versions on its own, computed from the commits that
+name it:
+
+    type(scope): subject            e.g. feat(scootbar): clock module
+
+`feat` is a minor bump, `fix`/`perf` a patch one, `!` or a
+`BREAKING CHANGE:` footer a major one. Commits with no package scope --
+unscoped (`feat: ...`), non-package scopes (`ci`, `docs`, `nix`,
+`backlog`, `claude`, `deps`), merge subjects -- never bump anything.
+
+The split (docs/backlog packaging/independent-versioning): the tightly
+coupled trio `scoot`/`scootctl`/`scootbg` moves in lockstep (any member's
+bump moves all three), the shell component `scootbar` moves on its own.
+Internal libraries (`scoot-core`, `scoot-ipc`, `scootbg-mem`) are
+`publish = false` and fan out to their consumers, the same fan-out CI's
+path classification uses.
+
+Pre-1.0: while the major version is 0, a major bump lands as a minor one
+(0.1.0 -> 0.2.0, never 1.0.0: the maintainer declares 1.0) and `feat`
+stays minor, `fix`/`perf` patch. Past 1.0 the normal rules apply.
+
+Tags name exactly one package: `<package>-vX.Y.Z` (e.g. `scoot-v0.2.0`,
+`scootbar-v0.3.0`).
+
+This tool never creates a tag, pushes, or publishes anything: the
+maintainer does the first release by hand from `plan`'s output. It only
+reads the repo.
+
+Subcommands (run `scripts/version --help`):
+
+    plan                 dry run: the bump per package from history, and
+                         the tags it would create (default; `--json` for
+                         machine-readable)
+    check                fail (exit 1) when a manifest disagrees with the
+                         declared policy: lockstep within the trio, valid
+                         semver, shipped crates pinned to their own
+                         `version`, internal libs `publish = false`
+    changelog <package>  per-package changelog since its last tag, for the
+                         release notes
+
+Stdlib only.
+"""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+# Shipped binaries: each carries its own `version` in its Cargo.toml.
+SHIPPED = ("scoot", "scootctl", "scootbg", "scootbar")
+
+# Lockstep groups: every member always carries the same version.
+# The trio is tightly coupled (scoot embeds scootctl's client and spawns
+# scootbg's apply-config); the bar speaks standard protocols plus an
+# IPC-guarded option, so it moves on its own.
+GROUPS = (
+    ("scoot", "scootctl", "scootbg"),
+    ("scootbar",),
+)
+
+# Internal libraries: publish = false, versioning with their consumer.
+# A commit scoped to one fans out to every shipped package that embeds
+# it -- the same fan-out as CI's path classification, so the version
+# moves everywhere the code does.
+INTERNAL = ("scoot-core", "scoot-ipc", "scootbg-mem")
+FANOUT = {
+    "scoot": ("scoot", "scootctl", "scootbg"),
+    "scootctl": ("scoot", "scootctl", "scootbg"),
+    "scootbg": ("scoot", "scootctl", "scootbg"),
+    "scoot-core": ("scoot", "scootctl", "scootbg"),
+    "scoot-ipc": ("scoot", "scootctl", "scootbg", "scootbar"),
+    "scootbg-mem": ("scoot", "scootctl", "scootbg", "scootbar"),
+    "scootbar": ("scootbar",),
+}
+
+# Scopes that are not packages and never bump a version (CLAUDE.md's
+# non-package scopes for repo-wide work).
+NON_PACKAGE_SCOPES = ("ci", "docs", "nix", "backlog", "claude", "deps")
+
+# Commit types this tool knows. Only feat/fix/perf (or a breaking marker)
+# move a version; anything else with a package scope (refactor, test,
+# build, chore, docs, ci) is internal housekeeping -- if it changed
+# behavior it should have been a feat/fix -- and moves nothing.
+TYPES = ("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore")
+BUMP_TYPE = {"feat": "minor", "fix": "patch", "perf": "patch"}
+
+SUBJECT_RE = re.compile(
+    r"^(?P<type>[A-Za-z]+)(?:\((?P<scopes>[^)]*)\))?(?P<bang>!)?\s*:\s*(?P<subject>.+)$"
+)
+VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+# `version = "0.1.0"` in a Cargo.toml (never `version.workspace` for these).
+MANIFEST_VERSION_RE = re.compile(r'(?m)^version\s*=\s*"([^"]+)"')
+TAG_PREFIX = "-v"
+
+
+def git(*args, cwd=None):
+    r = subprocess.run(["git", *args], cwd=str(cwd or ROOT),
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"version: git {' '.join(args)} failed: {r.stderr.strip()}")
+    return r.stdout
+
+
+def manifest_version(package):
+    """(version, pinned): the Cargo.toml version, and whether it is its own
+    literal rather than `version.workspace`."""
+    text = (ROOT / "crates" / package / "Cargo.toml").read_text()
+    m = MANIFEST_VERSION_RE.search(text)
+    if m:
+        return m.group(1), True
+    if "version.workspace" in text:
+        return workspace_version(), False
+    sys.exit(f"version: crates/{package}/Cargo.toml names no version at all")
+
+
+def workspace_version():
+    text = (ROOT / "Cargo.toml").read_text()
+    m = re.search(r"(?m)^version\s*=\s*\"([^\"]+)\"", text)
+    if not m:
+        sys.exit("version: root Cargo.toml names no [workspace.package] version")
+    return m.group(1)
+
+
+def manifest_publish_false(package):
+    text = (ROOT / "crates" / package / "Cargo.toml").read_text()
+    return "publish = false" in text
+
+
+def parse_version(text):
+    m = VERSION_RE.match(text.strip())
+    if not m:
+        return None
+    return tuple(int(g) for g in m.groups())
+
+
+def bump(version, kind):
+    """Next version after a minor/major/patch bump, with the pre-1.0 rule:
+    while major is 0 a major bump lands as minor (never 1.0.0 undeclared)."""
+    major, minor, patch = version
+    if kind == "major":
+        return (major + 1, 0, 0) if major >= 1 else (major, minor + 1, 0)
+    if kind == "minor":
+        return (major, minor + 1, 0)
+    return (major, minor, patch + 1)
+
+
+def fmt(version):
+    return ".".join(str(n) for n in version)
+
+
+def tag_name(package, version):
+    return f"{package}{TAG_PREFIX}{fmt(version)}"
+
+
+def last_tag(package):
+    """Newest `<package>-vX.Y.Z` tag, else None (no release yet)."""
+    out = git("tag", "--list", f"{package}{TAG_PREFIX}*", "--sort=-v:refname")
+    tags = [t for t in out.splitlines() if parse_version(t.split(TAG_PREFIX, 1)[1])]
+    return tags[0] if tags else None
+
+
+def commits_since(tag, to="HEAD"):
+    """(sha, subject, body) per commit in (tag, to], oldest first.
+    Merge commits are listed (their subjects never parse as conventional,
+    so they bump nothing); the range is empty when tag is None... no: with
+    no prior tag the history is everything reachable."""
+    rev = to if tag is None else f"{tag}..{to}"
+    out = git("log", "--format=%H%x00%s%x00%b%x1e", rev)
+    commits = []
+    for chunk in out.split("\x1e"):
+        chunk = chunk.strip("\n")
+        if not chunk:
+            continue
+        sha, _, rest = chunk.partition("\x00")
+        subject, _, body = rest.partition("\x00")
+        commits.append((sha.strip(), subject.strip(), body.strip()))
+    commits.reverse()
+    return commits
+
+
+def commit_bumps(subject, body):
+    """{package: bump} this one commit asks for, else {}."""
+    m = SUBJECT_RE.match(subject)
+    if not m:
+        return {}
+    ctype = m.group("type").lower()
+    if ctype not in TYPES:
+        return {}
+    raw_scopes = [s.strip().lower() for s in (m.group("scopes") or "").split(",")]
+    scopes = [s for s in raw_scopes if s]
+    if not scopes:
+        return {}  # unscoped: no package to blame, never bumps
+    if all(s in NON_PACKAGE_SCOPES for s in scopes):
+        return {}
+    breaking = bool(m.group("bang")) or "BREAKING CHANGE:" in body
+    kind = "major" if breaking else BUMP_TYPE.get(ctype)
+    if kind is None:
+        return {}  # refactor/test/build/chore/docs/ci with a scope: housekeeping
+    out = {}
+    for scope in scopes:
+        for package in FANOUT.get(scope, ()):
+            prev = out.get(package)
+            if prev != "major":
+                out[package] = kind if prev is None or kind == "major" or prev == "patch" else prev
+    return out
+
+
+def plan_package(package, to="HEAD"):
+    """The dry-run plan for one package: last tag, base, bump, next, tag."""
+    tag = last_tag(package)
+    base_text, _ = manifest_version(package)
+    base = parse_version(base_text)
+    if base is None:
+        sys.exit(f"version: crates/{package}/Cargo.toml has a non-semver "
+                 f"version {base_text!r}")
+    want = None
+    notes = []
+    for sha, subject, body in commits_since(tag, to):
+        bumps = commit_bumps(subject, body)
+        kind = bumps.get(package)
+        if kind is None:
+            continue
+        notes.append((sha[:8], kind, subject))
+        if want != "major":
+            want = kind if want is None or kind == "major" or want == "patch" else want
+    if want is None:
+        return {"package": package, "last_tag": tag, "base": fmt(base),
+                "bump": None, "next": fmt(base), "tag": None, "commits": []}
+    nxt = bump(base, want)
+    # A manifest already ahead of the tag (bumped, not yet tagged) bases
+    # the plan on the manifest, never backwards.
+    if tag is not None:
+        tagged = parse_version(tag.split(TAG_PREFIX, 1)[1])
+        if base < tagged:
+            sys.exit(f"version: crates/{package}/Cargo.toml ({fmt(base)}) is behind "
+                     f"its own tag {tag}")
+    return {"package": package, "last_tag": tag, "base": fmt(base),
+            "bump": want, "next": fmt(nxt), "tag": tag_name(package, nxt),
+            "commits": [{"sha": s, "bump": k, "subject": t} for s, k, t in notes]}
+
+
+def cmd_plan(a):
+    plans = [plan_package(p, a.to) for p in SHIPPED]
+    if a.json:
+        print(json.dumps(plans, indent=2))
+        return 0
+    for plan in plans:
+        if plan["bump"] is None:
+            print(f"{plan['package']}: no change since "
+                  f"{plan['last_tag'] or 'the beginning'} "
+                  f"(stays {plan['base']})")
+            continue
+        print(f"{plan['package']}: {plan['bump']} {plan['base']} -> "
+              f"{plan['next']} (tag {plan['tag']})")
+        if a.verbose:
+            for c in plan["commits"]:
+                print(f"  {c['bump']:6} {c['sha']} {c['subject']}")
+    if all(p["bump"] is None for p in plans):
+        print("no tags would be created")
+    else:
+        print("dry run only: no tag created, nothing pushed, nothing published")
+    return 0
+
+
+def cmd_check(a):
+    problems = []
+    versions = {}
+    for package in SHIPPED:
+        text = (ROOT / "crates" / package / "Cargo.toml").read_text()
+        m = MANIFEST_VERSION_RE.search(text)
+        if not m:
+            problems.append(f"crates/{package}/Cargo.toml: no own `version` "
+                            f"(version.workspace is not per-package versioning)")
+            versions[package] = workspace_version()
+            continue
+        versions[package] = m.group(1)
+        if parse_version(m.group(1)) is None:
+            problems.append(f"crates/{package}/Cargo.toml: version "
+                            f"{m.group(1)!r} is not X.Y.Z semver")
+    for group in GROUPS:
+        want = versions[group[0]]
+        for package in group[1:]:
+            if versions[package] != want:
+                problems.append(
+                    f"lockstep violated: crates/{package}/Cargo.toml is "
+                    f"{versions[package]}, crates/{group[0]}/Cargo.toml is "
+                    f"{want} (the {','.join(group)} trio moves together)")
+    for package in INTERNAL:
+        if not manifest_publish_false(package):
+            problems.append(f"crates/{package}/Cargo.toml: internal library "
+                            f"without `publish = false`")
+    # A tag must never disagree with its manifest: the manifest is bumped
+    # in the release commit the tag points at, or just after.
+    for package in SHIPPED:
+        tag = last_tag(package)
+        if tag is None:
+            continue
+        tagged = tag.split(TAG_PREFIX, 1)[1]
+        if parse_version(tagged) is None:
+            problems.append(f"tag {tag} is not <package>-vX.Y.Z")
+        elif versions[package] != tagged and not a.allow_ahead:
+            problems.append(f"crates/{package}/Cargo.toml is {versions[package]} "
+                            f"but its newest tag is {tag}")
+    for p in problems:
+        print(f"version check: {p}")
+    if problems:
+        print(f"version check: {len(problems)} problem(s)", file=sys.stderr)
+        return 1
+    print("version check: ok (trio lockstep, semver, own versions, libs private)")
+    return 0
+
+
+def cmd_changelog(a):
+    plan = plan_package(a.package, a.to)
+    lines = []
+    for c in plan["commits"]:
+        mark = " (breaking)" if c["bump"] == "major" else ""
+        lines.append(f"- {c['subject']}{mark} ({c['sha']})")
+    if not lines:
+        print(f"(no changes for {a.package} since {plan['last_tag'] or 'the beginning'})")
+        return 0
+    print(f"## {a.package} {plan['next']}")
+    print()
+    print("\n".join(lines))
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    # On the main parser (before the subcommand) and, via `common`, on
+    # each subcommand too: `version --root DIR check` and
+    # `version check --root DIR` both work.
+    ap.add_argument("--root", default=None,
+                    help="repo root (default: the checkout holding this script)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("plan", help="dry run: bumps and tags from history (default)")
+    p.add_argument("--to", default="HEAD", help="compute up to this rev (default HEAD)")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--verbose", "-v", action="store_true", help="list the commits per bump")
+    p.set_defaults(fn=cmd_plan)
+
+    p = sub.add_parser("check", help="fail when manifests disagree with the versioning policy")
+    p.add_argument("--allow-ahead", action="store_true",
+                   help="a manifest newer than its tag is fine (release just cut, tag pending)")
+    p.set_defaults(fn=cmd_check)
+
+    p = sub.add_parser("changelog", help="per-package changelog since its last tag")
+    p.add_argument("package", choices=list(SHIPPED))
+    p.add_argument("--to", default="HEAD")
+    p.set_defaults(fn=cmd_changelog)
+
+    a = ap.parse_args()
+    if a.root:
+        global ROOT
+        ROOT = Path(a.root).resolve()
+    sys.exit(a.fn(a) or 0)
+
+
+if __name__ == "__main__":
+    main()

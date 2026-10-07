@@ -1,7 +1,12 @@
 [package]
 name = "scoot"
 description = "A scrolling-tiling Wayland compositor that runs without a GPU"
-version.workspace = true
+# Independent versioning (docs/backlog/packaging/independent-versioning.md):
+# this crate versions in lockstep with scootctl and scootbg (scripts/version
+# enforces the trio); scootbar versions on its own. Internal libraries
+# (scoot-core, scoot-ipc, scootbg-mem) are publish = false and carry no
+# meaningful version of their own.
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

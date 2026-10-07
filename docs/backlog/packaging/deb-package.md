@@ -3,7 +3,7 @@ title: "Debian and Ubuntu packages: `.deb`s and a signed apt repository"
 status: "open"
 area: "packaging"
 priority: "low"
-blocked: "independent-versioning, release-artifacts"
+blocked: "release-artifacts"
 ---
 
 # Debian and Ubuntu packages
@@ -31,7 +31,7 @@ Filed 2026-09-29. Serves **daily-drive**.
   decide between installing a newer toolchain in the build container (fine for
   a repo-hosted package) or declining that release.
 - Split packages per binary, matching the independent versions
-  ([independent-versioning](independent-versioning.md)); the coupled pair
+  ([independent-versioning](../resolved/independent-versioning-done.md)); the coupled pair
   declares a versioned dependency.
 - Files as in [arch-package](arch-package.md): the session entry, license
   and third-party inventory, no writes to user config, the bar's user unit, a

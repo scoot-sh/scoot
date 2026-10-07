@@ -180,19 +180,26 @@ fn action_names() -> Vec<&'static str> {
 /// compatibility against a remote compositor before connecting.
 ///
 /// Derived from the same two constants the wire uses --
-/// `env!("CARGO_PKG_VERSION")`, which the IPC `version` reply also reads
+/// the binary's own `CARGO_PKG_VERSION`, which the IPC `version` reply also reads
 /// (so the two agree by construction), and [`scoot_ipc::PROTOCOL_VERSION`]
 /// -- never a duplicated literal, so the string cannot go stale when
 /// either moves.
 ///
-/// `env!` here reads *this* crate's version, which is `version.workspace`
-/// -- the same workspace version the `scoot` binary's own `env!` reads --
-/// so the line agrees with the IPC reply as long as the workspace version
-/// is shared (a test below pins that).
+/// `version_string()` answers with *this* crate's version. The `scoot`
+/// binary must not use it: it would name scootctl's version, not its own
+/// (they agree only while the lockstep trio holds). It calls
+/// [`version_string_for`] with its own `env!("CARGO_PKG_VERSION")` instead.
 pub fn version_string() -> String {
+    version_string_for(env!("CARGO_PKG_VERSION"))
+}
+
+/// One `--version` line for the binary named by `pkg_version`: the caller
+/// passes its own `env!("CARGO_PKG_VERSION")`, so each binary's line names
+/// its own build even once versions move independently.
+pub fn version_string_for(pkg_version: &str) -> String {
     format!(
         "scoot {} (ipc protocol {})",
-        env!("CARGO_PKG_VERSION"),
+        pkg_version,
         scoot_ipc::PROTOCOL_VERSION
     )
 }
@@ -735,6 +742,20 @@ mod tests {
         // one line, no trailing newline (`print_line` adds it).
         assert!(version_string().starts_with("scoot "));
         assert!(!version_string().ends_with('\n'));
+    }
+
+    #[test]
+    fn version_string_for_names_the_version_it_is_given() {
+        // Independent versioning: each binary passes its own
+        // `env!("CARGO_PKG_VERSION")`, so its line names its own build
+        // even once versions move independently. A version the helper
+        // ignored (reading only its own `env!`) would print scootctl's
+        // version from the `scoot` binary.
+        let line = version_string_for("9.9.9");
+        assert_eq!(
+            line,
+            format!("scoot 9.9.9 (ipc protocol {})", scoot_ipc::PROTOCOL_VERSION)
+        );
     }
 
     #[test]
