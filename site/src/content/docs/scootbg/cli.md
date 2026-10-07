@@ -80,7 +80,15 @@ does. Exit status: 0 done; 1 no daemon running,
 unknown output, image that cannot be shown, or drawing failed
 (`scootbg query`'s `draw_error` says why, as the daemon's stderr does);
 2 usage error, a malformed color, an unknown
-`--mode`/`--filter`, or a refused transition included.
+`--mode`/`--filter`, or a refused transition included. A `set` that has to scale the image
+(`fill`, `fit` or `stretch` when the image's size differs from the output's,
+with any `--filter`) first probes the scaler's whole budget — the output,
+each scaled axis's weight tables, and the row scratch when both axes scale
+— and fails here when the
+daemon has no room for it (an address-space limit, strict overcommit)
+instead of ending the daemon; the outputs keep what they showed and the
+next `set` retries. See
+[Troubleshooting](./troubleshooting.md#symptoms).
 
 
 
@@ -177,11 +185,13 @@ with `"url":"https://..."` beside `image` for a download (the link the
 cached file came from),
 or `null` for nothing. `draw_failed` is `true` when the last attempt to
 draw what the output should show failed (an image that exists but cannot
-be decoded, a buffer too large, a link that would not download), which tells that `null` apart from a
+be decoded, a buffer too large, a scaling draw the daemon had no room
+for, a link that would not download), which tells that `null` apart from a
 `clear`; the next request for the output, or a new size, retries.
 `draw_error` says why while `draw_failed` is `true` (the error the
-daemon's stderr gives, such as `"no such file"` or `"shared memory:
-Cannot allocate memory (os error 12)"`), and is `null` otherwise; it is
+daemon's stderr gives, such as `"no such file"`, `"shared memory:
+Cannot allocate memory (os error 12)"`, or `"out of memory: cannot
+allocate ... bytes for scaling"`), and is `null` otherwise; it is
 for a person or an agent to read, and its wording may change. `transition`
 is the animation running on the output now (`"fade"`, `"wipe"` or
 `"grow"`, else `null`; `none` lands at once and is never reported). `saving`

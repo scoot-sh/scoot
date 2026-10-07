@@ -116,10 +116,12 @@ full per-feature cycle.
     scoot recorded as a gap (covered on sway). The suites keep growing
     with every later milestone: [testing.md](../testing.md) says where
     each kind of test lives
-    - [The scaler's output allocation aborts the daemon when memory is refused](scaler-oom-abort.md)
-      — open, medium, waiting on a user decision: `pic-scale-safe`'s
-      infallible output `Vec` ends the daemon under `RLIMIT_AS` or strict
-      overcommit; accept, probe, fork the scaler, or switch scalers
+    - [The scaler's output allocation aborts the daemon when memory is refused](resolved/scaler-oom-abort-done.md)
+      — RESOLVED 2026-10-07: probe-then-refuse plus docs — `scale` probes
+      the output, each scaled axis's weight tables and the row scratch and
+      refuses the draw (`draw_failed` / `draw_error`) instead of letting
+      the scaler end the daemon; the probe stays a heuristic under strict
+      overcommit
 13. [**Idle image retention**](resolved/image-retention-done.md) — CLOSED
     2026-10-05 as two artifacts, no retained copy: the 12 MB "anon" is
     misclassified shm pools (same `smaps.sh` off-by-one), and the lean
