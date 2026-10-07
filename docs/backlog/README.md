@@ -597,7 +597,8 @@ be revisited.
   — RESOLVED 2026-10-06 in #473: no LUT, but the DCP exposes per-CRTC `CTM`, so the ramp's white endpoints go out as a diagonal S31.32 matrix (exact at default gamma, zero per-frame cost).
 - [output_power test set_mode_off_reaches_every_holder races under load](./resolved/output-power-test-race-done.md)
   — RESOLVED 2026-10-07: test-quality fix, `wait_for_event` and the second-output registry wait use a 10 s wall-clock deadline instead of a fixed roundtrip budget.
-- [Cursor overlay plane follow-ups](./core/cursor-overlay-followups.md) (medium, filed 2026-10-06 from #485's review): stale-flip gate, off-output twins, one-overlay CRTCs
+- [Cursor overlay plane follow-ups](./resolved/cursor-overlay-followups-done.md)
+  — RESOLVED 2026-10-07 in #492: stale-flip floor on the lit gate, off-output twin skip + cache clear on cursor rebuild, single-overlay yield to a marked window; doc nits and the fork rebase note with it.
 - [scoot panics when seatd dies under a running session](./resolved/seatd-loss-panics-done.md)
   — RESOLVED 2026-10-07 in #489: fork commit `fdf424d` (repinned) returns `ConnectionLost` instead of panicking; the session shuts down cleanly with exit 1.
 - [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
