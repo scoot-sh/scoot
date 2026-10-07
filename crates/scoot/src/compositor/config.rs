@@ -311,22 +311,28 @@ struct XwaylandConfig {
     fractional: Option<String>,
 }
 
-/// `[virtual_input]`. One field: `enabled`, whether the session offers the
+/// `[virtual_input]`. Two fields: `enabled`, whether the session offers the
 /// virtual-pointer (`zwlr_virtual_pointer_manager_v1`) and virtual-keyboard
 /// (`zwp_virtual_keyboard_manager_v1`) globals remote-control tools like
-/// wayvnc need. `Option` for the same reason [`LayoutConfig`] is: an absent
-/// key leaves the default.
+/// wayvnc need; and `binds`, whether virtual-keyboard keys run compositor
+/// keybindings (default off -- see below). Each `Option` for the same
+/// reason [`LayoutConfig`] is: an absent key leaves the default.
 ///
 /// Off unless the file says on. Any same-uid client could bind these and
 /// type and click as the user, so unlike the clipboard globals (which every
 /// same-uid process can already reach past) they are not advertised at all
-/// until this is set -- see `virtual_input.rs` and `site/src/content/docs/scoot/protocols.md`.
-/// Takes effect on restart: a reload refuses changes with a message naming
-/// that (see `reload.rs`).
+/// until `enabled` is set -- see `virtual_input.rs` and `site/src/content/docs/scoot/protocols.md`.
+/// `binds` widens the same boundary one step further: with it on, a client
+/// that can bind the virtual keyboard can also spawn programs through binds
+/// (e.g. a terminal) -- the same trust boundary `protocols.md` already
+/// states (no security-context support), so keep it off except for a
+/// webtop/VNC session the remote user owns. Both take effect on restart: a
+/// reload refuses changes with a message naming that (see `reload.rs`).
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct VirtualInputConfig {
     enabled: Option<bool>,
+    binds: Option<bool>,
 }
 
 /// `[xwayland] fractional`: what the X server draws at when an `[output]
@@ -525,6 +531,14 @@ pub struct LoadedConfig {
     /// all. Takes effect on restart -- a reload refuses changes with a
     /// message naming that (see `reload.rs` and [`VirtualInputConfig`]).
     pub virtual_input: bool,
+    /// Whether virtual-keyboard keys run compositor keybindings
+    /// (`[virtual_input] binds`, default `false`). `true` lets a client
+    /// that can bind the virtual keyboard also spawn programs through binds
+    /// (the same trust boundary `protocols.md` states); `false` means
+    /// virtual keys are forwarded to the focused window only, never
+    /// intercepted. Takes effect on restart with `enabled` (see `reload.rs`
+    /// and [`VirtualInputConfig`]).
+    pub virtual_input_binds: bool,
     /// What the X server draws at a fractional `[output] scale`: `sharp`
     /// (`ceil`) or `light` (`floor`) -- see [`XwaylandFractional`]. Re-applied
     /// live by a reload through the one X-scale chooser (see
@@ -584,6 +598,7 @@ impl LoadedConfig {
             renderer: None,
             xwayland: false,
             virtual_input: false,
+            virtual_input_binds: false,
             xwayland_fractional: XwaylandFractional::default(),
             invalid_xwayland_fractional: None,
             autostart: Vec::new(),
@@ -629,6 +644,11 @@ impl LoadedConfig {
             .virtual_input
             .as_ref()
             .and_then(|virtual_input| virtual_input.enabled)
+            .unwrap_or(false);
+        let virtual_input_binds = file
+            .virtual_input
+            .as_ref()
+            .and_then(|virtual_input| virtual_input.binds)
             .unwrap_or(false);
         let (xwayland_fractional, invalid_xwayland_fractional) = match XwaylandFractional::resolve(
             file.xwayland
@@ -676,6 +696,7 @@ impl LoadedConfig {
             renderer,
             xwayland,
             virtual_input,
+            virtual_input_binds,
             xwayland_fractional,
             invalid_xwayland_fractional,
             autostart,
@@ -860,9 +881,9 @@ pub fn default_config_toml() -> String {
          # appearance fields, binds, [floating] and [[window_rule]], new\n\
          # [autostart] spawn entries, [wallpaper] and [xwayland] fractional\n\
          # re-apply live with `scoot msg reload`; [tty] gpu, [renderer]\n\
-         # backend, [xwayland] enabled, [virtual_input] enabled and an\n\
-         # [[outputs]] mode take effect on restart and a reload refuses\n\
-         # them with a message.\n",
+         # backend, [xwayland] enabled, [virtual_input] enabled,\n\
+         # [virtual_input] binds and an [[outputs]] mode take effect on\n\
+         # restart and a reload refuses them with a message.\n",
     );
 
     out.push_str("\n[layout]\n");
@@ -984,6 +1005,15 @@ pub fn default_config_toml() -> String {
          # restart. See site/src/content/docs/scoot/remote-desktop.md.\n",
     );
     out.push_str("# enabled = false\n");
+    out.push_str(
+        "# Let virtual-keyboard keys run compositor keybindings, by translated\n\
+         # seat keysym (off by default: with binds on, a client that can bind\n\
+         # the virtual keyboard can also spawn programs through binds -- the\n\
+         # same trust boundary as `enabled` above, so keep it off except for\n\
+         # a webtop/VNC session the remote user owns). Takes effect on\n\
+         # restart. See site/src/content/docs/scoot/remote-desktop.md.\n",
+    );
+    out.push_str("# binds = false\n");
 
     out.push_str("\n[autostart]\n");
     out.push_str("# Action strings to run once each, in file order, at session startup.\n");
@@ -3940,16 +3970,25 @@ mod tests {
     #[test]
     fn virtual_input_is_off_unless_the_file_says_on() {
         let file: FileConfig = toml::from_str("").expect("an empty file parses");
+        let loaded = LoadedConfig::from_file(file);
+        assert!(!loaded.virtual_input, "no table means no virtual globals");
         assert!(
-            !LoadedConfig::from_file(file).virtual_input,
-            "no table means no virtual globals"
+            !loaded.virtual_input_binds,
+            "no table means virtual keys never bind"
         );
         let file: FileConfig =
             toml::from_str("[virtual_input]\nenabled = true\n").expect("a switch parses");
+        let loaded = LoadedConfig::from_file(file);
+        assert!(loaded.virtual_input, "enabled means advertised");
         assert!(
-            LoadedConfig::from_file(file).virtual_input,
-            "enabled means advertised"
+            !loaded.virtual_input_binds,
+            "binds stays off unless asked: enabling the globals must not enable binds"
         );
+        let file: FileConfig = toml::from_str("[virtual_input]\nenabled = true\nbinds = true\n")
+            .expect("both switches parse");
+        let loaded = LoadedConfig::from_file(file);
+        assert!(loaded.virtual_input, "enabled means advertised");
+        assert!(loaded.virtual_input_binds, "binds means virtual keys bind");
         assert!(
             toml::from_str::<FileConfig>("[virtual_input]\nenabled = true\nextra = 1\n").is_err(),
             "a typo in the new table must not parse"
@@ -3976,6 +4015,14 @@ mod tests {
         let file: FileConfig =
             toml::from_str(&format!("[virtual_input]\n{uncommented}\n")).expect("valid toml");
         assert!(!LoadedConfig::from_file(file).virtual_input);
+        let line = lines[section..]
+            .iter()
+            .find(|line| line.trim() == "# binds = false")
+            .expect("the emission names the virtual-binds default");
+        let uncommented = line.trim().strip_prefix("# ").expect("a comment");
+        let file: FileConfig =
+            toml::from_str(&format!("[virtual_input]\n{uncommented}\n")).expect("valid toml");
+        assert!(!LoadedConfig::from_file(file).virtual_input_binds);
     }
 
     #[test]

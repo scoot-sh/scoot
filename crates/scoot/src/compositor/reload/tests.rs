@@ -407,6 +407,34 @@ fn reload_refuses_a_virtual_input_flip_with_restart_named() {
 }
 
 #[test]
+fn reload_refuses_a_virtual_binds_flip_with_restart_named() {
+    // The bind gate is fixed at startup with the globals: flipping it in
+    // the file changes what a connected remote may do without restarting,
+    // so the reload refuses under its own name -- while an agreeing file
+    // stays silent in both lists. The fixture never asked (off), so
+    // `binds = true` is the flip and the bare file is the agreement.
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite("[virtual_input]\nenabled = true\nbinds = true\n");
+    let response = fixture.reload();
+    let refused = refused(&response);
+    let binds = refused
+        .iter()
+        .find(|entry| entry.starts_with(field::VIRTUAL_INPUT_BINDS))
+        .expect("the virtual-binds refusal");
+    assert!(
+        binds.contains("takes effect on restart"),
+        "the virtual-binds refusal should name restart: {binds}"
+    );
+
+    fixture.rewrite("");
+    let response = fixture.reload();
+    assert!(
+        !refused_names(&response).contains(&field::VIRTUAL_INPUT_BINDS),
+        "an agreeing virtual-binds knob should stay silent: {response:?}"
+    );
+}
+
+#[test]
 fn reload_applies_output_scale_and_halves_the_logical_geometry() {
     // The Phase 3 pin: `scale = 2.0` moves from the file into the live
     // session under its own applied name, the precomputed integer follows,

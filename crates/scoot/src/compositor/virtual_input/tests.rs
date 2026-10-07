@@ -27,8 +27,9 @@ use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{Receiver, Sender};
 
+use scoot_core::Action;
 use scoot_ipc::PointerButton;
-use smithay::input::keyboard::xkb;
+use smithay::input::keyboard::{Keysym, xkb};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use wayland_client::protocol::{
     wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm, wl_surface,
@@ -46,6 +47,7 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
 };
 
 use super::super::decorations::Appearance;
+use super::super::keybindings::{BindFlags, Bound, Modifiers};
 use super::super::test_support::{Harness, wait_for};
 
 /// The framebuffer the headless backend renders into. Absolute motion maps
@@ -61,6 +63,16 @@ impl Fixture {
     /// client running the test script.
     fn enabled() -> Self {
         let mut fixture = Harness::headless(Appearance::default(), CANVAS);
+        super::init(&mut fixture.state, true);
+        fixture.spawn(run_client);
+        fixture
+    }
+
+    /// A fixture with the managers advertised and `[virtual_input] binds`
+    /// on: virtual keys run binds by translated seat keysym.
+    fn with_binds() -> Self {
+        let mut fixture = Harness::headless(Appearance::default(), CANVAS);
+        fixture.state.virtual_input_binds = true;
         super::init(&mut fixture.state, true);
         fixture.spawn(run_client);
         fixture
@@ -1936,5 +1948,544 @@ fn virtual_keys_do_not_run_binds() {
     assert_eq!(
         fixture.state.focus, focused,
         "a virtual Super+h must not run the focus bind"
+    );
+}
+
+/// Sends one virtual chord: each `(name, pressed)` in order, translated
+/// through `layout`'s positions the way wayvnc sends them.
+fn press_chord(fixture: &mut Fixture, layout: &str, chord: &[(&str, bool)]) {
+    for (name, pressed) in chord {
+        let code = evdev_for(layout, name);
+        fixture.run(Step::Key {
+            code,
+            pressed: *pressed,
+        });
+    }
+}
+
+/// Binds `combo` (modifiers + unshifted keysym) to `action` in the live
+/// table: what a config file's `[binds]` entry becomes after load.
+fn bind(fixture: &mut Fixture, mods: Modifiers, keysym: Keysym, action: Action, flags: BindFlags) {
+    fixture
+        .state
+        .keybindings
+        .insert(mods, keysym, Bound::Action(action), flags);
+}
+
+/// Whether the focused window is fullscreen right now: the observable half
+/// of a `ToggleFullscreen` bind firing, no client cooperation needed (a
+/// `CloseFocused` bind only *asks* -- `send_close` -- and the test client
+/// never answers, so closes are invisible here).
+fn is_fullscreen(fixture: &Fixture) -> bool {
+    let id = fixture.state.focus.expect("a focused window");
+    fixture
+        .state
+        .world
+        .arrange()
+        .placements
+        .iter()
+        .find(|placement| placement.id == id)
+        .expect("a placement for the focused window")
+        .fullscreen
+}
+
+const ALT: Modifiers = Modifiers {
+    super_: false,
+    shift: false,
+    ctrl: false,
+    alt: true,
+};
+
+const SUPER: Modifiers = Modifiers {
+    super_: true,
+    shift: false,
+    ctrl: false,
+    alt: false,
+};
+
+#[test]
+fn virtual_bind_fires_when_binds_on() {
+    // The mirror of `virtual_keys_do_not_run_binds`: the same Super+h
+    // chord, but with the flag on -- focus moves left, the `h` press and
+    // its release are intercepted (the client never sees them), and the
+    // bare Super press and release still forward.
+    let mut fixture = Fixture::with_binds();
+    fixture.run(Step::Bind);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::MapWindow);
+    let focused = fixture.state.focus;
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "us".to_owned(),
+    });
+    fixture.take_log();
+    press_chord(
+        &mut fixture,
+        "us",
+        &[
+            ("Super_L", true),
+            ("h", true),
+            ("h", false),
+            ("Super_L", false),
+        ],
+    );
+    assert_ne!(
+        fixture.state.focus, focused,
+        "a virtual Super+h must run the focus bind with binds on"
+    );
+    assert_eq!(
+        fixture.take_log(),
+        [
+            Seen::Key {
+                code: seat_evdev(&fixture, "Super_L"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "Super_L"),
+                pressed: false
+            },
+        ],
+        "the intercepted h press+release must not reach the client"
+    );
+    assert!(
+        fixture.state.virtual_suppressed.is_empty(),
+        "the intercepted release must clear the suppression entry"
+    );
+}
+
+#[test]
+fn virtual_bind_off_forwards_the_chord_whole() {
+    // Default-off is inert as well as safe: the same chord as above is
+    // forwarded whole -- focus never moves and the client hears every key.
+    let mut fixture = Fixture::enabled();
+    assert!(
+        !fixture.state.virtual_input_binds,
+        "the harness default must match the config default (off)"
+    );
+    fixture.run(Step::Bind);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::MapWindow);
+    let focused = fixture.state.focus;
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "us".to_owned(),
+    });
+    fixture.take_log();
+    press_chord(
+        &mut fixture,
+        "us",
+        &[
+            ("Super_L", true),
+            ("h", true),
+            ("h", false),
+            ("Super_L", false),
+        ],
+    );
+    assert_eq!(
+        fixture.state.focus, focused,
+        "a virtual Super+h must not move focus with binds off"
+    );
+    assert_eq!(
+        fixture.take_log(),
+        [
+            Seen::Key {
+                code: seat_evdev(&fixture, "Super_L"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "h"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "h"),
+                pressed: false
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "Super_L"),
+                pressed: false
+            },
+        ]
+    );
+    assert!(
+        fixture.state.virtual_suppressed.is_empty(),
+        "nothing intercepted means nothing suppressed"
+    );
+}
+
+#[test]
+fn virtual_alt_return_fires_through_a_mismatched_remote_keymap() {
+    // The brief's chord (`Alt+Return`) against a German remote on a US
+    // seat: bind matching runs on the translated seat keysym, so `Return`
+    // -- the same keysym at every position carrying it -- still fires even
+    // though the positions disagree. The held Alt is what proves the
+    // seat-side modifier state: the bind sees Alt held because the
+    // translated Alt press updated it, not because the remote mask leaked.
+    let mut fixture = Fixture::with_binds();
+    bind(
+        &mut fixture,
+        ALT,
+        Keysym::Return,
+        Action::ToggleFullscreen,
+        BindFlags::default(),
+    );
+    fixture.run(Step::Bind);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "de".to_owned(),
+    });
+    fixture.take_log();
+    press_chord(
+        &mut fixture,
+        "de",
+        &[
+            ("Alt_L", true),
+            ("Return", true),
+            ("Return", false),
+            ("Alt_L", false),
+        ],
+    );
+    assert!(
+        is_fullscreen(&fixture),
+        "a virtual Alt+Return must run the fullscreen bind with binds on"
+    );
+    assert_eq!(
+        fixture.take_log(),
+        [
+            Seen::Key {
+                code: seat_evdev(&fixture, "Alt_L"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "Alt_L"),
+                pressed: false
+            },
+        ],
+        "the intercepted Return must not reach the client"
+    );
+}
+
+#[test]
+fn virtual_german_z_matches_the_seat_z_bind() {
+    // `z` sits where US has `y` on a German remote: translation by keysym
+    // lands on the seat's `z` key, so a `Super+z` bind fires -- and the
+    // position's US reading (`y`) must not.
+    let mut fixture = Fixture::with_binds();
+    bind(
+        &mut fixture,
+        SUPER,
+        Keysym::z,
+        Action::ToggleFullscreen,
+        BindFlags::default(),
+    );
+    fixture.run(Step::Bind);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "de".to_owned(),
+    });
+    fixture.take_log();
+    press_chord(
+        &mut fixture,
+        "de",
+        &[
+            ("Super_L", true),
+            ("z", true),
+            ("z", false),
+            ("Super_L", false),
+        ],
+    );
+    assert!(
+        is_fullscreen(&fixture),
+        "a German-remote Super+z must run the seat Super+z bind"
+    );
+}
+
+#[test]
+fn virtual_german_y_position_does_not_fire_the_z_bind() {
+    // The control for the test above: the German `y` position (US `z`) --
+    // keysym `y`, which no bind names -- forwards whole and closes
+    // nothing.
+    let mut fixture = Fixture::with_binds();
+    bind(
+        &mut fixture,
+        SUPER,
+        Keysym::z,
+        Action::ToggleFullscreen,
+        BindFlags::default(),
+    );
+    fixture.run(Step::Bind);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "de".to_owned(),
+    });
+    fixture.take_log();
+    press_chord(
+        &mut fixture,
+        "de",
+        &[
+            ("Super_L", true),
+            ("y", true),
+            ("y", false),
+            ("Super_L", false),
+        ],
+    );
+    assert!(
+        fixture.state.focus.is_some(),
+        "a German-remote Super+y must not run the Super+z bind"
+    );
+    assert_eq!(
+        fixture.take_log(),
+        [
+            Seen::Key {
+                code: seat_evdev(&fixture, "Super_L"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "y"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "y"),
+                pressed: false
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "Super_L"),
+                pressed: false
+            },
+        ]
+    );
+}
+
+#[test]
+fn locked_virtual_bind_fires_neither() {
+    // The lock gate stays absolute with binds on: a bound chord while
+    // locked neither runs the bind (the window survives) nor reaches any
+    // client (neither the window behind the lock nor the lock surface) --
+    // not even an `allow_when_locked` spawn.
+    let mut fixture = Fixture::with_binds();
+    bind(
+        &mut fixture,
+        ALT,
+        Keysym::Return,
+        Action::ToggleFullscreen,
+        BindFlags::default(),
+    );
+    bind(
+        &mut fixture,
+        ALT,
+        Keysym::m,
+        Action::ToggleMaximize,
+        BindFlags {
+            repeat: false,
+            allow_when_locked: true,
+        },
+    );
+    map_focused_window(&mut fixture);
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "us".to_owned(),
+    });
+    fixture.take_log();
+    lock_session(&mut fixture);
+    press_chord(
+        &mut fixture,
+        "us",
+        &[
+            ("Alt_L", true),
+            ("Return", true),
+            ("Return", false),
+            ("Alt_L", false),
+        ],
+    );
+    press_chord(
+        &mut fixture,
+        "us",
+        &[("Alt_L", true), ("m", true), ("m", false), ("Alt_L", false)],
+    );
+    assert!(
+        !fixture
+            .state
+            .world
+            .arrange()
+            .placements
+            .iter()
+            .any(|placement| placement.fullscreen || placement.maximized),
+        "no virtual bind may run while locked -- not even an allow_when_locked one"
+    );
+    assert_eq!(
+        fixture.take_log(),
+        [],
+        "locked virtual keys must not reach the window"
+    );
+    assert_eq!(
+        take_locker_log(&mut fixture),
+        [],
+        "locked virtual keys must not reach the lock surface either"
+    );
+}
+
+#[test]
+fn destroyed_virtual_keyboard_swallows_the_intercepted_release() {
+    // Press Super (forwarded) and `h` (intercepted: focus moves), then
+    // destroy with both still held. The synthesized releases must route
+    // like the live ones: Super's forwards to the still-focused window,
+    // `h`'s is swallowed (the client never saw its press), and no
+    // suppression entry strands.
+    let mut fixture = Fixture::with_binds();
+    fixture.run(Step::Bind);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::MapWindow);
+    let focused = fixture.state.focus;
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "us".to_owned(),
+    });
+    fixture.take_log();
+    press_chord(&mut fixture, "us", &[("Super_L", true), ("h", true)]);
+    assert_ne!(
+        fixture.state.focus, focused,
+        "the bind must have fired before the destroy"
+    );
+    fixture.take_log();
+    fixture.run(Step::DestroyKeyboard);
+    assert_eq!(
+        fixture.take_log(),
+        [Seen::Key {
+            code: seat_evdev(&fixture, "Super_L"),
+            pressed: false
+        }],
+        "only the forwarded Super release may arrive; the intercepted h release is swallowed"
+    );
+    assert!(
+        fixture.state.virtual_suppressed.is_empty(),
+        "the destroy sweep must not strand suppression entries"
+    );
+}
+
+#[test]
+fn lock_sweep_swallows_the_intercepted_release() {
+    // The same routing through the lock path: hold Super+h across the
+    // lock, and the window behind it must hear Super's release but never
+    // `h`'s -- and the lock surface must hear nothing at all.
+    let mut fixture = Fixture::with_binds();
+    fixture.run(Step::Bind);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "us".to_owned(),
+    });
+    fixture.take_log();
+    press_chord(&mut fixture, "us", &[("Super_L", true), ("h", true)]);
+    fixture.take_log();
+    lock_session(&mut fixture);
+    assert_eq!(
+        fixture.take_log(),
+        [Seen::Key {
+            code: seat_evdev(&fixture, "Super_L"),
+            pressed: false
+        }],
+        "the lock sweep releases what the device held, swallowing the intercepted key"
+    );
+    assert_eq!(take_locker_log(&mut fixture), []);
+    assert!(
+        fixture.state.virtual_suppressed.is_empty(),
+        "the lock sweep must not strand suppression entries"
+    );
+}
+
+#[test]
+fn a_held_virtual_bind_fires_exactly_once() {
+    // Two presses, one release pair: the second press is absorbed (the
+    // source already holds the key) before the filter, so a toggle bind
+    // ends on -- fired once, never twice, and never forwarded as a
+    // duplicate. The log proves interception (no Return events at all);
+    // the toggle proves the count (twice would flip it back off).
+    let mut fixture = Fixture::with_binds();
+    bind(
+        &mut fixture,
+        ALT,
+        Keysym::Return,
+        Action::ToggleFullscreen,
+        BindFlags::default(),
+    );
+    fixture.run(Step::Bind);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "us".to_owned(),
+    });
+    fixture.take_log();
+    press_chord(
+        &mut fixture,
+        "us",
+        &[
+            ("Alt_L", true),
+            ("Return", true),
+            ("Return", true),
+            ("Return", false),
+            ("Return", false),
+            ("Alt_L", false),
+        ],
+    );
+    assert!(
+        is_fullscreen(&fixture),
+        "the held bind must fire exactly once"
+    );
+    assert_eq!(
+        fixture.take_log(),
+        [
+            Seen::Key {
+                code: seat_evdev(&fixture, "Alt_L"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "Alt_L"),
+                pressed: false
+            },
+        ],
+        "neither Return press nor either release may reach the client"
+    );
+}
+
+#[test]
+fn virtual_bind_with_repeat_flag_fires_once_and_arms_nothing() {
+    // A flagged bind re-fires while a physical key is held; a virtual one
+    // must not: the hold has no repeat lifecycle the compositor owns, so
+    // the press fires once and arms no timer -- there is nothing whose
+    // release could strand a re-fire after the device is gone.
+    let mut fixture = Fixture::with_binds();
+    bind(
+        &mut fixture,
+        ALT,
+        Keysym::Return,
+        Action::ToggleFullscreen,
+        BindFlags {
+            repeat: true,
+            allow_when_locked: false,
+        },
+    );
+    fixture.run(Step::Bind);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "us".to_owned(),
+    });
+    fixture.take_log();
+    press_chord(&mut fixture, "us", &[("Alt_L", true), ("Return", true)]);
+    assert!(
+        is_fullscreen(&fixture),
+        "the flagged virtual bind fires its once"
+    );
+    assert!(
+        fixture.state.bind_repeat.is_none(),
+        "a virtual bind must never arm the repeat timer"
+    );
+    press_chord(&mut fixture, "us", &[("Return", false), ("Alt_L", false)]);
+    assert!(
+        is_fullscreen(&fixture),
+        "nothing re-fires after the release either"
     );
 }

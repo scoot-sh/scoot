@@ -62,13 +62,19 @@
 //!   `suppressed_keys` (or doesn't), and the release is routed by that set,
 //!   not by what the table says now (see `input::key`).
 //! - `[tty] gpu`, `[renderer] backend`, `[xwayland] enabled`,
-//!   `[virtual_input] enabled`: refused when
+//!   `[virtual_input] enabled` and `[virtual_input] binds`: refused when
 //!   they differ from what the session runs, naming restart as the remedy.
 //!   Each names something fixed before the first frame (the device already
 //!   driven, the renderer with client textures in it, the X server started
-//!   once or never) that no live swap can reach proportionate to its risk
-//!   -- rebuilding any of them mid-session is a restart keeping clients,
-//!   every step fallible mid-flight -- so the refusal stands and says so.
+//!   once or never, the globals advertised once or never, the trust
+//!   boundary a connected remote already holds) that no live swap can reach
+//!   proportionate to its risk -- rebuilding any of them mid-session is a
+//!   restart keeping clients, every step fallible mid-flight -- so the
+//!   refusal stands and says so. (`binds` is read on every virtual key, so
+//!   it *could* flip live like `[binds]`; it refuses with the section
+//!   instead, so the whole `[virtual_input]` contract is one restart-only
+//!   gate and a mid-hold flip can never strand virtual suppressed state --
+//!   see `virtual_input.rs`.)
 //! - `[xwayland] fractional`: applied -- the stored choice is swapped and
 //!   the X scale re-chosen through the one chooser
 //!   (`State::refit_xwayland`), exactly like a scale change: the client
@@ -195,6 +201,8 @@ mod field {
     /// `[virtual_input] enabled`: whether the virtual-pointer and
     /// virtual-keyboard globals are advertised.
     pub const VIRTUAL_INPUT: &str = "virtual_input.enabled";
+    /// `[virtual_input] binds`: whether virtual-keyboard keys run binds.
+    pub const VIRTUAL_INPUT_BINDS: &str = "virtual_input.binds";
     /// `[xwayland] fractional`: what X draws at a fractional scale.
     pub const FRACTIONAL: &str = "xwayland.fractional";
     pub const AUTOSTART: &str = "autostart.commands";
@@ -595,6 +603,19 @@ impl State {
             report.refused.push(refused(
                 field::VIRTUAL_INPUT,
                 "takes effect on restart: the virtual-pointer and virtual-keyboard globals are advertised once at startup",
+            ));
+        }
+        // The bind gate is read on every virtual key, so it could flip
+        // live -- but it refuses with the section instead: `binds` widens
+        // the same trust boundary `enabled` opens (a bound keyboard can
+        // spawn through binds), so the section stays one restart-only
+        // contract, and a mid-hold flip can never strand a suppressed
+        // virtual release (see `virtual_input.rs`). Compared against the
+        // live value, which no reload ever writes.
+        if fresh.virtual_input_binds != self.virtual_input_binds {
+            report.refused.push(refused(
+                field::VIRTUAL_INPUT_BINDS,
+                "takes effect on restart: the virtual-keyboard bind gate is fixed at startup with the virtual-input globals",
             ));
         }
     }

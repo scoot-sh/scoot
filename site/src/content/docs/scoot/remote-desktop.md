@@ -24,6 +24,21 @@ with, in the config file:
 enabled = true
 ```
 
+Want keybindings over VNC too — a webtop, or trying scoot in a browser
+where the remote user is the only user? Add the second switch:
+
+```toml
+[virtual_input]
+enabled = true
+binds = true
+```
+
+then restart the session (`scoot msg reload` refuses both keys with
+"takes effect on restart"). Without `binds`, remote `Super` moves no
+windows; with it, a remote chord runs the same bind the local keyboard
+would. Keep it off unless the remote user owns the session — see the
+trust note below.
+
 Then connect a viewer (`vncviewer 127.0.0.1:5900`, or macOS Screen Sharing
 for the DES-auth fallback) — or tunnel it over SSH and keep wayvnc on
 localhost, which is what it listens on by default. wayvnc captures one
@@ -36,6 +51,7 @@ until the screen changes or the pointer moves.
 | Field | Type | Default | Reload | Meaning |
 |---|---|---|---|---|
 | `[virtual_input] enabled` | bool | `false` | restart only | Offer the virtual-pointer (`zwlr_virtual_pointer_manager_v1`) and virtual-keyboard (`zwp_virtual_keyboard_manager_v1`) globals a remote-control tool like wayvnc needs to drive the session. Off unless asked: any same-uid client that binds them can type and click as the user, so with this off the globals are not advertised at all. |
+| `[virtual_input] binds` | bool | `false` | restart only | Let virtual-keyboard keys run compositor keybindings, matched by translated seat keysym. Off unless asked: with this on, a client that can bind the virtual keyboard can also spawn programs through binds (a terminal, a launcher) — the same trust boundary as `enabled` above. Needs `enabled` to matter (no globals, no keys). |
 
 What to know before pointing wayvnc at a session:
 
@@ -55,8 +71,10 @@ What to know before pointing wayvnc at a session:
 - **Nothing virtual delivers while the session is locked.** Motion,
   buttons, scroll, keys and modifiers are dropped — a remote client cannot
   type a password into the lock screen, blind or otherwise, and can never
-  unlock. Keys and buttons a device holds when the lock engages are
-  released first, so unlocking never inherits a stuck modifier. The lock
+  unlock. That includes binds: with `[virtual_input] binds` on, a virtual
+  chord while locked neither runs its bind (not even an `allow_when_locked`
+  spawn) nor reaches any client. Keys and buttons a device holds when the
+  lock engages are released first, so unlocking never inherits a stuck modifier. The lock
   screen itself keeps showing over VNC (captures see it, never the windows
   behind it).
 - **Virtual keys type through the seat layout.** A virtual keyboard brings
@@ -64,11 +82,31 @@ What to know before pointing wayvnc at a session:
   translated by keysym (`z` on a German remote types `z`, not the `y` at
   that position), without ever changing the seat keymap or the physical
   keyboard's state. A keysym the seat layout has no key for (a German `ß`
-  on a US seat) is dropped rather than mistyped. Virtual keys never run
-  keybindings: they are forwarded to the focused window like text, so
-  remote `Super` moves no windows (unlike some compositors, where a remote
-  Super drives the local binds) — window management stays local, or over
-  `scoot msg` (see [Requests](../msg/requests.md#requests)).
+  on a US seat) is dropped rather than mistyped. With `[virtual_input]
+  binds` off, virtual keys never run keybindings: they are forwarded to
+  the focused window like text, so remote `Super` moves no windows
+  (unlike some compositors, where a remote Super drives the local binds)
+  — window management stays local, or over `scoot msg` (see
+  [Requests](../msg/requests.md#requests)).
+- **With `binds`, a remote chord runs the seat's bind.** Matching is by
+  the *translated seat keysym* — the same symbol the forwarded keystroke
+  would carry — so a German remote's `Super+z` runs the seat's `Super+z`
+  bind (not the position's US reading), and `Alt+Return` fires even when
+  the two keymaps disagree about everything around it. The press and its
+  release are intercepted (the window never sees them); anything unmatched
+  still forwards like text. A flagged bind fires exactly once — virtual
+  holds never repeat, even with `repeat = true` (a virtual hold has no
+  repeat lifecycle the compositor owns, and the device may vanish
+  mid-hold). Two keyboards holding one key fire once: the seat tracks
+  holds per source and absorbs the second press before any bind runs.
+- **Trust it like a local keyboard, because it is one.** Any same-uid
+  client that can bind the virtual keyboard can already type into any
+  window; with `binds` on it can also spawn programs through binds. That
+  is the same trust boundary scoot already states (no security-context
+  support — see the trust note at the top of
+  [Protocols](./protocols.md)), not a new one. Turn `binds` on for a
+  webtop or try-scoot session the remote user owns, and leave it off when
+  a person sits at the machine and the remote is only helping.
 - **Absolute motion maps onto the named output, or the whole layout.**
   wayvnc names the output it captures (manager version 2), so the pointer
   lands where the remote screen shows it; a client that names no output
@@ -101,6 +139,10 @@ Troubleshooting, by symptom:
   `--disable-input` for view-only.
 - *The viewer shows the screen but typing does nothing*: the session is
   locked (see above), or no window has keyboard focus — click one first.
+- *The viewer shows the screen but keybindings do nothing*: `binds` is
+  off (the default) or the session was not restarted after turning it on
+  — a reload refuses `virtual_input.binds` with "takes effect on
+  restart". Set `enabled = true` and `binds = true`, then restart.
 - *A key types the wrong character*: the seat layout (US, unless the
   session was started with another) has no key for that keysym — see the
   translation rule above. Keys present in both layouts are exact.

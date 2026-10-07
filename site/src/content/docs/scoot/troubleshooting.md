@@ -55,4 +55,5 @@ description: "Compositor symptoms and their fixes — picture, keys, config, out
   [Backends](./backends.md#which-renderer-draws-the-frames).
 - *VNC connects but input does nothing.* Remote control is opt-in
   (`[virtual_input] enabled`, then restart), and nothing virtual
-  delivers while locked. See [Remote desktop](./remote-desktop.md).
+  delivers while locked. Keybindings over VNC need the second switch
+  (`[virtual_input] binds`, then restart). See [Remote desktop](./remote-desktop.md).
