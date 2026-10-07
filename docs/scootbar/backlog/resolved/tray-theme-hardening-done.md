@@ -1,9 +1,10 @@
 ---
 title: "Tray: themed-icon hardening follow-ups (N1-N4 from #497 review)"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-07"
 ---
 
 # Tray: themed-icon hardening follow-ups (N1-N4 from #497 review)
@@ -57,12 +58,53 @@ review):
 - N4: strip one trailing `.png`; return hidden (`None`) for `.svg`/`.xpm`.
   Test.
 
-Hot path: all of this runs once per `GetAll` answer on the bus turn,
-never per frame; keep it allocation-light (stack-sorted probe order,
-no new dependency) and bounded. Publish release file/`.text` size and
-idle RSS/wakeups before/after; the themed-icon size row was waived by
-the maintainer on 2026-10-07 for the decoder only, so any further
-growth is reported plainly and nothing is waived here.
+## Status (2026-10-07): landed in #502
+
+All four fixed in `crates/scootbar/src/modules/tray/theme.rs`, each
+with a test that fails before it (proven by revert-run-restore on the
+M2: seam commit `958ceac07` fails all five new tests, fix commit
+`022ff36fd` passes them):
+
+- N1: `read_file` opens `O_NONBLOCK`/`O_NOFOLLOW` through `rustix`
+  (no new dependency) and requires a regular file under the cap on the
+  opened fd's own metadata; the read stays `take`-bounded. Test:
+  `a_fifo_is_refused_without_blocking` (FIFO through the inner reader
+  behind a 10 s watchdog; blocked 10 s before).
+- N2: stored side capped at 64 px (`MAX_STORED_SIDE`, the pixmap bound;
+  larger decodes downscale once on the bus turn through the shared
+  resampler) and `MAX_THEME_TOTAL_BYTES` (32 x 16 KiB = 512 KiB),
+  pinned to its per-icon share by a `debug_assert` in `decode`. Tests:
+  `a_large_icon_is_stored_at_the_bound` (128 px stores at 64) and
+  `thirty_two_large_icons_fit_the_total_budget` (2 MiB before).
+- N3: `closest_order` sorts the fixed dirs by distance to the drawn
+  size (ties prefer the larger), `scalable` and the base file last;
+  `load` keeps a documented default (`LOOKUP_SIDE` 24, the middle of
+  the 14-48 tray range) and `load_for_side` takes an explicit size.
+  Test: `the_closest_size_wins` (22 red vs 48 green at 24 and 48).
+- N4: one trailing `.png` stripped, `.svg`/`.xpm` hidden. Test:
+  `a_name_with_an_extension_resolves_like_the_bare_name`.
+
+Real icon sizes (Asahi M2, `/run/current-system/sw/share/icons`):
+hicolor app PNGs at 16/22/24/32/48/64/72/96/128/256/512, every
+standard dir populated, so 64 keeps every real tray-size icon while
+bounding stored bytes to 16 KiB each.
+
+Verification: fmt clean; clippy matrix clean (none, default,
+`--all-features`, tray alone, tray with/without `icon-image`, each
+module alone, popup+tray); nextest 1385 passed / 4 skipped (no sway
+on the box; the one sway-gated clock test fails environmentally with
+`SCOOTBAR_REQUIRE_SWAY=1`, same as the #497 review); `cargo test`
+clean; `cargo deny check` ok; `scripts/backlog check` shows only the
+3 pre-existing problems; `nix build .#docs-site` green. Live recheck
+with pasystray 0.8.2 (IconName-only) on the M2: `shown:true`,
+tooltip `pasystray`, icon ink in a 1600x1000 screenshot.
+
+Size (release, stripped, aarch64, base `ee211c67d` vs head):
+file 2,364,128 B both (+0); `.text` 1,791,944 vs 1,793,448 (+1,504,
++0.08%); `.rodata` +64 B. Idle tray-only bars on headless scoot
+(20 s): RSS 4400 kB both, 0 wakeups both, 8 fds, 1 thread. The
+2026-10-07 size waiver covered the decoder only: this growth is
+reported plainly and nothing is waived here.
 
 ## Not in this ticket
 
