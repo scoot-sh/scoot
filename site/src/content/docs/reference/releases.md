@@ -55,6 +55,7 @@ not covered — these are glibc binaries. Check what you have before
 anything else:
 
 ```sh
+chmod +x scoot-0.2.0-x86_64-linux   # release downloads carry no executable bit
 ./scoot-0.2.0-x86_64-linux --version
 ```
 

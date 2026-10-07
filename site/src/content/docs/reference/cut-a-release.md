@@ -72,8 +72,9 @@ ships no binary); a bar tag builds `scootbar`.
 
 Dispatch the workflow by hand with dry-run on (the default). It runs
 resolve, vendor, both arch builds, the SBOM, the checksums and the
-changelog, then prints what it would publish and stops — no release,
-no upload, no attestation:
+changelog, then prints what it would publish and stops — no release and
+no attestation (it does upload the run's own build artifacts, kept 7
+days, which is how the build and publish jobs hand files over):
 
 ```sh
 gh workflow run release --ref main -f tag=scootbar-v0.3.0 -f dry_run=true
@@ -83,6 +84,12 @@ A dry run with `dry_run=false` publishes for real; that is the escape
 hatch for re-cutting after a deleted release, not the normal path.
 New workflow files cannot be dispatched until they are on main, so the
 first dry run always happens after merge.
+
+A dry run exercises the whole artifact round trip (vendor, build,
+download, assemble, checksums) but **not** the attestation or the
+release creation: those first run for real on the first tag. Expect to
+watch that first run, and if it fails after the build, use the recovery
+steps below before anyone downloads anything.
 
 ## When a run fails
 
