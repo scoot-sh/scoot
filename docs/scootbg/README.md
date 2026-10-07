@@ -593,7 +593,10 @@ Against the competitors: [below](#against-the-other-daemons).
 | What | Result |
 |---|---|
 | Stripped binary | 1,684,328 B with `apply-config` (+114,688 B: by symbol, spawning a process through `std::process` about 27 KB, the strict section parse about 23 KB, the client half about 20 KB; 8,192 B of it the fixes from its review); 1,569,640 B with images and restore (1,557,352 B at ticket 9 before its review fixes, 1,516,392 B before ticket 9, 1,500,008 B at ticket 6; 783,072 B with colors only then); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
+| Stripped binary with transitions | 1,643,424 B (+131,072 B over the 1,512,352 B build before them; `.text` +51,172 B), same three libraries: reported plainly for the maintainer under the resource ratchet, waived nothing |
 | `set` of a 6000×4000 JPEG onto a 3840×2160 output, request to reply, ×3 | 397.0–433.6 ms, 390–420 ms of CPU (PNG 408.1–417.6 ms; WebP 1,218.0–1,289.4 ms); peak RSS 120.5–120.6 MB with the previous wallpaper still mapped (88.0 MB for a first set; PNG 120.4–120.6 MB; WebP 142.0–142.1 MB) |
+| A transition frame, blending only (`transition::bench`, medians of 30 frames ×3 runs, release, Asahi M2) | 1920×1080: fade 5.4, wipe 3.0, grow 2.4 ms; 3840×2160: fade 21.6, wipe 12.1, grow 10.0 ms. 1080p holds 60 fps; 4K degrades to fewer steps (about 20 fps for a fade, 30 for a wipe or grow), never stalling the compositor |
+| Idle after transitions, one 3840×2160 color, 30 s windows, release | 0 context switches; RSS 3,920 kB, PSS 3,032 kB, 1 thread, 8 fds — against 3,680 / 2,792 kB for instant sets on the same build and 3,472 / 2,632 kB on the build before transitions (+208 kB of resident code, +240 kB more once the transition paths have run; no output-sized buffer retained) |
 | After it, idle 30 s | 1 thread, heap 372–568 kB, one 32.4 MB buffer; 0 context switches, 0 CPU |
 | A few hundred bytes claiming 16384×16384 (PNG, JPEG, WebP) | refused in under 1 ms; peak RSS within 72 kB of before |
 | Idle with a color set, 30 s ×3 | 0 context switches, 0 CPU ticks; RSS 2,720 kB, PSS 1,524 kB, 1 thread |
