@@ -199,7 +199,9 @@ def commit_bumps(subject, body):
         return {}  # unscoped: no package to blame, never bumps
     if all(s in NON_PACKAGE_SCOPES for s in scopes):
         return {}
-    breaking = bool(m.group("bang")) or "BREAKING CHANGE:" in body
+    breaking = bool(m.group("bang")) or bool(
+        re.search(r"^BREAKING[ -]CHANGE:", body, re.MULTILINE)
+    )  # footer position only: a body that merely quotes it does not count
     kind = "major" if breaking else BUMP_TYPE.get(ctype)
     if kind is None:
         return {}  # refactor/test/build/chore/docs/ci with a scope: housekeeping

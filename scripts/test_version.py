@@ -116,6 +116,14 @@ class TestBumps(unittest.TestCase):
         plan = self.w.plan()
         self.assertEqual(plan["scootbar"]["next"], "0.2.0")
 
+    def test_a_body_that_only_quotes_the_footer_is_not_breaking(self):
+        self.w.commit(
+            "fix(scootbar): tick",
+            body="This is not a BREAKING CHANGE: the clock shape is as before",
+        )
+        plan = self.w.plan()
+        self.assertEqual(plan["scootbar"]["bump"], "patch")
+
     def test_post10_uses_normal_rules(self):
         for p in SHIPPED:
             self.w.set_manifest(p, 'version = "1.2.3"')

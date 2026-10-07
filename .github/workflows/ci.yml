@@ -343,7 +343,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # `check` reads tags (its "no tag ahead of the manifest" rule); it never
+      # reads history, so tags without depth is all it needs.
       - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
       - name: scripts/version check
         run: python3 scripts/version check
       - name: scripts/version tests

@@ -113,8 +113,8 @@ The tool never tags; the maintainer does the first release by hand:
 1. `scripts/version plan --verbose` on main, and read what it would do.
 2. Bump each moving crate's `version` in its `Cargo.toml` to the
    planned number (the trio together, the bar on its own).
-3. Commit (`chore(scoot,scootbg): release 0.2.0` -- a non-package scope
-   pairing never bumps, so the release commit itself moves nothing),
+3. Commit (`chore(scoot,scootbg): release 0.2.0` -- the `chore` type never
+   bumps, whatever its scope, so the release commit itself moves nothing),
    then tag each moving package (`scoot-v0.2.0`, `scootbg-v0.2.0`, ...).
 4. Push the commit and the tags. The tag-triggered release workflow
    (blocked on this ticket) takes it from there: per-package changelog
