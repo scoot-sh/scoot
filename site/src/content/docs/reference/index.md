@@ -24,6 +24,8 @@ everything).
 | [scootbar CLI](./../scootbar/cli.md) | flags, `msg`, agent interface, exit statuses |
 | [scootbg CLI](../scootbg/cli.md) | commands, `apply-config`, `query`, exit statuses |
 | [Versions and compatibility](./versions.md) | what each `--version` prints, which versions work together |
+| [Releases](./releases.md) | get a release, which file is which, verify it |
+| [Cut a release](./cut-a-release.md) | maintainer: version, tag, dry-run, recover |
 | [Package scoot offline](./packaging.md) | vendored tarball, toolchain floor, system libraries per feature, forks, licenses |
 | [Generated CLI pages](./cli.md) | reserved: generated from `--help --json` when it lands |
 

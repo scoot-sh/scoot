@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Resolve and validate a release tag: the gate the tag-triggered release
+workflow runs before it builds anything.
+
+    scripts/release-resolve <tag> [--root DIR] [--main-ref REF]
+                             [--no-github] [--json]
+
+A tag names exactly one package (`scoot-v0.2.0`, `scootbar-v0.3.0`; the
+trio's tag releases the trio's binaries). The resolve refuses -- exit 2,
+nothing built, nothing published -- when:
+
+- the tag is not `<package>-vX.Y.Z` or names an unknown package;
+- the tag does not exist;
+- the tag's version disagrees with the package manifest (trio tags need
+  all three manifests equal: the lockstep `scripts/version check`
+  enforces in CI);
+- the tag's commit is not on the main line (`--main-ref`, default
+  `origin/main`);
+- the tag's GitHub release already holds every expected asset (a
+  re-publish; an incomplete one resumes, so retries converge).
+
+On success it prints the release plan (or `--json`: the same for the
+workflow) and exits 0. The GitHub check needs `gh`; `--no-github`
+skips it (local dry runs). Stdlib only.
+"""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+SHIPPED = ("scoot", "scootctl", "scootbg", "scootbar")
+# A tag on any trio member releases the trio's binaries (scootctl is the
+# client library inside `scoot msg`: it versions with the trio but ships
+# no binary of its own).
+GROUP = {
+    "scoot": ("scoot", "scootctl", "scootbg"),
+    "scootctl": ("scoot", "scootctl", "scootbg"),
+    "scootbg": ("scoot", "scootctl", "scootbg"),
+    "scootbar": ("scootbar",),
+}
+BINARIES = {
+    "scoot": ("scoot", "scootbg"),
+    "scootctl": ("scoot", "scootbg"),
+    "scootbg": ("scoot", "scootbg"),
+    "scootbar": ("scootbar",),
+}
+ARCHES = ("x86_64-linux", "aarch64-linux")
+
+TAG_RE = re.compile(r"^([A-Za-z0-9_-]+)-v(\d+\.\d+\.\d+)$")
+MANIFEST_VERSION_RE = re.compile(r'(?m)^version\s*=\s*"([^"]+)"')
+
+
+def git(*args):
+    r = subprocess.run(["git", *args], cwd=str(ROOT),
+                       capture_output=True, text=True)
+    return r
+
+
+def refuse(message):
+    print(f"release-resolve: refusing: {message}", file=sys.stderr)
+    return 2
+
+
+def manifest_version(package):
+    text = (ROOT / "crates" / package / "Cargo.toml").read_text()
+    m = MANIFEST_VERSION_RE.search(text)
+    if not m:
+        return None
+    return m.group(1)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("tag", help="package tag, e.g. scootbar-v0.2.0")
+    ap.add_argument("--root", default=None,
+                    help="repo root (default: the checkout holding this script)")
+    ap.add_argument("--main-ref", default="origin/main",
+                    help="the main line the tag must be on (default origin/main)")
+    ap.add_argument("--no-github", action="store_true",
+                    help="skip the existing-release check (local dry runs)")
+    ap.add_argument("--json", action="store_true",
+                    help="print the release plan as JSON")
+    a = ap.parse_args()
+
+    global ROOT
+    if a.root:
+        ROOT = Path(a.root).resolve()
+
+    m = TAG_RE.match(a.tag)
+    if not m:
+        return refuse(f"tag {a.tag!r} is not <package>-vX.Y.Z")
+    package, version = m.group(1), m.group(2)
+    if package not in SHIPPED:
+        return refuse(f"tag {a.tag!r} names unknown package {package!r} "
+                      f"(shipped: {', '.join(SHIPPED)})")
+
+    # The tag must exist: there is nothing to release otherwise.
+    r = git("rev-parse", "--verify", f"refs/tags/{a.tag}^{{commit}}")
+    if r.returncode != 0:
+        return refuse(f"no such tag {a.tag!r} in this checkout")
+    commit = r.stdout.strip()
+
+    # The tag's version must match the manifests. Trio tags need the
+    # whole trio equal: the three binaries ship together, so a tag that
+    # disagrees with any of them is a wrong cut, not a partial one.
+    for member in GROUP[package]:
+        manifest = manifest_version(member)
+        if manifest != version:
+            return refuse(
+                f"tag {a.tag} names {version} but "
+                f"crates/{member}/Cargo.toml carries {manifest!r}"
+                + (" (the trio moves in lockstep)" if len(GROUP[package]) > 1
+                   else " (bump the manifest in the release commit first)"))
+
+    # The tag must be on the main line: releases cut from anywhere else
+    # never went through main's CI.
+    r = git("merge-base", "--is-ancestor", commit, a.main_ref)
+    if r.returncode != 0:
+        return refuse(f"tag {a.tag} ({commit[:8]}) is not on main "
+                      f"({a.main_ref}): cut releases from main only")
+
+    binaries = list(BINARIES[package])
+    short = git("rev-parse", "--short", commit).stdout.strip()
+    assets = ([f"{b}-{version}-{arch}" for b in binaries for arch in ARCHES]
+              + [f"scoot-{short}-vendored.tar.gz",
+                 f"sbom-{package}-{version}.cyclonedx.json",
+                 "SHA256SUMS"])
+
+    if not a.no_github:
+        r = subprocess.run(["gh", "release", "view", a.tag,
+                            "--json", "assets", "--jq", ".assets[].name"],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            published = {line.strip() for line in r.stdout.splitlines()
+                         if line.strip()}
+            missing = [n for n in assets if n not in published]
+            if not missing:
+                return refuse(f"tag {a.tag} is already published with "
+                              f"all {len(assets)} assets: refusing a "
+                              f"re-publish (delete the release to re-cut it)")
+            print(f"release-resolve: incomplete release resumes: "
+                  f"{len(missing)} of {len(assets)} assets still missing",
+                  file=sys.stderr)
+        elif "release not found" in (r.stdout + r.stderr).lower() or \
+                "could not find" in (r.stdout + r.stderr).lower() or \
+                "404" in (r.stdout + r.stderr):
+            pass  # No release yet: the normal first-run path.
+        else:
+            return refuse(f"could not verify whether {a.tag} is already "
+                          f"published: {r.stderr.strip() or r.stdout.strip()}"
+                          f" (failing closed; --no-github skips this check)")
+
+    plan = {"tag": a.tag, "package": package, "version": version,
+            "group": list(GROUP[package]), "binaries": binaries,
+            "commit": commit, "assets": assets}
+    if a.json:
+        print(json.dumps(plan, indent=2))
+    else:
+        print(f"package={package}")
+        print(f"version={version}")
+        print(f"group={' '.join(plan['group'])}")
+        print(f"binaries={' '.join(binaries)}")
+        print(f"commit={commit}")
+        print(f"assets ({len(assets)}):")
+        for name in assets:
+            print(f"  {name}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

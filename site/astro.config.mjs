@@ -192,6 +192,8 @@ export default defineConfig({
           items: [
             { label: 'Reference hub', slug: 'reference' },
             { label: 'Versions and compatibility', slug: 'reference/versions' },
+            { label: 'Releases', slug: 'reference/releases' },
+            { label: 'Cut a release', slug: 'reference/cut-a-release' },
             { label: 'Package scoot offline', slug: 'reference/packaging' },
             { label: 'Generated CLI pages', slug: 'reference/cli' },
           ],
