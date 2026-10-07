@@ -20,15 +20,15 @@ existing entries are being checked against it by
 
 | Fork | Upstream | Based on | Carried commits | Pinned in scoot | Why |
 | --- | --- | --- | --- | --- | --- |
-| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/cursor-dmabuf-storage) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below); then `74edbf32`: clamp the pixman source image to its edge when scaling; then `6e6fe896`: flush the XDND proxy's remap when a drag leaves an X window; then `7388af13` and `9515d7e5`: end a Wayland drop onto X once, and end an offer whose target is gone or never finishes; then `d3a4cd73`: only a real X drag gives up a pending drop onto X; then `b1ac3ca7`: an X drag enters another client's X window without waiting for types (Smithay's generic `input/dnd` gains a defaulted `DndFocus::enter_needs_metadata`); then `7e18b661`: remap the proxy only once the drag has left every X window; then `b16cd6a2`: wait for types only over the window the drag started on; then `fcf6f314` (unused, see below); then `e7130254`: apply a commit's cached buffer scale and transform on every commit that has a buffer; then `035d447c`: flush XSETTINGS writes; then `7ab72d53`: scan out a compositor-owned dma-buf element | **yes**, `crates/scoot/Cargo.toml` rev `7ab72d53` (the drawn cursor on an overlay plane; `035d447c` was the XSETTINGS flush for scale-aware X windows; `e7130254` was the buffer-scale fix, content-identical to `6ab8b4a2` which `main` pinned from `scoot/buffer-scale-without-new-buffer` before this branch's XWayland lane merged; the same-app quick drag; `7e18b661` was the X drag first-motion fix, `b1ac3ca7` and its review fix; `d3a4cd73` was the XWayland pointer-focus X arm; `74edbf32` was PR #272; `5b575329` was PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. Without `74edbf32`, every upscaled surface fades to a semi-transparent 1-px border under the default renderer; without `6e6fe896`, an X drag that crossed an X window cannot drop on a Wayland one, so drags from X could not be let onto X windows; without `9515d7e5`, a Wayland drop onto an X target that dies or hangs before finishing stops every later X drag until scoot restarts, and without `d3a4cd73` any X client can end such a drop in flight and keep the selection; without `b1ac3ca7`, a GTK or Qt drag released on its first motion onto another X app drops nothing, and without `7e18b661` an X window mapped again under an X drag has the proxy over it, and without `b16cd6a2` a quick drag between two windows of one X app instance drops nothing; without `e7130254`, a scale-only commit keeps rendering at the old buffer scale (see below); without `035d447c`, an X app started right after XWayland is ready can read no scale over XSETTINGS and draw at half size; without `7ab72d53`, scoot's drawn cursor can never ride an overlay plane, so on a CRTC with no cursor plane (Apple's DCP) a visible pointer makes every fullscreen frame composite. |
+| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/cursor-dmabuf-storage) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below); then `74edbf32`: clamp the pixman source image to its edge when scaling; then `6e6fe896`: flush the XDND proxy's remap when a drag leaves an X window; then `7388af13` and `9515d7e5`: end a Wayland drop onto X once, and end an offer whose target is gone or never finishes; then `d3a4cd73`: only a real X drag gives up a pending drop onto X; then `b1ac3ca7`: an X drag enters another client's X window without waiting for types (Smithay's generic `input/dnd` gains a defaulted `DndFocus::enter_needs_metadata`); then `7e18b661`: remap the proxy only once the drag has left every X window; then `b16cd6a2`: wait for types only over the window the drag started on; then `fcf6f314` (unused, see below); then `e7130254`: apply a commit's cached buffer scale and transform on every commit that has a buffer; then `035d447c`: flush XSETTINGS writes; then `7ab72d53`: scan out a compositor-owned dma-buf element; then `fdf424d`: return a lost-session error instead of panicking when the seat is gone | **yes**, `crates/scoot/Cargo.toml` rev `fdf424d` (the seat-loss shutdown; `7ab72d53` was the drawn cursor on an overlay plane; `035d447c` was the XSETTINGS flush for scale-aware X windows; `e7130254` was the buffer-scale fix, content-identical to `6ab8b4a2` which `main` pinned from `scoot/buffer-scale-without-new-buffer` before this branch's XWayland lane merged; the same-app quick drag; `7e18b661` was the X drag first-motion fix, `b1ac3ca7` and its review fix; `d3a4cd73` was the XWayland pointer-focus X arm; `74edbf32` was PR #272; `5b575329` was PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. Without `74edbf32`, every upscaled surface fades to a semi-transparent 1-px border under the default renderer; without `6e6fe896`, an X drag that crossed an X window cannot drop on a Wayland one, so drags from X could not be let onto X windows; without `9515d7e5`, a Wayland drop onto an X target that dies or hangs before finishing stops every later X drag until scoot restarts, and without `d3a4cd73` any X client can end such a drop in flight and keep the selection; without `b1ac3ca7`, a GTK or Qt drag released on its first motion onto another X app drops nothing, and without `7e18b661` an X window mapped again under an X drag has the proxy over it, and without `b16cd6a2` a quick drag between two windows of one X app instance drops nothing; without `e7130254`, a scale-only commit keeps rendering at the old buffer scale (see below); without `035d447c`, an X app started right after XWayland is ready can read no scale over XSETTINGS and draw at half size; without `7ab72d53`, scoot's drawn cursor can never ride an overlay plane, so on a CRTC with no cursor plane (Apple's DCP) a visible pointer makes every fullscreen frame composite. Without `fdf424d`, a dead seat daemon (seatd killed, logind restarted) panics the compositor with ENOTCONN instead of shutting down cleanly. |
 | [`scoot-sh/wayland-rs`](https://github.com/scoot-sh/wayland-rs/tree/scoot/server-fd-queue-cap-adaptive) | [Smithay/wayland-rs](https://github.com/Smithay/wayland-rs) | `72f7fe0d` (the wayland-backend 0.3.17 release, `v0.31.x` branch) | `a39311b8`: server side, disconnects a client leaving too many received fds unclaimed; `70f81e00`: sizes that cap at one eighth of the soft `RLIMIT_NOFILE`, 128..=1024 | **yes**, root `Cargo.toml` `[patch.crates-io]` rev `70f81e00` (PR #241) | wayland-backend queues fds a client sends with fd-less requests for the connection's life, so one idle client could fill scoot's fd table and shed every newcomer, `scoot msg` included. |
 
 ## Per fork
 
 ### `scoot-sh/smithay`
 
-- **Branch:** `scoot/cursor-dmabuf-storage`, twenty-six commits on
-  `0ff00983`, the tip `7ab72d53` pinned: `scoot/xwayland-selection-dnd`
+- **Branch:** `scoot/cursor-dmabuf-storage`, twenty-seven commits on
+  `0ff00983`, the tip `fdf424d` pinned: `scoot/xwayland-selection-dnd`
   (twenty-five, tip `035d447c`) plus the cursor commit, on a branch of its
   own until the PR adding it merges, after which the lane branch can be
   fast-forwarded to it. `fcf6f314`, the twenty-third, is
@@ -348,6 +348,52 @@ existing entries are being checked against it by
     - *Hiding the pointer instead* (`[appearance] cursor_hide_after_ms`,
       shipped). Kept, and still the answer where no overlay is free, but it
       only helps once the pointer has sat still, and is opt-in.
+  - `fdf424d` **return a lost-session error instead of panicking when the
+    seat is gone** (branch `scoot/cursor-dmabuf-storage`, on `7ab72d53`).
+    `LibSeatSessionNotifier::process_events` called `unwrap` on
+    `libseat_dispatch`'s result, and on `disable()`'s, so a dead seat
+    daemon under a running `--tty` session panicked the compositor with
+    `ENOTCONN` (`backend/session/libseat.rs:215` at `7ab72d53`; reproduced
+    live on the Asahi M2, private seatd + `openvt`: kill seatd, panic,
+    exit 101). Both now return a new `Error::ConnectionLost` (also covered
+    by `AsErrno`), which the event loop propagates out of `run`, so the
+    session shuts down cleanly (exit 1, `scoot: ... Lost the seat
+    connection...`); pausing instead would hang forever, since without the
+    daemon no enable can ever resume it. The startup `dispatch` in
+    `LibSeatSession::new` maps the same failure to `FailedToOpenSession`.
+    libseat offers no reconnect, so resume is not possible on any route.
+    Smithay's session module has exactly one implementation (libseat), and
+    libseat picks its seatd/logind backend internally, so the seatd path
+    verified live and the logind-restart path share this code; a logind
+    restart was not tested live (it would drop the shared machine's own
+    sessions). Touches only `src/backend/session/libseat.rs`.
+    **Alternatives considered**, each checked against `7ab72d53`:
+    - *A scoot-side handler catching the session event and shutting down.*
+      There is no such event: the panic fires inside Smithay's
+      `process_events` before scoot's callback runs, and `SessionEvent`
+      carries no seat-lost variant. Rejected: the failure never surfaces
+      where a handler could see it.
+    - *A scoot-side `EventSource` wrapper around the notifier with
+      `catch_unwind`.* Tried live (spiked in `compositor/tty`, then
+      reverted): the shutdown came out clean (exit 1), but Rust's panic
+      hook still prints `thread 'main' panicked at .../libseat.rs:215`
+      before the unwind reaches the catcher, so the log keeps screaming
+      panic; and the wrapper could not cover the `register`/`reregister`
+      `get_fd().unwrap()` sites, while converting every future Smithay
+      panic in that source into a silent shutdown. Rejected: it hides the
+      defect instead of fixing it, at the cost of a permanent,
+      unwind-across-the-boundary contract.
+    - *A pre-check or canary from scoot* (polling the seat's health, or a
+      second libseat client watching the daemon). Rejected: `LibSeatSession`
+      exposes no live health check (`is_active` is a cached flag set only
+      on events), and no ordering guarantee puts scoot's check ahead of
+      Smithay's next `dispatch` -- the panic stays reachable through the
+      race. Watching seatd's socket directly is backend-specific (logind
+      has no socket to watch).
+    - *An in-tree copy of the session module* (~300 lines with the `Seat`
+      lifetime and fd-ownership code). Rejected: a 10x diff to fix three
+      call sites, with permanent drift from Smithay's own fixes to that
+      file.
 - **Evidence:** `docs/backlog/resolved/syncobj-handle-leak-done.md`, and on the
   dev VM `~/evidence/sync/master-validation/`. Upstream master `79bbed5e1`
   (2026-09-22) was built and measured: it leaks 3.5–4.1 MB per test run,
@@ -372,7 +418,10 @@ existing entries are being checked against it by
   `928d4a9b`): upstream's `XSettings::update` still returns after
   `change_property8` without a flush. `7ab72d53` (checked 2026-10-06,
   master `19c16d3e`): upstream's `UnderlyingStorage` and `ExportBuffer`
-  still have no dma-buf variant. No issue
+  still have no dma-buf variant. `fdf424d` (checked 2026-10-07, upstream master
+  `libseat.rs` blob `8a47aaa5`, unchanged from the base): upstream's `backend/session/libseat.rs` still calls `unwrap`
+  on the `dispatch` result in `new` and `process_events` and on the
+  `disable` result, with no seat-lost error variant. No issue
   or PR exists. Nothing has been filed from here.
 - **Upstream policy note, for the maintainer's decision:** Smithay's
   `AI.md` asks contributors to disclose AI-generated code, discourages
@@ -397,6 +446,10 @@ existing entries are being checked against it by
   `compositor/xwayland/tests/scale.rs` fails intermittently without
   `035d447c` (2 runs in 20: the X app reads no scale); scoot does not
   compile against a rev without `UnderlyingStorage::Dmabuf` (`7ab72d53`).
+  No in-suite test pins `fdf424d`: the seat path needs a live seatd and a
+  VT, so the pin is the recorded live repro (panic with exit 101 at
+  `7ab72d53`, clean shutdown with exit 1 at `fdf424d`); a repin that lost
+  it would panic the same way the next time seatd died.
 
 ### `scoot-sh/wayland-rs`
 
