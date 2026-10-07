@@ -129,6 +129,29 @@ the login screen, so it is opt-in twice over; it is refused at eval
 beside GDM or SDDM. Logging in through it starts the same session [First
 session](../start/first-session.md) describes.
 
+### What a switch does
+
+A switch never ends your session. The running compositor keeps running
+from its old store path — even a switch that ships a new scoot build —
+and the new build takes over at the next login. Session-bound units
+whose own files changed (the bar, mako, the clipboard watchers) restart
+against the still-running compositor; the display socket never moves,
+so they reattach to the same session. If the compositor itself exits
+instead — quitting, crashing, or being stopped — the session targets
+stop with it, so nothing is left restart-looping on a missing display;
+log back in for a fresh session on the new build. That includes
+`systemctl --user restart scoot.service`: restarting the compositor ends
+the session, so use it only when you mean to log out.
+
+> **Symptom:** after a switch the bar logs "cannot connect to the
+> Wayland compositor" over and over while the session targets stay
+> active. That is a session outliving its compositor — the shape this
+> unit setup replaced. Check which side went missing first
+> (`systemctl --user status scoot.service` names the state; `journalctl
+> --user -u scoot.service` names the exit), stop the leftovers
+> (`systemctl --user stop scoot.service scoot-session.target`), and log
+> in again.
+
 Which options live on which side:
 
 | Side | Owns |

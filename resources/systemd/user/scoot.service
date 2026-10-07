@@ -25,6 +25,28 @@
 # its unsaved state, and silently relaunching into a fresh session
 # would hide that; the launcher exits nonzero instead.
 #
+# The reverse direction -- the compositor stopping taking the session
+# down with it -- rides on `OnSuccess=` / `OnFailure=` below: however
+# the service leaves the active state (a clean quit, a crash, an
+# explicit stop), the shutdown target starts and `Conflicts=` stops the
+# session targets, so nothing loops on a missing display. Both lines
+# are needed: a clean exit enters `inactive` (`OnSuccess=` only) while
+# a crash enters `failed` (`OnFailure=` only). Neither fires on the way
+# up -- starting the service enters `activating`, never `inactive` --
+# so a normal login can never trip them. Both name units, never binary
+# paths the way an `ExecStopPost=` would have to, so the file stays
+# portable past NixOS. The launcher starts the same target on exit, so
+# the two paths are one teardown, run twice to no harm.
+#
+# A switch never restarts or stops this unit: `X-RestartIfChanged=false`
+# and `X-StopIfChanged=false` tell the NixOS switcher to leave the
+# running compositor alone, and the new build takes over at the next
+# login. Both live under `[Service]`, never `[Unit]`: the switcher
+# reads exactly that section and silently ignores the keys anywhere
+# else, the same section its own generated units carry them in. (`X-`
+# keys are ignored by systemd itself, so they change nothing at
+# runtime.)
+#
 # Install: the NixOS module (`programs.scoot.session.enable`) writes
 # these files with the package binary path filled in. The dependency
 # shape follows the session-target pattern systemd documents in
@@ -39,8 +61,12 @@ Description=scoot scrolling-tiling Wayland compositor
 PartOf=scoot-session.target
 Wants=graphical-session-pre.target
 After=graphical-session-pre.target
+OnSuccess=scoot-shutdown.target
+OnFailure=scoot-shutdown.target
 
 [Service]
 Type=simple
 ExecStart=@SCOOT_BIN@ --tty
 Slice=session.slice
+X-RestartIfChanged=false
+X-StopIfChanged=false

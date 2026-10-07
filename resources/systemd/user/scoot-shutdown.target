@@ -1,6 +1,8 @@
 # `scoot-shutdown.target`: how a scoot session ends.
 #
-# `scoot-session` starts this when the compositor exits (or when the
+# Started when the compositor exits -- by `scoot.service` itself
+# through `OnSuccess=` / `OnFailure=`, and by `scoot-session` when the
+# launcher sees the service leave the active state (or when the
 # launcher itself is signalled). `Conflicts=` stops the session targets,
 # which -- through `PartOf` on `scoot.service` and `PartOf` on
 # session-bound units like the status bar -- stops everything the

@@ -123,8 +123,14 @@ IPC, imports the session's own `WAYLAND_DISPLAY`, and only then reaches
 already set. While the session runs it blocks in the bus waiting for
 `scoot.service` to leave the active state: an idle session costs no wakeups,
 and logging out ends the session at once. A user-manager re-exec mid-session
-(a NixOS switch) rides through without ending the session. When scoot
-exits, the session targets stop and the display variables are restored.
+(a NixOS switch) rides through without ending the session — and a switch
+that changes the compositor build leaves the running one alone: the new
+build takes over at the next login, while session-bound units whose own
+files changed restart against the still-running compositor (the display
+socket never moves, so they reattach). When scoot itself exits, for any
+reason, the service starts `scoot-shutdown.target` on the way down, so
+the session targets stop with it instead of looping on a missing display —
+and the display variables are restored.
 
 > **Symptom:** a login is refused as already running, but no session is up.
 > A crashed session's units can outlive it — log in again and the launcher
