@@ -126,6 +126,10 @@ fi
 echo "--- tarball"
 rm -f "$STAGE/snippet.toml" "$STAGE/vendor-stderr.log" "$STAGE/deny-stderr.log" \
     "$STAGE/THIRD-PARTY-LICENSES"
-tar czf "$OUT/${NAME}.tar.gz" -C "$STAGE" source
-(cd "$OUT" && shasum -a 256 "${NAME}.tar.gz" 2>/dev/null || sha256sum "${NAME}.tar.gz}")
+# Deterministic: sorted names, commit-time mtimes, root ownership, no gzip
+# timestamp, so two runs from one commit give identical bytes (GNU tar).
+tar --sort=name --mtime="@$(git log -1 --format=%ct HEAD)" --owner=0 --group=0 \
+    --numeric-owner --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
+    -cf - -C "$STAGE" source | gzip -n > "$OUT/${NAME}.tar.gz"
+(cd "$OUT" && shasum -a 256 "${NAME}.tar.gz" 2>/dev/null || sha256sum "${NAME}.tar.gz")
 echo "staged: $STAGE/source"
