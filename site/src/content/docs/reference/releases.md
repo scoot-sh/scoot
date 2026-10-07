@@ -21,13 +21,15 @@ A release holds one set of files per architecture (`x86_64-linux`,
 | `scootbg-<version>-<arch>` | The wallpaper daemon (same version as `scoot`) |
 | `scootbar-<version>-<arch>` | The status bar (only in bar releases; its version is independent) |
 | `scoot-<commit>-vendored.tar.gz` | The exact tagged tree plus `vendor/` (every dependency), `.cargo/config.toml`, `THIRD-PARTY-LICENSES` and `OFFLINE-BUILD.txt` |
-| `sbom-<package>-<version>.cyclonedx.json` | Every locked dependency and its version, CycloneDX 1.3 |
+| `sbom-<package>-<version>.cyclonedx.json` | The locked dependencies of the shipped binary (union of both binaries for trio releases), CycloneDX 1.3 |
 | `SHA256SUMS` | The checksum of every file above |
 
 The binaries are the default feature build: the GPU-free compositor
 that runs on a box with no GPU stack installed, and a bar that links
 nothing beyond the C library. They are built with cargo from the
-vendored tree on Debian 12 (glibc 2.36), so they run on any glibc
+vendored tree on Debian 12 (glibc 2.36) with Rust 1.97.0 (the rustup
+pin in `release.yml`; the workspace `rust-version` floor predates the
+let-chains the tree uses), so they run on any glibc
 distro at or past that floor. What they are not: the `gpu-scanout`
 build (needs libgbm at run time) and the `xwayland` build (needs the
 `Xwayland` binary on `PATH`). For those, build from the vendored
@@ -74,11 +76,16 @@ sha256sum -c SHA256SUMS
 
 Every line must report `OK`. Then the provenance: each file carries a
 keyless GitHub attestation — no signing key to fetch, nothing to
-rotate. You need the `gh` CLI:
+rotate. You need the `gh` CLI (recent: the flag spelling below is
+checked against `gh attestation verify --help` at gh 2.92.0 and
+2.100.0; `ubuntu-latest` runners provide a recent `gh`):
 
 ```sh
-gh attestation verify scoot-0.2.0-x86_64-linux --owner scoot-sh
+gh attestation verify scoot-0.2.0-x86_64-linux --owner scoot-sh --signer-workflow scoot-sh/scoot/.github/workflows/release.yml
 ```
+
+Pinning `--signer-workflow` matters: `--owner` alone accepts a
+provenance attestation minted by any workflow in the org.
 
 A verified file prints who built it (the release workflow, on the
 tag's commit) and what went in. The SBOM is plain JSON for the same

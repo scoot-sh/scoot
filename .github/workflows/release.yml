@@ -119,6 +119,48 @@ jobs:
       - name: actionlint (pinned through this repo's flake.lock)
         run: nix shell --inputs-from . nixpkgs#actionlint --command actionlint .github/workflows/release.yml
 
+      - name: Release workflow guards (single-path artifacts, no inline context)
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+          path = ".github/workflows/release.yml"
+          text = open(path).read()
+          # 1. No multi-path upload: every upload-artifact path must be a single path
+          # (multiple path entries restore under their least common ancestor,
+          # so consumers cannot predict the layout; see the review of #498).
+          if re.search(r"(?m)^\s*path:\s*\|", text):
+              print("::error title=Multi-path upload::release.yml must not contain a block path (upload one staged directory per artifact).")
+              sys.exit(1)
+          # 2. No direct github/inputs/steps interpolation inside run blocks
+          # (pass values through env instead; needs/matrix/runner remain allowed).
+          # Built without a literal expression opener so this guard does not trip itself.
+          opener = chr(36) + chr(123) + chr(123)
+          forbidden = [opener + " steps.", opener + " github.", opener + " inputs."]
+          lines = text.splitlines()
+          in_run = False
+          run_indent = None
+          bad = []
+          for i, line in enumerate(lines, 1):
+              m = re.match(r"^(\s*)-?\s*run:\s*\|\s*$", line)
+              if m:
+                  in_run = True
+                  run_indent = len(line) - len(line.lstrip())
+                  continue
+              if in_run:
+                  if line.strip() == "" or len(line) - len(line.lstrip()) > run_indent:
+                      for pat in forbidden:
+                          if pat in line:
+                              bad.append(f"{i}:{pat.strip()} in run block: {line.strip()}")
+                  else:
+                      in_run = False
+          if bad:
+              print("::error title=Inline context in run::pass github/inputs/steps values through env instead.")
+              for b in bad:
+                  print(b)
+              sys.exit(1)
+          print("guards ok: single-path uploads, no inline github/inputs/steps in run")
+          EOF
+
       - name: scripts/release-resolve tests
         run: python3 scripts/test_release_resolve.py
 
@@ -162,8 +204,11 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_TO_RESOLVE: ${{ steps.tag.outputs.value }}
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
         run: |
-          plan=$(scripts/release-resolve --json '${{ steps.tag.outputs.value }}')
+          plan=$(scripts/release-resolve --json "$TAG_TO_RESOLVE")
           echo "$plan"
           {
             echo "tag=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag"])')"
@@ -171,7 +216,7 @@ jobs:
             echo "version=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
             echo "binaries=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["binaries"]))')"
             echo "assets=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["assets"]))')"
-            if [ '${{ github.event_name }}' = push ]; then echo "dry_run=false"; else echo "dry_run=${{ inputs.dry_run }}"; fi
+            if [ "$EVENT_NAME" = push ]; then echo "dry_run=false"; else echo "dry_run=$DRY_RUN_INPUT"; fi
           } >>"$GITHUB_OUTPUT"
 
   # The vendored source tarball plus the SBOM: arch-independent, staged
@@ -201,22 +246,71 @@ jobs:
           ls -l "$RUNNER_TEMP/vendor-release"
 
       - name: SBOM (CycloneDX from the lockfile, cargo-cyclonedx)
+        env:
+          RESOLVE_PACKAGE: ${{ needs.resolve.outputs.package }}
+          RESOLVE_VERSION: ${{ needs.resolve.outputs.version }}
+          RESOLVE_BINARIES: ${{ needs.resolve.outputs.binaries }}
         run: |
+          # Union SBOM over every shipped binary. A trio tag ships scoot and
+          # scootbg, but a single-package SBOM would omit the other binary's
+          # dependencies (e.g. scootbg's image-webp/zune-*/byteorder-lite
+          # decoders). cargo-cyclonedx emits crates/*/sbom.json in one run;
+          # merge the shipped binaries' (plus the trigger package's)
+          # components, deduplicated by bom-ref, into one file.
           nix shell --inputs-from . nixpkgs#cargo-cyclonedx --command \
             cargo cyclonedx -f json --override-filename sbom \
-              --manifest-path crates/${{ needs.resolve.outputs.package }}/Cargo.toml
-          cp crates/${{ needs.resolve.outputs.package }}/sbom.json \
-            "$RUNNER_TEMP/sbom-${{ needs.resolve.outputs.package }}-${{ needs.resolve.outputs.version }}.cyclonedx.json"
-          python3 -c "import json; d=json.load(open('$RUNNER_TEMP/sbom-${{ needs.resolve.outputs.package }}-${{ needs.resolve.outputs.version }}.cyclonedx.json')); print(d['bomFormat'], d['specVersion'], len(d['components']), 'components')"
+              --manifest-path "crates/$RESOLVE_PACKAGE/Cargo.toml"
+          python3 - <<'EOF'
+          import json, os
+          package = os.environ["RESOLVE_PACKAGE"]
+          version = os.environ["RESOLVE_VERSION"]
+          binaries = os.environ["RESOLVE_BINARIES"].split()
+          wanted = []
+          for name in [package] + binaries:
+              if name not in wanted:
+                  wanted.append(name)
+          merged = {}
+          base = None
+          for name in wanted:
+              path = f"crates/{name}/sbom.json"
+              try:
+                  with open(path) as f:
+                      data = json.load(f)
+              except FileNotFoundError:
+                  continue
+              if base is None:
+                  base = data
+              for comp in data.get("components", []):
+                  key = comp.get("bom-ref") or (comp.get("name", ""), comp.get("version", ""))
+                  if isinstance(key, tuple):
+                      key = f"{key[0]}@{key[1]}"
+                  merged[key] = comp
+          assert base is not None, f"no SBOM found for {wanted}"
+          base["components"] = [merged[k] for k in sorted(merged)]
+          runner_temp = os.environ["RUNNER_TEMP"]
+          out = f"{runner_temp}/sbom-{package}-{version}.cyclonedx.json"
+          with open(out, "w") as f:
+              json.dump(base, f, indent=2)
+          print(base.get("bomFormat"), base.get("specVersion"), len(base["components"]), "components", f"from {wanted}")
+          EOF
+          rm -f crates/*/sbom.json
+          ls -l "$RUNNER_TEMP"/sbom-*.cyclonedx.json
+
+      - name: Stage the vendor artifact (single directory)
+        run: |
+          STAGE="$RUNNER_TEMP/stage-vendor"
+          mkdir -p "$STAGE"
+          cp -a "$RUNNER_TEMP"/vendor-release/scoot-*-vendored/source "$STAGE/source"
+          test -f "$STAGE/source/.cargo/config.toml" || { echo "::error title=Staged source has no .cargo/config.toml::vendor-release.sh did not stage intact."; exit 1; }
+          cp "$RUNNER_TEMP"/vendor-release/*.tar.gz "$STAGE/"
+          cp "$RUNNER_TEMP"/sbom-*.cyclonedx.json "$STAGE/"
+          ls -l "$STAGE"
 
       - name: Upload the staged source, tarball and SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vendor
-          path: |
-            ${{ runner.temp }}/vendor-release/scoot-*-vendored/source/
-            ${{ runner.temp }}/vendor-release/*.tar.gz
-            ${{ runner.temp }}/sbom-*.cyclonedx.json
+          path: ${{ runner.temp }}/stage-vendor
           retention-days: 7
 
   # One portable glibc build per architecture, on that architecture's
@@ -285,7 +379,9 @@ jobs:
       # libraries installed -- no toolchain, no -dev packages -- so a
       # user installing the documented dependencies gets a binary that
       # starts. scoot needs its five system libraries (the ldd-derived
-      # list in the site packaging page); the others must start bare.
+      # list in the site packaging page); the others must start bare
+      # (scoot-[0-9]* matches only the compositor: scootbg-* and
+      # scootbar-* also start with scoot but must run with nothing installed).
       - name: The binaries start on the bare base
         run: |
           ls -l "$RUNNER_TEMP/dist"
@@ -293,22 +389,23 @@ jobs:
             apt-get update -qq
             for bin in /dist/*; do
               case "$(basename "$bin")" in
-                scoot-*) apt-get install -y -qq libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0 >/dev/null ;;
+                scoot-[0-9]*) apt-get install -y -qq libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0 >/dev/null ;;
               esac
               "$bin" --version
             done
           '
 
-      - name: Checksums and upload
+      - name: Checksums and stage (single directory)
         run: |
-          (cd "$RUNNER_TEMP/dist" && sha256sum -- * > "$RUNNER_TEMP/SHA256SUMS-${{ matrix.arch }}")
-          cat "$RUNNER_TEMP/SHA256SUMS-${{ matrix.arch }}"
+          (cd "$RUNNER_TEMP/dist" && sha256sum -- * > "SHA256SUMS-${{ matrix.arch }}")
+          cat "$RUNNER_TEMP/dist/SHA256SUMS-${{ matrix.arch }}"
+          mkdir -p "$RUNNER_TEMP/stage-dist"
+          cp -a "$RUNNER_TEMP/dist/." "$RUNNER_TEMP/stage-dist/"
+          ls -l "$RUNNER_TEMP/stage-dist"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: binaries-${{ matrix.arch }}
-          path: |
-            ${{ runner.temp }}/dist/*
-            ${{ runner.temp }}/SHA256SUMS-${{ matrix.arch }}
+          path: ${{ runner.temp }}/stage-dist
           retention-days: 7
 
   # Assemble, attest and publish (or print the dry-run summary). Runs
@@ -383,8 +480,11 @@ jobs:
 
       # Keyless build provenance over every file (no signing key in
       # secrets, nothing for the maintainer to rotate): users check it
-      # with `gh attestation verify <file> --owner scoot-sh`. Skipped
-      # in dry runs (an attestation is a public claim; a dry run makes
+      # with `gh attestation verify <file> --owner scoot-sh
+      # --signer-workflow scoot-sh/scoot/.github/workflows/release.yml`.
+      # Pinning the signer workflow matters: --owner alone accepts a
+      # provenance attestation minted by any workflow in the org.
+      # Skipped in dry runs (an attestation is a public claim; a dry run makes
       # none).
       - name: Attest the file set
         if: needs.resolve.outputs.dry_run != 'true'

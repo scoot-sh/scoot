@@ -55,11 +55,14 @@ git push origin main scootbar-v0.3.0
 
 Each run resolves its tag (`scripts/release-resolve`: shape,
 manifest match, on main, not already published), stages the vendored
-tarball and the SBOM once, builds portable glibc binaries for
+tarball and the SBOM once (the SBOM is the union of the shipped
+binaries' locked dependencies, so a trio release covers both `scoot`
+and `scootbg`), builds portable glibc binaries for
 `x86_64-linux` and `aarch64-linux` (cargo `--locked --offline` from
-that staged tree in a Debian 12 container: glibc floor 2.36), checks
+that staged tree in a Debian 12 container with Rust 1.97.0: glibc floor 2.36), checks
 that every binary starts on the bare base, assembles `SHA256SUMS`,
-attests every file with keyless build provenance, writes the
+attests every file with keyless build provenance (verify with the
+`--signer-workflow` pin on the [releases](./releases.md) page), writes the
 per-package changelog (`scripts/version changelog`) as the release
 notes, and publishes the GitHub Release. A trio tag builds `scoot` and
 `scootbg` (`scootctl` is the client library inside `scoot msg` and
@@ -111,8 +114,12 @@ What the runs need from the platform is what they already use
 elsewhere in this repo: GitHub-hosted runners with Docker (the arch
 builders), and third-party actions allowed (every action is pinned by
 commit SHA). The two pins a human bumps over time are the distro base
-(`debian:bookworm-slim`: the glibc floor) and the rustup toolchain in
-`.github/workflows/release.yml` — the toolchain must stay new enough
+(`debian:bookworm-slim`: the glibc floor) and the rustup toolchain
+(`1.97.0` in `.github/workflows/release.yml`: the portable binaries
+are built with Rust 1.97.0) — the toolchain must stay new enough
 to compile the tree (the workspace floor predates the let-chains in
 it), and the workflow asserts the toolchain and the glibc it produces
-on every run.
+on every run. Verify downloads with `gh attestation verify <file>
+--owner scoot-sh --signer-workflow
+scoot-sh/scoot/.github/workflows/release.yml` (see the
+[releases](./releases.md) page for why the signer pin matters).
