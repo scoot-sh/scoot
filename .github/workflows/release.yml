@@ -270,9 +270,10 @@ jobs:
               rustc --version
               ldd --version | head -1
               cd /src
-              for bin in '"${{ needs.resolve.outputs.binaries }}"'; do
-                pkg="$bin"
-                cargo build --release --locked --offline -p "$pkg"
+              # Unquoted on purpose: the resolve output is allowlist-safe
+              # (scoot/scootbg/scootbar from scripts/release-resolve).
+              for bin in ${{ needs.resolve.outputs.binaries }}; do
+                cargo build --release --locked --offline -p "$bin"
                 cp "/tmp/target/release/$bin" \
                   "/out/${bin}-${{ needs.resolve.outputs.version }}-${{ matrix.arch }}"
               done
