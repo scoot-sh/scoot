@@ -281,6 +281,17 @@ review judged the row within rule 1's noise margin, so no waiver was strictly
 needed; the ruling is given regardless. Numbers:
 [tooltips-done](resolved/tooltips-done.md#evidence).
 
+**Maintainer's ruling (2026-10-07, given in chat: "Waive the size thing."): the
+tray themed-icon-names binary-size row is waived.** It covers the PNG decoder
+the default `tray` feature now links to draw items that send only `IconName`
+(release file +131,072 B, `.text` +65,760 B, `.rodata` +24,568 B against `main`
+at `ae10e90bc`, same toolchain), and only that row. Nothing else is waived: idle
+wakeups, fds and threads do not move, and the idle RSS reading (+about 150 kB
+over base, inside the run-to-run noise) stays a measurement, not an accepted
+cost. The gated alternative (themed icons behind `icon-image`, default build
++2,272 B `.text`) was measured and not chosen. Numbers:
+[tray-icon-themes-done](resolved/tray-icon-themes-done.md).
+
 **A runaway item.** One item re-announcing its icon as fast as the bar
 re-reads it, for 20 s (`flood.sh` in the PR): the bar read it 434 times
 (the 50 ms floor), used 0.14 CPU-seconds (0.7% of a core), made about 68
