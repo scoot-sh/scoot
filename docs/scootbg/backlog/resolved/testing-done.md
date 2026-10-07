@@ -285,7 +285,7 @@ found nothing there either.
   infallible; [ticket 6](images-decode-and-fit-done.md)), not new, but
   it is why the test uses `center`, and why the out-of-memory case the
   daemon survives is the buffer and not the scaler. Now its own backlog
-  item, waiting on a decision: [scaler-oom-abort.md](../scaler-oom-abort.md).
+  item, since resolved: [scaler-oom-abort-done.md](scaler-oom-abort-done.md).
 
 ### For the next tickets
 
@@ -444,7 +444,9 @@ No blocking findings; the low ones, fixed in commits after `53669ac`:
    9185; at 2^22, 610,189 executions, `cov` 3690, `ft` 9987. A third
    fewer runs for more coverage in the same time: kept.
 6. **The scaler's out-of-memory abort** is its own backlog item,
-   [scaler-oom-abort.md](../scaler-oom-abort.md), open and waiting on a
+   now resolved as [scaler-oom-abort-done.md](scaler-oom-abort-done.md)
+   (probe-then-refuse plus docs; the decision below went for the probe).
+   At the time it was open and waiting on a
    decision between accepting it, a probe, a scoot-sh fork of
    `pic-scale-safe` with a destination-slice entry point, and another
    scaler.

@@ -1,9 +1,10 @@
 ---
 title: "The scaler's output allocation aborts the daemon when memory is refused"
-status: "open"
-area: "scootbg"
-priority: "medium"
-blocked: "a user decision between the options below"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
+resolved: "2026-10-07"
 ---
 
 # The scaler's output allocation aborts the daemon when memory is refused
@@ -105,3 +106,54 @@ about 2.4 MB an axis. They matter to the options:
 
 Waiting on the user's choice; (c) is the one that removes the abort
 rather than narrowing or documenting it.
+
+## Resolution (2026-10-07): (b) probe-then-refuse, plus (a) docs
+
+Decided in chat: option (b), with option (a)'s docs. No fork (c), no
+scaler switch (d).
+
+`scale::scale` (`crates/scootbg/src/image/scale.rs`) now probes before
+every scaling draw (`fill`, `fit`, `stretch`, any image whose size
+differs from the output, and the `Nearest` path): it `try_reserve_exact`s
+`probe_budget` — the output, each scaled axis's weight tables, and the
+transient row scratch when both axes scale — frees it, and only then calls
+the scaler. A refused
+probe is `ScaleError::NoMemory` (`out of memory: cannot allocate {bytes}
+bytes for scaling`), which travels the existing `draw_failed` /
+`draw_error` path (the `center` mode's shared-memory failure shape), never
+an abort.
+
+The budget is re-derived from the pinned `pic-scale-safe` 0.1.12 source
+for every filter scootbg can select, not taken from this ticket's "about
+36 bytes" summary: per scaled axis `kernel × out × 6 + out × 32 + kernel
+× 20` (the `f32` table plus its `i16` copy, both bounds copies, the
+conversion scratch/order and the generation temp), with `kernel =
+round(base × max(in / out, 1))` (bases 6/4/2 for Lanczos3/Catmull-Rom/
+Bilinear) plus one guard tap, plus the trampoline row scratch
+(`src_width × 3 × min(4, dst_height)`) when both axes scale, plus 64 KiB
+of page-rounding cover. `Nearest` budgets the output alone. Worked
+numbers: 1×1 → 3840×2160 is 25,393,028 bytes for Lanczos3, 24,948,736
+for `Nearest` (unit-pinned in `scale::tests`). The code comments and the
+site docs say honestly what the probe is: nearly sound under `RLIMIT_AS`,
+racy under strict overcommit, conservative about fragmentation.
+
+Evidence: `crates/scootbg/tests/scaler_probe.rs` — the ticket's
+reproduction as `scaling_draws_refuse_under_a_tight_limit` (idle + 16
+MiB, 1×1 PNG, `fill`, all four filters: daemon lives, `draw_failed` with
+the probe's `draw_error`, the next `set` draws), failing before (the
+daemon dies mid-draw: `the daemon closed the connection without
+replying`) and passing after; plus
+`a_limit_just_above_the_full_draw_budget_still_draws` (budget + 33 MB
+buffer + 8 MiB headroom draws with every filter). Strict overcommit is
+not tested (`vm.overcommit_memory=2` is a system setting, untouched) and
+is documented as the remaining race, alongside the decoders' still
+infallible working memory. Docs in `site/src/content/docs/scootbg/`
+(`cli.md`, `images.md`, a troubleshooting symptom box with the
+diagnosing commands and the `LimitAS=` / `ulimit -v` / strict-overcommit
+causes). Benchmarks, 6000×4000 → 4K `fill`, release, 5 runs on the Asahi
+M2: before — scale 112.4–112.5 ms, peak 87,648 kB, heap 752 kB;
+after — scale 112.5–112.6 ms, peak 87,648–87,776 kB, heap 752 kB (the
+probe lives inside the timed scale stage: +0.1 ms at most, noise);
+release binary 1,577,760 B both before and after, `.text` 1,470,754 →
+1,471,850 B (+1,096 B, +0.07%). No ratchet row regresses beyond the
+noise (see the PR).

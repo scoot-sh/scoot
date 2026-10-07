@@ -88,7 +88,7 @@ notes it could not reach Reddit or Hacker News), the failures that recur are
   compositor (rebuild if the output is still there).
 - **Allocation failure**: know where the bar can abort on refused memory (the
   scaler in scootbg is the precedent,
-  [`scaler-oom-abort`](../../scootbg/backlog/scaler-oom-abort.md)); avoid large
+  [`scaler-oom-abort`](../../scootbg/backlog/resolved/scaler-oom-abort-done.md)); avoid large
   allocations sized by external input.
 - **Restart policy**: scoot does not supervise clients. Ship a systemd user
   unit / home-manager `Restart=` in [nix-modules-and-stylix](resolved/nix-modules-and-stylix-done.md), and

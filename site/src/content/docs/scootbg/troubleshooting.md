@@ -45,6 +45,39 @@ description: "Wallpaper symptoms and their fixes — images, links, outputs, res
   angles plain numbers, positions two fractions with a comma), a
   transition flag without `--transition`, or any of them on a `clear`:
   exit 2, nothing changed.
+
+- *Out of memory: `scootbg` exits with `memory allocation of ... bytes
+  failed`, or a draw fails with `Cannot allocate memory`.* The daemon
+  runs under an address-space limit (`ulimit -v`, systemd's `LimitAS=`)
+  or strict overcommit (`vm.overcommit_memory=2`). A draw that scales
+  (`fill`, `fit`, `stretch`, any image sized differently than the
+  output, with any `--filter`) first probes the scaler's whole budget —
+  the output, each scaled axis's weight tables, and the row scratch when
+  both axes scale — and refuses
+  the draw when the probe fails instead of letting the scaler end the
+  daemon: `set` exits 1, `query` reports `draw_failed: true` with
+  `draw_error: "out of memory: cannot allocate ... bytes for scaling"`,
+  the output keeps what it showed, and the next `set` retries. That probe
+  is a heuristic: nearly sound under an address-space limit (the daemon
+  draws one job at a time), racy under strict overcommit, where another
+  process can take the commit charge between the probe and the scaler's
+  own allocation — and the image decoders' own working memory stays
+  infallible either way, so a huge image can still end the daemon where a
+  scaling draw no longer does. Diagnose with the failed draw first, then
+  the limit:
+
+```sh
+scootbg query        # draw_failed, draw_error: what the draw needed
+prlimit --as --pid "$(pidof scootbg)"   # the daemon's address-space limit
+ulimit -v            # your shell's (a daemon started here inherits it)
+cat /proc/sys/vm/overcommit_memory   # 2 means strict overcommit
+```
+
+What to change: give the daemon address space — raise or drop the
+`LimitAS=` line that starts it (or start it with `ulimit -v unlimited`),
+rather than shrinking the wallpaper. Do not answer a wallpaper failure
+by switching the whole machine to strict overcommit; it trades one
+refused draw for aborts anywhere the probe's race is lost.
 - *Nothing applied from scoot.* Check the `[wallpaper]` section
   ([The `[wallpaper]` section](./index.md#the-wallpaper-section)): an
   unknown key or wrong-typed value refuses the section (the rest of the

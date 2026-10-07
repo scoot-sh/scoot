@@ -28,7 +28,13 @@ applied (a JPEG's, a WebP's, or a PNG's `eXIf` chunk). `--mode` fits it to each 
 
 `--fill '#rrggbb'` is the color around a fitted or centred image (default
 `#000000`), `--filter lanczos3|catmull-rom|bilinear|nearest` the scaling
-filter (default `lanczos3`; `nearest` keeps pixel art hard). `--mode`,
+filter (default `lanczos3`; `nearest` keeps pixel art hard). Before
+scaling, the daemon probes the scaler's whole budget — the output, each
+scaled axis's weight tables, and the row scratch when both axes scale —
+and refuses the draw when the
+probe fails (see [Troubleshooting](./troubleshooting.md#symptoms)) rather
+than letting the scaler end the daemon; `center` and `tile` scale nothing
+and never probe. `--mode`,
 `--fill` and `--filter` with a color are a usage error. The image is
 decoded and scaled on a worker thread and the decoded pixels are dropped
 once drawn. Outputs of one size showing one image share one buffer's
