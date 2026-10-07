@@ -45,33 +45,33 @@ pid() { echo "$daemon"; }
 
 rss_kb() { awk '/^VmRSS:/{print $2}' "/proc/$(pid)/status"; }
 pss_kb() { awk '/^Pss:/{print $2}' "/proc/$(pid)/smaps" 2>/dev/null | awk '{s+=$1} END {print s}'; }
-wakeups() { grep -c . "/proc/$(pid)/task" 2>/dev/null; cat "/proc/$(pid)/status" | awk '/^voluntary_ctxt_switches:|^nonvoluntary_ctxt_switches:/{s+=$2} END {print s}'; }
+threads() { ls "/proc/$(pid)/task" 2>/dev/null | wc -l; }
+fds() { ls "/proc/$(pid)/fd" 2>/dev/null | wc -l; }
+switches() {
+    awk '/^voluntary_ctxt_switches:|^nonvoluntary_ctxt_switches:/{s+=$2} END {print s+0}' \
+        "/proc/$(pid)/status"
+}
 
 idle_30s() {
-    # $1 = label. Settles, then samples wakeups over 30 s.
+    # $1 = label. Settles, then samples context switches over 30 s.
     what="$1"
     sleep 2
-    before=$(wakeups)
-    start=$(date +%s)
+    before=$(switches)
     sleep 30
-    after=$(wakeups)
-    echo "$what rss_kb=$(rss_kb) pss_kb=$(pss_kb) switches_30s=$((after - before)) threads=$(wakeups | head -1)" | tee -a "$OUT.txt"
-    echo "elapsed: $(( $(date +%s) - start ))s (want 30)" >&2
+    after=$(switches)
+    echo "$what rss_kb=$(rss_kb) pss_kb=$(pss_kb) threads=$(threads) fds=$(fds) switches_30s=$((after - before))" | tee -a "$OUT.txt"
 }
 
 : > "$OUT.txt"
 echo "== instant color ==" | tee -a "$OUT.txt"
 "$SCOOTBG" set '#101014'
 idle_30s "instant-color"
-echo "== instant image ==" | tee -a "$OUT.txt"
-"$SCOOTBG" set "$OUT.jpg" 2>/dev/null || "$SCOOTBG" set '#101014'
-idle_30s "instant-image"
-echo "== transitioned (3 fades) then idle ==" | tee -a "$OUT.txt"
-"$SCOOTBG" set '#c03020' --transition fade --duration-ms 500
-"$SCOOTBG" set '#101014' --transition wipe --angle 90 --duration-ms 500
-"$SCOOTBG" set '#c03020' --transition grow --position 0.5,0.5 --duration-ms 500
+echo "== transitioned (3 kinds) then idle ==" | tee -a "$OUT.txt"
+if [ "${TRANSITIONS:-1}" = 1 ]; then
+    "$SCOOTBG" set '#c03020' --transition fade --duration-ms 500
+    "$SCOOTBG" set '#101014' --transition wipe --angle 90 --duration-ms 500
+    "$SCOOTBG" set '#c03020' --transition grow --position 0.5,0.5 --duration-ms 500
+fi
 idle_30s "after-transitions"
-echo "== threads/fds ==" | tee -a "$OUT.txt"
-echo "threads=$(ls /proc/$(pid)/task | wc -l) fds=$(ls /proc/$(pid)/fd | wc -l)" | tee -a "$OUT.txt"
 "$SCOOTBG" kill
 cat "$OUT.txt"
