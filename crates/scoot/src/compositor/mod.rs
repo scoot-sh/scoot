@@ -333,10 +333,13 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // Virtual pointer and keyboard for remote control (wayvnc): after the
     // outputs exist (absolute motion maps onto them) and before the
     // `WAYLAND_DISPLAY` export below, so no client can bind before the
-    // globals it should see exist. Records the answer in
+    // globals it should see exist. Records `enabled` in
     // `startup_virtual_input` for reload to diff against -- the globals are
-    // advertised once here, never mid-session.
+    // advertised once here, never mid-session -- and `binds` in
+    // `virtual_input_binds`, which every virtual key reads (see
+    // `virtual_input.rs`); both are restart-only (see `reload.rs`).
     state.startup_virtual_input = loaded.virtual_input;
+    state.virtual_input_binds = loaded.virtual_input_binds;
     virtual_input::init(&mut state, loaded.virtual_input);
     if xwayland {
         #[cfg(feature = "xwayland")]

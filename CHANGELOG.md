@@ -9,6 +9,18 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-10-07 — opt-in keybindings for virtual keyboards
+
+- **Virtual keyboards can now run compositor keybindings when you ask:
+  `[virtual_input] binds = true`** (default `false`, restart-only like
+  `[virtual_input] enabled`). A webtop or try-scoot session the remote
+  user owns is drivable over VNC at last: remote chords match by
+  translated seat keysym, fire once (never repeat), and never fire while
+  locked. Needs `enabled = true` to matter. Keep it off when a person
+  sits at the machine — with it on, a client that can bind the virtual
+  keyboard can also spawn programs through binds (the same trust boundary
+  as `enabled`). See [Remote desktop](site/src/content/docs/scoot/remote-desktop.md).
+
 ### 2026-10-07 — a dead seat daemon shuts the session down instead of panicking
 
 - **Killing seatd under a running `--tty` session (or a logind restart)

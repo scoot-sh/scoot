@@ -21,6 +21,66 @@
 //! bind may drive (the trust note in `site/src/content/docs/scoot/protocols.md`) -- and a flag can
 //! only say yes, so this takes effect on restart like `[xwayland] enabled`.
 //!
+//! ## Binds (opt-in, default off)
+//!
+//! Virtual keys never run keybindings unless `[virtual_input] binds` is set
+//! alongside `enabled` (see [`super::config`]): off means forward-only,
+//! like Smithay's own manager -- window management stays local. On, a
+//! virtual key that matches the session's bind table by its *translated
+//! seat keysym* runs the bind through the same `act_bind` path a physical
+//! key does, and the press (and its matching release) is intercepted rather
+//! than forwarded.
+//!
+//! Why the seat keysym, not the remote position: the remote layout and the
+//! seat layout binds are configured against can disagree about what a key
+//! *is* (wayvnc's `-k de` against a US seat puts `z` where the seat has
+//! `y`). Matching by position would make remote keys behave like neither;
+//! matching by the translated keysym -- the same keysym the forwarded
+//! keystroke would carry -- makes a remote `Super+z` mean the seat's `z`
+//! bind wherever `z` lives on either layout. A remote `Alt+Return` still
+//! fires with a mismatched remote keymap, because `Return` is the same
+//! keysym at every position that carries it.
+//!
+//! The rest of the contract, each pinned by test:
+//!
+//! - **Locked means neither.** Every mutating request is dropped while the
+//!   session is locked (see below), so a virtual key never unlocks and
+//!   never runs a bind while locked -- not even an `allow_when_locked`
+//!   spawn. The press never reaches the filter; there is nothing to
+//!   intercept and nothing forwarded.
+//! - **No repeat.** A flagged bind re-fires while a physical key is held
+//!   (see `bind_repeat.rs`); a virtual one fires exactly once. A virtual
+//!   hold has no repeat lifecycle the compositor owns -- the client may
+//!   disconnect mid-hold, and the destroy/lock/VT sweep must still release
+//!   it cleanly -- so arming the timer would risk re-firing after the key
+//!   is gone. Fire-once is the safe subset.
+//! - **One fire across sources.** Held state is tracked per source inside
+//!   Smithay: a second source pressing a seat keycode another already
+//!   holds is absorbed before the filter (no re-fire, no duplicate
+//!   forward). A virtual and a physical press of the same key therefore
+//!   fire at most once, whichever transitioned first.
+//! - **No cross-talk with physical suppression.** Intercepted virtual
+//!   presses are recorded in `State::virtual_suppressed` -- never in
+//!   `suppressed_keys`, which stays the physical path's alone -- so neither
+//!   side can swallow the other's release. Two virtual keyboards holding
+//!   one key share the one entry the same way Smithay shares the hold
+//!   (the filter runs only on the first press and the last release), so
+//!   the bind still fires exactly once.
+//! - **Focus follows the seat.** Delivery (and interception) is through the
+//!   seat to whoever has focus, exactly like a physical key: a bind that
+//!   closes the focused window closes the focused window, and a forwarded
+//!   key types into it.
+//! - **Off is inert.** The filter's first check is the one bool
+//!   (`State::virtual_input_binds`); off means `Forward` with no table
+//!   lookup, no allocation, no state touched -- the physical per-keypress
+//!   path never reads it at all.
+//!
+//! The trust note: any same-uid client that can bind the virtual keyboard
+//! can already type into any window; with `binds` on it can also spawn
+//! programs through binds (e.g. a terminal). That is the same trust
+//! boundary `protocols.md` already states (no security-context support);
+//! keep the flag off except for a webtop/VNC session the remote user owns.
+//!
 //! ## While locked
 //!
 //! Every mutating request (motion, buttons, scroll, keys, modifiers) is
@@ -45,16 +105,18 @@
 //!
 //! Delivery then goes through
 //! [`KeyboardHandle::input_from_source`] with a per-device
-//! [`KeyboardSource::Auxiliary`] id and a forward-only filter. That keeps
+//! [`KeyboardSource::Auxiliary`] id and -- unless `[virtual_input] binds`
+//! is on -- a forward-only filter. That keeps
 //! one seat-xkb invariant whole: held state is tracked per source inside
-//! Smithay, and [`KeyboardHandle::release_source`] -- run when a device is
-//! destroyed, when the session locks and on a VT switch-away -- forwards
-//! the outstanding releases to whoever has focus. Virtual keys never run
-//! keybindings (forward-only, like Smithay's own manager): the remote layout
-//! and the seat layout binds are configured against can disagree about what
-//! a key *is*, so intercepting would make remote keys behave like neither,
-//! and nothing virtual ever triggers a compositor action -- window
-//! management stays local. The seat keymap itself is never touched, so the
+//! Smithay, and teardown -- run when a device is
+//! destroyed, when the session locks and on a VT switch-away -- releases
+//! the outstanding presses to whoever has focus (synthesized through the
+//! same bind-aware filter when `binds` is on, so an intercepted press's
+//! release is swallowed rather than forwarded as a lone release the client
+//! never pressed; `release_source` when off, where nothing was ever
+//! intercepted). With `binds` off, virtual keys never run keybindings
+//! (forward-only, like Smithay's own manager) and nothing virtual ever
+//! triggers a compositor action -- window management stays local. The seat keymap itself is never touched, so the
 //! physical keyboard's held keys survive remote typing untouched -- but a
 //! held virtual modifier does change the seat's shared modifier state until
 //! it is released (a translated modifier press goes through
@@ -119,6 +181,7 @@ use smithay::utils::{Logical, Rectangle};
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 
 use super::State;
+use super::keybindings::Bound;
 use super::nested::PendingAxis;
 
 #[cfg(test)]
@@ -207,8 +270,19 @@ struct VirtualKeyboard {
     /// `no_keymap` error, not silent drops.
     keymap: Option<VirtualKeymap>,
     /// The seat source this device's keys are attributed to
-    /// (`input_from_source`/`release_source`), minted per object.
+    /// (`input_from_source`, and `release_source` on the binds-off path),
+    /// minted per object.
     source: KeyboardSource,
+    /// The seat keycodes this device currently holds, as the virtual evdev
+    /// positions that produced them: press-time translation, not a
+    /// re-translation on release (the device mask or group may have moved
+    /// in between, and Smithay holds what the press sent). Only tracked so
+    /// the binds-on teardown can synthesize releases through the bind-aware
+    /// filter -- which swallows an intercepted press's release instead of
+    /// forwarding a lone release the client never pressed. Read only on the
+    /// virtual path and its teardown; the physical hot path never touches
+    /// it.
+    held: Vec<(u32, Keycode)>,
 }
 
 /// A virtual keyboard's own keymap: what its keycodes mean, independent of
@@ -316,6 +390,7 @@ impl Dispatch2<ZwpVirtualKeyboardManagerV1, State> for VirtualKeyboardManagerUse
                     VirtualKeyboard {
                         keymap: None,
                         source: KeyboardSource::new_auxiliary(),
+                        held: Vec::new(),
                     },
                 );
             }
@@ -449,12 +524,21 @@ impl Dispatch2<ZwpVirtualKeyboardV1, State> for VirtualKeyboardUserData {
         _client: smithay::reexports::wayland_server::backend::ClientId,
         resource: &ZwpVirtualKeyboardV1,
     ) {
-        // Same shape as the pointer's: the seat tracked this source's held
-        // keys, and [`KeyboardHandle::release_source`] forwards their
-        // releases to whoever has focus -- the teardown path Smithay built
-        // for exactly this.
+        // Explicit destroy or client disconnect: the device is gone either
+        // way, and anything it still holds must be released to whoever has
+        // focus now -- a vanished remote pressing "down" forever is a stuck
+        // key the user cannot lift. With binds off that is Smithay's
+        // [`KeyboardHandle::release_source`], which forwards the releases
+        // directly (nothing was ever intercepted, so there is nothing to
+        // swallow). With binds on the releases go through the bind-aware
+        // filter instead (`release_held_virtual_keys`): an intercepted
+        // press's release is swallowed rather than forwarded as a lone
+        // release the client never pressed, and no entry strands in
+        // `virtual_suppressed`.
         if let Some(device) = state.virtual_input.keyboards.remove(resource) {
-            if let Some(keyboard) = state.seat.get_keyboard() {
+            if state.virtual_input_binds {
+                release_held_virtual_keys(state, device.source, device.held);
+            } else if let Some(keyboard) = state.seat.get_keyboard() {
                 keyboard.release_source(state, device.source);
             }
         }
@@ -847,50 +931,95 @@ fn upload_keymap(
 /// mis-encoded. Dropped while locked; without an uploaded keymap this is
 /// the protocol's `no_keymap` error; a keysym the seat layout cannot type
 /// is dropped with a debug log.
+///
+/// With `[virtual_input] binds` on, a press matching the bind table by its
+/// translated seat keysym runs the bind (see [`virtual_filter`]) and is
+/// intercepted rather than forwarded; its release is intercepted too, via
+/// `virtual_suppressed`. Fire-once, never repeat, never while locked.
 fn virtual_key(state: &mut State, resource: &ZwpVirtualKeyboardV1, key: u32, key_state: u32) {
     if state.session_lock.is_locked() {
         return;
     }
-    let Some(device) = state.virtual_input.keyboards.get(resource) else {
-        return;
+    // The press-time seat code for this virtual position, when this device
+    // already holds it: a release must free what its press sent, not what
+    // today's device mask would translate the position to (see `held`).
+    let held_code = state
+        .virtual_input
+        .keyboards
+        .get(resource)
+        .and_then(|device| {
+            device
+                .held
+                .iter()
+                .find(|(held_key, _)| *held_key == key)
+                .map(|(_, code)| *code)
+        });
+    let keysym = match held_code {
+        // A release of a held key needs no keymap and no translation: the
+        // press already decided what this key is.
+        Some(_) => None,
+        None => {
+            let Some(device) = state.virtual_input.keyboards.get(resource) else {
+                return;
+            };
+            let Some(virtual_map) = device.keymap.as_ref() else {
+                resource.post_error(
+                    zwp_virtual_keyboard_v1::Error::NoKeymap,
+                    "`key` sent before any keymap",
+                );
+                return;
+            };
+            // Wayland keycodes are evdev codes; xkb numbers from 8. A wrapped
+            // addition would translate a nonsense position into a real keysym, so
+            // the overflow refuses rather than mistypes.
+            let Some(code) = key.checked_add(8).map(Keycode::new) else {
+                tracing::debug!(
+                    key,
+                    "virtual key code overflows the xkb numbering; dropping it"
+                );
+                return;
+            };
+            let keysym = virtual_map.state.key_get_one_sym(code);
+            if keysym.raw() == 0 {
+                tracing::debug!(key, "virtual key with no keysym in its keymap; dropping it");
+                return;
+            }
+            Some(keysym)
+        }
     };
-    let Some(virtual_map) = device.keymap.as_ref() else {
-        resource.post_error(
-            zwp_virtual_keyboard_v1::Error::NoKeymap,
-            "`key` sent before any keymap",
-        );
-        return;
-    };
-    // Wayland keycodes are evdev codes; xkb numbers from 8. A wrapped
-    // addition would translate a nonsense position into a real keysym, so
-    // the overflow refuses rather than mistypes.
-    let Some(code) = key.checked_add(8).map(Keycode::new) else {
-        tracing::debug!(
-            key,
-            "virtual key code overflows the xkb numbering; dropping it"
-        );
-        return;
-    };
-    let keysym = virtual_map.state.key_get_one_sym(code);
-    if keysym.raw() == 0 {
-        tracing::debug!(key, "virtual key with no keysym in its keymap; dropping it");
-        return;
-    }
     let Some(keyboard) = state.seat.get_keyboard() else {
         return;
     };
-    let Some(seat_code) = keyboard.keycode_for_keysym(keysym) else {
-        tracing::debug!(
-            keysym = xkb::keysym_get_name(keysym),
-            "virtual keysym has no key in the seat layout; dropping it"
-        );
-        return;
+    let seat_code = match held_code {
+        Some(code) => code,
+        None => {
+            let keysym = keysym.expect("a translated keysym when nothing is held");
+            match keyboard.keycode_for_keysym(keysym) {
+                Some(code) => code,
+                None => {
+                    tracing::debug!(
+                        keysym = xkb::keysym_get_name(keysym),
+                        "virtual keysym has no key in the seat layout; dropping it"
+                    );
+                    return;
+                }
+            }
+        }
     };
     let pressed = key_state == 1;
-    let source = device.source;
     let serial = smithay::utils::SERIAL_COUNTER.next_serial();
     let time = InputTime::from_millis(state.millis());
     state.announce_activity();
+    // The device's source for the filter's suppression bookkeeping. Read
+    // before `input_from_source` takes `&mut State`; the borrow ends here.
+    let source = state
+        .virtual_input
+        .keyboards
+        .get(resource)
+        .map(|device| device.source);
+    let Some(source) = source else {
+        return;
+    };
     keyboard.input_from_source(
         source,
         state,
@@ -902,11 +1031,105 @@ fn virtual_key(state: &mut State, resource: &ZwpVirtualKeyboardV1, key: u32, key
         },
         serial,
         time,
-        |_: &mut State, _: &ModifiersState, _: KeysymHandle<'_>| -> FilterResult<()> {
-            FilterResult::Forward
-        },
+        |data, mods, handle| virtual_filter(data, pressed, seat_code, mods, handle),
     );
+    // Mirror Smithay's per-source holders for this device (which records
+    // the press even when absorbed as a non-transition): the binds-on
+    // teardown synthesizes releases for exactly this set. Tracked only
+    // with binds on -- with it off the teardown is `release_source`,
+    // which needs no mirror, so the off path touches no state past the
+    // filter's one bool (see the module doc's inertness note).
+    if state.virtual_input_binds {
+        if let Some(device) = state.virtual_input.keyboards.get_mut(resource) {
+            if pressed {
+                if !device.held.iter().any(|(held_key, _)| *held_key == key) {
+                    device.held.push((key, seat_code));
+                }
+            } else {
+                device.held.retain(|(held_key, _)| *held_key != key);
+            }
+        }
+    }
     state.check_keyboard_layout();
+}
+
+/// The `input_from_source` filter for virtual keys: forward-only with
+/// `[virtual_input] binds` off (one bool, no table lookup), bind-aware on.
+///
+/// Presses match by the seat keysym the filter reads live
+/// (`raw_syms().first()`, the unshifted symbol -- the same projection
+/// `input::key` matches on) with the seat modifiers Smithay derived for
+/// this key, so a remote layout that moved the key still names the seat's
+/// bind. A match runs through `act_bind` and intercepts; anything else --
+/// flag off, no match, or locked -- forwards. (The locked forward is
+/// belt-and-braces: `virtual_key` drops presses while locked before this
+/// filter is ever built, and teardown only ever synthesizes releases.)
+/// Releases never consult the table or the flag: an intercepted press's
+/// release is swallowed by `virtual_suppressed`, whatever gained focus in
+/// between, and every other release is forwarded.
+///
+/// `pressed` travels by closure capture (Smithay's filter signature carries
+/// no key state -- the physical path does exactly the same): the two
+/// halves never share routing. Deliberately no bind repeat: a flagged bind
+/// re-fires while a physical key is held, but a virtual hold has no repeat
+/// lifecycle the compositor owns (see the module doc), so a virtual bind
+/// fires exactly once. And deliberately no
+/// `held_keys`/`suppressed_keys`/`interaction_serials` touches: those
+/// mirror the physical `MAIN` source, which this path must leave exact.
+fn virtual_filter(
+    data: &mut State,
+    pressed: bool,
+    seat_code: Keycode,
+    mods: &ModifiersState,
+    handle: KeysymHandle<'_>,
+) -> FilterResult<()> {
+    if !pressed {
+        // Routed by what the press decided, never by the table mid-hold,
+        // and never gated on the lock (a sweep release must swallow even
+        // under lock) or the flag (restart-only: it cannot have flipped
+        // mid-hold, and swallowing must not depend on it if it ever could).
+        if data.virtual_suppressed.remove(&seat_code) {
+            return FilterResult::Intercept(());
+        }
+        return FilterResult::Forward;
+    }
+    // The off path: one bool, no table lookup, no allocation, no state
+    // touched. The physical per-keypress path never reaches this filter at
+    // all, so this branch is the whole of the default-off cost on virtual
+    // keys -- and zero on physical ones.
+    if !data.virtual_input_binds {
+        return FilterResult::Forward;
+    }
+    let Some(&keysym) = handle.raw_syms().first() else {
+        return FilterResult::Forward;
+    };
+    let Some((bound, flags)) = data.keybindings.match_key(keysym, mods.into()) else {
+        return FilterResult::Forward;
+    };
+    // Absolute, like the drop in `virtual_key`: a virtual key never runs a
+    // bind while locked -- not even an `allow_when_locked` spawn. Forward
+    // rather than swallow (the physical path's rule for disallowed binds),
+    // though this is unreachable while the drop above stands.
+    if data.session_lock.is_locked() {
+        return FilterResult::Forward;
+    }
+    // Remember this keycode was intercepted so the matching release is
+    // intercepted too, rather than forwarded to whatever gained focus in
+    // between (e.g. after this action closes the current focus) as a
+    // spurious lone release it never pressed. Keyed by keycode alone --
+    // Smithay runs this filter only on transitions (the first source to
+    // press, the last to release), so two virtual keyboards holding one
+    // key share the one entry and the bind still fires exactly once.
+    data.virtual_suppressed.insert(seat_code);
+    match bound {
+        Bound::Action(action) => {
+            data.act_bind(action, flags.allow_when_locked);
+        }
+        Bound::ChangeVt(vt) => {
+            let _ = data.change_vt(vt);
+        }
+    }
+    FilterResult::Intercept(())
 }
 
 /// One virtual `modifiers` request: updates the device's own xkb mask (and
@@ -942,26 +1165,78 @@ fn virtual_modifiers(
         .update_mask(mods_depressed, mods_latched, mods_locked, 0, 0, group);
 }
 
+/// Releases `held` (press-time seat codes) for `source` through the
+/// bind-aware filter: an intercepted press's release is swallowed via
+/// `virtual_suppressed`, every other release is forwarded to whoever has
+/// focus -- the same destination `release_source` would have used, but
+/// without its filter bypass. Runs even under lock (releases are never
+/// lock-gated); a missing seat keyboard drops the keys and scrubs the
+/// suppression entries so nothing strands.
+fn release_held_virtual_keys(state: &mut State, source: KeyboardSource, held: Vec<(u32, Keycode)>) {
+    if held.is_empty() {
+        return;
+    }
+    let Some(keyboard) = state.seat.get_keyboard() else {
+        for (_, code) in held {
+            state.virtual_suppressed.remove(&code);
+        }
+        return;
+    };
+    for (_, seat_code) in held {
+        let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+        let time = InputTime::from_millis(state.millis());
+        keyboard.input_from_source(
+            source,
+            state,
+            seat_code,
+            KeyState::Released,
+            serial,
+            time,
+            |data, mods, handle| virtual_filter(data, false, seat_code, mods, handle),
+        );
+    }
+}
+
 impl State {
-    /// Releases everything every virtual device holds: each keyboard's
-    /// source (its outstanding presses go up on whoever has focus) and each
-    /// pointer's held buttons. Pending scroll sequences are dropped rather
+    /// Releases everything every virtual device holds: each keyboard's held
+    /// keys (their releases go up on whoever has focus) and each pointer's
+    /// held buttons. Pending scroll sequences are dropped rather
     /// than delivered after the interruption: a half-sent wheel gesture from
     /// before the lock (or the switch away) is stale motion, not a scroll
     /// the user is still making. Called when the session locks (first, so
     /// the releases reach whoever held them), when the VT switches away,
     /// and -- per device -- when a device is destroyed (see the `destroyed`
-    /// impls above, which this funnels through for the whole table).
+    /// impls above, which release one device through the same choice).
+    ///
+    /// With binds off that is Smithay's `release_source`, which forwards
+    /// the releases directly (nothing was ever intercepted). With binds on
+    /// the releases go through the bind-aware filter instead
+    /// (`release_held_virtual_keys`): an intercepted press's release is
+    /// swallowed rather than forwarded as a lone release, and the sweep
+    /// runs even under lock (releases are never lock-gated -- only presses
+    /// are dropped).
     pub(super) fn release_virtual_input(&mut self) {
-        let sources: Vec<KeyboardSource> = self
-            .virtual_input
-            .keyboards
-            .values()
-            .map(|device| device.source)
-            .collect();
-        if let Some(keyboard) = self.seat.get_keyboard() {
-            for source in sources {
-                keyboard.release_source(self, source);
+        if self.virtual_input_binds {
+            let held: Vec<(KeyboardSource, Vec<(u32, Keycode)>)> = self
+                .virtual_input
+                .keyboards
+                .values_mut()
+                .map(|device| (device.source, std::mem::take(&mut device.held)))
+                .collect();
+            for (source, keys) in held {
+                release_held_virtual_keys(self, source, keys);
+            }
+        } else {
+            let sources: Vec<KeyboardSource> = self
+                .virtual_input
+                .keyboards
+                .values()
+                .map(|device| device.source)
+                .collect();
+            if let Some(keyboard) = self.seat.get_keyboard() {
+                for source in sources {
+                    keyboard.release_source(self, source);
+                }
             }
         }
         let held: Vec<u32> = self

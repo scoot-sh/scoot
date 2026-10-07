@@ -86,8 +86,9 @@ each applied field:
 ```
 
 **Refused, explicitly, pending a restart:** `[tty] gpu`, `[renderer]
-backend`, `[xwayland] enabled`, `[virtual_input] enabled`, and an
-`[[outputs]]` entry's `mode` — all five take effect on restart, and each
+backend`, `[xwayland] enabled`, `[virtual_input] enabled`,
+`[virtual_input] binds`, and an
+`[[outputs]]` entry's `mode` — all six take effect on restart, and each
 refusal says so. A reload
 that cannot load the file at all answers an `error` instead, keeps the
 running config untouched, and logs — never defaults, never a

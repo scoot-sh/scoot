@@ -132,6 +132,16 @@ pub struct State {
     /// `reload.rs`) -- the same request-snapshot shape as `startup_xwayland`
     /// above.
     pub startup_virtual_input: bool,
+    /// Whether virtual-keyboard keys run compositor keybindings
+    /// (`[virtual_input] binds`, default off -- see `virtual_input.rs`),
+    /// seeded once in `run`, never written after. What a reload diffs
+    /// `[virtual_input] binds` against and what every virtual key reads: one
+    /// bool on the virtual path only, so the physical per-keypress hot path
+    /// pays nothing for it. Restart-only with `enabled` above -- the two
+    /// are one trust boundary (a client that can bind the keyboard can also
+    /// spawn through binds), so the section reads as one contract and a
+    /// mid-hold flip can never strand suppressed state (see `reload.rs`).
+    pub virtual_input_binds: bool,
     /// What the X server draws at a fractional `[output] scale`: `sharp`
     /// (`ceil`) or `light` (`floor`) -- see
     /// [`XwaylandFractional`](super::config::XwaylandFractional). Seeded in
@@ -1055,7 +1065,14 @@ pub struct State {
     /// keycode from here, or the next real press+release of the same
     /// keycode will have its legitimate release wrongly intercepted as a
     /// stale stuck entry.
+    ///
+    /// Virtual binds deliberately do NOT use this set: they keep their own
+    /// per-source [`State::virtual_suppressed`] below, so a virtual press
+    /// and a physical press of the same seat keycode can never share (or
+    /// steal) one entry -- see `virtual_input.rs`.
     pub suppressed_keys: HashSet<Keycode>,
+    /// Virtual keycodes currently held that a keybinding intercepted on press, so their matching release is intercepted too instead of forwarded to whoever has focus -- even across a focus change the bind itself caused. The virtual counterpart of [`State::suppressed_keys`], kept separate so a virtual press and a physical press of the same seat keycode can never share (or steal) one entry -- see `virtual_input.rs`. Only the virtual-key filter inserts or removes entries here, and only on transitions (Smithay runs the filter solely for the first source to press a keycode and the last to release it, absorbing the rest before the filter), so two virtual keyboards holding one key fire once and swallow once; the destroy/lock/VT teardown synthesizes releases through that same filter (never `release_source`, which bypasses it), so no entry can strand. Empty -- and never read on the physical per-keypress path -- unless `[virtual_input] binds` is on and a virtual bind has fired.
+    pub virtual_suppressed: HashSet<Keycode>,
     /// Keycodes currently held, mirroring the set Smithay keeps inside the
     /// seat keyboard so `input.rs` can tell a key that will be *delivered*
     /// from one it will absorb as a non-transition -- a distinction
@@ -1260,6 +1277,7 @@ impl State {
             startup_autostart: Vec::new(),
             startup_xwayland: false,
             startup_virtual_input: false,
+            virtual_input_binds: false,
             xwayland_fractional: super::config::XwaylandFractional::default(),
             world: World::new(config),
             windows: HashMap::new(),
@@ -1392,6 +1410,7 @@ impl State {
             reaped_spawns: Vec::new(),
             wallpaper: Default::default(),
             suppressed_keys: HashSet::new(),
+            virtual_suppressed: HashSet::new(),
             held_keys: HashSet::new(),
             bind_repeat: None,
             bind_repeat_timer_live: false,
