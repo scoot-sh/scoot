@@ -295,9 +295,17 @@ fn the_closest_size_wins() {
     let red = super::load_for_side("id", "red", None, &bases, 24).expect("the red icon");
     let green = super::load_for_side("id", "green", None, &bases, 48).expect("the green icon");
     let near = super::load_for_side("id", "both", None, &bases, 24).expect("drawn at 24");
-    assert_eq!(near.id(), red.id(), "drawn 24 resolves past the 22x22 entry");
+    assert_eq!(
+        near.id(),
+        red.id(),
+        "drawn 24 resolves past the 22x22 entry"
+    );
     let far = super::load_for_side("id", "both", None, &bases, 48).expect("drawn at 48");
-    assert_eq!(far.id(), green.id(), "drawn 48 resolves past the 48x48 entry");
+    assert_eq!(
+        far.id(),
+        green.id(),
+        "drawn 48 resolves past the 48x48 entry"
+    );
     cleanup(&root);
 }
 
