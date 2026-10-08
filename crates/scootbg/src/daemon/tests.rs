@@ -20,6 +20,14 @@ type Choice = Option<Show<'static>>;
 fn owned(show: Show<'_>) -> Show<'static> {
     match show {
         Show::Color(color) => Show::Color(color),
+        Show::Slideshow(slideshow) => Show::Slideshow(crate::protocol::SlideshowRequest {
+            dir: Cow::Owned(slideshow.dir.into_owned()),
+            every_secs: slideshow.every_secs,
+            shuffle: slideshow.shuffle,
+            mode: slideshow.mode,
+            fill: slideshow.fill,
+            filter: slideshow.filter,
+        }),
         Show::Image(image) => Show::Image(ImageRequest {
             source: match image.source {
                 Source::Path(path) => Source::Path(Cow::Owned(path.into_owned())),
@@ -69,6 +77,10 @@ impl Changes for Fake<'_> {
 
     fn profile(&self) -> &str {
         "default"
+    }
+
+    fn rotation(&self) -> Option<crate::protocol::RotationInfo<'_>> {
+        None
     }
 
     fn apply_config(
@@ -262,6 +274,50 @@ fn too_many_waiting_images_is_an_error_now() {
     );
     assert_eq!(reply["type"], "error");
     let message = reply["message"].as_str().unwrap();
+    assert!(message.contains("nothing was changed"), "{message}");
+}
+
+#[test]
+fn an_unreadable_slideshow_entry_is_an_error_now_naming_the_cause() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    fake.refuse = Some(ChangeError::UnreadableDirectory {
+        dir: "/wallpapers".into(),
+        entry: "/wallpapers/loop".into(),
+        detail: "Too many levels of symbolic links (os error 40)".into(),
+    });
+    let mut responder = Responder::new(&mut fake);
+    let reply = ask(
+        &mut responder,
+        r#"{"protocol":1,"type":"set","directory":"/wallpapers","every":"30m"}"#,
+    );
+    assert_eq!(reply["type"], "error");
+    let message = reply["message"].as_str().unwrap();
+    assert!(message.contains("/wallpapers"), "{message}");
+    assert!(message.contains("/wallpapers/loop"), "{message}");
+    assert!(message.contains("symbolic links"), "{message}");
+    assert!(!message.contains("not a directory"), "{message}");
+    assert!(message.contains("nothing was changed"), "{message}");
+}
+
+#[test]
+fn a_slideshow_past_the_listing_cap_is_an_error_now_naming_the_cap() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    fake.refuse = Some(ChangeError::TooManyFiles {
+        dir: "/wallpapers".into(),
+        seen: crate::rotation::MAX_LISTED + 1,
+    });
+    let mut responder = Responder::new(&mut fake);
+    let reply = ask(
+        &mut responder,
+        r#"{"protocol":1,"type":"set","directory":"/wallpapers","every":"30m"}"#,
+    );
+    assert_eq!(reply["type"], "error");
+    let message = reply["message"].as_str().unwrap();
+    assert!(message.contains("/wallpapers"), "{message}");
+    assert!(
+        message.contains(&crate::rotation::MAX_LISTED.to_string()),
+        "{message}"
+    );
     assert!(message.contains("nothing was changed"), "{message}");
 }
 
@@ -594,7 +650,15 @@ fn a_superseded_image_request_waits_like_a_color() {
         serial: 1,
         fetch: None,
     });
-    jobs.trial(image, Trial { conn, output: None }).unwrap();
+    jobs.trial(
+        image,
+        Trial {
+            conn,
+            output: None,
+            slideshow: None,
+        },
+    )
+    .unwrap();
     // A color for every output, generation 2, recorded; its output (stamp
     // 2) is still drawing.
     let mut choices = Choices::default();

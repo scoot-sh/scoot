@@ -5,7 +5,8 @@ use std::fmt;
 use crate::control::{Answer, ConnId, Handler};
 use crate::outputs::{Outputs, Size};
 use crate::protocol::{
-    self, OutputEntry, OutputList, PROTOCOL_VERSION, Reply, Request, Show, Shows, SurfaceEntry,
+    self, OutputEntry, OutputList, PROTOCOL_VERSION, Reply, Request, RotationInfo, Show, Shows,
+    SurfaceEntry,
 };
 use crate::section::Section;
 use crate::state::Profile;
@@ -22,6 +23,9 @@ pub trait Changes {
 
     /// The profile restored and saved (`query`'s `profile`).
     fn profile(&self) -> &str;
+
+    /// The slideshow running now (`query`'s `rotation`), if any.
+    fn rotation(&self) -> Option<RotationInfo<'_>>;
 
     /// `apply-config`: adopts `profile` and applies `section` if it changed
     /// since it was last applied (`daemon::config`), registering `conn` to
@@ -57,6 +61,21 @@ pub enum ChangeError {
     Busy,
     /// A download, with nowhere to cache it.
     Cache(String),
+    /// A slideshow's directory is not one any more.
+    NotDirectory(String),
+    /// A slideshow's directory is there, but an entry in it could not be
+    /// read: the entry's path and the operating system's reason
+    /// (permissions, a symlink loop).
+    UnreadableDirectory {
+        dir: String,
+        entry: String,
+        detail: String,
+    },
+    /// A slideshow's directory holds no files.
+    EmptyDirectory(String),
+    /// A slideshow's directory holds more than
+    /// [`crate::rotation::MAX_LISTED`] files (`seen`: one past the cap).
+    TooManyFiles { dir: String, seen: usize },
 }
 
 /// The reply text for a refused change.
@@ -82,6 +101,29 @@ impl fmt::Display for Refused<'_> {
                 f,
                 "cannot cache the download ({error}); nothing was changed"
             ),
+            ChangeError::NotDirectory(dir) => {
+                write!(
+                    f,
+                    "{dir:?} is not a directory any more; nothing was changed"
+                )
+            }
+            ChangeError::UnreadableDirectory { dir, entry, detail } => {
+                write!(
+                    f,
+                    "{dir:?} cannot be fully listed: cannot read the entry {entry:?} \
+                     ({detail}); nothing was changed"
+                )
+            }
+            ChangeError::EmptyDirectory(dir) => {
+                write!(f, "{dir:?} holds no files; nothing was changed")
+            }
+            ChangeError::TooManyFiles { dir, seen } => {
+                write!(
+                    f,
+                    "{dir:?} holds more than {} files ({seen} seen); nothing was changed",
+                    crate::rotation::MAX_LISTED,
+                )
+            }
         }
     }
 }
@@ -136,6 +178,7 @@ impl Handler for Responder<'_> {
                         outputs: self.wallpaper.outputs(),
                         saving: self.wallpaper.saving(),
                         profile: self.wallpaper.profile(),
+                        rotation: self.wallpaper.rotation(),
                     },
                 );
                 return Answer::Now;

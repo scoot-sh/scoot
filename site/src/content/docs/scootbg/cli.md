@@ -27,6 +27,8 @@ scootbg set https://example.com/hills.jpg --sha256 9f86d081884c7d659a2feaa0c55ad
 scootbg set ./#draft.png              # a file whose name starts with '#'
 scootbg set city.png --output DP-2 --mode fit --fill '#101014'
 scootbg set tile.png --mode tile --filter nearest
+scootbg set ~/wallpapers --every 30m --shuffle
+                                       # a slideshow: its files in turn, one every 30 minutes
 scootbg set '#101014' --transition fade --duration-ms 800
 scootbg set city.png --transition wipe --angle 90
 scootbg set grid.png --transition grow --position 0,0 --output DP-1
@@ -91,6 +93,69 @@ next `set` retries. See
 [Troubleshooting](./troubleshooting.md#symptoms).
 
 
+
+## Slideshows
+
+**`scootbg set DIR --every DURATION [--shuffle]`** cycles a directory's
+regular files, one every `DURATION`, on a single timer, without polling
+the directory: it is listed once, when set, so a file added later starts
+showing after the next `set` of the directory. `DURATION` is a number and
+`s`, `m`, `h` or `d`, such as `30m`: at least `1m`, whole minutes, at most
+`7d`. The files go sorted by name, or shuffled once with `--shuffle`;
+`--mode`, `--fill`, `--filter` and `--transition` apply to every file, as
+for one image: each step animates like one image's `set`. At most 10,000 files are listed: a larger directory is
+refused outright (exit 1, naming the cap) rather than stalling the
+daemon's loop to list it. So is a directory with an entry that cannot be
+read (exit 1, naming the entry and the operating system's reason). The first file shows before `set` returns, as an image
+does — unless the first file itself cannot be shown, which still starts
+the slideshow (exit 1 saying so, and `query` reports the new directory):
+that file fails its turns like any file that is not an image, until the
+next rotation. A file that is not an image fails to draw when its turn comes (as a
+`set` of it would, `draw_failed` in `query` saying why) until the next
+rotation. One slideshow runs at a time. A new `set`, a `clear`, or a
+changed `apply-config` stops it (an unchanged section leaves it running,
+like a `set` made since); restarting the daemon shows the last image
+without resuming it. If the directory itself goes away mid-rotation, the
+slideshow stops at the next step — said on the daemon's stderr, and
+`query` no longer reports a `rotation` — instead of failing once a
+minute until stopped; a re-created directory starts with a fresh `set`.
+With no slideshow the timer does not exist: no file
+descriptor, no wakeups. With one, the daemon wakes at most once a minute.
+
+> **Symptom:** *`set` says the directory needs `--every`.*
+> A bare directory is only ever a slideshow: `scootbg set DIR` is a
+> usage error (exit 2) naming `--every`. Diagnose with the pace it
+> suggests, e.g. `scootbg set ~/wallpapers --every 30m`.
+>
+> **Symptom:** *`set` says the directory holds no files.*
+> An empty directory reaches the daemon, which refuses it (exit 1),
+> changing nothing. Diagnose with `ls -la DIR` — hidden files count,
+> subdirectories do not.
+>
+> **Symptom:** *one step shows nothing / `draw_failed` until the next step.*
+> That file is not an image scootbg reads (told apart by content, not
+> name), so its turn fails like a `set` of it would and the next file
+> follows on schedule. Diagnose with `scootbg query` (`draw_error`
+> says why, as the daemon's stderr does) and `scootbg set FILE` on the
+> file itself.
+>
+> **Symptom:** *`set` says the directory holds more than 10,000 files.*
+> That is the listing cap, refused outright (exit 1) rather than showing
+> a silent subset: what shows is exactly the directory, or nothing.
+> Diagnose with `ls -la DIR | wc -l` — split the directory or point the
+> slideshow at a smaller one.
+>
+> **Symptom:** *`set` says it cannot read an entry in the directory.*
+> The directory lists, but one entry does not (a dangling symlink, a
+> symlink loop, a permission): the reply (exit 1) names the entry and the
+> operating system's reason, and nothing changes. Diagnose with
+> `find DIR -xtype l` — dangling links — and `ls -la DIR` on the entry it
+> names.
+>
+> **Symptom:** *the slideshow stopped after the directory moved.*
+> That is the design above, not a crash: the daemon says so on stderr
+> and `query` drops `rotation`. Diagnose with `scootbg query` (no
+> `rotation` object) and re-`set` the new path.
 
 ## `apply-config`
 
@@ -194,7 +259,13 @@ Cannot allocate memory (os error 12)"`, or `"out of memory: cannot
 allocate ... bytes for scaling"`), and is `null` otherwise; it is
 for a person or an agent to read, and its wording may change. `transition`
 is the animation running on the output now (`"fade"`, `"wipe"` or
-`"grow"`, else `null`; `none` lands at once and is never reported). `saving`
+`"grow"`, else `null`; `none` lands at once and is never reported). While a
+slideshow runs (`scootbg set DIR --every`, below), a `rotation` object
+follows `profile`: `{"directory":"/home/me/wallpapers","every_secs":1800,
+"shuffle":false,"files":12}` — what it cycles, every how many seconds, in
+what order, and how many files that is. Which file shows now is each
+output's `shows`, as for a `set`. Absent while no slideshow runs, so a
+static wallpaper's reply is what it was. `saving`
 (after the list) is `false` while `set` and `clear` are not saved for
 the next start (see [Restore](./restore.md#restore)), and `profile` is the profile
 whose state is restored and saved. New keys

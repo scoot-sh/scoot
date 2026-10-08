@@ -962,3 +962,175 @@ fn set_refuses_bad_transitions_plainly() {
         other => panic!("{other:?}"),
     }
 }
+
+fn slideshow_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "sbg-cli-{tag}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ));
+    std::fs::create_dir(&dir).unwrap();
+    dir
+}
+
+#[allow(clippy::too_many_arguments)]
+fn slideshow(
+    dir: &str,
+    every_secs: u64,
+    shuffle: bool,
+    mode: Mode,
+    fill: &str,
+    filter: Filter,
+    output: Option<&str>,
+) -> Result<Command, Error> {
+    Ok(Command::Client(Request::Set {
+        show: Show::Slideshow(crate::protocol::SlideshowRequest {
+            dir: dir.to_owned().into(),
+            every_secs,
+            shuffle,
+            mode,
+            fill: Color::parse(fill).unwrap(),
+            filter,
+        }),
+        output: output.map(|o| o.to_owned().into()),
+        transition: crate::transition::Spec::none(),
+    }))
+}
+
+#[test]
+fn a_directory_with_every_is_a_slideshow() {
+    let dir = slideshow_dir("set");
+    let path = dir.to_str().unwrap().to_owned();
+    assert_eq!(
+        args(&["set", &path, "--every", "30m"]),
+        slideshow(
+            &path,
+            1800,
+            false,
+            Mode::Fill,
+            "#000000",
+            Filter::Lanczos3,
+            None
+        )
+    );
+    assert_eq!(
+        args(&[
+            "set",
+            &path,
+            "--every=2h",
+            "--shuffle",
+            "--mode",
+            "fit",
+            "--output",
+            "DP-1"
+        ]),
+        slideshow(
+            &path,
+            7200,
+            true,
+            Mode::Fit,
+            "#000000",
+            Filter::Lanczos3,
+            Some("DP-1")
+        )
+    );
+    std::fs::remove_dir(&dir).unwrap();
+}
+
+#[test]
+fn a_directory_without_every_names_it() {
+    let dir = slideshow_dir("noevery");
+    let path = dir.to_str().unwrap().to_owned();
+    assert_eq!(
+        args(&["set", &path]),
+        Err(Error::DirectoryNeedsEvery(path.clone()))
+    );
+    let message = Error::DirectoryNeedsEvery(path).to_string();
+    assert!(message.contains("--every 30m"), "{message}");
+    std::fs::remove_dir(&dir).unwrap();
+}
+
+#[test]
+fn every_without_a_directory_is_refused() {
+    let dir = slideshow_dir("everyfile");
+    let file = dir.join("a.png");
+    std::fs::write(&file, b"fake").unwrap();
+    let path = file.to_str().unwrap().to_owned();
+    assert_eq!(
+        args(&["set", &path, "--every", "30m"]),
+        Err(Error::EveryNeedsDirectory(path))
+    );
+    assert_eq!(
+        args(&["set", "#000000", "--every", "30m"]),
+        Err(Error::EveryNeedsDirectory("#000000".into()))
+    );
+    assert_eq!(
+        args(&["set", "https://example.com/a.png", "--every", "30m"]),
+        Err(Error::EveryNeedsDirectory(
+            "https://example.com/a.png".into()
+        ))
+    );
+    // Missing entirely: still not a directory.
+    assert_eq!(
+        args(&["set", "/no/such/file.png", "--every", "30m"]),
+        Err(Error::EveryNeedsDirectory("/no/such/file.png".into()))
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn shuffle_without_every_is_refused() {
+    assert_eq!(
+        args(&["set", "/a", "--shuffle"]),
+        Err(Error::ShuffleNeedsEvery)
+    );
+    assert_eq!(
+        args(&["set", "/a", "--shuffle", "--shuffle"]),
+        Err(Error::Repeated {
+            command: "set",
+            flag: "--shuffle"
+        })
+    );
+    assert!(matches!(
+        args(&["set", "/a", "--shuffle=x"]),
+        Err(Error::Unexpected { .. })
+    ));
+    assert!(matches!(
+        args(&["clear", "--every", "30m"]),
+        Err(Error::Unexpected { .. })
+    ));
+}
+
+#[test]
+fn every_with_a_bad_duration_is_refused() {
+    use crate::rotation::EveryError;
+    let dir = slideshow_dir("badevery");
+    let path = dir.to_str().unwrap().to_owned();
+    assert_eq!(
+        args(&["set", &path, "--every", "30s"]),
+        Err(Error::BadEvery(EveryError::TooShort))
+    );
+    assert_eq!(
+        args(&["set", &path, "--every", "90s"]),
+        Err(Error::BadEvery(EveryError::NotAligned))
+    );
+    assert_eq!(
+        args(&["set", &path, "--every", "never"]),
+        Err(Error::BadEvery(EveryError::BadFormat("never".into())))
+    );
+    assert_eq!(
+        args(&[
+            "set",
+            &path,
+            "--every",
+            "30m",
+            "--sha256",
+            "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+        ]),
+        Err(Error::ShaImageOnly)
+    );
+    std::fs::remove_dir(&dir).unwrap();
+}

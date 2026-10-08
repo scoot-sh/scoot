@@ -26,6 +26,7 @@ mod paint;
 mod paths;
 mod print;
 mod protocol;
+mod rotation;
 mod section;
 mod sha256;
 mod share;

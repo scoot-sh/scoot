@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use super::{
-    DEFAULT_FILL, ImageRequest, OutputEntry, PROTOCOL_VERSION, Reply, Request, RequestError, Show,
-    Source, parse, write_reply,
+    DEFAULT_FILL, ImageRequest, OutputEntry, PROTOCOL_VERSION, Reply, Request, RequestError,
+    RotationInfo, Show, SlideshowRequest, Source, parse, write_reply,
 };
 use crate::color::Color;
 use crate::image::render::Look;
@@ -295,6 +295,7 @@ fn replies_are_one_tagged_line() {
             outputs: &[] as &[OutputEntry<'_>; 0],
             saving: true,
             profile: "default",
+            rotation: None,
         }),
         "{\"type\":\"outputs\",\"outputs\":[],\"saving\":true,\"profile\":\"default\"}\n"
     );
@@ -365,6 +366,7 @@ fn output_entries_have_a_fixed_shape() {
         outputs: &[known, unknown],
         saving: false,
         profile: "scoot",
+        rotation: None,
     });
     assert_eq!(line.matches('\n').count(), 1);
     let value: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -739,4 +741,138 @@ fn a_set_carries_a_transition() {
     }
     let message = RequestError::TransitionWithClear.to_string();
     assert!(message.contains("nothing to blend"), "{message}");
+}
+
+#[test]
+fn a_slideshow_round_trips() {
+    for request in [
+        Request::Set {
+            show: Show::Slideshow(SlideshowRequest {
+                dir: "/home/me/Pictures".into(),
+                every_secs: 1800,
+                shuffle: false,
+                mode: Mode::Fill,
+                fill: DEFAULT_FILL,
+                filter: Filter::Lanczos3,
+            }),
+            output: None,
+            transition: crate::transition::Spec::none(),
+        },
+        Request::Set {
+            show: Show::Slideshow(SlideshowRequest {
+                dir: "/home/me/Pictures".into(),
+                every_secs: 3600,
+                shuffle: true,
+                mode: Mode::Tile,
+                fill: red(),
+                filter: Filter::Nearest,
+            }),
+            output: Some("DP-1".into()),
+            transition: crate::transition::Spec::none(),
+        },
+    ] {
+        let line = request.line();
+        assert!(line.ends_with('\n'));
+        assert_eq!(line.matches('\n').count(), 1);
+        assert_eq!(parse(line.trim_end().as_bytes()).unwrap(), request);
+    }
+}
+
+#[test]
+fn a_slideshow_line_is_what_the_docs_say() {
+    let set = Request::Set {
+        show: Show::Slideshow(SlideshowRequest {
+            dir: "/pics".into(),
+            every_secs: 1800,
+            shuffle: false,
+            mode: Mode::Fill,
+            fill: DEFAULT_FILL,
+            filter: Filter::Lanczos3,
+        }),
+        output: None,
+        transition: crate::transition::Spec::none(),
+    };
+    assert_eq!(
+        set.line(),
+        "{\"protocol\":1,\"type\":\"set\",\"directory\":\"/pics\",\"every\":\"1800s\",\"mode\":\"fill\",\"fill\":\"#000000\",\"filter\":\"lanczos3\"}\n"
+    );
+}
+
+#[test]
+fn a_slideshow_needs_a_directory_and_its_pace() {
+    // No target at all.
+    assert!(matches!(
+        parse(br#"{"protocol":1,"type":"set"}"#),
+        Err(RequestError::NoTarget)
+    ));
+    // A directory without its pace, and a pace without its directory.
+    assert!(matches!(
+        parse(br#"{"protocol":1,"type":"set","directory":"/pics"}"#),
+        Err(RequestError::EveryMissing)
+    ));
+    assert!(matches!(
+        parse(br#"{"protocol":1,"type":"set","every":"1800s"}"#),
+        Err(RequestError::EveryWithoutDirectory)
+    ));
+    assert!(matches!(
+        parse(br#"{"protocol":1,"type":"set","shuffle":true}"#),
+        Err(RequestError::ShuffleWithoutDirectory)
+    ));
+    // Two targets, and a hash pinning what is not a download.
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"set","color":"#000000","directory":"/pics","every":"1800s"}"##),
+        Err(RequestError::Both)
+    ));
+    assert!(matches!(
+        parse(
+            br#"{"protocol":1,"type":"set","directory":"/pics","every":"1800s","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}"#
+        ),
+        Err(RequestError::ShaWithDirectory)
+    ));
+    // A relative directory, and a pace that is not one.
+    assert!(matches!(
+        parse(br#"{"protocol":1,"type":"set","directory":"pics","every":"1800s"}"#),
+        Err(RequestError::RelativePath(_))
+    ));
+    assert!(matches!(
+        parse(br#"{"protocol":1,"type":"set","directory":"/pics","every":"30s"}"#),
+        Err(RequestError::BadEvery(_))
+    ));
+    // Unknown fields are ignored: an old daemon reads this as a `set`
+    // with no target, and refuses loudly instead of misreading.
+    let parsed =
+        parse(br#"{"protocol":1,"type":"set","directory":"/pics","every":"1800s"}"#).unwrap();
+    let Request::Set { show, .. } = parsed else {
+        panic!("a slideshow is a set");
+    };
+    assert!(matches!(show, Show::Slideshow(_)));
+}
+
+#[test]
+fn a_query_without_a_slideshow_is_byte_for_byte_what_it_was() {
+    assert_eq!(
+        reply_string(&Reply::Outputs {
+            outputs: &[] as &[OutputEntry<'_>; 0],
+            saving: true,
+            profile: "default",
+            rotation: None,
+        }),
+        "{\"type\":\"outputs\",\"outputs\":[],\"saving\":true,\"profile\":\"default\"}\n"
+    );
+    let line = reply_string(&Reply::Outputs {
+        outputs: &[] as &[OutputEntry<'_>; 0],
+        saving: true,
+        profile: "default",
+        rotation: Some(RotationInfo {
+            directory: "/pics",
+            every_secs: 1800,
+            shuffle: true,
+            files: 12,
+        }),
+    });
+    let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(
+        value["rotation"],
+        serde_json::json!({"directory": "/pics", "every_secs": 1800, "shuffle": true, "files": 12})
+    );
 }

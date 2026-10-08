@@ -20,13 +20,16 @@ use wayland_client::{Connection, QueueHandle};
 
 use super::canvas::Drew;
 use super::respond::{ChangeError, Changes};
+use super::rotation::{Rotation, StartError};
 use super::surfaces::{LayerObjects, Objects, RoundTrip};
 use super::transition::{self, Transitions};
 use super::wayland::{Globals, State};
 use crate::choices::{Choice, Choices};
 use crate::control::ConnId;
+use crate::fetch::Fetch;
+use crate::image::render::Look;
 use crate::jobs::{Jobs, Target, Trial};
-use crate::outputs::{Entry, Output};
+use crate::outputs::{Entry, Output, Outputs};
 use crate::paint::{self, Plan};
 use crate::print::warn;
 use crate::protocol::{OutputList, Show, Source};
@@ -181,6 +184,10 @@ impl Changes for Control<'_> {
         self.state.saved.profile().as_str()
     }
 
+    fn rotation(&self) -> Option<crate::protocol::RotationInfo<'_>> {
+        self.state.rotation.as_ref().map(|rotation| rotation.info())
+    }
+
     fn apply_config(
         &mut self,
         conn: ConnId,
@@ -205,6 +212,7 @@ impl Changes for Control<'_> {
             images,
             saved,
             transitions,
+            rotation,
             ..
         } = &mut *self.state;
         let targets = |entry: &Entry<Objects>| {
@@ -215,9 +223,75 @@ impl Changes for Control<'_> {
         }
         let generation = waiters.next_generation();
         let choice: Choice = match show {
-            None => None,
-            Some(Show::Color(color)) => Some(Wallpaper::Color(color)),
+            None => {
+                // A `clear` stops a running slideshow: back to the
+                // compositor's own background, at once.
+                *rotation = None;
+                None
+            }
+            Some(Show::Color(color)) => {
+                // A color `set` replaces a running slideshow with itself.
+                *rotation = None;
+                Some(Wallpaper::Color(color))
+            }
+            Some(Show::Slideshow(request)) => {
+                let look = Look {
+                    mode: request.mode,
+                    fill: request.fill,
+                    filter: request.filter,
+                };
+                // Moved out once: the refusal below and the trial's
+                // slideshow marker both own it.
+                let dir = request.dir.into_owned();
+                let next = Rotation::start(
+                    &dir,
+                    request.every_secs,
+                    request.shuffle,
+                    output,
+                    look,
+                    transition,
+                    Instant::now(),
+                )
+                .map_err(|error| match error {
+                    StartError::NotDirectory => ChangeError::NotDirectory(dir.clone()),
+                    StartError::Unreadable { entry, detail } => ChangeError::UnreadableDirectory {
+                        dir: dir.clone(),
+                        entry,
+                        detail,
+                    },
+                    StartError::Empty => ChangeError::EmptyDirectory(dir.clone()),
+                    StartError::TooMany { seen } => ChangeError::TooManyFiles {
+                        dir: dir.clone(),
+                        seen,
+                    },
+                })?;
+                // Only an accepted slideshow replaces the running one: a
+                // refused one changes nothing, running one included. The
+                // trial below is what accepts it (too many queued trials
+                // refuses), so the running slideshow stays until that
+                // succeeds: a refused new `set` leaves the old one showing
+                // and advancing.
+                let first = next.first().to_owned();
+                let started = trial_image(
+                    outputs,
+                    &mut images.jobs,
+                    conn,
+                    output,
+                    first,
+                    None,
+                    look,
+                    transition,
+                    generation,
+                    Some(dir),
+                );
+                if started.is_ok() {
+                    *rotation = Some(next);
+                }
+                return started;
+            }
             Some(Show::Image(request)) => {
+                // An image `set` replaces a running slideshow with itself.
+                *rotation = None;
                 // Nothing changes until it has decoded (`crate::jobs`): a
                 // trial, drawn for the outputs it targets once none of them
                 // is about to be configured (`images::pump`). A download
@@ -236,29 +310,22 @@ impl Changes for Control<'_> {
                         (path, Some(fetch))
                     }
                 };
-                let image = Arc::new(Image {
+                return trial_image(
+                    outputs,
+                    &mut images.jobs,
+                    conn,
+                    output,
                     path,
-                    look: crate::image::render::Look {
+                    fetch,
+                    Look {
                         mode: request.mode,
                         fill: request.fill,
                         filter: request.filter,
                     },
-                    serial: generation,
-                    fetch,
-                });
-                let trial = Trial {
-                    conn,
-                    output: output.map(str::to_owned),
-                };
-                // The transition waits with the trial: the pixels landing
-                // starts it.
-                for entry in outputs.iter_mut().filter(|entry| targets(entry)) {
-                    entry.output.request_transition(transition, generation);
-                }
-                return images
-                    .jobs
-                    .trial(image, trial)
-                    .map_err(|_| ChangeError::Busy);
+                    transition,
+                    generation,
+                    None,
+                );
             }
         };
         // Always recorded: nothing is newer than a request made now.
@@ -284,4 +351,44 @@ impl Changes for Control<'_> {
         waiters.push(conn, generation);
         Ok(())
     }
+}
+
+/// Queues an image trial: nothing changes until it has decoded, and the
+/// reply waits for what replaces it. Shared by an image `set` and a
+/// slideshow's first file.
+#[allow(clippy::too_many_arguments)]
+fn trial_image(
+    outputs: &mut Outputs<Objects>,
+    jobs: &mut Jobs<ConnId>,
+    conn: ConnId,
+    output: Option<&str>,
+    path: String,
+    fetch: Option<Fetch>,
+    look: Look,
+    transition: Spec,
+    generation: u64,
+    slideshow: Option<String>,
+) -> Result<(), ChangeError> {
+    let image = Arc::new(Image {
+        path,
+        look,
+        serial: generation,
+        fetch,
+    });
+    let trial = Trial {
+        conn,
+        output: output.map(str::to_owned),
+        slideshow,
+    };
+    // Queued first: a refused trial (too many waiting) changes nothing,
+    // not even the outputs' pending transitions.
+    jobs.trial(image, trial).map_err(|_| ChangeError::Busy)?;
+    // The transition waits with the trial: the pixels landing starts it.
+    for entry in outputs
+        .iter_mut()
+        .filter(|entry| output.is_none_or(|name| entry.output.info().name.as_deref() == Some(name)))
+    {
+        entry.output.request_transition(transition, generation);
+    }
+    Ok(())
 }

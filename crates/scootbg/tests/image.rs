@@ -408,7 +408,6 @@ fn a_failed_set_leaves_the_previous_wallpaper() {
     let missing = dir.join("missing.png");
     for (target, reason) in [
         (path_str(&missing), "no such file"),
-        (path_str(dir), "not a regular file"),
         (path_str(&text), "not an image"),
         (path_str(&truncated), "truncated or corrupt"),
         (path_str(&bomb), "image too large"),
@@ -421,6 +420,21 @@ fn a_failed_set_leaves_the_previous_wallpaper() {
             assert!(stderr.contains("nothing was changed"), "{target}: {stderr}");
             assert_eq!(shows(&session), before, "{target} changed what shows");
         }
+    }
+    // A directory without `--every` is a usage error at the CLI (it names
+    // the flag), not a daemon round trip — and changes nothing either.
+    for output in [None, Some("headless-2")] {
+        let mut args = vec!["set", path_str(dir)];
+        args.extend(output.iter().flat_map(|o| ["--output", *o]));
+        let out = session.run(&args);
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {stderr}");
+        assert!(stderr.contains("--every"), "{stderr}");
+        assert_eq!(
+            shows(&session),
+            before,
+            "a bare directory changed what shows"
+        );
     }
     // A relative path sent straight to the socket (the CLI never does).
     let stream = UnixStream::connect(session.socket()).unwrap();

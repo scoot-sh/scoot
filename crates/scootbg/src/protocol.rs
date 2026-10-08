@@ -35,6 +35,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
 use crate::outputs::Size;
+use crate::rotation::{self, EveryError};
 use crate::section::Section;
 use crate::state::{Profile, ProfileError};
 use crate::transition::{self, Kind, Spec};
@@ -112,6 +113,34 @@ pub enum Request<'a> {
 pub enum Show<'a> {
     Color(Color),
     Image(ImageRequest<'a>),
+    /// A slideshow from a directory: `dir`'s regular files in turn, one
+    /// every `every_secs` seconds (`crate::rotation`). The first file goes
+    /// through the normal image path (decoded before the reply; when it
+    /// cannot be shown the show still starts, said in the reply, and that
+    /// file fails its turns until the next rotation); later ones advance
+    /// the same way, with no reply.
+    Slideshow(SlideshowRequest<'a>),
+}
+
+/// A slideshow, as a `set` asks for it. On the wire `mode`, `fill` and
+/// `filter` may be left out, for `fill`, `#000000` and `lanczos3`;
+/// `shuffle` may be left out whenever the order stays sorted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlideshowRequest<'a> {
+    /// Absolute: the daemon refuses anything else, since its working
+    /// directory is not the client's.
+    pub dir: Cow<'a, str>,
+    /// Seconds between images: whole minutes, at least one minute. On the wire as
+    /// seconds with an `s` (`"1800s"`), read by the same
+    /// [`parse_every`](crate::rotation::parse_every) the CLI uses, so one
+    /// grammar names every pace.
+    pub every_secs: u64,
+    /// Cycle in a shuffled order (shuffled once, when set).
+    pub shuffle: bool,
+    pub mode: Mode,
+    /// Behind a letterboxed or centred image, and under transparency.
+    pub fill: Color,
+    pub filter: Filter,
 }
 
 /// An image, as a `set` asks for it. On the wire `mode`, `fill` and
@@ -175,6 +204,12 @@ impl Request<'_> {
             #[serde(skip_serializing_if = "Option::is_none")]
             image: Option<&'r str>,
             #[serde(skip_serializing_if = "Option::is_none")]
+            directory: Option<&'r str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            every: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            shuffle: Option<bool>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             sha256: Option<String>,
             #[serde(skip_serializing_if = "Option::is_none")]
             mode: Option<Mode>,
@@ -200,6 +235,9 @@ impl Request<'_> {
             kind: self.name(),
             color: None,
             image: None,
+            directory: None,
+            every: None,
+            shuffle: None,
             sha256: None,
             mode: None,
             fill: None,
@@ -227,6 +265,16 @@ impl Request<'_> {
                 }
                 match show {
                     Show::Color(color) => line.color = Some(*color),
+                    Show::Slideshow(slideshow) => {
+                        line.directory = Some(&slideshow.dir);
+                        line.every = Some(format!("{}s", slideshow.every_secs));
+                        if slideshow.shuffle {
+                            line.shuffle = Some(true);
+                        }
+                        line.mode = Some(slideshow.mode);
+                        line.fill = Some(slideshow.fill);
+                        line.filter = Some(slideshow.filter);
+                    }
                     Show::Image(image) => {
                         match &image.source {
                             Source::Path(path) => line.image = Some(path),
@@ -267,9 +315,9 @@ pub enum RequestError {
     WrongProtocol(u32),
     NoType,
     Unknown(String),
-    /// `set` with neither a `color` nor an `image`.
+    /// `set` with neither a `color`, an `image` nor a `directory`.
     NoTarget,
-    /// `set` with both.
+    /// `set` with more than one of a `color`, an `image` and a `directory`.
     Both,
     /// `set` with a `color` that is not `#rrggbb`.
     BadColor {
@@ -292,6 +340,20 @@ pub enum RequestError {
     /// A `sha256` with a file: it pins a download, and a file is already
     /// here to be read.
     ShaWithFile,
+    /// A `sha256` with a directory: it pins a download, and a directory is
+    /// listed, not downloaded.
+    ShaWithDirectory,
+    /// An `every` without a `directory`: it paces a slideshow, and this
+    /// `set` names no directory.
+    EveryWithoutDirectory,
+    /// A `directory` without an `every`: a directory is only ever a
+    /// slideshow, which needs its pace.
+    EveryMissing,
+    /// An `every` that is not a rotation pace.
+    BadEvery(EveryError),
+    /// A `shuffle` without a `directory`: it shuffles a slideshow, and this
+    /// `set` names none.
+    ShuffleWithoutDirectory,
     /// An image URL with a NUL byte.
     UrlNul,
     /// `apply-config` whose `profile` or `config` is not one (serde's
@@ -326,10 +388,13 @@ impl fmt::Display for RequestError {
             Self::Unknown(name) => write!(f, "unknown request `{name}`"),
             Self::NoTarget => write!(
                 f,
-                "`set` needs a `color` (\"#rrggbb\") or an `image` (an absolute path, or an \
-                 `http(s)` URL)"
+                "`set` needs a `color` (\"#rrggbb\"), an `image` (an absolute path, or an \
+                 `http(s)` URL) or a `directory` (an absolute path, with an `every`)"
             ),
-            Self::Both => write!(f, "`set` takes a `color` or an `image`, not both"),
+            Self::Both => write!(
+                f,
+                "`set` takes a `color`, an `image` or a `directory`, not more than one"
+            ),
             Self::BadColor { text, error } => write!(f, "bad color {text:?}: {error}"),
             Self::BadFill { text, error } => write!(f, "bad fill color {text:?}: {error}"),
             Self::BadMode(mode) => write!(
@@ -353,6 +418,23 @@ impl fmt::Display for RequestError {
             Self::ShaWithFile => write!(
                 f,
                 "`sha256` pins a downloaded image, and this one is a file"
+            ),
+            Self::ShaWithDirectory => write!(
+                f,
+                "`sha256` pins a downloaded image, and this one is a directory"
+            ),
+            Self::EveryWithoutDirectory => write!(
+                f,
+                "`every` paces a slideshow, and this `set` names no directory"
+            ),
+            Self::EveryMissing => write!(
+                f,
+                "a `directory` is a slideshow, which needs an `every` (such as `\"1800s\"`)"
+            ),
+            Self::BadEvery(error) => write!(f, "{error}"),
+            Self::ShuffleWithoutDirectory => write!(
+                f,
+                "`shuffle` shuffles a slideshow, and this `set` names no directory"
             ),
             Self::UrlNul => write!(f, "the image URL has a NUL byte"),
             Self::BadApply(error) => write!(f, "bad apply-config request: {error}"),
@@ -383,6 +465,11 @@ struct Envelope<'a> {
     color: Option<Cow<'a, str>>,
     #[serde(borrow)]
     image: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    directory: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    every: Option<Cow<'a, str>>,
+    shuffle: Option<bool>,
     #[serde(borrow)]
     sha256: Option<Cow<'a, str>>,
     #[serde(borrow)]
@@ -438,6 +525,9 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
             let show = show(
                 envelope.color,
                 envelope.image,
+                envelope.directory,
+                envelope.every,
+                envelope.shuffle,
                 envelope.sha256,
                 envelope.mode,
                 envelope.fill,
@@ -495,15 +585,49 @@ fn apply_config(line: &[u8]) -> Result<Request<'static>, RequestError> {
     })
 }
 
-/// What a `set` asks to show, from its fields.
+/// What a `set` asks to show, from its fields: one parameter per field the
+/// envelope carries, so nine. Split further only if a tenth arrives.
+#[allow(clippy::too_many_arguments)]
 fn show<'a>(
     color: Option<Cow<'a, str>>,
     image: Option<Cow<'a, str>>,
+    directory: Option<Cow<'a, str>>,
+    every: Option<Cow<'a, str>>,
+    shuffle: Option<bool>,
     sha256: Option<Cow<'a, str>>,
     mode: Option<Cow<'a, str>>,
     fill: Option<Cow<'a, str>>,
     filter: Option<Cow<'a, str>>,
 ) -> Result<Show<'a>, RequestError> {
+    let shuffle = shuffle.unwrap_or(false);
+    if let Some(dir) = directory {
+        if color.is_some() || image.is_some() {
+            return Err(RequestError::Both);
+        }
+        if sha256.is_some() {
+            return Err(RequestError::ShaWithDirectory);
+        }
+        if !dir.starts_with('/') {
+            return Err(RequestError::RelativePath(dir.into_owned()));
+        }
+        let every = every.ok_or(RequestError::EveryMissing)?;
+        let every_secs = rotation::parse_every(&every).map_err(RequestError::BadEvery)?;
+        let (mode, fill, filter) = look(mode, fill, filter)?;
+        return Ok(Show::Slideshow(SlideshowRequest {
+            dir,
+            every_secs,
+            shuffle,
+            mode,
+            fill,
+            filter,
+        }));
+    }
+    if every.is_some() {
+        return Err(RequestError::EveryWithoutDirectory);
+    }
+    if shuffle {
+        return Err(RequestError::ShuffleWithoutDirectory);
+    }
     match (color, image) {
         (Some(_), Some(_)) => Err(RequestError::Both),
         (None, None) => Err(RequestError::NoTarget),
@@ -546,23 +670,7 @@ fn show<'a>(
                 }
                 Source::Path(image)
             };
-            let mode = match mode {
-                None => Mode::default(),
-                Some(name) => Mode::from_name(&name)
-                    .ok_or_else(|| RequestError::BadMode(name.into_owned()))?,
-            };
-            let filter = match filter {
-                None => Filter::default(),
-                Some(name) => Filter::from_name(&name)
-                    .ok_or_else(|| RequestError::BadFilter(name.into_owned()))?,
-            };
-            let fill = match fill {
-                None => DEFAULT_FILL,
-                Some(text) => Color::parse(&text).map_err(|error| RequestError::BadFill {
-                    text: text.into_owned(),
-                    error,
-                })?,
-            };
+            let (mode, fill, filter) = look(mode, fill, filter)?;
             Ok(Show::Image(ImageRequest {
                 source,
                 mode,
@@ -571,6 +679,35 @@ fn show<'a>(
             }))
         }
     }
+}
+
+/// An image's `mode`, `fill` and `filter`, as a `set` asks for them: the
+/// defaults for what is left out.
+fn look(
+    mode: Option<Cow<'_, str>>,
+    fill: Option<Cow<'_, str>>,
+    filter: Option<Cow<'_, str>>,
+) -> Result<(Mode, Color, Filter), RequestError> {
+    let mode = match mode {
+        None => Mode::default(),
+        Some(name) => {
+            Mode::from_name(&name).ok_or_else(|| RequestError::BadMode(name.into_owned()))?
+        }
+    };
+    let filter = match filter {
+        None => Filter::default(),
+        Some(name) => {
+            Filter::from_name(&name).ok_or_else(|| RequestError::BadFilter(name.into_owned()))?
+        }
+    };
+    let fill = match fill {
+        None => DEFAULT_FILL,
+        Some(text) => Color::parse(&text).map_err(|error| RequestError::BadFill {
+            text: text.into_owned(),
+            error,
+        })?,
+    };
+    Ok((mode, fill, filter))
 }
 
 /// What a `set` transitions through, from its fields: parsed strictly
@@ -707,6 +844,20 @@ pub struct SurfaceEntry {
     pub pixels: Option<Size>,
 }
 
+/// A running slideshow, as a `query` reply reports it: what directory it
+/// cycles, every how many seconds, shuffled or in order, and how many files
+/// that is. Which file shows now is each output's `shows`, as for a `set`.
+/// Added within protocol 1; older clients ignore it. Absent while no
+/// slideshow runs, so a static wallpaper's reply is byte-for-byte what it
+/// was.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RotationInfo<'a> {
+    pub directory: &'a str,
+    pub every_secs: u64,
+    pub shuffle: bool,
+    pub files: usize,
+}
+
 /// The daemon's outputs, as a `query` reply lists them.
 pub trait OutputList {
     /// Calls `each` with every output's entry, in order.
@@ -740,6 +891,9 @@ pub enum Reply<'a> {
         /// The profile whose state the daemon restores and saves: its
         /// `--profile`, or the last one an `apply-config` made it adopt.
         profile: &'a str,
+        /// The slideshow running now, if any (`crate::rotation`).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rotation: Option<RotationInfo<'a>>,
     },
     Error {
         #[serde(serialize_with = "display")]

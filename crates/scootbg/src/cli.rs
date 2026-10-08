@@ -13,7 +13,10 @@ use std::fmt;
 
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
-use crate::protocol::{DEFAULT_FILL, ImageRequest, PROTOCOL_VERSION, Request, Show, Source};
+use crate::protocol::{
+    DEFAULT_FILL, ImageRequest, PROTOCOL_VERSION, Request, Show, SlideshowRequest, Source,
+};
+use crate::rotation::EveryError;
 use crate::section::{Section, SectionError};
 use crate::state::{Profile, ProfileError};
 
@@ -151,7 +154,7 @@ pub fn daemon_help() -> String {
 }
 
 pub const SET_HELP: &str = "\
-scootbg set -- show a color or an image on every output, or on one
+scootbg set -- show a color, an image or a rotating directory, on every output, or on one
 
 USAGE:
     scootbg set '#rrggbb' [--output NAME] [--transition KIND ...]
@@ -159,6 +162,8 @@ USAGE:
                      [--filter FILTER] [--transition KIND ...]
     scootbg set URL [--output NAME] [--mode MODE] [--fill '#rrggbb']
                     [--filter FILTER] [--sha256 HEX] [--transition KIND ...]
+    scootbg set DIR --every DURATION [--shuffle] [--output NAME] [--mode MODE]
+                    [--fill '#rrggbb'] [--filter FILTER] [--transition KIND ...]
 
     KIND ... is [--duration-ms MS] [--easing EASING] [--angle DEGREES]
                [--position X,Y]
@@ -166,6 +171,20 @@ USAGE:
 An argument starting with '#' is a color: '#' and six hex digits, either
 case, such as '#1e1e2e'; quote it, since the shell reads '#' as a comment.
 Wallpapers are opaque, so there is no alpha.
+
+A directory (with --every) is a slideshow: its regular files in turn, one
+every DURATION, on one timer, without polling the directory. DURATION is a
+number and `s`, `m`, `h` or `d`, such as `30m`: at least `1m`, whole
+minutes, at most `7d`. The files are tried sorted by name, or shuffled
+once with --shuffle; a file that is not an image fails to draw when its
+turn comes (as a `set` of it would) until the next rotation. At most
+10,000 files are listed: a larger directory is refused, naming the cap,
+rather than stalling the daemon's loop to list it. The first
+file shows before `set` returns, as an image does. A new `set`, a `clear`
+or a changed `apply-config` stops the slideshow, as does the directory
+going away (at the next step, said on stderr: restarting the show takes a
+fresh `set`); restarting the daemon
+shows the last image, without resuming it. One slideshow runs at a time.
 
 An `http://` or `https://` URL is downloaded once and cached
 (`$XDG_CACHE_HOME/scootbg/`, else `~/.cache/scootbg/`): a file already
@@ -200,6 +219,11 @@ PNG's eXIf chunk).
                      bilinear or nearest (hard pixels, for pixel art)
     --sha256 HEX     pin a URL's bytes (64 hex digits, as `sha256sum`
                      prints): anything else fails instead of showing
+    --every DURATION rotate through a directory: its files in turn, one
+                     every DURATION, such as `30m` (a number and `s`, `m`,
+                     `h` or `d`; at least `1m`, whole minutes, at most `7d`)
+    --shuffle        cycle the directory in a shuffled order, shuffled once
+                     when set (needs --every)
     --transition KIND
                      how the new wallpaper arrives: none (the default: it
                      lands at once), fade, wipe or grow. With a kind, the
@@ -228,7 +252,15 @@ processed it, so a screenshot taken straight after shows it. With a
 transition, that means once the animation has finished: the reply waits
 for the last frame, not the first. An image that
 cannot be shown (no such file, not an image, too large, truncated or
-corrupt) is an error, and every output keeps what it showed. An output
+corrupt) is an error, and every output keeps what it showed. A directory
+with no files in it is an error too, as is one past the 10,000-file
+listing cap or with an entry that cannot be read, changing nothing;
+with files, the
+first shows before `set` returns, and the rest follow on the timer, each
+step animating through `--transition` like one image's `set`. When the
+first file itself cannot be shown, the slideshow still starts (the reply
+says so, and the rotation changes): that file fails its turns like any
+file that is not an image, until the next rotation. An output
 unplugged meanwhile is left out of that wait; an output whose surface is
 not configured yet is waited for, until a round trip after scootbg made
 it (one the compositor is slower than that to configure is drawn when it
@@ -243,14 +275,17 @@ The choice is saved and shown again when the daemon next starts (see
 `scootbg daemon --help`): a color at once, an image once it has decoded.
 
 Exit status: 0 once shown; 1 when no daemon is running, the output is
-unknown, the image cannot be shown, or drawing failed (the daemon's stderr
-says why); 2 for a usage error, such as a malformed color or an unknown
-mode.
+unknown, the image cannot be shown, the directory holds no files, holds
+more than 10,000 files, or has an unreadable entry, or
+drawing failed (the daemon's stderr
+says why); 2 for a usage error, such as a malformed color, an unknown
+mode, a directory without --every, or an --every without a directory.
 
 EXAMPLES:
     scootbg set '#1e1e2e'
     scootbg set ~/wallpapers/sunset.jpg --mode fill
     scootbg set ~/wallpapers/grid.png --mode tile --output DP-1
+    scootbg set ~/wallpapers --every 30m --shuffle
     scootbg set '#101014' --transition fade --duration-ms 800
     scootbg set ~/wallpapers/city.png --transition wipe --angle 90
 
@@ -516,6 +551,15 @@ pub enum Error {
     BadSha(String),
     /// `--sha256` with a color or a file: it pins a download.
     ShaImageOnly,
+    /// `--every` that is not a rotation pace.
+    BadEvery(EveryError),
+    /// `--every` with a color, a file or a link: it paces a slideshow
+    /// through a directory.
+    EveryNeedsDirectory(String),
+    /// A directory without `--every`: it is only ever a slideshow.
+    DirectoryNeedsEvery(String),
+    /// `--shuffle` without `--every`: it shuffles a slideshow.
+    ShuffleNeedsEvery,
     /// A URL with a NUL byte.
     UrlNul,
     /// A path that the control protocol (JSON) cannot carry.
@@ -608,6 +652,22 @@ impl fmt::Display for Error {
             Self::ShaImageOnly => write!(
                 f,
                 "`--sha256` pins a downloaded image, and this one is not a URL \
+                 (try `scootbg set --help`)"
+            ),
+            Self::BadEvery(error) => write!(f, "`--every`: {error} (try `scootbg set --help`)"),
+            Self::EveryNeedsDirectory(target) => write!(
+                f,
+                "`--every` rotates through a directory, and `{target}` is not one \
+                 (try `scootbg set --help`)"
+            ),
+            Self::DirectoryNeedsEvery(target) => write!(
+                f,
+                "`{target}` is a directory: add `--every` to rotate through it, such as \
+                 `--every 30m` (try `scootbg set --help`)"
+            ),
+            Self::ShuffleNeedsEvery => write!(
+                f,
+                "`--shuffle` shuffles a slideshow, and there is none: add `--every` \
                  (try `scootbg set --help`)"
             ),
             Self::UrlNul => write!(f, "the image URL has a NUL byte"),
@@ -972,16 +1032,19 @@ const MODE: &str = "--mode";
 const FILL: &str = "--fill";
 const FILTER: &str = "--filter";
 const SHA256: &str = "--sha256";
+const EVERY: &str = "--every";
+const SHUFFLE: &str = "--shuffle";
 const TRANSITION: &str = "--transition";
 const DURATION_MS: &str = "--duration-ms";
 const EASING: &str = "--easing";
 const ANGLE: &str = "--angle";
 const POSITION: &str = "--position";
 
-/// `set COLOR|PATH|URL [--output NAME] [--mode M] [--fill C] [--filter F]
-/// [--sha256 HEX]` and `clear [--output NAME]`, flags in any order after
-/// the command, each also as `--flag=VALUE`. `--help` alone asks for help,
-/// as for every command.
+/// `set COLOR|PATH|URL|DIR [--output NAME] [--mode M] [--fill C] [--filter F]
+/// [--sha256 HEX] [--every DURATION] [--shuffle]` and `clear [--output NAME]`,
+/// flags in any order after the command, each also as `--flag=VALUE`
+/// (`--shuffle` takes none). `--help` alone asks for help, as for every
+/// command.
 fn change<I: Iterator<Item = Result<String, String>>>(
     command: &'static str,
     topic: Topic,
@@ -994,6 +1057,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             FILL,
             FILTER,
             SHA256,
+            EVERY,
             TRANSITION,
             DURATION_MS,
             EASING,
@@ -1018,7 +1082,10 @@ fn change<I: Iterator<Item = Result<String, String>>>(
     };
     let mut target: Option<String> = None;
     // Indexed as `flags`.
-    let mut values: [Option<String>; 10] = Default::default();
+    let mut values: [Option<String>; 11] = Default::default();
+    // `--shuffle` takes no value, so it is kept out of `flags` (whose
+    // machinery reads one) and handled here, bare only.
+    let mut shuffle = false;
     let mut first = true;
     while let Some(arg) = args.next() {
         let arg = match arg {
@@ -1029,6 +1096,19 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             }
             Err(lossy) => return Err(unexpected(lossy)),
         };
+        if command == "set" && (arg == SHUFFLE || arg.starts_with("--shuffle=")) {
+            if arg != SHUFFLE {
+                return Err(unexpected(arg));
+            }
+            if std::mem::replace(&mut shuffle, true) {
+                return Err(Error::Repeated {
+                    command,
+                    flag: SHUFFLE,
+                });
+            }
+            first = false;
+            continue;
+        }
         let flag = flags.iter().enumerate().find_map(|(index, &flag)| {
             if arg == flag {
                 Some((index, flag, None))
@@ -1066,6 +1146,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         fill,
         filter,
         sha256,
+        every,
         transition,
         duration_ms,
         easing,
@@ -1077,6 +1158,9 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         return Ok(Command::Client(Request::Clear { output }));
     }
     let argument = target.ok_or(Error::MissingTarget)?;
+    if shuffle && every.is_none() {
+        return Err(Error::ShuffleNeedsEvery);
+    }
     let transition = parse_transition(transition, duration_ms, easing, angle, position)?;
     if argument.starts_with('#') {
         for (flag, given) in [
@@ -1088,6 +1172,9 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             if given.is_some() {
                 return Err(Error::ImageOnly(flag));
             }
+        }
+        if every.is_some() {
+            return Err(Error::EveryNeedsDirectory(argument));
         }
         return match Color::parse(&argument) {
             Ok(color) => Ok(Command::Client(Request::Set {
@@ -1120,6 +1207,9 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         if argument.contains('\0') {
             return Err(Error::UrlNul);
         }
+        if every.is_some() {
+            return Err(Error::EveryNeedsDirectory(argument));
+        }
         let sha256 = sha256
             .map(|value| crate::fetch::parse_sha256(&value).map_err(|_| Error::BadSha(value)))
             .transpose()?;
@@ -1127,7 +1217,29 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             url: Cow::Owned(argument),
             sha256,
         }
+    } else if std::fs::metadata(&argument).is_ok_and(|meta| meta.is_dir()) {
+        if sha256.is_some() {
+            return Err(Error::ShaImageOnly);
+        }
+        let every = every.ok_or_else(|| Error::DirectoryNeedsEvery(argument.clone()))?;
+        let every_secs = crate::rotation::parse_every(&every).map_err(Error::BadEvery)?;
+        let path = absolute(&argument)?;
+        return Ok(Command::Client(Request::Set {
+            show: Show::Slideshow(SlideshowRequest {
+                dir: Cow::Owned(path),
+                every_secs,
+                shuffle,
+                mode,
+                fill,
+                filter,
+            }),
+            output,
+            transition,
+        }));
     } else {
+        if every.is_some() {
+            return Err(Error::EveryNeedsDirectory(argument));
+        }
         if sha256.is_some() {
             return Err(Error::ShaImageOnly);
         }
