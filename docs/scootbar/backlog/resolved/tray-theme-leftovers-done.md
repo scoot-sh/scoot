@@ -28,7 +28,7 @@ and #502 (its hardening). Serves **daily-drive**. None of these is a
 defect that bites a real desktop today; each is a doc or a hardening step
 worth doing the next time someone is in `theme.rs`.
 
-## Status (2026-10-08): all six items landed in this PR
+## Status (2026-10-08): all six items landed in #524
 
 Conservative choices throughout (maintainer away): docs qualified rather
 than behavior changed for item 2; `openat2` contained open added behind
