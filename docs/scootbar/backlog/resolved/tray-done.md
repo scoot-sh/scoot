@@ -92,7 +92,7 @@ What remains moved to its own entries: [themed icon
 names](tray-icon-themes.md), [abstract
 sockets](tray-abstract-socket.md), [real
 apps](tray-real-apps.md), [runaway
-redraws](tray-redraw-coalesce.md).
+redraws](tray-redraw-coalesce-done.md).
 
 Out of scope: an item's own tooltip text is not drawn. The module's
 tooltip lists the shown items' titles, which identifies every item;
