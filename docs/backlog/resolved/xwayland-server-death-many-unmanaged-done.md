@@ -76,8 +76,8 @@ So:
   committed buffers for all 240. Only the window manager may set
   `_XWAYLAND_ALLOW_COMMITS` (`xwl_access_property_callback` in
   `hw/xwayland/xwayland-screen.c`), and that write is private to Smithay's
-  `X11Wm`. Follow-up:
-  [`xwayland-refused-windows-still-commit`](../protocols/xwayland-refused-windows-still-commit.md).
+  `X11Wm`. Follow-up (now resolved):
+  [`xwayland-refused-windows-still-commit`](../resolved/xwayland-refused-windows-still-commit-done.md).
 - **Why 2 per window:** XWayland makes each window pixmap its own
   `wl_shm` pool, destroys the pool right after `create_buffer`
   (`xwayland-shm.c`), and double-buffers each window
