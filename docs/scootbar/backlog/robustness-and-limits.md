@@ -138,7 +138,7 @@ and all are already capped, each with a test that fails without it:
   32 tray items (`MAX_ITEMS`), all refused whole with the last state kept.
 - **Config sizes**: 64 KiB file cap above; icon files 8 MiB with 1 Mpx and
   16 MiB decode budgets; fonts 64 MiB.
-- **Protocol vectors**: 32 outputs, 8 ext-workspace groups with 32
+- **Protocol vectors**: 32 configured outputs (policy; live `wl_output` globals follow the compositor and are not counted), 8 ext-workspace groups with 32
   workspaces (#334), 64 toplevels with 64-byte app ids (#374), 128-byte
   output names (#539).
 
