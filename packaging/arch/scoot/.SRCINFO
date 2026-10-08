@@ -12,13 +12,14 @@ pkgbase = scoot
 	makedepends = git
 	makedepends = wayland
 	makedepends = wayland-protocols
-	depends = bash
 	depends = glibc
+	depends = libgcc
 	depends = libinput
 	depends = libxkbcommon
 	depends = pixman
 	depends = scootbg=0.1.0
 	depends = seatd
+	depends = sh
 	depends = systemd-libs
 	optdepends = mesa: GPU scanout tier (rebuild with --features gpu-scanout)
 	optdepends = libdrm: GPU scanout tier (rebuild with --features gpu-scanout)

@@ -12,6 +12,7 @@ pkgbase = scootbg-git
 	makedepends = wayland
 	makedepends = wayland-protocols
 	depends = glibc
+	depends = libgcc
 	provides = scootbg
 	conflicts = scootbg
 	options = !debug

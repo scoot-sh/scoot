@@ -40,11 +40,12 @@ release build: `scoot` 6.5 MB with those five sonames, `scootbg`
 - `libudev.so.1` comes from `systemd-libs`; `libgbm.so.1`/`libdrm.so.2`
   (the `gpu-scanout` feature's extras) from `mesa`/`libdrm`, carried
   as `optdepends` since the shipped build is the default feature set.
-- `bash` is a dependency of the `scoot` packages (the `scoot-session`
-  launcher is a `sh` script); `gcc-libs` is deliberately absent
-  (namcap: `libgcc_s` is implicitly satisfied, the explicit entry
-  unneeded). `glibc` stays: the binaries link it and namcap wants it
-  named.
+- `sh` is a dependency of the `scoot` packages (the `scoot-session`
+  launcher is a `sh` script, and `sh` is what the distro's own
+  packages depend on — `bash` provides it); `libgcc` is one everywhere
+  (every binary links `libgcc_s`, and namcap names it the provider —
+  the `gcc-libs` entry it replaced covered nothing the binaries use).
+  `glibc` stays: the binaries link it and namcap wants it named.
 - `cargo-deny` generates each package's `THIRD-PARTY-LICENSES` at
   build time (lockfile-only `cargo deny list`, no network); it is in
   `extra` on both architectures.

@@ -20,7 +20,7 @@ pkgdesc='Scrolling-tiling Wayland compositor (CPU rendering by default, no GPU n
 arch=('x86_64' 'aarch64')
 url='https://github.com/scoot-sh/scoot'
 license=('MIT')
-depends=('bash' 'glibc' 'libinput' 'libxkbcommon' 'pixman' "scootbg=$pkgver" 'seatd' 'systemd-libs')
+depends=('glibc' 'libgcc' 'libinput' 'libxkbcommon' 'pixman' "scootbg=$pkgver" 'seatd' 'sh' 'systemd-libs')
 makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
 optdepends=('mesa: GPU scanout tier (rebuild with --features gpu-scanout)'
             'libdrm: GPU scanout tier (rebuild with --features gpu-scanout)'

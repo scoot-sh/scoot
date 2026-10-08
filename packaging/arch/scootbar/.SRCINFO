@@ -13,6 +13,7 @@ pkgbase = scootbar
 	makedepends = wayland
 	makedepends = wayland-protocols
 	depends = glibc
+	depends = libgcc
 	optdepends = systemd: run the bar as a user unit (scootbar.service)
 	optdepends = ttf-dejavu: sans font the bar finds on its own
 	options = !debug
