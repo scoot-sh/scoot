@@ -84,6 +84,24 @@ fn broken_properties_are_ignored() {
 }
 
 #[test]
+fn an_overlong_output_name_is_ignored() {
+    use crate::policy::MAX_NAME;
+    let (mut outputs, id) = bound();
+    let output = output(&mut outputs, id);
+    // A megabyte of connector name: a broken compositor cannot grow the
+    // bar's memory or its `query` replies through it.
+    output.stage_name("x".repeat(1 << 20));
+    output.done();
+    assert_eq!(output.info().name, None);
+    assert_eq!(output.label().to_string(), "an unnamed output");
+    // At the bound is kept whole.
+    let within = "y".repeat(MAX_NAME);
+    output.stage_name(within.clone());
+    output.done();
+    assert_eq!(output.info().name.as_deref(), Some(within.as_str()));
+}
+
+#[test]
 fn a_configure_is_acked_and_then_drawn() {
     let (mut outputs, id) = configured(1920, 28);
     let bar = Bar::default();
