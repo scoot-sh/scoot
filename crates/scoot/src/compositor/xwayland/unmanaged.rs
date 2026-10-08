@@ -32,7 +32,9 @@ use smithay::xwayland::X11Surface;
 
 use super::super::State;
 use super::super::pointer_focus::PointerFocus;
-use super::super::toplevel_cap::MAX_X11_UNMANAGED_PER_CLIENT;
+use super::super::toplevel_cap::{
+    MAX_X11_UNMANAGED_PER_CLIENT, MAX_X11_UNMANAGED_REFUSED_TOLERANCE,
+};
 use super::focus::x_client_key;
 
 /// Where an override-redirect window is on the screen: the position it
@@ -49,8 +51,11 @@ impl State {
     /// never drawn, never hit-tested, never sent frame callbacks -- the
     /// refuse-the-map form, the way `map_x11_window` refuses a managed
     /// window past its own cap. X has no client object to post an error
-    /// to, so there is no kill to send; the window simply stays invisible,
-    /// and its client keeps everything it had. Other X clients (other
+    /// to, so there is no kill to send. Up to the kill tolerance past
+    /// the cap the window simply stays invisible, and its client keeps
+    /// everything it had; past the tolerance its X connection is killed,
+    /// so one client cannot spend the server's budget on refused menus
+    /// alone (see `kill_runaway_x_client`). Other X clients (other
     /// client bits) are unaffected: the count is per X client.
     pub(super) fn map_x11_unmanaged(&mut self, window: X11Surface) {
         let (xwm, xid) = (window.xwm_id(), window.window_id());
@@ -73,6 +78,14 @@ impl State {
                 cap = MAX_X11_UNMANAGED_PER_CLIENT,
                 "refusing to map an X11 override-redirect window: its client is past the per-client cap"
             );
+            // Tolerated refused windows stay mapped X-side (never drawn)
+            // up to the reclaim tolerance; past it the runaway client is
+            // killed, so one client cannot spend the server's budget on
+            // its own (see `kill_runaway_x_client`).
+            if self.x11_unmanaged_cap.track_refused(x_client, xid) {
+                return;
+            }
+            self.kill_runaway_x_client(xid);
             return;
         }
         self.x11_unmanaged.push(std::sync::Arc::new(window));
@@ -90,12 +103,113 @@ impl State {
         self.request_render();
     }
 
+    /// A runaway X client past the reclaim tolerance: kill its X
+    /// connection, so its windows' server buffers go and it maps no more.
+    ///
+    /// A refused menu costs the XWayland server what a drawn one does,
+    /// spent before the window manager hears of the map (see
+    /// `xwayland/tests/refused_cost.rs` and the ticket): untracked, one X
+    /// client mapping menus past its cap spends the server's budget
+    /// (`xwayland_budget.rs`) on its own, and at the budget scoot
+    /// disconnects the server and every X client's windows go with it.
+    /// Withholding `_XWAYLAND_ALLOW_COMMITS` was measured and changes
+    /// nothing (the buffers are spent before the refusal, and a refused
+    /// window never commits again for lack of frame callbacks). Closing
+    /// refused windows one by one was measured too and does not keep up:
+    /// a paced 5000-menu storm still disconnects with thousands reclaimed
+    /// (the frees lag the maps even settling every map), so the source
+    /// has to stop, not be chased.
+    ///
+    /// Up to [`MAX_X11_UNMANAGED_REFUSED_TOLERANCE`] refused windows past
+    /// the cap are merely refused (tracked, never drawn) -- killing a
+    /// client for its 129th menu would be hostile to a legitimate burst,
+    /// and a toolkit whose menu is destroyed under it can fail on its
+    /// next request to it (`BadWindow`, which kills a plain Xlib client).
+    /// Past the tolerance (192 mapped menus total) the client is
+    /// unmistakably runaway, and it is killed whole: every one of its
+    /// windows -- drawn, tolerated and in-flight refused alike -- is
+    /// destroyed by the X server at once, their server buffers freed on
+    /// unrealize, and its connection broken so it maps no more. Other X
+    /// clients (other client bits) and the server itself stay served --
+    /// the same last-resort shape as disconnecting a Wayland client past
+    /// its own bound, except X has no client object to post an error to,
+    /// so the kill is the disconnect. A later request by the dead client
+    /// fails on its broken connection, never as a dangling `BadWindow` in
+    /// a live client: cleaner than destroying its windows one by one and
+    /// leaving it alive to trip over their ids.
+    ///
+    /// The kill runs over scoot's own X connection to its own server
+    /// (`State::xkill`, connected lazily here, dropped with the server),
+    /// with `XKillClient` on any one of the runaway's window ids (the X
+    /// server kills the connection that owns the resource). One X request
+    /// plus a flush, on the window-open abuse path only -- nothing for a
+    /// client under its tolerance, and no per-frame cost. A kill that
+    /// fails (no display, no connection, the window or the server already
+    /// gone) is a debug line, never a panic: the refusal above already
+    /// holds, and the server's death drains everything anyway.
+    fn kill_runaway_x_client(&mut self, xid: u32) {
+        use smithay::reexports::x11rb::connection::Connection as _;
+        use smithay::reexports::x11rb::protocol::xproto::ConnectionExt as _;
+        if self.xkill.is_none() {
+            let Some(display) = self.xdisplay else {
+                tracing::debug!(xid, "no X display to kill a runaway X client on");
+                return;
+            };
+            match smithay::reexports::x11rb::connect(Some(&super::display_value(display))) {
+                Ok((conn, _)) => self.xkill = Some(conn),
+                Err(error) => {
+                    tracing::debug!(xid, %error, "could not connect to kill a runaway X client");
+                    return;
+                }
+            }
+        }
+        // `kill_client` sends; `check` reports an X11 error for a bad
+        // resource (the window already gone); `flush` (or the send
+        // itself) reports a transport error when the server is gone. Any
+        // failure drops the connection (reconnected lazily on the next
+        // kill; a bad resource is rare enough that the reconnect costs
+        // nothing measurable) and is a debug line, never a panic. The
+        // borrow ends before any assignment below.
+        let result: Result<(), String> = {
+            let Some(conn) = self.xkill.as_ref() else {
+                return;
+            };
+            (|| {
+                let cookie = conn
+                    .kill_client(xid)
+                    .map_err(|error| format!("send: {error}"))?;
+                cookie
+                    .check()
+                    .map_err(|error| format!("refused: {error:?}"))?;
+                conn.flush().map_err(|error| format!("flush: {error}"))?;
+                Ok(())
+            })()
+        };
+        match result {
+            Ok(()) => tracing::warn!(
+                xid,
+                cap = MAX_X11_UNMANAGED_PER_CLIENT,
+                tolerance = MAX_X11_UNMANAGED_REFUSED_TOLERANCE,
+                "killed a runaway X11 client past the override-redirect reclaim tolerance"
+            ),
+            Err(where_) => {
+                tracing::debug!(xid, %where_, "could not kill a runaway X11 client");
+                self.xkill = None;
+            }
+        }
+    }
+
     /// An override-redirect window unmapped or died. The pointer is
     /// re-derived because it may have been over it: `wl_pointer.button`
     /// goes to whatever the pointer last entered, and a menu that closed
     /// under a resting pointer would otherwise take the next click with it.
     pub(super) fn unmap_x11_unmanaged(&mut self, window: &X11Surface) {
         let (xwm, xid) = (window.xwm_id(), window.window_id());
+        // A tolerated refused window was never drawn, so its unmap or
+        // destroy frees only its refused unit -- idempotent (a reclaimed
+        // window was never tracked, a drawn window holds the drawn unit
+        // instead). A drawn window's removal below is unchanged.
+        self.x11_unmanaged_cap.release_refused(&xid);
         let before = self.x11_unmanaged.len();
         self.x11_unmanaged
             .retain(|known| !(known.window_id() == xid && known.xwm_id() == xwm));
@@ -122,11 +236,15 @@ impl State {
     /// Every override-redirect window gone at once: the server died.
     /// A dead server sends no unmap or destroy for the windows it had, so
     /// without the drain their units would stay claimed against window ids
-    /// a restarted server reuses.
+    /// a restarted server reuses. The cap's clear drains the drawn units
+    /// and the tolerated-refused ones together (a refused window's X id is
+    /// as reusable as a drawn one's); the draw-list refresh below runs
+    /// only when drawn windows existed, since a refused window was never
+    /// drawn.
     pub(super) fn clear_x11_unmanaged(&mut self) {
+        self.x11_unmanaged_cap.clear();
         if !self.x11_unmanaged.is_empty() {
             self.x11_unmanaged.clear();
-            self.x11_unmanaged_cap.clear();
             self.refresh_pointer_focus();
             self.request_render();
         }

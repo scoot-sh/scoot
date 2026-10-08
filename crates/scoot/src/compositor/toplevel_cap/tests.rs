@@ -277,7 +277,9 @@ mod x11 {
 
 #[cfg(feature = "xwayland")]
 mod x11_unmanaged {
-    use super::super::{MAX_X11_UNMANAGED_PER_CLIENT, X11UnmanagedCap};
+    use super::super::{
+        MAX_X11_UNMANAGED_PER_CLIENT, MAX_X11_UNMANAGED_REFUSED_TOLERANCE, X11UnmanagedCap,
+    };
 
     /// Two X clients, as window-id client bits (see `xwayland/focus.rs`):
     /// the high bits differ, the low 21 do not matter here.
@@ -403,6 +405,158 @@ mod x11_unmanaged {
         assert_eq!(cap.live_for(&X_B), 0);
         assert_eq!(cap.in_flight(), 0);
         assert!(cap.admits(&X_A));
+    }
+
+    /// The reclaim tolerance, spelled out so this file does not depend on
+    /// it: refused windows past the cap are tracked up to the tolerance,
+    /// then refused the tolerance (the caller reclaims them instead).
+    const X_REFUSED_TOLERANCE: u32 = 64;
+
+    fn refused_tolerance() -> u32 {
+        assert_eq!(
+            MAX_X11_UNMANAGED_REFUSED_TOLERANCE, X_REFUSED_TOLERANCE,
+            "the test's spelled-out refused tolerance drifted from the code's"
+        );
+        X_REFUSED_TOLERANCE
+    }
+
+    /// A refused map is tolerated up to exactly the tolerance, then
+    /// refused it: the 65th refused menu past the cap is the first the
+    /// caller must reclaim.
+    #[test]
+    fn refused_maps_are_tolerated_up_to_exactly_the_tolerance() {
+        let tolerance = refused_tolerance();
+        let mut cap = or_cap();
+        let mut xids = Xids(0);
+        for _ in 0..tolerance {
+            assert!(
+                cap.track_refused(X_A, xids.next(X_A)),
+                "a refused menu under the tolerance was not tolerated"
+            );
+        }
+        assert_eq!(cap.refused_live_for(&X_A), tolerance);
+        assert_eq!(cap.refused_in_flight(), tolerance);
+        assert!(
+            !cap.track_refused(X_A, xids.next(X_A)),
+            "a refused menu past the tolerance was tolerated"
+        );
+        assert_eq!(
+            cap.refused_live_for(&X_A),
+            tolerance,
+            "the refused tolerance claimed a unit past it"
+        );
+    }
+
+    /// The refused tolerance is per X client, and a repeated report for an
+    /// already-tolerated window stays tolerated without claiming twice.
+    #[test]
+    fn the_refused_tolerance_is_per_client_and_dedupes() {
+        let tolerance = refused_tolerance();
+        let mut cap = or_cap();
+        let mut xids = Xids(0);
+        for _ in 0..tolerance {
+            assert!(cap.track_refused(X_A, xids.next(X_A)));
+        }
+        assert!(!cap.track_refused(X_A, xids.next(X_A)));
+        assert!(
+            cap.track_refused(X_B, xids.next(X_B)),
+            "one client's tolerance stopped another's"
+        );
+        assert_eq!(cap.refused_live_for(&X_B), 1);
+        let xid = xids.next(X_B);
+        assert!(cap.track_refused(X_B, xid));
+        assert!(
+            cap.track_refused(X_B, xid),
+            "a repeated refused report claimed twice"
+        );
+        assert_eq!(cap.refused_live_for(&X_B), 2);
+    }
+
+    /// Releasing a tolerated refused window hands the tolerance back, and
+    /// the release is idempotent: an untracked id and a double release
+    /// both change nothing.
+    #[test]
+    fn refused_releases_free_the_tolerance_and_are_idempotent() {
+        let tolerance = refused_tolerance();
+        let mut cap = or_cap();
+        let mut xids = Xids(0);
+        let mut held = Vec::new();
+        for _ in 0..tolerance {
+            let xid = xids.next(X_A);
+            assert!(cap.track_refused(X_A, xid));
+            held.push(xid);
+        }
+        assert!(!cap.track_refused(X_A, xids.next(X_A)));
+        cap.release_refused(&held[0]);
+        assert_eq!(cap.refused_live_for(&X_A), tolerance - 1);
+        assert!(
+            cap.track_refused(X_A, xids.next(X_A)),
+            "an unmap did not free the tolerance"
+        );
+        cap.release_refused(&X_A);
+        assert_eq!(
+            cap.refused_in_flight(),
+            tolerance,
+            "an unknown id changed the count"
+        );
+        let xid = held[1];
+        cap.release_refused(&xid);
+        cap.release_refused(&xid);
+        assert_eq!(
+            cap.refused_live_for(&X_A),
+            tolerance - 1,
+            "a double release went negative"
+        );
+    }
+
+    /// The drawn count never sees refused windows and back: tracking
+    /// refused claims no drawn unit, and releasing refused touches no
+    /// drawn count.
+    #[test]
+    fn refused_tracking_shares_nothing_with_the_drawn_count() {
+        let mut cap = or_cap();
+        let mut xids = Xids(0);
+        let drawn = xids.next(X_A);
+        cap.claim(X_A, drawn);
+        let refused = xids.next(X_A);
+        assert!(cap.track_refused(X_A, refused));
+        assert_eq!(cap.live_for(&X_A), 1);
+        assert_eq!(cap.refused_live_for(&X_A), 1);
+        cap.release_refused(&refused);
+        assert_eq!(
+            cap.live_for(&X_A),
+            1,
+            "a refused release touched the drawn count"
+        );
+        cap.release(&drawn);
+        assert_eq!(
+            cap.refused_live_for(&X_A),
+            0,
+            "a drawn release touched the refused count"
+        );
+    }
+
+    /// The server's death drains the refused tolerance with the drawn
+    /// count, so a restarted server reusing window ids starts clean on
+    /// both.
+    #[test]
+    fn the_server_dying_clears_the_refused_tolerance_too() {
+        let mut cap = or_cap();
+        let mut xids = Xids(0);
+        for _ in 0..5 {
+            assert!(cap.track_refused(X_A, xids.next(X_A)));
+        }
+        for _ in 0..3 {
+            assert!(cap.track_refused(X_B, xids.next(X_B)));
+        }
+        cap.clear();
+        assert_eq!(cap.refused_live_for(&X_A), 0);
+        assert_eq!(cap.refused_live_for(&X_B), 0);
+        assert_eq!(cap.refused_in_flight(), 0);
+        assert!(
+            cap.track_refused(X_A, xids.next(X_A)),
+            "a cleared tolerance stayed full"
+        );
     }
 }
 

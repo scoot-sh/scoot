@@ -623,6 +623,17 @@ pub struct State {
     /// (setting a dead client's scale is harmless) and replaced by a restart.
     #[cfg(feature = "xwayland")]
     pub(in crate::compositor) xwayland_client: Option<smithay::reexports::wayland_server::Client>,
+    /// scoot's own X connection to its XWayland server, for killing a
+    /// runaway X client past the reclaim tolerance (see
+    /// `xwayland/unmanaged.rs`). Connected lazily on the first kill --
+    /// never for a session that stays under its caps, and never in a
+    /// session without XWayland -- over the abstract socket, like any X
+    /// client; dropped whole when the server dies (`sweep_x11_windows`),
+    /// so no stale connection survives into a restarted server. `None`
+    /// until first use, and after every server death.
+    #[cfg(feature = "xwayland")]
+    pub(in crate::compositor) xkill:
+        Option<smithay::reexports::x11rb::rust_connection::RustConnection>,
     /// The scale X draws at -- XWayland's client scale -- and whether the
     /// layout fits X's coordinates at it: `ceil([output] scale)`, or lower
     /// where the whole layout would not fit X's 16-bit coordinates at that
@@ -1341,6 +1352,8 @@ impl State {
             xwayland_grab: None,
             #[cfg(feature = "xwayland")]
             xwayland_client: None,
+            #[cfg(feature = "xwayland")]
+            xkill: None,
             #[cfg(feature = "xwayland")]
             x11_fit: xwayland::scale::XScale::UNSET,
             #[cfg(feature = "xwayland")]

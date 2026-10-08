@@ -321,11 +321,40 @@ impl X11ToplevelCap {
 #[cfg(feature = "xwayland")]
 pub(super) const MAX_X11_UNMANAGED_PER_CLIENT: u32 = 128;
 
+/// How many refused override-redirect windows past the cap one X client
+/// may still keep mapped before scoot kills its X connection.
+///
+/// A refused menu costs the XWayland server what a drawn one does (see
+/// `xwayland/tests/refused_cost.rs`), so an untracked refusal lets one X
+/// client spend the server's whole budget on its own. Past the cap plus
+/// this tolerance scoot kills the runaway client's X connection
+/// (`XKillClient` on one of its window ids): every one of its windows is
+/// destroyed by the X server at once and it maps no more, so the server
+/// stays served for everyone else. Per-window closes were measured and do
+/// not keep up (a paced 5000-menu storm still disconnects with thousands
+/// closed -- the frees lag the maps), so the source has to stop.
+///
+/// 64 bounds the kill to unmistakably runaway clients: 192 mapped menus
+/// total (128 drawn + 64 tolerated refused), far past the heaviest
+/// legitimate use the 128 cap already allows several times over, while
+/// keeping one client's worst case far under the smallest server budget
+/// (512). Deterministic and synchronous (counted on the map/unmap
+/// dispatch), so no pressure threshold to tune and no lag race in the
+/// decision itself.
+///
+/// Only in `xwayland` builds.
+#[cfg(feature = "xwayland")]
+pub(super) const MAX_X11_UNMANAGED_REFUSED_TOLERANCE: u32 = 64;
+
 /// The live override-redirect X windows, per X client and per window: the
 /// unmanaged half of [`ToplevelCap`], in the same two-map shape and the
 /// same counting discipline. An entry exists in `per_client` only while it
 /// is nonzero, and in `owner` only while the window is claimed, so both
-/// maps are bounded by live override-redirect windows.
+/// maps are bounded by live override-redirect windows. The tolerated
+/// refused windows past the cap (`refused_per_client` / `refused_owner`,
+/// bounded by [`MAX_X11_UNMANAGED_REFUSED_TOLERANCE`] per client) share
+/// the discipline: entries exist only while the refused window is still
+/// mapped X-side.
 ///
 /// Only in `xwayland` builds, with the counter's users.
 #[cfg(feature = "xwayland")]
@@ -342,6 +371,17 @@ pub struct X11UnmanagedCap {
     /// [`X11UnmanagedCap::clear`]), so no claim survives into a restarted
     /// server.
     owner: HashMap<u32, u32>,
+    /// Tolerated refused windows per X client, keyed by window-id client
+    /// bits: what the kill tolerance reads. A refused window past the
+    /// cap that is still under this tolerance is tracked here (never
+    /// drawn, but still mapped X-side with its server cost); one past it
+    /// kills the client's X connection instead and is never tracked.
+    refused_per_client: HashMap<u32, u32>,
+    /// Which X client each tolerated refused X window id belongs to: what
+    /// the refused release reads. Keyed by X window id like `owner`, and
+    /// drained whole with it on the server's death, so no refused claim
+    /// survives into a restarted server either.
+    refused_owner: HashMap<u32, u32>,
 }
 
 #[cfg(feature = "xwayland")]
@@ -394,8 +434,9 @@ impl X11UnmanagedCap {
     }
 
     /// Forgets the claim on `xid`, if it has one. Idempotent: a refused
-    /// window never reached [`X11UnmanagedCap::claim`], a managed X window
-    /// holds the managed cap's unit instead, and a claimed one is
+    /// window never reached [`X11UnmanagedCap::claim`] (a tolerated one
+    /// holds a refused unit instead -- see [`X11UnmanagedCap::release_refused`]),
+    /// a managed X window holds the managed cap's unit instead, and a claimed one is
     /// forgotten once, wherever its removal runs -- an unmap or a destroy
     /// (both funnel through `unmap_x11_unmanaged`).
     pub(super) fn release(&mut self, xid: &u32) {
@@ -410,11 +451,72 @@ impl X11UnmanagedCap {
         }
     }
 
+    /// How many tolerated refused windows `client` (window-id client bits)
+    /// still keeps mapped.
+    #[cfg(test)]
+    pub(super) fn refused_live_for(&self, client: &u32) -> u32 {
+        self.refused_per_client.get(client).copied().unwrap_or(0)
+    }
+
+    /// How many tolerated refused windows every X client holds between
+    /// them. Test-only.
+    #[cfg(test)]
+    pub(super) fn refused_in_flight(&self) -> u32 {
+        self.refused_per_client.values().sum()
+    }
+
+    /// Tracks a refused map of `xid` for `client` under the kill
+    /// tolerance, or refuses the tolerance: `true` when the window is
+    /// tolerated (still mapped X-side, never drawn) and now counted,
+    /// `false` once the client holds [`MAX_X11_UNMANAGED_REFUSED_TOLERANCE`]
+    /// refused windows already -- the caller should kill its X connection
+    /// instead of tracking it.
+    ///
+    /// Idempotent by the refused owner map: a repeated report for an
+    /// already-tolerated window stays tolerated without claiming twice
+    /// (Smithay can report a map twice). The count cannot overflow: each
+    /// unit is a live refused window, and the tolerance stops a client far
+    /// below `u32::MAX`. Sound on the loop with no dispatch between the
+    /// refusal read and this call, the way `admits` + `claim` are.
+    pub(super) fn track_refused(&mut self, client: u32, xid: u32) -> bool {
+        if self.refused_owner.contains_key(&xid) {
+            return true;
+        }
+        let live = self.refused_per_client.get(&client).copied().unwrap_or(0);
+        if live >= MAX_X11_UNMANAGED_REFUSED_TOLERANCE {
+            return false;
+        }
+        *self.refused_per_client.entry(client).or_insert(0) += 1;
+        self.refused_owner.insert(xid, client);
+        true
+    }
+
+    /// Forgets the tolerated-refused claim on `xid`, if it has one.
+    /// Idempotent: a drawn window holds the drawn unit instead (see
+    /// [`X11UnmanagedCap::release`]), a reclaimed window was never
+    /// tracked, and a tolerated one is forgotten once, wherever its
+    /// removal runs -- an unmap or a destroy (both funnel through
+    /// `unmap_x11_unmanaged`, and the destroy that follows a reclaim
+    /// lands there too).
+    pub(super) fn release_refused(&mut self, xid: &u32) {
+        let Some(client) = self.refused_owner.remove(xid) else {
+            return;
+        };
+        if let Some(live) = self.refused_per_client.get_mut(&client) {
+            *live = live.saturating_sub(1);
+            if *live == 0 {
+                self.refused_per_client.remove(&client);
+            }
+        }
+    }
+
     /// Forgets every claim at once: the server died, and
     /// `clear_x11_unmanaged` drops every window together, so per-window
     /// releases would chase ids already gone.
     pub(super) fn clear(&mut self) {
         self.per_client.clear();
         self.owner.clear();
+        self.refused_per_client.clear();
+        self.refused_owner.clear();
     }
 }

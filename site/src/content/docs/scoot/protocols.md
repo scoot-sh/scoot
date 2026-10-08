@@ -184,9 +184,15 @@ keep one; AGX shows that expectation cannot be assumed.
   with the GPU, so before, about 64 X windows drawing at once could
   disconnect every X app. A managed X window refused under the
   per-X-client limit above costs the X server nothing. A refused
-  override-redirect window costs it what a drawn one does, 2 fds and 2
-  buffers, so one X app mapping menus past its limit still uses up the
-  server's.
+  override-redirect window costs it what a drawn one does -- up to 64
+  refused menus past the limit, which scoot tolerates (never drawn, never
+  hit-tested, never sent frame callbacks). Past that scoot kills the
+  runaway client's X connection, so one X app mapping menus far past its
+  limit cannot use up the server on its own: its windows go with it and
+  it maps no more, while every other X client stays served. Killing a
+  client for its 193rd menu is a last resort: the client loses everything
+  it had, so the kill fires only past the tolerance, when the alternative
+  is disconnecting the server and losing every X window in the session.
 - **128 live `xdg_popup`s per client.** A client already holding 128 that
   opens one more is disconnected with `wl_display.error` `no_memory` ("at
   most 128 live xdg_popups per client"); closing or losing its popups
