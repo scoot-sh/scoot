@@ -105,7 +105,7 @@ library), not eyedroppered:
 Body text is cream on near-black at **16.2:1**, ginger at **6.8:1**,
 amber at **10.7:1** and ember at **5.3:1** (WCAG AA needs 4.5:1).
 `mist` (4.7:1) passes AA too and carries dimmed text; only the
-inactive ring (1.7:1) never carries text — an unfocused ring, the same
+inactive ring (1.5:1) never carries text — an unfocused ring, the same
 role moonrise's mauve ring plays.
 
 ## What it costs

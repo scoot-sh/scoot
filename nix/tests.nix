@@ -2924,6 +2924,7 @@ let
   hmNightLocated = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
     desktop.nightlight.latitude = 37.33;
     desktop.nightlight.longitude = -121.89;
   };
@@ -2931,6 +2932,7 @@ let
   hmNightGamma = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
     desktop.nightlight.daemon = "gammastep";
     desktop.nightlight.latitude = 37.33;
     desktop.nightlight.longitude = -121.89;
@@ -6426,8 +6428,10 @@ let
       assert hmDesk.config.programs.scoot.desktop.nightlight.dayTemp == 6500;
       true
     )
+    # ...and the night warms to the default look's own temperature
+    # (ginger-night: 3300 K).
     (
-      assert hmDesk.config.programs.scoot.desktop.nightlight.nightTemp == 3500;
+      assert hmDesk.config.programs.scoot.desktop.nightlight.nightTemp == 3300;
       true
     )
     (
