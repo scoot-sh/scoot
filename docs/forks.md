@@ -16,7 +16,7 @@ another layer), each with why it was rejected and the evidence. A hard constrain
 is checked against the pinned fork's source. If the line is missing, the entry is
 incomplete, and "the fork was simpler" is not a reason. (Rule added 2026-09-29; the
 existing entries are being checked against it by
-[the decision audit](backlog/core/fork-decisions-audit.md).)
+[the decision audit](resolved/fork-decisions-audit-done.md).)
 
 | Fork | Upstream | Based on | Carried commits | Pinned in scoot | Why |
 | --- | --- | --- | --- | --- | --- |
@@ -502,6 +502,33 @@ existing entries are being checked against it by
   on master (the 0.4 rewrite). No issue or PR exists. Nothing has been
   filed from here. There is no AI-contribution policy file.
 - **Drop the fork when** a released wayland-backend bounds the queue.
+
+## Decision audit (2026-10-08)
+
+Audit for [fork-decisions-audit](backlog/resolved/fork-decisions-audit-done.md). Each
+carried commit group is classified by that ticket's method: **1**,
+alternatives listed and ruled out with measurement or a concrete
+constraint; **2**, mentioned without evidence; **3**, none recorded;
+**4**, a hard constraint checked against the pinned fork's source. Source
+references below are against the pinned rev `fdf424d`
+(`~/.cargo/git/checkouts/smithay-*/fdf424d`), re-checked against the same
+rev on the Asahi M2. No decision was found wrong, so no wrong-decision
+ticket was filed; the groups that were class 2 or 3 are already priority
+routes in [fork-changes-in-scoot](backlog/core/fork-changes-in-scoot.md),
+so nothing was added there.
+
+| Group | Class | Scoot-side alternatives considered (why rejected) | Verdict |
+| --- | --- | --- | --- |
+| syncobj `Drop` (`43f50eb2`) | 1 + 4 | As recorded in `syncobj-handle-leak-done.md`: destroying the handle from scoot (the handle is private to Smithay, `src/wayland/drm_syncobj/sync_point.rs:46-50`, and guessing risks a live handle); rotating the import device (Smithay drops destroyed timelines from `known_timelines`, so in-flight points could never signal); capping imports per connection (kills legitimate long-lived Vulkan clients). | Record sufficient; no re-exam. |
+| XWayland selection transfers, thirteen (`35c335e0`..`5b575329`), and the XWM hooks they added (`selection_owner`, `selection_generation`, `allow_drag`, `set_selection_transfer_timeout`) | 3, re-derived 4 | A wrapper tracking the same state from events scoot sees (no such stream: the XWM owns the X connection, `conn` private at `src/xwayland/xwm/mod.rs:623`, and `SetSelectionOwner` accepts any window id, so owner-window comparison is forgeable, as PR #246's review showed live); an in-tree copy of the selection module (403 + 1222 lines coupled to the XWM's 2883-line core, versus small carried diffs); bounds enforced from scoot's `XwmHandler` side (unenforceable: pending transfers hold their fd and window inside the XWM's event loop, never reaching scoot's code). | Fork stands; already a priority route in the investigation. |
+| XDND, seven (`6e6fe896`, `7388af13`, `9515d7e5`, `d3a4cd73`, `b1ac3ca7`, `7e18b661`, `b16cd6a2`) | 3, re-derived 4 | Enter ordering from scoot through the existing `DndFocus` trait (impossible: the delay-until-types lives inside `DnDGrab::update_focus`, `src/input/dnd/grab.rs:300`, and the trait at `src/input/dnd/mod.rs:102` offers no hook for it, so the defaulted `enter_needs_metadata` is the smallest seam); flushing the proxy remap from scoot (the remap sits in the XWM's buffered connection, unreachable); an in-tree copy of `xwm/dnd.rs` (1222 lines). The two narrowings fix fork-only code from `b1ac3ca7`/`9515d7e5` and have no upstream counterpart. | Fork stands; already a priority route in the investigation. |
+| pixman `Repeat::Pad` (`74edbf32`) | 3, re-derived 4 | A scoot-side workaround such as a custom render element, pre-padding, or avoiding the bilinear tap (the scaler flags are set inside Smithay's `PixmanFrame`, `src/backend/renderer/pixman/mod.rs:596-602`; scoot supplies elements, never the scaler call, and sets no filter or repeat on this path, so any workaround pays per-frame cost on the pixman hot path for a one-line fix that matches the GLES backend's `CLAMP_TO_EDGE`). | Fork stands; already a priority route in the investigation. |
+| buffer scale and transform without a new buffer (`e7130254`) | 3, re-derived 4 | Re-attaching the buffer whenever the scale changes (scootbg does this, but it fixes only scoot's own client; the compositor must render every client right); a scoot-side commit handler applying the scale (the state is `pub(crate)` to Smithay, `src/backend/renderer/utils/wayland.rs:40-50`, unreachable from scoot). | Fork stands; already a priority route in the investigation. |
+| XSETTINGS flush (`035d447c`) | 2, re-derived 4 | Weighed in `xwayland-scale-aware-done.md`: environment variables (rejected, `GDK_SCALE` pins GTK against the live setting and `QT_SCALE_FACTOR` double-scales Qt on Wayland) and the `Xft.dpi` resource (the window manager cannot write the root `RESOURCE_MANAGER`, and a second X connection can block on its own server). Flushing from scoot is impossible on top: `XSettings` and `update` are `pub(super)` (`src/xwayland/xwm/settings.rs:19,205`) and the connection is the XWM's private one. | Fork stands; already a priority route in the investigation. |
+| `set_commits_allowed` (`fcf6f314`) | N/A | Carried unused; nothing uses it. | Drop at the next rebase, as already recorded. |
+| compositor-owned dma-buf scanout (`7ab72d53`) | 1 | As recorded below (phantom-client `wl_buffer`, exporter wrapper, in-tree `DrmCompositor` copy, hiding the pointer). | Record sufficient; no re-exam. |
+| seat-loss error (`fdf424d`) | 1 | As recorded below (no surfacing event for a handler; a `catch_unwind` wrapper tried live, still prints through the panic hook and misses the `register` sites; polling/canary races the next dispatch; an in-tree copy is ~300 lines for three call sites). | Record sufficient; no re-exam. |
+| wayland-rs fd-queue cap (`a39311b8`, `70f81e00`) | 1 | As recorded in `wayland-backend-fd-queue-done.md`: per-client attribution (the queued fds never reach scoot's code, so no scoot-side cap can see them) and a kill heuristic (the holder's counted creations stay under grace, so pressure never picks it); the queue itself is a private field of the backend's `BufferedSocket` (`wayland-backend/src/rs/socket.rs:135`), so only the backend can bound it. | Record sufficient; no re-exam. |
 
 ## Maintaining a fork
 

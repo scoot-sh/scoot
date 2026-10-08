@@ -604,7 +604,8 @@ be revisited.
   — RESOLVED 2026-10-07 in #492: stale-flip floor on the lit gate, off-output twin skip + cache clear on cursor rebuild, single-overlay yield to a marked window; doc nits and the fork rebase note with it.
 - [scoot panics when seatd dies under a running session](./resolved/seatd-loss-panics-done.md)
   — RESOLVED 2026-10-07 in #489: fork commit `fdf424d` (repinned) returns `ConnectionLost` instead of panicking; the session shuts down cleanly with exit 1.
-- [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
+- [Audit the fork decisions](./resolved/fork-decisions-audit-done.md)
+  — RESOLVED 2026-10-08 (this PR), docs-only: every carried commit group classified against the fork rule with its constraint re-checked against the pinned fork source (rev `fdf424d`); no decision found wrong, so no code changed. The class 2/3 gaps (XWayland selection + hooks, XDND, pixman edge, buffer scale, XSETTINGS flush) are now recorded with their rejected scoot-side routes in `docs/forks.md`'s "Decision audit" section; all were already priority routes in the entry below.
 - [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
 - [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
 - [Pointer-button presses don't activate browser modal buttons, and virtual button hold doesn't persist across IPC calls](./resolved/pointer-button-popups-done.md)
