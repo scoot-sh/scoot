@@ -1,0 +1,10 @@
+@font-face {
+  font-family: 'Missing';
+  src: url('./fonts/missing-font.woff2') format('woff2');
+}
+.hero {
+  background: url('./images/present-bg.webp');
+}
+.badge {
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E");
+}

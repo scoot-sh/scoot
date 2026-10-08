@@ -1,9 +1,10 @@
 ---
 title: "The docs-site build stays green when a referenced asset is missing"
-status: "open"
-area: "packaging"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-07"
 ---
 
 # The docs-site build stays green when a referenced asset is missing
@@ -35,3 +36,24 @@ Add an asset-reference check to the scripts `nix/docs-site.nix` runs
 ## Not in this ticket
 
 External links (that's a link checker, with network).
+
+## Resolution (PR #504, 2026-10-07)
+
+Landed as filed: `site/scripts/check-assets.mjs` runs in
+`nix/docs-site.nix` beside the llms and snippet gates (wired through
+`site/package.json`'s `verify`), resolving every CSS `url()` and every
+HTML `src`/`href`/`srcset` in `dist/`, base-aware (root-absolute under
+the built base inferred from the `/_astro/` prefix; relative against
+the linking file), scoped to images/fonts/CSS-JS/icons with the `.md`
+twins excluded. `site/scripts/test-check-assets.mjs` pins the fixture
+(`site/scripts/fixtures/check-assets/`): one missing font plus one
+missing image must fail (2 missing), the all-present twin must pass.
+The `src` filter now excludes only the site-root `dist/` so the
+fixtures reach the sandbox.
+
+Evidence (Asahi M2): doctored dist (font + hero image deleted) —
+`check-llms` ok (48 pages), `check-md-links` ok (330 links),
+`check-assets` FAIL naming exactly the two; baseline dist —
+`check-assets` ok (537 asset references, 0 missing). `nix build
+.#docs-site` green with all six gates; `cargo deny check`
+licenses+advisories green; `nix flake check` green.
