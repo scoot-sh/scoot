@@ -1,9 +1,10 @@
 ---
 title: "Switching back to a scoot --tty session fails to reactivate DRM while the greeter holds master"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-08"
 ---
 
 # Switching back to a scoot --tty session fails to reactivate DRM while the greeter holds master
@@ -55,7 +56,7 @@ the seat reports active. It fails before any of the lit-gate logic runs.
 - A test that fails before the fix if the activate path can be driven
   against a fake device; otherwise a recorded live repro.
 
-## Resolution (2026-10-08, PR #TBD)
+## Resolution (2026-10-08, PR #530)
 
 Diagnosed live on the M2 (round 1, recorded in the coordinator's
 scratchpad): seatd's single re-acquire attempt on switch-back races
