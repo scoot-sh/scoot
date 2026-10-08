@@ -179,7 +179,7 @@ jobs:
             "$DISTRO_IMAGE" bash -euo pipefail -c '
               apt-get update -qq
               apt-get update -qq
-              # The release job's build inputs (release.yml): the -dev
+              # The release job build inputs (release.yml): the -dev
               # packages the sys crates pkg-config against (the runtime
               # libraries arrive as their dependencies, which is also
               # what dpkg-shlibdeps resolves the binary against), plus
@@ -200,7 +200,7 @@ jobs:
               chmod +x /tmp/pkg/deb/build-deb.sh /tmp/pkg/deb/make-repo-index.sh
               /tmp/pkg/deb/build-deb.sh --source /src --out /out
               ls -l /out/*.deb
-              # lintian's judgment here, where the log lands in the
+              # lintian judgment here, where the log lands in the
               # artifact: any error fails, and a warning fails unless it
               # names an override this tree ships (there are none today:
               # the build is clean or the run is red).
