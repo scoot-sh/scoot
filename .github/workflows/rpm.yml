@@ -1,0 +1,281 @@
+# scoot RPM packages: the spec files for scoot, scootbg and scootbar
+# (docs/backlog/packaging/rpm-package.md).
+#
+# WHAT IT DOES: stages the vendored-sources tarball with
+# scripts/vendor-release.sh, builds all three specs under `packaging/rpm/`
+# with `rpmbuild -ba` in a Fedora 43 and an openSUSE Tumbleweed container,
+# lints each spec and each built RPM with `rpmlint`, installs the trio,
+# and runs `scoot --version`, the bar's `--check` on its shipped example,
+# and — in the Fedora container, which is what the ticket's "done when"
+# names — the headless smoke test (`scripts/smoke-test.sh`) against the
+# installed binaries. That is the ticket's proof the packages work.
+#
+# WHAT IT DOES NOT DO: publish anything. No COPR project, no repository,
+# no tag, no release. COPR stays designed-and-documented
+# (packaging/rpm/README.md); creating the project is a manual maintainer
+# step, the way the AUR push is for the Arch packages.
+#
+# THE VENDORED TARBALL SUBSTITUTION: no release is cut yet, so the specs'
+# `Source0` URLs 404 until the first release names its assets. Each job
+# stages the same-layout tarball of HEAD (`scripts/vendor-release.sh`,
+# whose output the release job publishes) and places it under SOURCES
+# with the provisional basename the spec names, so the `%setup` lines
+# and the offline `%build` are the real ones and only the URL part is
+# substitution.
+#
+# Path filters (the CLAUDE.md rule: CI runs only what changed): a PR or
+# a push to main runs this only when the specs, the scripts they run, or
+# this workflow could have changed. `packaging/rpm` is claimed as a no-op
+# in ci.yml's classify job, so a spec-only change runs here and nowhere
+# else. Docs-only pushes start nothing: the README is negated below and
+# every other doc path never matches.
+
+name: rpm packages (specs in Fedora and openSUSE containers)
+
+on:
+  pull_request:
+    paths:
+      - 'packaging/rpm/**'
+      - '!packaging/rpm/README.md'
+      - 'scripts/smoke-test.sh'
+      - 'scripts/vendor-release.sh'
+      - '.github/workflows/rpm.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packaging/rpm/**'
+      - '!packaging/rpm/README.md'
+      - 'scripts/smoke-test.sh'
+      - 'scripts/vendor-release.sh'
+      - '.github/workflows/rpm.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fedora:
+    name: rpmbuild + rpmlint + install + smoke (Fedora 43, x86_64)
+    runs-on: ubuntu-latest
+    container: fedora:43
+    # Three release-profile workspace builds from the vendored tree
+    # (cargo fingerprints by path; the registry is shared, compiled deps
+    # are per-build), plus one headless smoke run.
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      # actions/checkout shells out to git inside the container, which
+      # fedora:43 does not ship: bootstrap it first (steps run in
+      # order, so checkout need not be first).
+      - name: Bootstrap git for checkout
+        run: |
+          dnf install -y git
+
+      - uses: actions/checkout@v7
+
+      - name: Install the build, lint and smoke tools
+        run: |
+          dnf install -y \
+            cargo cargo-deny desktop-file-utils dejavu-sans-fonts foot gcc \
+            jq libinput-devel libseat-devel libxkbcommon-devel pixman-devel \
+            rpm-build rpmdevtools rpmlint systemd-devel systemd-rpm-macros \
+            wayland-devel wayland-protocols-devel wayland-utils
+          mkdir -p "$GITHUB_WORKSPACE/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS} \
+            "$GITHUB_WORKSPACE/dist" "$GITHUB_WORKSPACE/.rpm-vendor"
+
+      - name: rpmlint the spec files
+        run: |
+          rpmlint packaging/rpm/*.spec 2>&1 | tee "$GITHUB_WORKSPACE/dist/rpmlint-spec.log"
+          if grep -q ' E: ' "$GITHUB_WORKSPACE/dist/rpmlint-spec.log"; then
+            echo "::error title=rpmlint errors on a spec file::see rpmlint-spec.log"
+            exit 1
+          fi
+          echo "ok: no rpmlint errors on the spec files (warnings, if any, are above)"
+
+      # The spec `Version` must name its crate's version (the trio
+      # together, the bar on its own); the staged tarball is placed
+      # under the provisional Source0 basename naming that version.
+      - name: Spec versions track their crate manifests, stage the tarball
+        run: |
+          python3 - <<'EOF'
+          import re
+          pairs = [("scoot", "crates/scoot/Cargo.toml", "scoot"),
+                   ("scootbg", "crates/scootbg/Cargo.toml", "scoot"),
+                   ("scootbar", "crates/scootbar/Cargo.toml", "scootbar")]
+          for spec, manifest, tag in pairs:
+              crate_ver = re.search(r'^version = "(.*)"$', open(manifest).read(), re.M).group(1)
+              text = open(f"packaging/rpm/{spec}.spec").read()
+              spec_ver = re.search(r'^Version:\s+(.*)$', text, re.M).group(1).strip()
+              status = "ok" if spec_ver == crate_ver else "MISMATCH"
+              print(f"{spec}.spec: Version={spec_ver} crate={crate_ver} tag={tag}-v{crate_ver} {status}")
+              assert spec_ver == crate_ver, f"{spec}.spec Version {spec_ver} != crate {crate_ver}"
+          EOF
+          scripts/vendor-release.sh --out "$GITHUB_WORKSPACE/.rpm-vendor"
+          ls -l "$GITHUB_WORKSPACE/.rpm-vendor"
+          scoot_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scoot.spec)
+          bar_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scootbar.spec)
+          cp "$GITHUB_WORKSPACE"/.rpm-vendor/scoot-*-vendored.tar.gz \
+            "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scoot-$scoot_ver-vendored.tar.gz"
+          cp "$GITHUB_WORKSPACE"/.rpm-vendor/scoot-*-vendored.tar.gz \
+            "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scootbar-$bar_ver-vendored.tar.gz"
+          ls -l "$GITHUB_WORKSPACE/rpmbuild/SOURCES"
+
+      - name: rpmbuild all three specs
+        run: |
+          for s in scoot scootbg scootbar; do
+            rpmbuild -ba --define "_topdir $GITHUB_WORKSPACE/rpmbuild" "packaging/rpm/$s.spec"
+          done
+          find "$GITHUB_WORKSPACE/rpmbuild/RPMS" "$GITHUB_WORKSPACE/rpmbuild/SRPMS" -name '*.rpm' | sort
+
+      - name: rpmlint the built RPMs
+        run: |
+          rpmlint "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/*.rpm 2>&1 | tee "$GITHUB_WORKSPACE/dist/rpmlint-packages.log"
+          if grep -q ' E: ' "$GITHUB_WORKSPACE/dist/rpmlint-packages.log"; then
+            echo "::error title=rpmlint errors on a built RPM::see rpmlint-packages.log"
+            exit 1
+          fi
+          echo "ok: no rpmlint errors on the built RPMs (warnings, if any, are above)"
+
+      - name: desktop-file-validate the session entry
+        run: |
+          desktop-file-validate packaging/rpm/scoot.desktop
+
+      # The ticket's proof against the installed binaries: every
+      # --version, the bar's --check on its shipped example, and the
+      # headless smoke test with the installed scoot and scootbg.
+      - name: Install the trio and prove it
+        run: |
+          dnf install -y "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/*.rpm
+          scoot --version
+          scootbg --version
+          scootbar --version
+          scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
+          mkdir -p /tmp/rpm-smoke-xdg
+          chmod 700 /tmp/rpm-smoke-xdg
+          export XDG_RUNTIME_DIR=/tmp/rpm-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
+          export SMOKE_PREFIX=/tmp/rpm-smoke SMOKE_REQUIRE_SCOOTBG=1
+          scripts/smoke-test.sh
+
+      - name: Upload the built RPMs and lint logs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: rpm-packages-fedora
+          path: |
+            ${{ github.workspace }}/rpmbuild/RPMS
+            ${{ github.workspace }}/rpmbuild/SRPMS
+            ${{ github.workspace }}/dist
+          include-hidden-files: true
+          retention-days: 7
+
+  opensuse:
+    name: rpmbuild + rpmlint + install (openSUSE Tumbleweed, x86_64)
+    runs-on: ubuntu-latest
+    container: opensuse/tumbleweed:latest
+    # Same three builds against the same staged tarball, proving the
+    # specs' SUSE conditionals. No smoke test here: the ticket's "done
+    # when" names the Fedora container for it, and the bar --check plus
+    # --version runs below prove the installed trio starts.
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Bootstrap git for checkout
+        run: |
+          zypper --non-interactive install --no-recommends git
+
+      - uses: actions/checkout@v7
+
+      - name: Install the build and lint tools
+        run: |
+          zypper --non-interactive install --no-recommends \
+            cargo dejavu-fonts desktop-file-utils gcc libinput-devel \
+            libpixman-1-0-devel libxkbcommon-devel rpm-build rpmlint \
+            seatd-devel systemd-devel systemd-rpm-macros wayland-devel \
+            wayland-protocols-devel
+          # No cargo-deny package on openSUSE (packaging/rpm/README.md):
+          # install it with cargo so vendor-release.sh can stage the
+          # tarball. It never runs at rpmbuild time.
+          cargo install cargo-deny --locked
+          echo "$HOME/.cargo/bin" >>"$GITHUB_PATH"
+          mkdir -p "$GITHUB_WORKSPACE/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS} \
+            "$GITHUB_WORKSPACE/dist" "$GITHUB_WORKSPACE/.rpm-vendor"
+
+      - name: rpmlint the spec files
+        run: |
+          rpmlint packaging/rpm/*.spec 2>&1 | tee "$GITHUB_WORKSPACE/dist/rpmlint-spec.log"
+          if grep -q ' E: ' "$GITHUB_WORKSPACE/dist/rpmlint-spec.log"; then
+            echo "::error title=rpmlint errors on a spec file::see rpmlint-spec.log"
+            exit 1
+          fi
+          echo "ok: no rpmlint errors on the spec files (warnings, if any, are above)"
+
+      - name: Spec versions track their crate manifests, stage the tarball
+        run: |
+          python3 - <<'EOF'
+          import re
+          pairs = [("scoot", "crates/scoot/Cargo.toml", "scoot"),
+                   ("scootbg", "crates/scootbg/Cargo.toml", "scoot"),
+                   ("scootbar", "crates/scootbar/Cargo.toml", "scootbar")]
+          for spec, manifest, tag in pairs:
+              crate_ver = re.search(r'^version = "(.*)"$', open(manifest).read(), re.M).group(1)
+              text = open(f"packaging/rpm/{spec}.spec").read()
+              spec_ver = re.search(r'^Version:\s+(.*)$', text, re.M).group(1).strip()
+              status = "ok" if spec_ver == crate_ver else "MISMATCH"
+              print(f"{spec}.spec: Version={spec_ver} crate={crate_ver} tag={tag}-v{crate_ver} {status}")
+              assert spec_ver == crate_ver, f"{spec}.spec Version {spec_ver} != crate {crate_ver}"
+          EOF
+          scripts/vendor-release.sh --out "$GITHUB_WORKSPACE/.rpm-vendor"
+          ls -l "$GITHUB_WORKSPACE/.rpm-vendor"
+          scoot_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scoot.spec)
+          bar_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scootbar.spec)
+          cp "$GITHUB_WORKSPACE"/.rpm-vendor/scoot-*-vendored.tar.gz \
+            "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scoot-$scoot_ver-vendored.tar.gz"
+          cp "$GITHUB_WORKSPACE"/.rpm-vendor/scoot-*-vendored.tar.gz \
+            "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scootbar-$bar_ver-vendored.tar.gz"
+          ls -l "$GITHUB_WORKSPACE/rpmbuild/SOURCES"
+
+      - name: rpmbuild all three specs
+        run: |
+          for s in scoot scootbg scootbar; do
+            rpmbuild -ba --define "_topdir $GITHUB_WORKSPACE/rpmbuild" "packaging/rpm/$s.spec"
+          done
+          find "$GITHUB_WORKSPACE/rpmbuild/RPMS" "$GITHUB_WORKSPACE/rpmbuild/SRPMS" -name '*.rpm' | sort
+
+      - name: rpmlint the built RPMs
+        run: |
+          rpmlint "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/*.rpm 2>&1 | tee "$GITHUB_WORKSPACE/dist/rpmlint-packages.log"
+          if grep -q ' E: ' "$GITHUB_WORKSPACE/dist/rpmlint-packages.log"; then
+            echo "::error title=rpmlint errors on a built RPM::see rpmlint-packages.log"
+            exit 1
+          fi
+          echo "ok: no rpmlint errors on the built RPMs (warnings, if any, are above)"
+
+      - name: desktop-file-validate the session entry
+        run: |
+          desktop-file-validate packaging/rpm/scoot.desktop
+
+      - name: Install the trio and prove it
+        run: |
+          zypper --non-interactive --no-gpg-checks install --allow-unsigned-rpm \
+            "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/*.rpm
+          scoot --version
+          scootbg --version
+          scootbar --version
+          scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
+
+      - name: Upload the built RPMs and lint logs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: rpm-packages-opensuse
+          path: |
+            ${{ github.workspace }}/rpmbuild/RPMS
+            ${{ github.workspace }}/rpmbuild/SRPMS
+            ${{ github.workspace }}/dist
+          include-hidden-files: true
+          retention-days: 7

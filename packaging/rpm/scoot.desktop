@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=scoot
+Comment=scoot scrolling-tiling Wayland compositor
+Exec=/usr/bin/scoot-session
+Type=Application
+DesktopNames=scoot

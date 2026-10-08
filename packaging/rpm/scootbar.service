@@ -1,0 +1,28 @@
+# `scootbar.service`: the bar inside the user session (standalone shape).
+#
+# The same policy as the Nix home-manager module
+# (`nix/modules/scootbar-home.nix`): `Restart=on-failure` brings the bar
+# back after a crash or after the compositor goes away, and a start
+# before `WAYLAND_DISPLAY` exists is retried rather than skipped (hence
+# no `ConditionEnvironment`: a skipped start is never retried).
+# `StartLimitIntervalSec=0` keeps those retries unending, and
+# `KillMode=process` keeps apps a bar button launched alive across a bar
+# restart. Bound to the shared `graphical-session.target` (not scoot's
+# own session target: this unit ships for any compositor running the
+# bar standalone). A config change does not restart the bar here; run
+# `scootbar msg reload` instead.
+[Unit]
+Description=scootbar, the status bar
+PartOf=graphical-session.target
+After=graphical-session.target
+Before=tray.target
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/bin/scootbar daemon
+Restart=on-failure
+RestartSec=2
+KillMode=process
+
+[Install]
+WantedBy=graphical-session.target
