@@ -260,6 +260,11 @@ jobs:
             "$DISTRO_IMAGE" bash -euo pipefail -c '
             printf "Types: deb\nURIs: file:/repo\nSuites: bookworm\nComponents: main\nTrusted: yes\n" \
               >/etc/apt/sources.list.d/scoot.sources
+            # Container images exclude /usr/share/doc/* from every
+            # install -- but the shipped examples live there, and the
+            # proof below reads them. Real systems install them, so the
+            # proof restores stock dpkg behavior first.
+            rm -f /etc/dpkg/dpkg.cfg.d/docker /etc/dpkg/dpkg.cfg.d/excludes
             apt-get update -qq
             apt-get install -y -qq scoot scootbg scootbar
             scoot --version
@@ -279,6 +284,9 @@ jobs:
           docker run --rm -v "$RUNNER_TEMP/repo:/repo:ro" ubuntu:24.04 bash -euo pipefail -c '
             printf "Types: deb\nURIs: file:/repo\nSuites: bookworm\nComponents: main\nTrusted: yes\n" \
               >/etc/apt/sources.list.d/scoot.sources
+            # Same doc exclusion as the bookworm image above (Ubuntu
+            # containers carry it too); same remedy.
+            rm -f /etc/dpkg/dpkg.cfg.d/docker /etc/dpkg/dpkg.cfg.d/excludes
             apt-get update -qq
             apt-get install -y -qq scoot scootbg scootbar
             scoot --version
