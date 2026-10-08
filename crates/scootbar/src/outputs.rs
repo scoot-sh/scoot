@@ -80,7 +80,8 @@ pub enum Rotation {
 /// An output's applied properties: what the last `done` made current.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Info {
-    /// `wl_output.name` (v4), for messages.
+    /// `wl_output.name` (v4), for messages: at most
+    /// [`crate::policy::MAX_NAME`] bytes, longer ones ignored at staging.
     pub name: Option<String>,
     /// The current mode, in device pixels.
     pub mode: Option<Size>,
@@ -301,7 +302,14 @@ impl Output {
         Label(self.info.name.as_deref())
     }
 
+    /// A `wl_output.name` event. A name past [`crate::policy::MAX_NAME`]
+    /// bytes is a broken compositor, and ignored like a non-positive mode
+    /// or a sub-1 scale: what is kept sizes `query` replies and policy
+    /// matches, so it never grows on a name.
     pub fn stage_name(&mut self, name: String) {
+        if name.len() > crate::policy::MAX_NAME {
+            return;
+        }
         self.staged.name = Some(name);
     }
 

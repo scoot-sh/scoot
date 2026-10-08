@@ -423,6 +423,9 @@ cannot:
   error) ends the daemon with exit status 1 and one line on stderr saying
   why. There is no reconnect; your session's autostart starts it again with
   the compositor.
+- **An output name past 128 bytes** is ignored, like a non-positive mode:
+  what the bar keeps sizes `query` replies and policy matches, so a broken
+  compositor cannot grow it through a name.
 - **SIGTERM and SIGINT** end it at once, running no destructor: it keeps no
   state, and the compositor removes its surfaces with the connection. Its
   `exec` commands end with it all the same (the kernel's parent-death
