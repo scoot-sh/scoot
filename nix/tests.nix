@@ -7720,6 +7720,15 @@ let
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
+          # ...and the default look's theme seven (cursor, icon, all
+          # three faces, qt6ct and its Adwaita style).
+          pkgs.vanilla-dmz
+          pkgs.adwaita-icon-theme
+          pkgs.nerd-fonts.droid-sans-mono
+          pkgs.dejavu_fonts.minimal
+          pkgs.nerd-fonts.fira-code
+          pkgs.qt6Packages.qt6ct
+          pkgs.adwaita-qt6
         ];
       true
     )
@@ -7744,8 +7753,9 @@ let
       assert !(hmLockOff.config.xdg.configFile ? "swaylock/config");
       true
     )
+    # 39 slot packages plus the default look's theme seven.
     (
-      assert builtins.length hmLockOff.config.home.packages == 39;
+      assert builtins.length hmLockOff.config.home.packages == 46;
       true
     )
     # The inhibitor off: the policy without the audio hold (four
@@ -7764,8 +7774,9 @@ let
       assert !(hmInhibitOff.config.systemd.user.services ? scoot-audio-inhibit);
       true
     )
+    # 39 slot packages plus the default look's theme seven.
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 39;
+      assert builtins.length hmInhibitOff.config.home.packages == 46;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
