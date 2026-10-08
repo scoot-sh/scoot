@@ -20,7 +20,7 @@ and maintainers primarily: `docs/` still serves two audiences at once.
 `site/OUTLINE.md` (status 2026-10-05): "the `dev/` plan for the contributor
 tree, whose move is still open." Still in `docs/` with no `dev/` tree
 (checked 2026-10-07, `ls dev` → no such directory): benches and spikes,
-`docs/forks.md`, the resource-ratchet history in
+`dev/forks.md`, the resource-ratchet history in
 `docs/scootbar/backlog/lightest.md`, and dated measurement prose in user
 pages. PR B (`docs/site-move`, #447) deliberately kept backlogs,
 `docs/roadmap/` and `ROADMAP.md` in `docs/` — that stand-down is recorded in

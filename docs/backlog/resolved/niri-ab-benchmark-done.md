@@ -11,7 +11,7 @@ blocked: null
 RESOLVED 2026-09-24 (PR #237). The ticket was blocked on "after the remaining
 unblocked GPU-tier tickets"; the user then asked for it directly ("Do we
 have any sense of resource usage of niri vs scoot? Can we A/B them?"). The
-results, method and every caveat are in [`docs/benchmarks.md`](../../benchmarks.md);
+results, method and every caveat are in [`dev/benches/benchmarks.md`](../../../dev/benches/benchmarks.md);
 the harness is `scripts/niri-ab-bench.sh` with its helpers in
 `scripts/niri-ab/`. The real-GPU half, `--tty` included, is its own open
 item: [`testing/niri-ab-real-gpu.md`](../testing/niri-ab-real-gpu.md)
@@ -88,6 +88,6 @@ config into scoot is not (`CLAUDE.md`).
 
 ## Output
 
-A results section in a new `docs/benchmarks.md` (or `Asahi.md` for the
+A results section in a new `dev/benches/benchmarks.md` (or `Asahi.md` for the
 hardware half), and a short, honest README line only if the numbers
 support one — README is for users and prospective users.

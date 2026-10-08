@@ -180,7 +180,7 @@ invoker first).
 
 ## Original ticket
 
-Filed 2026-09-24 from the scoot/niri A/B (`docs/benchmarks.md`,
+Filed 2026-09-24 from the scoot/niri A/B (`dev/benches/benchmarks.md`,
 "animate" scene): nested pixman scoot presented 49.8 frames/s against
 niri's 54.1 for a `foot` printing a line ~every 16 ms, far from
 CPU-bound — suspected frame-callback pacing, uninvestigated, low

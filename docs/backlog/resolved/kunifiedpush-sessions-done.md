@@ -10,7 +10,7 @@ resolved: "2026-10-08"
 # kunifiedpush distributor runs in minimal sessions at 15 MB PSS
 
 Filed 2026-10-05 from the five-desktop idle benchmark (Asahi M2,
-`docs/benchmarks.md`). Serves **daily-drive** (dead weight in every
+`dev/benches/benchmarks.md`). Serves **daily-drive** (dead weight in every
 session's footprint: push notifications nobody on this box uses).
 
 ## The gap

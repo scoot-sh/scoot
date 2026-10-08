@@ -8,7 +8,7 @@
 # reaches what is behind the bar. It ends with a PASS/FAIL/INFO table, and
 # writes every raw number to files in OUT so they can be pasted into
 # docs/scootbar/backlog/lightest.md's resource ratchet. Method and what to send
-# back: docs/scootbar/testing.md ("The appearance hardware test").
+# back: dev/research/scootbar-testing.md ("The appearance hardware test").
 #
 #   SCOOTBAR_HW_MODE=--headless SCOOTBAR_HW_OUT=/tmp/sb-appearance scripts/scootbar-appearance-hw-test.sh
 #   SCOOTBAR_HW_MODE=--nested   SCOOTBAR_HW_OUT=/tmp/sb-appearance scripts/scootbar-appearance-hw-test.sh

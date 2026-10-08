@@ -10,7 +10,7 @@ blocked: null
 
 RESOLVED 2026-09-25 (PR #241) by route 2 below, together with
 [raising scoot's fd limit](./raise-nofile-limit-done.md): scoot builds
-against a scoot-sh fork of wayland-backend (`docs/forks.md`), pinned through
+against a scoot-sh fork of wayland-backend (`dev/forks.md`), pinned through
 the root `Cargo.toml`'s `[patch.crates-io]` at `70f81e00` (the 0.3.17
 release `72f7fe0d` plus two server-side commits), and raises its own soft
 `RLIMIT_NOFILE` at startup. Nothing was filed upstream.
@@ -408,7 +408,7 @@ plug into that ledger's per-client total is in
 ### Fix routes (as filed; the user chose 2)
 
 1. **Upstream:** a bound (or libwayland-style disconnect) on the received-fd
-   queue in wayland-rs. Nothing is filed upstream from this project (`docs/forks.md`); don't
+   queue in wayland-rs. Nothing is filed upstream from this project (`dev/forks.md`); don't
    draft upstream text (see `CLAUDE.md` and the Smithay AI-policy note;
    check wayland-rs's own contribution policy first).
 2. **A scoot-carried fork** of wayland-backend with that bound, pinned the

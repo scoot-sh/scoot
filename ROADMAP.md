@@ -173,7 +173,7 @@ each item's own file records why it landed when it did.
   any X client could hijack any held press, a Wayland one included, since
   Phase 1 (fail-first); presses on X windows stay open to a stranger naming
   the pressed window (X11 limit, pinned). Thirteen measured XWM bugs and hooks went into the
-  scoot-sh Smithay fork (`5b575329`, `docs/forks.md`; six from two review rounds:
+  scoot-sh Smithay fork (`5b575329`, `dev/forks.md`; six from two review rounds:
   a forgeable owner check, unbounded memory and fds, a bound exhausted for
   good by stalled or trickling pastes, orphaned transfers waiting on an
   unrelated event): 64 KiB truncation
@@ -290,7 +290,7 @@ each item's own file records why it landed when it did.
   (2026-09-25, PR #241) — wayland-backend 0.3.17 kept the fds a client
   attaches to fd-less requests for the connection's life; one idle client
   took scoot from 18 to 999 fds and shed every newcomer, `scootctl`
-  included. scoot now builds against the scoot-sh fork (`docs/forks.md`,
+  included. scoot now builds against the scoot-sh fork (`dev/forks.md`,
   0.3.17 + `a39311b8` + `70f81e00`, pinned by the root `Cargo.toml`'s
   `[patch.crates-io]`; `Cargo.lock` moves only `wayland-backend` and
   `wayland-sys`), which disconnects a client leaving more than its cap
@@ -392,7 +392,7 @@ each item's own file records why it landed when it did.
 
 - **[scoot vs niri, measured (dev VM half)](docs/backlog/resolved/niri-ab-benchmark-done.md)**
   (2026-09-24, PR #237) — the user asked directly whether we had any sense of
-  niri's resource usage against scoot's. [`docs/benchmarks.md`](docs/benchmarks.md) now has it for the one
+  niri's resource usage against scoot's. [`dev/benches/benchmarks.md`](dev/benches/benchmarks.md) now has it for the one
   arrangement the dev VM allows: both nested in the same cage host, niri
   26.04 (nixpkgs) and scoot `fe41921` (release), three rotating rounds, host
   pointer injection through one persistent virtual pointer, a separate
@@ -2235,7 +2235,7 @@ medium priority — the effective top of what's actually open.
    corpus replayed in CI by an ordinary test; a live `set` that cannot be
    drawn checked end to end, `query` now saying why (`draw_error`); the
    suites keep growing with each milestone
-   ([docs/scootbg/testing.md](docs/scootbg/testing.md)).
+   ([dev/research/scootbg-testing.md](dev/research/scootbg-testing.md)).
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 

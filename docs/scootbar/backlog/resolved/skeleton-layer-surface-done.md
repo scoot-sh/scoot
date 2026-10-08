@@ -39,7 +39,7 @@ Resolved 2026-09-29. What landed:
 - **Flags, no config file**: `--edge top|bottom`, `--height` (1–1024,
   default 28), `--margin` (CSS shorthand, comma-separated, 0–1024 each),
   `--background '#rrggbb'`. Reference: [cli.md](../../cli.md); tests:
-  [testing.md](../../testing.md).
+  [testing.md](../../../../dev/research/scootbar-testing.md).
 - **CI**: a `scootbar` path filter in the classify job, a `scootbar` job
   (fmt, clippy, nextest and `cargo test`, no `libc` crate, `ldd` of the
   release binary) and a `scootbar-integration` job on headless scoot and
@@ -71,7 +71,7 @@ SCOOTBAR_REQUIRE_SWAY=1 SCOOTBAR_TEST_SWAY=<sway 1.12 from the pinned
 nixpkgs>`, `cargo nextest run -p scootbar`: 71 passed, 0 skipped;
 `cargo test -p scootbar`: 58 unit, 9 on scoot, 4 on sway, all passed.
 
-**Benchmark**: M0's harness (`docs/scootbar/spikes/m0/bench/bar-bench.py`,
+**Benchmark**: M0's harness (`dev/spikes/scootbar/m0/bench/bar-bench.py`,
 only its scratch log path changed) over the release binary (602,832 bytes,
 stripped), `scoot --headless --outputs 1 --width 1920 --height 1080` (debug
 build of the same tree, pixman) and headless sway 1.12 (pixman, 1920×1080),

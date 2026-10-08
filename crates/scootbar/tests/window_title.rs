@@ -12,7 +12,7 @@
 //! the test.
 
 // Every test here places the window-title module, so this file exists
-// only where it does (docs/scootbar/testing.md: the feature matrix).
+// only where it does (dev/research/scootbar-testing.md: the feature matrix).
 #![cfg(feature = "window-title")]
 
 mod common;

@@ -3,7 +3,7 @@
 B=/tmp/sb-bench; . $B/env.sh
 export SCOOT_SOCKET=/tmp/sb-bench/rt/scoot-ipc.sock SWAYSOCK=$(ls /tmp/sb-bench/rt/sway-ipc.*.sock)
 C=/tmp/sb-m0-target/debug/scootctl; SM=/nix/store/5ddkfdxnq991rfzn2f6n5w1kd6dvaqp3-sway-1.12/bin/swaymsg
-H=/tmp/sb-m0/docs/scootbar/spikes/m0/bench/bar-bench.py
+H=/tmp/sb-m0/dev/spikes/scootbar/m0/bench/bar-bench.py
 declare -A BIN=([yambar]=/nix/store/csn1vphr40wshc60v5a5mdjc5yjr4j8n-yambar-1.11.0/bin/yambar [waybar]=/nix/store/wlngldlifb2jlab2gmm5gbsb9r8wrch6-waybar-0.15.0/bin/waybar [ironbar]=/nix/store/8iqc8rcid97d63sih16b239sxr1y51qv-ironbar-0.19.0/bin/ironbar [ashell]=/nix/store/fz9as7cihw4xbb3zmbfmgmfbz6hklqzh-ashell-0.10.0/bin/ashell)
 for comp in scoot sway; do
   for b in yambar waybar ironbar ashell; do

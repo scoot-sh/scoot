@@ -1,7 +1,7 @@
 # What people want from a status bar: research notes (2026-09-29)
 
 Gathered by a research agent from public GitHub issues and a few web searches, to
-inform [scootbar's backlog](backlog/README.md). **Treat it as leads, not gospel**: the
+inform [scootbar's backlog](../../docs/scootbar/backlog/README.md). **Treat it as leads, not gospel**: the
 agent could not reach Reddit, Hacker News or lobste.rs, saw Nix Discourse only as
 titles, and found no measured RAM or wakeup benchmarks for any bar. Issue numbers and
 counts are as it reported them on 2026-09-29 and were not independently re-checked;

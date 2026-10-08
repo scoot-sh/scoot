@@ -18,7 +18,7 @@ The resource budget is the feature. Targets to measure and publish in
 
 - **Idle:** no wakeups at all with a static wallpaper (no timers, no frame
   callbacks requested). Verify with `perf stat` / wakeup counts over a
-  minute, the way `docs/benchmarks.md` measures the compositor.
+  minute, the way `dev/benches/benchmarks.md` measures the compositor.
 - **Buffers:** one `XRGB8888` buffer per output in a `memfd` pool, opaque
   region set, reused in place on a same-size redraw. A 4K output is ~33 MB;
   two 4K outputs showing one image share nothing but the source decode.

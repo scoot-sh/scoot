@@ -10,7 +10,7 @@
 //! `SCOOTBAR_REQUIRE_SCOOT` makes that a failure.
 
 // The test places `--center clock`, so this file exists only where it
-// does (docs/scootbar/testing.md: the feature matrix).
+// does (dev/research/scootbar-testing.md: the feature matrix).
 #![cfg(feature = "clock")]
 
 mod common;

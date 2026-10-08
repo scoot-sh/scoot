@@ -1,7 +1,7 @@
 # Config parser spike: `toml` vs `basic-toml` vs hand-rolled
 
 Measured 2026-09-29 for
-[config-cli-and-reload](../backlog/resolved/config-cli-and-reload-done.md). The schema
+[config-cli-and-reload](../../../docs/scootbar/backlog/resolved/config-cli-and-reload-done.md). The schema
 under test is the real one (nested `[bar]`/`[colors]`/`[clock]` tables,
 `left`/`center`/`right` arrays, every table `deny_unknown_fields`):
 `GOOD` in the spike crate below parses the full planned `bar.toml`.

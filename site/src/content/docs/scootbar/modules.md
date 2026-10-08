@@ -493,7 +493,7 @@ pixels. A Cargo feature (`tray`), on by default; the smallest build
 (`--no-default-features`) has none of it. It speaks D-Bus through the
 bar's own client (`src/dbus`: no `zbus`, no libdbus, no thread; its
 socket is one more source in the `poll` loop), which is the
-[spike's](https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/spikes/dbus-client.md) hand-rolled choice.
+[spike's](https://github.com/scoot-sh/scoot/tree/main/dev/spikes/scootbar/dbus-client.md) hand-rolled choice.
 
 - **The bar is the watcher.** It owns `org.kde.StatusNotifierWatcher` (and
   the `org.freedesktop` twin) when they are free, answers apps'

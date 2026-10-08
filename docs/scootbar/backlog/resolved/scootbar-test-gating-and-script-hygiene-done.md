@@ -61,7 +61,7 @@ Landed as the ticket asks, all three gaps, evidence keyed to the Asahi M2
    `scootbar-integration` CI job runs a fixed subset of eight integration
    binaries (`bar hotplug clock icons popup tooltip visibility workspaces`)
    against the three reduced-feature bars; the review ran the full suite
-   unfiltered in those configurations and the omitted binaries pass too. `docs/scootbar/testing.md` states the rule.
+   unfiltered in those configurations and the omitted binaries pass too. `dev/research/scootbar-testing.md` states the rule.
 2. `scripts/scootbar-unit-test.sh` `cleanup()` removes the bar's control
    socket and lock on the run's own display (`scootbar-$WL.{sock,lock}`,
    the run's own headless scoot's) and reports the leftover count; the

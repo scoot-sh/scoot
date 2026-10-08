@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A/B resource usage of scoot against niri on identical nested workloads
-# (docs/benchmarks.md has the method, the results and every caveat).
+# (dev/benches/benchmarks.md has the method, the results and every caveat).
 #
 # Both compositors run *nested*, one at a time, inside the same host: cage on
 # wlroots' headless backend with its pixman renderer (HOST_RENDERER below),

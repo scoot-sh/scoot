@@ -1,6 +1,6 @@
 //! A TZif reader (RFC 8536, versions 1 to 4) with the POSIX TZ footer,
 //! sized for a clock: one lookup per tick. Ported from M0's spike
-//! (`docs/scootbar/spikes/m0/clock/src/tzif.rs`), which matched `zdump` on
+//! (`dev/spikes/scootbar/m0/clock/src/tzif.rs`), which matched `zdump` on
 //! every transition of every zone in tzdata 2026c, fat and slim, from 1800
 //! to 2200 (the record's §3b); the fixture tests here keep a slice of that
 //! check in CI with no tzdata on the machine.

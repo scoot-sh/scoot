@@ -64,7 +64,7 @@ would *not* fix it: the color channels still fade, giving an opaque dark
 vignette instead.)
 
 The code is Smithay's, so the fix is a commit on the scoot-sh/smithay fork,
-listed in [`docs/forks.md`](../../forks.md) in the same PR, per `CLAUDE.md`'s
+listed in [`dev/forks.md`](../../../dev/forks.md) in the same PR, per `CLAUDE.md`'s
 fork policy. Test with pixel samples at the corners and edge midpoints for
 both cases above (1×1 viewported, and scale-1 on a scale-2 output), plus a
 check that downscaled surfaces are unchanged.

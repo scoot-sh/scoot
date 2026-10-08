@@ -52,7 +52,7 @@ One consumer (start with [scootnotify](../scootnotify.md) or the
 ## Spike outcome (2026-10-02)
 
 The spike first, the client with the tray. Measured in
-[spikes/dbus-client.md](../../spikes/dbus-client.md): a hand-rolled
+[spikes/dbus-client.md](../../../../dev/spikes/scootbar/dbus-client.md): a hand-rolled
 minimal client beats `zbus` 5 (1,448,032 B, 86 crates, mandatory async
 runtime, 4 threads) and libdbus (686,368 B plus `libdbus-1.so.3`) on
 every row — 332,456 B, zero dependencies, 1 thread — while all three idle

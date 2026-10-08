@@ -29,7 +29,7 @@ floor window the same way.
   turn produce one re-read and one redraw, however many signals
   arrived (the floor stays as the backstop across turns).
 - Measure before/after on the flood harness
-  (`docs/scootbar/bench/m6-tray-vm/scripts/flood.sh`): reads, CPU
+  (`dev/benches/scootbar/m6-tray-vm/scripts/flood.sh`): reads, CPU
   seconds and wakeups per second for one runaway item, plus a menu
   flooding `LayoutUpdated` while open.
 - Hold the idle rows: zero wakeups with a quiet bus, in the same

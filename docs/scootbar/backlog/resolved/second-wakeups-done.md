@@ -10,7 +10,7 @@ resolved: "2026-10-05"
 # scootbar wakes about 40 times a minute at idle
 
 Filed 2026-10-05 from the five-desktop idle benchmark (Asahi M2,
-`docs/benchmarks.md`), answering the open question in
+`dev/benches/benchmarks.md`), answering the open question in
 `docs/backlog/resolved/session-launcher-idle-poll-done.md` ("file separately if
 real"). Serves **daily-drive** (battery: wakeups are the idle-CPU
 story once the launcher poll is fixed).

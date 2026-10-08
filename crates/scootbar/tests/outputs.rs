@@ -8,7 +8,7 @@
 //! `SCOOTBAR_REQUIRE_SCOOT` makes that a failure.
 
 // Every test here places the clock (two also place workspaces, gated per
-// test), so this file exists only where it does (docs/scootbar/testing.md:
+// test), so this file exists only where it does (dev/research/scootbar-testing.md:
 // the feature matrix).
 #![cfg(feature = "clock")]
 

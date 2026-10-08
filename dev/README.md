@@ -1,3 +1,17 @@
+# Contributor tree (unpublished)
+
+You are a contributor; start here. This `dev/` tree holds the material
+that is written for maintainers and reviewers, not users: how to build
+and test (below), the dependency forks ([forks.md](forks.md)), dated
+measurement prose ([benches/](benches/benchmarks.md)), spikes
+([spikes/](spikes/scootbar/)) and research notes
+([research/](research/scootbar-research.md)). It is never deployed (no
+link from the site nav, excluded from every `llms*.txt` bundle) and a
+dev-only push starts no workflow. Backlogs (`docs/backlog/`,
+`docs/scootbar/backlog/`, `docs/scootbg/backlog/`), `docs/roadmap/` and
+`ROADMAP.md` stay in `docs/` per PR #447; the user reference lives on
+the site (https://www.scoot.sh/).
+
 # Developing scoot
 
 Building, testing, and what CI checks. The engineering standards every
@@ -57,7 +71,7 @@ install devenv the usual way.
 | `crates/scoot` | the CLI and the Smithay-based compositor |
 | `crates/scootbg` | the wallpaper daemon |
 | `crates/scootbg-mem` | the only `unsafe` code scootbg has (scootbar's `wl_shm` buffers too) |
-| `crates/scootbar` | the status bar ([docs/scootbar/](scootbar/README.md)) |
+| `crates/scootbar` | the status bar ([docs/scootbar/](../docs/scootbar/README.md)) |
 
 [`vm/README.md`](../vm/README.md) sets up a Mac-native NixOS VM to run the
 Linux-only half in.
@@ -94,7 +108,7 @@ checked by real pixels on both, fractional scales included. A
 compositor-only change skips scootbg's job. A change under
 `crates/scootbar/` alone runs scootbar's own job (the same checks) plus
 its integration tests on a headless scoot and sway
-([scootbar/testing.md](scootbar/testing.md)); a `crates/scootbg-mem/`
+([scootbar/testing.md](research/scootbar-testing.md)); a `crates/scootbg-mem/`
 change runs scootbar's too, since its buffers are scootbar's. Shared files
 (`Cargo.*`, `flake.*`, `nix/`, `.github/`, and anything unlisted) run
 everything.

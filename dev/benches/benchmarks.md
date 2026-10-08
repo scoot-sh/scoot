@@ -9,7 +9,7 @@ they aren't is marked.
 - [scoot vs niri, nested on the dev VM (2026-09-24)](#scoot-vs-niri-nested-on-the-dev-vm-2026-09-24)
 - [scoot vs niri on a real GPU, nested and `--tty` (2026-09-25)](#scoot-vs-niri-on-a-real-gpu-nested-and---tty-2026-09-25)
 - scoot's own tiers on real hardware (dumb buffers + pixman vs GPU scanout
-  on an Apple M2) are in [`Asahi.md`](../Asahi.md) Test 4, summarised in
+  on an Apple M2) are in [`Asahi.md`](../../Asahi.md) Test 4, summarised in
   [backends](https://www.scoot.sh/scoot/backends.md#which-renderer-draws-the-frames).
 
 ## Whole-desktop idle cost on the Asahi M2: scoot vs niri vs Hyprland vs GNOME vs KDE Plasma (2026-10-05)
@@ -221,7 +221,7 @@ Reading it role by role:
   ticks and ~400 of its 470 wakeups are `scoot-session`'s 1 s poll
   (4–5 ticks, ~200 wakes) plus the user-manager round trips it causes
   (~30 ticks, ~200 wakes) — the already-filed
-  [idle-poll ticket](backlog/resolved/session-launcher-idle-poll-done.md), now
+  [idle-poll ticket](../../docs/backlog/resolved/session-launcher-idle-poll-done.md), now
   quantified: the fix takes the whole session from 0.60% of a core to
   ~0.03%. Hyprland's plumbing is second noisiest (dbus-broker alone
   wakes ~600 times a minute — something chats constantly on its bus;
@@ -257,12 +257,12 @@ state was restored exactly afterwards (threshold 80, timer restarted,
 Biggest expected win first. Each is filed; the first confirms and
 quantifies the ticket this benchmark was built to check.
 
-1. **Kill the 1 s session poll** ([idle-poll ticket](backlog/resolved/session-launcher-idle-poll-done.md),
+1. **Kill the 1 s session poll** ([idle-poll ticket](../../docs/backlog/resolved/session-launcher-idle-poll-done.md),
    already open): 35 of 36 ticks and ~400 of 470 wakeups per minute.
    Nothing else in the session is within an order of magnitude. The
    fix takes scoot from the most CPU-hungry session here (0.60%) to
    the least (~0.03%, compositor 1 tick + foot 0).
-2. **scootbg's bimodal idle image** ([image-retention](scootbg/backlog/resolved/image-retention-done.md)):
+2. **scootbg's bimodal idle image** ([image-retention](../../docs/scootbg/backlog/resolved/image-retention-done.md)):
    14.7 vs 2.1 MB across identical sessions, and the compositor shows
    the same ~12 MB campaign delta (75.6 vs 63.6 MB). *Correction
    (2026-10-05): traced to two artifacts, not a leak — the fat cohort's
@@ -271,7 +271,7 @@ quantifies the ticket this benchmark was built to check.
    wallpaper at all (its image file was unreadable: `Permission denied`,
    so the compositor's background showed). No saving to take; the ticket
    pins the no-retained-copy behavior with a test instead.*
-3. **Verify the 17 MB `[stack]`** ([compositor-stack-pss](backlog/resolved/compositor-stack-pss-done.md)):
+3. **Verify the 17 MB `[stack]`** ([compositor-stack-pss](../../docs/backlog/resolved/compositor-stack-pss-done.md)):
    the mapping split's largest scoot-owned row after file-backed Mesa.
    If real touched stack, shrink the deep path (up to ~17 MB); if an
    artifact, fix the classifier both this page and the ticket rely on.
@@ -280,7 +280,7 @@ quantifies the ticket this benchmark was built to check.
    off-by-one credited a client shm buffer's PSS to `[stack]` (live
    `[stack]` is 128 kB); all three fat rounds hold the same ~29.5 MB
    shm. No compositor change.*
-4. **The push distributor is Plasma's, not the session's** ([kunifiedpush-sessions](backlog/resolved/kunifiedpush-sessions-done.md)):
+4. **The push distributor is Plasma's, not the session's** ([kunifiedpush-sessions](../../docs/backlog/resolved/kunifiedpush-sessions-done.md)):
    `kunifiedpush-distributor` at ~15 MB in every session for push
    notifications nothing uses — bigger than mako, the bar and the idle
    daemon combined. *Correction (2026-10-08): it arrives with Plasma 6
@@ -293,7 +293,7 @@ quantifies the ticket this benchmark was built to check.
    scoot profile installs neither the distributor nor any Push backend,
    and there is no Push route to mask. On a box that also runs Plasma,
    masking the user unit reclaims the ~15 MB per session.*
-5. **Wake the bar only when its text changes** ([second-wakeups](scootbar/backlog/resolved/second-wakeups-done.md), resolved 2026-10-05 in #458):
+5. **Wake the bar only when its text changes** ([second-wakeups](../../docs/scootbar/backlog/resolved/second-wakeups-done.md), resolved 2026-10-05 in #458):
    ~40 wakes/min. The guess at the time (the clock ticking every second)
    was wrong: the clock is minute-aligned and wakes twice a minute. The
    cause was the network module redrawing on every dBm wobble of its 10 s
@@ -306,7 +306,7 @@ cohort showed the compositor's background, not the wallpaper; with the
 wallpaper up scootbg holds its output-sized floor, ~12 MB PSS here,
 against swaybg's 2.0 MB, which drops client buffers after upload — a
 possible future lever, kept deliberately for now: see
-[image-retention](scootbg/backlog/resolved/image-retention-done.md)*),
+[image-retention](../../docs/scootbg/backlog/resolved/image-retention-done.md)*),
 portals on demand (0 resident
 against niri's 52 and 44 each for GNOME/KDE), and no XWayland tax. The notification daemon is
 the same small mako everywhere it runs (3–4 MB; the 7.4 MB niri reading is its themed config).
@@ -342,7 +342,7 @@ the same small mako everywhere it runs (3–4 MB; the 7.4 MB niri reading is its
 The same comparison on an Apple M2 under Asahi Linux (Mesa 26.2.2's
 `asahi` driver). Here both compositors' GLES paths render on a real GPU,
 and both can own the real panel over `--tty`. The full method, every
-check and each raw cell are in [`Asahi.md`](../Asahi.md) Test 9. This is
+check and each raw cell are in [`Asahi.md`](../../Asahi.md) Test 9. This is
 the summary. The build is `main` at `e1dce6f`, built on the machine; the
 niri is nixpkgs' 26.04. CPU is the compositor's process total
 (`/proc/PID/stat`), in ms.
@@ -452,7 +452,7 @@ each compositor gives you.
   about 20% less memory at rest (149 MB RSS against 185 MB). However, it
   **grew by one frame of memory per screenshot while nothing was redrawing**,
   which is a bug this benchmark found. It is
-  [fixed](backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md) as
+  [fixed](../../docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md) as
   of PR #238, after these numbers were taken. niri stayed bounded under the
   same captures.
 - **Part of scoot's lower totals comes from doing less work, not doing
@@ -626,7 +626,7 @@ row), though it did stop further captures from growing it.
 **These scoot-gles RSS numbers predate the fix** (PR #238, after `fe41921`).
 With it, 120 captures of a still screen leave scoot-gles flat after at most
 one frame, and the rows after a screenshot scene would no longer carry the
-jump. The [resolved record](backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)
+jump. The [resolved record](../../docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)
 has the before/after numbers. It also explains the release behaviour: a
 drawn frame did free the queued buffers, and glibc kept its high-water
 mark. The rest of this table, and every CPU number, is unaffected.
@@ -736,7 +736,7 @@ and the X11 client libraries. Its runtime closure in the Nix store is 738 MB.
   a second against 54.1). The client prints about one line per 16 ms.
   scoot-pixman is far from CPU-bound there (12% of a core), so the cause is
   pacing rather than cost. Since resolved as a measured don't-build
-  ([record](backlog/resolved/nested-frame-rate-vs-client-done.md)):
+  ([record](../../docs/backlog/resolved/nested-frame-rate-vs-client-done.md)):
   scoot paces `--nested` off its own 16 ms timer rather than host frame
   callbacks, and the done-gated client draws fewer frames on the longer
   loop — loop-paced, nothing cheap and safe to fix.

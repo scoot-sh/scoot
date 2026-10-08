@@ -2,7 +2,7 @@
 //!
 //! The shared bus client speaks the protocol itself (no `zbus`, no
 //! libdbus), in the shape the spike decided
-//! (`docs/scootbar/spikes/dbus-client.md`): one multiplexed connection,
+//! (`dev/spikes/scootbar/dbus-client.md`): one multiplexed connection,
 //! a poll-loop fd, a pending-call table, central `NameOwnerChanged`
 //! tracking, and a marshaller for exactly the types the consumers need —
 //! every basic type, plus `ARRAY`, `STRUCT`, `VARIANT` and `DICT_ENTRY`.

@@ -60,7 +60,7 @@ milestone's table kept, not overwritten.
 looks had measured costs published here. `scripts/scootbar-appearance-hw-test.sh`
 measures them (four looks: flush-opaque, rounded-opaque,
 rounded-translucent, floating), on real `--tty` hardware for the numbers that
-count; [testing.md](../testing.md#the-appearance-hardware-test) has the method.
+count; [testing.md](../../../dev/research/scootbar-testing.md#the-appearance-hardware-test) has the method.
 
 Measured 2026-09-30 on the Asahi M2 (NixOS aarch64, 8 CPUs), `--tty` on VT 2,
 DejaVu Sans as the clock's font (`SCOOTBAR_HW_FONT`), release builds of scoot
@@ -203,7 +203,7 @@ Wakeup counts are per process and exact for the window; the RSS and PSS
 differences under about 130 kB are not resolved by one run (two rounds of
 this table, a different commit apart, disagreed by that much on the
 unplaced rows). The scripts and raw logs are in
-[`bench/m6-tray-vm`](../bench/m6-tray-vm/README.md).
+[`bench/m6-tray-vm`](../../../dev/benches/scootbar/m6-tray-vm/README.md).
 
 | Row | RSS kB | PSS kB | wakeups in 60 s | fds |
 |---|---|---|---|---|
@@ -366,7 +366,7 @@ exact for the window; the RSS and PSS differences under about 130 kB are not
 resolved by one run (PSS also moves with what else maps the binary: the
 media-built row below reads 2323 and 1464 kB in two reruns of the same
 binary, `logs/measure-rerun-row2.txt`). The scripts and raw logs are in
-[`bench/m6-media-vm`](../bench/m6-media-vm/README.md).
+[`bench/m6-media-vm`](../../../dev/benches/scootbar/m6-media-vm/README.md).
 
 | Row | RSS kB | PSS kB | wakeups in 60 s | fds |
 |---|---|---|---|---|
@@ -507,7 +507,7 @@ from `/proc/PID` after 14 s of settling and again 60 s later (`VmRSS`,
 other agents were building and testing on. Wakeup counts are per process
 and exact for the window; RSS and PSS differences under about 130 kB are
 not resolved by one run. The scripts and raw logs are in
-[`bench/m6-bluetooth-vm`](../bench/m6-bluetooth-vm/README.md).
+[`bench/m6-bluetooth-vm`](../../../dev/benches/scootbar/m6-bluetooth-vm/README.md).
 
 | Row | RSS kB | PSS kB | wakeups in 60 s | fds |
 |---|---|---|---|---|
@@ -598,7 +598,7 @@ reply, `dbus-broker` 37 does not), an unknown-drop event that resolves the
 flight of a reply skipped unread, a big-endian length read right, pruned
 hosts, and the tray's ~250-line bus-lifecycle copy deleted (one lifecycle
 for both consumers; one connection per consumer stands, decided in the
-[spike](../spikes/dbus-client.md#one-connection-per-consumer-decided-2026-10-03)).
+[spike](../../../dev/spikes/scootbar/dbus-client.md#one-connection-per-consumer-decided-2026-10-03)).
 No behavior change by design; this is the proof.
 
 **Method.** Release builds (`lto = "fat"`, stripped) of `origin/main` at
@@ -981,7 +981,7 @@ Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`
 at `3211551` (`crates/scootbar` has not changed on `main` since). Tables, machine
 readings and the method are in the
 [README](../README.md#m3-clock-and-workspaces-on-the-asahi-m2) and
-[testing.md](../testing.md#benchmark); the raw runs are
+[testing.md](../../../dev/research/scootbar-testing.md#benchmark); the raw runs are
 `bench/m3-asahi-*`. This records the findings; it waives no row and moves no
 target. Nothing in it was fixed in the PR that recorded it.
 
@@ -1041,12 +1041,12 @@ The daemon now binds `ext_workspace_manager_v1` and `wl_seat` only while a
 workspaces module is placed (at connect, when the global appears later, and
 after a `reload`, which also lets them go when the module is removed). One run
 of the same harness and settings on the same machine
-([`bench/m3-asahi-clock-bindfix`](../bench/m3-asahi-clock-bindfix/table.md);
+([`bench/m3-asahi-clock-bindfix`](../../../dev/benches/scootbar/m3-asahi-clock-bindfix/table.md);
 a single run, not repeated, so each verdict below is one pairing):
-`compare` against [`m3-asahi-clock`](../bench/m3-asahi-clock/table.md) exits 1
+`compare` against [`m3-asahi-clock`](../../../dev/benches/scootbar/m3-asahi-clock/table.md) exits 1
 (one flag: sway idle CPU, 0.6 to 0.9 ms, a row the table above already did
 not count; switching CPU is better on both compositors) and against
-[`m3-asahi-m1-baseline-clock`](../bench/m3-asahi-m1-baseline-clock/table.md)
+[`m3-asahi-m1-baseline-clock`](../../../dev/benches/scootbar/m3-asahi-m1-baseline-clock/table.md)
 exits 1 (11 flags).
 
 - **Fixed: CPU while switching workspaces**, 12.0 / 10.5 ms (scoot / sway) to

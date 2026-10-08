@@ -17,7 +17,7 @@
 //! cannot. So on such a CRTC [`CursorPlanes::back`] swaps each drawn-shape
 //! element of the frame for a [`PlaneCursorElement`]: the same pixels in a
 //! `LINEAR` `Argb8888` dma-buf, answered as `UnderlyingStorage::Dmabuf` (a
-//! scoot-sh Smithay fork variant, `docs/forks.md`). Smithay then tests it on
+//! scoot-sh Smithay fork variant, `dev/forks.md`). Smithay then tests it on
 //! an overlay plane like any candidate and composites it if the test fails.
 //!
 //! A client's own cursor surface is left alone: its buffer is the client's,

@@ -5,7 +5,7 @@ Run from the repository root with the harness of `main` (`98c4b7a32`, the harnes
 ## The final #367 tip against the final `main` (first run)
 
 ```text
-$ python3 scripts/scootbar-bench/bench.py compare docs/scootbar/bench/m4-asahi-final-pr367 docs/scootbar/bench/m4-asahi-final-main
+$ python3 scripts/scootbar-bench/bench.py compare dev/benches/scootbar/m4-asahi-final-pr367 dev/benches/scootbar/m4-asahi-final-main
 | Compositor | Row | baseline | now | verdict |
 |---|---|---|---|---|
 | scoot | Startup to first frame | 31.8 [24.7–44.7] | 29.0 [28.9–37.5] | same |
@@ -38,7 +38,7 @@ exit status: 1
 ## The final #367 tip against the final `main` (the A-B-A rerun)
 
 ```text
-$ python3 scripts/scootbar-bench/bench.py compare docs/scootbar/bench/m4-asahi-final-pr367 docs/scootbar/bench/m4-asahi-final-main-rerun
+$ python3 scripts/scootbar-bench/bench.py compare dev/benches/scootbar/m4-asahi-final-pr367 dev/benches/scootbar/m4-asahi-final-main-rerun
 | Compositor | Row | baseline | now | verdict |
 |---|---|---|---|---|
 | scoot | Startup to first frame | 29.4 [15.7–38.3] | 29.0 [28.9–37.5] | same |
@@ -71,7 +71,7 @@ exit status: 1
 ## The final #367 tip against M3 post-fix
 
 ```text
-$ python3 scripts/scootbar-bench/bench.py compare docs/scootbar/bench/m4-asahi-final-pr367 docs/scootbar/bench/m3-asahi-clock-bindfix
+$ python3 scripts/scootbar-bench/bench.py compare dev/benches/scootbar/m4-asahi-final-pr367 dev/benches/scootbar/m3-asahi-clock-bindfix
 | Compositor | Row | baseline | now | verdict |
 |---|---|---|---|---|
 | scoot | Startup to first frame | 31.0 [24.6–36.8] | 29.0 [28.9–37.5] | same |
@@ -104,7 +104,7 @@ exit status: 1
 ## Final `main` (first run) against M3 post-fix
 
 ```text
-$ python3 scripts/scootbar-bench/bench.py compare docs/scootbar/bench/m4-asahi-final-main docs/scootbar/bench/m3-asahi-clock-bindfix
+$ python3 scripts/scootbar-bench/bench.py compare dev/benches/scootbar/m4-asahi-final-main dev/benches/scootbar/m3-asahi-clock-bindfix
 | Compositor | Row | baseline | now | verdict |
 |---|---|---|---|---|
 | scoot | Startup to first frame | 31.0 [24.6–36.8] | 31.8 [24.7–44.7] | same |
@@ -137,7 +137,7 @@ exit status: 0
 ## Final `main` (rerun) against M3 post-fix
 
 ```text
-$ python3 scripts/scootbar-bench/bench.py compare docs/scootbar/bench/m4-asahi-final-main-rerun docs/scootbar/bench/m3-asahi-clock-bindfix
+$ python3 scripts/scootbar-bench/bench.py compare dev/benches/scootbar/m4-asahi-final-main-rerun dev/benches/scootbar/m3-asahi-clock-bindfix
 | Compositor | Row | baseline | now | verdict |
 |---|---|---|---|---|
 | scoot | Startup to first frame | 31.0 [24.6–36.8] | 29.4 [15.7–38.3] | same |
@@ -170,7 +170,7 @@ exit status: 0
 ## Drift: the final `main` rerun against its first run (A-B-A)
 
 ```text
-$ python3 scripts/scootbar-bench/bench.py compare docs/scootbar/bench/m4-asahi-final-main-rerun docs/scootbar/bench/m4-asahi-final-main
+$ python3 scripts/scootbar-bench/bench.py compare dev/benches/scootbar/m4-asahi-final-main-rerun dev/benches/scootbar/m4-asahi-final-main
 | Compositor | Row | baseline | now | verdict |
 |---|---|---|---|---|
 | scoot | Startup to first frame | 31.8 [24.7–44.7] | 29.4 [15.7–38.3] | same |
@@ -203,7 +203,7 @@ exit status: 0
 ## Final `main` (first run) against the earlier M4 `main` (round three, scoot and sway)
 
 ```text
-$ python3 scripts/scootbar-bench/bench.py compare docs/scootbar/bench/m4-asahi-final-main docs/scootbar/bench/m4-asahi-clock-both-main
+$ python3 scripts/scootbar-bench/bench.py compare dev/benches/scootbar/m4-asahi-final-main dev/benches/scootbar/m4-asahi-clock-both-main
 | Compositor | Row | baseline | now | verdict |
 |---|---|---|---|---|
 | scoot | Startup to first frame | 29.8 [24.1–38.2] | 31.8 [24.7–44.7] | same |
@@ -236,7 +236,7 @@ exit status: 1
 ## Final `main` (rerun) against the earlier M4 `main` (round three)
 
 ```text
-$ python3 scripts/scootbar-bench/bench.py compare docs/scootbar/bench/m4-asahi-final-main-rerun docs/scootbar/bench/m4-asahi-clock-both-main
+$ python3 scripts/scootbar-bench/bench.py compare dev/benches/scootbar/m4-asahi-final-main-rerun dev/benches/scootbar/m4-asahi-clock-both-main
 | Compositor | Row | baseline | now | verdict |
 |---|---|---|---|---|
 | scoot | Startup to first frame | 29.8 [24.1–38.2] | 29.4 [15.7–38.3] | same |
@@ -269,7 +269,7 @@ exit status: 0
 ## The final #367 tip against the earlier #367 (round three, `b6dee9710`)
 
 ```text
-$ python3 scripts/scootbar-bench/bench.py compare docs/scootbar/bench/m4-asahi-final-pr367 docs/scootbar/bench/m4-asahi-clock-both-pr367
+$ python3 scripts/scootbar-bench/bench.py compare dev/benches/scootbar/m4-asahi-final-pr367 dev/benches/scootbar/m4-asahi-clock-both-pr367
 | Compositor | Row | baseline | now | verdict |
 |---|---|---|---|---|
 | scoot | Startup to first frame | 38.1 [29.5–48.1] | 29.0 [28.9–37.5] | same |
@@ -306,9 +306,9 @@ The same `pool.py` (verbatim from [`m4-asahi-compares.md`](m4-asahi-compares.md#
 ### scoot: the final #367 tip against the two final `main` runs pooled
 
 ```text
-$ COMPOSITOR=scoot python3 pool-tmp.py . docs/scootbar/bench/m4-asahi-final-main,docs/scootbar/bench/m4-asahi-final-main-rerun pr367=docs/scootbar/bench/m4-asahi-final-pr367
+$ COMPOSITOR=scoot python3 pool-tmp.py . dev/benches/scootbar/m4-asahi-final-main,dev/benches/scootbar/m4-asahi-final-main-rerun pr367=dev/benches/scootbar/m4-asahi-final-pr367
 
-### pr367  (1 run(s) pooled) against docs/scootbar/bench/m4-asahi-final-main,docs/scootbar/bench/m4-asahi-final-main-rerun
+### pr367  (1 run(s) pooled) against dev/benches/scootbar/m4-asahi-final-main,dev/benches/scootbar/m4-asahi-final-main-rerun
 | Startup to first frame | 30.7 [15.7–44.7] | 29.0 [28.9–37.5] | same | margin 37.6 |
 | Idle RSS | 3.5 [3.5–3.5] | 3.6 | same | margin 0.176 |
 | Idle PSS | 2.1 [2.1–2.1] | 2.2 | REGRESSED | margin 0.106 |
@@ -327,9 +327,9 @@ $ COMPOSITOR=scoot python3 pool-tmp.py . docs/scootbar/bench/m4-asahi-final-main
 ### sway: the final #367 tip against the two final `main` runs pooled
 
 ```text
-$ COMPOSITOR=sway python3 pool-tmp.py . docs/scootbar/bench/m4-asahi-final-main,docs/scootbar/bench/m4-asahi-final-main-rerun pr367=docs/scootbar/bench/m4-asahi-final-pr367
+$ COMPOSITOR=sway python3 pool-tmp.py . dev/benches/scootbar/m4-asahi-final-main,dev/benches/scootbar/m4-asahi-final-main-rerun pr367=dev/benches/scootbar/m4-asahi-final-pr367
 
-### pr367  (1 run(s) pooled) against docs/scootbar/bench/m4-asahi-final-main,docs/scootbar/bench/m4-asahi-final-main-rerun
+### pr367  (1 run(s) pooled) against dev/benches/scootbar/m4-asahi-final-main,dev/benches/scootbar/m4-asahi-final-main-rerun
 | Startup to first frame | 17.7 [8.0–25.1] | 17.2 [7.7–17.6] | same | margin 27 |
 | Idle RSS | 3.5 [3.5–3.5] | 3.6 | same | margin 0.175 |
 | Idle PSS | 2.2 [2.1–2.2] | 2.3 | REGRESSED | margin 0.108 |
@@ -348,9 +348,9 @@ $ COMPOSITOR=sway python3 pool-tmp.py . docs/scootbar/bench/m4-asahi-final-main,
 ### The same, with the earlier M4 `main` runs (rounds one to three, 3 runs) added to the baseline: five `main` runs, scoot
 
 ```text
-$ COMPOSITOR=scoot python3 pool-tmp.py . [five main dirs] pr367=docs/scootbar/bench/m4-asahi-final-pr367
+$ COMPOSITOR=scoot python3 pool-tmp.py . [five main dirs] pr367=dev/benches/scootbar/m4-asahi-final-pr367
 
-### pr367  (1 run(s) pooled) against docs/scootbar/bench/m4-asahi-final-main,docs/scootbar/bench/m4-asahi-final-main-rerun,docs/scootbar/bench/m4-asahi-clock-main,docs/scootbar/bench/m4-asahi-clock-main-rerun,docs/scootbar/bench/m4-asahi-clock-both-main
+### pr367  (1 run(s) pooled) against dev/benches/scootbar/m4-asahi-final-main,dev/benches/scootbar/m4-asahi-final-main-rerun,dev/benches/scootbar/m4-asahi-clock-main,dev/benches/scootbar/m4-asahi-clock-main-rerun,dev/benches/scootbar/m4-asahi-clock-both-main
 | Startup to first frame | 30.6 [15.7–48.3] | 29.0 [28.9–37.5] | same | margin 41.3 |
 | Idle RSS | 3.5 [3.5–3.5] | 3.6 | same | margin 0.177 |
 | Idle PSS | 2.1 [2.1–2.1] | 2.2 | REGRESSED | margin 0.103 |

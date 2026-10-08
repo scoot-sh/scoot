@@ -61,7 +61,7 @@ Resolved 2026-09-29. What landed:
   screenshots, per-module damage, idle between minutes, a real `foot`
   window closed and checked gone, font refusals, a hotplugged output);
   `cargo fuzz` targets `format` and `tzif` (`crates/scootbar/fuzz`).
-  Reference: [cli.md](../../cli.md); tests: [testing.md](../../testing.md).
+  Reference: [cli.md](../../cli.md); tests: [testing.md](../../../../dev/research/scootbar-testing.md).
 
 **Review of #324**, fixed in `de27775`:
 
@@ -109,7 +109,7 @@ the final commit (the PR says which); the benchmark below is at `44fc656`,
 before two changes that touch no measured path (the layout skipped when no
 width changed; the opt-in step test).
 
-**Benchmark**: M0's harness (`docs/scootbar/spikes/m0/bench/bar-bench.py`,
+**Benchmark**: M0's harness (`dev/spikes/scootbar/m0/bench/bar-bench.py`,
 only its scratch log path changed) over the release binary (848,624 bytes,
 sha256 `13db2359b160775a...`), `scoot --headless --outputs 1 --width 1920
 --height 1080` (debug build of the same tree) and headless sway 1.12

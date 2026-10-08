@@ -180,7 +180,7 @@
 //! wayland-backend keeps fds that a client sends alongside a request with no
 //! fd argument, until the client leaves or parks more than its cap of them
 //! (the bound the scoot-sh wayland-backend fork adds, 1024 on scoot's raised
-//! table and 128 on a 1024-fd one, `docs/forks.md`; released 0.3.17 kept them
+//! table and 128 on a 1024-fd one, `dev/forks.md`; released 0.3.17 kept them
 //! for the connection's life). A syncobj fd parked there on
 //! a number some other client's dead timeline record names would make that
 //! record read live, and so inflate the *other* client's count. Pool and

@@ -10,7 +10,7 @@
 //! `SCOOTBAR_REQUIRE_SCOOT` makes that a failure.
 
 // The tests place button, push and workspaces modules (gated per test),
-// so this file exists where any of them does (docs/scootbar/testing.md:
+// so this file exists where any of them does (dev/research/scootbar-testing.md:
 // the feature matrix); helpers used by only one kind carry that gate too.
 #![cfg(any(feature = "button", feature = "push", feature = "workspaces"))]
 

@@ -30,7 +30,7 @@ Resolved 2026-09-29. What landed:
   minute. i3status-rust was not measured (it needs `swaybar`, so sway only,
   and is not a bar by itself; see the record's §4a).
 - The spike code, kept for re-derivation, in
-  [`docs/scootbar/spikes/m0/`](../../spikes/m0/README.md).
+  [`dev/spikes/scootbar/m0/`](../../../../dev/spikes/scootbar/m0/README.md).
 
 The entry as filed:
 

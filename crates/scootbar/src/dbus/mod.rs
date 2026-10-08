@@ -1,7 +1,7 @@
 //! The shared D-Bus client: the session and system buses over one
 //! multiplexed connection each, on a poll-loop fd.
 //!
-//! The spike's verdict (`docs/scootbar/spikes/dbus-client.md`): a
+//! The spike's verdict (`dev/spikes/scootbar/dbus-client.md`): a
 //! hand-rolled minimal client wins on every measured row (332,456 B,
 //! zero dependencies, 1 thread) and is the only option fitting the bar's
 //! doctrine (one single-threaded `poll(2)` loop, no async runtime, no C

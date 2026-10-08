@@ -63,7 +63,7 @@ validated but refused — no module takes sets yet, the hook for
 `exec-push-button-modules`) plus `$XDG_CONFIG_HOME/scoot/bar.toml` (`--config`
 override; defaults < file < flags, flags re-overlaid on every reload) and a
 lock-guarded `0600` socket following scootbg's framing/claim design. Parser
-spike (`docs/scootbar/spikes/config-parser.md`) chose the workspace's existing
+spike (`dev/spikes/scootbar/config-parser.md`) chose the workspace's existing
 `toml` (zero new `Cargo.lock` packages). `query` returns every placed module's
 text/class/icon per output — the agent hook. Review caught two real bugs
 before merge: reload not forcing a redraw (fixed via canvas clear), and the

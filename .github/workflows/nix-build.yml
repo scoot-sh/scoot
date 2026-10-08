@@ -90,7 +90,7 @@
 # derivation recompiled the whole dependency graph, so each bought one
 # more full Smithay compile per push per architecture. Under crane each
 # variant is one more compiled-dependencies derivation, rebuilt only when
-# `Cargo.lock` or a fork rev changes (rare by design: `docs/forks.md`)
+# `Cargo.lock` or a fork rev changes (rare by design: `dev/forks.md`)
 # and substituted from the cache on every other push -- so on a code-only
 # merge they cost one small first-party-crates-only compile each (measured
 # on 4 M2 cores: 81--96 s per compositor package against 110--132 s for a
@@ -113,12 +113,14 @@ name: nix build (packaged artifacts)
 on:
   push:
     branches: [main]
-    # Docs-only pushes (and backlog claim commits under docs/backlog/claims/)
+    # Docs-only pushes (and backlog claim commits under docs/backlog/claims/,
+    # plus anything under the unpublished dev/ tree)
     # build nothing: skipped only when every changed path matches. See the
     # same filter in ci.yml.
     paths-ignore:
       - '**.md'
       - 'docs/**'
+      - 'dev/**'
   workflow_dispatch:
 
 permissions:

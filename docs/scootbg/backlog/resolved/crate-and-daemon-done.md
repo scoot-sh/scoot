@@ -352,5 +352,5 @@ never runs on a Mac (the user, 2026-09-29: "Scootbg only needs Linux
 too"), so off Linux `scootbg-mem` stops the build with a
 `compile_error!`, and the macOS CI job runs `cargo check --workspace
 --exclude scootbar --exclude scootbg --exclude scootbg-mem --all-targets`
-([docs/development.md](../../../development.md)). The record above is left
+([dev/README.md](../../../../dev/README.md)). The record above is left
 as it was.

@@ -10,7 +10,7 @@ resolved: "2026-10-05"
 # scootbg holds 12 MB anon at idle in some sessions, near zero in others
 
 Filed 2026-10-05 from the five-desktop idle benchmark (Asahi M2,
-`docs/benchmarks.md`). Serves **daily-drive** (memory footprint: the
+`dev/benches/benchmarks.md`). Serves **daily-drive** (memory footprint: the
 decoded wallpaper is scootbg's biggest resident by far when retained).
 
 ## The gap

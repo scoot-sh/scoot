@@ -73,7 +73,7 @@
 //! `position` scan of the unmapped list on every surface commit, and the
 //! `xdg_popup` destructor's linear `known_popups` search. Measured at
 //! 40 x 128 (dev VM release): ~80 ms track, ~80 ms destroy. A further
-//! index would be a Smithay fork change (`docs/forks.md`); with the
+//! index would be a Smithay fork change (`dev/forks.md`); with the
 //! configure walk gone there is no seconds-scale stall left to justify
 //! one.
 

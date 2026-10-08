@@ -44,6 +44,6 @@ commit; `crates/scootbg/tests/scale.rs` checks it by screenshot).
 **Fix:** in the fork, apply the cached `buffer_scale` and
 `buffer_transform` on every commit that has a buffer, not only on a new
 one (and recompute the surface view, which already happens each commit),
-as a scoot-sh/smithay commit listed in `docs/forks.md`; then a
+as a scoot-sh/smithay commit listed in `dev/forks.md`; then a
 compositor-side test attaching once and changing only the scale. Not sent
 upstream from here (see `CLAUDE.md`).

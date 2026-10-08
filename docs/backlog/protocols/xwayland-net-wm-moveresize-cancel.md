@@ -38,4 +38,4 @@ the floating grab (`State::end_floating_grab`, then `apply()`) only when it
 is dragging that window, and only for a request from the window's own X
 client -- which, as for the move itself, the window manager cannot tell
 from a stranger naming the window. Flip the pinning test to "the cancel
-ends the drag". List the commit in `docs/forks.md`.
+ends the drag". List the commit in `dev/forks.md`.

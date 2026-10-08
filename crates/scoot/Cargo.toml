@@ -151,7 +151,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
 # A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty-seven
 # commits, branch `scoot/cursor-dmabuf-storage` (`scoot/xwayland-selection-dnd`
-# plus the last one; see `docs/forks.md` for each one and why):
+# plus the last one; see `dev/forks.md` for each one and why):
 #
 # - `43f50eb2` (also branch `scoot/syncobj-timeline-drop`) adds a `Drop` for
 #   `DrmTimelineDeviceSpecific`. Without it every

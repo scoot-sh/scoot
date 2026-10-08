@@ -776,8 +776,8 @@ buffer with the compositor that maps it. The same runs' Set and Startup
 rows agree with the first run's; the JPEG at start-up against wbg is
 again a tie by the rule (scoot 494 against 451 ms, CPU 475 against 426
 ms, inside a combined spread of 79 and 81 ms). They are in
-[`bench/2026-09-28-scoot-peak/`](bench/2026-09-28-scoot-peak/table.md)
-and [`bench/2026-09-28-sway-peak/`](bench/2026-09-28-sway-peak/table.md).
+[`bench/2026-09-28-scoot-peak/`](../../dev/benches/scootbg/2026-09-28-scoot-peak/table.md)
+and [`bench/2026-09-28-sway-peak/`](../../dev/benches/scootbg/2026-09-28-sway-peak/table.md).
 
 ### Idle rows re-run (2026-09-28)
 
@@ -805,8 +805,8 @@ scootbg beyond the margin.
 
 The same 9 losses to awww on each compositor. `compare` against the
 2026-09-27 runs: no regression, and no change beyond the margin. The runs
-are in [`bench/2026-09-28-idle-scoot/`](bench/2026-09-28-idle-scoot/table.md)
-and [`bench/2026-09-28-idle-sway/`](bench/2026-09-28-idle-sway/table.md).
+are in [`bench/2026-09-28-idle-scoot/`](../../dev/benches/scootbg/2026-09-28-idle-scoot/table.md)
+and [`bench/2026-09-28-idle-sway/`](../../dev/benches/scootbg/2026-09-28-idle-sway/table.md).
 
 ### What ran, and what did not
 
@@ -1025,7 +1025,7 @@ devenv shell -- python3 scripts/scootbg-bench/bench.py run --out /tmp/bench \
 devenv shell -- python3 scripts/scootbg-bench/bench.py run --out /tmp/bench-sway \
     --compositor sway --sway "$(command -v sway)" --scootbg-store …
 python3 scripts/scootbg-bench/bench.py report /tmp/bench           # the table and the gate again
-python3 scripts/scootbg-bench/bench.py compare /tmp/bench docs/scootbg/bench/2026-09-27-scoot
+python3 scripts/scootbg-bench/bench.py compare /tmp/bench dev/benches/scootbg/2026-09-27-scoot
 ```
 
 - It needs root, or the right to make a cgroup (for CPU), and to read
@@ -1045,7 +1045,7 @@ python3 scripts/scootbg-bench/bench.py compare /tmp/bench docs/scootbg/bench/202
 ### On sway
 
 The same run against headless sway 1.12 (wlroots, pixman renderer),
-[`bench/2026-09-27-sway/`](bench/2026-09-27-sway/table.md), gives the
+[`bench/2026-09-27-sway/`](../../dev/benches/scootbg/2026-09-27-sway/table.md), gives the
 same verdicts: the same 9 losses to awww on idle memory above the floor
 (RSS 3.87–4.45 against 2.66–2.90 MiB, PSS 2.06–2.39 against 0.90–1.04
 MiB, the 1080p image's total 10.3 against 8.9 MiB), and a win or a tie on
@@ -1149,7 +1149,7 @@ safety are not traded against each other:
   their RustSec record. Where a dependency is not fuzzed upstream,
   scootbg fuzzes the path through it: a `cargo fuzz` target over decode,
   crop, scale and pack, on the stable toolchain
-  ([testing.md](testing.md)).
+  ([testing.md](../../dev/research/scootbg-testing.md)).
 
 The audit behind these rules, and the one measured cost they carry (CPU
 per change from the safe scaler), is in

@@ -23,7 +23,7 @@ here** (the config parser in
 and licence check.
 
 The spike code is kept, not deleted, so each number can be re-derived: it
-is in [`docs/scootbar/spikes/m0/`](../../spikes/m0/README.md), outside the
+is in [`dev/spikes/scootbar/m0/`](../../../../dev/spikes/scootbar/m0/README.md), outside the
 Cargo workspace and outside CI, with the raw output, configs and
 screenshots under its `results/`. Paths below written `bench/…`,
 `clock/…` or `results/…` are relative to that directory. The published baselines table is in

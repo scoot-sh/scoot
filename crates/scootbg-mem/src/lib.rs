@@ -33,7 +33,7 @@
 compile_error!(
     "scootbg-mem, scootbg and scootbar run on Linux only; on a Mac, \
      cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem \
-     (docs/development.md)"
+     (dev/README.md)"
 );
 
 pub mod alloc;

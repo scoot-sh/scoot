@@ -11,7 +11,7 @@ blocked: "input-to-present latency needs a measurement method first; everything 
 This is the half of the [niri A/B](../resolved/niri-ab-benchmark-done.md)
 that the dev VM cannot run. On the VM, niri runs only nested (it refuses
 llvmpipe on `--tty`), and every GLES number is software rasterisation. The
-VM results and their caveats are in `docs/benchmarks.md`.
+VM results and their caveats are in `dev/benches/benchmarks.md`.
 
 The runbook is `Asahi.md` Test 9:
 
@@ -38,7 +38,7 @@ Still open after the VM half, and to answer here:
 ## Run 2026-09-25: everything except latency
 
 `Asahi.md` Test 9 ran on the Apple M2 (`main` at `e1dce6f`, niri 26.04).
-The results are in `Asahi.md` and in `docs/benchmarks.md`'s real-GPU
+The results are in `Asahi.md` and in `dev/benches/benchmarks.md`'s real-GPU
 section. Against the list above:
 
 - **Per-frame GLES cost: answered.** Nested, niri costs 0.94 ms per

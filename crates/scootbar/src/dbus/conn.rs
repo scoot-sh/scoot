@@ -1,6 +1,6 @@
 //! One multiplexed session-bus connection, on a poll-loop fd.
 //!
-//! The shape the spike decided (`docs/scootbar/spikes/dbus-client.md`):
+//! The shape the spike decided (`dev/spikes/scootbar/dbus-client.md`):
 //! a single connection per bar process, a pending-call table keyed by
 //! serial (replies must be demultiplexed — server signals arrive between
 //! a call and its reply), match-rule multiplexing, and central

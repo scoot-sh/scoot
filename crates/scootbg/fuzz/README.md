@@ -80,7 +80,7 @@ devenv shell -- nix shell --inputs-from . nixpkgs#cargo-fuzz --command bash -c '
 Reproduce it with `cargo fuzz run -s none whole PATH`. Fix it in scootbg,
 guarding in scootbg's own code if the panic is in a dependency (fixes to
 a dependency go in a scoot-sh fork, never upstream: see
-[`docs/forks.md`](../../../docs/forks.md)). Then copy the input to
+[`dev/forks.md`](../../../dev/forks.md)). Then copy the input to
 `regressions/whole/` with a name that says what it was: scootbg's stable
 test `image::fuzz::tests::the_corpus_and_every_past_crash_replay_cleanly`
 replays that directory and the seed corpus on every `cargo test`, so CI

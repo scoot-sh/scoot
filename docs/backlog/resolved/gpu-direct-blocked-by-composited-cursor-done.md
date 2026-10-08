@@ -71,7 +71,7 @@ every frame with the pointer visible.
    exporter also rejects `wl_shm` buffers (`drm/exporter/gbm.rs`
    ~105–118). A scoot-side `Kind::Cursor` element backed by a dma-buf
    therefore needs **a change in scoot's Smithay fork**, following the
-   `docs/forks.md` process, with no upstream PRs. It also competes with
+   `dev/forks.md` process, with no upstream PRs. It also competes with
    [windows on overlay planes](gpu-overlay-window-candidates.md) for the one
    overlay. The captures table in `docs/tty.md` already has a "cursor on an
    overlay plane" row.
@@ -125,7 +125,7 @@ Asahi verification.** It covers one client (mpv), a 1000 ms delay,
 motion-driven reshows only, and scale 1.5 on eDP-1.
 
 Remaining: option 2 (cursor on the overlay plane, needs a Smithay-fork
-change per `docs/forks.md`). This Asahi kernel (7.1.13) now exposes **two**
+change per `dev/forks.md`). This Asahi kernel (7.1.13) now exposes **two**
 overlays per CRTC, so option 2 need not compete with window overlays
 there. The option-2 text above, which says it competes for the one overlay,
 predates this. The ticket keeps `status: "open"` until option 2 lands or
@@ -147,7 +147,7 @@ Smithay would otherwise remember that failure for as long as the pointer
 stays still.
 
 Smithay could not export a memory buffer at all, so this needed a fork
-commit: `7ab72d53` adds `UnderlyingStorage::Dmabuf` (`docs/forks.md` has
+commit: `7ab72d53` adds `UnderlyingStorage::Dmabuf` (`dev/forks.md` has
 the scoot-side alternatives and why each was rejected).
 
 Verified on the M2 (`Asahi.md`, Test 17, commit `267f43749`):

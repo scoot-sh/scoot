@@ -28,7 +28,7 @@ are under [Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs).
 | [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | **ANSWERED** (2026-09-25): 162 pairs (54 formats x tiled-compressed/tiled/`LINEAR`); clients pick compressed and Mesa follows the scanout tranche to `LINEAR`; mpv `dmabuf-wayland` cannot run (no hardware decoder: AVD firmware missing) |
 | [Test 7: explicit sync on a real GPU](docs/backlog/resolved/linux-drm-syncobj-done.md) | medium | yes | **ANSWERED** (2026-09-25): offered on the display device; `vkcube` uses it |
 | [Test 8: nested dma-buf presentation](docs/backlog/resolved/nested-dmabuf-present-done.md) | medium | Part B only | **ANSWERED** (2026-09-25): nested CPU 1.8–2x lower, host 2.2–3x lower, pixels identical, niri imports scoot's compressed buffers intact |
-| [Test 9: scoot vs niri on a real GPU](docs/benchmarks.md) | medium | Part B only | **ANSWERED** (2026-09-25) except input latency: on the real panel scoot-gpu used the least total CPU for relayout and pointer motion (no frame counts there); pixman the most |
+| [Test 9: scoot vs niri on a real GPU](dev/benches/benchmarks.md) | medium | Part B only | **ANSWERED** (2026-09-25) except input latency: on the real panel scoot-gpu used the least total CPU for relayout and pointer motion (no frame counts there); pixman the most |
 | Test 10: does the GPU driver keep an fd per imported plane | — | yes | **ANSWERED** (2026-09-25): yes, one (`copies_per_plane_per_output=1`). While a client runs scoot counts it exactly; after a client quits, one fd can linger until the next redraw, and one extra fd in one session is unexplained |
 | Test 11: output remove/restore, reconnected modeset and multi-head mode change on the dumb tier (the #249 runbook, for real) | — | yes | **ANSWERED** (2026-09-26): virtual-pull force-off/on of DP-1 removed and re-added its output; both windows adopted then restored in order under a fresh id, positional binds reach the returned monitor; `--mode 1280x720` drives DP-1 at that mode with eDP-1 warned onto preferred; runtime mode switch stays refused by design (read-only `wlr-output-management`) |
 | Test 12: GPU-tier runtime add, real-HPD remove/restore and multi-head mode change | — | yes | **ANSWERED** (2026-09-26): powering on a sleeping monitor adds a GPU-scanout head in ~50 ms; a real unplug adopts its window and the replug restores it under a fresh id with binds following; `--mode 1280x720` drives DP-1 at that mode on the GPU tier and a replug keeps it; adopted windows feel like they disappear ([UX ticket](docs/backlog/core/unplug-adopted-windows-invisible.md)) |
@@ -1455,7 +1455,7 @@ on the AGX: `GL Renderer: "Apple M2 (G14G B0)"`. Nested scoot used
 
 ## Test 9 — scoot vs niri on a real GPU
 
-Why: the scoot/niri A/B in [`docs/benchmarks.md`](docs/benchmarks.md) ran on
+Why: the scoot/niri A/B in [`dev/benches/benchmarks.md`](dev/benches/benchmarks.md) ran on
 the dev VM, where it could only be half an answer. niri renders only through
 GLES and refuses a software renderer on `--tty`. The VM's GPU has no 3D, so
 there niri could run only nested, and both GLES paths (niri's and scoot's)
@@ -1548,7 +1548,7 @@ S=scripts/niri-ab/sample.sh; O=/tmp/fx/t9b.tsv
 # columns: label comm wall_s proc_cpu_ms cpu_ns wakeups threads rss_kb pss_kb.
 # Compare proc_cpu_ms (the process total). cpu_ns misses threads that exit
 # inside the window, and niri encodes every screenshot on one: on the dev VM
-# cpu_ns missed 19-23% of niri's screenshot CPU (docs/benchmarks.md).
+# cpu_ns missed 19-23% of niri's screenshot CPU (dev/benches/benchmarks.md).
 $S session 20 idle >> $O
 # relayout, through the compositor's own IPC (use the scoot or the niri line)
 $S session 10 relayout -- sh -c 'while :; do scootctl action focus-column left; sleep 0.05; scootctl action focus-column right; sleep 0.05; done' >> $O
@@ -1625,7 +1625,7 @@ variants (not the gpu build). From it:
   presents none, because the host draws the pointer.
 
 What changes on a real GPU, against the dev VM's llvmpipe table in
-`docs/benchmarks.md`:
+`dev/benches/benchmarks.md`:
 - **niri's per-frame cost drops 6–15x** (14.2 → 0.94 ms relayout,
   14.8 → 2.35 ms animate).
 - **scoot-gles on the read-back path now costs about the same per animated

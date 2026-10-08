@@ -18,7 +18,7 @@ one more reason [the repin](smithay-fork-repin.md) is blocked. This is an
 Start from [the decision audit](resolved/fork-decisions-audit-done.md): it classifies how well
 each fork's alternatives were recorded, and whatever it finds thin goes first here.
 
-## What is carried (`docs/forks.md` is the source of truth)
+## What is carried (`dev/forks.md` is the source of truth)
 
 `scoot-sh/smithay` (26 commits on upstream `0ff00983`, tip `7ab72d53`) and
 `scoot-sh/wayland-rs` (2 commits on 0.3.17), grouped:
@@ -33,7 +33,7 @@ each fork's alternatives were recorded, and whatever it finds thin goes first he
 | cached buffer scale and transform on commit | apply them without a new buffer | scoot's commit handler doing what the renderer does not |
 | XSETTINGS flush | scale reaches X toolkits | a flush from scoot after its own write, if the connection is reachable |
 | `set_commits_allowed` | unused; drop at the next rebase | nothing: just delete it |
-| `UnderlyingStorage::Dmabuf` | a compositor-owned dma-buf (the drawn cursor) can ride a plane | **already evaluated** in `docs/forks.md` (`7ab72d53`): a phantom-client `wl_buffer` and an exporter wrapper were ruled out |
+| `UnderlyingStorage::Dmabuf` | a compositor-owned dma-buf (the drawn cursor) can ride a plane | **already evaluated** in `dev/forks.md` (`7ab72d53`): a phantom-client `wl_buffer` and an exporter wrapper were ruled out |
 | wayland-rs fd-queue cap | disconnect a client leaving too many unclaimed fds | **already evaluated**: scoot-side attribution, a kill heuristic and a socket proxy were ruled out (`wayland-backend-fd-queue-done.md`); reopen only with a new idea |
 
 ## Method, per carried commit
@@ -67,7 +67,7 @@ memory of Smithay.
 ## Output
 
 A "could it live in scoot?" column and a verdict per commit added to
-`docs/forks.md`, and one follow-up ticket per verdict that says "moves", each with
+`dev/forks.md`, and one follow-up ticket per verdict that says "moves", each with
 its plan and its tests. If most commits move, [the repin](smithay-fork-repin.md)
 shrinks to a plain upstream pin and this entry's follow-ups replace it.
 
@@ -88,9 +88,9 @@ internals), and both wayland-rs commits need the crate-private fd queue
 (`wayland-backend-fd-queue-done.md` already ruled out the scoot-side routes).
 The four XWM hooks plus `enter_needs_metadata` are the minimal fork surface
 scoot's gates build on, not movable behavior. `fcf6f314` (`set_commits_allowed`)
-is unused: **delete** at the next rebase, already recorded in `docs/forks.md`
+is unused: **delete** at the next rebase, already recorded in `dev/forks.md`
 and `crates/scoot/Cargo.toml`, so no new ticket. No follow-up move tickets
-filed. Per-commit evidence table added to `docs/forks.md` ("Could it live in
+filed. Per-commit evidence table added to `dev/forks.md` ("Could it live in
 scoot?", 2026-10-08); `CLAUDE.md`'s fork paragraph points at it. Conservative
 call per the brief: no pin change in this PR (dropping `fcf6f314` needs fork
 surgery plus a repin for an additive, zero-cost method), trivially reversible

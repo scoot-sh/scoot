@@ -1,9 +1,9 @@
 # M6 tray and D-Bus client: dev VM evidence
 
 The raw runs behind the
-[tray's cost table](../../backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02)
+[tray's cost table](../../../../docs/scootbar/backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02)
 and the PR that landed the [tray](../../backlog/tray.md) on the
-[D-Bus client](../../backlog/resolved/dbus-client-done.md). Not a
+[D-Bus client](../../../../docs/scootbar/backlog/resolved/dbus-client-done.md). Not a
 `scripts/scootbar-bench` run (that harness needs its compositor lane, and
 has no D-Bus item): a handful of shell scripts, written for the dev VM
 (`ssh -p 2222 dev@localhost`, aarch64, 6 CPUs, rustc 1.97.1, shared with

@@ -119,7 +119,7 @@ place to relax the floor.
 
 Two dependencies are scoot-sh forks, pinned by exact rev (the full
 list, with the alternatives considered for each, is
-[docs/forks.md](https://github.com/scoot-sh/scoot/blob/main/docs/forks.md)):
+[dev/forks.md](https://github.com/scoot-sh/scoot/blob/main/dev/forks.md)):
 
 | Fork | Pinned rev | Why it exists |
 |---|---|---|

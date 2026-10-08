@@ -36,7 +36,7 @@ benchmark and must not regress beyond the margin.
 **Maintainer's ruling (2026-10-08, given in chat: "Sounds good", accepting the
 recommendation below): the idle-memory rows of #529 and #531 are waived, and the
 two #531 color rows are accepted.** The release benchmark
-([2026-10-08-pr529-pr531](../bench/2026-10-08-pr529-pr531/README.md)) put
+([2026-10-08-pr529-pr531](../../../dev/benches/scootbg/2026-10-08-pr529-pr531/README.md)) put
 #529's two idle-PSS-above-the-floor rows (+0.13 to +0.14 MiB) and four of #531's
 six gated idle rows (+0.13 to +0.17 MiB) in the class waived on 2026-09-28; the
 other two gated rows on #531 are total-with-floor color rows where scootbg still
@@ -181,8 +181,8 @@ machine has none; on sway it binds `xdg_wm_base` v6 where sway has v5.
 After the attribution and the cheap levers of
 [idle-code-pages.md](resolved/idle-code-pages-done.md#levers-tried-2026-09-28), the idle
 rows ran again, 5 rounds, on headless scoot and sway, with `35f3a13`
-([scoot](../bench/2026-09-28-idle-scoot/table.md),
-[sway](../bench/2026-09-28-idle-sway/table.md)). The same 9 losses to awww
+([scoot](../../../dev/benches/scootbg/2026-09-28-idle-scoot/table.md),
+[sway](../../../dev/benches/scootbg/2026-09-28-idle-sway/table.md)). The same 9 losses to awww
 on each; `compare` against the 2026-09-27 runs finds no regression.
 
 - **Kept:** one lever, `getpid` through `rustix`, 64 KiB of libc code
@@ -232,7 +232,7 @@ rule decided:
 ### On sway
 
 Headless sway 1.12 gives the same verdicts
-([table](../bench/2026-09-27-sway/table.md)): the same 9 idle losses to
+([table](../../../dev/benches/scootbg/2026-09-27-sway/table.md)): the same 9 idle losses to
 awww (RSS above the floor 3.87–4.45 against 2.66–2.90 MiB, PSS 2.06–2.39
 against 0.90–1.04 MiB, the 1080p image's total 10.3 against 8.9 MiB),
 and the JPEG at start-up against wbg again a tie (475 against 490 ms).

@@ -1106,7 +1106,7 @@ fn a_scaled_surface_lands_at_the_physical_rectangle() {
 /// scale-only commit kept rendering at the old scale: an 80x80 buffer
 /// committed at scale 2 with no re-attach still covered its whole 80x80,
 /// the top-left quarter blown up. The fork fix reads the cached scale on
-/// every commit that has a buffer (see `docs/forks.md`); this test fails on
+/// every commit that has a buffer (see `dev/forks.md`); this test fails on
 /// the pre-fix fork -- the far pixel is still window fill -- and passes
 /// after. Scaling back to 1 in a second scale-only commit covers several
 /// scales in a row; the transform takes the same path (two adjacent
