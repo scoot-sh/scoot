@@ -291,7 +291,9 @@ prompt, editor and monitor configs. The default is `ginger-night`
 | `moonrise` | amber ring `#FF9A49`, slate navy `#2B3648` | navy, cream and amber | ships (copied to the store) |
 | `vinyl-sunset` | orange ring `#E59560`, espresso `#271A1F` | espresso, cream and orange | **no image ships**: the illustration's license forbids passing it on standalone, so the session shows the flat espresso `background_color` unless you set `wallpaper` yourself |
 
-`null` themes nothing (explicit opt-out: `look = null`). What the look does not theme
+With the profile on and no `look` set, the look is `ginger-night`: that is the
+default. `null` themes nothing and is only reached by setting `look = null`
+explicitly (the opt-out), or by not enabling the profile at all. What the look does not theme
 stays yours: layout details (gaps, corner radius, column widths — copy
 them from the example's `scoot.toml` if you want the whole look).
 

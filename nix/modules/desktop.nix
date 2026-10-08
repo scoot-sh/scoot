@@ -183,12 +183,15 @@ in
   options = {
     enable = lib.mkEnableOption "the scoot desktop profile: the session wiring plus bar and wallpaper defaults, themed by `look`";
 
-    # Null (the default) themes nothing: every value below is a default
-    # the user or Stylix beats per key. With the profile on and no choice,
-    # `home.nix`/`nixos.nix` default it to ginger-night (kept out of this
-    # option default so a look never lands without the profile -- the
-    # refusal in those files keeps firing then). An unknown value is an
-    # eval error naming these five (the `enum` type's own message).
+    # The effective default is ginger-night whenever the profile is on:
+    # `home.nix`/`nixos.nix` set it with `mkDefault` under `desktop.enable`
+    # (kept out of this option's own `default` so a look never lands
+    # without the profile -- the refusal in those files keeps firing
+    # then). The option's own `default` is `null`, which themes nothing;
+    # it is only reachable with the profile on by setting `look = null`
+    # explicitly, the opt-out. Every value is a default the user or
+    # Stylix beats per key. An unknown value is an eval error naming
+    # these five (the `enum` type's own message).
     look = lib.mkOption {
       type = lib.types.nullOr (
         lib.types.enum [
@@ -200,14 +203,20 @@ in
         ]
       );
       default = null;
+      defaultText = lib.literalMD ''
+        `"ginger-night"` when `desktop.enable` is on (the profile sets it),
+        `null` (nothing themed) otherwise
+      '';
       example = "vinyl-sunset";
       description = ''
         One of `docs/examples/*`: applies that example's palette to every
         piece the flake owns today (the compositor `[appearance]` colors,
         the bar `colors`, the session wallpaper where one ships in the
-        repository). Null themes nothing; with the profile on and no
-        choice this defaults to `ginger-night` (the cat-peeking look).
-        Each value is a default a value
+        repository). With the profile on and no choice, the look is
+        `ginger-night` (the cat-peeking look): that is the default. Setting
+        `look = null` explicitly is the opt-out, and themes nothing (a
+        look needs the profile, so `null` is also what you get without
+        `desktop.enable`). Each value is a default a value
         you set in `settings` beats per key, and Stylix beats where
         present (Stylix stays the override path); see site/src/content/docs/scoot/theming.md#stylix.
       '';
