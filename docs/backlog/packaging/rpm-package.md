@@ -31,7 +31,7 @@ Filed 2026-09-29. Serves **daily-drive**.
 - Split subpackages per binary, matching
   [independent-versioning](../resolved/independent-versioning-done.md); the coupled pair
   declares versioned requirements.
-- Files as in [arch-package](arch-package.md): the session entry, license and
+- Files as in [arch-package](../resolved/arch-package-done.md): the session entry, license and
   third-party inventory, no writes to user config, the bar's user unit, clean
   removal.
 - **CI**: build, lint with `rpmlint`, install, run `scoot --version` and the

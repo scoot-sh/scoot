@@ -1,0 +1,9 @@
+post_install() {
+  echo 'scootbar installed its user unit (scootbar.service). To run the bar'
+  echo 'as a user service: copy /usr/share/doc/scootbar/bar.toml.example to'
+  echo '~/.config/scoot/bar.toml, then systemctl --user enable --now scootbar.'
+}
+
+post_upgrade() {
+  post_install
+}

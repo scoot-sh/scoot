@@ -141,6 +141,13 @@ jobs:
   #                                           cannot alter the built site; the
   #                                           Pages deploy workflow tracks
   #                                           `docs/**` separately.
+  #   packaging/arch/*                       -> nothing here: the Arch
+  #                                           container workflow
+  #                                           (arch.yml) owns those files,
+  #                                           the way the session harness
+  #                                           owns its script above. A
+  #                                           PKGBUILD-only change runs there
+  #                                           and nowhere else.
   #     except its Cargo.toml               -> scoot too, for the flake's
   #     read of its description, as scootbg's
   #   crates/scootbg-mem/                  -> scootbar too: its shm buffer
@@ -174,7 +181,7 @@ jobs:
       scootbg: ${{ steps.classify.outputs.scootbg }}
       scootbar: ${{ steps.classify.outputs.scootbar }}
       backlog: ${{ steps.classify.outputs.backlog }}
-      docs-site: ${{ steps.classify.outputs.docs-site }}
+      docs-site: ${{ steps.classify.outputs.docs_site }}
       session: ${{ steps.classify.outputs.session }}
       version: ${{ steps.classify.outputs.version }}
     steps:
@@ -240,6 +247,10 @@ jobs:
                 # The same for the Stylix run (fetches two flakes and builds
                 # Stylix's palette generator; docs/scootbar/testing.md).
                 scripts/scootbar-unit-test.sh | scripts/scootbar-stylix-test.sh) ;;
+                # The Arch PKGBUILDs and their README: the Arch container
+                # workflow (arch.yml) owns them, so a change there alone
+                # runs nothing here.
+                packaging/arch/*) ;;
                 # The backlog tool and its tests: only their own job.
                 scripts/backlog | scripts/test_backlog.py)
                   backlog=true ;;
@@ -393,7 +404,7 @@ jobs:
   docs-site:
     name: Docs site (Starlight + llms.txt)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_site != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.docs-site != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -445,7 +456,8 @@ jobs:
       # mean to test. Exported for every later step, not just this one.
       - name: Create XDG_RUNTIME_DIR
         run: |
-          mkdir -p -m 700 "$RUNNER_TEMP/xdg"
+          mkdir -p "$RUNNER_TEMP/xdg"
+          chmod 700 "$RUNNER_TEMP/xdg"
           echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
 
       # Split restore/save rather than `actions/cache`: the combined action
@@ -736,7 +748,8 @@ jobs:
       # `/run/user/<uid>`.
       - name: Create XDG_RUNTIME_DIR
         run: |
-          mkdir -p -m 700 "$RUNNER_TEMP/xdg"
+          mkdir -p "$RUNNER_TEMP/xdg"
+          chmod 700 "$RUNNER_TEMP/xdg"
           echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
 
       # Restore-only, from the `linux` job's entries: every dependency but

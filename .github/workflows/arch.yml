@@ -1,0 +1,253 @@
+# scoot Arch packages: the PKGBUILDs (release and `-git`) for scoot,
+# scootbg and scootbar (docs/backlog/packaging/arch-package.md).
+#
+# WHAT IT DOES: builds all six PKGBUILDs under `packaging/arch/` in an
+# Arch container with `makepkg`, lints each PKGBUILD and each built
+# package with `namcap`, installs the release trio and the `-git` trio
+# in turn, and runs `scoot --version`, the bar's `--check` on its
+# shipped example config, and the headless smoke test
+# (`scripts/smoke-test.sh`) against the installed binaries. That is the
+# ticket's proof the packages work.
+#
+# WHAT IT DOES NOT DO: publish anything. No AUR push, no tag, no
+# release. AUR submission stays a manual maintainer step
+# (packaging/arch/README.md).
+#
+# THE RELEASE TARBALL SUBSTITUTION: no tag is cut yet, so the release
+# PKGBUILDs' `source` URLs 404 until the first release. The build below
+# points them at same-layout tarballs of HEAD instead (`git archive`
+# with the exact top directory a codeload tag tarball would have, so
+# the `cd` lines and the lockfile are the real ones) and only the
+# URL-plus-checksum part is substitution. The `-git` PKGBUILDs build
+# the PR head itself (`git+file://` pinned at `$GITHUB_SHA`).
+#
+# Path filters (the CLAUDE.md rule: CI runs only what changed): a PR or
+# a push to main runs this only when the PKGBUILDs, the smoke script
+# they run, or this workflow could have changed. `packaging/arch` is
+# claimed as a no-op in ci.yml's classify job, so a PKGBUILD-only
+# change runs here and nowhere else. Docs-only pushes start nothing:
+# the README is negated below and every other doc path never matches.
+
+name: arch packages (PKGBUILDs in an Arch container)
+
+on:
+  pull_request:
+    paths:
+      - 'packaging/arch/**'
+      - '!packaging/arch/README.md'
+      - 'scripts/smoke-test.sh'
+      - '.github/workflows/arch.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packaging/arch/**'
+      - '!packaging/arch/README.md'
+      - 'scripts/smoke-test.sh'
+      - '.github/workflows/arch.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arch:
+    name: makepkg + namcap + install + smoke (x86_64)
+    runs-on: ubuntu-latest
+    container: archlinux:base
+    # Six release-profile workspace builds, each from its own srcdir
+    # (cargo fingerprints by path, so they share the registry but not
+    # compiled deps), plus two headless smoke runs.
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      # actions/checkout shells out to git inside the container, which
+      # archlinux:base does not ship: bootstrap it first (steps run in
+      # order, so checkout need not be first). The workspace is
+      # re-owned to the builder user below, which would make later
+      # root-run git invocations fail on dubious ownership: mark it
+      # safe system-wide up front, for every user.
+      - name: Bootstrap git for checkout
+        run: |
+          pacman -Sy --noconfirm --needed git
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+
+      # Full history: the -git PKGBUILDs' pkgver() counts main's
+      # commits, which a shallow clone would report as 1.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install the build, lint and smoke tools
+        run: |
+          # The image's pacman.conf skips docs on install (NoExtract),
+          # which would leave the shipped example configs off disk even
+          # though the packages own them: install everything, so the
+          # --check below reads the installed files, not just the db.
+          sed -i -e '/^NoExtract/d' /etc/pacman.conf
+          pacman -Syu --noconfirm --needed \
+            base-devel cargo cargo-deny desktop-file-utils foot git imagemagick \
+            jq namcap sudo ttf-dejavu wayland wayland-protocols wayland-utils
+          useradd -m builder
+          echo 'builder ALL=(ALL:ALL) NOPASSWD: ALL' >/etc/sudoers.d/builder
+          chmod 440 /etc/sudoers.d/builder
+          mkdir -p "$GITHUB_WORKSPACE/dist" "$GITHUB_WORKSPACE/.cargo-target" "$GITHUB_WORKSPACE/.test-tarballs"
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      - name: namcap the PKGBUILDs
+        run: |
+          namcap packaging/arch/*/PKGBUILD 2>&1 | tee "$GITHUB_WORKSPACE/dist/namcap-pkgbuild.log"
+          if grep -q ' E: ' "$GITHUB_WORKSPACE/dist/namcap-pkgbuild.log"; then
+            echo "::error title=namcap errors on a PKGBUILD::see namcap-pkgbuild.log"
+            exit 1
+          fi
+          echo "ok: no namcap errors on the PKGBUILDs (warnings, if any, are above)"
+
+      - name: The committed .SRCINFO matches makepkg --printsrcinfo
+        run: |
+          for p in scoot scootbg scootbar scoot-git scootbg-git scootbar-git; do
+            sudo -u builder bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/$p' && makepkg --printsrcinfo" | diff - "packaging/arch/$p/.SRCINFO" \
+              || { echo "::error title=.SRCINFO drift in $p::run makepkg --printsrcinfo > .SRCINFO there and commit it."; exit 1; }
+          done
+          echo "ok: all six .SRCINFO files match"
+
+      # The release PKGBUILDs point at tag tarballs that do not exist
+      # until the first release is cut. Stage same-layout tarballs of
+      # HEAD (`git archive` with the codeload top directory, so the
+      # PKGBUILDs' `cd` lines are the real ones) and rewrite only the
+      # URL to a local file. The -git PKGBUILDs build this exact head
+      # instead (`git+file://` pinned at the tested commit, so fork PRs
+      # work too). This runs after the two lint steps above so they
+      # check the committed files, not the substitutions.
+      - name: Stage the HEAD tarballs and point the PKGBUILDs at them
+        run: |
+          scoot_ver=$(sed -n 's/^pkgver=//p' packaging/arch/scoot/PKGBUILD)
+          bar_ver=$(sed -n 's/^pkgver=//p' packaging/arch/scootbar/PKGBUILD)
+          git archive HEAD --prefix "scoot-scoot-v$scoot_ver/" -o .test-tarballs/scoot-test.tar.gz
+          git archive HEAD --prefix "scoot-scootbar-v$bar_ver/" -o .test-tarballs/scootbar-test.tar.gz
+          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scoot-v\$pkgver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scoot-test.tar.gz|" \
+            packaging/arch/scoot/PKGBUILD packaging/arch/scootbg/PKGBUILD
+          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scootbar-v\$pkgver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scootbar-test.tar.gz|" \
+            packaging/arch/scootbar/PKGBUILD
+          sed -i "s|git+https://github.com/scoot-sh/scoot\.git|git+file://$GITHUB_WORKSPACE#commit=$GITHUB_SHA|" \
+            packaging/arch/scoot-git/PKGBUILD packaging/arch/scootbg-git/PKGBUILD packaging/arch/scootbar-git/PKGBUILD
+          # Loud if a substitution missed: an unrewritten URL would
+          # otherwise fail pages later as a 404 (release) or build the
+          # wrong tree (git).
+          if grep -r 'archive/refs/tags' packaging/arch/scoot*/PKGBUILD \
+            || grep -r 'git+https' packaging/arch/*-git/PKGBUILD; then
+            echo "::error title=Test-tarball substitution missed::a source URL above was not rewritten."
+            exit 1
+          fi
+          ls -l .test-tarballs
+
+      # The release pkgver must name its crate's version (the trio
+      # together, the bar on its own); the -git static pkgver must
+      # start from it too (pkgver() counts past it at build time).
+      - name: PKGBUILD versions track their crate manifests
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+          pairs = [("scoot", "crates/scoot/Cargo.toml"),
+                   ("scootbg", "crates/scootbg/Cargo.toml"),
+                   ("scootbar", "crates/scootbar/Cargo.toml")]
+          bad = False
+          for pkg, manifest in pairs:
+              crate_ver = re.search(r'^version = "(.*)"$', open(manifest).read(), re.M).group(1)
+              for suffix in ("", "-git"):
+                  text = open(f"packaging/arch/{pkg}{suffix}/PKGBUILD").read()
+                  pkgver = re.search(r'^pkgver=(.*)$', text, re.M).group(1)
+                  ok = pkgver == crate_ver if not suffix else pkgver.startswith(crate_ver + ".r")
+                  print(f"{pkg}{suffix}: pkgver={pkgver} crate={crate_ver} {'ok' if ok else 'MISMATCH'}")
+                  bad = bad or not ok
+          sys.exit(1 if bad else 0)
+          EOF
+
+      - name: makepkg all six packages (one cargo target dir for the disk budget)
+        run: |
+          # Passed through sudo with env: sudo's env_reset would drop
+          # shell exports, so they ride on the command line instead.
+          # One CARGO_TARGET_DIR keeps six target trees out of the
+          # srcdirs (each PKGBUILD rebuilds: cargo fingerprints by
+          # absolute path, so nothing is shared between them but the
+          # registry in the builder's home).
+          #
+          # scootbg first, installed: scoot's versioned dependency on
+          # it (`scootbg=$pkgver`) resolves against no repository yet,
+          # so `makepkg -s` for scoot would fail to satisfy it. This is
+          # the same order an AUR helper builds the chain in.
+          sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
+            bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/scootbg' && makepkg -s --noconfirm"
+          pacman -U --noconfirm "$GITHUB_WORKSPACE"/dist/scootbg-0*.pkg.tar.zst
+          for p in scoot scootbar scoot-git scootbg-git scootbar-git; do
+            sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
+              bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/$p' && makepkg -s --noconfirm"
+          done
+          ls -l "$GITHUB_WORKSPACE/dist"/*.pkg.tar.zst
+
+      - name: namcap the built packages
+        run: |
+          namcap dist/*.pkg.tar.zst 2>&1 | tee "$GITHUB_WORKSPACE/dist/namcap-packages.log"
+          if grep -q ' E: ' "$GITHUB_WORKSPACE/dist/namcap-packages.log"; then
+            echo "::error title=namcap errors on a built package::see namcap-packages.log"
+            exit 1
+          fi
+          echo "ok: no namcap errors on the built packages (warnings, if any, are above)"
+
+      # DesktopNames is the session's XDG_CURRENT_DESKTOP name: sway
+      # ships it in its own session entry and the Nix-built entry
+      # carries it too, so the Arch login behaves the same. The
+      # validator's key list predates it and flags exactly that key, so
+      # that one finding is accepted and anything else fails.
+      - name: desktop-file-validate the session entry
+        run: |
+          out=$(desktop-file-validate packaging/arch/scoot/scoot.desktop 2>&1 || true)
+          echo "$out"
+          rest=$(echo "$out" | grep -v 'key "DesktopNames"' || true)
+          if [ -n "$rest" ]; then
+            echo "::error title=desktop file invalid::see above (the DesktopNames note is expected)."
+            exit 1
+          fi
+
+      # Twice: the release trio, then the -git trio (they conflict, so
+      # one set is removed before the other installs). Each round runs
+      # the ticket's proof against the installed binaries: every
+      # --version, the bar's --check on its shipped example (which
+      # needs the Arch font path, hence ttf-dejavu above), and the
+      # headless smoke test with the installed scoot and scootbg.
+      - name: Install the release trio and prove it
+        run: |
+          pacman -U --noconfirm dist/scoot-0*.pkg.tar.zst dist/scootbg-0*.pkg.tar.zst dist/scootbar-0*.pkg.tar.zst
+          scoot --version
+          scootbg --version
+          scootbar --version
+          scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
+          mkdir -p /tmp/arch-smoke-xdg
+          chmod 700 /tmp/arch-smoke-xdg
+          export XDG_RUNTIME_DIR=/tmp/arch-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
+          export SMOKE_PREFIX=/tmp/arch-smoke-release SMOKE_REQUIRE_SCOOTBG=1
+          scripts/smoke-test.sh
+
+      - name: Swap to the -git trio and prove it
+        run: |
+          pacman -Rns --noconfirm scoot scootbg scootbar
+          pacman -U --noconfirm dist/scoot-git-*.pkg.tar.zst dist/scootbg-git-*.pkg.tar.zst dist/scootbar-git-*.pkg.tar.zst
+          scoot --version
+          scootbg --version
+          scootbar --version
+          scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
+          export XDG_RUNTIME_DIR=/tmp/arch-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
+          export SMOKE_PREFIX=/tmp/arch-smoke-git SMOKE_REQUIRE_SCOOTBG=1
+          scripts/smoke-test.sh
+
+      - name: Upload the built packages and lint logs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: arch-packages
+          path: ${{ github.workspace }}/dist
+          include-hidden-files: true
+          retention-days: 7

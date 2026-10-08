@@ -1,0 +1,23 @@
+pkgbase = scootbar
+	pkgdesc = Status bar for the scoot compositor
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/scoot-sh/scoot
+	install = scootbar.install
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	makedepends = cargo-deny
+	makedepends = git
+	makedepends = wayland
+	makedepends = wayland-protocols
+	depends = glibc
+	depends = libgcc
+	optdepends = systemd: run the bar as a user unit (scootbar.service)
+	optdepends = ttf-dejavu: sans font the bar finds on its own
+	options = !debug
+	source = scootbar-0.1.0.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/scootbar-v0.1.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = scootbar

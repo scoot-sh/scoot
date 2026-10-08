@@ -1,0 +1,38 @@
+# scootbg: the wallpaper daemon for the scoot compositor (release build).
+#
+# Built from the same trio tag as `scoot` (`scoot-v$pkgver`): the two move
+# in lockstep (docs/versioning.md). The daemon links nothing past the C
+# library, so it carries no system-library dependencies. Its `[wallpaper]`
+# section is documented in scoot's example config
+# (/usr/share/doc/scoot/config.toml.example).
+#
+# No tag is cut yet, so `sha256sums` is SKIP until the first release;
+# `updpkgsums` fills it then (see packaging/arch/README.md). CI builds
+# this exact file against a same-layout tarball of HEAD.
+
+pkgname=scootbg
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Wallpaper daemon for the scoot compositor'
+arch=('x86_64' 'aarch64')
+url='https://github.com/scoot-sh/scoot'
+license=('MIT')
+depends=('glibc' 'libgcc')
+makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
+options=('!debug')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/scoot-v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "scoot-scoot-v$pkgver"
+  cargo build --release --locked -p scootbg
+  cargo deny list > THIRD-PARTY-LICENSES
+}
+
+package() {
+  cd "scoot-scoot-v$pkgver"
+  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/scootbg" "$pkgdir/usr/bin/scootbg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+  install -Dm644 THIRD-PARTY-LICENSES "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-LICENSES"
+}
