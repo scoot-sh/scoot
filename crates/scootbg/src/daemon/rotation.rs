@@ -3,13 +3,16 @@
 //!
 //! A `set DIR --every` lists the directory once and shows its files one
 //! after another: the first through the normal image path (so the reply
-//! waits for it, and a file that cannot be shown refuses the whole `set`),
-//! the rest here, paced by the poll timeout, with no reply to send. Each
-//! step records and chooses its image exactly like a restored one
-//! (`daemon::restore`): decoded on demand by the worker, saved for the next
-//! start, and reported by `query` as what shows. A step that cannot be
-//! drawn fails like any draw (`draw_failed` in `query`, said on stderr)
-//! until the next step.
+//! waits for it; a file that cannot be shown still starts the show, said
+//! in the reply, and fails its turns like any later step's undecodable
+//! file), the rest here, paced by the poll timeout, with no reply to
+//! send. Each step records and chooses its image exactly like a restored
+//! one (`daemon::restore`): decoded on demand by the worker, saved for the
+//! next start, and reported by `query` as what shows. Each step animates
+//! through the request's transition exactly like one image's `set` (stamped
+//! like `change()` stamps it, so the pending transition survives to the
+//! draw). A step that cannot be drawn fails like any draw (`draw_failed`
+//! in `query`, said on stderr) until the next step.
 //!
 //! One slideshow runs at a time: a new `set`, a `clear` or a changed
 //! `apply-config` drops it. With none running the loop's timeout is what
@@ -72,8 +75,9 @@ pub enum StartError {
     /// one, or sent over the protocol directly).
     NotDirectory,
     /// The directory is there but an entry in it could not be read: the
-    /// operating system's reason, such as a permission or a symlink loop.
-    Unreadable(String),
+    /// entry's path and the operating system's reason, such as a
+    /// permission or a symlink loop.
+    Unreadable { entry: String, detail: String },
     /// Nothing to cycle through.
     Empty,
     /// More than [`crate::rotation::MAX_LISTED`] files: refused rather
@@ -85,9 +89,9 @@ impl std::fmt::Display for StartError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotDirectory => write!(f, "not a directory any more; nothing was changed"),
-            Self::Unreadable(detail) => write!(
+            Self::Unreadable { entry, detail } => write!(
                 f,
-                "cannot read an entry in the directory ({detail}); nothing was changed"
+                "cannot read the entry {entry:?} ({detail}); nothing was changed"
             ),
             Self::Empty => write!(f, "the directory holds no files; nothing was changed"),
             Self::TooMany { seen } => write!(
@@ -121,9 +125,10 @@ impl Rotation {
         let listed =
             crate::rotation::list_dir(std::path::Path::new(dir)).map_err(|error| match error {
                 crate::rotation::ListError::Open(_) => StartError::NotDirectory,
-                crate::rotation::ListError::Entry(error) => {
-                    StartError::Unreadable(error.to_string())
-                }
+                crate::rotation::ListError::Entry { path, error } => StartError::Unreadable {
+                    entry: path.to_string_lossy().into_owned(),
+                    detail: error.to_string(),
+                },
                 crate::rotation::ListError::TooMany { seen } => StartError::TooMany { seen },
             })?;
         if listed.files.is_empty() {
@@ -293,6 +298,11 @@ pub fn drive_due(state: &mut State, qh: &QueueHandle<State>, now: Instant) {
             .as_deref()
             .is_none_or(|name| entry.output.info().name.as_deref() == Some(name))
     }) {
+        // Stamped like a `set` (`change()`'s path): without it the pending
+        // transition's generation never matches the output's stamp, and
+        // `take_transition` drops it unread, so steps would cut instead of
+        // animating.
+        entry.output.want(generation);
         entry.output.request_transition(transition, generation);
         reconcile(
             globals,

@@ -68,6 +68,10 @@ pub struct Trial<C> {
     pub conn: C,
     /// `None` for every output.
     pub output: Option<String>,
+    /// A slideshow's directory, when this trial is its first file: the
+    /// show is already armed, so a file that cannot be shown starts it
+    /// anyway (said in the reply) rather than changing nothing.
+    pub slideshow: Option<String>,
 }
 
 #[derive(Debug)]

@@ -261,6 +261,197 @@ fn no_slideshow_means_no_wakeups() {
     kill(&session, &mut daemon);
 }
 
+/// Each slideshow step animates through the request's transition, exactly
+/// like one image's `set`: `query` reports the running kind mid-step. And
+/// stopping the show frees the animation: the pending buffers go with the
+/// transition (at most two frame buffers plus the restart snapshot, by
+/// construction of the one path steps share with single `set`s) and the
+/// daemon settles back to no wakeups.
+///
+/// Stepping is proven through the state file, not pixels: each step
+/// records its file synchronously on the loop, while pixels wait on the
+/// decode worker and a transition finish waits on frames, both of which a
+/// loaded box delays past the 1 s debug steps (the same reason the busy
+/// test reads the state file). Both files decode, so no step can fail and
+/// poison the `set`'s wait the way a failing step can under contention;
+/// the undecodable-file interplay lives in the first-file test instead.
+#[test]
+fn a_slideshow_step_animates_through_its_transition() {
+    let Some(session) = Session::start_with("rotation-transition", 1, "") else {
+        return;
+    };
+    // Debug-shortened to 1 s.
+    let mut daemon = session.daemon_logged(&[("SCOOTBG_DEBUG_ROTATION_EVERY", "1")]);
+    configured(&session, 1);
+    let dir = session.runtime_dir().join("wallpapers");
+    let (red, blue) = two_images(&dir);
+
+    ok(
+        &session,
+        &[
+            "set",
+            path_str(&dir),
+            "--every",
+            "1m",
+            "--transition",
+            "fade",
+            "--duration-ms",
+            "200",
+        ],
+    );
+    // The first file shows before `set` returns; under contention the first
+    // 1 s step may already have advanced past it (the same race the older
+    // 1 s-step tests have), so either file proves files show.
+    let first = shows(&session)[0]["image"].clone();
+    assert!(
+        first == json!(red) || first == json!(blue),
+        "the first file shows, or the show already stepped: {first}"
+    );
+    // A step animates: it goes through a transition, not a cut. (Without
+    // the per-step stamp this never fires: the pending transition's
+    // generation matches no stamp and is dropped unread. The first file's
+    // own fade ends before `set` returns, so any fade seen is a step's.
+    // Starting one needs only the step's pixels landed, not the finish,
+    // so a loaded box still shows it.)
+    session.query_until("the step animates", |o| o[0]["transition"] == json!("fade"));
+    // The steps keep firing: the recorded choice moves on to each file in
+    // turn, then cycles.
+    let state_file = session.state_home.join("scootbg").join("default");
+    for (what, needle) in [
+        ("the rotation steps", blue.clone()),
+        ("the rotation cycles", red.clone()),
+        ("the rotation steps again", blue.clone()),
+    ] {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let text = std::fs::read_to_string(&state_file).unwrap_or_default();
+            if text.contains(&needle) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{what}: never recorded {needle}; state: {text}"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    // ... and a later step animates again.
+    session.query_until("a later step animates too", |o| {
+        o[0]["transition"] == json!("fade")
+    });
+    // Stopping frees the animation: nothing runs, and the daemon sleeps.
+    ok(&session, &["clear"]);
+    session.query_until("the transition is gone", |o| o[0]["transition"].is_null());
+    let pid = daemon.id();
+    let deadline = Instant::now() + PATIENCE;
+    let mut last = switches(pid);
+    loop {
+        std::thread::sleep(Duration::from_millis(300));
+        let now = switches(pid);
+        if now == last {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the daemon never settled");
+        last = now;
+    }
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(switches(pid), last, "the daemon woke up after the stop");
+
+    kill(&session, &mut daemon);
+}
+
+/// A slideshow whose first file cannot be shown still starts: the reply
+/// says so (rather than "nothing was changed"), `query` reports the new
+/// directory, and the show advances past the bad file at the next step.
+/// The bad file fails only its own turn: later steps still animate through
+/// the request's transition, proven the same state-file way as the
+/// transition test (a loaded box delays pixels and finishes past the
+/// 1 s steps).
+#[test]
+fn a_slideshow_with_an_undecodable_first_file_starts_and_advances() {
+    let Some(session) = Session::start_with("rotation-first-bad", 1, "") else {
+        return;
+    };
+    // Debug-shortened to 1 s, so the step past the bad first file comes at once.
+    let mut daemon = session.daemon_logged(&[("SCOOTBG_DEBUG_ROTATION_EVERY", "1")]);
+    configured(&session, 1);
+    let dir = session.runtime_dir().join("wallpapers");
+    let (red, blue) = two_images(&dir);
+    ok(&session, &["set", path_str(&dir), "--every", "1m"]);
+    // The first file shows before `set` returns; under contention the first
+    // 1 s step may already have advanced past it, so either file proves it.
+    let first = shows(&session)[0]["image"].clone();
+    assert!(
+        first == json!(red) || first == json!(blue),
+        "the first file shows, or the show already stepped: {first}"
+    );
+
+    let other = session.runtime_dir().join("elsewhere");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("00-bad.txt"), b"not an image").unwrap();
+    let good = other.join("01-good.png");
+    write_png(&good, 64, 64, [0, 0, 255]);
+    let good = path_str(&good).to_owned();
+
+    // The trial itself is the bad file, so it fails fast and deterministically,
+    // however loaded the box is: no step can overtake it.
+    let stderr = fails(
+        &session,
+        1,
+        &[
+            "set",
+            path_str(&other),
+            "--every",
+            "1m",
+            "--transition",
+            "fade",
+            "--duration-ms",
+            "200",
+        ],
+    );
+    assert!(stderr.contains("slideshow"), "{stderr}");
+    assert!(stderr.contains(path_str(&other)), "{stderr}");
+    assert!(!stderr.contains("nothing was changed"), "{stderr}");
+    // The rotation changed all the same ...
+    assert_eq!(
+        rotation(&session)["directory"],
+        json!(path_str(&other)),
+        "the slideshow started"
+    );
+    // ... and the steps keep firing past the file that cannot be shown:
+    // the recorded choice moves on to the good file, the bad one again at
+    // its turn, then cycles. (The failed trial records nothing, and the
+    // bad step's pixels never come, so no animation starts for either.)
+    let state_file = session.state_home.join("scootbg").join("default");
+    for (what, needle) in [
+        (
+            "the slideshow advances past its bad first file",
+            good.clone(),
+        ),
+        ("the bad file fails only its own turn", "00-bad".to_owned()),
+        ("the slideshow cycles past it", good.clone()),
+    ] {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let text = std::fs::read_to_string(&state_file).unwrap_or_default();
+            if text.contains(&needle) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{what}: never recorded {needle}; state: {text}"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    // ... and a good step animates: the failed steps wedged nothing.
+    session.query_until("a step past the failure animates", |o| {
+        o[0]["transition"] == json!("fade")
+    });
+
+    kill(&session, &mut daemon);
+}
+
 /// A refused new slideshow leaves the running one alone: its reply says
 /// nothing was changed, `query` still reports it, and it still advances.
 /// The refusal is forced by filling the trial queue (32 waiting trials)
@@ -385,6 +576,7 @@ fn unreadable_entries_are_refused_naming_the_cause() {
 
     let stderr = fails(&session, 1, &["set", path_str(&dir), "--every", "30m"]);
     assert!(stderr.contains("nothing was changed"), "{stderr}");
+    assert!(stderr.contains("loop"), "{stderr}");
     assert!(!stderr.contains("not a directory"), "{stderr}");
     assert_eq!(shows(&session)[0], Value::Null);
     assert_eq!(rotation(&session), Value::Null);

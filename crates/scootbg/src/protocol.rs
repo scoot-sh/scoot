@@ -115,8 +115,10 @@ pub enum Show<'a> {
     Image(ImageRequest<'a>),
     /// A slideshow from a directory: `dir`'s regular files in turn, one
     /// every `every_secs` seconds (`crate::rotation`). The first file goes
-    /// through the normal image path (decoded before it shows, refused with
-    /// why when it cannot); later ones advance the same way, with no reply.
+    /// through the normal image path (decoded before the reply; when it
+    /// cannot be shown the show still starts, said in the reply, and that
+    /// file fails its turns until the next rotation); later ones advance
+    /// the same way, with no reply.
     Slideshow(SlideshowRequest<'a>),
 }
 

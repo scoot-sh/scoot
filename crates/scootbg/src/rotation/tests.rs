@@ -125,12 +125,16 @@ fn listing_names_an_unreadable_entry_rather_than_the_directory() {
     let error = list_dir(&dir).unwrap_err();
     let detail = error.to_string();
     assert!(
-        matches!(error, ListError::Entry(_)),
+        matches!(error, ListError::Entry { .. }),
         "an entry error, not an open error: {detail}"
     );
     assert!(
         detail.contains("entry"),
         "the message names the entry: {detail}"
+    );
+    assert!(
+        detail.contains("loop"),
+        "the message names which entry: {detail}"
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }

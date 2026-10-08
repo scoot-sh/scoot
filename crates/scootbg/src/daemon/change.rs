@@ -240,8 +240,11 @@ impl Changes for Control<'_> {
                     fill: request.fill,
                     filter: request.filter,
                 };
+                // Moved out once: the refusal below and the trial's
+                // slideshow marker both own it.
+                let dir = request.dir.into_owned();
                 let next = Rotation::start(
-                    &request.dir,
+                    &dir,
                     request.every_secs,
                     request.shuffle,
                     output,
@@ -250,14 +253,15 @@ impl Changes for Control<'_> {
                     Instant::now(),
                 )
                 .map_err(|error| match error {
-                    StartError::NotDirectory => ChangeError::NotDirectory(request.dir.into_owned()),
-                    StartError::Unreadable(detail) => ChangeError::UnreadableDirectory {
-                        dir: request.dir.into_owned(),
+                    StartError::NotDirectory => ChangeError::NotDirectory(dir.clone()),
+                    StartError::Unreadable { entry, detail } => ChangeError::UnreadableDirectory {
+                        dir: dir.clone(),
+                        entry,
                         detail,
                     },
-                    StartError::Empty => ChangeError::EmptyDirectory(request.dir.into_owned()),
+                    StartError::Empty => ChangeError::EmptyDirectory(dir.clone()),
                     StartError::TooMany { seen } => ChangeError::TooManyFiles {
-                        dir: request.dir.into_owned(),
+                        dir: dir.clone(),
                         seen,
                     },
                 })?;
@@ -278,6 +282,7 @@ impl Changes for Control<'_> {
                     look,
                     transition,
                     generation,
+                    Some(dir),
                 );
                 if started.is_ok() {
                     *rotation = Some(next);
@@ -319,6 +324,7 @@ impl Changes for Control<'_> {
                     },
                     transition,
                     generation,
+                    None,
                 );
             }
         };
@@ -361,6 +367,7 @@ fn trial_image(
     look: Look,
     transition: Spec,
     generation: u64,
+    slideshow: Option<String>,
 ) -> Result<(), ChangeError> {
     let image = Arc::new(Image {
         path,
@@ -371,6 +378,7 @@ fn trial_image(
     let trial = Trial {
         conn,
         output: output.map(str::to_owned),
+        slideshow,
     };
     // Queued first: a refused trial (too many waiting) changes nothing,
     // not even the outputs' pending transitions.

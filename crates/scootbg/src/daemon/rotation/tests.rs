@@ -142,13 +142,20 @@ fn starting_names_an_unreadable_entry_rather_than_the_directory() {
     .unwrap_err();
     let message = error.to_string();
     match &error {
-        super::StartError::Unreadable(detail) => assert!(
-            !detail.is_empty(),
-            "the operating system's reason travels with it"
-        ),
+        super::StartError::Unreadable { entry, detail } => {
+            assert!(
+                !detail.is_empty(),
+                "the operating system's reason travels with it"
+            );
+            assert!(
+                entry.contains("loop"),
+                "the entry path travels with it: {message}"
+            );
+        }
         other => panic!("an unreadable-entry refusal, not {other:?}"),
     }
     assert!(message.contains("nothing was changed"), "{message}");
+    assert!(message.contains("loop"), "{message}");
     assert!(!message.contains("not a directory"), "{message}");
     std::fs::remove_dir_all(&dir).unwrap();
 }

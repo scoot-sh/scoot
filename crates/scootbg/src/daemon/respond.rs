@@ -64,8 +64,13 @@ pub enum ChangeError {
     /// A slideshow's directory is not one any more.
     NotDirectory(String),
     /// A slideshow's directory is there, but an entry in it could not be
-    /// read: the operating system's reason (permissions, a symlink loop).
-    UnreadableDirectory { dir: String, detail: String },
+    /// read: the entry's path and the operating system's reason
+    /// (permissions, a symlink loop).
+    UnreadableDirectory {
+        dir: String,
+        entry: String,
+        detail: String,
+    },
     /// A slideshow's directory holds no files.
     EmptyDirectory(String),
     /// A slideshow's directory holds more than
@@ -102,10 +107,11 @@ impl fmt::Display for Refused<'_> {
                     "{dir:?} is not a directory any more; nothing was changed"
                 )
             }
-            ChangeError::UnreadableDirectory { dir, detail } => {
+            ChangeError::UnreadableDirectory { dir, entry, detail } => {
                 write!(
                     f,
-                    "{dir:?} cannot be fully listed ({detail}); nothing was changed"
+                    "{dir:?} cannot be fully listed: cannot read the entry {entry:?} \
+                     ({detail}); nothing was changed"
                 )
             }
             ChangeError::EmptyDirectory(dir) => {

@@ -256,7 +256,11 @@ corrupt) is an error, and every output keeps what it showed. A directory
 with no files in it is an error too, as is one past the 10,000-file
 listing cap or with an entry that cannot be read, changing nothing;
 with files, the
-first shows before `set` returns, and the rest follow on the timer. An output
+first shows before `set` returns, and the rest follow on the timer, each
+step animating through `--transition` like one image's `set`. When the
+first file itself cannot be shown, the slideshow still starts (the reply
+says so, and the rotation changes): that file fails its turns like any
+file that is not an image, until the next rotation. An output
 unplugged meanwhile is left out of that wait; an output whose surface is
 not configured yet is waited for, until a round trip after scootbg made
 it (one the compositor is slower than that to configure is drawn when it

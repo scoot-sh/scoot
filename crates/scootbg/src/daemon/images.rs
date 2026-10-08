@@ -20,7 +20,9 @@
 //! A **trial** (a `set` of an image) changes nothing until it lands:
 //!
 //! - it could not be decoded: its reply is the reason, and every output
-//!   keeps what it showed;
+//!   keeps what it showed (a slideshow's first file is the exception:
+//!   the show is already armed, so the reply says it started and moves
+//!   on at the next step);
 //! - newer choices cover everything it asked for (it was superseded while
 //!   decoding): nothing changes, and its reply is `ok` once what replaced
 //!   it is on screen, as for a superseded color;
@@ -279,10 +281,20 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
     let rendered = match done {
         Ok(rendered) => rendered,
         Err(error) => {
-            let message = format!(
-                "cannot show {}: {error}; nothing was changed",
-                describe(&image)
-            );
+            // A slideshow's first file fails like any later step's: the
+            // show is already armed, so the reply says it started and
+            // moves on, rather than that nothing was changed.
+            let message = match &trial.slideshow {
+                Some(dir) => format!(
+                    "cannot show {}: {error}; the slideshow {dir:?} started and moves on \
+                     at the next step",
+                    describe(&image)
+                ),
+                None => format!(
+                    "cannot show {}: {error}; nothing was changed",
+                    describe(&image)
+                ),
+            };
             ready.push((trial.conn, Ready::Refused(message)));
             return;
         }

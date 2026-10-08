@@ -472,10 +472,14 @@ anything wrong                                                -> {"type":"error"
   usual `mode`/`fill`/`filter`/`output`/`transition`. A daemon that
   predates them ignores the unknown fields and refuses the `set` as
   targetless, loudly rather than misread. The first file answers like an
-  image `set`; later steps have no reply. `query` reports the slideshow
+  image `set` — unless it cannot be shown, which still starts the show
+  (an error saying so): that file fails its turns like any later step's
+  undecodable file, until the next rotation; later steps have no reply.
+  `query` reports the slideshow
   as a top-level `rotation` object, absent while none runs. Listing refuses
   past 10,000 files (naming the cap), and an entry that cannot be read
-  (permissions, a symlink loop) is refused naming the operating system's
+  (permissions, a symlink loop) is refused naming the entry and the
+  operating system's
   reason rather than as "not a directory". If the directory goes away
   mid-rotation the slideshow stops at the next step instead of failing
   once a minute until stopped.

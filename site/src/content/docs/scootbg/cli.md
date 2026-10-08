@@ -103,10 +103,14 @@ showing after the next `set` of the directory. `DURATION` is a number and
 `s`, `m`, `h` or `d`, such as `30m`: at least `1m`, whole minutes, at most
 `7d`. The files go sorted by name, or shuffled once with `--shuffle`;
 `--mode`, `--fill`, `--filter` and `--transition` apply to every file, as
-for one image. At most 10,000 files are listed: a larger directory is
+for one image: each step animates like one image's `set`. At most 10,000 files are listed: a larger directory is
 refused outright (exit 1, naming the cap) rather than stalling the
-daemon's loop to list it. The first file shows before `set` returns, as an image
-does; a file that is not an image fails to draw when its turn comes (as a
+daemon's loop to list it. So is a directory with an entry that cannot be
+read (exit 1, naming the entry and the operating system's reason). The first file shows before `set` returns, as an image
+does — unless the first file itself cannot be shown, which still starts
+the slideshow (exit 1 saying so, and `query` reports the new directory):
+that file fails its turns like any file that is not an image, until the
+next rotation. A file that is not an image fails to draw when its turn comes (as a
 `set` of it would, `draw_failed` in `query` saying why) until the next
 rotation. One slideshow runs at a time. A new `set`, a `clear`, or a
 changed `apply-config` stops it (an unchanged section leaves it running,
@@ -134,6 +138,19 @@ descriptor, no wakeups. With one, the daemon wakes at most once a minute.
 > follows on schedule. Diagnose with `scootbg query` (`draw_error`
 > says why, as the daemon's stderr does) and `scootbg set FILE` on the
 > file itself.
+>
+> **Symptom:** *`set` says the directory holds more than 10,000 files.*
+> That is the listing cap, refused outright (exit 1) rather than showing
+> a silent subset: what shows is exactly the directory, or nothing.
+> Diagnose with `ls -la DIR | wc -l` — split the directory or point the
+> slideshow at a smaller one.
+>
+> **Symptom:** *`set` says it cannot read an entry in the directory.*
+> The directory lists, but one entry does not (a dangling symlink, a
+> symlink loop, a permission): the reply (exit 1) names the entry and the
+> operating system's reason, and nothing changes. Diagnose with
+> `find DIR -xtype l` — dangling links — and `ls -la DIR` on the entry it
+> names.
 >
 > **Symptom:** *the slideshow stopped after the directory moved.*
 > That is the design above, not a crash: the daemon says so on stderr

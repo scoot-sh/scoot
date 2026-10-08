@@ -34,7 +34,11 @@ fn target(output: OutputId, width: u32) -> Target {
 }
 
 fn all(conn: u32) -> Trial<u32> {
-    Trial { conn, output: None }
+    Trial {
+        conn,
+        output: None,
+        slideshow: None,
+    }
 }
 
 /// A trial starts, drawing for nothing (it only validates the file).
@@ -75,6 +79,7 @@ fn superseded_trials_are_answered_without_running() {
         Trial {
             conn: 20,
             output: Some("DP-1".into()),
+            slideshow: None,
         },
     )
     .unwrap();
@@ -100,6 +105,7 @@ fn a_sweep_passes_each_trials_output() {
         Trial {
             conn: 1,
             output: Some("A".into()),
+            slideshow: None,
         },
     )
     .unwrap();
@@ -108,6 +114,7 @@ fn a_sweep_passes_each_trials_output() {
         Trial {
             conn: 2,
             output: Some("B".into()),
+            slideshow: None,
         },
     )
     .unwrap();

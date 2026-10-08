@@ -113,8 +113,13 @@ pub enum ListError {
     /// never one.
     Open(std::io::Error),
     /// Reading one entry, or stating it, failed (permissions, a symlink
-    /// loop): the directory is there, the entry is not readable.
-    Entry(std::io::Error),
+    /// loop): the directory is there, the entry is not readable. Holds
+    /// the entry's path (the directory itself when the entry could not
+    /// even be read) and the operating system's reason.
+    Entry {
+        path: std::path::PathBuf,
+        error: std::io::Error,
+    },
     /// More than [`MAX_LISTED`] files: refused rather than truncated, so
     /// what shows is exactly the directory, or nothing. Holds how many
     /// files were seen (one past the cap).
@@ -125,7 +130,9 @@ impl std::fmt::Display for ListError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Open(error) => write!(f, "cannot list the directory: {error}"),
-            Self::Entry(error) => write!(f, "cannot read an entry in the directory: {error}"),
+            Self::Entry { path, error } => {
+                write!(f, "cannot read the entry {path:?}: {error}")
+            }
             Self::TooMany { seen } => write!(
                 f,
                 "the directory holds more than {MAX_LISTED} files ({seen} seen)"
@@ -157,12 +164,16 @@ pub fn list_dir(dir: &std::path::Path) -> Result<Listed, ListError> {
     let mut files = Vec::new();
     let mut skipped_non_utf8 = 0;
     for entry in entries {
-        let entry = entry.map_err(ListError::Entry)?;
+        let entry = entry.map_err(|error| ListError::Entry {
+            path: dir.to_path_buf(),
+            error,
+        })?;
         // Following links (`std::fs::metadata`, not `DirEntry::metadata`,
         // which stats the link itself): a symlinked image is listed, and
         // an unreadable target (a loop, a dangling link, a denied
-        // directory) is an entry error, not a silent skip.
-        let meta = std::fs::metadata(entry.path()).map_err(ListError::Entry)?;
+        // directory) is an entry error naming the entry, not a silent skip.
+        let path = entry.path();
+        let meta = std::fs::metadata(&path).map_err(|error| ListError::Entry { path, error })?;
         if !meta.is_file() {
             continue;
         }
