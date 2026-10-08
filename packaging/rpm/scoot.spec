@@ -94,5 +94,5 @@ cd source
 %doc source/config.toml.example
 
 %changelog
-* Wed Oct 08 2026 scoot-sh <packages@scoot.sh> - 0.1.0-1
+* Thu Oct 08 2026 scoot-sh <packages@scoot.sh> - 0.1.0-1
 - First RPM: compositor plus greeter launcher, from the vendored tarball.

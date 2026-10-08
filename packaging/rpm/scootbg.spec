@@ -49,5 +49,5 @@ cd source
 %license source/LICENSE source/NOTICE source/THIRD-PARTY-LICENSES
 
 %changelog
-* Wed Oct 08 2026 scoot-sh <packages@scoot.sh> - 0.1.0-1
+* Thu Oct 08 2026 scoot-sh <packages@scoot.sh> - 0.1.0-1
 - First RPM: wallpaper daemon, from the vendored tarball.

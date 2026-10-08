@@ -67,5 +67,5 @@ cd source
 %doc packaging/rpm/bar.toml.example
 
 %changelog
-* Wed Oct 08 2026 scoot-sh <packages@scoot.sh> - 0.1.0-1
+* Thu Oct 08 2026 scoot-sh <packages@scoot.sh> - 0.1.0-1
 - First RPM: status bar plus user unit, from the vendored tarball.
