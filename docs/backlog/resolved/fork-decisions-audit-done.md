@@ -1,9 +1,10 @@
 ---
 title: "Audit: did we reach for a fork before exhausting scoot-side options? Check each fork's decision record"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-07"
 ---
 
 # Audit the fork decisions
@@ -71,3 +72,29 @@ verify-against-fork rule) counted at the time?
 
 Every carried commit group has a classified record and the gaps are queued in the
 investigation (the process rule is already in place).
+
+## Resolution (2026-10-08, this PR)
+
+Audited every carried commit group against the CLAUDE.md rule, verifying each
+claimed hard constraint against the pinned fork source (rev `fdf424d`, checked
+both in the local cargo checkout and the Asahi M2's checkout of the same rev).
+No decision was found wrong, so no wrong-decision ticket was filed and no code
+changed: docs-only.
+
+- **Class 1, record already sufficient:** syncobj `Drop` (three alternatives
+  in `syncobj-handle-leak-done.md`), compositor-owned dma-buf scanout and
+  seat-loss error (alternatives inline in `docs/forks.md`), wayland-rs
+  fd-queue cap (extensive evidence in `wayland-backend-fd-queue-done.md`).
+- **Class 2/3 gaps, re-derived to 4 against the pinned source, evidence added
+  to the new "Decision audit" section in `docs/forks.md`:** the thirteen
+  XWayland selection commits plus the XWM hooks, the seven XDND commits, the
+  pixman `Repeat::Pad` fix, the buffer-scale fix, and the XSETTINGS flush.
+  In each case the scoot-side route fails on state private to the dependency
+  (the XWM's connection, the backend's fd queue, `pub(crate)` renderer
+  state, the grab's internal enter ordering, the scaler call inside
+  Smithay's frame), and the in-tree-copy alternative costs hundreds to
+  thousands of lines against small carried diffs.
+- **Queueing:** every re-derived group is already a priority route in
+  [fork-changes-in-scoot](fork-changes-in-scoot.md), which was filed from the
+  same starting notes and covers all ten groups; nothing was added there, and
+  that in-flight investigation file was left otherwise untouched.
