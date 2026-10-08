@@ -171,6 +171,7 @@ in
     ./power-home.nix
     ./displays-home.nix
     ./apps-home.nix
+    ./inputmethod-home.nix
     ./keys-home.nix
     ./theme-home.nix
   ];
@@ -453,6 +454,7 @@ in
         || cfg.desktop.nightlight.enable
         || cfg.desktop.displays.enable
         || cfg.desktop.automount.enable
+        || cfg.desktop.inputMethod.enable
       )
       {
         xdg.configFile."systemd/user/scoot-session.target".source =

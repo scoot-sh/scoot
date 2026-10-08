@@ -65,6 +65,8 @@ follow the palette:
 | `~/.config/starship.toml` | the example's own file | next prompt |
 | `~/.config/helix/config.toml` + `themes/<look>.toml` | the example's own files | Helix on restart |
 | `~/.config/btop/btop.conf` + `themes/<look>.theme` | the example's own files | btop on restart |
+| `~/.local/share/fcitx5/themes/scoot-look/theme.conf` (needs `inputMethod.enable`) | a classic-UI theme generated from the look's palette (accent selection, background surfaces) | fcitx5 on restart (the unit restarts into a new theme) |
+| `~/.config/fcitx5/conf/classicui.conf` (needs `inputMethod.enable`) | `Theme=scoot-look` (plus `DarkTheme=scoot-look` for the portal dark path) | fcitx5 on restart |
 | ReGreet (NixOS, needs `greeter.enable`) | the session wallpaper behind the login card, the dark setting, the look's CSS and proportional sans | next login |
 
 `radial-burst` ships no shell, editor or monitor files, so those

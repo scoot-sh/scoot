@@ -578,6 +578,27 @@ in
         };
       };
 
+      # The input-method engine's package: the shape is in
+      # `desktop.nix` (shared with the home-manager side) and the
+      # user unit that runs it is that side's
+      # (`inputmethod-home.nix`); this side installs the engine and
+      # its `addons` system-wide. The same packages as there, so
+      # either side alone names the same engine. Merged here for the
+      # same one-declaration reason as above. Linux-only: off Linux
+      # it defaults to null, which the assertion below refuses loudly.
+      inputMethod = desktop.options.inputMethod // {
+        package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fcitx5 or null else null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fcitx5 or null else null";
+          description = ''
+            The input-method engine to install system-wide (fcitx5,
+            the same default as the home-manager side). Null installs
+            nothing. Linux-only: null off Linux.
+          '';
+        };
+      };
+
       # The privilege prompt's agent package: the shape is in
       # `desktop.nix` (shared with the home-manager side) and the user
       # unit that runs it is that side's (`auth-home.nix`); this side
@@ -1618,6 +1639,28 @@ in
       environment.systemPackages = lib.optional (
         cfg.desktop.automount.package != null
       ) cfg.desktop.automount.package;
+    })
+    # The input-method engine's system half: the engine and its
+    # `addons` on PATH. The unit, the toolkit variables and the
+    # candidate theme are the home-manager side's
+    # (`inputmethod-home.nix`): without it the engine sits ready for
+    # a hand-written setup, the way a `[wallpaper]` finds scootbg on
+    # PATH without the home-manager side.
+    (lib.mkIf cfg.desktop.inputMethod.enable {
+      assertions = [
+        {
+          assertion = cfg.desktop.inputMethod.package != null;
+          message = ''
+            programs.scoot.desktop.inputMethod.enable is set but
+            programs.scoot.desktop.inputMethod.package is null: set it
+            explicitly (apply the overlay, or point at an fcitx5).
+          '';
+        }
+      ];
+
+      environment.systemPackages =
+        lib.optional (cfg.desktop.inputMethod.package != null) cfg.desktop.inputMethod.package
+        ++ cfg.desktop.inputMethod.addons;
     })
     # The night light's system half: its tool on PATH. The unit is the
     # home-manager side's (`nightlight-home.nix`): without it the tool
