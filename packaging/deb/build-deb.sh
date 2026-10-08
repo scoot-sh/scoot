@@ -133,12 +133,19 @@ for pkg in scoot scootbg scootbar; do
     # Derived, not remembered: shlibdeps versions, allow-list checked.
     # Only the binary: scoot-session is a shell script, and passing it
     # would only add a warning (it stays covered by inspection -- it
-    # execs the compositor or degrades to it).
+    # execs the compositor or degrades to it). dpkg-shlibdeps insists
+    # on reading debian/control, so it gets a stub in the stage (real
+    # metadata ships only in DEBIAN/control); the stub is removed
+    # before dpkg-deb runs, never packaged.
+    mkdir -p "$STAGE/debian"
+    printf 'Source: %s\n\nPackage: %s\nArchitecture: %s\nDescription: shlibdeps stub\n' \
+        "$pkg" "$pkg" "$ARCH" >"$STAGE/debian/control"
     if ! SHLIBS=$(cd "$STAGE" && dpkg-shlibdeps -O "usr/bin/$pkg" 2>"$OUT/shlibdeps-$pkg.log"); then
         echo "build-deb.sh: dpkg-shlibdeps failed for $pkg (log below)" >&2
         cat "$OUT/shlibdeps-$pkg.log" >&2
         exit 1
     fi
+    rm -rf "$STAGE/debian"
     DEPENDS=$(python3 "$META" check-shlibdeps --package "$pkg" "$SHLIBS")
     echo "--- $pkg: Depends: $DEPENDS"
 
