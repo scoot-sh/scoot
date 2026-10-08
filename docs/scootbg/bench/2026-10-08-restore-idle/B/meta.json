@@ -1,0 +1,256 @@
+{
+ "date": "2026-10-08 10:43:03 EDT",
+ "machine": {
+  "kernel": "7.1.13",
+  "cpus": 8,
+  "memory_kb": 7664928,
+  "loadavg_start": [
+   0.3173828125,
+   0.78662109375,
+   0.58837890625
+  ],
+  "loadavg_end": [
+   0.26806640625,
+   0.76025390625,
+   0.58154296875
+  ]
+ },
+ "compositor": "scoot",
+ "compositor_version": "scoot 0.1.0 (ipc protocol 10)",
+ "scoot_binary": {
+  "path": "/home/steve/fx/bgrestore-d88213b6/bins-B/scoot",
+  "realpath": "/home/steve/fx/bgrestore-d88213b6/bins-B/scoot",
+  "sha256": "88bcfd54ecc0e328c1ad67c2786c118f5e0ee60638325c6920bf3694e9aa89b0"
+ },
+ "compositor_binaries": {
+  "scoot": {
+   "path": "/home/steve/fx/bgrestore-d88213b6/bins-B/scoot",
+   "realpath": "/home/steve/fx/bgrestore-d88213b6/bins-B/scoot",
+   "sha256": "88bcfd54ecc0e328c1ad67c2786c118f5e0ee60638325c6920bf3694e9aa89b0"
+  }
+ },
+ "harness": {
+  "commit": "",
+  "status": "",
+  "files": {
+   "bench.py": "00cf373a54795a39bafeba532b156232d139048ba89d5b0e92245ba3893448d5",
+   "commits.py": "b35531476f5f8140c02b123ec6691ca03dbd1286a5fc3168bdbe9fa69d07efc6",
+   "daemons.py": "5cc32191899d14430059cef162f5c67f0b18b5ad3c381ba05045a84ba056c239",
+   "procs.py": "f150c2a75ad4d0a5719e9fcb5c59d818045a587ee1bb80117ea17aa59be9d68f",
+   "report.py": "7abe381e3399327419f274c401815d3a808adeadbf92ad25a49ae148a7b0d05c",
+   "runner.py": "1a628b930f009ff9da18154e7ab6d1bacc47b16cf066796584bf61563cbf7e47",
+   "scenarios.py": "5bf30d3d20d0bd44ee768a8b06f9d675abe3db0edb6469f2a65d7f8bad5074bc",
+   "session.py": "977a1c3b779e0424b3f8f62ddbc4ccbbdfa6cb7bf46dda81dc49f9376cd47f83",
+   "size.py": "c889f4d402961e71300e710f213879baf481ed2f5db43d65dd27866133a69e51",
+   "test_bench.py": "c29732442de1ac3941da74c2e77adbf660615af00c6bef44c39e920bbdfb7486"
+  }
+ },
+ "commit": "",
+ "tree_dirty": false,
+ "mesa": {
+  "store": "/nix/store/4xnk693i3b3rm7fgxkyjkga4qcwyqr47-mesa-26.2.2",
+  "version": "26.2.2"
+ },
+ "rounds": 20,
+ "idle_secs": 60.0,
+ "window_secs": 60.0,
+ "daemons": {
+  "scootbg": {
+   "version": "scootbg 0.1.0 (protocol 1)",
+   "binary": "/home/steve/fx/bgrestore-d88213b6/bins-B/scootbg",
+   "sha256": "1e83aeed114da7b728b710fb62079cbf977dcdba52b2cdc1e7096f5a14e31ae2",
+   "store": null,
+   "needs_egl": false,
+   "informational": false,
+   "ran": true,
+   "exe": {
+    "path": "/home/steve/fx/bgrestore-d88213b6/bins-B/scootbg",
+    "realpath": "/home/steve/fx/bgrestore-d88213b6/bins-B/scootbg",
+    "sha256": "1e83aeed114da7b728b710fb62079cbf977dcdba52b2cdc1e7096f5a14e31ae2"
+   },
+   "static": {
+    "binaries_bytes": 1774368,
+    "ldd_libraries_bytes": 133096,
+    "size_bytes": 1907464,
+    "runtime_only_bytes": 0,
+    "files": [
+     [
+      "/home/steve/fx/bgrestore-d88213b6/bins-B/scootbg",
+      1774368,
+      "binary"
+     ],
+     [
+      "/nix/store/w7dbq2jaa5r43k751jdfkfnwbas10vr8-gcc-15.3.0-libgcc/lib/libgcc_s.so.1",
+      133096,
+      "ldd"
+     ]
+    ],
+    "package_bytes": 1774368,
+    "closure_bytes": 1907464,
+    "closure_paths": [],
+    "disk_bytes": 1907464
+   }
+  },
+  "awww": {
+   "version": "0.12.1",
+   "store": "/nix/store/64fk4jgc5ql8rqkrasmfsr45pv2m9ld4-awww-0.12.1",
+   "nix_attr": "awww",
+   "binaries": [
+    {
+     "path": "/nix/store/64fk4jgc5ql8rqkrasmfsr45pv2m9ld4-awww-0.12.1/bin/.awww-daemon-wrapped",
+     "realpath": "/nix/store/64fk4jgc5ql8rqkrasmfsr45pv2m9ld4-awww-0.12.1/bin/.awww-daemon-wrapped",
+     "sha256": "054da2c143c5aaaf7ce142ce6ec06cd5d7c4517e17defe60903b1a5162648203"
+    },
+    {
+     "path": "/nix/store/64fk4jgc5ql8rqkrasmfsr45pv2m9ld4-awww-0.12.1/bin/.awww-wrapped",
+     "realpath": "/nix/store/64fk4jgc5ql8rqkrasmfsr45pv2m9ld4-awww-0.12.1/bin/.awww-wrapped",
+     "sha256": "0b6c9dd0f4acd954fbee9a5bccff7af979a0e26c867aa2f8cf100eeee81f1797"
+    }
+   ],
+   "needs_egl": false,
+   "informational": false,
+   "ran": true,
+   "exe": {
+    "path": "/nix/store/64fk4jgc5ql8rqkrasmfsr45pv2m9ld4-awww-0.12.1/bin/.awww-daemon-wrapped",
+    "realpath": "/nix/store/64fk4jgc5ql8rqkrasmfsr45pv2m9ld4-awww-0.12.1/bin/.awww-daemon-wrapped",
+    "sha256": "054da2c143c5aaaf7ce142ce6ec06cd5d7c4517e17defe60903b1a5162648203"
+   },
+   "static": {
+    "binaries_bytes": 6958640,
+    "ldd_libraries_bytes": 462728,
+    "size_bytes": 7421368,
+    "runtime_only_bytes": 0,
+    "files": [
+     [
+      "/nix/store/64fk4jgc5ql8rqkrasmfsr45pv2m9ld4-awww-0.12.1/bin/.awww-daemon-wrapped",
+      463960,
+      "binary"
+     ],
+     [
+      "/nix/store/64fk4jgc5ql8rqkrasmfsr45pv2m9ld4-awww-0.12.1/bin/.awww-wrapped",
+      6494680,
+      "binary"
+     ],
+     [
+      "/nix/store/372xr0cffzp4jk2i44wf5j1w7q9xlqp0-lz4-1.10.0-lib/lib/liblz4.so.1.10.0",
+      329632,
+      "ldd"
+     ],
+     [
+      "/nix/store/w7dbq2jaa5r43k751jdfkfnwbas10vr8-gcc-15.3.0-libgcc/lib/libgcc_s.so.1",
+      133096,
+      "ldd"
+     ]
+    ],
+    "package_bytes": 8331341,
+    "closure_bytes": 35132088,
+    "closure_paths": [
+     [
+      "/nix/store/372xr0cffzp4jk2i44wf5j1w7q9xlqp0-lz4-1.10.0-lib",
+      341496
+     ],
+     [
+      "/nix/store/60afk5jlqmx8xh5pr76j7j8vdrhwzrmv-gcc-15.3.0-lib",
+      9840560
+     ],
+     [
+      "/nix/store/64fk4jgc5ql8rqkrasmfsr45pv2m9ld4-awww-0.12.1",
+      8336400
+     ],
+     [
+      "/nix/store/8gv5adkfjh3fllh3p54y1zislnc5h5qv-libxcrypt-4.5.2",
+      159224
+     ],
+     [
+      "/nix/store/m38xlx8088r9zkzm9h2dnn627yiiidm8-procps-4.0.7",
+      3131088
+     ],
+     [
+      "/nix/store/n4mpywjcl0ldl3q1g2i6q9dply86b4sg-systemd-minimal-libs-261.2",
+      4740384
+     ],
+     [
+      "/nix/store/pzdryh10isj2rhiz4jindd2388l6397p-util-linux-minimal-2.42.2-login",
+      154816
+     ],
+     [
+      "/nix/store/s2a5cmk71qpzk4lj4dcfzcz1qk62fnkq-ncurses-6.6",
+      4254504
+     ],
+     [
+      "/nix/store/w7dbq2jaa5r43k751jdfkfnwbas10vr8-gcc-15.3.0-libgcc",
+      153832
+     ],
+     [
+      "/nix/store/z3x2qxagi8wqfx9n59frhdyml7njr9z2-bash-5.3p15",
+      4019784
+     ]
+    ],
+    "disk_bytes": 35132088
+   }
+  }
+ },
+ "supports": {
+  "scootbg": {
+   "startup:image": true,
+   "startup:color": true,
+   "set:image": true,
+   "set:color": true,
+   "restore:image": true,
+   "restore:color": true,
+   "idle:image": true,
+   "idle:color": true
+  },
+  "awww": {
+   "startup:image": true,
+   "startup:color": true,
+   "set:image": true,
+   "set:color": true,
+   "restore:image": true,
+   "restore:color": false,
+   "idle:image": true,
+   "idle:color": true
+  }
+ },
+ "images": {
+  "jpeg": {
+   "path": "/home/steve/fx/bgrestore-d88213b6/images/big.jpg",
+   "bytes": 8851735,
+   "sha256": "301279ffb3d4c8e39aecac039e596eb4795829293e47670468247bc747f027a0",
+   "recipe": "magick -seed 1 -size 6000x4000 plasma:fractal -attenuate 0.5 +noise Gaussian -quality 92 -sampling-factor 4:2:0",
+   "expected_sha256": "301279ffb3d4c8e39aecac039e596eb4795829293e47670468247bc747f027a0"
+  },
+  "first": {
+   "path": "/home/steve/fx/bgrestore-d88213b6/images/first.png",
+   "what": "64x64 solid #c83232 PNG, the wallpaper a live change replaces"
+  }
+ },
+ "compositor_exe": {
+  "path": "/home/steve/fx/bgrestore-d88213b6/bins-B/scoot",
+  "realpath": "/home/steve/fx/bgrestore-d88213b6/bins-B/scoot",
+  "sha256": "88bcfd54ecc0e328c1ad67c2786c118f5e0ee60638325c6920bf3694e9aa89b0"
+ },
+ "note": "20x `bench.py run --rounds 1 --only restore --daemons scootbg,awww`, interleaved base/A/B round-robin in p1 (order base,A,B) and p2 (order B,A,base); 1-min load <0.30 before every round; merged runs.jsonl",
+ "sources": [
+  "out-p1-B-r01",
+  "out-p1-B-r02",
+  "out-p1-B-r03",
+  "out-p1-B-r04",
+  "out-p1-B-r05",
+  "out-p1-B-r06",
+  "out-p1-B-r07",
+  "out-p1-B-r08",
+  "out-p1-B-r09",
+  "out-p1-B-r10",
+  "out-p2-B-r01",
+  "out-p2-B-r02",
+  "out-p2-B-r03",
+  "out-p2-B-r04",
+  "out-p2-B-r05",
+  "out-p2-B-r06",
+  "out-p2-B-r07",
+  "out-p2-B-r08",
+  "out-p2-B-r09",
+  "out-p2-B-r10"
+ ]
+}
