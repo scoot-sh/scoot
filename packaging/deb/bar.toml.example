@@ -1,0 +1,10 @@
+# A starting scootbar config. Copy it to ~/.config/scoot/bar.toml and
+# check it with `scootbar daemon --check` (prints `ok`). Every option is
+# documented on the site (https://www.scoot.sh/scootbar/configure/); the
+# bar needs a font to draw text, and without `--font` it uses the first
+# of these that loads: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+# on Debian and Ubuntu (the `fonts-dejavu-core` package), or give one
+# with `--font PATH`.
+left = ["workspaces"]
+center = ["clock"]
+right = ["window-title"]
