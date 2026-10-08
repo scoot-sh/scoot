@@ -5,7 +5,7 @@
 
 use std::ffi::OsStr;
 
-use super::conn::{bus_path_for, system_bus_path_for};
+use super::conn::{bus_addr_for, bus_path_for, system_bus_path_for};
 use super::proto::{
     Kind, Message, Writer, check_body_signature, check_interface, check_member, check_name,
     check_path, check_signature, frame_at,
@@ -45,6 +45,60 @@ fn the_bus_address_names_a_path_or_is_refused() {
     // Not set, or empty: the runtime default.
     for address in [None, Some(OsStr::new(""))] {
         let path = bus_path_for(address).unwrap();
+        assert!(path.ends_with("bus"), "{}", path.display());
+        assert!(path.is_absolute());
+    }
+}
+
+#[test]
+fn the_session_bus_address_names_a_path_or_an_abstract_name() {
+    use super::conn::BusAddr;
+    let addr = |text| bus_addr_for(Some(OsStr::new(text)));
+    assert_eq!(
+        addr("unix:path=/run/user/1000/bus"),
+        Ok(BusAddr::Path("/run/user/1000/bus".into()))
+    );
+    assert_eq!(
+        addr("unix:path=/sock,guid=abc;unix:path=/other"),
+        Ok(BusAddr::Path("/sock".into()))
+    );
+    // A pure abstract address is dialled, escapes decoded as on a path.
+    assert_eq!(
+        addr("unix:abstract=/tmp/dbus-X,guid=abc"),
+        Ok(BusAddr::Abstract(b"/tmp/dbus-X".to_vec()))
+    );
+    assert_eq!(
+        addr("unix:abstract=/tmp/a%20b%2Fc"),
+        Ok(BusAddr::Abstract(b"/tmp/a b/c".to_vec()))
+    );
+    // A path wins when the address names both (the rule before abstract
+    // names were dialled: the filesystem bus the address also names is
+    // the one reached).
+    assert_eq!(
+        addr("unix:abstract=/tmp/dbus-X;unix:path=/second"),
+        Ok(BusAddr::Path("/second".into()))
+    );
+    assert_eq!(
+        addr("unix:path=/first;unix:abstract=/tmp/dbus-X"),
+        Ok(BusAddr::Path("/first".into()))
+    );
+    // Truly undialable transports are refused, never replaced by the
+    // default bus; so are empty and NUL-holding abstract names.
+    for address in [
+        "autolaunch:",
+        "tcp:host=localhost,port=1",
+        "unix:path=",
+        "unix:abstract=",
+        "unix:abstract=a%00b",
+        "garbage",
+    ] {
+        assert_eq!(addr(address), Err(()), "{address}");
+    }
+    // Not set, or empty: the runtime default, a path.
+    for address in [None, Some(OsStr::new(""))] {
+        let BusAddr::Path(path) = bus_addr_for(address).unwrap() else {
+            panic!("the default is a path");
+        };
         assert!(path.ends_with("bus"), "{}", path.display());
         assert!(path.is_absolute());
     }
@@ -355,6 +409,20 @@ fn setup_on_a_scripted_daemon_names_us() {
     let (conn, _daemon) = connected();
     assert_eq!(conn.unique(), ":1.7");
     assert!(!conn.dead());
+}
+
+/// An abstract bus is dialled by name: a real `dbus-daemon` on an
+/// abstract socket answers the set-up like one on a path.
+#[test]
+fn an_abstract_bus_is_dialled_by_name() {
+    let Some(daemon) = super::testdaemon::Daemon::spawn_abstract() else {
+        return;
+    };
+    let name = daemon.abstract_name().expect("an abstract test name");
+    let conn = conn::connect_abstract(name.as_bytes()).expect("dials the abstract bus");
+    assert!(conn.unique().starts_with(":1."), "{}", conn.unique());
+    assert!(!conn.dead());
+    drop(daemon);
 }
 
 /// A bus that accepts and never answers (a stopped daemon) costs the

@@ -20,7 +20,9 @@
 //!
 //! ## States, like the tray's
 //!
-//! `Waiting` owns an inotify fd on the bus socket's directory and shows
+//! `Waiting` owns an inotify fd on the bus socket's directory for a
+//! filesystem path, or the retry timer alone for an abstract bus
+//! address, and shows
 //! nothing; `Live` owns the connection. A dead connection drops back to
 //! waiting with nothing shown and dials once more at once, a bus that
 //! keeps dropping the bar is left alone for a while, and a machine with no
@@ -172,12 +174,13 @@ impl Default for Settings {
 }
 
 pub fn init(settings: &super::Settings) -> Init {
-    let addr = match conn::bus_path() {
-        Ok(path) => Addr::Path(path),
+    let addr = match conn::bus_addr() {
+        Ok(conn::BusAddr::Path(path)) => Addr::Path(path),
+        Ok(conn::BusAddr::Abstract(name)) => Addr::Abstract(name),
         Err(()) => {
             crate::print::warn(format_args!(
-                "scootbar: media: DBUS_SESSION_BUS_ADDRESS names no filesystem path \
-                 (abstract and other transports are not dialled); no media"
+                "scootbar: media: DBUS_SESSION_BUS_ADDRESS names no dialable transport \
+                 (tcp and autolaunch are not dialled); no media"
             ));
             Addr::Unusable
         }

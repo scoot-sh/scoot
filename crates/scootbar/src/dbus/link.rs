@@ -3,9 +3,13 @@
 //! moved onto this).
 //!
 //! Two states. **Waiting** owns an inotify fd on the bus socket's
-//! directory (and, only after the bus kept dropping the bar, a one-shot
-//! retry timer) and holds nothing else: a machine with no session bus
-//! costs one descriptor and no wakeups. **Live** owns the connection, set
+//! directory for a filesystem path (and, only after the bus kept
+//! dropping the bar, a one-shot retry timer), or the retry timer alone
+//! for an abstract bus, which has no directory to watch: an abstract
+//! bus is polled on that timer, never watched. Either way it holds
+//! nothing else: a machine with no session bus costs one descriptor
+//! and, for an abstract address, one wakeup per retry. **Live** owns the
+//! connection, set
 //! up by the consumer's `start` into its own state `S`; a dead connection
 //! drops `S` whole (a bus that went away takes every pending call and
 //! every name the consumer tracked with it) and dials once more at once,
@@ -62,6 +66,9 @@ pub trait Session {
 pub enum Addr {
     /// The socket's filesystem path.
     Path(PathBuf),
+    /// The socket's Linux abstract-namespace name (without the leading
+    /// NUL the kernel adds).
+    Abstract(Vec<u8>),
     /// The bus's address names nothing this client dials: never
     /// connects, shows nothing, holds no descriptor.
     Unusable,
@@ -70,11 +77,22 @@ pub enum Addr {
     Stream(UnixStream),
 }
 
+/// Where the link dials: a filesystem path (waited on with inotify) or
+/// an abstract name (polled on the retry timer, which has no directory
+/// to watch).
+#[derive(Debug)]
+enum Target {
+    Path(PathBuf),
+    Abstract(Vec<u8>),
+}
+
 enum Bus<S> {
     Waiting {
-        /// The directory watch, when it could be armed.
+        /// The directory watch, when it could be armed (a filesystem
+        /// path only: an abstract bus has none).
         notify: Option<OwnedFd>,
-        /// Armed only after the bus kept dropping us.
+        /// Armed after the bus kept dropping us, and for the whole wait
+        /// on an abstract bus.
         retry: Option<OwnedFd>,
     },
     Live(Box<S>),
@@ -86,7 +104,8 @@ pub struct Link<S: Session> {
     who: &'static str,
     /// For the same lines: `session bus`, or `system bus` for BlueZ.
     bus_name: &'static str,
-    path: PathBuf,
+    /// Where the bus is dialled, if anywhere.
+    target: Option<Target>,
     bus: Bus<S>,
     /// Builds the session on a fresh connection.
     start: fn(Conn) -> S,
@@ -113,15 +132,18 @@ impl<S: Session> Link<S> {
         addr: Addr,
         start: fn(Conn) -> S,
     ) -> Self {
-        let (path, stream, dial): (_, Option<UnixStream>, _) = match addr {
-            Addr::Path(path) => (path, None, true),
-            Addr::Unusable => (PathBuf::new(), None, false),
+        let (target, stream, dial): (_, Option<UnixStream>, _) = match addr {
+            Addr::Path(path) => (Some(Target::Path(path)), None, true),
+            Addr::Abstract(name) => (Some(Target::Abstract(name)), None, true),
+            Addr::Unusable => (None, None, false),
             #[cfg(test)]
             // No path to redial: a stream the tests hand over is the only
             // bus there is, and a real session bus on the machine running
             // them must not be mistaken for it.
             Addr::Stream(stream) => (
-                PathBuf::from("/nonexistent/scootbar-test-bus"),
+                Some(Target::Path(PathBuf::from(
+                    "/nonexistent/scootbar-test-bus",
+                ))),
                 Some(stream),
                 true,
             ),
@@ -129,7 +151,7 @@ impl<S: Session> Link<S> {
         let mut link = Self {
             who,
             bus_name,
-            path,
+            target,
             bus: Bus::Waiting {
                 notify: None,
                 retry: None,
@@ -176,7 +198,8 @@ impl<S: Session> Link<S> {
     /// live (with `OUT` only while a write waits or staged messages wait
     /// their turn, so the poll returns at once and the work goes on a wake
     /// at a time), the directory watch and the retry timer while waiting.
-    /// No other timer, ever: an idle link wakes nothing.
+    /// No other timer, ever: an idle link on a filesystem path wakes
+    /// nothing, and one on an abstract address wakes once per retry.
     pub fn watch<'fd>(&'fd self, add: &mut dyn FnMut(BorrowedFd<'fd>, PollFlags)) {
         match &self.bus {
             Bus::Live(live) => {
@@ -259,35 +282,50 @@ impl<S: Session> Link<S> {
         changed
     }
 
-    /// Waits on the bus socket's directory: the socket's own directory
-    /// when there is one, else the runtime directory. A watch that cannot
-    /// be armed is nothing polled: a reload starts over (the volume
-    /// module's rule).
+    /// Waits on the bus: for a filesystem path, on the socket's
+    /// directory (the socket's own directory when there is one, else the
+    /// runtime directory); for an abstract name, on the retry timer
+    /// alone, since an abstract socket has no directory to watch. A
+    /// watch that cannot be armed is nothing polled: a reload starts
+    /// over (the volume module's rule).
     fn wait(&mut self) {
-        let dir = self
-            .path
-            .parent()
-            .filter(|parent| parent.is_dir())
-            .map(Path::to_path_buf)
-            .unwrap_or_else(crate::control::paths::runtime_dir);
-        let notify = rustix::fs::inotify::init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK)
-            .ok()
-            .and_then(|fd| {
-                rustix::fs::inotify::add_watch(
-                    &fd,
-                    &dir,
-                    WatchFlags::CREATE
-                        | WatchFlags::MOVED_TO
-                        | WatchFlags::DELETE_SELF
-                        | WatchFlags::MOVE_SELF,
-                )
-                .ok()
-                .map(|_| fd)
-            });
-        self.bus = Bus::Waiting {
-            notify,
-            retry: None,
+        let waiting = match &self.target {
+            Some(Target::Abstract(_)) => Bus::Waiting {
+                notify: None,
+                retry: Self::retry_timer(),
+            },
+            Some(Target::Path(path)) => {
+                let dir = path
+                    .parent()
+                    .filter(|parent| parent.is_dir())
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(crate::control::paths::runtime_dir);
+                let notify =
+                    rustix::fs::inotify::init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK)
+                        .ok()
+                        .and_then(|fd| {
+                            rustix::fs::inotify::add_watch(
+                                &fd,
+                                &dir,
+                                WatchFlags::CREATE
+                                    | WatchFlags::MOVED_TO
+                                    | WatchFlags::DELETE_SELF
+                                    | WatchFlags::MOVE_SELF,
+                            )
+                            .ok()
+                            .map(|_| fd)
+                        });
+                Bus::Waiting {
+                    notify,
+                    retry: None,
+                }
+            }
+            None => Bus::Waiting {
+                notify: None,
+                retry: None,
+            },
         };
+        self.bus = waiting;
     }
 
     /// Drops the session (what it held is gone with the bus), then dials
@@ -339,7 +377,12 @@ impl<S: Session> Link<S> {
     /// Dials the bus; a failure waits, said on stderr so an empty module
     /// names its reason.
     fn connect(&mut self) {
-        match conn::connect(&self.path) {
+        let result = match &self.target {
+            Some(Target::Path(path)) => conn::connect(path),
+            Some(Target::Abstract(name)) => conn::connect_abstract(name),
+            None => return,
+        };
+        match result {
             Ok(conn) => self.adopt(conn),
             Err(error) => {
                 crate::print::warn(format_args!(
@@ -356,16 +399,24 @@ impl<S: Session> Link<S> {
         self.bus = Bus::Live(Box::new((self.start)(conn)));
     }
 
-    /// Arms the one-shot retry for a bus that kept dropping us.
+    /// Arms the one-shot retry for a bus that kept dropping us (and for
+    /// an abstract bus with no bus yet, which has no directory watch to
+    /// wait on: its whole wait is this timer).
     fn arm_retry(&mut self) {
         let Bus::Waiting { retry, .. } = &mut self.bus else {
             return;
         };
+        *retry = Self::retry_timer();
+    }
+
+    /// Makes the one-shot retry timer, firing once after
+    /// [`RETRY_AFTER_QUICK_DEATHS`].
+    fn retry_timer() -> Option<OwnedFd> {
         let Ok(fd) = timerfd_create(
             TimerfdClockId::Monotonic,
             TimerfdFlags::CLOEXEC | TimerfdFlags::NONBLOCK,
         ) else {
-            return;
+            return None;
         };
         let spec = Itimerspec {
             it_interval: Timespec {
@@ -378,12 +429,18 @@ impl<S: Session> Link<S> {
             },
         };
         if timerfd_settime(&fd, TimerfdTimerFlags::empty(), &spec).is_ok() {
-            *retry = Some(fd);
+            Some(fd)
+        } else {
+            None
         }
     }
 
-    /// The retry fired: one more dial, and one more quick death puts the
-    /// link back to waiting (the count is left one short of the limit).
+    /// The retry fired: one more dial. After the latch (the count is at
+    /// the limit) one more quick death puts the link back to waiting
+    /// (the count is left one short of the limit); a poll of an
+    /// abstract bus that simply was not there resets the count instead,
+    /// the way a directory watch's arrival does — an absent bus is not a
+    /// bus that drops us.
     fn on_retry(&mut self) -> bool {
         if let Bus::Waiting { retry, .. } = &mut self.bus {
             if let Some(timer) = retry.take() {
@@ -391,14 +448,19 @@ impl<S: Session> Link<S> {
                 let _ = rustix::io::read(&timer, &mut expirations);
             }
         }
-        self.quick_deaths = MAX_QUICK_DEATHS - 1;
+        if self.quick_deaths >= MAX_QUICK_DEATHS {
+            self.quick_deaths = MAX_QUICK_DEATHS - 1;
+        } else {
+            self.quick_deaths = 0;
+        }
         self.connect();
         false
     }
 
     /// Handles the directory watch: drains it (else it stays ready) and
     /// dials when the socket's name arrived. Events for other names cost
-    /// one scan of the bytes read, never a dial.
+    /// one scan of the bytes read, never a dial. An abstract bus has no
+    /// watch (its wait is the retry timer), so there is nothing to handle.
     fn on_notify(&mut self, events: PollFlags) -> bool {
         if events.intersects(PollFlags::HUP | PollFlags::ERR | PollFlags::NVAL) {
             self.wait();
@@ -407,6 +469,10 @@ impl<S: Session> Link<S> {
         let Bus::Waiting { notify, .. } = &self.bus else {
             return false;
         };
+        let Some(Target::Path(path)) = &self.target else {
+            return false;
+        };
+        let want = bus_name(path);
         let mut arrived = false;
         let mut failed = false;
         if let Some(fd) = notify {
@@ -414,7 +480,7 @@ impl<S: Session> Link<S> {
             loop {
                 match rustix::io::read(fd, &mut buf) {
                     Ok(0) | Err(rustix::io::Errno::AGAIN) => break,
-                    Ok(n) => arrived |= scan_names(&buf[..n], bus_name(&self.path)),
+                    Ok(n) => arrived |= scan_names(&buf[..n], want),
                     Err(_) => {
                         failed = true;
                         break;
