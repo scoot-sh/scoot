@@ -80,26 +80,9 @@ jobs:
             jq namcap sudo ttf-dejavu wayland wayland-protocols wayland-utils
           useradd -m builder
           echo 'builder ALL=(ALL:ALL) NOPASSWD: ALL' >/etc/sudoers.d/builder
+          chmod 440 /etc/sudoers.d/builder
           mkdir -p "$GITHUB_WORKSPACE/dist" "$GITHUB_WORKSPACE/.cargo-target" "$GITHUB_WORKSPACE/.test-tarballs"
           chown -R builder:builder "$GITHUB_WORKSPACE"
-
-      # The release PKGBUILDs point at tag tarballs that do not exist
-      # until the first release is cut. Stage same-layout tarballs of
-      # HEAD (`git archive` with the codeload top directory, so the
-      # PKGBUILDs' `cd` lines are the real ones) and rewrite only the
-      # URL to a local file. The -git PKGBUILDs build this exact head
-      # instead (`git+file://` pinned at the tested commit).
-      - name: Stage the HEAD tarballs and point the PKGBUILDs at them
-        run: |
-          scoot_ver=$(sed -n 's/^pkgver=//p' packaging/arch/scoot/PKGBUILD)
-          bar_ver=$(sed -n 's/^pkgver=//p' packaging/arch/scootbar/PKGBUILD)
-          git archive HEAD --prefix "scoot-scoot-v$scoot_ver/" -o .test-tarballs/scoot-test.tar.gz
-          git archive HEAD --prefix "scoot-scootbar-v$bar_ver/" -o .test-tarballs/scootbar-test.tar.gz
-          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scoot-v$scoot_ver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scoot-test.tar.gz|" \
-            packaging/arch/scoot/PKGBUILD packaging/arch/scootbg/PKGBUILD
-          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scootbar-v$bar_ver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scootbar-test.tar.gz|" \
-            packaging/arch/scootbar/PKGBUILD
-          ls -l .test-tarballs
 
       - name: namcap the PKGBUILDs
         run: |
@@ -117,6 +100,28 @@ jobs:
               || { echo "::error title=.SRCINFO drift in $p::run makepkg --printsrcinfo > .SRCINFO there and commit it."; exit 1; }
           done
           echo "ok: all six .SRCINFO files match"
+
+      # The release PKGBUILDs point at tag tarballs that do not exist
+      # until the first release is cut. Stage same-layout tarballs of
+      # HEAD (`git archive` with the codeload top directory, so the
+      # PKGBUILDs' `cd` lines are the real ones) and rewrite only the
+      # URL to a local file. The -git PKGBUILDs build this exact head
+      # instead (`git+file://` pinned at the tested commit, so fork PRs
+      # work too). This runs after the two lint steps above so they
+      # check the committed files, not the substitutions.
+      - name: Stage the HEAD tarballs and point the PKGBUILDs at them
+        run: |
+          scoot_ver=$(sed -n 's/^pkgver=//p' packaging/arch/scoot/PKGBUILD)
+          bar_ver=$(sed -n 's/^pkgver=//p' packaging/arch/scootbar/PKGBUILD)
+          git archive HEAD --prefix "scoot-scoot-v$scoot_ver/" -o .test-tarballs/scoot-test.tar.gz
+          git archive HEAD --prefix "scoot-scootbar-v$bar_ver/" -o .test-tarballs/scootbar-test.tar.gz
+          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scoot-v$scoot_ver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scoot-test.tar.gz|" \
+            packaging/arch/scoot/PKGBUILD packaging/arch/scootbg/PKGBUILD
+          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scootbar-v$bar_ver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scootbar-test.tar.gz|" \
+            packaging/arch/scootbar/PKGBUILD
+          sed -i "s|git+https://github.com/scoot-sh/scoot\.git|git+file://$GITHUB_WORKSPACE#commit=$GITHUB_SHA|" \
+            packaging/arch/scoot-git/PKGBUILD packaging/arch/scootbg-git/PKGBUILD packaging/arch/scootbar-git/PKGBUILD
+          ls -l .test-tarballs
 
       # The release pkgver must name its crate's version (the trio
       # together, the bar on its own); the -git static pkgver must
