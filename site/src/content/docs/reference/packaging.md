@@ -7,9 +7,9 @@ Build scoot the way a distro builder does: from a source tree that
 needs no network, with a toolchain and system libraries you provide.
 Start here if you maintain the Arch, deb or rpm package. The Arch
 PKGBUILDs (release and `-git`) have landed in
-[`packaging/arch/`][arch-pkg] and build on this page; the deb and rpm
-recipes still live in the contributor backlog ([deb][deb-pkg],
-[rpm][rpm-pkg]).
+[`packaging/arch/`][arch-pkg] and build on this page; the deb
+(`packaging/deb`, `deb.yml`) and rpm recipes have landed too --
+contributor history in [deb][deb-pkg], [rpm][rpm-pkg].
 
 [arch-pkg]: https://github.com/scoot-sh/scoot/blob/main/packaging/arch/README.md
 [deb-pkg]: https://github.com/scoot-sh/scoot/blob/main/docs/backlog/resolved/deb-package-done.md

@@ -79,8 +79,10 @@ asserted in CI, so one build runs on trixie, noble and newer.
 
 - `scoot`: `/usr/bin/scoot`, `/usr/bin/scoot-session` (the in-tree
   greeter launcher; degrades to `exec scoot --tty` with no systemd
-  user manager), `/usr/share/wayland-sessions/scoot.desktop`,
-  copyright, the deny-generated `THIRD-PARTY-LICENSES`, a
+  user manager), `/usr/share/wayland-sessions/scoot.desktop`
+  (with `DesktopNames=scoot`, the same key the Arch, rpm and Nix
+  entries ship), a DEP-5 `copyright`, the deny-generated
+  `THIRD-PARTY-LICENSES`, `NOTICE`, a
   `changelog.Debian.gz` (required: our versions carry a Debian
   revision, so the packages are non-native and lintian fails without
   one; its entry points at the per-package release notes, where this
@@ -91,11 +93,13 @@ asserted in CI, so one build runs on trixie, noble and newer.
   `[wallpaper]` handoff, so `scootbg` ships no separate example).
   Nothing is written to a user's home; with no conffiles and no
   maintainer scripts, removal leaves nothing behind.
-- `scootbg`: `/usr/bin/scootbg` plus its licenses and changelog.
+- `scootbg`: `/usr/bin/scootbg` plus its licenses, inventory, notice
+  and changelog.
 - `scootbar`: `/usr/bin/scootbar`, the `scootbar.service` user unit
   (`Restart=on-failure`, the same policy as
   `nix/modules/scootbar-home.nix`, bound to the shared
-  `graphical-session.target` for standalone use), licenses, a
+  `graphical-session.target` for standalone use), licenses, inventory,
+  notice, a
   changelog, a `README.Debian`, and a starting `bar.toml.example`
   (proven valid: `scootbar daemon --check` prints `ok`).
 
@@ -104,7 +108,12 @@ than overridden -- `no-manual-page` on each binary (the binaries'
 `--help` plus the site reference are the documentation; manpages are a
 later addition, not this ticket) and `initial-upload-closes-no-bugs`
 on each changelog (expected: the first upload closes no Debian bugs;
-the history lives in the release notes). `Standards-Version` is
+the history lives in the release notes). Informational tags, also
+accepted: `hardening-no-bindnow` on each binary (the release profile
+passes no `-z now`; the `.deb` binaries deliberately carry the same
+link flags as the release binaries) and nothing else -- every `.deb`
+ships `DEBIAN/md5sums`, so there is no `no-md5sums-control-file`.
+`Standards-Version` is
 deliberately absent from the binary control: it belongs in source
 packaging, and bookworm's lintian flags it as `unknown-field` there.
 

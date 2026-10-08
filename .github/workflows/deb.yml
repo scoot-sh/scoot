@@ -218,15 +218,28 @@ jobs:
               echo "ok: lintian reports no errors (warnings, if any, are above)"
             '
 
+      # DesktopNames is the session's XDG_CURRENT_DESKTOP name: sway
+      # ships it in its own session entry and the Nix-built entry
+      # carries it too, so the deb login behaves the same. The
+      # validator's key list predates it and flags exactly that key, so
+      # that one finding is accepted and anything else fails (the same
+      # scope arch.yml uses).
       - name: desktop-file-validate the session entry
         run: |
-          docker run --rm -v "$RUNNER_TEMP/debs:/debs:ro" "$DISTRO_IMAGE" bash -euo pipefail -c '
+          docker run --rm -v "$RUNNER_TEMP/debs:/debs:ro" \
+            -e VALIDATE_IGNORE='key "DesktopNames"' \
+            "$DISTRO_IMAGE" bash -euo pipefail -c '
             apt-get update -qq
             apt-get install -y -qq desktop-file-utils
             tmp=$(mktemp -d)
             dpkg-deb --fsys-tarfile /debs/scoot_*.deb | tar -x -C "$tmp" ./usr/share/wayland-sessions/scoot.desktop
-            desktop-file-validate "$tmp/usr/share/wayland-sessions/scoot.desktop"
-            echo "ok: session entry validates"
+            desktop-file-validate "$tmp/usr/share/wayland-sessions/scoot.desktop" 2>&1 | tee "$tmp/validate.log" || true
+            rest=$(grep -v "$VALIDATE_IGNORE" "$tmp/validate.log" || true)
+            if [ -n "$rest" ]; then
+              echo "::error title=desktop file invalid::see validate.log above (the DesktopNames note is expected)."
+              exit 1
+            fi
+            echo "ok: only the known DesktopNames notice"
           '
 
       # The repository metadata without any key: proves the Packages /
