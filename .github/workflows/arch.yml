@@ -192,9 +192,20 @@ jobs:
           fi
           echo "ok: no namcap errors on the built packages (warnings, if any, are above)"
 
+      # DesktopNames is the session's XDG_CURRENT_DESKTOP name: sway
+      # ships it in its own session entry and the Nix-built entry
+      # carries it too, so the Arch login behaves the same. The
+      # validator's key list predates it and flags exactly that key, so
+      # that one finding is accepted and anything else fails.
       - name: desktop-file-validate the session entry
         run: |
-          desktop-file-validate packaging/arch/scoot/scoot.desktop
+          out=$(desktop-file-validate packaging/arch/scoot/scoot.desktop 2>&1 || true)
+          echo "$out"
+          rest=$(echo "$out" | grep -v 'key "DesktopNames"' || true)
+          if [ -n "$rest" ]; then
+            echo "::error title=desktop file invalid::see above (the DesktopNames note is expected)."
+            exit 1
+          fi
 
       # Twice: the release trio, then the -git trio (they conflict, so
       # one set is removed before the other installs). Each round runs

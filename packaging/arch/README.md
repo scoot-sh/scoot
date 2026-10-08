@@ -64,7 +64,10 @@ pair), not a linked library, which a linkage linter cannot see.
   `scoot --print-default-config` as
   `/usr/share/doc/scoot/config.toml.example` (it documents the
   `[wallpaper]` handoff, so `scootbg` ships no separate example).
-  Nothing is written to a user's home; uninstall leaves nothing behind.
+  The session entry names the session `scoot` via `DesktopNames`
+  (XDG_CURRENT_DESKTOP), the same key sway and the Nix-built entry
+  carry. Nothing is written to a user's home; uninstall leaves
+  nothing behind.
 - `scootbg`: `/usr/bin/scootbg` plus its licenses.
 - `scootbar`: `/usr/bin/scootbar`, the `scootbar.service` user unit
   (`Restart=on-failure`, the same policy as
