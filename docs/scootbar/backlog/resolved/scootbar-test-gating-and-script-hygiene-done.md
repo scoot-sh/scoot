@@ -58,8 +58,10 @@ Landed as the ticket asks, all three gaps, evidence keyed to the Asahi M2
    `--features workspaces` 570 passed (was 16 failed), each under both
    `cargo nextest run` and `cargo test` with `SCOOTBAR_REQUIRE_SCOOT=1`
    `SCOOTBAR_REQUIRE_SWAY=1` `SCOOTBAR_REQUIRE_DBUS_DAEMON=1`. The
-   `scootbar-integration` CI job runs the same tests against all three
-   reduced-feature bars. `docs/scootbar/testing.md` states the rule.
+   `scootbar-integration` CI job runs a fixed subset of eight integration
+   binaries (`bar hotplug clock icons popup tooltip visibility workspaces`)
+   against the three reduced-feature bars; the review ran the full suite
+   unfiltered in those configurations and the omitted binaries pass too. `docs/scootbar/testing.md` states the rule.
 2. `scripts/scootbar-unit-test.sh` `cleanup()` removes the bar's control
    socket and lock on the run's own display (`scootbar-$WL.{sock,lock}`,
    the run's own headless scoot's) and reports the leftover count; the
