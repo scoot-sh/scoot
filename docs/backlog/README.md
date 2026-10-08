@@ -271,7 +271,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [Smaller/general protocol gaps (bundled)](./protocols/protocol-gaps-general.md)
 - [Niche protocol gaps (bundled)](./protocols/protocol-gaps-niche.md)
 - [Virtual pointer and keyboard protocols, so wayvnc gives full remote control](./resolved/virtual-input-remote-control-done.md) — RESOLVED 2026-10-05 (PR #448): both managers behind `[virtual_input] enabled`, refused under lock, keys translated by keysym; capture already worked
-- [Per-client allow-list for the virtual-input globals via `security-context-v1`](./protocols/virtual-input-allow-list.md) (low, filed 2026-10-05 from #448's review): the on/off switch gates the network threat, not local clients; an allow-list needs security-context support first
+- [Per-client allow-list for the virtual-input globals via `security-context-v1`](./resolved/virtual-input-allow-list-done.md) — CLOSED 2026-10-08 as an accepted tradeoff (no code): `security-context-v1` marks sandboxed clients only, so it cannot tell wayvnc from any other same-uid client; the on/off switch stays the whole gate
 - [Opt-in keybindings for virtual keyboards](./resolved/virtual-input-binds-done.md) — RESOLVED 2026-10-07 (PR #494): `[virtual_input] binds` (default off, restart-only) lets virtual keys run binds by seat keysym for webtop/try-scoot sessions
 - [Research: native remote desktop that streams the scene, not pixels](./protocols/native-remote-scene-streaming.md) (research, filed 2026-10-04): per-surface content plus arrangement deltas, so a scroll costs bytes not frames; frame mode for video and thin viewers; network code in a separate helper
 
