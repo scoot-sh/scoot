@@ -315,6 +315,7 @@ fn wait_all_bars_on(session: &Session, bar: &mut Reaper, want: &[&str]) -> Vec<S
     })
 }
 
+#[cfg(feature = "clock")]
 #[test]
 fn modules_still_update_after_a_hotplug_storm() {
     let Some(session) = Session::sway("storm-modules", 2) else {

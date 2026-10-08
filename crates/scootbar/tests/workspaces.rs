@@ -349,6 +349,7 @@ fn two_outputs(tag: &str) -> Option<(Session, Reaper)> {
     Some((session, bar))
 }
 
+#[cfg(feature = "workspaces")]
 #[test]
 fn each_output_shows_its_own_workspace_active_in_a_pill() {
     let Some((_session, _bar)) = two_outputs("ws-each") else {
@@ -356,6 +357,7 @@ fn each_output_shows_its_own_workspace_active_in_a_pill() {
     };
 }
 
+#[cfg(feature = "workspaces")]
 #[test]
 fn the_pill_follows_a_switch() {
     let Some((session, mut bar)) = two_outputs("ws-switch") else {
@@ -386,6 +388,7 @@ fn the_pill_follows_a_switch() {
     toy.close(&session, &mut bar);
 }
 
+#[cfg(feature = "workspaces")]
 #[test]
 fn a_click_switches() {
     let Some((session, mut bar)) = two_outputs("ws-click") else {
@@ -423,6 +426,7 @@ fn a_click_switches() {
     toy.close(&session, &mut bar);
 }
 
+#[cfg(feature = "workspaces")]
 #[test]
 fn appearing_and_disappearing_redraw() {
     let Some((session, mut bar)) = two_outputs("ws-appear") else {
@@ -454,6 +458,7 @@ fn appearing_and_disappearing_redraw() {
 }
 
 /// On sway: the workspaces on an output plugged in while the bar runs.
+#[cfg(feature = "workspaces")]
 #[test]
 fn workspaces_follow_a_hotplugged_output_on_sway() {
     let Some(session) = Session::sway("swayws", 1) else {
@@ -503,6 +508,7 @@ fn text_cols(shot: &Shot) -> Vec<u32> {
 /// click on another workspace's digit still switches to it: the hit test
 /// follows the shape the draw paints. (`read` is not used: it takes the
 /// background-colored corners inside a round pill's columns for ink.)
+#[cfg(feature = "workspaces")]
 #[test]
 fn a_circle_pill_is_round_and_a_click_still_switches() {
     let Some(session) = Session::scoot("ws-circle", 1, "") else {
@@ -670,6 +676,7 @@ fn churn(session: &Session, bar: &mut Reaper) {
     std::thread::sleep(Duration::from_millis(300));
 }
 
+#[cfg(feature = "clock")]
 #[test]
 fn a_bar_without_the_module_binds_no_workspace_protocol_and_hears_nothing() {
     let Some(session) = Session::scoot("ws-unplaced", 1, "") else {
@@ -689,6 +696,7 @@ fn a_bar_without_the_module_binds_no_workspace_protocol_and_hears_nothing() {
     assert!(events.is_empty(), "{events:?}");
 }
 
+#[cfg(all(feature = "clock", feature = "workspaces"))]
 #[test]
 fn a_bar_with_the_module_binds_the_protocol_once_and_hears_the_changes() {
     let Some(session) = Session::scoot("ws-placed", 1, "") else {
@@ -706,6 +714,7 @@ fn a_bar_with_the_module_binds_the_protocol_once_and_hears_the_changes() {
     assert!(workspace_events(&trace).len() > 4);
 }
 
+#[cfg(all(feature = "clock", feature = "workspaces"))]
 #[test]
 fn a_reload_binds_and_releases_the_protocol_with_the_module() {
     let Some(session) = Session::scoot("ws-reload", 1, "") else {

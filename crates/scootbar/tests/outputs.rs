@@ -91,6 +91,7 @@ fn pair(id: &str, section: &str) -> (String, String) {
     (id.to_owned(), section.to_owned())
 }
 
+#[cfg(all(feature = "clock", feature = "workspaces"))]
 #[test]
 fn two_outputs_show_different_module_sets_heights_and_edges_from_one_config() {
     let Some(session) = Session::scoot("multi", 2, "") else {
@@ -119,6 +120,7 @@ fn two_outputs_show_different_module_sets_heights_and_edges_from_one_config() {
     assert!(bar.0.try_wait().unwrap().is_none());
 }
 
+#[cfg(feature = "clock")]
 #[test]
 fn the_list_leaves_an_output_without_a_bar_and_a_reload_moves_it() {
     let Some(session) = Session::scoot("list", 2, "") else {
@@ -169,6 +171,7 @@ fn the_list_leaves_an_output_without_a_bar_and_a_reload_moves_it() {
 /// Hide and show are per the list: a shown bar comes back only where the
 /// list wants one, and a reload that changes the list while hidden takes
 /// effect at the show.
+#[cfg(feature = "clock")]
 #[test]
 fn hide_and_show_keep_to_the_list() {
     let Some(session) = Session::scoot("vis", 2, "") else {
@@ -209,6 +212,7 @@ fn hide_and_show_keep_to_the_list() {
 /// A second output adds a surface and its buffers, not another set of
 /// data sources: the daemon holds the same number of fds with two bars as
 /// with one, and the modules are started once.
+#[cfg(all(feature = "clock", feature = "workspaces"))]
 #[test]
 fn a_second_output_adds_no_fds() {
     let fds = |outputs: u32| {

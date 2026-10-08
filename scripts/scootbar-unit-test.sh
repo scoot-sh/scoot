@@ -17,7 +17,9 @@
 #   S8  graphical-session.target, started the way a session script does it (a
 #       session target that BindsTo it, since the target itself refuses a manual
 #       start): the unit's WantedBy= starts the bar, After= orders it, PartOf=
-#       stops it with the session, and a clean stop stays stopped
+#       stops it with the session, and a clean stop stays stopped (`--nixos`
+#       links the module's own generated wants link; `--home` exercises its
+#       generated link in S9)
 #   S9  (--home only) the config changes: home-manager's own switch tool
 #       (sd-switch, `--dry-run` first) restarts the bar when its X-Restart-Triggers
 #       change, and leaves it alone when an unrelated part of the generation does
@@ -38,7 +40,8 @@
 # anything wanted by it (S8 starts and stops it), or if a unit it would create
 # already exists. On exit, and on INT, TERM or HUP, it removes what it made: the
 # units and their drop-ins and wants directory, the WAYLAND_DISPLAY it put in the
-# manager's environment (only that), and its scratch directory. A SIGKILL of the
+# manager's environment (only that), the bar's control socket and lock on this
+# run's display, and its scratch directory. A SIGKILL of the
 # script itself cannot be trapped and leaves them: `systemctl --user stop
 # scootbar-test-session.target scootbar.service`, delete
 # $XDG_RUNTIME_DIR/systemd/user/{scootbar.service{,.d},scootbar-test-session.target,
@@ -46,8 +49,10 @@
 # --user unset-environment WAYLAND_DISPLAY`. The `nix build` writes the store, which
 # stays. A bar the test SIGKILLs (S2, S3) leaves its control socket
 # $XDG_RUNTIME_DIR/scootbar-wayland-N.sock and a lock file beside it, as any crashed bar
-# does; the next bar on that display name recognises the dead lock and replaces them, and
-# they are not removed here (the name may be a live session's).
+# does; the next bar on that display name recognises the dead lock and replaces them.
+# The display is this run's own headless scoot's, so `cleanup()` removes that
+# pair too, after killing that scoot (the socket name that never existed
+# leaves only its lock, removed the same way).
 #
 # --home never touches your home-manager generation: `activate` of the generation
 # runs for real, but with HOME and XDG_RUNTIME_DIR pointed into the scratch
@@ -142,7 +147,13 @@ cleanup() {
     # The bar makes a lock file named after the display it was told to connect to, and leaves it
     # when the connection fails: the one for the socket name that is not there.
     rm -f "$RT/scootbar-$NOWHERE.lock"
-    echo "--- cleanup: unit loaded: $(sc is-enabled scootbar.service 2>&1 | head -1); graphical-session.target: $(sc is-active graphical-session.target 2>&1 | head -1); WAYLAND_DISPLAY in the manager: $(sc show-environment | grep -c WAYLAND_DISPLAY); scratch dir: $([ -e "$W" ] && echo left || echo gone)"
+    # S2 and S3 SIGKILL the bar, which leaves its control socket and lock
+    # behind in the runtime dir. The display is this run's own headless
+    # scoot's (dead by now), so no live session can own the name.
+    if [ -n "${WL:-}" ]; then
+        rm -f "$RT/scootbar-$WL.sock" "$RT/scootbar-$WL.lock"
+    fi
+    echo "--- cleanup: unit loaded: $(sc is-enabled scootbar.service 2>&1 | head -1); graphical-session.target: $(sc is-active graphical-session.target 2>&1 | head -1); WAYLAND_DISPLAY in the manager: $(sc show-environment | grep -c WAYLAND_DISPLAY); scratch dir: $([ -e "$W" ] && echo left || echo gone); bar socket left: $(ls "$RT"/scootbar-wayland-*.sock "$RT"/scootbar-wayland-*.lock "$RT"/scootbar-$NOWHERE.lock 2>/dev/null | wc -l)"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -338,11 +349,23 @@ echo "== S8: graphical-session.target started by a session script: WantedBy, Aft
 # the target. graphical-session.target refuses a manual start (RefuseManualStart=yes), so
 # the script starts a session target of its own that BindsTo it, as NixOS's own
 # nixos-fake-graphical-session.target does; the bar's WantedBy= is the wants link
-# that `enable` (or the module's Install section) makes.
+# that `enable` (or the module's Install section) makes. In `--nixos` mode that
+# link is the generated one, copied from the module's own user-unit directory;
+# `--home` makes the same link by hand (its generated link is exercised in S9).
 sc stop scootbar.service; sc reset-failed scootbar.service >/dev/null 2>&1
 rm -f "$UNITDIR/scootbar.service.d/nowhere.conf" "$UNITDIR/scootbar.service.d/limit.conf"
 mkdir -p "$UNITDIR/graphical-session.target.wants"
-ln -s ../scootbar.service "$UNITDIR/graphical-session.target.wants/scootbar.service"
+if [ "$MODE" = nixos ]; then
+    # The module's own WantedBy output, not a hand-made link: S8 then
+    # proves the generated unit is wired to the session target, not just
+    # that systemd's wants semantics work.
+    genwant=$UNITS/graphical-session.target.wants/scootbar.service
+    [ -L "$genwant" ] || die "the NixOS module generated no graphical-session.target.wants link ($UNITS holds: $(ls "$UNITS"))"
+    echo "   generated wants link: $genwant -> $(readlink "$genwant")"
+    cp -P "$genwant" "$UNITDIR/graphical-session.target.wants/scootbar.service"
+else
+    ln -s ../scootbar.service "$UNITDIR/graphical-session.target.wants/scootbar.service"
+fi
 cat > "$UNITDIR/scootbar-test-session.target" <<DROP
 [Unit]
 Description=scootbar-unit-test session

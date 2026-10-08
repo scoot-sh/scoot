@@ -167,6 +167,7 @@ fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn an_exec_module_shows_what_its_command_prints() {
     let tables = "[exec.out]\ncommand = [\"sh\", \"-c\", \"echo 12:34; sleep 600\"]\n";
@@ -181,6 +182,7 @@ fn an_exec_module_shows_what_its_command_prints() {
     assert_eq!(module["section"], "right");
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn an_exec_json_line_sets_the_text_and_the_class_color() {
     let tables = "[exec.out]\nformat = \"json\"\ncommand = [\"sh\", \"-c\", \
@@ -196,6 +198,7 @@ fn an_exec_json_line_sets_the_text_and_the_class_color() {
     assert_eq!(rig.query()["modules"][0]["class"], "urgent");
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn push_set_changes_the_bar_and_a_bad_value_changes_nothing() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
@@ -235,6 +238,7 @@ fn push_set_changes_the_bar_and_a_bad_value_changes_nothing() {
     rig.wait_text("");
 }
 
+#[cfg(all(feature = "button", feature = "push"))]
 #[test]
 fn set_names_what_cannot_take_a_value() {
     let tables = "[button.b]\ntext = \"1\"\n[push.p]\n";
@@ -264,6 +268,7 @@ fn set_names_what_cannot_take_a_value() {
     );
 }
 
+#[cfg(feature = "button")]
 #[test]
 fn a_button_click_runs_its_command() {
     let tables = "[button.go]\ntext = \"7\"\n\
@@ -280,6 +285,7 @@ fn a_button_click_runs_its_command() {
     assert_eq!(rig.wait_lines("log", 1), ["pressed"]);
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_flooding_command_costs_the_bar_no_memory_and_no_descriptors() {
     let tables = "[exec.out]\ncommand = [\"yes\", \"flood\"]\n";
@@ -329,6 +335,7 @@ fn a_flooding_command_costs_the_bar_no_memory_and_no_descriptors() {
     assert!(rig.bar.0.try_wait().unwrap().is_none());
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_that_dies_is_started_again_by_the_bar() {
     let tables = "[exec.out]\ncommand = [\"sh\", \"-c\", \"echo run >> DIR/runs\"]\n";
@@ -357,6 +364,7 @@ fn a_command_that_dies_is_started_again_by_the_bar() {
     assert_eq!(zombies, 0);
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_holds_none_of_the_bars_descriptors() {
     let tables = "[exec.out]\ncommand = [\"sh\", \"-c\", \
@@ -405,6 +413,7 @@ fn ignored_signals(pid: impl std::fmt::Display) -> u64 {
         .expect("SigIgn in /proc/PID/status")
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_gets_the_default_sigpipe_not_the_bars_ignored_one() {
     // A Rust program ignores `SIGPIPE`; ignored signals survive `exec`. The
@@ -441,6 +450,7 @@ fn a_command_gets_the_default_sigpipe_not_the_bars_ignored_one() {
     );
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_that_is_not_found_is_one_warning_a_restart_naming_it() {
     let tables = "[exec.out]\ncommand = [\"scootbar-no-such-program\"]\n";
@@ -468,6 +478,7 @@ fn a_command_that_is_not_found_is_one_warning_a_restart_naming_it() {
     assert!(rig.bar.0.try_wait().unwrap().is_none());
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_that_is_not_executable_says_so_once() {
     let tables = "[exec.out]\ncommand = [\"DIR/not-a-program\"]\n";
@@ -490,6 +501,7 @@ fn a_command_that_is_not_executable_says_so_once() {
     );
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_reload_replaces_the_command_and_kills_the_old_one_with_its_workers() {
     let first = "[exec.out]\ncommand = [\"sh\", \"-c\", \"sleep 421 & echo 1; wait\"]\n";
@@ -560,11 +572,13 @@ fn a_command_ends_with_a_bar_that_dies_of(tag: &str, signal: rustix::process::Si
     }
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_ends_with_a_bar_that_is_killed() {
     a_command_ends_with_a_bar_that_dies_of("exec-sigkill", rustix::process::Signal::KILL);
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_ends_with_a_bar_that_is_terminated() {
     // `SIGINT`, `SIGHUP` and a crash (`SIGABRT`, what a panic does under
@@ -575,6 +589,7 @@ fn a_command_ends_with_a_bar_that_is_terminated() {
     a_command_ends_with_a_bar_that_dies_of("exec-sigterm", rustix::process::Signal::TERM);
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn a_burst_of_pushes_in_one_turn_is_a_few_redraws() {
     use std::io::{BufRead, BufReader, Write};
@@ -623,6 +638,7 @@ fn a_burst_of_pushes_in_one_turn_is_a_few_redraws() {
     rig.wait_text("9");
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn too_many_exec_modules_are_refused_by_name() {
     let Some(session) = Session::scoot("exec-many", 1, "") else {

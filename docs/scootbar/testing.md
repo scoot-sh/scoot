@@ -51,6 +51,24 @@ devenv shell -- cargo nextest run -p scootbar --bin scootbar --no-default-featur
 devenv shell -- cargo nextest run -p scootbar --bin scootbar --no-default-features --features icon-image
 ```
 
+An integration test that places a module exists only where that module
+does: a `#[cfg(feature = "...")]` on the test (a whole file's worth at the
+top where every test places the same module, as `tests/clock.rs` does for
+`clock`), so a reduced-feature build runs what it builds instead of failing
+what it left out. A test placing several modules gates on all of them
+(`tests/outputs.rs` needs `clock` and `workspaces`; tooltips need `push`
+and the `popup` machinery that shows them). With `scoot` built beside the
+tests, the reduced builds must pass whole:
+
+```sh
+SCOOTBAR_REQUIRE_SCOOT=1 SCOOTBAR_REQUIRE_SWAY=1 \
+  devenv shell -- cargo nextest run -p scootbar --no-default-features
+SCOOTBAR_REQUIRE_SCOOT=1 SCOOTBAR_REQUIRE_SWAY=1 \
+  devenv shell -- cargo nextest run -p scootbar --no-default-features --features clock
+SCOOTBAR_REQUIRE_SCOOT=1 SCOOTBAR_REQUIRE_SWAY=1 \
+  devenv shell -- cargo nextest run -p scootbar --no-default-features --features workspaces
+```
+
 No test needs a font or time-zone data on the machine: the text tests draw
 with a seven-segment font built in code (`src/testfont.rs`), which the
 integration tests write to a file and pass as `--font`, and the zone tests
@@ -558,7 +576,7 @@ the change reaches it too (the crate's `Cargo.toml` does):
 | Job | What it runs |
 |---|---|
 | `scootbar` | `fmt --check`; the benchmark harness's unit tests; clippy `-D warnings` on the default build, `--no-default-features`, and each module alone (the modules read from `Cargo.toml`, so a new one joins with no workflow change); `cargo nextest run` and `cargo test` of the default build (both: `CLAUDE.md` says why), then `cargo nextest run` of the unit tests with every module, with none, and with each alone; no `libc` crate, and an `ldd` check that the release binary links only libc, libm and libgcc_s (no libEGL, libgbm or libwayland); all six fuzz targets for a fixed budget, 1,000,000 runs of `format`, 5,000,000 of `tzif`, 2,000,000 of `payload`, 2,000,000 of `volume`, 2,000,000 of `network` and 1,000,000 of `dbus` from seed 1 (about a minute), a finding's input printed in base64, after `cargo fetch --locked` of the fuzz workspace (cargo-fuzz has no `--locked`), so a stale `fuzz/Cargo.lock` fails |
-| `scootbar-integration` | the integration tests on headless scoot and sway, with `SCOOTBAR_REQUIRE_SCOOT` and `SCOOTBAR_REQUIRE_SWAY` so a missing compositor fails instead of skipping; also on a compositor-only change |
+| `scootbar-integration` | the integration tests on headless scoot and sway, with `SCOOTBAR_REQUIRE_SCOOT` and `SCOOTBAR_REQUIRE_SWAY` so a missing compositor fails instead of skipping (also on a compositor-only change), and the same tests against reduced-feature bars (`--no-default-features`, `--features clock`, `--features workspaces`), where the module-gated tests compile out and the rest must still pass |
 
 The bar never runs on a Mac, and does not build there (neither does
 scootbg): the `macos` job's `cargo check` leaves both out, with
@@ -742,12 +760,15 @@ compositor, comes up once `WAYLAND_DISPLAY` reaches the manager, is restarted af
 SIGKILL (and eight in a row), stays stopped after a SIGTERM, `scootbar msg kill` and a
 stop (S0 to S7), and starts and stops with `graphical-session.target` (S8: a session
 target that `BindsTo=` it, started with the environment imported first, as docs/nix.md
-shows; the direct start the target refuses is checked too). `--home` adds S9: home-manager's
+shows; `--nixos` links the module's own generated wants link there, so S8 proves the
+module's wiring and not just systemd's wants semantics; the direct start the target refuses is checked too). `--home` adds S9: home-manager's
 own switch tool, sd-switch, restarts the bar when its config changes and leaves it alone when
 only something unrelated in the generation does. It loads the unit into the manager's
 *runtime* directory only (nothing persistent), refuses to run if a `scootbar.service`
 exists, if `graphical-session.target` is active or has anything wired to it, or if the
-manager already has a `WAYLAND_DISPLAY`, and removes everything on exit. Needs Linux
+manager already has a `WAYLAND_DISPLAY`, and removes everything on exit (the units,
+the manager environment it set, the bar's control socket and lock on this run's
+display, and its scratch directory). Needs Linux
 with a user manager, Nix, a built scoot, and python3; it prints `RESULT:
 PASS n FAIL m` and exits 1 on a FAIL. It is not run in CI (CI has no user manager); the
 CI `scootbar` job builds the Nix module check on x86_64-linux instead.

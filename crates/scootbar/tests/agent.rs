@@ -179,6 +179,7 @@ fn ink_problem(shot: &common::Shot, output: &Value) -> Option<String> {
     None
 }
 
+#[cfg(feature = "button")]
 #[test]
 fn layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales() {
     let Some(mut rig) = Rig::start(
@@ -290,6 +291,7 @@ fn layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales() {
     }
 }
 
+#[cfg(feature = "button")]
 #[test]
 fn a_hidden_bar_has_no_rectangles() {
     let Some(rig) = Rig::start(
@@ -315,6 +317,7 @@ fn a_hidden_bar_has_no_rectangles() {
     assert_eq!(layout["outputs"][0]["modules"], serde_json::json!([]));
 }
 
+#[cfg(feature = "button")]
 #[test]
 fn query_names_one_module_and_refuses_one_that_is_not_placed() {
     let Some(rig) = Rig::start(
@@ -340,6 +343,7 @@ fn query_names_one_module_and_refuses_one_that_is_not_placed() {
     );
 }
 
+#[cfg(feature = "button")]
 #[test]
 fn invoke_runs_the_binding_a_click_would() {
     let bindings = format!(
@@ -384,6 +388,7 @@ fn invoke_runs_the_binding_a_click_would() {
     rig.wait_lines("clicks", 4);
 }
 
+#[cfg(feature = "workspaces")]
 #[test]
 fn invoke_runs_a_module_action_with_its_number() {
     let Some(rig) = Rig::start("agent-invoke-ws", "", 1, "", "right = [\"workspaces\"]\n") else {
@@ -448,6 +453,7 @@ impl Drop for Subscriber {
     }
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn a_stream_of_changes_is_told_at_the_frame_rate() {
     use std::io::Write;
@@ -514,6 +520,7 @@ fn a_stream_of_changes_is_told_at_the_frame_rate() {
     );
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn a_subscriber_that_hangs_up_leaves_the_daemon_unharmed_and_idle() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
@@ -530,6 +537,7 @@ fn a_subscriber_that_hangs_up_leaves_the_daemon_unharmed_and_idle() {
     assert!(rig.json(&["version"])["protocol"].is_number());
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn a_subscribed_connection_is_refused_further_requests() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
@@ -564,6 +572,7 @@ fn a_subscribed_connection_is_refused_further_requests() {
     );
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn only_so_many_connections_may_subscribe_and_a_slot_comes_back() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
@@ -601,6 +610,7 @@ fn only_so_many_connections_may_subscribe_and_a_slot_comes_back() {
     }
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn a_subscription_outlives_a_flood_of_other_connections() {
     // More idle connections than the daemon holds: each closes the oldest
@@ -624,6 +634,7 @@ fn a_subscription_outlives_a_flood_of_other_connections() {
     drop(flood);
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn an_idle_bar_with_subscribers_and_queries_wakes_for_nothing() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
