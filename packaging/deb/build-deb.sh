@@ -85,6 +85,9 @@ export CARGO_NET_OFFLINE=true
 STAGE_ROOT="$OUT/stage"
 rm -rf "$STAGE_ROOT"
 mkdir -p "$OUT" "$STAGE_ROOT"
+# Honor an outside CARGO_TARGET_DIR (CI sets one); default to the
+# source tree's own target/ otherwise.
+BINDIR="${CARGO_TARGET_DIR:-$SOURCE/target}/release"
 
 for pkg in scoot scootbg scootbar; do
     echo "--- $pkg: cargo build --release --locked --offline -p $pkg"
@@ -93,7 +96,7 @@ for pkg in scoot scootbg scootbar; do
     STAGE="$STAGE_ROOT/$pkg"
     mkdir -p "$STAGE/DEBIAN" "$STAGE/usr/bin" "$STAGE/usr/share/doc/$pkg"
 
-    install -m755 "$SOURCE/target/release/$pkg" "$STAGE/usr/bin/$pkg"
+    install -m755 "$BINDIR/$pkg" "$STAGE/usr/bin/$pkg"
     install -m644 "$SOURCE/THIRD-PARTY-LICENSES" "$STAGE/usr/share/doc/$pkg/THIRD-PARTY-LICENSES"
 
     # The license inventory's companion: the MIT grant itself plus what
@@ -117,7 +120,7 @@ for pkg in scoot scootbg scootbar; do
         scoot)
             install -m755 "$SOURCE/resources/scoot-session" "$STAGE/usr/bin/scoot-session"
             install -Dm644 "$HERE/scoot.desktop" "$STAGE/usr/share/wayland-sessions/scoot.desktop"
-            "$SOURCE/target/release/scoot" --print-default-config >"$STAGE/usr/share/doc/scoot/config.toml.example"
+            "$BINDIR/scoot" --print-default-config >"$STAGE/usr/share/doc/scoot/config.toml.example"
             install -m644 "$HERE/README.Debian.scoot" "$STAGE/usr/share/doc/scoot/README.Debian"
             ;;
         scootbar)

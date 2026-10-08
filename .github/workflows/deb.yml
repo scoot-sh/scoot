@@ -193,27 +193,17 @@ jobs:
               chmod +x /tmp/pkg/deb/build-deb.sh /tmp/pkg/deb/make-repo-index.sh
               /tmp/pkg/deb/build-deb.sh --source /src --out /out
               ls -l /out/*.deb
+              # lintian's judgment here, where the log lands in the
+              # artifact: any error fails, and a warning fails unless it
+              # names an override this tree ships (there are none today:
+              # the build is clean or the run is red).
+              lintian --no-tag-display-limit /out/*.deb 2>&1 | tee /out/lintian.log
+              if grep -q "^E: " /out/lintian.log; then
+                echo "::error title=lintian errors::see lintian.log in the debs artifact."
+                exit 1
+              fi
+              echo "ok: lintian reports no errors (warnings, if any, are above)"
             ' "$RUST_TOOLCHAIN"
-
-      # The floor the packages promise: the build ran on bookworm
-      # (glibc 2.36) with only runtime libraries installed, so a user
-      # installing the documented dependencies gets binaries that
-      # start. lintian's judgment on the side: any error fails, and a
-      # warning fails unless it names an override this tree ships
-      # (there are none today: the build is clean or the run is red).
-      - name: lintian the built packages
-        run: |
-          ls -l "$RUNNER_TEMP/debs"/*.deb
-          docker run --rm -v "$RUNNER_TEMP/debs:/debs:ro" "$DISTRO_IMAGE" bash -euo pipefail -c '
-            apt-get update -qq
-            apt-get install -y -qq lintian
-            lintian --no-tag-display-limit /debs/*.deb 2>&1 | tee /tmp/lintian.log
-            if grep -q "^E: " /tmp/lintian.log; then
-              echo "::error title=lintian errors::see the log above."
-              exit 1
-            fi
-            echo "ok: lintian reports no errors (warnings, if any, are above)"
-          '
 
       - name: desktop-file-validate the session entry
         run: |
@@ -284,7 +274,7 @@ jobs:
             scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
           '
 
-      - name: Upload the built packages and the index
+      - name: Upload the built packages and lint logs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
