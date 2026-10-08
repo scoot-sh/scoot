@@ -628,6 +628,8 @@ impl State {
 
     /// The XWM lost its server: every X window goes, managed and unmanaged.
     /// A death event, once per server -- the id list is the one allocation.
+    /// The kill connection goes with it (it spoke to the dead display),
+    /// so a restarted server gets a fresh one lazily on the next kill.
     pub(super) fn sweep_x11_windows(&mut self) {
         let managed: Vec<WindowId> = self
             .windows
@@ -640,6 +642,7 @@ impl State {
         }
         self.clear_x11_unmanaged();
         self.x11_startup_carriers.clear();
+        self.xkill = None;
     }
 
     /// A frame an X window committed: reported only for a floating one (see

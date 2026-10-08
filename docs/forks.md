@@ -255,7 +255,7 @@ existing entries are being checked against it by
   - `fcf6f314` **(on the branch, not pinned)** adds a public
     `X11Surface::set_commits_allowed`, so the window manager can withhold
     `_XWAYLAND_ALLOW_COMMITS` from an X window it refuses. It was written
-    for `docs/backlog/protocols/xwayland-refused-windows-still-commit.md`
+    for `docs/backlog/resolved/xwayland-refused-windows-still-commit-done.md`
     and measured in scoot against a local repin before anything was
     pinned. It does not help: XWayland spends a refused override-redirect
     window's two buffers before the window manager hears of the map (480

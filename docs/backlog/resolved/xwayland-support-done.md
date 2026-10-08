@@ -703,5 +703,5 @@ pixel-only xdg client gets),
 [scale-aware X windows](xwayland-scale-aware-done.md) (resolved). Still open
 from earlier phases:
 [refused override-redirect windows still cost the server
-buffers](../protocols/xwayland-refused-windows-still-commit.md), its own
+buffers](../resolved/xwayland-refused-windows-still-commit-done.md), its own
 entry. XIM stays unprovided (XWayland links no `text-input-v3`).

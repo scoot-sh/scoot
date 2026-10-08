@@ -1,9 +1,10 @@
 ---
 title: "An override-redirect X window scoot refuses still costs the XWayland server its buffers"
-status: "open"
-area: "protocols"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-07"
 ---
 
 # An override-redirect X window scoot refuses still costs the XWayland server its buffers
@@ -107,3 +108,34 @@ commit.
 - A fix adds a fail-first live test: one X client far past its
   override-redirect cap, and the server's buffer count stays near what its
   128 drawn menus cost.
+
+## Resolved 2026-10-08 (PR #511)
+
+Tolerate 64 refused menus past the 128 cap (192 mapped total), then kill
+the runaway client's X connection (`XKillClient` over scoot's own X
+connection, lazy, dropped with the server) -- so one client cannot spend
+the server's budget on its own, while other X clients stay served. The
+ticket's fork premise (unmap or destroy the refused window via a fork
+method) was not needed and would not have kept up anyway: withholding
+commits was already measured as no help, and closing refused windows one
+by one was measured here and still disconnects (a paced 5000-menu storm
+with thousands closed, Broken pipe; the frees lag the maps). Killing
+stops the source; a later request by the dead client fails on its broken
+connection, never as a dangling `BadWindow` in a live client. No fork,
+no new dependency (Smithay re-exported `x11rb`), no hot-path cost for
+legitimate maps.
+
+Evidence (Asahi M2, XWayland 24.1.13, loadavg beside each number):
+- Without the kill: 5000-menu storm FAILs, runaway mapped 4112 menus
+  before its connection broke (server disconnected past its 4096
+  budget), Broken pipe.
+- With it: 21 tests pass (hermetic tolerance discipline + pins + storm
+  in ~1.4 s, runaway killed near 193 maps, server under budget, another
+  X client served).
+- Measured live here, one mapped menu holds 1 buffer and 1 fd once
+  settled (a 2500-storm holds 2500/2500); the ticket's 2-each was for a
+  longer-settled scene with second frames.
+- `cargo nextest run --workspace`, `cargo test -p scoot` (soft-egl),
+  `cargo clippy` (default + `gpu-scanout`), `cargo fmt --check`,
+  `scripts/smoke-test.sh`, `cargo deny check`, `scripts/backlog check`
+  (3 pre-existing only), site build: all green (see PR #511 checks).

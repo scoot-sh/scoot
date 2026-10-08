@@ -28,6 +28,14 @@ scoot has not cut a numbered release yet; entries are dated.
   the wallpaper, a byte-identical copy of the maintainer's own
   `docs/assets/CatPeeking.png`, MIT like the repo). See [Theming](site/src/content/docs/scoot/theming.md).
 
+### 2026-10-08 — a runaway X app's menus no longer take down every X window
+
+- **One X client mapping menus far past its 128-window limit no longer
+  spends the XWayland server to its budget.** The first 64 refused menus
+  are still merely refused (never drawn); past that scoot kills the
+  runaway client's X connection, so its windows go with it and it maps no
+  more, while every other X client stays served. See [Protocols](site/src/content/docs/scoot/protocols.md#per-client-limits-on-what-scoot-keeps).
+
 ### 2026-10-07 — opt-in keybindings for virtual keyboards
 
 - **Virtual keyboards can now run compositor keybindings when you ask:

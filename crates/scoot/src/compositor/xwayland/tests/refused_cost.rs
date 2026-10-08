@@ -10,18 +10,28 @@
 //!   granted, so its frame window is never mapped, XWayland never realizes
 //!   it, and no `wl_surface`, pool or buffer is made for it.
 //! - A refused **override-redirect** window costs what a drawn one does,
-//!   two pools and two buffers, and no more. Both are made before scoot
-//!   hears of the map: the window's backing pixmap has its pool and buffer
-//!   from the moment it is realized (`xwl_shm_create_pixmap`), and the
-//!   first commit swaps in a second. It never commits again, because a
-//!   refused window is never sent a frame callback and XWayland posts a
-//!   window's next frame only after its last one's callback.
+//!   and no more -- up to the kill tolerance past the cap. Both are
+//!   made before scoot hears of the map: the window's backing pixmap has
+//!   its pool and buffer from the moment it is realized
+//!   (`xwl_shm_create_pixmap`), and the first commit hands it over (a
+//!   second follows on the next frame, which never comes for a refused
+//!   window: it is never sent a frame callback, and XWayland posts a
+//!   window's next frame only after its last one's callback -- measured
+//!   here, one mapped menu holds one buffer and one fd once settled).
+//! - Past the tolerance (64 refused menus past the 128 cap) the runaway
+//!   client's X connection is killed (`XKillClient`), so one X client
+//!   mapping menus far past its cap cannot spend the server to its budget
+//!   on its own. Closing refused windows one by one was measured and does
+//!   not keep up (a paced 5000-menu storm still disconnects with thousands
+//!   closed -- the frees lag the maps), so the source has to stop. Below
+//!   the tolerance a refused menu is merely refused, and costs what a
+//!   drawn one does.
 //!
-//! So the server's cost is two per mapped window whether scoot draws it or
-//! not, and a runaway X client mapping override-redirect windows past its
-//! cap still spends the server's budget. What these pin is the part that
-//! holds: the cost is bounded per window and does not grow while the
-//! windows sit refused, and other X clients stay served.
+//! So below the tolerance the server's cost is bounded per mapped window
+//! whether scoot draws it or not, and what the pins hold is the part that
+//! keeps: the cost does not grow while refused windows sit, other X
+//! clients stay served -- and far past the cap the runaway is killed with
+//! the server still connected and other clients still served.
 
 use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::backend::ClientId;
@@ -149,7 +159,9 @@ fn a_refused_menu_costs_the_server_no_more_than_a_drawn_one() {
     let server = server(&live);
     let (at_cap, _) = cost(&live, &server);
 
-    const REFUSED: u32 = 112;
+    // Under the kill tolerance (64 refused past the cap): all tolerated,
+    // none killed -- the kill storm is its own test below.
+    const REFUSED: u32 = 64;
     for i in 0..REFUSED {
         live.x.map(&menu);
         if i % 16 == 15 {
@@ -180,4 +192,79 @@ fn a_refused_menu_costs_the_server_no_more_than_a_drawn_one() {
             .any(|window| window.window_id() == xid)
     });
     all_served(&[&live.x, &other]);
+}
+
+/// One X client mapping menus far past its cap -- past what the server's
+/// budget holds -- does not take the server: past the kill tolerance its X
+/// connection is killed (`XKillClient`), so its windows go with it and it
+/// maps no more, while the server and other X clients stay served.
+///
+/// Live: needs the `Xwayland` binary on `PATH`. Fails without the kill
+/// (the runaway maps until the server is disconnected past its budget,
+/// and every X connection breaks), passes with it (the runaway is killed
+/// near 192 maps, the server stays connected, and another X client is
+/// still served).
+#[test]
+fn a_runaway_menu_storm_does_not_take_the_server() {
+    let Some(mut live) = live("a_runaway_menu_storm_does_not_take_the_server") else {
+        return;
+    };
+    let mut menu = Props::new(RED);
+    menu.override_redirect = true;
+    // Past the largest server budget (4096): without the kill the runaway
+    // maps until the server is disconnected on every table; with it the
+    // runaway is killed near 128 + 64 maps on every table. Measured, one
+    // mapped override-redirect window costs the server 1 buffer and 1 fd
+    // here, so 5000 maps exceed even the largest budget without the kill.
+    const STORM: usize = 5000;
+    let mut mapped = 0;
+    for i in 0..STORM {
+        if live.x.try_map(&menu).is_none() {
+            break;
+        }
+        mapped += 1;
+        if i % 16 == 15 {
+            live.fixture.settle();
+        }
+    }
+    // With the kill the runaway is dead long before the storm ends (near
+    // 193 maps: 128 drawn + 64 tolerated + the one that trips the kill);
+    // without it the runaway maps until the server dies (512+ maps even
+    // on the smallest table). Either way its connection is broken by now
+    // -- what distinguishes the two is whether the server survived for
+    // others.
+    assert!(
+        mapped < 300,
+        "the runaway mapped {mapped} menus before its connection broke: the kill did not fire"
+    );
+    live.drain();
+    // The server's own Wayland client (not via the draw list: the kill
+    // destroyed every drawn window with the runaway, so no surface is
+    // left to trace it through).
+    let server = live
+        .fixture
+        .state
+        .xwayland_client
+        .as_ref()
+        .map(|client| client.id())
+        .expect("the XWayland server's connection");
+    let (buffers, fds) = cost(&live, &server);
+    let bound = crate::compositor::xwayland_budget::bound();
+    assert!(
+        buffers <= bound && fds <= bound,
+        "the storm holds the server at {buffers} buffers and {fds} fds, past its {bound} budget"
+    );
+
+    let other = XClient::connect(live.display);
+    let mut other_menu = Props::new(RED);
+    other_menu.override_redirect = true;
+    let xid = other.map(&other_menu);
+    eventually(&mut live.fixture, "the other X client's menu", |fixture| {
+        fixture
+            .state
+            .x11_unmanaged
+            .iter()
+            .any(|window| window.window_id() == xid)
+    });
+    all_served(&[&other]);
 }

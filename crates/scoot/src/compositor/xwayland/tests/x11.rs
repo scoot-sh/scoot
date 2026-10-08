@@ -138,7 +138,15 @@ impl XClient {
     /// Creates a window with `props` and maps it. Selects key presses and
     /// focus changes, so a test can read what reached it.
     pub(super) fn map(&self, props: &Props) -> Window {
-        let window = self.conn.generate_id().expect("an X window id");
+        self.try_map(props)
+            .expect("the X server accepted the window")
+    }
+
+    /// [`map`](Self::map) without panicking: `None` when the X server is
+    /// gone (its connection broken) or refuses a request -- what a test
+    /// mapping past a kill (or past the server's death) drives on.
+    pub(super) fn try_map(&self, props: &Props) -> Option<Window> {
+        let window = self.conn.generate_id().ok()?;
         let (x, y, w, h) = props.rect;
         self.conn
             .create_window(
@@ -161,9 +169,9 @@ impl XClient {
                             | EventMask::STRUCTURE_NOTIFY,
                     ),
             )
-            .expect("a create request")
+            .ok()?
             .check()
-            .expect("the X server accepted the window");
+            .ok()?;
         if let Some((instance, class)) = props.class {
             let value = format!("{instance}\0{class}\0");
             self.string(
@@ -276,14 +284,10 @@ impl XClient {
                 AtomEnum::ATOM,
                 &[self.atoms.wm_delete_window],
             )
-            .expect("a property request");
-        self.conn
-            .map_window(window)
-            .expect("a map request")
-            .check()
-            .expect("the X server accepted the map");
-        self.conn.flush().expect("the requests hit the wire");
-        window
+            .ok()?;
+        self.conn.map_window(window).ok()?.check().ok()?;
+        self.conn.flush().ok()?;
+        Some(window)
     }
 
     fn string(&self, window: Window, property: Atom, kind: Atom, value: &str) {

@@ -972,13 +972,12 @@ scale/mode) into one hardware session.
   sixteenth of the fd table, 512..=4096 (300 windows over 3 X clients stay
   up live; still refused at the budget). Its acquire-wait bound (GPU
   tier) now scales with that budget too: 512 on the usual table, not one
-  app's 64. Follow-up, open and low: [a refused override-redirect X window
-  still costs the server its
-  buffers](./protocols/xwayland-refused-windows-still-commit.md).
-  Withholding `_XWAYLAND_ALLOW_COMMITS` was measured and does not help
-  (480 buffers either way): XWayland spends both buffers before scoot
-  hears of the map. A refused managed window costs nothing. A fix has to
-  unmap or destroy the refused window, which needs a design pass.
+  app's 64. Follow-up [a refused override-redirect X window still costs
+  the server its
+  buffers](./resolved/xwayland-refused-windows-still-commit-done.md) is
+  RESOLVED 2026-10-08 (PR #511): 64 refused menus past the 128 cap are
+  tolerated, past that the runaway client's X connection is killed, so one
+  client cannot spend the server's budget on its own.
 - [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
   — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
   steps landed — cursor plane active where exposed (PR #216), overlay planes
