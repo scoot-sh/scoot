@@ -15,6 +15,7 @@ fn image(serial: u64) -> Arc<Image> {
             fill: Color { r: 0, g: 0, b: 0 },
             filter: Filter::Lanczos3,
         },
+        animate: true,
         serial,
         fetch: None,
     })

@@ -127,12 +127,16 @@ fn the_cache_path_is_keyed_by_the_url() {
 }
 
 #[test]
-fn the_magic_is_png_jpeg_or_webp() {
+fn the_magic_is_png_jpeg_gif_or_webp() {
     let png = [b"\x89PNG\r\n\x1a\n".as_slice(), b"rest"].concat();
     let jpeg = [b"\xff\xd8\xff".as_slice(), b"rest"].concat();
+    let gif87 = [b"GIF87a".as_slice(), b"rest"].concat();
+    let gif89 = [b"GIF89a".as_slice(), b"rest"].concat();
     let webp = [b"RIFF....WEBP".as_slice(), b"rest"].concat();
     assert!(is_image(&png));
     assert!(is_image(&jpeg));
+    assert!(is_image(&gif87));
+    assert!(is_image(&gif89));
     assert!(is_image(&webp));
     for not in [
         vec![],
@@ -142,7 +146,7 @@ fn the_magic_is_png_jpeg_or_webp() {
         b"RIFF".to_vec(),
         b"\x89PNG\r\n".to_vec(),
         b"\xff\xd8".to_vec(),
-        b"GIF89a...".to_vec(),
+        b"GIF".to_vec(),
     ] {
         assert!(!is_image(&not), "{not:?}");
     }

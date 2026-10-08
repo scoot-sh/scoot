@@ -41,6 +41,7 @@ fn each_request_parses() {
                 mode: Mode::Tile,
                 fill: red(),
                 filter: Filter::Nearest,
+                animate: true,
             }),
             output: Some("DP-1".into()),
             transition: crate::transition::Spec::none(),
@@ -61,6 +62,7 @@ fn each_request_parses() {
                 mode: Mode::Tile,
                 fill: red(),
                 filter: Filter::Nearest,
+                animate: true,
             }),
             output: Some("DP-1".into()),
             workspace: "2 DP-1".into(),
@@ -176,6 +178,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
                 mode: Mode::Fill,
                 fill: DEFAULT_FILL,
                 filter: Filter::Lanczos3,
+                animate: true,
             }),
             output: None,
             transition: crate::transition::Spec::none(),
@@ -190,6 +193,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
                 mode: Mode::Center,
                 fill: Color::parse("#abcdef").unwrap(),
                 filter: Filter::Bilinear,
+                animate: true,
             }),
             output: Some("X".into()),
             transition: crate::transition::Spec::none(),
@@ -202,6 +206,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
             mode: Mode::Fit,
             fill: Color::parse("#101014").unwrap(),
             filter: Filter::Lanczos3,
+            animate: true,
         }),
         output: None,
         transition: crate::transition::Spec::none(),
@@ -585,6 +590,7 @@ fn an_image_shows_its_path_mode_fill_and_filter() {
             fill: Color::parse("#101014").unwrap(),
             filter: Filter::CatmullRom,
         },
+        animate: true,
         serial: 7,
         fetch: None,
     }));
@@ -1002,4 +1008,157 @@ fn a_query_without_a_slideshow_is_byte_for_byte_what_it_was() {
         value["rotation"],
         serde_json::json!({"directory": "/pics", "every_secs": 1800, "shuffle": true, "files": 12})
     );
+}
+
+#[test]
+fn animate_absent_animates_false_stills_anything_else_refuses() {
+    // Absent (and the default-omitted `"true"`) mean checks on; only
+    // `"false"` stills.
+    let request = parse(br##"{"protocol":1,"type":"set","image":"/p/a.gif"}"##).unwrap();
+    let Request::Set {
+        show: Show::Image(image),
+        ..
+    } = request
+    else {
+        panic!("not a set");
+    };
+    assert!(image.animate);
+    let request =
+        parse(br##"{"protocol":1,"type":"set","image":"/p/a.gif","animate":"true"}"##).unwrap();
+    let Request::Set {
+        show: Show::Image(image),
+        ..
+    } = request
+    else {
+        panic!("not a set");
+    };
+    assert!(image.animate);
+    let request =
+        parse(br##"{"protocol":1,"type":"set","image":"/p/a.gif","animate":"false"}"##).unwrap();
+    let Request::Set {
+        show: Show::Image(image),
+        ..
+    } = request
+    else {
+        panic!("not a set");
+    };
+    assert!(!image.animate);
+    // `false` is the only value ever on the wire: it round-trips, and
+    // `true` is omitted (the line never carries it).
+    let line = Request::Set {
+        show: Show::Image(ImageRequest {
+            source: Source::Path("/p/a.gif".into()),
+            mode: Mode::Fill,
+            fill: DEFAULT_FILL,
+            filter: Filter::Lanczos3,
+            animate: false,
+        }),
+        output: None,
+        transition: crate::transition::Spec::none(),
+    }
+    .line();
+    assert!(line.contains("\"animate\":\"false\""), "{line}");
+    assert_eq!(parse(line.trim_end().as_bytes()).unwrap().line(), line);
+    // Anything else is refused, naming the value.
+    let Err(RequestError::BadAnimate(got)) =
+        parse(br##"{"protocol":1,"type":"set","image":"/p/a.gif","animate":"yes"}"##)
+    else {
+        panic!("animate:yes parsed");
+    };
+    assert_eq!(got, "yes");
+    // `animate` on a color or a clear is refused: neither has frames.
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"set","color":"#ffffff","animate":"false"}"##),
+        Err(RequestError::ImageOnly(_))
+    ));
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"clear","animate":"false"}"##),
+        Err(RequestError::AnimateWithClear)
+    ));
+}
+
+#[test]
+fn animate_with_a_directory_is_refused() {
+    // A slideshow steps through many images, each checked like one `set`:
+    // `animate` stills one image, so a directory takes none.
+    assert!(matches!(
+        parse(
+            br#"{"protocol":1,"type":"set","directory":"/pics","every":"1800s","animate":"false"}"#
+        ),
+        Err(RequestError::AnimateWithSlideshow)
+    ));
+    let message = RequestError::AnimateWithSlideshow.to_string();
+    assert!(message.contains("slideshow"), "{message}");
+}
+
+#[test]
+fn animate_composes_with_workspace_requests() {
+    // A workspace-mapped image stills like any image: `false` round-trips
+    // on the wire, absent (and omitted `true`) means checked.
+    let line = Request::SetWorkspace {
+        show: Show::Image(ImageRequest {
+            source: Source::Path("/p/a.gif".into()),
+            mode: Mode::Fill,
+            fill: DEFAULT_FILL,
+            filter: Filter::Lanczos3,
+            animate: false,
+        }),
+        output: None,
+        workspace: "2".into(),
+        transition: crate::transition::Spec::none(),
+    }
+    .line();
+    assert!(line.contains("\"animate\":\"false\""), "{line}");
+    let request = parse(line.trim_end().as_bytes()).unwrap();
+    let Request::SetWorkspace {
+        show: Show::Image(image),
+        workspace,
+        ..
+    } = &request
+    else {
+        panic!("not a set-workspace: {line}");
+    };
+    assert!(!image.animate, "the still survives the wire");
+    assert_eq!(workspace.as_ref(), "2");
+    assert_eq!(request.line(), line, "and serializes back");
+    // Checked (the default) omits the field, like a base `set`.
+    let line = Request::SetWorkspace {
+        show: Show::Image(ImageRequest {
+            source: Source::Path("/p/a.gif".into()),
+            mode: Mode::Fill,
+            fill: DEFAULT_FILL,
+            filter: Filter::Lanczos3,
+            animate: true,
+        }),
+        output: None,
+        workspace: "2".into(),
+        transition: crate::transition::Spec::none(),
+    }
+    .line();
+    assert!(!line.contains("animate"), "{line}");
+    // A slideshow cannot be mapped per workspace: that refusal wins over
+    // the per-image still one, like the CLI's `--workspace` check wins
+    // over `--no-animate`.
+    assert!(matches!(
+        parse(
+            br#"{"protocol":1,"type":"set-workspace","workspace":"2","directory":"/pics","every":"1800s","animate":"false"}"#
+        ),
+        Err(RequestError::SlideshowWithWorkspace)
+    ));
+    assert!(matches!(
+        parse(
+            br#"{"protocol":1,"type":"set-workspace","workspace":"2","directory":"/pics","every":"1800s"}"#
+        ),
+        Err(RequestError::SlideshowWithWorkspace)
+    ));
+    // `animate` on a mapped color or a cleared mapping is refused: neither
+    // has frames.
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"set-workspace","workspace":"2","color":"#ffffff","animate":"false"}"##),
+        Err(RequestError::ImageOnly(_))
+    ));
+    assert!(matches!(
+        parse(br#"{"protocol":1,"type":"clear-workspace","workspace":"2","animate":"false"}"#),
+        Err(RequestError::AnimateWithClear)
+    ));
 }

@@ -249,6 +249,7 @@ fn image(
             mode,
             fill: Color::parse(fill).unwrap(),
             filter,
+            animate: true,
         }),
         output: output.map(|o| o.to_owned().into()),
         transition: crate::transition::Spec::none(),
@@ -272,6 +273,7 @@ fn download(
             mode,
             fill: Color::parse(fill).unwrap(),
             filter,
+            animate: true,
         }),
         output: output.map(|o| o.to_owned().into()),
         transition: crate::transition::Spec::none(),
@@ -341,6 +343,7 @@ fn set_and_clear_take_a_workspace() {
                 mode: Mode::Fill,
                 fill: Color::parse("#000000").unwrap(),
                 filter: Filter::Lanczos3,
+                animate: true,
             }),
             output: None,
             workspace: "web".into(),
@@ -1227,6 +1230,133 @@ fn every_with_a_bad_duration_is_refused() {
             "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
         ]),
         Err(Error::ShaImageOnly)
+    );
+    std::fs::remove_dir(&dir).unwrap();
+}
+
+#[test]
+fn no_animate_stills_the_image() {
+    let Command::Client(Request::Set {
+        show: Show::Image(image),
+        ..
+    }) = args(&["set", "/tmp/a.gif", "--no-animate"]).unwrap()
+    else {
+        panic!("not an image set");
+    };
+    assert!(!image.animate, "--no-animate stills");
+    // Without it, animation checks stay on.
+    let Command::Client(Request::Set {
+        show: Show::Image(image),
+        ..
+    }) = args(&["set", "/tmp/a.gif"]).unwrap()
+    else {
+        panic!("not an image set");
+    };
+    assert!(image.animate);
+    // On a color it is refused: a color has no frames.
+    assert!(matches!(
+        args(&["set", "#ffffff", "--no-animate"]),
+        Err(Error::ImageOnly(_))
+    ));
+    // On a link it stills: a download is one image.
+    let Command::Client(Request::Set {
+        show: Show::Image(image),
+        ..
+    }) = args(&["set", "https://example.com/a.gif", "--no-animate"]).unwrap()
+    else {
+        panic!("not an image set");
+    };
+    assert!(!image.animate, "--no-animate stills a link");
+}
+
+#[test]
+fn no_animate_with_every_is_refused() {
+    let dir = slideshow_dir("noanimate");
+    let path = dir.to_str().unwrap().to_owned();
+    // A slideshow steps through many images, each checked like one `set`:
+    // stilling is per image, so `--every` and `--no-animate` do not mix.
+    assert_eq!(
+        args(&["set", &path, "--every", "30m", "--no-animate"]),
+        Err(Error::NoAnimateWithEvery)
+    );
+    let message = Error::NoAnimateWithEvery.to_string();
+    assert!(message.contains("--no-animate"), "{message}");
+    assert!(message.contains("--every"), "{message}");
+    // Without `--every` the directory names its pace, not the still flag.
+    assert_eq!(
+        args(&["set", &path, "--no-animate"]),
+        Err(Error::DirectoryNeedsEvery(path))
+    );
+    std::fs::remove_dir(&dir).unwrap();
+}
+
+#[test]
+fn no_animate_with_workspace_stills_the_mapped_image() {
+    // `--no-animate` composes with `--workspace`: a workspace-mapped image
+    // stills like any image (the caps are per image, and a mapping holds
+    // one). Only slideshows refuse either flag.
+    let Command::Client(Request::SetWorkspace {
+        show: Show::Image(image),
+        workspace,
+        output,
+        ..
+    }) = args(&["set", "/tmp/a.gif", "--workspace", "2", "--no-animate"]).unwrap()
+    else {
+        panic!("not a workspace image set");
+    };
+    assert!(!image.animate, "--no-animate stills the mapping");
+    assert_eq!(workspace.as_ref(), "2");
+    assert!(output.is_none());
+    // Without it, the mapped animation is checked like any image's.
+    let Command::Client(Request::SetWorkspace {
+        show: Show::Image(image),
+        ..
+    }) = args(&["set", "/tmp/a.gif", "--workspace", "2"]).unwrap()
+    else {
+        panic!("not a workspace image set");
+    };
+    assert!(image.animate);
+    // A link maps stilled the same way: a download is one image.
+    let Command::Client(Request::SetWorkspace {
+        show: Show::Image(image),
+        ..
+    }) = args(&[
+        "set",
+        "https://example.com/a.gif",
+        "--workspace",
+        "web",
+        "--no-animate",
+    ])
+    .unwrap()
+    else {
+        panic!("not a workspace image set");
+    };
+    assert!(!image.animate, "--no-animate stills a mapped link");
+    // A color has no frames, mapped or not.
+    assert!(matches!(
+        args(&["set", "#ffffff", "--workspace", "2", "--no-animate"]),
+        Err(Error::ImageOnly(_))
+    ));
+    // A slideshow cannot be mapped per workspace: the workspace refusal
+    // wins over the still one (like the wire's `SlideshowWithWorkspace`
+    // wins over `AnimateWithSlideshow`).
+    let dir = slideshow_dir("wsnoanimate");
+    let path = dir.to_str().unwrap().to_owned();
+    assert_eq!(
+        args(&["set", &path, "--every", "30m", "--workspace", "2"]),
+        Err(Error::SlideshowWithWorkspace(path.clone()))
+    );
+    assert_eq!(
+        args(&[
+            "set",
+            &path,
+            "--every",
+            "30m",
+            "--workspace",
+            "2",
+            "--no-animate"
+        ]),
+        Err(Error::SlideshowWithWorkspace(path))
     );
     std::fs::remove_dir(&dir).unwrap();
 }

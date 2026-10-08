@@ -30,7 +30,8 @@ use rustix::io::Errno;
 use scootbg_mem::ShmBuffer;
 
 use crate::image::DECODE_STACK;
-use crate::image::decode::{DecodeError, decode_file};
+use crate::image::animated::{Animated, Checked, decode_checked};
+use crate::image::decode::{DecodeError, Decoded, decode_file};
 use crate::image::render::render_each;
 use crate::jobs::Target;
 use crate::wallpaper::Image;
@@ -259,6 +260,14 @@ impl Drop for Guard {
 /// offers it to each). A download is fetched first, on this thread (off
 /// the loop); the decoded source is handed to the last size's draw by
 /// value, so it is dropped before that buffer is allocated.
+///
+/// An animated image with animation checks on goes through
+/// [`decode_checked`] first: one open for the check and the draw, past
+/// the frame/byte caps the job fails with a refusal naming `--no-animate`,
+/// within them its first frame is drawn (frame-by-frame playback is a
+/// follow-up). With `--no-animate` (`animate` false) it decodes the
+/// static way, first frame only, with no animation caps. Either way what
+/// shows is a still, with zero wakeups.
 pub fn work(image: &Image, targets: &[Target]) -> Done {
     let path;
     let file = match &image.fetch {
@@ -268,7 +277,14 @@ pub fn work(image: &Image, targets: &[Target]) -> Done {
             path.as_path()
         }
     };
-    let decoded = decode_file(file, image.look.fill).map_err(JobError::Decode)?;
+    let decoded = if image.animate {
+        match decode_checked(file, image.look.fill).map_err(JobError::Decode)? {
+            Checked::Animated(animated) => first_frame(animated)?,
+            Checked::Static(decoded) => decoded,
+        }
+    } else {
+        decode_file(file, image.look.fill).map_err(JobError::Decode)?
+    };
     let mut sizes: Vec<(u32, u32)> = Vec::with_capacity(targets.len());
     for target in targets {
         if !sizes.contains(&target.dims) {
@@ -280,4 +296,22 @@ pub fn work(image: &Image, targets: &[Target]) -> Done {
         out.push((dims, drawn.map_err(|error| error.to_string())));
     });
     Ok(out)
+}
+
+/// The still an animation shows: its first, composited frame. The full
+/// decode never returns an empty animation, so this is unreachable in
+/// practice; a corrupt one fails the job rather than drawing nothing.
+fn first_frame(animated: Animated) -> Result<Decoded, JobError> {
+    let mut frames = animated.frames.into_iter();
+    match frames.next() {
+        Some(frame) => Ok(Decoded {
+            rgb: frame.rgb,
+            width: animated.width,
+            height: animated.height,
+            orientation: animated.orientation,
+        }),
+        None => Err(JobError::Decode(DecodeError::Corrupt(
+            "the animation holds no frames".into(),
+        ))),
+    }
 }

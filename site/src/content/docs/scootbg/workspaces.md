@@ -76,6 +76,29 @@ daemon never shares pixels between mappings by path; the 64-mapping cap
 bounds the worst case. Map colors, or fewer images, where memory is
 tight.
 
+## Animated images
+
+A mapped animated image (GIF, APNG, animated WebP) shows its first
+frame, like any image: at most 64 frames and 64 MiB of frames, checked
+when the mapping is set — past which the `set --workspace` is refused,
+naming `--no-animate`. `scootbg set anim.gif --workspace 2 --no-animate`
+stills it:
+
+```sh
+scootbg set ~/Pictures/anim.gif --workspace 2                # first frame, caps checked
+scootbg set ~/Pictures/anim.gif --workspace 2 --no-animate   # first frame, caps skipped
+```
+
+A slideshow cannot be mapped per workspace:
+`set DIR --every DURATION --workspace NAME` is refused (usage error,
+exit 2) on the CLI and on the wire.
+
+A `--no-animate` still is live-only: the state file never persists the
+flag, so after a restart the caps are checked again and an over-cap
+mapping is refused then (the output shows its own wallpaper until the
+next `set --workspace`). A slideshow cannot be mapped per workspace at
+all: map images or colors per workspace instead.
+
 Without the compositor's workspace protocol (sway has none), mappings
 are recorded and saved all the same, and apply once a compositor with
 one is: the base wallpaper shows meanwhile, and the daemon says so once

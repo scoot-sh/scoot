@@ -6,9 +6,9 @@
 //! The pipeline, as decided by measurement in
 //! `docs/scootbg/backlog/resolved/dependencies-done.md` (§2, §3b, §6b):
 //!
-//! 1. [`decode`]: PNG, JPEG or WebP, sniffed from the first bytes, straight
-//!    through `png`, `zune-jpeg` and `image-webp` into packed RGB, 3 bytes a
-//!    pixel. The size is checked against [`decode::MAX_PIXELS`] from the
+//! 1. [`decode`]: PNG, JPEG, GIF (first frame) or WebP, sniffed from the
+//!    first bytes, straight through `png`, `zune-jpeg`, `gif` and
+//!    `image-webp` into packed RGB, 3 bytes a pixel. The size is checked against [`decode::MAX_PIXELS`] from the
 //!    header, before anything the size of the image is allocated, and the
 //!    EXIF orientation is read ([`exif`]).
 //! 2. [`fit`]: where the image goes on the output, per [`Mode`], worked out
@@ -23,6 +23,7 @@
 //! Images are treated as sRGB and written as 8 bits a channel: color
 //! management is out of scope for v1.
 
+pub mod animated;
 #[cfg(test)]
 mod bench;
 pub mod decode;

@@ -13,8 +13,12 @@ wallpaper is opaque). **Anything not starting with `#` is an image**: a
 path, or an `http://` or `https://` URL ([below](./from-url.md#a-wallpaper-from-a-link));
 a file whose name starts with `#` is given as `./#name.png`. A path is
 made absolute before it is sent (the daemon's working directory is not
-yours) and must be valid UTF-8. PNG, JPEG and WebP are read, told apart by
-content, not by name (an animated PNG or WebP shows its first frame);
+yours) and must be valid UTF-8. PNG, JPEG, GIF and WebP are read, told
+apart by content, not by name (an animated GIF, APNG or animated WebP
+shows its first frame: at most 64 frames and 64 MiB of frames; past
+that the `set` is refused — pass `--no-animate` for the first frame
+instead; playing frame by frame is a follow-up; a `--no-animate` still
+is live-only, re-checked after a restart);
 transparency is shown over the fill color, and EXIF orientation is
 applied (a JPEG's, a WebP's, or a PNG's `eXIf` chunk). `--mode` fits it to each output:
 

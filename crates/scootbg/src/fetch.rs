@@ -7,7 +7,7 @@
 //! there shows it; otherwise the worker thread (never the event loop)
 //! downloads it by spawning `curl` — no TLS or HTTP stack is linked into
 //! this binary for it — verifies the expected `sha256` when one was given,
-//! checks the bytes start as a PNG, JPEG or WebP, and only then renames
+//! checks the bytes start as a PNG, JPEG, GIF or WebP, and only then renames
 //! the temporary file into place. Anything else (no `curl`, no network, an
 //! HTTP error, a file past the size cap, a hash mismatch, HTML) is an
 //! error naming the URL, and nothing is cached.
@@ -104,7 +104,7 @@ pub enum FetchError {
     TooLarge,
     /// The bytes are not what `sha256` pins.
     Mismatch { expected: String, actual: String },
-    /// The bytes do not start as a PNG, JPEG or WebP (an error page, say):
+    /// The bytes do not start as a PNG, JPEG, GIF or WebP (an error page, say):
     /// never cached, so a fixed upstream is picked up on the next request.
     NotAnImage { url: String, bytes: u64 },
     /// The cache directory cannot be made or used.
@@ -143,7 +143,7 @@ impl fmt::Display for FetchError {
             ),
             Self::NotAnImage { url, bytes } => write!(
                 f,
-                "{url:?} downloaded {bytes} bytes that do not start as a PNG, JPEG or WebP \
+                "{url:?} downloaded {bytes} bytes that do not start as a PNG, JPEG, GIF or WebP \
                  (an error page, say); nothing was cached"
             ),
             Self::Cache { path, error } => write!(
@@ -451,11 +451,13 @@ fn check(temp: &Path, fetch: &Fetch) -> Result<(), FetchError> {
     Ok(())
 }
 
-/// Whether `bytes` start as a PNG, JPEG or WebP: the signatures
+/// Whether `bytes` start as a PNG, JPEG, GIF or WebP: the signatures
 /// `image::decode` reads, before it reads them.
 fn is_image(bytes: &[u8]) -> bool {
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
     bytes.starts_with(PNG)
         || bytes.starts_with(b"\xff\xd8\xff")
+        || bytes.starts_with(b"GIF87a")
+        || bytes.starts_with(b"GIF89a")
         || (bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP".as_slice()))
 }

@@ -275,9 +275,14 @@ pub fn drive_due(state: &mut State, qh: &QueueHandle<State>, now: Instant) {
     );
     rotation.next = now + Duration::from_secs(every_secs);
     let generation = state.waiters.next_generation();
+    // Like one image's `set` with the animation checks on: an animated
+    // file shows its first frame, and past the frame/byte caps that step
+    // fails like any undecodable file (`draw_failed` until the next one).
+    // `--no-animate` is refused with `--every`, so steps never still.
     let choice: Choice = Some(Wallpaper::Image(Arc::new(Image {
         path: file,
         look,
+        animate: true,
         serial: generation,
         fetch: None,
     })));

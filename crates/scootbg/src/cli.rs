@@ -28,7 +28,8 @@ mod tests;
 const USAGE_BODY: &str = "\
 scootbg -- wallpaper daemon for Wayland
 
-Early days: colors and images (PNG, JPEG, WebP) work, and the daemon
+Early days: colors and images (PNG, JPEG, GIF, WebP; an animated GIF,
+APNG or animated WebP shows its first frame) work, and the daemon
 shows the last ones again when it next starts.
 
 USAGE:
@@ -159,9 +160,9 @@ scootbg set -- show a color, an image or a rotating directory, on every output, 
 USAGE:
     scootbg set '#rrggbb' [--output NAME] [--workspace NAME] [--transition KIND ...]
     scootbg set PATH [--output NAME] [--workspace NAME] [--mode MODE] [--fill '#rrggbb']
-                     [--filter FILTER] [--transition KIND ...]
+                     [--filter FILTER] [--no-animate] [--transition KIND ...]
     scootbg set URL [--output NAME] [--workspace NAME] [--mode MODE] [--fill '#rrggbb']
-                    [--filter FILTER] [--sha256 HEX] [--transition KIND ...]
+                    [--filter FILTER] [--sha256 HEX] [--no-animate] [--transition KIND ...]
     scootbg set DIR --every DURATION [--shuffle] [--output NAME] [--mode MODE]
                     [--fill '#rrggbb'] [--filter FILTER] [--transition KIND ...]
 
@@ -177,7 +178,10 @@ every DURATION, on one timer, without polling the directory. DURATION is a
 number and `s`, `m`, `h` or `d`, such as `30m`: at least `1m`, whole
 minutes, at most `7d`. The files are tried sorted by name, or shuffled
 once with --shuffle; a file that is not an image fails to draw when its
-turn comes (as a `set` of it would) until the next rotation. At most
+turn comes (as a `set` of it would) until the next rotation. An animated
+file shows its first frame, checked per step like one `set` (past 64
+frames or 64 MiB of frames that step fails); `--no-animate` with
+`--every` is a usage error: stilling is per image. At most
 10,000 files are listed: a larger directory is refused, naming the cap,
 rather than stalling the daemon's loop to list it. The first
 file shows before `set` returns, as an image does. A new `set`, a `clear`
@@ -196,8 +200,11 @@ the error says why; nothing is retried in a loop (a new `set`, a changed
 section, a reconfigured output, or a restart tries again). `file://` and
 other schemes are not fetched. Prefer `https`, and pin `--sha256`.
 
-Anything else is the path of an image: PNG, JPEG or WebP (the first frame
-of an animated one), told apart by content, not by name. It is made
+Anything else is the path of an image: PNG, JPEG, GIF or WebP, told
+apart by content, not by name. An animated GIF, APNG or animated WebP
+shows its first frame (up to 64 frames and 64 MiB of frames; past that
+the `set` is refused and `--no-animate` shows the first frame instead;
+playing frame by frame is a follow-up). It is made
 absolute here, so a relative path means from this directory. A file whose
 name starts with '#' is given as './#name.png'. The file is read when the
 daemon gets the request (and again for an output plugged in later), not
@@ -217,6 +224,10 @@ PNG's eXIf chunk).
                      a transparent one (default '#000000')
     --filter FILTER  the scaling filter: lanczos3 (the default), catmull-rom,
                      bilinear or nearest (hard pixels, for pixel art)
+    --no-animate     show the first frame only: a still with zero idle
+                     cost, for an animation past the size cap or where
+                     stillness is wanted (one image only: a color or a
+                     slideshow takes none)
     --sha256 HEX     pin a URL's bytes (64 hex digits, as `sha256sum`
                      prints): anything else fails instead of showing
     --every DURATION rotate through a directory: its files in turn, one
@@ -258,7 +269,11 @@ active, so this works on any compositor with it, not only scoot; without
 it the mapping waits (and is still saved) until one does. A newer `set`
 covers an older `set --workspace`, and a newer `set --workspace` covers
 an older `set`: whichever you changed last wins. `scootbg clear
---workspace NAME` takes the mapping back off.
+--workspace NAME` takes the mapping back off. A mapped animated image
+shows its first frame like any image (the same frame and byte caps,
+checked when it is set); `--no-animate` beside `--workspace` stills it,
+live-only like any still. A directory slideshow cannot be mapped per
+workspace: it is a usage error.
 
 Returns once every targeted output shows it and the compositor has
 processed it, so a screenshot taken straight after shows it. With a
@@ -286,13 +301,17 @@ replaced color does. Prints nothing on success.
 
 The choice is saved and shown again when the daemon next starts (see
 `scootbg daemon --help`): a color at once, an image once it has decoded.
+A `--no-animate` still is live-only: after a restart the animation caps
+are checked again, so an over-cap animation is refused then and the
+output loses its wallpaper until the next `set`.
 
 Exit status: 0 once shown; 1 when no daemon is running, the output is
 unknown, the image cannot be shown, the directory holds no files, holds
 more than 10,000 files, or has an unreadable entry, or
 drawing failed (the daemon's stderr
 says why); 2 for a usage error, such as a malformed color, an unknown
-mode, a directory without --every, or an --every without a directory.
+mode, a directory without --every, an --every without a directory, or a
+--no-animate with --every, or a slideshow with --workspace.
 
 EXAMPLES:
     scootbg set '#1e1e2e'
@@ -586,6 +605,9 @@ pub enum Error {
     /// output (or one `--output`), not per workspace; map images or colors
     /// per workspace instead.
     SlideshowWithWorkspace(String),
+    /// `--no-animate` with `--every`: stilling is per image, and a
+    /// slideshow steps through many (each checked like one `set`).
+    NoAnimateWithEvery,
     /// A URL with a NUL byte.
     UrlNul,
     /// `--workspace` empty, too long, or with a NUL byte.
@@ -706,6 +728,12 @@ impl fmt::Display for Error {
                 "`{target}` is a directory: a slideshow runs on every output (or one \
                  `--output`), not per workspace; map an image or a color with \
                  `--workspace` instead (try `scootbg set --help`)"
+            ),
+            Self::NoAnimateWithEvery => write!(
+                f,
+                "`--no-animate` stills one image, and a slideshow steps through a \
+                 directory (each step checked like one `set`): drop `--every` to \
+                 still a file (try `scootbg set --help`)"
             ),
             Self::UrlNul => write!(f, "the image URL has a NUL byte"),
             Self::BadWorkspace { value, reason } => write!(
@@ -1081,6 +1109,7 @@ const DURATION_MS: &str = "--duration-ms";
 const EASING: &str = "--easing";
 const ANGLE: &str = "--angle";
 const POSITION: &str = "--position";
+const NO_ANIMATE: &str = "--no-animate";
 
 /// `set COLOR|PATH|URL|DIR [--output NAME] [--mode M] [--fill C] [--filter F]
 /// [--sha256 HEX] [--every DURATION] [--shuffle]` and `clear [--output NAME]`,
@@ -1106,6 +1135,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             EASING,
             ANGLE,
             POSITION,
+            NO_ANIMATE,
         ]
     } else {
         &[OUTPUT, WORKSPACE]
@@ -1124,11 +1154,13 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         })
     };
     let mut target: Option<String> = None;
-    // Indexed as `flags`.
-    let mut values: [Option<String>; 12] = Default::default();
+    // Indexed as `flags`; the last, `--no-animate`, is a boolean handled
+    // above and never lands here (its slot stays `None`).
+    let mut values: [Option<String>; 13] = Default::default();
     // `--shuffle` takes no value, so it is kept out of `flags` (whose
     // machinery reads one) and handled here, bare only.
     let mut shuffle = false;
+    let mut no_animate = false;
     let mut first = true;
     while let Some(arg) = args.next() {
         let arg = match arg {
@@ -1161,6 +1193,17 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             }
         });
         if let Some((index, flag, value)) = flag {
+            // `--no-animate` is a boolean: no value, never repeated.
+            if flag == NO_ANIMATE {
+                if value.is_some() {
+                    return Err(unexpected(arg));
+                }
+                if std::mem::replace(&mut no_animate, true) {
+                    return Err(Error::Repeated { command, flag });
+                }
+                first = false;
+                continue;
+            }
             let value = match value {
                 Some(value) => value,
                 None => args
@@ -1196,7 +1239,12 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         easing,
         angle,
         position,
+        no_animate_value,
     ] = values;
+    // `--no-animate` never lands in `values` (handled above as a boolean);
+    // a value there would mean the matching changed.
+    debug_assert!(no_animate_value.is_none());
+    let _ = no_animate_value;
     let output = output.map(Cow::Owned);
     let workspace = workspace.map(check_workspace).transpose()?.map(Cow::Owned);
     if command == "clear" {
@@ -1220,6 +1268,9 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             if given.is_some() {
                 return Err(Error::ImageOnly(flag));
             }
+        }
+        if no_animate {
+            return Err(Error::ImageOnly(NO_ANIMATE));
         }
         if every.is_some() {
             return Err(Error::EveryNeedsDirectory(argument));
@@ -1282,6 +1333,9 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         }
         let every = every.ok_or_else(|| Error::DirectoryNeedsEvery(argument.clone()))?;
         let every_secs = crate::rotation::parse_every(&every).map_err(Error::BadEvery)?;
+        if no_animate {
+            return Err(Error::NoAnimateWithEvery);
+        }
         let path = absolute(&argument)?;
         return Ok(Command::Client(Request::Set {
             show: Show::Slideshow(SlideshowRequest {
@@ -1312,6 +1366,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
                 mode,
                 fill,
                 filter,
+                animate: !no_animate,
             }),
             output,
             workspace,
@@ -1323,6 +1378,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
                 mode,
                 fill,
                 filter,
+                animate: !no_animate,
             }),
             output,
             transition,

@@ -49,11 +49,15 @@ serde_json.workspace = true
 # more, reads a whole JPEG into memory first (+9.5 MB of peak) and copies
 # the whole image to apply EXIF orientation (§2). `zune-jpeg`'s `unsafe` is
 # its SIMD kernels, fuzzed upstream; `png` and `image-webp` are
-# `forbid(unsafe_code)` (§10).
+# `forbid(unsafe_code)` (§10). `gif` (MIT/Apache-2.0, pure Rust, no default
+# features so no `color_quant`: decoding indexed frames to RGBA needs none
+# of it) decodes animated GIFs; APNG and animated WebP come from `png` and
+# `image-webp` already above, so no new decoder there.
 zune-jpeg = "0.5"
 zune-core = "0.5"
 png = "0.18"
 image-webp = "0.2"
+gif = { version = "0.14", default-features = false, features = ["std"] }
 # The scaler: `forbid(unsafe_code)`, 174 ms and +25 MB (the output only) for
 # 6000x4000 -> 3840x2160 Lanczos3, against fir's 80 ms / +63 MB and ~650
 # `unsafe` sites; the user's choice after both were measured (§3b). Behind

@@ -26,6 +26,10 @@ fn ids(n: usize) -> Vec<OutputId> {
 }
 
 fn image(path: &std::path::Path, mode: Mode) -> Image {
+    image_animated(path, mode, true)
+}
+
+fn image_animated(path: &std::path::Path, mode: Mode, animate: bool) -> Image {
     Image {
         path: path.to_str().unwrap().into(),
         look: Look {
@@ -33,6 +37,7 @@ fn image(path: &std::path::Path, mode: Mode) -> Image {
             fill: Color { r: 0, g: 0, b: 0 },
             filter: Filter::Lanczos3,
         },
+        animate,
         serial: 1,
         fetch: None,
     }
@@ -321,5 +326,79 @@ fn eagain_retries_then_starts() {
         std::thread::sleep(Duration::from_millis(10));
     }
     thread.join().expect("the decoding thread ended cleanly");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// An animated GIF with checks on draws its first frame: one buffer per
+/// size, the first frame's pixels (red, green here, XRGB).
+#[test]
+fn an_animated_gif_with_checks_draws_its_first_frame() {
+    use crate::image::samples;
+
+    let dir = scratch("gif-first");
+    let file = dir.join("two.gif");
+    std::fs::write(&file, samples::gif_two_frame()).unwrap();
+    let [a] = ids(1)[..] else { unreachable!() };
+    let targets = [Target {
+        output: a,
+        dims: (2, 1),
+    }];
+    let mut done = work(&image(&file, Mode::Stretch), &targets).unwrap();
+    assert_eq!(done.len(), 1);
+    let (dims, buffer) = done.pop().unwrap();
+    assert_eq!(dims, (2, 1));
+    // XRGB8888: red, then green.
+    assert_eq!(
+        &buffer.unwrap().pixels_mut()[..8],
+        &[0, 0, 255, 255, 0, 255, 0, 255]
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Past the frame cap with checks on, the whole job fails with a refusal
+/// naming `--no-animate`; the outputs keep what they showed.
+#[test]
+fn an_animation_past_the_cap_is_refused_naming_no_animate() {
+    use crate::image::animated::MAX_ANIMATED_FRAMES;
+    use crate::image::samples;
+
+    let dir = scratch("gif-cap");
+    let file = dir.join("many.gif");
+    std::fs::write(&file, samples::gif_many_frames(MAX_ANIMATED_FRAMES + 1)).unwrap();
+    let [a] = ids(1)[..] else { unreachable!() };
+    let targets = [Target {
+        output: a,
+        dims: (1, 1),
+    }];
+    let Err(JobError::Decode(DecodeError::Corrupt(message))) =
+        work(&image(&file, Mode::Stretch), &targets)
+    else {
+        panic!("an over-cap animation was drawn");
+    };
+    assert!(message.contains("--no-animate"), "{message}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `--no-animate` skips the animation caps: the same over-cap file draws
+/// its first frame.
+#[test]
+fn no_animate_draws_the_first_frame_past_the_cap() {
+    use crate::image::animated::MAX_ANIMATED_FRAMES;
+    use crate::image::samples;
+
+    let dir = scratch("gif-still");
+    let file = dir.join("many.gif");
+    std::fs::write(&file, samples::gif_many_frames(MAX_ANIMATED_FRAMES + 1)).unwrap();
+    let [a] = ids(1)[..] else { unreachable!() };
+    let targets = [Target {
+        output: a,
+        dims: (1, 1),
+    }];
+    let mut done = work(&image_animated(&file, Mode::Stretch, false), &targets).unwrap();
+    assert_eq!(done.len(), 1);
+    let (dims, buffer) = done.pop().unwrap();
+    assert_eq!(dims, (1, 1));
+    // The first frame: black.
+    assert_eq!(&buffer.unwrap().pixels_mut()[..4], &[0, 0, 0, 255]);
     std::fs::remove_dir_all(&dir).unwrap();
 }

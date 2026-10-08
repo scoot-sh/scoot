@@ -40,6 +40,7 @@ fn owned(show: Show<'_>) -> Show<'static> {
             mode: image.mode,
             fill: image.fill,
             filter: image.filter,
+            animate: image.animate,
         }),
     }
 }
@@ -228,6 +229,7 @@ fn set_and_clear_change_the_wallpaper_and_answer_later() {
         mode: Mode::Center,
         fill: red,
         filter: Filter::Bilinear,
+        animate: true,
     });
     for request in [
         Request::Set {
@@ -329,6 +331,49 @@ fn workspace_requests_reach_change_workspace_and_answer_later() {
             (Some("DP-2".to_owned()), "web".to_owned(), None),
         ]
     );
+}
+
+#[test]
+fn a_workspace_image_keeps_its_animate_through_the_wire() {
+    // The daemon threads the mapped image's `animate` like a base `set`
+    // does: a `--no-animate --workspace` still reaches the change stilled
+    // (the worker then decodes it the static way, caps skipped), and a
+    // plain mapped animation arrives checked.
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
+    for animate in [false, true] {
+        let request = Request::SetWorkspace {
+            show: Show::Image(ImageRequest {
+                source: Source::Path("/p/a.gif".into()),
+                mode: Mode::Fill,
+                fill: Color::parse("#000000").unwrap(),
+                filter: Filter::Lanczos3,
+                animate,
+            }),
+            output: None,
+            workspace: "2".into(),
+            transition: crate::transition::Spec::none(),
+        };
+        let mut out = Vec::new();
+        let line = request.line();
+        if animate {
+            assert!(!line.contains("animate"), "{line}");
+        } else {
+            assert!(line.contains("\"animate\":\"false\""), "{line}");
+        }
+        let answer = responder.handle(ConnId::for_test(1), line.trim_end().as_bytes(), &mut out);
+        assert_eq!(answer, Answer::Later, "{line}");
+        assert!(out.is_empty(), "nothing written yet: {line}");
+    }
+    let animates: Vec<bool> = fake
+        .workspace_changes
+        .iter()
+        .map(|(_, _, _, choice, _)| match choice {
+            Some(Show::Image(image)) => image.animate,
+            other => panic!("not a mapped image: {other:?}"),
+        })
+        .collect();
+    assert_eq!(animates, [false, true], "stilled, then checked");
 }
 
 #[test]
@@ -736,6 +781,7 @@ fn a_superseded_image_request_waits_like_a_color() {
             fill: Color { r: 0, g: 0, b: 0 },
             filter: Filter::Lanczos3,
         },
+        animate: true,
         serial: 1,
         fetch: None,
     });

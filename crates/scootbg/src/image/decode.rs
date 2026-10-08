@@ -1,9 +1,9 @@
 //! From a file to packed RGB, 3 bytes a pixel, with its EXIF orientation.
 //!
 //! The format is sniffed from the first bytes, never the name: PNG
-//! (`\x89PNG\r\n\x1a\n`), JPEG (`FF D8 FF`) and WebP (`RIFF....WEBP`),
-//! each through its crate directly (dependencies-done.md §2). Anything
-//! else is [`DecodeError::NotAnImage`].
+//! (`\x89PNG\r\n\x1a\n`), JPEG (`FF D8 FF`), GIF (`GIF87a`/`GIF89a`, first
+//! frame only) and WebP (`RIFF....WEBP`), each through its crate directly
+//! (dependencies-done.md §2). Anything else is [`DecodeError::NotAnImage`].
 //!
 //! **Size first.** Every decoder's header is read, and the image refused
 //! past [`MAX_PIXELS`], before anything the size of the image is
@@ -11,9 +11,9 @@
 //! JPEG must also hold at least the data its size needs
 //! ([`jpeg_min_len`]).
 //!
-//! **What is fallible, and what is committed.** Only the pixel buffer
-//! allocated here (the decoded image, and the decoder's RGBA or grey
-//! before it becomes RGB) is fallible: the allocator refusing it is an
+//! **What is fallible, and what is committed.** Only the pixel buffers
+//! are fallible (the decoded image here, the decoder's RGBA or grey
+//! before it becomes RGB, and `animated`'s RGBA canvases): the allocator refusing it is an
 //! error reply. It is also committed only as it is written
 //! (`scootbg_mem::zeroed`), so a file that claims a large size and holds
 //! little costs what it decodes, not what it claims. The decoders' own
@@ -32,7 +32,10 @@
 //!
 //! **Transparency** is flattened over the fill color here, once: a
 //! wallpaper is opaque. Grey images become RGB, 16-bit channels 8-bit.
-//! Animated PNG and WebP show their first frame (animation is milestone 2).
+//! Animated images show their first frame through this path (GIF, APNG,
+//! animated WebP; frame-by-frame playback is a follow-up): with animation
+//! checks on, [`super::animated::decode_animated`] runs first and refuses
+//! past its frame/byte caps, so this path is the `--no-animate` still.
 
 use std::fmt;
 use std::fs::File;
@@ -78,7 +81,7 @@ pub enum DecodeError {
     /// A directory, a FIFO, a device: not something to decode.
     NotAFile,
     Unreadable(io::Error),
-    /// Not a PNG, JPEG or WebP.
+    /// Not a PNG, JPEG, GIF or WebP.
     NotAnImage,
     /// Past [`MAX_PIXELS`].
     TooLarge {
@@ -97,7 +100,7 @@ impl fmt::Display for DecodeError {
             Self::NotFound => write!(f, "no such file"),
             Self::NotAFile => write!(f, "not a regular file"),
             Self::Unreadable(error) => write!(f, "cannot read it: {error}"),
-            Self::NotAnImage => write!(f, "not an image scootbg reads (PNG, JPEG or WebP)"),
+            Self::NotAnImage => write!(f, "not an image scootbg reads (PNG, JPEG, GIF or WebP)"),
             Self::TooLarge { width, height } => write!(
                 f,
                 "image too large: {width}x{height} is more than the {MAX_PIXELS} pixels \
@@ -115,7 +118,15 @@ impl fmt::Display for DecodeError {
 }
 
 /// Decodes the image at `path`, transparency flattened over `fill`.
+/// The file is opened once; the sniff and the decode share the open.
 pub fn decode_file(path: &Path, fill: Color) -> Result<Decoded, DecodeError> {
+    decode(&mut open(path)?, fill)
+}
+
+/// Opens `path` for decoding: `O_NONBLOCK`, refused unless it is a
+/// regular file, so a FIFO or a device named by mistake neither blocks
+/// the worker nor streams forever.
+pub(crate) fn open(path: &Path) -> Result<BufReader<File>, DecodeError> {
     let flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY;
     let fd = rustix::fs::open(path, flags, Mode::empty()).map_err(|errno| match errno {
         Errno::NOENT | Errno::NOTDIR => DecodeError::NotFound,
@@ -126,11 +137,18 @@ pub fn decode_file(path: &Path, fill: Color) -> Result<Decoded, DecodeError> {
     if !metadata.is_file() {
         return Err(DecodeError::NotAFile);
     }
-    decode(BufReader::new(file), fill)
+    Ok(BufReader::new(file))
 }
 
-/// Decodes an image from `reader`, sniffing its format.
-pub fn decode<R: BufRead + Seek>(mut reader: R, fill: Color) -> Result<Decoded, DecodeError> {
+/// Decodes an image from `reader`, sniffing its format. The reader is
+/// borrowed, so a caller that peeked at the format first (an animation
+/// check) hands over the same open, and the image is read once.
+pub fn decode<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Decoded, DecodeError> {
+    // From the start, whatever a previous check left the position at: a
+    // caller that peeked at the format first hands over the same open.
+    reader
+        .seek(SeekFrom::Start(0))
+        .map_err(DecodeError::Unreadable)?;
     let mut magic = [0; 12];
     let mut got = 0;
     while got < magic.len() {
@@ -149,6 +167,8 @@ pub fn decode<R: BufRead + Seek>(mut reader: R, fill: Color) -> Result<Decoded, 
         png(reader, fill)
     } else if magic.starts_with(&[0xff, 0xd8, 0xff]) {
         jpeg(reader)
+    } else if magic.starts_with(b"GIF87a") || magic.starts_with(b"GIF89a") {
+        super::animated::gif_first_frame(reader, fill)
     } else if magic.len() == 12 && magic.starts_with(b"RIFF") && &magic[8..12] == b"WEBP" {
         webp(reader, fill)
     } else {
@@ -157,7 +177,7 @@ pub fn decode<R: BufRead + Seek>(mut reader: R, fill: Color) -> Result<Decoded, 
 }
 
 /// Checks a header's size against the budget.
-fn budget(width: u64, height: u64) -> Result<(u32, u32), DecodeError> {
+pub(crate) fn budget(width: u64, height: u64) -> Result<(u32, u32), DecodeError> {
     if width == 0 || height == 0 {
         return Err(DecodeError::Corrupt(format!(
             "the image is {width}x{height}"
@@ -185,7 +205,7 @@ fn buffer(len: usize) -> Result<Vec<u8>, DecodeError> {
     scootbg_mem::zeroed_bytes(len).ok_or(DecodeError::OutOfMemory(len))
 }
 
-fn jpeg<R: BufRead + Seek>(mut reader: R) -> Result<Decoded, DecodeError> {
+fn jpeg<R: BufRead + Seek>(mut reader: &mut R) -> Result<Decoded, DecodeError> {
     let corrupt = |error: zune_jpeg::errors::DecodeErrors| DecodeError::Corrupt(error.to_string());
     // No size limit of zune's own (the format's is 65535 a side): the
     // budget below is the limit. Strict, so a truncated file is an error
@@ -287,7 +307,7 @@ fn jpeg_ended<R: Read + Seek>(reader: &mut R) -> io::Result<bool> {
     Ok(window[..got].windows(2).any(|pair| pair == [0xff, 0xd9]))
 }
 
-fn png<R: BufRead + Seek>(reader: R, fill: Color) -> Result<Decoded, DecodeError> {
+fn png<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Decoded, DecodeError> {
     let corrupt = |error: png::DecodingError| match error {
         png::DecodingError::IoError(error) if error.kind() != io::ErrorKind::UnexpectedEof => {
             DecodeError::Unreadable(error)
@@ -339,7 +359,7 @@ fn png<R: BufRead + Seek>(reader: R, fill: Color) -> Result<Decoded, DecodeError
     })
 }
 
-fn webp<R: BufRead + Seek>(reader: R, fill: Color) -> Result<Decoded, DecodeError> {
+fn webp<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Decoded, DecodeError> {
     let corrupt = |error: image_webp::DecodingError| DecodeError::Corrupt(error.to_string());
     let mut decoder = image_webp::WebPDecoder::new(reader).map_err(corrupt)?;
     let (width, height) = decoder.dimensions();

@@ -304,6 +304,12 @@ impl Changes for Control<'_> {
                     first,
                     None,
                     look,
+                    // Slideshow steps check the animation caps like one
+                    // image's `set` (each shows its first frame; past the
+                    // caps that step fails like any undecodable file).
+                    // `--no-animate` is refused with `--every`: stilling is
+                    // per image, and a slideshow steps through many.
+                    true,
                     transition,
                     generation,
                     Some(dir),
@@ -346,6 +352,7 @@ impl Changes for Control<'_> {
                         fill: request.fill,
                         filter: request.filter,
                     },
+                    request.animate,
                     transition,
                     generation,
                     None,
@@ -457,6 +464,7 @@ impl Changes for Control<'_> {
                         fill: request.fill,
                         filter: request.filter,
                     },
+                    animate: request.animate,
                     serial: generation,
                     fetch,
                 });
@@ -535,6 +543,7 @@ fn trial_image(
     path: String,
     fetch: Option<Fetch>,
     look: Look,
+    animate: bool,
     transition: Spec,
     generation: u64,
     slideshow: Option<String>,
@@ -542,6 +551,7 @@ fn trial_image(
     let image = Arc::new(Image {
         path,
         look,
+        animate,
         serial: generation,
         fetch,
     });
