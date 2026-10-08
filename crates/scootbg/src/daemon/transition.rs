@@ -276,7 +276,10 @@ fn start(
     spec: Spec,
     now: Instant,
 ) -> bool {
-    let wanted = choices.for_output(entry.output.info().name.as_deref());
+    let wanted = choices.for_output(
+        entry.output.info().name.as_deref(),
+        entry.output.active_workspace(),
+    );
     let scale = paint::scale_for(globals.path, wanted, entry.output.scale());
     let Plan::Show(target) = entry.output.plan(wanted, scale) else {
         return false;
@@ -391,7 +394,10 @@ fn restart(
     let Some(position) = active_position(transitions, id) else {
         return false;
     };
-    let wanted = choices.for_output(entry.output.info().name.as_deref());
+    let wanted = choices.for_output(
+        entry.output.info().name.as_deref(),
+        entry.output.active_workspace(),
+    );
     let scale = paint::scale_for(globals.path, wanted, entry.output.scale());
     let Plan::Show(target) = entry.output.plan(wanted, scale) else {
         // Nothing to animate to (a `clear`, say): drop, draw normally.
@@ -845,7 +851,10 @@ fn finish(
     // Still what is wanted: a choice made without a transition (an
     // unchanged reload putting an image back, say) drops the animation
     // instead of finishing stale, and the normal path draws it.
-    let wanted = choices.for_output(entry.output.info().name.as_deref());
+    let wanted = choices.for_output(
+        entry.output.info().name.as_deref(),
+        entry.output.active_workspace(),
+    );
     if wanted != Some(&target.content) {
         drop_active(transitions, entry, position);
         return false;

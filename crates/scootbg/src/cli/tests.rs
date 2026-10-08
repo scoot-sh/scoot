@@ -312,6 +312,89 @@ fn set_takes_a_color_and_an_optional_output_in_any_order() {
 }
 
 #[test]
+fn set_and_clear_take_a_workspace() {
+    // A color for a workspace, in any order.
+    assert_eq!(
+        args(&["set", "#c03020", "--workspace", "2"]),
+        Ok(Command::Client(Request::SetWorkspace {
+            show: Show::Color(Color::parse("#c03020").unwrap()),
+            output: None,
+            workspace: "2".into(),
+            transition: crate::transition::Spec::none(),
+        }))
+    );
+    assert_eq!(
+        args(&["set", "--workspace=2", "--output", "DP-1", "#c03020"]),
+        Ok(Command::Client(Request::SetWorkspace {
+            show: Show::Color(Color::parse("#c03020").unwrap()),
+            output: Some("DP-1".into()),
+            workspace: "2".into(),
+            transition: crate::transition::Spec::none(),
+        }))
+    );
+    // An image for a workspace.
+    assert_eq!(
+        args(&["set", "/p/a.png", "--workspace", "web"]),
+        Ok(Command::Client(Request::SetWorkspace {
+            show: Show::Image(ImageRequest {
+                source: Source::Path("/p/a.png".into()),
+                mode: Mode::Fill,
+                fill: Color::parse("#000000").unwrap(),
+                filter: Filter::Lanczos3,
+            }),
+            output: None,
+            workspace: "web".into(),
+            transition: crate::transition::Spec::none(),
+        }))
+    );
+    // Clearing a workspace mapping.
+    assert_eq!(
+        args(&["clear", "--workspace", "2"]),
+        Ok(Command::Client(Request::ClearWorkspace {
+            output: None,
+            workspace: "2".into(),
+        }))
+    );
+    assert_eq!(
+        args(&["clear", "--output", "DP-1", "--workspace", "2"]),
+        Ok(Command::Client(Request::ClearWorkspace {
+            output: Some("DP-1".into()),
+            workspace: "2".into(),
+        }))
+    );
+    // Without --workspace, the same lines are the old requests.
+    assert_eq!(args(&["set", "#c03020"]), set("#c03020", None));
+    assert_eq!(args(&["clear"]), clear(None));
+}
+
+#[test]
+fn a_bad_workspace_is_a_usage_error() {
+    assert!(matches!(
+        args(&["set", "#c03020", "--workspace", ""]),
+        Err(Error::BadWorkspace { .. })
+    ));
+    assert!(matches!(
+        args(&["clear", "--workspace", ""]),
+        Err(Error::BadWorkspace { .. })
+    ));
+    let long = "w".repeat(crate::choices::MAX_WORKSPACE_NAME + 1);
+    assert!(matches!(
+        args(&["set", "#c03020", "--workspace", &long]),
+        Err(Error::BadWorkspace { .. })
+    ));
+    // Twice is repeated, like every other flag.
+    assert!(matches!(
+        args(&["set", "#c03020", "--workspace", "1", "--workspace", "2"]),
+        Err(Error::Repeated { .. })
+    ));
+    // Missing its value.
+    assert!(matches!(
+        args(&["set", "#c03020", "--workspace"]),
+        Err(Error::MissingValue { .. })
+    ));
+}
+
+#[test]
 fn clear_takes_an_optional_output() {
     assert_eq!(args(&["clear"]), clear(None));
     assert_eq!(

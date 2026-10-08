@@ -527,6 +527,9 @@ impl Section {
                 .flatten()
                 .map(|(name, table)| (name.clone(), table.pick.record(cache)))
                 .collect(),
+            // Sections name no workspace wallpapers (see the follow-up in
+            // `docs/scootbg/backlog/`): the live mappings stand.
+            workspaces: Vec::new(),
         }
     }
 

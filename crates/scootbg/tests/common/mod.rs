@@ -254,6 +254,27 @@ impl Session {
         Some(session)
     }
 
+    /// `scoot msg ARGS` against this session's scoot (a scoot session
+    /// only); panics unless it succeeds. Needs the `scoot` binary beside
+    /// `scootbg`, as the sessions themselves do. The socket is the
+    /// session's own (`scoot.sock` in its runtime directory).
+    pub fn scoot_msg(&self, args: &[&str]) -> String {
+        let scoot = scootbg_bin().with_file_name("scoot");
+        let output = Command::new(&scoot)
+            .arg("msg")
+            .args(args)
+            .env("XDG_RUNTIME_DIR", &self.scratch.0)
+            .env_remove("SCOOT_SOCKET")
+            .output()
+            .unwrap_or_else(|e| panic!("cannot start {}: {e}", scoot.display()));
+        assert!(
+            output.status.success(),
+            "scoot msg {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    }
+
     /// `swaymsg ARGS` against this session's sway; panics unless it
     /// succeeds.
     pub fn swaymsg(&self, args: &[&str]) -> String {

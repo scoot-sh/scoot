@@ -148,7 +148,7 @@ fn a_set_survives_a_restart() {
     assert!(stderr.is_empty(), "{stderr}");
     let text = read_state(&session, "default");
     assert!(
-        text.starts_with("scootbg-state 2\nprofile default\n"),
+        text.starts_with("scootbg-state 3\nprofile default\n"),
         "{text}"
     );
     assert!(text.contains("a%20picture%20#1.png"), "escaped: {text}");
@@ -199,7 +199,7 @@ fn a_set_survives_a_restart() {
     stop(&session, &mut daemon);
     assert_eq!(
         read_state(&session, "default"),
-        "scootbg-state 2\nprofile default\nall clear\n"
+        "scootbg-state 3\nprofile default\nall clear\n"
     );
     let mut daemon = session.daemon();
     configured_names(&session, 2);
@@ -415,7 +415,7 @@ fn an_unusable_state_file_never_stops_the_daemon() {
     };
     let file = state_file(&session, "default");
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    let newer = "scootbg-state 3\nall color #ff0000\n";
+    let newer = "scootbg-state 4\nall color #ff0000\n";
     std::fs::write(&file, newer).unwrap();
     let mut daemon = session.daemon();
     let names = configured_names(&session, 1);
@@ -427,7 +427,7 @@ fn an_unusable_state_file_never_stops_the_daemon() {
     );
     ok(&session, &["set", BLUE]);
     let stderr = stop(&session, &mut daemon);
-    assert!(stderr.contains("version 3"), "{stderr}");
+    assert!(stderr.contains("version 4"), "{stderr}");
     assert!(
         stderr.contains("remove or rename") && stderr.contains("to save again"),
         "how to recover: {stderr}"

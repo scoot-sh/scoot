@@ -178,7 +178,7 @@ fn the_fingerprint_and_profile_are_kept_as_read() {
     );
     assert_eq!(
         saved.text(),
-        "scootbg-state 2\nprofile scoot\nfingerprint abc123\n"
+        "scootbg-state 3\nprofile scoot\nfingerprint abc123\n"
     );
 }
 
@@ -273,7 +273,7 @@ fn an_applied_section_records_its_fingerprint() {
     assert!(saved.flush(Duration::from_secs(10)));
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
-        "scootbg-state 2\nprofile scoot\nfingerprint f00d\nall color #010101\n\
+        "scootbg-state 3\nprofile scoot\nfingerprint f00d\nall color #010101\n\
          output DP-2 color #020202\n"
     );
     // A `set` after it keeps the fingerprint.
@@ -281,7 +281,7 @@ fn an_applied_section_records_its_fingerprint() {
     assert!(saved.flush(Duration::from_secs(10)));
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
-        "scootbg-state 2\nprofile scoot\nfingerprint f00d\nall color #030303\n"
+        "scootbg-state 3\nprofile scoot\nfingerprint f00d\nall color #030303\n"
     );
     // With nowhere to save, it is still remembered for the daemon's life.
     let mut nowhere = Saved::nowhere();
@@ -329,5 +329,38 @@ fn a_writer_is_taken_back_only_for_its_own_profile() {
     assert_eq!(
         parsed.record.all,
         Some(Pick::Color(Color { r: 2, g: 2, b: 2 }))
+    );
+}
+
+/// Workspace mappings save and restore: lines after the named ones, with
+/// the transition they arrive through.
+#[test]
+fn workspace_mappings_are_saved_and_restored() {
+    use crate::transition::{Kind, Spec};
+    let mut saved = Saved::nowhere();
+    saved.record(None, &color(1), 1);
+    let fade = Spec {
+        kind: Kind::Fade,
+        ..Spec::none()
+    };
+    saved.record_workspace(None, "2", &color(2), fade, 2);
+    saved.record_workspace(Some("DP-1"), "web", &image("/w.jpg", 3), Spec::none(), 3);
+    let text = saved.text();
+    assert!(
+        text.contains("workspace 2 color #020202 transition fade 500 ease-out 0 0.5,0.5\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("workspace-output DP-1 web image /w.jpg fill #000000 lanczos3\n"),
+        "{text}"
+    );
+    // Restores, newest-wins intact: clearing a mapping drops its line
+    // (a cleared mapping restores nothing).
+    saved.record_workspace(None, "2", &None, Spec::none(), 4);
+    let text = saved.text();
+    assert!(!text.contains("workspace 2"), "{text}");
+    assert!(
+        text.contains("workspace-output DP-1 web image /w.jpg fill #000000 lanczos3\n"),
+        "{text}"
     );
 }

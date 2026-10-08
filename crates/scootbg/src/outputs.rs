@@ -321,6 +321,12 @@ pub struct Output {
     /// (`RoundTrip::Configured`): the surface's size and scale are settled
     /// for it. See [`Output::coming`].
     settled_serial: Option<u32>,
+    /// The workspace active on this output, by the name the compositor
+    /// announces through `ext-workspace-v1` (`None` while unknown: no
+    /// manager, no events yet, or the group went ambiguous). Set from the
+    /// manager's batches, read by what this output shows
+    /// (`crate::choices`) and by `query`. Runtime only: never saved.
+    active_workspace: Option<String>,
 }
 
 impl Output {
@@ -622,6 +628,17 @@ impl Output {
         self.running
     }
 
+    /// Notes which workspace is active on this output (`None`: unknown,
+    /// back to the base wallpaper): from `ext-workspace-v1`'s batches.
+    pub fn set_active_workspace(&mut self, workspace: Option<String>) {
+        self.active_workspace = workspace;
+    }
+
+    /// The workspace active on this output, if one was announced for it.
+    pub fn active_workspace(&self) -> Option<&str> {
+        self.active_workspace.as_deref()
+    }
+
     /// The surface was committed with `drawn`.
     pub fn drew(&mut self, drawn: Drawn) {
         if let Surface::Configured { drawn: slot, .. } = &mut self.surface {
@@ -862,6 +879,7 @@ impl<O> Outputs<O> {
                 creation: 0,
                 late: false,
                 settled_serial: None,
+                active_workspace: None,
             },
             objects: objects(id),
         });

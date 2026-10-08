@@ -157,10 +157,10 @@ pub const SET_HELP: &str = "\
 scootbg set -- show a color, an image or a rotating directory, on every output, or on one
 
 USAGE:
-    scootbg set '#rrggbb' [--output NAME] [--transition KIND ...]
-    scootbg set PATH [--output NAME] [--mode MODE] [--fill '#rrggbb']
+    scootbg set '#rrggbb' [--output NAME] [--workspace NAME] [--transition KIND ...]
+    scootbg set PATH [--output NAME] [--workspace NAME] [--mode MODE] [--fill '#rrggbb']
                      [--filter FILTER] [--transition KIND ...]
-    scootbg set URL [--output NAME] [--mode MODE] [--fill '#rrggbb']
+    scootbg set URL [--output NAME] [--workspace NAME] [--mode MODE] [--fill '#rrggbb']
                     [--filter FILTER] [--sha256 HEX] [--transition KIND ...]
     scootbg set DIR --every DURATION [--shuffle] [--output NAME] [--mode MODE]
                     [--fill '#rrggbb'] [--filter FILTER] [--transition KIND ...]
@@ -247,6 +247,19 @@ NAME (a connector name, as `scootbg query` lists them), only that output
 does, and it keeps it when it is unplugged and plugged back in. A name that
 no output has now is an error, and nothing is changed.
 
+With --workspace NAME, the wallpaper is for one workspace instead: while
+the workspace NAME (the name the compositor announces, \"1\", \"2\", ... on
+scoot, as `scootbg query` lists them per output) is active, the targeted
+outputs show it, arriving through the transition given here when the
+workspace turns active; otherwise they show their own wallpaper. With
+--output as well, only that output does. The daemon follows the
+compositor's ext-workspace-v1 protocol to learn which workspace is
+active, so this works on any compositor with it, not only scoot; without
+it the mapping waits (and is still saved) until one does. A newer `set`
+covers an older `set --workspace`, and a newer `set --workspace` covers
+an older `set`: whichever you changed last wins. `scootbg clear
+--workspace NAME` takes the mapping back off.
+
 Returns once every targeted output shows it and the compositor has
 processed it, so a screenshot taken straight after shows it. With a
 transition, that means once the animation has finished: the reply waits
@@ -300,10 +313,13 @@ scootbg clear -- back to the compositor's own background
 USAGE:
     scootbg clear
     scootbg clear --output NAME
+    scootbg clear --workspace NAME [--output NAME]
 
 Takes the wallpaper off every output (without --output, including any
 choice made for a single output), or off the output named NAME, so the
-compositor's own background shows. The daemon keeps running. A `clear`
+compositor's own background shows. With --workspace NAME, takes only the
+mapping for that workspace off (that output's own wallpaper shows while
+it is active); without --output, for every output. The daemon keeps running. A `clear`
 lands at once and takes no transition: there is no wallpaper to blend
 from or to. An output
 plugged in later shows nothing until the next `scootbg set`, unless a
@@ -325,14 +341,20 @@ USAGE:
     scootbg query
 
 Prints the daemon's reply, one line of JSON with one entry per output:
-{\"type\":\"outputs\",\"outputs\":[...],\"saving\":true,\"profile\":\"default\"}
+{\"type\":\"outputs\",\"outputs\":[...],\"workspaces\":[...],
+\"saving\":true,\"profile\":\"default\"}
 Each entry has the output's name, description, mode, scale, transform and
 logical size, its surface's state: waiting, pending, configured (with its
 size), closed or gave-up (until the output is replugged), whether drawing
 what it should show failed (draw_failed) and why (draw_error, as the
 daemon's stderr says it), and what it shows: {\"color\":\"#rrggbb\"},
 {\"image\":\"/path\",\"mode\":\"fill\",\"fill\":\"#rrggbb\",
-\"filter\":\"lanczos3\"}, or null for nothing. After the list, \"saving\"
+\"filter\":\"lanczos3\"}, or null for nothing. `workspace` names the
+workspace active on the output now (\"1\", \"2\", ... on scoot), or null
+while unknown. After the outputs, `workspaces` lists the live
+per-workspace mappings (`scootbg set --workspace`): each with its output
+(null for every output), its workspace, and what it shows. After the
+lists, \"saving\"
 says whether changes are saved for the next start (see `scootbg daemon
 --help`), and \"profile\" whose state is restored and saved: the
 daemon's --profile, or the last one an `apply-config` made it adopt.
@@ -562,6 +584,11 @@ pub enum Error {
     ShuffleNeedsEvery,
     /// A URL with a NUL byte.
     UrlNul,
+    /// `--workspace` empty, too long, or with a NUL byte.
+    BadWorkspace {
+        value: String,
+        reason: String,
+    },
     /// A path that the control protocol (JSON) cannot carry.
     NotUtf8(String),
     /// The path could not be made absolute (no working directory).
@@ -671,6 +698,10 @@ impl fmt::Display for Error {
                  (try `scootbg set --help`)"
             ),
             Self::UrlNul => write!(f, "the image URL has a NUL byte"),
+            Self::BadWorkspace { value, reason } => write!(
+                f,
+                "`--workspace {value:?}`: {reason} (try `scootbg set --help`)"
+            ),
             Self::NotUtf8(lossy) => write!(
                 f,
                 "`{lossy}`: the path is not valid UTF-8, which the control protocol cannot \
@@ -1028,6 +1059,7 @@ fn apply_config<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Resu
 }
 
 const OUTPUT: &str = "--output";
+const WORKSPACE: &str = "--workspace";
 const MODE: &str = "--mode";
 const FILL: &str = "--fill";
 const FILTER: &str = "--filter";
@@ -1053,6 +1085,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
     let flags: &[&'static str] = if command == "set" {
         &[
             OUTPUT,
+            WORKSPACE,
             MODE,
             FILL,
             FILTER,
@@ -1065,7 +1098,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             POSITION,
         ]
     } else {
-        &[OUTPUT]
+        &[OUTPUT, WORKSPACE]
     };
     let help_topic = if command == "set" {
         "scootbg set --help"
@@ -1142,6 +1175,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
     }
     let [
         output,
+        workspace,
         mode,
         fill,
         filter,
@@ -1154,8 +1188,12 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         position,
     ] = values;
     let output = output.map(Cow::Owned);
+    let workspace = workspace.map(check_workspace).transpose()?.map(Cow::Owned);
     if command == "clear" {
-        return Ok(Command::Client(Request::Clear { output }));
+        return Ok(Command::Client(match workspace {
+            Some(workspace) => Request::ClearWorkspace { output, workspace },
+            None => Request::Clear { output },
+        }));
     }
     let argument = target.ok_or(Error::MissingTarget)?;
     if shuffle && every.is_none() {
@@ -1177,10 +1215,18 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             return Err(Error::EveryNeedsDirectory(argument));
         }
         return match Color::parse(&argument) {
-            Ok(color) => Ok(Command::Client(Request::Set {
-                show: Show::Color(color),
-                output,
-                transition,
+            Ok(color) => Ok(Command::Client(match workspace {
+                Some(workspace) => Request::SetWorkspace {
+                    show: Show::Color(color),
+                    output,
+                    workspace,
+                    transition,
+                },
+                None => Request::Set {
+                    show: Show::Color(color),
+                    output,
+                    transition,
+                },
             })),
             Err(error) => Err(Error::Color { argument, error }),
         };
@@ -1246,16 +1292,54 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         let path = absolute(&argument)?;
         Source::Path(Cow::Owned(path))
     };
-    Ok(Command::Client(Request::Set {
-        show: Show::Image(ImageRequest {
-            source,
-            mode,
-            fill,
-            filter,
-        }),
-        output,
-        transition,
+    Ok(Command::Client(match workspace {
+        Some(workspace) => Request::SetWorkspace {
+            show: Show::Image(ImageRequest {
+                source,
+                mode,
+                fill,
+                filter,
+            }),
+            output,
+            workspace,
+            transition,
+        },
+        None => Request::Set {
+            show: Show::Image(ImageRequest {
+                source,
+                mode,
+                fill,
+                filter,
+            }),
+            output,
+            transition,
+        },
     }))
+}
+
+/// A `--workspace` value checked: non-empty, short, and without a NUL
+/// byte (which the control protocol's JSON could carry only escaped, and
+/// nothing downstream wants).
+fn check_workspace(value: String) -> Result<String, Error> {
+    if value.is_empty() {
+        return Err(Error::BadWorkspace {
+            value,
+            reason: "it is empty".to_owned(),
+        });
+    }
+    if value.len() > crate::choices::MAX_WORKSPACE_NAME {
+        return Err(Error::BadWorkspace {
+            value,
+            reason: format!("it is past {} bytes", crate::choices::MAX_WORKSPACE_NAME),
+        });
+    }
+    if value.contains('\0') {
+        return Err(Error::BadWorkspace {
+            value,
+            reason: "it has a NUL byte".to_owned(),
+        });
+    }
+    Ok(value)
 }
 
 /// The five transition flags as one [`Spec`](crate::transition::Spec):

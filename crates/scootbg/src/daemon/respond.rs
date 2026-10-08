@@ -2,11 +2,12 @@
 
 use std::fmt;
 
+use crate::choices::Choices;
 use crate::control::{Answer, ConnId, Handler};
 use crate::outputs::{Outputs, Size};
 use crate::protocol::{
     self, OutputEntry, OutputList, PROTOCOL_VERSION, Reply, Request, RotationInfo, Show, Shows,
-    SurfaceEntry,
+    SurfaceEntry, WorkspaceEntry, WorkspaceList,
 };
 use crate::section::Section;
 use crate::state::Profile;
@@ -17,6 +18,9 @@ use crate::waiters::Outcome;
 /// `query`, and a way to change what they show, for `set` and `clear`.
 pub trait Changes {
     fn outputs(&self) -> &dyn OutputList;
+
+    /// The live per-workspace mappings, for `query`.
+    fn workspaces(&self) -> &dyn WorkspaceList;
 
     /// Whether changes are saved for the next start (`query`'s `saving`).
     fn saving(&self) -> bool;
@@ -50,9 +54,25 @@ pub trait Changes {
         show: Option<Show<'_>>,
         transition: Spec,
     ) -> Result<(), ChangeError>;
+
+    /// Makes `workspace` show `show` (nothing when `None`, which takes the
+    /// mapping back off) on every output (`output` is `None`) or on the
+    /// outputs named `output`, arriving through `transition` when the
+    /// workspace turns active, and registers `conn` to be answered once it
+    /// is preloaded (and shown, where already active), or, for an image
+    /// that cannot be shown, with why. `Err` changes nothing.
+    fn change_workspace(
+        &mut self,
+        conn: ConnId,
+        output: Option<&str>,
+        workspace: &str,
+        show: Option<Show<'_>>,
+        transition: Spec,
+    ) -> Result<(), ChangeError>;
 }
 
-/// Why a `set` or `clear` was refused; nothing was changed.
+/// Why a `set`, `clear`, `set-workspace` or `clear-workspace` was
+/// refused; nothing was changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChangeError {
     /// No output has that name now.
@@ -76,12 +96,17 @@ pub enum ChangeError {
     /// A slideshow's directory holds more than
     /// [`crate::rotation::MAX_LISTED`] files (`seen`: one past the cap).
     TooManyFiles { dir: String, seen: usize },
+    /// Too many workspace mappings already (`crate::choices`).
+    TooManyWorkspaces,
+    /// No mapping for that workspace stands to clear.
+    UnknownWorkspace,
 }
 
 /// The reply text for a refused change.
 struct Refused<'a> {
     error: ChangeError,
     output: Option<&'a str>,
+    workspace: Option<&'a str>,
 }
 
 impl fmt::Display for Refused<'_> {
@@ -124,6 +149,21 @@ impl fmt::Display for Refused<'_> {
                     crate::rotation::MAX_LISTED,
                 )
             }
+            ChangeError::TooManyWorkspaces => write!(
+                f,
+                "too many workspace wallpapers are mapped (`scootbg query` lists them under \
+                 `workspaces`; clear one with `scootbg clear --workspace` first); nothing was \
+                 changed"
+            ),
+            ChangeError::UnknownWorkspace => write!(
+                f,
+                "no wallpaper is mapped for workspace {:?}{}; nothing was changed",
+                self.workspace.unwrap_or_default(),
+                match self.output {
+                    Some(output) => format!(" on output {output:?}"),
+                    None => String::new(),
+                }
+            ),
         }
     }
 }
@@ -170,12 +210,13 @@ pub fn write_ready(out: &mut Vec<u8>, ready: &Ready) {
 
 impl Handler for Responder<'_> {
     fn handle(&mut self, conn: ConnId, line: &[u8], out: &mut Vec<u8>) -> Answer {
-        let (output, show, transition) = match protocol::parse(line) {
+        let (output, workspace, show, transition) = match protocol::parse(line) {
             Ok(Request::Query) => {
                 protocol::write_reply(
                     out,
                     &Reply::Outputs {
                         outputs: self.wallpaper.outputs(),
+                        workspaces: self.wallpaper.workspaces(),
                         saving: self.wallpaper.saving(),
                         profile: self.wallpaper.profile(),
                         rotation: self.wallpaper.rotation(),
@@ -202,8 +243,17 @@ impl Handler for Responder<'_> {
                 show,
                 output,
                 transition,
-            }) => (output, Some(show), transition),
-            Ok(Request::Clear { output }) => (output, None, Spec::none()),
+            }) => (output, None, Some(show), transition),
+            Ok(Request::Clear { output }) => (output, None, None, Spec::none()),
+            Ok(Request::SetWorkspace {
+                show,
+                output,
+                workspace,
+                transition,
+            }) => (output, Some(workspace), Some(show), transition),
+            Ok(Request::ClearWorkspace { output, workspace }) => {
+                (output, Some(workspace), None, Spec::none())
+            }
             Ok(Request::ApplyConfig { profile, section }) => {
                 return match self.wallpaper.apply_config(conn, profile, &section) {
                     Ok(()) => Answer::Later,
@@ -218,15 +268,25 @@ impl Handler for Responder<'_> {
                 return Answer::Now;
             }
         };
-        match self
-            .wallpaper
-            .change(conn, output.as_deref(), show, transition)
-        {
+        let result = match &workspace {
+            Some(workspace) => self.wallpaper.change_workspace(
+                conn,
+                output.as_deref(),
+                workspace,
+                show,
+                transition,
+            ),
+            None => self
+                .wallpaper
+                .change(conn, output.as_deref(), show, transition),
+        };
+        match result {
             Ok(()) => Answer::Later,
             Err(error) => {
                 let refused = Refused {
                     error,
                     output: output.as_deref(),
+                    workspace: workspace.as_deref(),
                 };
                 protocol::write_reply(out, &Reply::Error { message: &refused });
                 Answer::Now
@@ -260,7 +320,25 @@ impl<O> OutputList for Outputs<O> {
                 draw_failed: output.has_failed(),
                 draw_error: output.failure(),
                 shows: output.shows().map(Shows),
+                workspace: output.active_workspace(),
                 transition: output.running().map(|kind| kind.name()),
+            });
+        }
+    }
+}
+
+/// Each live workspace mapping's `query` entry, borrowed from the
+/// choices: no allocation.
+impl WorkspaceList for Choices {
+    fn for_each_entry(&self, each: &mut dyn FnMut(&WorkspaceEntry<'_>)) {
+        for (output, workspace, choice, ..) in self.workspaces() {
+            let Some(wallpaper) = choice else {
+                continue;
+            };
+            each(&WorkspaceEntry {
+                output,
+                workspace,
+                shows: Shows(wallpaper),
             });
         }
     }

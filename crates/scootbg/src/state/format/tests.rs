@@ -33,7 +33,12 @@ fn color(r: u8, g: u8, b: u8) -> Choice {
     Some(Wallpaper::Color(Color { r, g, b }))
 }
 
-fn text(fingerprint: Option<&str>, all: Option<&Choice>, named: &[(&str, Choice)]) -> String {
+fn text(
+    fingerprint: Option<&str>,
+    all: Option<&Choice>,
+    named: &[(&str, Choice)],
+    workspaces: &[super::WorkspaceLine<'_>],
+) -> String {
     let mut out = String::new();
     encode(
         &mut out,
@@ -44,6 +49,7 @@ fn text(fingerprint: Option<&str>, all: Option<&Choice>, named: &[(&str, Choice)
             .iter()
             .map(|(name, choice)| (*name, choice))
             .collect::<Vec<_>>(),
+        workspaces,
     );
     out
 }
@@ -77,10 +83,11 @@ fn the_file_reads_as_documented() {
             ("DP-1", image("/home/me/My Pictures/hills.jpg")),
             ("HDMI-A-1", None),
         ],
+        &[],
     );
     assert_eq!(
         written,
-        "scootbg-state 2\n\
+        "scootbg-state 3\n\
          profile default\n\
          fingerprint 9c1e\n\
          all color #1e1e2e\n\
@@ -96,7 +103,7 @@ fn everything_round_trips() {
         ("HDMI-A-1", None),
         ("eDP-1", color(1, 2, 3)),
     ];
-    let record = clean(text(Some("abc"), Some(&image("/all.png")), &named).as_bytes());
+    let record = clean(text(Some("abc"), Some(&image("/all.png")), &named, &[]).as_bytes());
     assert_eq!(
         record,
         Record {
@@ -108,15 +115,16 @@ fn everything_round_trips() {
                 ("HDMI-A-1".to_owned(), Pick::Clear),
                 ("eDP-1".to_owned(), Pick::Color(Color { r: 1, g: 2, b: 3 })),
             ],
+            workspaces: vec![],
         }
     );
     // Nothing chosen: only the header and profile, and nothing read back.
-    let empty = text(None, None, &[]);
-    assert_eq!(empty, "scootbg-state 2\nprofile default\n");
+    let empty = text(None, None, &[], &[]);
+    assert_eq!(empty, "scootbg-state 3\nprofile default\n");
     let record = clean(empty.as_bytes());
     assert_eq!((record.all, record.named.len()), (None, 0));
     // A clear of every output is a choice, and kept.
-    let record = clean(text(None, Some(&None), &[]).as_bytes());
+    let record = clean(text(None, Some(&None), &[], &[]).as_bytes());
     assert_eq!(record.all, Some(Pick::Clear));
 }
 
@@ -137,7 +145,7 @@ fn hostile_paths_round_trip() {
         "/ ",
     ] {
         let named = [(path, image(path))];
-        let record = clean(text(Some(path), Some(&image(path)), &named).as_bytes());
+        let record = clean(text(Some(path), Some(&image(path)), &named, &[]).as_bytes());
         assert_eq!(record.all, Some(pick_image(path)), "{path:?}");
         assert_eq!(record.fingerprint.as_deref(), Some(path));
         assert_eq!(record.named, vec![(path.to_owned(), pick_image(path))]);
@@ -243,7 +251,7 @@ fn a_raw_non_utf8_path_is_skipped_with_a_warning() {
 }
 
 #[test]
-fn headers_other_than_versions_1_and_2_restore_nothing() {
+fn headers_other_than_versions_1_to_3_restore_nothing() {
     for header in [
         "",
         "scootbg-state",
@@ -277,15 +285,17 @@ fn headers_other_than_versions_1_and_2_restore_nothing() {
 /// daemon never writes over it.
 #[test]
 fn a_newer_version_is_neither_read_nor_to_be_written() {
-    let parsed = decode(b"scootbg-state 3\nall color #ffffff\nsomething new\n");
+    let parsed = decode(b"scootbg-state 4\nall color #ffffff\nsomething new\n");
     assert!(parsed.newer);
     assert_eq!(parsed.record, Record::default());
     assert_eq!(parsed.warnings.len(), 1);
     assert!(
-        parsed.warnings[0].contains("version 3"),
+        parsed.warnings[0].contains("version 4"),
         "{:?}",
         parsed.warnings
     );
+    // Version 3 reads (its workspace lines below).
+    assert!(!decode(b"scootbg-state 3\nall color #ffffff\n").newer);
 }
 
 #[test]
@@ -365,7 +375,7 @@ fn outputs_beyond_the_limit_keep_the_newest() {
 fn encoded(all: Option<&Choice>, named: &[(String, Choice)]) -> (String, super::Left) {
     let mut out = String::new();
     let list: Vec<(&str, &Choice)> = named.iter().map(|(n, c)| (n.as_str(), c)).collect();
-    let left = encode(&mut out, "default", Some("f"), all, &list);
+    let left = encode(&mut out, "default", Some("f"), all, &list, &[]);
     (out, left)
 }
 
@@ -381,6 +391,7 @@ fn the_writer_keeps_the_newest_within_the_line_limit() {
         left,
         super::Left {
             named: 5,
+            workspaces: 0,
             all: false
         }
     );
@@ -421,6 +432,7 @@ fn the_writer_keeps_the_newest_within_the_byte_limit() {
         left,
         super::Left {
             named: 0,
+            workspaces: 0,
             all: true
         }
     );
@@ -431,6 +443,7 @@ fn the_writer_keeps_the_newest_within_the_byte_limit() {
         left,
         super::Left {
             named: 1,
+            workspaces: 0,
             all: false
         },
         "the older, huge one"
@@ -483,7 +496,7 @@ fn blank_lines_and_a_missing_final_newline_are_fine() {
 /// written as a line no reader takes.
 #[test]
 fn an_empty_output_name_is_not_written() {
-    let written = text(None, None, &[("", color(1, 1, 1)), ("A", None)]);
+    let written = text(None, None, &[("", color(1, 1, 1)), ("A", None)], &[]);
     assert!(!written.contains("output  "), "{written}");
     let record = clean(written.as_bytes());
     assert_eq!(record.named, vec![("A".to_owned(), Pick::Clear)]);
@@ -532,11 +545,11 @@ fn downloads_round_trip_and_version_1_still_reads() {
             }),
         })))
     };
-    let written = text(None, Some(&downloaded()), &[]);
+    let written = text(None, Some(&downloaded()), &[], &[]);
     assert_eq!(
         written,
         format!(
-            "scootbg-state 2\nprofile default\nall image /cache/9f86d081 fit #101014 \
+            "scootbg-state 3\nprofile default\nall image /cache/9f86d081 fit #101014 \
              catmull-rom url https://example.com/a%20b.png sha256 {sha_hex}\n"
         )
     );
@@ -562,7 +575,7 @@ fn downloads_round_trip_and_version_1_still_reads() {
             sha256: None,
         }),
     })));
-    let written = text(None, Some(&unpinned), &[]);
+    let written = text(None, Some(&unpinned), &[], &[]);
     assert!(
         written.ends_with("url http://127.0.0.1:1/a.png\n"),
         "{written}"
@@ -591,4 +604,145 @@ fn bad_trailers_are_skipped() {
         assert_eq!(parsed.warnings.len(), 1, "{line}: {:?}", parsed.warnings);
         assert!(!parsed.newer);
     }
+}
+
+/// Workspace lines round-trip: every output's and one output's, with and
+/// without a transition, and a clear.
+#[test]
+fn workspace_lines_round_trip() {
+    use crate::transition::{Easing, Kind, Spec};
+    let fade = Spec {
+        kind: Kind::Fade,
+        duration_ms: 800,
+        easing: Easing::EaseOut,
+        angle_deg: 0.0,
+        pos: (0.5, 0.5),
+    };
+    let lines = [
+        super::WorkspaceLine {
+            output: None,
+            workspace: "2",
+            choice: &color(0x10, 0x10, 0x14),
+            transition: fade,
+        },
+        super::WorkspaceLine {
+            output: Some("DP-1"),
+            workspace: "web",
+            choice: &image("/w.jpg"),
+            transition: Spec::none(),
+        },
+        super::WorkspaceLine {
+            output: Some("DP-1"),
+            workspace: "3",
+            choice: &None,
+            transition: Spec::none(),
+        },
+    ];
+    let written = text(None, None, &[], &lines);
+    assert!(
+        written.contains("workspace 2 color #101014 transition fade 800 ease-out 0 0.5,0.5\n"),
+        "{written}"
+    );
+    assert!(
+        written.contains("workspace-output DP-1 web image /w.jpg"),
+        "{written}"
+    );
+    assert!(!written.contains("transition none"), "{written}");
+    let record = clean(written.as_bytes());
+    assert_eq!(record.workspaces.len(), 3);
+    assert_eq!(
+        record.workspaces[0],
+        (
+            None,
+            "2".to_owned(),
+            Pick::Color(Color {
+                r: 0x10,
+                g: 0x10,
+                b: 0x14
+            }),
+            fade
+        )
+    );
+    assert_eq!(record.workspaces[1].0, Some("DP-1".to_owned()),);
+    assert_eq!(record.workspaces[1].3, Spec::none());
+    // A clear stays a clear.
+    assert_eq!(record.workspaces[2].2, Pick::Clear);
+}
+
+/// Bad workspace lines are skipped, one warning each.
+#[test]
+fn bad_workspace_lines_are_skipped() {
+    for line in [
+        // No choice.
+        "workspace 2",
+        // No workspace.
+        "workspace-output DP-1",
+        // Empty name.
+        "workspace-output DP-1  color #101014",
+        // A bad choice.
+        "workspace 2 color #zzzzzz",
+        // A bad transition trailer.
+        "workspace 2 color #101014 transition fade",
+        "workspace 2 color #101014 transition spin 500 ease-out 0 0.5,0.5",
+        "workspace 2 color #101014 transition none 500 ease-out 0 0.5,0.5",
+    ] {
+        let parsed = decode(format!("scootbg-state 3\n{line}\n").as_bytes());
+        assert!(parsed.record.workspaces.is_empty(), "{line}");
+        assert_eq!(parsed.warnings.len(), 1, "{line}: {:?}", parsed.warnings);
+        assert!(!parsed.newer);
+    }
+    // A duplicate key: the later line wins, with a warning.
+    let parsed = decode(b"scootbg-state 3\nworkspace 2 color #101014\nworkspace 2 clear\n");
+    assert_eq!(
+        parsed.record.workspaces,
+        vec![(
+            None,
+            "2".to_owned(),
+            Pick::Clear,
+            crate::transition::Spec::none()
+        )]
+    );
+    assert_eq!(parsed.warnings.len(), 1);
+}
+
+/// Version 1 and 2 files have no workspace lines and read without them.
+#[test]
+fn old_versions_have_no_workspaces() {
+    for version in [1, 2] {
+        let record = clean(
+            format!("scootbg-state {version}\nall color #010101\noutput A clear\n").as_bytes(),
+        );
+        assert_eq!(record.all, Some(Pick::Color(Color { r: 1, g: 1, b: 1 })));
+        assert!(record.workspaces.is_empty());
+    }
+}
+
+/// Past `MAX_WORKSPACES` mappings, the writer keeps the newest, oldest
+/// first — and the reader takes the same.
+#[test]
+fn the_writer_keeps_the_newest_workspaces() {
+    use crate::transition::Spec;
+    let choice = color(1, 2, 3);
+    let names: Vec<String> = (0..super::MAX_WORKSPACES + 3)
+        .map(|i| format!("ws-{i}"))
+        .collect();
+    let lines: Vec<super::WorkspaceLine<'_>> = names
+        .iter()
+        .map(|name| super::WorkspaceLine {
+            output: None,
+            workspace: name,
+            choice: &choice,
+            transition: Spec::none(),
+        })
+        .collect();
+    let mut out = String::new();
+    let left = encode(&mut out, "default", None, None, &[], &lines);
+    assert_eq!(left.workspaces, 3);
+    let record = clean(out.as_bytes());
+    assert_eq!(record.workspaces.len(), super::MAX_WORKSPACES);
+    assert_eq!(record.workspaces[0].1, "ws-3");
+    assert_eq!(
+        record.workspaces.last().unwrap().1,
+        format!("ws-{}", super::MAX_WORKSPACES + 2)
+    );
 }

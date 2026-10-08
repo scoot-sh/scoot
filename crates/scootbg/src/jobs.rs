@@ -63,7 +63,7 @@ pub struct Target {
 }
 
 /// A trial's request: who to answer, and which outputs it chose for.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Trial<C> {
     pub conn: C,
     /// `None` for every output.
@@ -72,6 +72,14 @@ pub struct Trial<C> {
     /// show is already armed, so a file that cannot be shown starts it
     /// anyway (said in the reply) rather than changing nothing.
     pub slideshow: Option<String>,
+    /// `Some` for a workspace mapping (`set --workspace`): the choice is
+    /// recorded as the wallpaper for this workspace rather than the
+    /// outputs' own.
+    pub workspace: Option<String>,
+    /// How the wallpaper arrives: through this when its workspace turns
+    /// active (workspace trials), or at once for the trial's own draw.
+    /// `crate::transition::Spec` is `Copy`, so trials stay cheap to move.
+    pub transition: crate::transition::Spec,
 }
 
 #[derive(Debug)]

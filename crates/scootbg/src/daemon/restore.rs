@@ -186,7 +186,88 @@ pub fn put(state: &mut State, record: Record, show: bool, origin: Origin) -> Vec
     for (name, pick) in record.named {
         put(Some(&name), pick);
     }
+    for (output, workspace, pick, spec) in record.workspaces {
+        put_workspace(state, output.as_deref(), &workspace, pick, spec, show);
+    }
     problems
+}
+
+/// Puts one restored workspace mapping in the saved table and, when
+/// `show`, in the daemon's choices: like [`put`], a local image that is
+/// gone shows the base wallpaper there (staying saved), and a download is
+/// always put live. `spec` is the transition its switches arrive through.
+fn put_workspace(
+    state: &mut State,
+    output: Option<&str>,
+    workspace: &str,
+    pick: Pick,
+    spec: crate::transition::Spec,
+    show: bool,
+) {
+    let generation = state.waiters.next_generation();
+    let choice: Choice = match pick {
+        Pick::Clear => None,
+        Pick::Color(color) => Some(Wallpaper::Color(color)),
+        Pick::Image { path, look, fetch } => Some(Wallpaper::Image(Arc::new(Image {
+            path,
+            look,
+            serial: generation,
+            fetch,
+        }))),
+    };
+    state
+        .saved
+        .record_workspace(output, workspace, &choice, spec, generation);
+    if !show {
+        return;
+    }
+    if let Some(Wallpaper::Image(image)) = &choice {
+        if image.fetch.is_none() {
+            if let Err(why) = present(&image.path) {
+                warn(format_args!(
+                    "scootbg: cannot restore {:?} for workspace {:?}: {why}; showing the \
+                     output's own wallpaper there (it stays saved until the next `scootbg \
+                     set --workspace` or `clear --workspace` for it)",
+                    image.path, workspace,
+                ));
+                state
+                    .choices
+                    .set_workspace(output, workspace, None, spec, generation);
+                return;
+            }
+        }
+    }
+    let rendered = match &choice {
+        Some(Wallpaper::Image(image)) => Some(Arc::clone(image)),
+        _ => None,
+    };
+    state
+        .choices
+        .set_workspace(output, workspace, choice, spec, generation);
+    // Where outputs already have a size (a profile adopted at runtime),
+    // pre-render the restored image for them, so the first switch is
+    // instant; at start-up nothing is configured yet, and the `configure`
+    // hook (`daemon::surfaces`) does this instead.
+    if let Some(image) = rendered {
+        for entry in state.outputs.iter() {
+            let name = entry.output.info().name.as_deref();
+            let targeted = output.is_none_or(|want| name == Some(want));
+            if !targeted {
+                continue;
+            }
+            if let Some(dims) = super::change::image_dims(&entry.output) {
+                if entry.objects.canvas.image(image.serial, dims).is_none() {
+                    state.images.jobs.render(
+                        &image,
+                        crate::jobs::Target {
+                            output: entry.output.id(),
+                            dims,
+                        },
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Whether `path` is a regular file now (following links), and if not,

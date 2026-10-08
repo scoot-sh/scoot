@@ -318,6 +318,14 @@ pub struct Canvas {
     /// An image rendered for this output, waiting to go on screen. At most
     /// one, and often the same pixels as other outputs' (`Pixels`).
     ready: Option<Pixels>,
+    /// Rendered workspace wallpapers kept for instant switches
+    /// (`crate::workspaces`): one entry per (image, size), shared with
+    /// other outputs of that size showing that image (`Pixels`). A switch
+    /// to a workspace whose pixels are stashed attaches at once; without
+    /// them it would decode first (hundreds of milliseconds). Bounded by
+    /// the mappings (`crate::choices::MAX_WORKSPACES`), dropped with them
+    /// and when the output's size leaves them stale.
+    stash: Vec<Pixels>,
     /// A draw waits for a buffer to be released.
     pub stalled: bool,
 }
@@ -335,6 +343,7 @@ impl fmt::Debug for Canvas {
                     .as_ref()
                     .map(|r| (r.memory().content, r.memory().dims)),
             )
+            .field("stashed", &self.stash.len())
             .field("stalled", &self.stalled)
             .finish()
     }
@@ -360,8 +369,9 @@ impl Canvas {
         }
     }
 
-    /// Pixels this output has (on screen, kept, or waiting) holding image
-    /// `serial` at `dims`, for another output of that size to share.
+    /// Pixels this output has (on screen, kept, waiting, or stashed for a
+    /// workspace switch) holding image `serial` at `dims`, for another
+    /// output of that size to share.
     pub fn image(&self, serial: u64, dims: (u32, u32)) -> Option<&Pixels> {
         let content = Content::Image(serial);
         self.slots
@@ -369,7 +379,60 @@ impl Canvas {
             .flatten()
             .map(Slot::shared)
             .chain(&self.ready)
+            .chain(&self.stash)
             .find(|pixels| pixels.memory().content == content && pixels.memory().dims == dims)
+    }
+
+    /// Keeps `pixels` for a workspace switch that may come: a later draw
+    /// of that image at that size attaches at once instead of decoding.
+    /// Replaces (drops) what was stashed for that image at that size; the
+    /// memory is shared with other outputs holding the same pixels.
+    pub fn stash(&mut self, pixels: Pixels) {
+        let (content, dims) = {
+            let memory = pixels.memory();
+            (memory.content, memory.dims)
+        };
+        if let Some(index) = self.stash.iter().position(|stashed| {
+            let memory = stashed.memory();
+            memory.content == content && memory.dims == dims
+        }) {
+            self.stash[index] = pixels;
+        } else {
+            self.stash.push(pixels);
+        }
+    }
+
+    /// Moves stashed pixels for image `serial` at `dims` into `ready`, for
+    /// the next draw to attach: whether a switch to that workspace is
+    /// instant. `false` when nothing was stashed (decode instead).
+    pub fn revive(&mut self, serial: u64, dims: (u32, u32)) -> bool {
+        let content = Content::Image(serial);
+        let index = self.stash.iter().position(|stashed| {
+            let memory = stashed.memory();
+            memory.content == content && memory.dims == dims
+        });
+        match index {
+            Some(index) => {
+                self.ready = Some(self.stash[index].clone());
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Drops everything stashed for image `serial`: its mapping went away
+    /// (or was replaced), so no switch will ever want it.
+    pub fn drop_stash_serial(&mut self, serial: u64) {
+        let content = Content::Image(serial);
+        self.stash
+            .retain(|stashed| stashed.memory().content != content);
+    }
+
+    /// Drops everything stashed at another size than `dims`: the output
+    /// was reconfigured, and a switch draws at its size now. Stashes for
+    /// the output's own size stay (other mappings may still want them).
+    pub fn drop_stale_stash(&mut self, dims: (u32, u32)) {
+        self.stash.retain(|stashed| stashed.memory().dims == dims);
     }
 
     /// Draws `target` on `layer`'s surface and commits, or reports why not.
@@ -666,7 +729,9 @@ impl Canvas {
     /// Nothing is to be shown for now (`clear`, the output gone, or given
     /// up on; its surface is destroyed first): every buffer goes. Pixels
     /// another output shares stay with it, frozen if this output's buffer
-    /// over them was still held (`crate::share`).
+    /// over them was still held (`crate::share`). Stashed workspace pixels
+    /// stay: the mappings stand, and the next draw for them attaches at
+    /// once rather than decoding again.
     pub fn clear(&mut self) {
         self.surface_gone();
         self.ready = None;

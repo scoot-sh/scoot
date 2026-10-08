@@ -174,6 +174,7 @@ export default defineConfig({
             { label: 'Wallpaper from a link', slug: 'scootbg/from-url' },
             { label: 'Restore', slug: 'scootbg/restore' },
             { label: 'Transitions', slug: 'scootbg/transitions' },
+            { label: 'A wallpaper per workspace', slug: 'scootbg/workspaces' },
             { label: 'CLI reference', slug: 'scootbg/cli' },
             { label: 'Troubleshooting', slug: 'scootbg/troubleshooting' },
           ],

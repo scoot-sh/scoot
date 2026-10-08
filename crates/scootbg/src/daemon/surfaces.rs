@@ -38,6 +38,7 @@ use wayland_client::protocol::wl_region::WlRegion;
 use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum, delegate_noop};
+use wayland_protocols::ext::workspace::v1::client::ext_workspace_manager_v1::ExtWorkspaceManagerV1;
 use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_manager_v1::ZxdgOutputManagerV1;
 use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_v1::{self, ZxdgOutputV1};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer;
@@ -272,7 +273,7 @@ pub enum RoundTrip {
 
 impl State {
     /// A global appeared (at start-up or later). Binds it if it is an
-    /// output.
+    /// output; notes the workspace manager for a later lazy bind.
     pub fn global(
         &mut self,
         registry: &WlRegistry,
@@ -282,6 +283,12 @@ impl State {
         name: u32,
         version: u32,
     ) {
+        if interface == ExtWorkspaceManagerV1::interface().name {
+            self.workspaces.advertised(name, version);
+            // Appeared after start-up with mappings waiting: bind now.
+            super::workspaces::ensure_bound(&mut self.workspaces, &self.choices, &self.globals, qh);
+            return;
+        }
         if interface != WlOutput::interface().name {
             return;
         }
@@ -308,8 +315,14 @@ impl State {
     }
 
     /// A global went away. An output's objects are all destroyed, whatever
-    /// state it was in.
-    pub fn global_remove(&mut self, name: u32) {
+    /// state it was in; the workspace manager's going falls every output
+    /// back to its own wallpaper.
+    pub fn global_remove(&mut self, name: u32, qh: &QueueHandle<Self>) {
+        if self.workspaces.is_manager(name) {
+            self.workspaces.unadvertised(name);
+            super::workspaces::manager_gone(self, qh);
+            return;
+        }
         match self.outputs.remove_global(name) {
             Some(mut entry) => {
                 // Any transition on it ends with it: its buffers go too.
@@ -477,6 +490,23 @@ impl Dispatch<ZwlrLayerSurfaceV1, OutputId> for State {
             _ => Effect::None,
         };
         Self::apply(&state.globals, &mut *entry, effect, conn, qh);
+        // A fresh size pre-renders the workspace wallpapers mapped here,
+        // so the next switch to one attaches at once rather than
+        // decoding; stashes at any other size are stale and go.
+        if matches!(effect, Effect::Ack(_)) {
+            if let Some(dims) = super::change::image_dims(&entry.output) {
+                entry.objects.canvas.drop_stale_stash(dims);
+                let name = entry.output.info().name.clone();
+                for image in state.choices.workspace_images_for(name.as_deref()) {
+                    if entry.objects.canvas.image(image.serial, dims).is_none() {
+                        state
+                            .images
+                            .jobs
+                            .render(&image, crate::jobs::Target { output: *id, dims });
+                    }
+                }
+            }
+        }
         // A closed surface ends any transition on it: the animation has
         // nothing to commit to, and the re-created surface draws the final
         // wallpaper the normal way.

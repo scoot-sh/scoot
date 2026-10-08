@@ -292,6 +292,9 @@ fn adopt(state: &mut State, profile: Profile) -> Record {
     let (mut saved, record) = restore::load(profile);
     let generation = state.waiters.next_generation();
     state.choices.set(None, None, generation);
+    // The new profile's file says what its workspace mappings are (see
+    // `restore::apply` below): nothing of the old profile's carries over.
+    state.choices.clear_workspaces();
     // Writers with nothing left to write are dropped: they have nothing to
     // lose. One still stuck on this profile (the wait above ran out) is
     // taken back rather than a second one started (`Saved::take_writer`),

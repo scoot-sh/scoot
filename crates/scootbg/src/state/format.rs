@@ -2,12 +2,14 @@
 //! (dependencies-done.md §5 chose it over `toml`, 180 KB lighter).
 //!
 //! ```text
-//! scootbg-state 2
+//! scootbg-state 3
 //! profile default
 //! fingerprint 9c1e...
 //! all color #1e1e2e
 //! output DP-1 image /home/me/My%20Pictures/hills.jpg fill #000000 lanczos3
 //! output HDMI-A-1 clear
+//! workspace 2 color #101014 transition fade 500 ease-out 0 0.5,0.5
+//! workspace-output DP-1 2 image /home/me/two.jpg fill #000000 lanczos3
 //! ```
 //!
 //! - **The first line** is `scootbg-state N`, `N` the format's version.
@@ -27,7 +29,12 @@
 //!   #rrggbb`, or `image PATH MODE FILL FILTER`, with a downloaded image's
 //!   URL (and pinned hash) after that: `image PATH MODE FILL FILTER url URL`
 //!   and `image PATH MODE FILL FILTER url URL sha256 HEX`. PATH is the
-//!   cache file; the URL is what re-downloads it.
+//!   cache file; the URL is what re-downloads it. `workspace WS` is the
+//!   wallpaper for workspace `WS` on every output, `workspace-output
+//!   OUTPUT WS` the one for that workspace on that output alone; each the
+//!   same choice grammar, with the transition it arrives through after
+//!   that (`transition KIND DURATION_MS EASING ANGLE X,Y`, omitted for an
+//!   instant one).
 //! - **Fields are escaped**: `%`, space and every ASCII control byte
 //!   (newline and tab included) are written `%XX`, uppercase hex, so a
 //!   field never holds a separator and a path round-trips exactly. Any
@@ -46,29 +53,39 @@
 //! have no trailer); a version-1 scootbg reading a version-2 file restores
 //! nothing, as for any newer version.
 //!
-//! **Within version 2**, a key may be added only if a reader that skips
+//! **Version 3** adds the `workspace` and `workspace-output` lines, for one
+//! wallpaper per workspace. A version-2 scootbg reading a version-3 file
+//! restores nothing (a newer version throughout), so it can never write
+//! the mappings away.
+//!
+//! **Within one version**, a key may be added only if a reader that skips
 //! it (with its warning) loses nothing it needs; anything else bumps the
 //! version. `profile` and `fingerprint` are both read and kept from this
 //! first version on, so ticket 10 writes them with no bump.
 
 use std::fmt::Write as _;
 
-use crate::choices::Choice;
+use crate::choices::{Choice, MAX_WORKSPACE_NAME};
 use crate::color::Color;
 use crate::fetch::{Fetch, MAX_URL};
 use crate::image::render::Look;
 use crate::image::{Filter, Mode};
+use crate::transition::{Easing, Kind, Spec};
 use crate::wallpaper::Wallpaper;
 
 #[cfg(test)]
 mod tests;
 
 /// The format this build reads and writes.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// The earliest format still read: version 1's `image` lines carry no
-/// trailer, and read as file choices.
+/// trailer, and read as file choices; version 2's file has no workspace
+/// lines.
 pub const OLDEST: u32 = 1;
+
+/// The most workspace lines read: [`crate::choices::MAX_WORKSPACES`].
+pub const MAX_WORKSPACES: usize = crate::choices::MAX_WORKSPACES;
 
 /// The first line's first word.
 pub const MAGIC: &str = "scootbg-state";
@@ -98,7 +115,7 @@ pub enum Pick {
 }
 
 /// What a file says.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Record {
     pub profile: Option<String>,
     pub fingerprint: Option<String>,
@@ -106,6 +123,10 @@ pub struct Record {
     pub all: Option<Pick>,
     /// For single outputs, by connector name, in file order; one per name.
     pub named: Vec<(String, Pick)>,
+    /// For workspaces, in file order: the output each is for (`None`:
+    /// every output), the workspace, what it shows, and through what
+    /// transition it arrives. One per (output, workspace).
+    pub workspaces: Vec<(Option<String>, String, Pick, Spec)>,
 }
 
 /// A file read: what it says, and what was wrong with it.
@@ -124,6 +145,8 @@ pub struct Parsed {
 pub struct Left {
     /// The oldest per-output choices, this many from the front of `named`.
     pub named: usize,
+    /// The oldest workspace mappings, this many from the front.
+    pub workspaces: usize,
     /// The choice for every output (only a line longer than the whole
     /// file may be, which only a hand-edited file can lead to).
     pub all: bool,
@@ -133,20 +156,24 @@ pub struct Left {
 /// fingerprint if there is one, the choice for every output if one was
 /// made, then the named choices, `named` given **oldest first**, and
 /// written in that order, so a restore gives them generations in the same
-/// order and "least recently set" survives a restart.
+/// order and "least recently set" survives a restart. Workspace mappings
+/// follow, oldest first for the same reason.
 ///
 /// **Within what the reader takes** ([`MAX_OUTPUTS`] lines, [`MAX_BYTES`]
 /// in all): when the named choices do not all fit, the oldest are left
 /// out, so the newest always survive; the caller forgets them too
 /// ([`Left`]), so the table and the file agree. A name that is empty is
 /// left out (and not counted): no output can be given one by name, and
-/// the format has no way to write it.
+/// the format has no way to write it. Workspace mappings share the byte
+/// budget after the named choices (at most [`MAX_WORKSPACES`]); the same
+/// oldest-out rule and caller-forgets apply.
 pub fn encode(
     out: &mut String,
     profile: &str,
     fingerprint: Option<&str>,
     all: Option<&Choice>,
     named: &[(&str, &Choice)],
+    workspaces: &[WorkspaceLine],
 ) -> Left {
     let start = out.len();
     // Writing into a `String` cannot fail.
@@ -201,7 +228,70 @@ pub fn encode(
         out.push_str(line);
     }
     left.named = named.len() - kept;
+    let mut kept_workspaces = 0;
+    lines.clear();
+    for line in workspaces.iter().rev() {
+        if lines.len() == MAX_WORKSPACES {
+            break;
+        }
+        let mut text = String::new();
+        workspace_line(&mut text, line);
+        text.push('\n');
+        if text.len() > budget {
+            break;
+        }
+        budget -= text.len();
+        lines.push(text);
+        kept_workspaces += 1;
+    }
+    for line in lines.iter().rev() {
+        out.push_str(line);
+    }
+    left.workspaces = workspaces.len() - kept_workspaces;
     left
+}
+
+/// One workspace mapping as the file writes it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkspaceLine<'a> {
+    /// The output each is for (`None`: every output).
+    pub output: Option<&'a str>,
+    pub workspace: &'a str,
+    pub choice: &'a Choice,
+    pub transition: Spec,
+}
+
+/// Appends one `workspace` (every output) or `workspace-output OUTPUT`
+/// (one output) line: the choice, then the transition it arrives through
+/// (omitted for an instant one).
+fn workspace_line(out: &mut String, line: &WorkspaceLine<'_>) {
+    match line.output {
+        Some(output) => {
+            out.push_str("workspace-output ");
+            escape(out, output);
+            out.push(' ');
+            escape(out, line.workspace);
+            out.push(' ');
+        }
+        None => {
+            out.push_str("workspace ");
+            escape(out, line.workspace);
+            out.push(' ');
+        }
+    }
+    pick(out, line.choice);
+    if !line.transition.is_instant() {
+        let _ = write!(
+            out,
+            " transition {} {} {} {} {},{}",
+            line.transition.kind.name(),
+            line.transition.duration_ms,
+            line.transition.easing.name(),
+            line.transition.angle_deg,
+            line.transition.pos.0,
+            line.transition.pos.1,
+        );
+    }
 }
 
 fn pick(out: &mut String, choice: &Choice) {
@@ -299,19 +389,20 @@ pub fn decode(bytes: &[u8]) -> Parsed {
     let mut lines = bytes.split(|&b| b == b'\n');
     let header = lines.next().unwrap_or_default();
     match version(header) {
-        Some(OLDEST) | Some(VERSION) => {}
+        Some(found) if (OLDEST..=VERSION).contains(&found) => {}
         Some(later) if later > VERSION => {
             parsed.newer = true;
             parsed.warnings.push(format!(
                 "it is version {later} of the format, from a newer scootbg; this one reads \
-                 version {VERSION}, so nothing was restored from it, and it is left as it is"
+                 versions {OLDEST} to {VERSION}, so nothing was restored from it, and it is \
+                 left as it is"
             ));
             return parsed;
         }
         _ => {
             parsed.warnings.push(format!(
-                "its first line is not `{MAGIC} {OLDEST}` or `{MAGIC} {VERSION}`; nothing \
-                 was restored from it"
+                "its first line is not `{MAGIC} N` for versions {OLDEST} to {VERSION}; \
+                 nothing was restored from it"
             ));
             return parsed;
         }
@@ -366,6 +457,12 @@ enum Skip {
     Url,
     /// A `sha256` that is not 64 hex digits, or one without a `url`.
     Sha,
+    /// A workspace name that is too long, or has a NUL byte.
+    Workspace,
+    /// A `transition` trailer that is not one.
+    Transition,
+    /// More than [`MAX_WORKSPACES`] workspace mappings.
+    TooManyWorkspaces,
 }
 
 impl std::fmt::Display for Skip {
@@ -397,6 +494,20 @@ impl std::fmt::Display for Skip {
             Self::Sha => write!(
                 f,
                 "the `sha256` is not 64 hex digits, or there is no `url` for it"
+            ),
+            Self::Workspace => write!(
+                f,
+                "the workspace name is empty, past {MAX_WORKSPACE_NAME} bytes, or has a NUL byte"
+            ),
+            Self::Transition => write!(
+                f,
+                "the `transition` trailer is not `transition KIND DURATION_MS EASING ANGLE \
+                 X,Y` (as `scootbg set --transition` takes them)"
+            ),
+            Self::TooManyWorkspaces => write!(
+                f,
+                "more than {MAX_WORKSPACES} workspace mappings: the earliest `workspace` line \
+                 kept so far is dropped"
             ),
         }
     }
@@ -458,8 +569,112 @@ fn entry(record: &mut Record, line: &[u8], seen_all: &mut bool) -> Result<(), Sk
                 }
             }
         }
+        b"workspace" => {
+            let [workspace, rest @ ..] = &fields[..] else {
+                return Err(Skip::Fields("`workspace NAME` and a choice"));
+            };
+            let workspace = workspace_name(workspace)?;
+            let (pick, spec) = workspace_pick(rest)?;
+            put_workspace(record, None, workspace, pick, spec)
+        }
+        b"workspace-output" => {
+            let [output, workspace, rest @ ..] = &fields[..] else {
+                return Err(Skip::Fields("`workspace-output OUTPUT NAME` and a choice"));
+            };
+            let output = text(output, "output name")?;
+            let workspace = workspace_name(workspace)?;
+            let (pick, spec) = workspace_pick(rest)?;
+            put_workspace(record, Some(output), workspace, pick, spec)
+        }
         other => Err(Skip::Unknown(String::from_utf8_lossy(other).into_owned())),
     }
+}
+
+/// Records one workspace mapping read: the later line wins for a key read
+/// twice, and past [`MAX_WORKSPACES`] the oldest goes, as for `output`
+/// lines.
+fn put_workspace(
+    record: &mut Record,
+    output: Option<String>,
+    workspace: String,
+    pick: Pick,
+    spec: Spec,
+) -> Result<(), Skip> {
+    let full = record.workspaces.len() >= MAX_WORKSPACES;
+    match record
+        .workspaces
+        .iter_mut()
+        .find(|(o, w, ..)| *o == output && *w == workspace)
+    {
+        Some((_, _, slot, spec_slot)) => {
+            *slot = pick;
+            *spec_slot = spec;
+            Err(Skip::Duplicate("line for this workspace"))
+        }
+        None if full => {
+            record.workspaces.remove(0);
+            record.workspaces.push((output, workspace, pick, spec));
+            Err(Skip::TooManyWorkspaces)
+        }
+        None => {
+            record.workspaces.push((output, workspace, pick, spec));
+            Ok(())
+        }
+    }
+}
+
+/// A workspace name read: non-empty, short, and without a NUL byte (see
+/// [`crate::choices::MAX_WORKSPACE_NAME`]).
+fn workspace_name(field: &[u8]) -> Result<String, Skip> {
+    let name = text(field, "workspace name")?;
+    if name.len() > MAX_WORKSPACE_NAME || name.contains('\0') {
+        return Err(Skip::Workspace);
+    }
+    Ok(name)
+}
+
+/// A workspace line's choice and transition: the choice grammar, then an
+/// optional `transition KIND DURATION_MS EASING ANGLE X,Y` trailer
+/// (absent: at once).
+fn workspace_pick(fields: &[&[u8]]) -> Result<(Pick, Spec), Skip> {
+    // Split off the trailer: `transition` with five fields after it.
+    let (choice, trailer) = match fields.iter().position(|field| *field == b"transition") {
+        Some(index) => (&fields[..index], &fields[index + 1..]),
+        None => (fields, &[][..]),
+    };
+    let pick = pick_of(choice)?;
+    let spec = match trailer {
+        [] => Spec::none(),
+        [kind, duration, easing, angle, position] => {
+            // Borrowed text, strictly: a nested function, so the
+            // borrower's lifetime is the caller's, not a closure's.
+            fn field_str<'f>(field: &'f [u8], what: &'static str) -> Result<&'f str, Skip> {
+                std::str::from_utf8(field).map_err(|_| Skip::Field(what, FieldError::NotUtf8))
+            }
+            let kind =
+                Kind::parse(field_str(kind, "transition kind")?).map_err(|_| Skip::Transition)?;
+            if kind == Kind::None {
+                return Err(Skip::Transition);
+            }
+            let duration = crate::transition::parse_duration_ms(field_str(duration, "duration")?)
+                .map_err(|_| Skip::Transition)?;
+            let easing =
+                Easing::parse(field_str(easing, "easing")?).map_err(|_| Skip::Transition)?;
+            let angle = crate::transition::parse_angle_deg(field_str(angle, "angle")?)
+                .map_err(|_| Skip::Transition)?;
+            let pos = crate::transition::parse_position(field_str(position, "position")?)
+                .map_err(|_| Skip::Transition)?;
+            Spec {
+                kind,
+                duration_ms: duration,
+                easing,
+                angle_deg: angle,
+                pos,
+            }
+        }
+        _ => return Err(Skip::Transition),
+    };
+    Ok((pick, spec))
 }
 
 fn again_is(again: bool, what: &'static str) -> Result<(), Skip> {

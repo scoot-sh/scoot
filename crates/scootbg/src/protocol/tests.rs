@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::{
     DEFAULT_FILL, ImageRequest, OutputEntry, PROTOCOL_VERSION, Reply, Request, RequestError,
-    RotationInfo, Show, SlideshowRequest, Source, parse, write_reply,
+    RotationInfo, Show, SlideshowRequest, Source, WorkspaceEntry, parse, write_reply,
 };
 use crate::color::Color;
 use crate::image::render::Look;
@@ -48,6 +48,31 @@ fn each_request_parses() {
         Request::Clear { output: None },
         Request::Clear {
             output: Some("HEADLESS-2".into()),
+        },
+        Request::SetWorkspace {
+            show: Show::Color(red()),
+            output: None,
+            workspace: "2".into(),
+            transition: crate::transition::Spec::none(),
+        },
+        Request::SetWorkspace {
+            show: Show::Image(ImageRequest {
+                source: Source::Path("/home/me/Pictures/a b \"c\".jpg".into()),
+                mode: Mode::Tile,
+                fill: red(),
+                filter: Filter::Nearest,
+            }),
+            output: Some("DP-1".into()),
+            workspace: "2 DP-1".into(),
+            transition: crate::transition::Spec::none(),
+        },
+        Request::ClearWorkspace {
+            output: None,
+            workspace: "2".into(),
+        },
+        Request::ClearWorkspace {
+            output: Some("HEADLESS-2".into()),
+            workspace: "web".into(),
         },
     ] {
         let line = request.line();
@@ -102,7 +127,7 @@ fn any_output_name_round_trips() {
 #[test]
 fn a_set_needs_a_valid_color() {
     assert!(matches!(
-        parse(br#"{"protocol":1,"type":"set"}"#),
+        parse(br##"{"protocol":1,"type":"set"}"##),
         Err(RequestError::NoTarget)
     ));
     assert!(matches!(
@@ -144,7 +169,7 @@ fn a_set_needs_a_valid_color() {
 #[test]
 fn an_image_set_has_defaults_and_checks_every_field() {
     assert_eq!(
-        parse(br#"{"protocol":1,"type":"set","image":"/p/a.png"}"#).unwrap(),
+        parse(br##"{"protocol":1,"type":"set","image":"/p/a.png"}"##).unwrap(),
         Request::Set {
             show: Show::Image(ImageRequest {
                 source: Source::Path("/p/a.png".into()),
@@ -189,24 +214,27 @@ fn an_image_set_has_defaults_and_checks_every_field() {
     );
     for (line, check) in [
         (
-            &br#"{"protocol":1,"type":"set","image":"a.png"}"#[..],
-            "not absolute",
-        ),
-        (br#"{"protocol":1,"type":"set","image":""}"#, "not absolute"),
-        (
-            br#"{"protocol":1,"type":"set","image":"~/a.png"}"#,
+            &br##"{"protocol":1,"type":"set","image":"a.png"}"##[..],
             "not absolute",
         ),
         (
-            br#"{"protocol":1,"type":"set","image":"/a","mode":"cover"}"#,
+            br##"{"protocol":1,"type":"set","image":""}"##,
+            "not absolute",
+        ),
+        (
+            br##"{"protocol":1,"type":"set","image":"~/a.png"}"##,
+            "not absolute",
+        ),
+        (
+            br##"{"protocol":1,"type":"set","image":"/a","mode":"cover"}"##,
             "unknown mode",
         ),
         (
-            br#"{"protocol":1,"type":"set","image":"/a","filter":"lanczos"}"#,
+            br##"{"protocol":1,"type":"set","image":"/a","filter":"lanczos"}"##,
             "unknown filter",
         ),
         (
-            br#"{"protocol":1,"type":"set","image":"/a","fill":"black"}"#,
+            br##"{"protocol":1,"type":"set","image":"/a","fill":"black"}"##,
             "bad fill",
         ),
         (
@@ -221,7 +249,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
 
 #[test]
 fn field_order_whitespace_and_extra_fields_do_not_matter() {
-    let line = br#" { "future": [1, 2], "type" : "query", "protocol" : 1 } "#;
+    let line = br##" { "future": [1, 2], "type" : "query", "protocol" : 1 } "##;
     assert_eq!(parse(line).unwrap(), Request::Query);
     // A trailing carriage return is whitespace to JSON.
     assert_eq!(
@@ -232,7 +260,7 @@ fn field_order_whitespace_and_extra_fields_do_not_matter() {
 
 #[test]
 fn an_escaped_type_still_parses() {
-    let line = br#"{"protocol":1,"type":"query"}"#;
+    let line = br##"{"protocol":1,"type":"query"}"##;
     assert_eq!(parse(line).unwrap(), Request::Query);
 }
 
@@ -260,15 +288,15 @@ fn malformed_json_is_refused() {
 #[test]
 fn a_missing_or_wrong_protocol_is_refused() {
     assert!(matches!(
-        parse(br#"{"type":"query"}"#),
+        parse(br##"{"type":"query"}"##),
         Err(RequestError::NoProtocol)
     ));
     assert!(matches!(
-        parse(br#"{"protocol":2,"type":"query"}"#),
+        parse(br##"{"protocol":2,"type":"query"}"##),
         Err(RequestError::WrongProtocol(2))
     ));
     assert!(matches!(
-        parse(br#"{"protocol":0,"type":"query"}"#),
+        parse(br##"{"protocol":0,"type":"query"}"##),
         Err(RequestError::WrongProtocol(0))
     ));
     let message = RequestError::WrongProtocol(9).to_string();
@@ -278,10 +306,10 @@ fn a_missing_or_wrong_protocol_is_refused() {
 #[test]
 fn a_missing_or_unknown_type_is_refused() {
     assert!(matches!(
-        parse(br#"{"protocol":1}"#),
+        parse(br##"{"protocol":1}"##),
         Err(RequestError::NoType)
     ));
-    match parse(br#"{"protocol":1,"type":"apply-configs"}"#) {
+    match parse(br##"{"protocol":1,"type":"apply-configs"}"##) {
         Err(RequestError::Unknown(name)) => assert_eq!(name, "apply-configs"),
         other => panic!("expected Unknown, got {other:?}"),
     }
@@ -293,11 +321,12 @@ fn replies_are_one_tagged_line() {
     assert_eq!(
         reply_string(&Reply::Outputs {
             outputs: &[] as &[OutputEntry<'_>; 0],
+            workspaces: &[] as &[WorkspaceEntry<'_>; 0],
             saving: true,
             profile: "default",
             rotation: None,
         }),
-        "{\"type\":\"outputs\",\"outputs\":[],\"saving\":true,\"profile\":\"default\"}\n"
+        "{\"type\":\"outputs\",\"outputs\":[],\"workspaces\":[],\"saving\":true,\"profile\":\"default\"}\n"
     );
     assert_eq!(
         reply_string(&Reply::Version {
@@ -342,6 +371,7 @@ fn output_entries_have_a_fixed_shape() {
         draw_failed: false,
         draw_error: None,
         shows: Some(super::Shows(&color)),
+        workspace: Some("2"),
         transition: Some("fade"),
     };
     let unknown = OutputEntry {
@@ -360,10 +390,17 @@ fn output_entries_have_a_fixed_shape() {
         draw_failed: true,
         draw_error: Some("a \"reason\"\nover two lines"),
         shows: None,
+        workspace: None,
         transition: None,
+    };
+    let mapping = WorkspaceEntry {
+        output: Some("DP-1"),
+        workspace: "2",
+        shows: super::Shows(&color),
     };
     let line = reply_string(&Reply::Outputs {
         outputs: &[known, unknown],
+        workspaces: &[mapping],
         saving: false,
         profile: "scoot",
         rotation: None,
@@ -389,6 +426,7 @@ fn output_entries_have_a_fixed_shape() {
                 "draw_failed": false,
                 "draw_error": null,
                 "shows": {"color": "#c03020"},
+                "workspace": "2",
                 "transition": "fade",
             },
             {
@@ -402,10 +440,87 @@ fn output_entries_have_a_fixed_shape() {
                 "draw_failed": true,
                 "draw_error": "a \"reason\"\nover two lines",
                 "shows": null,
+                "workspace": null,
                 "transition": null,
             },
+        ],
+        "workspaces": [
+            {"output": "DP-1", "workspace": "2", "shows": {"color": "#c03020"}},
         ], "saving": false, "profile": "scoot"})
     );
+}
+
+#[test]
+fn workspace_requests_need_a_good_name() {
+    // Missing.
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"set-workspace","color":"#c03020"}"##),
+        Err(RequestError::NoWorkspace)
+    ));
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"clear-workspace"}"##),
+        Err(RequestError::NoWorkspace)
+    ));
+    // Empty.
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"clear-workspace","workspace":""}"##),
+        Err(RequestError::EmptyWorkspace)
+    ));
+    // Past the bound.
+    let long = "w".repeat(crate::choices::MAX_WORKSPACE_NAME + 1);
+    assert!(matches!(
+        parse(
+            format!(
+                r##"{{"protocol":1,"type":"set-workspace","workspace":"{long}","color":"#c03020"}}"##
+            )
+            .as_bytes()
+        ),
+        Err(RequestError::WorkspaceTooLong)
+    ));
+    // A NUL byte, as a JSON escape (one cannot appear raw).
+    assert!(matches!(
+        parse(
+            br##"{"protocol":1,"type":"set-workspace","workspace":"a\u0000b","color":"#c03020"}"##
+                .as_ref()
+        ),
+        Err(RequestError::WorkspaceNul)
+    ));
+    // A set-workspace still needs something to show, and parses its
+    // transition like a set does.
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"set-workspace","workspace":"2"}"##),
+        Err(RequestError::NoTarget)
+    ));
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"set-workspace","workspace":"2","color":"#c03020","duration-ms":"500"}"##),
+        Err(RequestError::BadTransition(_))
+    ));
+    // A clear-workspace with transition fields is refused, like a clear.
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"clear-workspace","workspace":"2","transition":"fade"}"##),
+        Err(RequestError::TransitionWithClear)
+    ));
+}
+
+#[test]
+fn a_workspace_line_carries_what_a_set_does_plus_the_name() {
+    let request = Request::SetWorkspace {
+        show: Show::Color(red()),
+        output: Some("DP-1".into()),
+        workspace: "2".into(),
+        transition: crate::transition::Spec::none(),
+    };
+    let line = request.line();
+    let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(value["type"], "set-workspace");
+    assert_eq!(value["workspace"], "2");
+    assert_eq!(value["output"], "DP-1");
+    assert_eq!(value["color"], "#c03020");
+    assert!(
+        value.get("transition").is_none(),
+        "no transition: no fields"
+    );
+    assert_eq!(parse(line.trim_end().as_bytes()).unwrap(), request);
 }
 
 #[test]
@@ -430,8 +545,8 @@ fn replies_append_to_the_buffer() {
 #[test]
 fn only_an_object_is_a_request() {
     for line in [
-        &br#"[1,"kill"]"#[..],
-        br#" [1, "query"] "#,
+        &br##"[1,"kill"]"##[..],
+        br##" [1, "query"] "##,
         b"[]",
         b"\"query\"",
         b"1",
@@ -552,7 +667,7 @@ fn apply_config_is_checked() {
 #[test]
 fn config_on_another_request_is_ignored() {
     assert_eq!(
-        parse(br#"{"protocol":1,"type":"query","config":{"imgae":1},"profile":"../"}"#).unwrap(),
+        parse(br##"{"protocol":1,"type":"query","config":{"imgae":1},"profile":"../"}"##).unwrap(),
         Request::Query
     );
 }

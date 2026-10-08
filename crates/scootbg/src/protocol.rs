@@ -32,6 +32,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize, Serializer};
 
+use crate::choices::MAX_WORKSPACE_NAME;
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
 use crate::outputs::Size;
@@ -80,6 +81,16 @@ pub const MAX_REQUEST_LINE: usize = 64 * 1024;
 /// shows the same wallpaper, without the animation.
 /// A `clear` with any of them is refused: clearing shows the compositor's
 /// own background at once, which there is nothing to blend from or to.
+///
+/// A `set-workspace` shows `show` on `workspace` (one workspace, by the
+/// name the compositor announces: "1", "2", ... on scoot) rather than on
+/// every output: while that workspace is active, those outputs show it,
+/// arriving through `transition` when the workspace turns active (see
+/// `crate::choices`). A `clear-workspace` takes that mapping back off, and
+/// refuses transition fields like `clear` does. Both are their own request
+/// types, rather than a `workspace` field on `set` and `clear`, so a daemon
+/// that predates workspaces refuses them (`unknown request`) instead of
+/// misreading one as a wallpaper for every output.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Request<'a> {
     /// What each output shows.
@@ -98,6 +109,21 @@ pub enum Request<'a> {
     /// Show nothing (the compositor's own background) on every output, or
     /// on the outputs named `output`.
     Clear { output: Option<Cow<'a, str>> },
+    /// Show `show` on `workspace` (every output, or the outputs named
+    /// `output`, while that workspace is active there), arriving through
+    /// `transition` when it turns active.
+    SetWorkspace {
+        show: Show<'a>,
+        output: Option<Cow<'a, str>>,
+        workspace: Cow<'a, str>,
+        transition: Spec,
+    },
+    /// Take the `workspace` mapping back off (every output, or the outputs
+    /// named `output`): those outputs fall back to their own wallpaper.
+    ClearWorkspace {
+        output: Option<Cow<'a, str>>,
+        workspace: Cow<'a, str>,
+    },
     /// A `[wallpaper]` section from scoot's config, for `profile`
     /// (`crate::section`, `daemon::config`): adopt the profile, and apply
     /// the section if it changed since it was last applied. Boxed: the
@@ -182,6 +208,8 @@ impl Request<'_> {
             Self::Version => "version",
             Self::Set { .. } => "set",
             Self::Clear { .. } => "clear",
+            Self::SetWorkspace { .. } => "set-workspace",
+            Self::ClearWorkspace { .. } => "clear-workspace",
             Self::ApplyConfig { .. } => "apply-config",
         }
     }
@@ -220,6 +248,8 @@ impl Request<'_> {
             #[serde(skip_serializing_if = "Option::is_none")]
             output: Option<&'r str>,
             #[serde(skip_serializing_if = "Option::is_none")]
+            workspace: Option<&'r str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             transition: Option<&'static str>,
             #[serde(skip_serializing_if = "Option::is_none", rename = "duration-ms")]
             duration_ms: Option<String>,
@@ -243,12 +273,27 @@ impl Request<'_> {
             fill: None,
             filter: None,
             output: None,
+            workspace: None,
             transition: None,
             duration_ms: None,
             easing: None,
             angle: None,
             position: None,
         };
+        // One `set`'s transition fields, shared by `set` and
+        // `set-workspace`: only owned strings and `&'static` names cross
+        // into the line, so no lifetime ties to the request. The show
+        // itself is filled inline per arm, as it always was: its strings
+        // borrow the request, which the compiler threads on its own.
+        fn fill_transition(line: &mut Line<'_>, transition: &Spec) {
+            if transition.kind != Kind::None {
+                line.transition = Some(transition.kind.name());
+                line.duration_ms = Some(transition.duration_ms.to_string());
+                line.easing = Some(transition.easing.name());
+                line.angle = Some(transition.angle_deg.to_string());
+                line.position = Some(format!("{},{}", transition.pos.0, transition.pos.1));
+            }
+        }
         match self {
             Self::Set {
                 show,
@@ -256,13 +301,35 @@ impl Request<'_> {
                 transition,
             } => {
                 line.output = output.as_deref();
-                if transition.kind != Kind::None {
-                    line.transition = Some(transition.kind.name());
-                    line.duration_ms = Some(transition.duration_ms.to_string());
-                    line.easing = Some(transition.easing.name());
-                    line.angle = Some(transition.angle_deg.to_string());
-                    line.position = Some(format!("{},{}", transition.pos.0, transition.pos.1));
+                fill_transition(&mut line, transition);
+                match show {
+                    Show::Color(color) => line.color = Some(*color),
+                    Show::Image(image) => {
+                        match &image.source {
+                            Source::Path(path) => line.image = Some(path),
+                            Source::Url { url, sha256 } => {
+                                line.image = Some(url);
+                                line.sha256 = sha256
+                                    .as_ref()
+                                    .map(|hash| crate::sha256::hex_bytes(hash.as_slice()));
+                            }
+                        }
+                        line.mode = Some(image.mode);
+                        line.fill = Some(image.fill);
+                        line.filter = Some(image.filter);
+                    }
                 }
+            }
+            Self::SetWorkspace {
+                show,
+                output,
+                workspace,
+                transition,
+            } => {
+                line.output = output.as_deref();
+                let workspace: &str = workspace;
+                line.workspace = Some(workspace);
+                fill_transition(&mut line, transition);
                 match show {
                     Show::Color(color) => line.color = Some(*color),
                     Show::Slideshow(slideshow) => {
@@ -292,6 +359,11 @@ impl Request<'_> {
                 }
             }
             Self::Clear { output } => line.output = output.as_deref(),
+            Self::ClearWorkspace { output, workspace } => {
+                line.output = output.as_deref();
+                let workspace: &str = workspace;
+                line.workspace = Some(workspace);
+            }
             Self::Query | Self::Kill | Self::Version | Self::ApplyConfig { .. } => {}
         }
         // Serializing strings and numbers into a `String` cannot fail; if
@@ -371,6 +443,16 @@ pub enum RequestError {
     /// A `clear` with transition fields: clearing shows the compositor's
     /// own background at once, which there is nothing to blend from or to.
     TransitionWithClear,
+    /// A `set-workspace` or `clear-workspace` without a `workspace`.
+    NoWorkspace,
+    /// A `set-workspace` or `clear-workspace` with an empty `workspace`.
+    EmptyWorkspace,
+    /// A `set-workspace` or `clear-workspace` with a `workspace` past
+    /// [`MAX_WORKSPACE_NAME`](crate::choices::MAX_WORKSPACE_NAME) bytes.
+    WorkspaceTooLong,
+    /// A `set-workspace` or `clear-workspace` with a `workspace` holding
+    /// a NUL byte.
+    WorkspaceNul,
 }
 
 impl fmt::Display for RequestError {
@@ -450,6 +532,16 @@ impl fmt::Display for RequestError {
                 "`clear` shows the compositor's own background at once: there is nothing to \
                  blend from or to, so it takes no transition"
             ),
+            Self::NoWorkspace => write!(
+                f,
+                "`set-workspace` and `clear-workspace` need a `workspace` (the name the \
+                 compositor announces: \"1\", \"2\", ... on scoot)"
+            ),
+            Self::EmptyWorkspace => write!(f, "the `workspace` is empty"),
+            Self::WorkspaceTooLong => {
+                write!(f, "the `workspace` is past {MAX_WORKSPACE_NAME} bytes")
+            }
+            Self::WorkspaceNul => write!(f, "the `workspace` has a NUL byte"),
         }
     }
 }
@@ -480,6 +572,8 @@ struct Envelope<'a> {
     filter: Option<Cow<'a, str>>,
     #[serde(borrow)]
     output: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    workspace: Option<Cow<'a, str>>,
     #[serde(borrow)]
     transition: Option<Cow<'a, str>>,
     #[serde(borrow, rename = "duration-ms")]
@@ -559,9 +653,63 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
                 output: envelope.output,
             })
         }
+        "set-workspace" => {
+            let show = show(
+                envelope.color,
+                envelope.image,
+                envelope.sha256,
+                envelope.mode,
+                envelope.fill,
+                envelope.filter,
+            )?;
+            let transition = transition(
+                envelope.transition,
+                envelope.duration_ms,
+                envelope.easing,
+                envelope.angle,
+                envelope.position,
+            )?;
+            Ok(Request::SetWorkspace {
+                show,
+                output: envelope.output,
+                workspace: workspace(envelope.workspace)?,
+                transition,
+            })
+        }
+        "clear-workspace" => {
+            if envelope.transition.is_some()
+                || envelope.duration_ms.is_some()
+                || envelope.easing.is_some()
+                || envelope.angle.is_some()
+                || envelope.position.is_some()
+            {
+                return Err(RequestError::TransitionWithClear);
+            }
+            Ok(Request::ClearWorkspace {
+                output: envelope.output,
+                workspace: workspace(envelope.workspace)?,
+            })
+        }
         "apply-config" => apply_config(line),
         _ => Err(RequestError::Unknown(kind.into_owned())),
     }
+}
+
+/// The workspace a `set-workspace` or `clear-workspace` names: present,
+/// non-empty, short, and without a NUL byte (which JSON can carry as an
+/// escape, and nothing downstream wants).
+fn workspace(workspace: Option<Cow<'_, str>>) -> Result<Cow<'_, str>, RequestError> {
+    let workspace = workspace.ok_or(RequestError::NoWorkspace)?;
+    if workspace.is_empty() {
+        return Err(RequestError::EmptyWorkspace);
+    }
+    if workspace.len() > MAX_WORKSPACE_NAME {
+        return Err(RequestError::WorkspaceTooLong);
+    }
+    if workspace.contains('\0') {
+        return Err(RequestError::WorkspaceNul);
+    }
+    Ok(workspace)
 }
 
 /// `apply-config`'s own fields, read in a second pass over the line (only
@@ -743,7 +891,8 @@ fn transition(
 ///  "logical":{"width":1920,"height":1080},
 ///  "surface":{"state":"configured","size":{"width":1920,"height":1080},
 ///             "scale":2,"pixels":{"width":3840,"height":2160}},
-///  "draw_failed":false,"draw_error":null,"shows":null}
+///  "draw_failed":false,"draw_error":null,"shows":null,
+///  "workspace":"2","transition":null}
 /// ```
 ///
 /// Every key is always present, `null` when not known (yet). New keys may
@@ -784,6 +933,12 @@ pub struct OutputEntry<'a> {
     /// or `null` for nothing (the compositor's own background, or no
     /// surface yet).
     pub shows: Option<Shows<'a>>,
+    /// The workspace active on the output now, by the name the compositor
+    /// announces ("1", "2", ... on scoot): `null` while unknown (no
+    /// workspace wallpaper mapped, no manager, or no events yet). Added
+    /// for per-workspace wallpapers within protocol 1; older clients
+    /// ignore it.
+    pub workspace: Option<&'a str>,
     /// The transition running on the output now (`none` is never reported:
     /// it lands at once): `fade`, `wipe` or `grow`, else `null`. Added for
     /// transitions within protocol 1; older clients ignore it.
@@ -871,6 +1026,36 @@ impl<const N: usize> OutputList for [OutputEntry<'_>; N] {
     }
 }
 
+/// One workspace mapping in a `query` reply: the wallpaper for
+/// `workspace` on `output` (`null`: every output) while that workspace is
+/// active there. Only live mappings are listed (cleared ones, kept for
+/// ordering against older requests, show nothing and are listed nowhere).
+/// Added for per-workspace wallpapers within protocol 1; older clients
+/// ignore the whole list.
+#[derive(Debug, Serialize)]
+pub struct WorkspaceEntry<'a> {
+    /// The connector name the mapping is for, `null` for every output.
+    pub output: Option<&'a str>,
+    /// The workspace, by the name the compositor announces.
+    pub workspace: &'a str,
+    /// What those outputs show while the workspace is active: `shows`'s
+    /// shape (`{"color":...}` or `{"image":...}`).
+    pub shows: Shows<'a>,
+}
+
+/// The daemon's workspace mappings, as a `query` reply lists them.
+pub trait WorkspaceList {
+    /// Calls `each` with every live mapping's entry, in order made.
+    fn for_each_entry(&self, each: &mut dyn FnMut(&WorkspaceEntry<'_>));
+}
+
+/// For fixed lists, as in tests (a slice cannot be a `dyn` value).
+impl<const N: usize> WorkspaceList for [WorkspaceEntry<'_>; N] {
+    fn for_each_entry(&self, each: &mut dyn FnMut(&WorkspaceEntry<'_>)) {
+        self.iter().for_each(each);
+    }
+}
+
 /// A reply line.
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -883,6 +1068,10 @@ pub enum Reply<'a> {
     Outputs {
         #[serde(serialize_with = "list")]
         outputs: &'a dyn OutputList,
+        /// The live per-workspace mappings (`set-workspace`): empty when
+        /// none. Added within protocol 1; older clients ignore it.
+        #[serde(serialize_with = "workspace_list")]
+        workspaces: &'a dyn WorkspaceList,
         /// Whether `set` and `clear` are saved for the next start
         /// (`crate::state`): `false` when saving is off (no state
         /// directory, or a state file that could not be read or is a newer
@@ -908,6 +1097,25 @@ fn display<S: Serializer>(value: &&dyn fmt::Display, serializer: S) -> Result<S:
 
 /// Serializes an [`OutputList`] as a JSON array, entry by entry.
 fn list<S: Serializer>(value: &&dyn OutputList, serializer: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq;
+    let mut seq = serializer.serialize_seq(None)?;
+    let mut failed = None;
+    value.for_each_entry(&mut |entry| {
+        if failed.is_none() {
+            failed = seq.serialize_element(entry).err();
+        }
+    });
+    match failed {
+        Some(error) => Err(error),
+        None => seq.end(),
+    }
+}
+
+/// Serializes a [`WorkspaceList`] as a JSON array, entry by entry.
+fn workspace_list<S: Serializer>(
+    value: &&dyn WorkspaceList,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
     use serde::ser::SerializeSeq;
     let mut seq = serializer.serialize_seq(None)?;
     let mut failed = None;

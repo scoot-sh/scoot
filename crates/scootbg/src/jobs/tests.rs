@@ -38,6 +38,8 @@ fn all(conn: u32) -> Trial<u32> {
         conn,
         output: None,
         slideshow: None,
+        workspace: None,
+        transition: crate::transition::Spec::none(),
     }
 }
 
@@ -80,6 +82,8 @@ fn superseded_trials_are_answered_without_running() {
             conn: 20,
             output: Some("DP-1".into()),
             slideshow: None,
+            workspace: None,
+            transition: crate::transition::Spec::none(),
         },
     )
     .unwrap();
@@ -106,6 +110,8 @@ fn a_sweep_passes_each_trials_output() {
             conn: 1,
             output: Some("A".into()),
             slideshow: None,
+            workspace: None,
+            transition: crate::transition::Spec::none(),
         },
     )
     .unwrap();
@@ -115,6 +121,8 @@ fn a_sweep_passes_each_trials_output() {
             conn: 2,
             output: Some("B".into()),
             slideshow: None,
+            workspace: None,
+            transition: crate::transition::Spec::none(),
         },
     )
     .unwrap();

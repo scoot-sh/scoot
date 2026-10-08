@@ -230,6 +230,32 @@ impl Saved {
         self.save();
     }
 
+    /// A `set --workspace` or `clear --workspace` of `generation` was
+    /// recorded as the daemon's choice: recorded here too (newest wins per
+    /// mapping; past [`crate::choices::MAX_WORKSPACES`] keys the mapping
+    /// is already refused, so this always lands), and the file written in
+    /// the background. The transition travels with the mapping, so a
+    /// restart switches through it too.
+    pub fn record_workspace(
+        &mut self,
+        output: Option<&str>,
+        workspace: &str,
+        choice: &Choice,
+        transition: crate::transition::Spec,
+        generation: u64,
+    ) {
+        if generation < self.floor {
+            return;
+        }
+        if !self
+            .choices
+            .set_workspace(output, workspace, choice.clone(), transition, generation)
+        {
+            return;
+        }
+        self.save();
+    }
+
     /// Writes the file for what is recorded now, in the background.
     fn save(&mut self) {
         if self.saver.is_none() {
@@ -253,18 +279,47 @@ impl Saved {
             .iter()
             .map(|&(name, choice, _)| (name, choice))
             .collect();
+        let mut mappings: Vec<(Option<&str>, &str, &Choice, u64, crate::transition::Spec)> =
+            self.choices.workspaces().collect();
+        // Live mappings only: cleared ones order same-boot landings, and
+        // the file has nothing to restore for them.
+        mappings.retain(|(_, _, choice, ..)| choice.is_some());
+        mappings.sort_by_key(|&(.., made, _)| made);
+        let workspaces: Vec<format::WorkspaceLine<'_>> = mappings
+            .iter()
+            .map(
+                |&(output, workspace, choice, _, transition)| format::WorkspaceLine {
+                    output,
+                    workspace,
+                    choice,
+                    transition,
+                },
+            )
+            .collect();
         let left = format::encode(
             &mut text,
             self.profile.as_str(),
             self.fingerprint.as_deref(),
             self.choices.every(),
             &oldest_first,
+            &workspaces,
         );
+        // Owned before anything is forgotten: the lines above borrow the
+        // table, and forgetting mutates it.
         let dropped: Vec<String> = oldest_first
             .iter()
             .take(left.named)
             .map(|&(name, _)| name.to_owned())
             .collect();
+        let dropped_workspaces: Vec<(Option<String>, String)> = mappings
+            .iter()
+            .take(left.workspaces)
+            .map(|(output, workspace, ..)| (output.map(str::to_owned), (*workspace).to_owned()))
+            .collect();
+        drop(mappings);
+        drop(workspaces);
+        drop(oldest_first);
+        drop(named);
         if left.all {
             warn(format_args!(
                 "scootbg: the choice for every output is too long for the state file \
@@ -282,6 +337,20 @@ impl Saved {
             ));
             for name in &dropped {
                 self.choices.forget(name);
+            }
+        }
+        if left.workspaces > 0 {
+            warn(format_args!(
+                "scootbg: the state file keeps at most {} workspace mappings ({} bytes in \
+                 all); the {} least recently set are no longer saved",
+                format::MAX_WORKSPACES,
+                format::MAX_BYTES,
+                left.workspaces
+            ));
+            // Oldest first, as written: the file's dropped prefix goes
+            // from the table too.
+            for (output, workspace) in &dropped_workspaces {
+                self.choices.forget_workspace(output.as_deref(), workspace);
             }
         }
         text
