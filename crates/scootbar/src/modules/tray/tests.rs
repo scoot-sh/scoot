@@ -1290,6 +1290,128 @@ fn an_item_that_announces_nonstop_is_read_at_most_every_gap() {
     assert!((5..=30).contains(&asked), "{asked} reads in a second");
 }
 
+/// The scripted item's answer at generation `n`: the same icon, a new
+/// title, so every re-read moves the view.
+fn versioned(n: usize) -> Vec<u8> {
+    fake::item_body(
+        &format!("V{n}"),
+        "Active",
+        2,
+        2,
+        &fake::solid(2, 2, 255, 9, 9, 9),
+    )
+}
+
+/// Whether the module shows one item titled `want`.
+fn title_is(harness: &Harness, want: &str) -> bool {
+    harness
+        .value_on(None)
+        .and_then(|value| {
+            value.get("items")?.as_array().and_then(|items| {
+                items
+                    .first()?
+                    .get("title")?
+                    .as_str()
+                    .map(|title| title == want)
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// A runaway item announcing as fast as it is read is redrawn ten times
+/// a second at most, not once per re-read: content changes past the
+/// first after a quiet spell wait out the draw gap, however many signals
+/// arrived in the turn. The 50 ms re-read floor stays the backstop
+/// across turns.
+#[test]
+fn a_runaway_item_is_redrawn_ten_times_a_second_at_most() {
+    let (stream, mut fake) = Fake::pair();
+    fake.add_item(SERVICE, OWNER, versioned(0));
+    let mut harness = Harness::new(start_connected(stream));
+    until_shown(&mut harness, &mut fake, 1);
+    // A new generation a turn, as a runaway item announcing at hundreds
+    // a second is heard when the bar keeps up: a redraw each, were they
+    // not held.
+    let mut drawn = 0;
+    let mut n = 0;
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_millis(600) {
+        n += 1;
+        fake.add_item(SERVICE, OWNER, versioned(n));
+        fake.send_item_signal(OWNER, "NewIcon");
+        fake.pump();
+        if harness.wait(Duration::from_millis(5)) == Some(Update::Changed) {
+            drawn += 1;
+        }
+        fake.pump();
+    }
+    // One a gap: six in 600 ms, a little over for a gap's rounding,
+    // never one per floor window.
+    assert!((1..=9).contains(&drawn), "{drawn} draws");
+    // And the run ends on its last generation, once the held one is drawn.
+    drive(&mut harness, &mut fake, |harness| {
+        title_is(harness, &format!("V{n}"))
+    });
+    // The held redraw lands on the draw timer: drain, then nothing is held.
+    let drained = std::time::Instant::now();
+    while drained.elapsed() < Duration::from_millis(250) {
+        fake.pump();
+        harness.wait(Duration::from_millis(5));
+        fake.pump();
+    }
+    assert_eq!(harness.source_count(), 1, "no timer once nothing is held");
+}
+
+/// A second content change inside the draw gap is held, not drawn and
+/// not lost: the answer lands, the turn reports nothing, the draw timer
+/// is the module's only extra source, and the timer's turn draws the
+/// latest generation.
+#[test]
+fn a_second_change_inside_the_gap_is_held_and_not_lost() {
+    let (stream, mut fake) = Fake::pair();
+    fake.add_item(SERVICE, OWNER, versioned(0));
+    let mut harness = Harness::new(start_connected(stream));
+    until_shown(&mut harness, &mut fake, 1);
+    fake.add_item(SERVICE, OWNER, versioned(1));
+    fake.send_item_signal(OWNER, "NewIcon");
+    drive(&mut harness, &mut fake, |harness| title_is(harness, "V1"));
+    let first = std::time::Instant::now();
+    // Inside the gap (and past the re-read floor, through the coalesce
+    // timer): the re-read goes out, its answer lands, but no redraw yet.
+    fake.add_item(SERVICE, OWNER, versioned(2));
+    fake.send_item_signal(OWNER, "NewIcon");
+    let reads = fake.getall_count(SERVICE);
+    let start = std::time::Instant::now();
+    while fake.getall_count(SERVICE) == reads {
+        assert!(start.elapsed() < Duration::from_secs(10), "never re-read");
+        fake.pump();
+        harness.wait(Duration::from_millis(5));
+        fake.pump();
+    }
+    for _ in 0..4 {
+        fake.pump();
+        harness.wait(Duration::from_millis(5));
+        fake.pump();
+    }
+    if first.elapsed() < super::DRAW_GAP {
+        assert!(title_is(&harness, "V2"), "the answer landed");
+        assert_eq!(harness.source_count(), 2, "held for the draw timer");
+    }
+    // The held change is drawn when the timer fires, with the state as
+    // it is, and nothing is held after it.
+    drive(&mut harness, &mut fake, |harness| title_is(harness, "V2"));
+    let start = std::time::Instant::now();
+    while harness.source_count() != 1 {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "a timer still held"
+        );
+        fake.pump();
+        harness.wait(Duration::from_millis(5));
+        fake.pump();
+    }
+}
+
 /// The icon is drawn at the output's device pixels at a fractional scale:
 /// its ink spans `art_side(em)` on a side, `em` being what the scale made
 /// of the font size (1.5 at 16 logical is 24 device pixels).

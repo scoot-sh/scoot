@@ -879,6 +879,92 @@ loaded sections) in the default build, and only that row. Nothing else is
 waived: the CPU per open+close row stays a one-run observation, not an
 accepted cost.
 
+## M6 tray redraw coalescing (measured 2026-10-08)
+
+The [runaway redraws](resolved/tray-redraw-coalesce-done.md) fix (PR #515): an item's
+new icon or title, and a menu's new rows, past the first after a quiet
+spell wait out a 100 ms draw gap (the media/bluetooth/window-title
+pattern), instead of redrawing with every re-read. Appearing, emptying
+and mode changes still draw at once; the 50 ms re-read floor is
+untouched, and the draw timer exists only while a change is held.
+
+**Method.** Release builds (`lto = "fat"`, stripped): sizes of
+`origin/main` at `b843f333a` against the branch head (code commit
+`cde0d2117`), each with its own target dir; the flood and idle runs of
+`origin/main` at `59cf18f89` (claim commits only between it and
+`b843f333a`, no code) against the fix on its base, whose
+`crates/scootbar/src/modules/tray/` tree is byte-identical to the head's
+(verified by diff after the rebase). All on the Asahi M2 (NixOS
+aarch64, rustc 1.97.1 via the dev shell); a headless `scoot` from the
+same tree (used read-only), a private `dbus-daemon` 1.16.2, and the
+items `jeepney` peers (the flood item is
+`bench/m6-tray-vm/scripts/item.py` unchanged; the menu flood is a new
+peer serving one versioned row and flooding `LayoutUpdated`, run from
+scratch scripts, not committed). One bar per run; load beside every
+number (other agents building throughout). Redraws are counted by a
+scratch `eprintln` on each committed frame (tray alone, no clock),
+reverted before the PR, not a committed counter.
+
+| Run (20 s flood) | load (1 min) | reads | redraws (frames) | wakeups/s | bar CPU s | scoot CPU s |
+|---|---|---|---|---|---|---|
+| base, icon flood A | 3.92 | 445 | — | 69.2 | 0.07 | 0.06 |
+| base, icon flood B | 4.49 | 446 | — | 61.8 | 0.07 | 0.08 |
+| branch, icon flood A | 5.63 | 448 | — | 66.1 | 0.05 | 0.04 |
+| branch, icon flood B | 6.08 | 448 | — | 72.4 | 0.06 | 0.05 |
+| base, icon flood, frames | 0.51 | 441 | 444 (22.2/s) | — | — | — |
+| branch, icon flood, frames | 0.31 | 442 | 233 (11.6/s) | — | — | — |
+| base, menu flood A | 5.63 | 403 layouts | — | 221.5 | 0.08 | 0.00 |
+| base, menu flood B | 4.23 | 399 layouts | — | 218.5 | 0.11 | 0.00 |
+| branch, menu flood A | 2.73 | 397 layouts | — | 217.0 | 0.13 | 0.00 |
+| branch, menu flood B | 1.80 | 402 layouts | — | 217.1 | 0.11 | 0.00 |
+
+How to read it. Reads are unchanged by design (the floor backstops
+them across turns: ~445 in 20 s both sides, ~400 layouts both sides).
+Redraws halve: 444 frames against 442 reads on base (every re-read
+redraws, as the ticket says) to 233 on the branch, ~22 to ~12 a
+second. Wakeups do not move with them: the icon flood stays at about
+60 to 72 a second (the signal-plus-reply traffic per round trip
+dominates, and the draw-gap timer replaces the saved
+`wl_buffer.release` wakeup about one for one), and the menu flood at
+about 217 to 222 (its ~200 `LayoutUpdated` a second each wake the bar
+whatever the bar draws). Bar CPU seconds sit in jiffy noise either way
+(a saved frame is a fraction of a millisecond). The unit tests pin
+the redraw side where the harness cannot resolve it: a runaway item is
+redrawn at most nine times in 600 ms (eight without the fix, failing),
+and a flooding menu re-filled at most nine times (eight without).
+
+Idle, 60 s windows, tray with one quiet item (RSS flat throughout,
+one thread):
+
+| Row | wakeups in 60 s | fds |
+|---|---|---|
+| base, tray and clock | 2 (the clock's) | 9 |
+| branch, tray and clock | 2 (the clock's) | 9 |
+| branch, tray alone, quiet bus | **0** | 8 |
+
+**Binary** (aarch64, stripped), `readelf -S -W`:
+
+| Build | file bytes | `.text` | `.rodata` |
+|---|---|---|---|
+| `main` (`b843f333a`) | 2,364,128 | 1,785,736 | 164,127 |
+| branch (`cde0d2117`) | 2,364,128 (+0) | 1,787,016 (+1,280, +0.07%) | 164,127 (+0) |
+
+`ldd` still shows only libc, libm and libgcc_s, and `Cargo.lock` is
+byte-identical to `main`'s.
+
+**Which rows of the rules regress.** Rule 1: the stripped binary size
+row regresses by 1,280 B of `.text` (+0.07%; the file does not grow),
+for the maintainer to waive or not. No other row regresses: idle
+wakeups, RSS, fds and threads are level, and the flood rows move only
+the redraw count they were meant to move. No row is waived here, and
+none is claimed waived.
+
+**Not measured**, and the rows above do not claim them: the dev VM
+(down for this lane; the M2 stood in), the full `scripts/scootbar-bench`
+rows, the soak, a real app as the item (the peers are scripted), and
+rule 2 against yambar (unchanged from the M6 tray round: passed
+against Waybar, open against yambar).
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`

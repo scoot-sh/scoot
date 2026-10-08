@@ -68,6 +68,7 @@ use crate::text::Text;
 mod item;
 mod menu;
 pub(super) mod theme;
+mod timer;
 mod watcher;
 
 #[cfg(test)]
@@ -162,8 +163,15 @@ const MAX_STORED_ICONS: usize = 8;
 const MAX_ITEM_TEXT: usize = 128;
 /// An item is read (`GetAll`) no oftener than this: one that announces a
 /// change as fast as it is read (a buggy app, a hostile one) costs 20
-/// round trips and redraws a second, not a thousand.
+/// round trips a second, not a thousand (and ten redraws, behind the
+/// draw gap below).
 const MIN_REFRESH_GAP: std::time::Duration = std::time::Duration::from_millis(50);
+/// A content change (an item's new icon or title, a menu's new rows) is
+/// redrawn no oftener than this: the first after a quiet spell at once,
+/// the rest held for one timer, however many follow. Ten redraws a
+/// second, like the media, bluetooth and window-title modules' gaps, so
+/// a runaway item costs a timer, not a redraw per re-read.
+const DRAW_GAP: std::time::Duration = std::time::Duration::from_millis(100);
 /// A scroll's delta past this magnitude is clamped to it: a touchpad
 /// flood is one bounded call, never an accumulated one.
 const MAX_SCROLL_DELTA: u32 = 64;
@@ -259,9 +267,10 @@ impl Module for Tray {
     }
 
     /// The link's fds (the bus socket, or the directory watch), then the
-    /// refresh timer while an item waits out its gap. No other timer,
-    /// ever: every refresh is bus-driven, and an idle module wakes
-    /// nothing.
+    /// refresh timer while an item waits out its gap, then the draw timer
+    /// while a content change is held. No other timer, ever: every refresh
+    /// is bus-driven, every held change timer-driven, and an idle module
+    /// wakes nothing.
     fn sources<'fd>(&'fd self, sources: &mut Sources<'_, 'fd>) {
         self.link.watch(&mut |fd, events| {
             sources.add(fd, events);
@@ -269,17 +278,36 @@ impl Module for Tray {
         if let Some(timer) = self.link.live().and_then(|live| live.coalesce.as_ref()) {
             sources.add(timer.as_fd(), PollFlags::IN);
         }
+        if let Some(timer) = self.link.live().and_then(|live| live.held.as_ref()) {
+            sources.add(timer.as_fd(), PollFlags::IN);
+        }
     }
 
     fn on_ready(&mut self, source: usize, events: PollFlags) -> Update {
         let own = self.link.source_count();
         if source >= own {
-            // The refresh timer, past the link's sources: items that
-            // waited out the gap are read again (answered later, through
-            // the bus).
-            if source == own && self.link.live().is_some_and(|live| live.coalesce.is_some()) {
+            // Past the link's sources: the refresh timer first while it
+            // is armed (items that waited out the gap are read again,
+            // answered later through the bus), then the draw timer while
+            // a content change is held (its turn draws the latest).
+            let mut timer = source - own;
+            let refreshing = self.link.live().is_some_and(|live| live.coalesce.is_some());
+            if refreshing && timer == 0 {
                 if let Some(live) = self.link.live_mut() {
                     live.on_coalesce();
+                }
+                return Update::Unchanged;
+            }
+            if refreshing {
+                timer -= 1;
+            }
+            let holding = self.link.live().is_some_and(|live| live.held.is_some());
+            if holding && timer == 0 {
+                if let Some(live) = self.link.live_mut() {
+                    if let Some(held) = live.held.take() {
+                        held.drain();
+                        return live.draw_now();
+                    }
                 }
             }
             return Update::Unchanged;
