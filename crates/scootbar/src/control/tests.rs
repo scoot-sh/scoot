@@ -194,6 +194,23 @@ fn requests_refuse_loudly() {
     ));
 }
 
+#[test]
+fn a_deeply_nested_value_is_a_named_refusal_not_a_crash() {
+    // A `set` value nested past any honest use (deeper than serde_json's
+    // own recursion bound, far past the payload's depth 8): parsing refuses
+    // it as malformed instead of recursing without end.
+    let mut line = String::from("{\"protocol\":1,\"type\":\"set\",\"id\":\"x\",\"value\":");
+    for _ in 0..1000 {
+        line.push('[');
+    }
+    for _ in 0..1000 {
+        line.push(']');
+    }
+    line.push('}');
+    let error = protocol::parse(line.as_bytes()).unwrap_err().to_string();
+    assert!(error.contains("malformed"), "{error}");
+}
+
 /// A handler answering every request with `ok`.
 struct OkHandler;
 

@@ -275,6 +275,32 @@ fn a_file_past_the_bound_is_refused() {
 }
 
 #[test]
+fn a_fifo_is_refused_without_blocking() {
+    // A FIFO with no writer: `File::open` on it blocks, which would wedge
+    // start-up, and a reload wedges the daemon's whole loop. Read on a
+    // thread: before the non-blocking open this never answers, and the
+    // timeout below fails the test instead of hanging it.
+    let scratch = Scratch::new();
+    let fifo = scratch.path.join("bar.toml");
+    rustix::fs::mkfifoat(
+        rustix::fs::CWD,
+        &fifo,
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )
+    .unwrap();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let error = super::read_file(&fifo).unwrap_err().to_string();
+        let _ = done_tx.send(error);
+    });
+    let message = done_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("reading a FIFO must not block: refusing it took over 5 s");
+    assert!(message.contains("bar.toml"), "{message}");
+    assert!(message.contains("regular"), "{message}");
+}
+
+#[test]
 fn an_explicit_missing_file_is_a_refusal() {
     assert!(load_startup(Some(&missing_path())).is_err());
 }
