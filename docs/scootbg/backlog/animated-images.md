@@ -63,7 +63,7 @@ moot — stage 1 behavior, kept by the rebase:
   (`NoAnimateWithEvery`, exit 2) and on the wire
   (`AnimateWithSlideshow`): stilling is per image, and a slideshow steps
   through many.
-- `--no-animate` stills are live-only: the state file (still format v2)
+- `--no-animate` stills are live-only: the state file (still format v3)
   never persists `animate`, so after a restart the caps are checked
   again and an over-cap animation is refused then.
 - The GIF/APNG RGBA canvases allocate through the checked `buffer()`,

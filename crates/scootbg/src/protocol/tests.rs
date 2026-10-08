@@ -62,6 +62,7 @@ fn each_request_parses() {
                 mode: Mode::Tile,
                 fill: red(),
                 filter: Filter::Nearest,
+                animate: true,
             }),
             output: Some("DP-1".into()),
             workspace: "2 DP-1".into(),
@@ -1088,4 +1089,76 @@ fn animate_with_a_directory_is_refused() {
     ));
     let message = RequestError::AnimateWithSlideshow.to_string();
     assert!(message.contains("slideshow"), "{message}");
+}
+
+#[test]
+fn animate_composes_with_workspace_requests() {
+    // A workspace-mapped image stills like any image: `false` round-trips
+    // on the wire, absent (and omitted `true`) means checked.
+    let line = Request::SetWorkspace {
+        show: Show::Image(ImageRequest {
+            source: Source::Path("/p/a.gif".into()),
+            mode: Mode::Fill,
+            fill: DEFAULT_FILL,
+            filter: Filter::Lanczos3,
+            animate: false,
+        }),
+        output: None,
+        workspace: "2".into(),
+        transition: crate::transition::Spec::none(),
+    }
+    .line();
+    assert!(line.contains("\"animate\":\"false\""), "{line}");
+    let request = parse(line.trim_end().as_bytes()).unwrap();
+    let Request::SetWorkspace {
+        show: Show::Image(image),
+        workspace,
+        ..
+    } = &request
+    else {
+        panic!("not a set-workspace: {line}");
+    };
+    assert!(!image.animate, "the still survives the wire");
+    assert_eq!(workspace.as_ref(), "2");
+    assert_eq!(request.line(), line, "and serializes back");
+    // Checked (the default) omits the field, like a base `set`.
+    let line = Request::SetWorkspace {
+        show: Show::Image(ImageRequest {
+            source: Source::Path("/p/a.gif".into()),
+            mode: Mode::Fill,
+            fill: DEFAULT_FILL,
+            filter: Filter::Lanczos3,
+            animate: true,
+        }),
+        output: None,
+        workspace: "2".into(),
+        transition: crate::transition::Spec::none(),
+    }
+    .line();
+    assert!(!line.contains("animate"), "{line}");
+    // A slideshow cannot be mapped per workspace: that refusal wins over
+    // the per-image still one, like the CLI's `--workspace` check wins
+    // over `--no-animate`.
+    assert!(matches!(
+        parse(
+            br#"{"protocol":1,"type":"set-workspace","workspace":"2","directory":"/pics","every":"1800s","animate":"false"}"#
+        ),
+        Err(RequestError::SlideshowWithWorkspace)
+    ));
+    assert!(matches!(
+        parse(
+            br#"{"protocol":1,"type":"set-workspace","workspace":"2","directory":"/pics","every":"1800s"}"#
+        ),
+        Err(RequestError::SlideshowWithWorkspace)
+    ));
+    // `animate` on a mapped color or a cleared mapping is refused: neither
+    // has frames.
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"set-workspace","workspace":"2","color":"#ffffff","animate":"false"}"##),
+        Err(RequestError::ImageOnly(_))
+    ));
+    assert!(matches!(
+        parse(br#"{"protocol":1,"type":"clear-workspace","workspace":"2","animate":"false"}"#),
+        Err(RequestError::AnimateWithClear)
+    ));
 }

@@ -212,6 +212,10 @@ fn put_workspace(
         Pick::Image { path, look, fetch } => Some(Wallpaper::Image(Arc::new(Image {
             path,
             look,
+            // Like a base image restore: the state file does not persist
+            // `animate` (live-only), so a restart re-checks the animation
+            // caps and refuses an over-cap mapping until the next `set`.
+            animate: true,
             serial: generation,
             fetch,
         }))),

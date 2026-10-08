@@ -51,7 +51,9 @@ scoot has not cut a numbered release yet; entries are dated.
   after a restart the caps are checked again, so an over-cap animation
   is refused then. Slideshows step through animated files showing each
   first frame (checked per step); `--no-animate` with `--every` is
-  refused. With a new daemon and an old client, an over-cap animation
+  refused. A workspace-mapped animated image shows its first frame the
+  same way (caps checked at set); `--no-animate` beside `--workspace`
+  stills it, and a slideshow cannot be mapped per workspace. With a new daemon and an old client, an over-cap animation
   that used to show its first frame is now refused (upgrade for
   `--no-animate`). See [Images and
   color](site/src/content/docs/scootbg/images.md).

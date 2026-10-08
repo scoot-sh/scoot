@@ -392,3 +392,107 @@ fn workspace_switch_through_fade_animates() {
     session.run(&["kill"]);
     assert!(wait_exit(&mut daemon).success());
 }
+
+/// A two-frame 64×64 GIF: red, then blue.
+fn write_anim_gif(path: &std::path::Path) {
+    let palette = [255u8, 0, 0, 0, 0, 255];
+    let file = std::fs::File::create(path).unwrap();
+    let mut encoder = gif::Encoder::new(file, 64, 64, &palette).unwrap();
+    for index in [0u8, 1] {
+        let frame = gif::Frame {
+            width: 64,
+            height: 64,
+            delay: 10,
+            buffer: std::borrow::Cow::Owned(vec![index; 64 * 64]),
+            ..Default::default()
+        };
+        encoder.write_frame(&frame).unwrap();
+    }
+}
+
+/// A 65-frame 16×16 GIF: past the 64-frame animation cap.
+fn write_many_frame_gif(path: &std::path::Path) {
+    let palette = [255u8, 0, 0, 0, 0, 255];
+    let file = std::fs::File::create(path).unwrap();
+    let mut encoder = gif::Encoder::new(file, 16, 16, &palette).unwrap();
+    for _ in 0..65 {
+        let frame = gif::Frame {
+            width: 16,
+            height: 16,
+            delay: 10,
+            buffer: std::borrow::Cow::Owned(vec![0u8; 16 * 16]),
+            ..Default::default()
+        };
+        encoder.write_frame(&frame).unwrap();
+    }
+}
+
+/// A workspace-mapped animation is checked like any image's `set`, and
+/// `--no-animate` beside `--workspace` stills it: an over-cap GIF is
+/// refused naming the flag (mapping nothing), stilled it maps, and a
+/// mapped animation shows its first frame when its workspace turns
+/// active.
+#[test]
+fn a_workspace_mapped_animation_is_checked_and_stills() {
+    let Some(session) = Session::start_with("perws-animated", 1, "") else {
+        return;
+    };
+    let mut daemon = session.daemon();
+    configured(&session, 1);
+    let dir = session.scratch.0.join("wallpapers");
+    std::fs::create_dir_all(&dir).unwrap();
+    let big = dir.join("big.gif");
+    write_many_frame_gif(&big);
+    let big = big.to_str().unwrap().to_owned();
+
+    // Past the caps with checks on: refused naming `--no-animate`, and
+    // no mapping is recorded.
+    let out = session.run(&["set", &big, "--workspace", "2"]);
+    assert_eq!(out.status.code(), Some(1), "the over-cap mapping fails");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--no-animate"),
+        "the refusal names the still flag: {stderr}"
+    );
+    assert_eq!(
+        session.query()["workspaces"].as_array().unwrap().len(),
+        0,
+        "nothing was mapped"
+    );
+
+    // Stilled: the same file maps, decoded the static way (caps skipped).
+    ok(&session, &["set", &big, "--workspace", "2", "--no-animate"]);
+    let reply = session.query();
+    let mappings = reply["workspaces"].as_array().unwrap();
+    assert_eq!(mappings.len(), 1, "{reply}");
+    assert_eq!(mappings[0]["workspace"], json!("2"));
+    assert_eq!(mappings[0]["shows"]["image"], json!(big));
+
+    // A mapped animation within the caps shows its first frame once its
+    // workspace turns active (needs a window to switch with).
+    if let Some(mut windows) = open_windows(&session, 1) {
+        let anim = dir.join("anim.gif");
+        write_anim_gif(&anim);
+        let anim = anim.to_str().unwrap().to_owned();
+        ok(&session, &["set", &anim, "--workspace", "2"]);
+        let ids = scoot_ids(&session);
+        switch_to(&session, &ids, 1, "2");
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let shot = session.scoot_screenshot(ids[0].0);
+            let at = shot.at(shot.width / 2, shot.height / 2);
+            if at[0] > 200 && at[1] < 60 && at[2] < 60 {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "never showed the first frame (red): {at:?}"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        close_windows(&mut windows);
+    }
+
+    session.run(&["kill"]);
+    assert!(wait_exit(&mut daemon).success());
+}

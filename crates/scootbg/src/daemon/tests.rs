@@ -334,6 +334,49 @@ fn workspace_requests_reach_change_workspace_and_answer_later() {
 }
 
 #[test]
+fn a_workspace_image_keeps_its_animate_through_the_wire() {
+    // The daemon threads the mapped image's `animate` like a base `set`
+    // does: a `--no-animate --workspace` still reaches the change stilled
+    // (the worker then decodes it the static way, caps skipped), and a
+    // plain mapped animation arrives checked.
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
+    for animate in [false, true] {
+        let request = Request::SetWorkspace {
+            show: Show::Image(ImageRequest {
+                source: Source::Path("/p/a.gif".into()),
+                mode: Mode::Fill,
+                fill: Color::parse("#000000").unwrap(),
+                filter: Filter::Lanczos3,
+                animate,
+            }),
+            output: None,
+            workspace: "2".into(),
+            transition: crate::transition::Spec::none(),
+        };
+        let mut out = Vec::new();
+        let line = request.line();
+        if animate {
+            assert!(!line.contains("animate"), "{line}");
+        } else {
+            assert!(line.contains("\"animate\":\"false\""), "{line}");
+        }
+        let answer = responder.handle(ConnId::for_test(1), line.trim_end().as_bytes(), &mut out);
+        assert_eq!(answer, Answer::Later, "{line}");
+        assert!(out.is_empty(), "nothing written yet: {line}");
+    }
+    let animates: Vec<bool> = fake
+        .workspace_changes
+        .iter()
+        .map(|(_, _, _, choice, _)| match choice {
+            Some(Show::Image(image)) => image.animate,
+            other => panic!("not a mapped image: {other:?}"),
+        })
+        .collect();
+    assert_eq!(animates, [false, true], "stilled, then checked");
+}
+
+#[test]
 fn a_refused_change_is_an_error_now_naming_the_output() {
     let mut fake = Fake::new(NO_OUTPUTS);
     fake.refuse = Some(ChangeError::UnknownOutput);

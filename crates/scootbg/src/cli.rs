@@ -269,7 +269,11 @@ active, so this works on any compositor with it, not only scoot; without
 it the mapping waits (and is still saved) until one does. A newer `set`
 covers an older `set --workspace`, and a newer `set --workspace` covers
 an older `set`: whichever you changed last wins. `scootbg clear
---workspace NAME` takes the mapping back off.
+--workspace NAME` takes the mapping back off. A mapped animated image
+shows its first frame like any image (the same frame and byte caps,
+checked when it is set); `--no-animate` beside `--workspace` stills it,
+live-only like any still. A directory slideshow cannot be mapped per
+workspace: it is a usage error.
 
 Returns once every targeted output shows it and the compositor has
 processed it, so a screenshot taken straight after shows it. With a
@@ -307,7 +311,7 @@ more than 10,000 files, or has an unreadable entry, or
 drawing failed (the daemon's stderr
 says why); 2 for a usage error, such as a malformed color, an unknown
 mode, a directory without --every, an --every without a directory, or a
---no-animate with --every.
+--no-animate with --every, or a slideshow with --workspace.
 
 EXAMPLES:
     scootbg set '#1e1e2e'
@@ -730,7 +734,6 @@ impl fmt::Display for Error {
                 "`--no-animate` stills one image, and a slideshow steps through a \
                  directory (each step checked like one `set`): drop `--every` to \
                  still a file (try `scootbg set --help`)"
-            ),
             ),
             Self::UrlNul => write!(f, "the image URL has a NUL byte"),
             Self::BadWorkspace { value, reason } => write!(

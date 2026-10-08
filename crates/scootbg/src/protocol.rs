@@ -599,7 +599,6 @@ impl fmt::Display for RequestError {
                 f,
                 "`animate` is `true` or `false` (absent animates), not {text:?}"
             ),
-            ),
         }
     }
 }
