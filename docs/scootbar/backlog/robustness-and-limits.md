@@ -16,11 +16,15 @@ what scootbg and scoot bound (`docs/scootbg/README.md`, `docs/ipc.md#resource-bo
 
 ## Bounds to build in from the first PR that adds the surface
 
-- **Control socket** (*built*; the write-stall deadline landed in #493, 30 s
-  for a request peer that stops reading, refreshed on any delivery): connection
-  cap with a refusal that says why; line and message size caps; a write-stall
-  deadline that drops a peer that stopped reading; `EMFILE` on accept sheds
-  instead of spinning the loop.
+- **Control socket** (*built*: 16 connections with the oldest
+  non-subscriber evicted to admit one more (#339); 4 subscribers with the
+  5th refused with a reason (#367); 64 KiB request lines refused with a
+  reason (#339); the EMFILE spare fd plus a 1 s listener rest instead of
+  a spin (#339); the write-stall deadline landed in #493, 30 s
+  for a request peer that stops reading, refreshed on any delivery):
+  connection cap with a refusal that says why; line and message size caps;
+  a write-stall deadline that drops a peer that stopped reading; `EMFILE`
+  on accept sheds instead of spinning the loop.
 - **`exec` modules** (*built*, with
   [exec-push-button-modules](resolved/exec-push-button-modules-done.md): at most
   8 placed, lines past 4096 bytes dropped whole, one 4 KiB read per 16 ms frame
@@ -32,8 +36,11 @@ what scootbg and scoot bound (`docs/scootbg/README.md`, `docs/ipc.md#resource-bo
   with exponential backoff; children reaped (no zombies), never inheriting the
   bar's fds (close-on-exec everywhere, verified as scoot's fd audit did); a
   child that never prints is fine, one that floods cannot grow memory.
-- **Config and JSON**: size caps, depth limits, and every parse failure a
-  named error, never a panic. Hot reload keeps the running config on failure.
+- **Config and JSON** (*built*: the file is capped at 64 KiB, read with
+  `.take(MAX_FILE + 1)` from a regular file opened non-blocking (#339,
+  #513); update payloads are capped at 4096 bytes and 8 levels deep
+  (#366); every parse failure is a named error, never a panic, and hot
+  reload keeps the running config on failure (#339).
 - **Text**: bounded glyph cache and bounded string lengths per module.
   *Built with the clock
   ([module-api-and-clock](resolved/module-api-and-clock-done.md)):* the
@@ -56,9 +63,10 @@ what scootbg and scoot bound (`docs/scootbg/README.md`, `docs/ipc.md#resource-bo
   `TZ=:/dev/zero` or a FIFO cannot hang or balloon it), the instant is
   clamped before any arithmetic, and a `cargo fuzz` target covers the
   reader and the POSIX rule parser.
-- **Module count and layout**: a configured list has a maximum; a layout wider
-  than the output clips deliberately, not by overflow (saturating arithmetic on
-  every client-controlled size).
+- **Module count and layout** (*built*: at most 32 modules placed (#324);
+  a layout wider than the output clips deliberately, not by overflow:
+  `layout.rs` uses saturating arithmetic on every client-controlled size
+  (#324)).
 
 ## Where other bars actually break
 
@@ -83,16 +91,22 @@ notes it could not reach Reddit or Hacker News), the failures that recur are
 ## Failure of the world around it
 
 - **Compositor gone**: the Wayland connection breaks; exit promptly and cleanly.
-- **Registry changes**: the `ext-workspace` manager sending `finished`, an
-  output or global removed mid-frame, a layer surface `closed` by the
-  compositor (rebuild if the output is still there).
+- **Registry changes** (*built*: the `ext-workspace` and toplevel managers'
+  `finished` drops staged state and destroys the handles, with tests
+  (#334, #374); an output or global removed mid-frame is handled by the
+  output set; a layer surface `closed` by the compositor is rebuilt once
+  the output is still there, then given up on for that output's life
+  (#323); a `wl_output.name` past 128 bytes is ignored (#539).
 - **Allocation failure**: know where the bar can abort on refused memory (the
   scaler in scootbg is the precedent,
   [`scaler-oom-abort`](../../scootbg/backlog/resolved/scaler-oom-abort-done.md)); avoid large
   allocations sized by external input.
-- **Restart policy**: scoot does not supervise clients. Ship a systemd user
-  unit / home-manager `Restart=` in [nix-modules-and-stylix](resolved/nix-modules-and-stylix-done.md), and
-  say in the docs what happens without one.
+- **Restart policy** (*built*: the NixOS and home-manager units set
+  `Restart=on-failure` with `RestartSec=2`, bound to
+  `scoot-session.target` (#454); scoot itself does not supervise clients).
+  What is left is the docs half of
+  [nix-modules-and-stylix](resolved/nix-modules-and-stylix-done.md): say in the
+  docs what happens without the unit.
 
 ## Verification
 
@@ -104,3 +118,38 @@ and after, and a kill of the compositor mid-frame.
 
 Each bound above has a test that fails without it, and none of the storms moves
 RSS or fd count beyond a stated margin.
+
+## Audit 2026-10-08
+
+The ticket is claimed live by `rob2` (claimed 2026-10-07, still within TTL
+when checked; the claim was left alone, not forced). The external-input
+vectors the brief named were audited against the code instead of re-bounded,
+and all are already capped, each with a test that fails without it:
+
+- **D-Bus**: messages past 1 MiB are skipped whole (`MAX_MESSAGE`,
+  `frame_header`), the spec's own 128 MiB ends the connection (`MAX_WIRE`);
+  nesting past 32 refused (`MAX_DEPTH`); names/paths/signatures at the
+  spec's 255/1024/255 (`MAX_NAME`, `MAX_PATH`, `MAX_SIGNATURE`); strings are
+  borrowed and cut where they are used (tray titles at 128 bytes, MPRIS
+  fields at 120, view text at 256). All in #388 and its follow-ups.
+- **Tray pixmaps and menus**: 64 pixmaps of at most 256 px a side
+  (`MAX_PIXMAPS`, `MAX_PIXMAP_SIDE`), 64 menu items at 8 levels
+  (`MAX_MENU_ITEMS`, `MAX_MENU_DEPTH`), 128 properties (`MAX_PROPERTIES`),
+  32 tray items (`MAX_ITEMS`), all refused whole with the last state kept.
+- **Config sizes**: 64 KiB file cap above; icon files 8 MiB with 1 Mpx and
+  16 MiB decode budgets; fonts 64 MiB.
+- **Protocol vectors**: 32 configured outputs (policy; live `wl_output` globals follow the compositor and are not counted), 8 ext-workspace groups with 32
+  workspaces (#334), 64 toplevels with 64-byte app ids (#374), 128-byte
+  output names (#539).
+
+Two walks deliberately stop at the message cap plus a consumer cap rather
+than a walk cap, and both say so in their module docs with tests: MPRIS
+artists (walks the list, keeps 16) and BlueZ managed objects (bounded by
+the 1 MiB message, held to 8 adapters and 64 devices). No new bound was
+invented on top of those decisions.
+
+Genuinely open: the suspend/resume DPMS test, the hotplug storm test, the
+multi-day soak, compositor-gone mid-frame, zero outputs with a compositor
+restart, the allocation-failure audit, and the restart-policy docs half
+above. This entry stays `open` (`ongoing`): it is the checklist, not a task
+to resolve.
