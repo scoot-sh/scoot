@@ -66,9 +66,14 @@ jobs:
     steps:
       # actions/checkout shells out to git inside the container, which
       # archlinux:base does not ship: bootstrap it first (steps run in
-      # order, so checkout need not be first).
+      # order, so checkout need not be first). The workspace is
+      # re-owned to the builder user below, which would make later
+      # root-run git invocations fail on dubious ownership: mark it
+      # safe system-wide up front, for every user.
       - name: Bootstrap git for checkout
-        run: pacman -Sy --noconfirm --needed git
+        run: |
+          pacman -Sy --noconfirm --needed git
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
 
       # Full history: the -git PKGBUILDs' pkgver() counts main's
       # commits, which a shallow clone would report as 1.
