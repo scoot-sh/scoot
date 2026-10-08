@@ -1539,8 +1539,8 @@ placeholder = "..."
 ```
 
 - **Cost.** Two `awk` reads a minute and two sleeps: a few short-lived
-  processes, and the bar itself wakes only when a line arrives (once a
-  minute) plus the compositor's release. Sampling every second instead
+  processes (7 ms of CPU a minute measured), and the bar itself wakes only
+  when a line arrives (once a minute) plus the compositor's release. Sampling every second instead
   would cost sixty times the spawns for a number that jitters: keep it
   coarse.
 
@@ -1555,7 +1555,7 @@ format = "text"
 placeholder = "..."
 ```
 
-- **Cost.** One `awk` a minute; the bar wakes once a minute with it. An
+- **Cost.** One `awk` a minute (1 ms of CPU measured); the bar wakes once a minute with it. An
   unreadable `meminfo` prints nothing that tick and the module keeps its
   last line.
 
@@ -1563,6 +1563,11 @@ placeholder = "..."
 takes a stall-threshold trigger that `poll(2)` waits on, so this script
 prints `pressure ok` once, then blocks in the kernel and prints one line
 per stall (`stall memory 0.35`), at most one a minute while pressure lasts.
+The trigger's window must be a multiple of 2 seconds: anything else is
+refused with `EINVAL` (a 1 s window lands on `pressure n/a`, never
+`pressure ok`). It needs two things from the machine: `python3` on the
+bar's `PATH`, and stall information in the kernel (`CONFIG_PSI=y`, on some
+distributions with `psi=1` on the kernel command line).
 Save it first:
 
 ```sh
@@ -1579,7 +1584,7 @@ if SOURCE not in ("cpu", "memory", "io"):
     print(f"pressure.py wants cpu, memory or io, not {SOURCE!r}", file=sys.stderr)
     sys.exit(2)
 PATH = f"/proc/pressure/{SOURCE}"
-TRIGGER = "some 150000 1000000\n"  # 150 ms stalled in a 1 s window
+TRIGGER = "some 150000 2000000\n"  # 150 ms stalled in a 2 s window
 
 
 def wait_forever():
@@ -1628,15 +1633,33 @@ placeholder = "..."
 ```
 
 - **Cost.** One `python3` that sleeps in `poll` while nothing stalls: zero
-  wakeups idle, one line per stall event. `memory` watches allocation
+  wakeups idle, one line per stall event. It stays Python on purpose: only
+  a trigger write plus `poll` waits with no timer, which `sh`/`awk` cannot
+  do, and the interpreter starts once per bar lifetime (61 ms measured,
+  against 17 ms for one `awk`), never once a tick the way the per-minute
+  loops above would. `memory` watches allocation
   stalls; swap it for `cpu` or `io` to watch those, and tune the
-  `150000 1000000` in the script (the kernel's
-  `Documentation/accounting/psi.rst` names the shape). Anything but those
+  `150000 2000000` in the script (the kernel's
+  `Documentation/accounting/psi.rst` names the shape; the window must be a
+  multiple of 2 seconds). Anything but those
   three is refused on stderr (exit 2) rather than opening a path it should
   not.
 - **Without PSI** in the kernel (or a trigger the kernel refuses) the
   module shows `pressure n/a` and the script blocks with no timer until
-  the bar ends it.
+  the bar ends it. A refused trigger says why first: `cannot arm
+  /proc/pressure/memory: Invalid argument` on stderr.
+
+> **Symptom:** the pressure recipe shows nothing but `...`, and the bar's
+> log says `exec: python3: not found`, the command ending with `exit
+> status: 127, command not found` and restarting after 1 s, 2 s, 4 s and so
+> on up to a minute. The bar's environment has no `python3` on its `PATH`:
+> a systemd user unit, a minimal container, and a NixOS module all start
+> the bar with a small `PATH` that omits it. Give the unit the path (for
+> example `Environment=PATH=/run/current-system/sw/bin:/usr/bin:/bin`
+> naming the directory that holds `python3`), or the NixOS module the
+> package (add `pkgs.python3` to the module's path so `python3` resolves).
+> The CPU and memory recipes need no Python: they are `sh`/`awk` on
+> `/proc` already, which is why only this recipe names the prerequisite.
 
 **Bounds.** Every recipe prints only numbers its own `printf` formats (a
 dozen bytes, no control characters), far inside what the bar takes: a line
