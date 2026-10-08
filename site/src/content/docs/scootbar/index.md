@@ -62,6 +62,13 @@ path, so a hand-started daemon reads what the service does); NixOS
 writes `/etc/scootbar/bar.toml`, named with `--config` in the system
 unit.
 
+There is deliberately no `[bar]` section in scoot's own config: the
+service above (or `[autostart]` without Nix) is the one route that
+starts the bar, and a config change restarts it through the service
+(`scootbar msg reload` by hand). A scoot-driven launcher would duplicate
+that supervisor while coupling the two releases; the decision is recorded
+in the backlog ([`scoot-integration`](https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/backlog/resolved/scoot-integration-done.md)).
+
 Modules are Cargo features, reachable through `.override` — a bar
 with no modules needs no font, and `icon-image` (the PNG decoder,
 +115 KB) builds the same way (each line is one alternative):
