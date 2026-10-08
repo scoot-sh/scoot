@@ -23,7 +23,7 @@ Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: the vendored crate sources
 # carry their upstream modes (executable .rs files, a `#!` attribute
 # line that is not a shebang), which trips brp-mangle-shebangs over
-# /usr/src/debug. Revisit with a mode-normalizing %prep if distro-grade
+# /usr/src/debug. Revisit with a mode-normalizing %%prep if distro-grade
 # inclusion ever wants debuginfo (packaging/rpm/README.md).
 %global         debug_package %{nil}
 Summary:        Scrolling-tiling Wayland compositor
