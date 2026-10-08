@@ -310,7 +310,7 @@ falsify. Read `flexwm` there as `scoot`.
 
 ### --tty / backend
 - [Config-file key for the DRM device](./resolved/tty-gpu-config-key-done.md)
-- [Switching back to a scoot `--tty` session fails to reactivate DRM while the greeter holds master](./core/vt-switch-back-greeter-master.md) — found live during #492's review (daily-drive: a VT switch is the recovery path back to a running session; not the 05b defect)
+- [Switching back to a scoot `--tty` session fails to reactivate DRM while the greeter holds master](./resolved/vt-switch-back-greeter-master-done.md) — found live during #492's review (daily-drive: a VT switch is the recovery path back to a running session; not the 05b defect)
   — RESOLVED 2026-09-18: `[tty] gpu` names the device `--gpu` would
   (exactly that device, no fallback, fail-closed startup error; `--gpu`
   wins when both name one), verified live on the dev VM single-GPU
