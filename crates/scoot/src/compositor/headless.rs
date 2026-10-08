@@ -77,10 +77,7 @@ pub fn init_named(
     height: i32,
     scanout: ScanoutHandoff,
 ) -> Result<OutputId, Box<dyn Error>> {
-    let position = state
-        .output_entries
-        .position_for(name)
-        .unwrap_or((0, 0));
+    let position = state.output_entries.position_for(name).unwrap_or((0, 0));
     let output = create_output(state, name, width, height, position);
 
     // The renderer the session resolved at startup (`render::resolve`, then
