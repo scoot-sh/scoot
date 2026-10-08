@@ -33,7 +33,9 @@
 //! A workspace table is the wallpaper while that workspace is active
 //! (by name, as `scootbg set --workspace` takes it): `workspace."2"` for
 //! every output, `output."DP-1".workspace."2"` for one output alone; where
-//! both name one output the newest change wins, as for every other choice.
+//! both name one output within one section the per-output table wins (it is
+//! applied after the global one); against `set --workspace` the newest change
+//! wins, as for every other choice.
 //! An
 //! empty workspace table is no mapping there (the output's own wallpaper
 //! shows): writing one takes a mapping back off, as `scootbg clear

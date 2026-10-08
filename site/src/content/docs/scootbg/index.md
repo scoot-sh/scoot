@@ -62,7 +62,7 @@ an image nobody commits. `sha256` pins the download's bytes.
 | `position` | string (`X,Y`) | live (re-applied) | Where a grow starts, as fractions (`0.5,0.5` is the center). |
 | `output."NAME"` | table | live | The same keys for one output, by connector name (as `scootbg query` lists them). Each output table stands alone: an output's `image` does not take the top level's `mode`. An empty table is nothing on that output. |
 | `workspace."NAME"` | table | live | The same keys while workspace `NAME` is active, on every output (the name is what the compositor announces: `"1"`, `"2"`, ... on scoot). Each workspace table stands alone: it takes no other table's `mode` or `transition`. An empty table takes that mapping back off. Absent tables leave live mappings alone. |
-| `output."NAME".workspace."WS"` | table | live | The same keys while workspace `WS` is active on output `NAME` alone. Where both it and `workspace."WS"` name one output, the newest change wins, as everywhere else. |
+| `output."NAME".workspace."WS"` | table | live | The same keys while workspace `WS` is active on output `NAME` alone. Within one section, where both it and `workspace."WS"` name one output, this table wins for that output (it applies after the global one). Against `set --workspace` the newest change wins. |
 | `command` | string | live | The `scootbg` to run. Default `"scootbg"` on `PATH`; the Nix modules set it to the installed package's store path. |
 
 **Whichever you changed last wins.** Edit `[wallpaper]` (and start or

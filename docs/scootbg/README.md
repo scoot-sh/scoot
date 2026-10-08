@@ -301,7 +301,7 @@ scootbg apply-config --profile scoot '{}'     # the section is gone: clear
 | `sha256` | with a URL `image` only: 64 hex digits pinning the download's bytes |
 | `output` | per-output tables by connector name, each with the keys above plus an optional `workspace` object, and nothing else; an empty table is nothing on that output |
 | `workspace` | per-workspace tables by workspace name (as `scootbg set --workspace` takes it), for every output, each with the keys above and nothing else; an empty table takes that mapping back off, as `clear --workspace` does |
-| `output."NAME".workspace` | per-workspace tables for that output alone, by workspace name; where both name one output, the per-output mapping wins for it |
+| `output."NAME".workspace` | per-workspace tables for that output alone, by workspace name; where both name one output within one section, the per-output mapping wins for it (it applies after the global one); against `set --workspace` the newest change wins |
 | `command` | scoot's (where to find `scootbg`): accepted, ignored, and never part of the fingerprint |
 
 - **Each table stands alone**, as a `scootbg set` does: an output's own

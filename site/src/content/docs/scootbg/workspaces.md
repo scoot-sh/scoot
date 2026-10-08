@@ -97,7 +97,9 @@ A `--no-animate` still is live-only: the state file never persists the
 flag, so after a restart the caps are checked again and an over-cap
 mapping is refused then (the output shows its own wallpaper until the
 next `set --workspace`). A slideshow cannot be mapped per workspace at
-all: map images or colors per workspace instead.
+all: map images or colors per workspace instead. The `[wallpaper]` workspace
+tables always animate: there is no `animate` key, so if the caps refuse an
+animated file, map a still or a smaller file.
 
 Without the compositor's workspace protocol (sway has none), mappings
 are recorded and saved all the same, and apply once a compositor with
