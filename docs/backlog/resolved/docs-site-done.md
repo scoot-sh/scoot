@@ -167,8 +167,12 @@ docs-only resolve.
 - Hosting: `docs-site-deploy.yml` pushes to Pages on `site/**`,
   `docs/**`, `nix/docs-site.nix` (the explicit `docs/**` trigger the
   ticket required); `DEPLOY_TARGET = 'www'`, live at
-  https://www.scoot.sh/ with Starlight search (Pagefind index built;
-  `site-search` + `data-pagefind-body` on the live home page).
+  https://www.scoot.sh/ with Starlight search (the live site serves
+  `/pagefind/pagefind.js`, Pagefind v1.5.2, and the home page carries
+  `site-search` + `data-pagefind-body`). A local `nix build .#docs-site` on a
+  16K-page host such as the Asahi M2 builds the site but emits no search index
+  (Pagefind's jemalloc refuses that page size); the deployed site is built on
+  4K-page CI runners and is unaffected.
 - README points at the site throughout (install, desktop, IPC,
   keybindings, protocols links to `www.scoot.sh`).
 
