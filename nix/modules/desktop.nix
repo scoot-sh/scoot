@@ -14,26 +14,6 @@
 { lib }:
 
 let
-  # A slot that installs nothing, only config when its child lands
-  # (output wiring, an input-method setup): a boolean alone.
-  # (`keys` used to be one of these; it now owns the shared keymap
-  # below, so it declares its own subtree instead. `slot` used to
-  # sit beside it -- one boolean plus package override per future
-  # piece -- until the last reserved piece (`desktop-apps`)
-  # landed and every slot carried its own options.)
-  configSlot =
-    { child, does }:
-    {
-      enable = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = ''
-          Reserved for the `${child}` child (${does}). Off: enabling it
-          today is accepted and inert.
-        '';
-      };
-    };
-
   # The shared keymap's static half: per bind the `[binds]` combo,
   # which slot's `enable` gates it beside `keys.enable` (`null`
   # gates on nothing: the bind belongs to the keymap itself), and
@@ -1399,6 +1379,17 @@ in
           100%). Set to `false` to keep wob's own style.
         '';
       };
+      targets.inputMethod.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Theme the input-method candidate window from the look (a
+          `scoot-look` classic UI theme: menu background and text,
+          selection and border from its palette -- the same roles
+          the launcher is themed from). Set to `false` to keep
+          fcitx5's own style.
+        '';
+      };
       targets.nightlight.enable = lib.mkOption {
         type = lib.types.bool;
         default = true;
@@ -1822,10 +1813,71 @@ in
         '';
       };
     };
-    # Input-method wiring, off by default like everything here.
-    inputMethod = configSlot {
-      child = "desktop-input-method";
-      does = "input-method wiring";
+    # An input-method engine for CJK and compose, over the
+    # compositor's `text-input-v3` + `input-method-v2`
+    # (site/src/content/docs/scoot/protocols.md "Input methods").
+    # Filled by the `desktop-input-method` child: fcitx5 (the only
+    # maintained engine speaking `input-method-v2` -- ibus speaks its
+    # own D-Bus protocol, kime is Korean-only on the v1 path, uim is
+    # XIM-only -- see site/src/content/docs/desktop/index.md#input-method
+    # for the measured pick) as a user unit bound to
+    # `scoot-session.target`, the toolkit variables only where a
+    # toolkit still needs them (XMODIFIERS for XWayland, QT_IM_MODULE
+    # for Qt5/older Qt6; GTK3/4 and Qt6 speak text-input natively, so
+    # GTK_IM_MODULE stays unset), and the candidate window themed by
+    # the look unless `theme.targets.inputMethod.enable` opts out.
+    # Each `package` lives beside this in the side modules
+    # (`inputmethod-home.nix` installs and runs for the user,
+    # `nixos.nix` system-wide), which is also where their defaults
+    # live; everything here is plain values, so this file stays
+    # `lib`-only.
+    #
+    # Opt-in (NOT on with the profile): most users type no CJK, and
+    # an engine awake in every session would spend wakeups and closure
+    # on nothing -- set `inputMethod.enable` explicitly. Without the
+    # profile, `enable` works standalone (unthemed: a look needs the
+    # profile, and the user unit needs the home-manager side, the way
+    # the themed candidate window does).
+    inputMethod = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Run the input-method engine: fcitx5 (its package beside
+          this) owning the `input-method-v2` seat as a user unit, with
+          the toolkit variables set where a toolkit still needs them.
+          Without it the protocols have no engine to talk to.
+        '';
+      };
+
+      daemon = lib.mkOption {
+        type = lib.types.enum [ "fcitx5" ];
+        default = "fcitx5";
+        description = ''
+          The engine behind `enable`. Only fcitx5 today (the only
+          maintained engine speaking `input-method-v2` -- see
+          site/src/content/docs/desktop/index.md#input-method for the
+          measured pick); a future engine widens this enum, the option
+          staying as it is.
+        '';
+      };
+
+      # CJK engines and toolkit plugins beside the core (which already
+      # carries keyboard layouts, compose and the XIM server): pinyin,
+      # mozc, hangul, the Qt5 input-panel plugin -- each installed
+      # beside the engine. Empty by default (the lightest shape that
+      # still speaks the protocols); add what you type.
+      addons = lib.mkOption {
+        type = lib.types.listOf lib.types.package;
+        default = [ ];
+        example = lib.literalExpression "with pkgs.qt6Packages; [ fcitx5-chinese-addons ]";
+        description = ''
+          Extra fcitx5 addons beside the engine (CJK engines like
+          `fcitx5-chinese-addons`, toolkit plugins like the Qt5 input
+          panel). Empty keeps the core (keyboard layouts, compose,
+          XIM) with no CJK data.
+        '';
+      };
     };
     # Removable-media automount over udisks2. Filled by the
     # `desktop-apps` child: `udiskie` trayless (`-a -n -T`, browsing

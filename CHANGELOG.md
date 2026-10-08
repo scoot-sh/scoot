@@ -36,6 +36,27 @@ scoot has not cut a numbered release yet; entries are dated.
   runaway client's X connection, so its windows go with it and it maps no
   more, while every other X client stays served. See [Protocols](site/src/content/docs/scoot/protocols.md#per-client-limits-on-what-scoot-keeps).
 
+### Input-method engine slot for the desktop profile (opt-in)
+
+- **`programs.scoot.desktop.inputMethod.enable` runs fcitx5 as a
+  `scoot-input-method.service` user unit in `scoot-session.target`**
+  (opt-in, never with the profile: most sessions type no CJK).
+  fcitx5 is the only maintained engine speaking the compositor's
+  `input-method-v2` (measured against ibus, kime and uim at the
+  pinned rev); the default package is plain fcitx5 (keyboard
+  layouts, compose, XIM for XWayland) with CJK engines beside it
+  through `inputMethod.addons` (e.g. `qt6Packages.fcitx5-chinese-addons`
+  for pinyin). Toolkit variables land only where a toolkit still
+  needs them (`XMODIFIERS` for XWayland, `QT_IM_MODULE`/`QT_IM_MODULES`
+  for Qt; `GTK_IM_MODULE` stays unset so GTK3/4 keep their native
+  text-input path), and the candidate window follows the look through
+  a generated `scoot-look` theme (`theme.targets.inputMethod.enable =
+  false` keeps fcitx5's own style). Proven live against headless
+  scoot (the engine binds `zwp_input_method_manager_v2`); compose a
+  CJK string by hand once per the steps in [Input
+  method](site/src/content/docs/desktop/index.md#input-method).
+
+
 ### 2026-10-07 — opt-in keybindings for virtual keyboards
 
 - **Virtual keyboards can now run compositor keybindings when you ask:

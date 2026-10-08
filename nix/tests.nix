@@ -225,12 +225,19 @@
 #   variables only);
 #   every profile unit (the idle pair, mako, the bar feed, both
 #   clipboard watchers, the night light, the OSD, the automounter,
-#   and the profile-managed bar -- never the standalone bar) starts in
+#   the input-method engine, and the profile-managed bar -- never the
+#   standalone bar) starts in
 #   `scoot-session.target`, never the shared
 #   `graphical-session.target`, so no other desktop starts them; the
 #   home-manager side installs that target itself (present exactly
 #   while a unit can want it), which is what carries a launcher-less
 #   setup too;
+#   the input method (`desktop-input-method` child) is opt-in (never
+#   with the profile): fcitx5 as the user unit above, the toolkit
+#   variables only where a toolkit still needs them (XMODIFIERS and
+#   the Qt pair set, GTK_IM_MODULE unset), the candidate window
+#   themed by the look unless `theme.targets.inputMethod.enable`
+#   opts out, CJK engines beside the core through `addons`;
 #   every remaining future slot
 #   defaults off and inert; `enable` without scoot, a look without the
 #   profile, and an unknown look each fail eval;
@@ -323,6 +330,26 @@ let
             };
             executable = lib.mkOption {
               type = lib.types.nullOr lib.types.bool;
+              default = null;
+            };
+          };
+        }
+      );
+      default = { };
+    };
+    # The input-method slot's look theme (`fcitx5/themes/...` under
+    # XDG_DATA_HOME): the same shape as `configFile` (home-manager's
+    # real `xdg.dataFile` carries `source`/`text` the same way).
+    options.xdg.dataFile = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            source = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+            };
+            text = lib.mkOption {
+              type = lib.types.nullOr lib.types.lines;
               default = null;
             };
           };
@@ -830,6 +857,13 @@ let
     mkdir -p $out/bin
     echo '#!/bin/sh' > $out/bin/scootbg
     chmod +x $out/bin/scootbg
+  '';
+  # A stand-in fcitx5 addon (a CJK engine beside the core): a tiny
+  # derivation, so the input-method `addons` pins stay hermetic (no
+  # real engine in the check closure) on every platform.
+  fakeImAddon = pkgs.runCommand "fake-fcitx5-addon" { } ''
+    mkdir -p $out/lib/fcitx5
+    : > $out/lib/fcitx5/libfakeaddon.so
   '';
 
   drvs = map (p: p.drvPath);
@@ -3046,6 +3080,92 @@ let
     package = fakePkg;
     desktop.enable = true;
     desktop.nightlight.package = null;
+  };
+
+  # --- input method (`programs.scoot.desktop.inputMethod`) evaluations ---
+  #
+  # Standalone (no profile): the engine on PATH, its unit in the
+  # session scope (which the home-manager side installs for it),
+  # the toolkit variables set where a toolkit still needs them, and
+  # no theme files (no look to derive from). Opt-in beside the
+  # profile too: the profile leaves it off (most sessions type no
+  # CJK), so this is also the shape `desktop.enable` alone takes.
+  hmInputMethod = evalHome {
+    enable = true;
+    desktop.inputMethod.enable = true;
+  };
+  # ...with the profile and a look: the same unit, the candidate
+  # window themed by the look (still explicitly on beside the
+  # profile -- the profile turns every other slot on, never this
+  # one).
+  hmInputMethodThemed = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+    desktop.inputMethod.enable = true;
+  };
+  # ...opted out of candidate theming (fcitx5's own theme stands
+  # while the engine runs).
+  hmInputMethodTargetOff = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "moonrise";
+    desktop.inputMethod.enable = true;
+    desktop.theme.targets.inputMethod.enable = false;
+  };
+  # ...with a CJK engine beside the core (on PATH beside it).
+  hmInputMethodAddons = evalHome {
+    enable = true;
+    desktop.inputMethod.enable = true;
+    desktop.inputMethod.addons = [ fakeImAddon ];
+  };
+  # Refusals: the slot with no engine to run (pinned by message in
+  # `_inputMethodPins`)...
+  hmInputMethodNoPkg = evalHome {
+    enable = true;
+    desktop.inputMethod.enable = true;
+    desktop.inputMethod.package = null;
+  };
+  # ...and an unknown engine, which is an option type error (the
+  # `enum`'s own message names the valid values), caught here by
+  # `tryEval`.
+  hmInputMethodDaemonBogus =
+    builtins.tryEval
+      (evalHome {
+        enable = true;
+        desktop.inputMethod.enable = true;
+        desktop.inputMethod.daemon = "bogus-engine";
+      }).config.programs.scoot.desktop.inputMethod.daemon;
+
+  # --- input method system evaluations ---
+  osInputMethod = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.inputMethod.enable = true;
+    desktop.inputMethod.addons = [ fakeImAddon ];
+  };
+  osInputMethodOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.look = null;
+  };
+  osInputMethodStandalone = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.inputMethod.enable = true;
+  };
+  osInputMethodNoPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.look = null;
+    desktop.inputMethod.enable = true;
+    desktop.inputMethod.package = null;
   };
 
   # --- privilege prompt + keyring (`programs.scoot.desktop.auth`,
@@ -12240,6 +12360,247 @@ let
     )
   ];
 
+  # --- input method (`programs.scoot.desktop.inputMethod`) ---
+  #
+  # Linux only: the engine, its unit, the toolkit variables and the
+  # look's candidate theme. (Off Linux the tool is null -- pinned in
+  # `_darwinInputMethodPins`.)
+  _inputMethodPins = lib.optionals isLinux [
+    # Home-manager standalone: the slot on (the engine on PATH, fcitx5
+    # by default -- off by default, and the profile leaves it off, so
+    # this is also the shape `desktop.enable` alone never takes), its
+    # unit bound to the session scope...
+    (
+      assert allAssertionsHold hmInputMethod.config;
+      true
+    )
+    (
+      assert hmInputMethod.config.programs.scoot.desktop.inputMethod.enable;
+      true
+    )
+    (
+      assert hmInputMethod.config.programs.scoot.desktop.inputMethod.daemon == "fcitx5";
+      true
+    )
+    (
+      assert
+        hmInputMethod.config.programs.scoot.desktop.inputMethod.package.drvPath == pkgs.fcitx5.drvPath;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "fcitx5") hmInputMethod.config.home.packages;
+      true
+    )
+    (
+      assert
+        hmInputMethod.config.systemd.user.services.scoot-input-method.Install.WantedBy
+        == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmInputMethod.config.systemd.user.services.scoot-input-method.Unit.PartOf
+        == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert
+        hmInputMethod.config.systemd.user.services.scoot-input-method.Unit.After
+        == [ "scoot-session.target" ];
+      true
+    )
+    # ...running the engine itself, not a wrapper (nothing periodic
+    # lives here: the engine wakes on protocol events and D-Bus calls
+    # only -- a polling wrapper would show in this line)...
+    (
+      assert
+        hmInputMethod.config.systemd.user.services.scoot-input-method.Service.ExecStart
+        == "${pkgs.fcitx5}/bin/fcitx5";
+      true
+    )
+    # ...retried like the bar's unit, and gated on the display the
+    # way mako's unit is...
+    (
+      assert
+        hmInputMethod.config.systemd.user.services.scoot-input-method.Service.Restart == "on-failure";
+      true
+    )
+    (
+      assert lib.hasInfix "WAYLAND_DISPLAY"
+        hmInputMethod.config.systemd.user.services.scoot-input-method.Service.ExecCondition;
+      true
+    )
+    # ...with the session scope installed for it...
+    (
+      assert hmInputMethod.config.xdg.configFile ? "systemd/user/scoot-session.target";
+      true
+    )
+    # ...the toolkit variables only where a toolkit still needs them
+    # (XMODIFIERS for XWayland, the Qt pair for Qt5 and older/newer
+    # Qt6; GTK_IM_MODULE stays unset so GTK3/4 take their native
+    # text-input path)...
+    (
+      assert hmInputMethod.config.home.sessionVariables.XMODIFIERS == "@im=fcitx";
+      true
+    )
+    (
+      assert hmInputMethod.config.home.sessionVariables.QT_IM_MODULE == "fcitx";
+      true
+    )
+    (
+      assert hmInputMethod.config.home.sessionVariables.QT_IM_MODULES == "wayland;fcitx";
+      true
+    )
+    (
+      assert hmInputMethod.config.systemd.user.sessionVariables.XMODIFIERS == "@im=fcitx";
+      true
+    )
+    (
+      assert hmInputMethod.config.systemd.user.sessionVariables.QT_IM_MODULE == "fcitx";
+      true
+    )
+    (
+      assert hmInputMethod.config.systemd.user.sessionVariables.QT_IM_MODULES == "wayland;fcitx";
+      true
+    )
+    (
+      assert !(hmInputMethod.config.home.sessionVariables ? GTK_IM_MODULE);
+      true
+    )
+    (
+      assert !(hmInputMethod.config.systemd.user.sessionVariables ? GTK_IM_MODULE);
+      true
+    )
+    # ...and unthemed without a look (no theme files: fcitx5's own
+    # theme stands).
+    (
+      assert !(hmInputMethod.config.xdg.dataFile ? "fcitx5/themes/scoot-look/theme.conf");
+      true
+    )
+    (
+      assert !(hmInputMethod.config.xdg.configFile ? "fcitx5/conf/classicui.conf");
+      true
+    )
+    # With the profile and a look, explicitly on beside them: the
+    # engine runs, and the candidate window wears the look...
+    (
+      assert allAssertionsHold hmInputMethodThemed.config;
+      true
+    )
+    (
+      assert hmInputMethodThemed.config.programs.scoot.desktop.inputMethod.enable;
+      true
+    )
+    (
+      assert hmInputMethodThemed.config.xdg.dataFile ? "fcitx5/themes/scoot-look/theme.conf";
+      true
+    )
+    (
+      assert hmInputMethodThemed.config.xdg.configFile ? "fcitx5/conf/classicui.conf";
+      true
+    )
+    # ...in the look's own roles (moonrise: cream text on slate, the
+    # amber accent selecting, its ring on the border -- pinned by
+    # content in the check script below, not here: reading a
+    # derivation output at eval builds it, which breaks evaluating
+    # this system's checks from another platform (gh #486's
+    # FlakeHub gate), so file bytes are asserted at build time
+    # instead).
+    # ...opted out of candidate theming: the engine runs unthemed
+    # (both files gone, the unit staying)...
+    (
+      assert allAssertionsHold hmInputMethodTargetOff.config;
+      true
+    )
+    (
+      assert hmInputMethodTargetOff.config.systemd.user.services ? scoot-input-method;
+      true
+    )
+    (
+      assert !(hmInputMethodTargetOff.config.xdg.dataFile ? "fcitx5/themes/scoot-look/theme.conf");
+      true
+    )
+    (
+      assert !(hmInputMethodTargetOff.config.xdg.configFile ? "fcitx5/conf/classicui.conf");
+      true
+    )
+    # ...with an addon beside the core: both on PATH...
+    (
+      assert allAssertionsHold hmInputMethodAddons.config;
+      true
+    )
+    (
+      assert lib.elem fakeImAddon hmInputMethodAddons.config.home.packages;
+      true
+    )
+    # NixOS: the engine (and the addon) system-wide when on...
+    (
+      assert allAssertionsHold osInputMethod.config;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "fcitx5") osInputMethod.config.environment.systemPackages;
+      true
+    )
+    (
+      assert lib.elem fakeImAddon osInputMethod.config.environment.systemPackages;
+      true
+    )
+    # ...nothing without the slot (the profile alone installs no
+    # engine)...
+    (
+      assert allAssertionsHold osInputMethodOff.config;
+      true
+    )
+    (
+      assert
+        !(lib.any (p: (p.pname or "") == "fcitx5") osInputMethodOff.config.environment.systemPackages);
+      true
+    )
+    # ...standalone (no profile): the engine without the session entry...
+    (
+      assert allAssertionsHold osInputMethodStandalone.config;
+      true
+    )
+    (
+      assert builtins.length osInputMethodStandalone.config.services.displayManager.sessionPackages == 0;
+      true
+    )
+    (
+      assert lib.any (
+        p: (p.pname or "") == "fcitx5"
+      ) osInputMethodStandalone.config.environment.systemPackages;
+      true
+    )
+    # ...and the refusal names the switch on this side as well.
+    (
+      assert builtins.length (failing osInputMethodNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "inputMethod.package is null" (
+        builtins.head (failing osInputMethodNoPkg.config)
+      );
+      true
+    )
+    # Home-manager refusal: no engine beside `enable`...
+    (
+      assert builtins.length (failing hmInputMethodNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "inputMethod.package is null" (
+        builtins.head (failing hmInputMethodNoPkg.config)
+      );
+      true
+    )
+    # ...and an unknown engine fails at the option type.
+    (
+      assert !hmInputMethodDaemonBogus.success;
+      true
+    )
+  ];
+
   # --- night light off Linux (fail `nix flake check` at eval) ---
   #
   # The tool is Linux-only like the idle policy's: off Linux its
@@ -12279,6 +12640,43 @@ let
     # one plus the keyring's two plus the apps slots' six (the terminal's one, each picker's two, the automounter's one)).
     (
       assert builtins.length (failing osNight.config) == 27;
+      true
+    )
+  ];
+
+  # --- input method off Linux (fail `nix flake check` at eval) ---
+  #
+  # The tool is Linux-only like the idle policy's: off Linux its
+  # package defaults to null, which the slot's own assertion refuses
+  # loudly instead of installing nothing silently. The engine choice
+  # is plain data, so it still lands. (The Linux check above is where
+  # the slot is pinned.)
+  _darwinInputMethodPins = lib.optionals (!isLinux) [
+    # Home-manager: null, refused loudly beside `enable`...
+    (
+      assert hmInputMethod.config.programs.scoot.desktop.inputMethod.package == null;
+      true
+    )
+    (
+      assert hmInputMethod.config.programs.scoot.desktop.inputMethod.daemon == "fcitx5";
+      true
+    )
+    (
+      assert builtins.length (failing hmInputMethod.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "inputMethod.package is null" m) (failing hmInputMethod.config);
+      true
+    )
+    # NixOS: the same null (nothing installed)...
+    (
+      assert osInputMethod.config.programs.scoot.desktop.inputMethod.package == null;
+      true
+    )
+    # ...refused loudly there too.
+    (
+      assert builtins.length (failing osInputMethod.config) == 1;
       true
     )
   ];
@@ -13879,6 +14277,7 @@ assert lib.all (x: x) _launchPins;
 assert lib.all (x: x) _capturePins;
 assert lib.all (x: x) _audioPins;
 assert lib.all (x: x) _nightlightPins;
+assert lib.all (x: x) _inputMethodPins;
 assert lib.all (x: x) _authPins;
 assert lib.all (x: x) _themePins;
 assert lib.all (x: x) _keysPins;
@@ -13891,6 +14290,7 @@ assert lib.all (x: x) _darwinAppsPins;
 assert lib.all (x: x) _darwinLaunchPins;
 assert lib.all (x: x) _darwinCapturePins;
 assert lib.all (x: x) _darwinNightlightPins;
+assert lib.all (x: x) _darwinInputMethodPins;
 assert lib.all (x: x) _darwinAuthPins;
 assert lib.all (x: x) _darwinThemePins;
 assert lib.all (x: x) _darwinKeysPins;
@@ -16324,6 +16724,35 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       if grep -v ' /dev/null$' "$A/stdins"; then echo "bluetoothctl read a stdin other than /dev/null (23r)" >&2; exit 1; fi
       echo "ok: only the scan carries --timeout, no --agent, stdin /dev/null"
     ''}
+
+  ${lib.optionalString isLinux ''
+    # 24. Input-method slot content: the candidate theme carries the
+    # look's own roles (moonrise: cream text on slate, the amber
+    # accent selecting, its ring on the border) and the classic UI
+    # names it on both the light and the dark path. Build-time greps,
+    # not eval asserts: an eval-time read of these derivations builds
+    # them, which breaks evaluating this system's checks from another
+    # platform (the FlakeHub `--all-systems` gate).
+    grep -F -q "NormalColor=#F6EEDC" ${
+      hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+    }
+    grep -F -q "Color=#2B3648" ${
+      hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+    }
+    grep -F -q "Color=#FFA45C" ${
+      hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+    }
+    grep -F -q "BorderColor=#FF9A49" ${
+      hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+    }
+    grep -F -x -q "Theme=scoot-look" ${
+      hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source
+    }
+    grep -F -x -q "DarkTheme=scoot-look" ${
+      hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source
+    }
+    echo "ok: candidate window wears the look, both classic UI paths name it"
+  ''}
 
   touch $out
   echo "scoot-modules: all file-content checks passed"
