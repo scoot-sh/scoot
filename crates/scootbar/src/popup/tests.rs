@@ -466,6 +466,107 @@ fn a_scrolled_away_press_is_dropped_and_a_new_content_holds_the_scroll() {
 }
 
 #[test]
+fn arrows_move_the_hover_among_buttons_only_and_clamp_at_the_ends() {
+    // `sample`: text, slider, two buttons (rows 2 and 3).
+    let content = sample();
+    let layout = laid(&content);
+    let mut state = Interaction::default();
+    // Down with no hover takes the first button; text and slider rows are
+    // never hover targets.
+    assert!(state.move_selection(&content, &layout, 1).redraw);
+    assert_eq!(state.hover(), Some(2));
+    assert!(state.move_selection(&content, &layout, 1).redraw);
+    assert_eq!(state.hover(), Some(3));
+    // Clamped at the end: no movement, no redraw.
+    assert!(!state.move_selection(&content, &layout, 1).redraw);
+    assert_eq!(state.hover(), Some(3));
+    assert!(!state.move_selection(&content, &layout, 5).redraw);
+    assert_eq!(state.hover(), Some(3));
+    // Back up, clamped at the first button the same way.
+    assert!(state.move_selection(&content, &layout, -1).redraw);
+    assert_eq!(state.hover(), Some(2));
+    assert!(!state.move_selection(&content, &layout, -1).redraw);
+    assert_eq!(state.hover(), Some(2));
+    // Up with no hover takes the last button.
+    let mut fresh = Interaction::default();
+    assert!(fresh.move_selection(&content, &layout, -1).redraw);
+    assert_eq!(fresh.hover(), Some(3));
+    // Zero is nothing.
+    assert!(!fresh.move_selection(&content, &layout, 0).redraw);
+    // No buttons at all: nothing.
+    let mut text_only = Content::default();
+    text_only.text(format_args!("line"));
+    let uncut = laid(&text_only);
+    let mut empty = Interaction::default();
+    assert!(!empty.move_selection(&text_only, &uncut, 1).redraw);
+    assert_eq!(empty.hover(), None);
+}
+
+#[test]
+fn arrows_follow_the_scroll_so_the_hovered_row_stays_visible() {
+    let (content, layout, row_h) = tall();
+    assert_eq!(layout.max_scroll(), row_h * 8);
+    let mut state = Interaction::default();
+    // Down to the last row: the scroll followed all the way down.
+    for _ in 0..10 {
+        state.move_selection(&content, &layout, 1);
+    }
+    assert_eq!(state.hover(), Some(9));
+    assert_eq!(state.scroll(), row_h * 8);
+    // And back to the first: the scroll followed all the way up.
+    for _ in 0..10 {
+        state.move_selection(&content, &layout, -1);
+    }
+    assert_eq!(state.hover(), Some(0));
+    assert_eq!(state.scroll(), 0);
+    // A scroll that moved drops a pointer press armed on a row, as the
+    // wheel does: the release must land over the button it armed on.
+    let x = i64::from(layout.width / 2);
+    let mut armed = Interaction::default();
+    armed.press(&content, &layout, x, mid(&layout, 0));
+    for _ in 0..10 {
+        armed.move_selection(&content, &layout, 1);
+    }
+    assert_eq!(
+        armed
+            .release(&content, &layout, x, mid(&layout, 0))
+            .activate,
+        None
+    );
+}
+
+#[test]
+fn enter_activates_the_hovered_button_with_its_closes_flag() {
+    let mut content = Content::default();
+    content.button(format_args!("stay"), "menu", None, false, false);
+    content.button(format_args!("go"), "connect", Some(2), false, true);
+    let layout = laid(&content);
+    let mut state = Interaction::default();
+    // No hover: nothing.
+    assert_eq!(state.keyboard_enter(&content), None);
+    state.move_selection(&content, &layout, 1);
+    assert_eq!(
+        state
+            .keyboard_enter(&content)
+            .map(|a| (a.action, a.arg, a.closes)),
+        Some(("menu", None, false))
+    );
+    state.move_selection(&content, &layout, 1);
+    assert_eq!(
+        state
+            .keyboard_enter(&content)
+            .map(|a| (a.action, a.arg, a.closes)),
+        Some(("connect", Some(2), true))
+    );
+    // While a pointer press is held the pointer owns the click: Enter does
+    // not fire a second action beside the release.
+    let x = i64::from(layout.width / 2);
+    state.press(&content, &layout, x, mid(&layout, 0));
+    assert_eq!(state.keyboard_enter(&content), None);
+    state.release(&content, &layout, x, mid(&layout, 0));
+}
+
+#[test]
 fn a_wheel_groups_a_frame_into_rows() {
     let mut wheel = Wheel::default();
     wheel.axis_value120(120);
@@ -736,6 +837,9 @@ fn a_warm_popup_allocates_nothing() {
             state.retain(&shown, &layout);
             state.scroll_by(&layout, 1);
             state.scroll_by(&layout, -1);
+            state.move_selection(&shown, &layout, 1);
+            state.move_selection(&shown, &layout, -1);
+            let _ = state.keyboard_enter(&shown);
             let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
             let shape = if round % 2 == 0 { &sharp } else { &arc };
             paint(

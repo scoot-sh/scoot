@@ -226,6 +226,150 @@ impl Interaction {
         matches!(content.widgets().get(row)?.kind, Kind::Button { .. }).then_some(row)
     }
 
+    /// The keyboard moved the selection one row up (`delta < 0`) or down
+    /// (`delta > 0`): the hover among the button rows, clamped at the ends
+    /// (no wrapping: the least surprise, trivially reversible), the scroll
+    /// following so the hovered row stays fully visible. Text and slider
+    /// rows are never hover targets, as with the pointer. With no button
+    /// rows, or already at the end, nothing happens. A press held on the
+    /// pointer is left alone (the release still lands where the pointer
+    /// is); a scroll that moved drops it, as `scroll_by` does, since the
+    /// armed row moved from under the pointer. Bounded work (one pass over
+    /// at most `MAX_WIDGETS` rows, arithmetic and stores), no allocation.
+    pub fn move_selection(&mut self, content: &Content, layout: &Layout, delta: i32) -> Outcome {
+        if delta == 0 {
+            return Outcome::default();
+        }
+        let mut buttons = [0usize; super::MAX_WIDGETS];
+        let mut count = 0usize;
+        for (index, widget) in content.widgets().iter().enumerate() {
+            if matches!(widget.kind, Kind::Button { .. }) && count < buttons.len() {
+                buttons[count] = index;
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return Outcome::default();
+        }
+        let current = self.hover.and_then(|hover| {
+            if content
+                .widgets()
+                .get(hover)
+                .is_some_and(|w| matches!(w.kind, Kind::Button { .. }))
+            {
+                buttons[..count].iter().position(|row| *row == hover)
+            } else {
+                None
+            }
+        });
+        let next = match current {
+            // No hover (or a hover on a row that stopped being a button):
+            // Down takes the first button, Up the last, so either end is
+            // one keypress away.
+            None => {
+                if delta > 0 {
+                    buttons[0]
+                } else {
+                    buttons[count - 1]
+                }
+            }
+            Some(position) => {
+                let moved = if delta > 0 {
+                    position.saturating_add(1).min(count - 1)
+                } else {
+                    position.saturating_sub(1)
+                };
+                if moved == position {
+                    return Outcome::default();
+                }
+                buttons[moved]
+            }
+        };
+        self.hover = Some(next);
+        if self.ensure_visible(layout, next) {
+            // The content moved under a pointer press armed on a row: the
+            // release must land over the button it armed on, and the
+            // pointer did not move (as when the wheel scrolls instead).
+            self.held = None;
+        }
+        Outcome {
+            redraw: true,
+            activate: None,
+        }
+    }
+
+    /// Follows the scroll so row `row` is fully visible, if it fits. Whether
+    /// the view moved: the caller redraws then. The scroll stays a multiple
+    /// of a row off the top edge where a wheel would put it when the row is
+    /// reached from above; from below it lands the row's bottom one edge
+    /// above the popup's bottom. A row taller than the whole popup shows its
+    /// top. Bounded work, no allocation.
+    fn ensure_visible(&mut self, layout: &Layout, row: usize) -> bool {
+        let Some(current) = layout.rows().get(row).copied() else {
+            return false;
+        };
+        let height = layout.height;
+        let edge = layout.frame.saturating_add(layout.pad / 2);
+        // A row that never fits shows its top, grid-aligned like the wheel.
+        if current.y1.saturating_sub(current.y0) >= height {
+            let aligned = current.y0.saturating_sub(edge).min(layout.max_scroll());
+            if aligned == self.scroll {
+                return false;
+            }
+            self.scroll = aligned;
+            return true;
+        }
+        if current.y0 < self.scroll.saturating_add(edge) && self.scroll > 0 {
+            // Above the view: put it at the top, grid-aligned.
+            let aligned = current.y0.saturating_sub(edge).min(layout.max_scroll());
+            if aligned == self.scroll {
+                return false;
+            }
+            self.scroll = aligned;
+            return true;
+        }
+        let bottom = self.scroll.saturating_add(height);
+        if current.y1.saturating_add(edge) > bottom {
+            let scrolled = current
+                .y1
+                .saturating_add(edge)
+                .saturating_sub(height)
+                .min(layout.max_scroll());
+            if scrolled == self.scroll {
+                return false;
+            }
+            self.scroll = scrolled;
+            return true;
+        }
+        false
+    }
+
+    /// The keyboard confirmed the hovered row (Enter): its action, with its
+    /// `closes` flag, exactly as a release over it would ask. Nothing with
+    /// no hover, with a hover on no button, or while a pointer press is
+    /// held (the pointer owns that click; firing both would act twice).
+    pub fn keyboard_enter(&self, content: &Content) -> Option<Activate> {
+        if self.held.is_some() {
+            return None;
+        }
+        let row = self.hover?;
+        if let Some(Kind::Button {
+            action,
+            arg,
+            closes,
+            ..
+        }) = content.widgets().get(row).map(|w| w.kind)
+        {
+            Some(Activate {
+                action,
+                arg,
+                closes,
+            })
+        } else {
+            None
+        }
+    }
+
     /// The pointer moved to `(x, y)`, device pixels in the popup as drawn
     /// (the scroll is added to reach the rows).
     pub fn motion(&mut self, content: &Content, layout: &Layout, x: i64, y: i64) -> Outcome {

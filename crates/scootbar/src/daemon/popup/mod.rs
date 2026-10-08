@@ -46,10 +46,17 @@
 //!
 //! The bar's layer surface asks for no keyboard (`KeyboardInteractivity::
 //! None`) and still does. A `wl_keyboard` is taken from the seat **only
-//! while a popup that grabbed is open**, to hear Escape (the popup grab is
-//! what gives the popup the keyboard), and released with it. Without a grab
-//! (an agent's `invoke`) there is no keyboard and no Escape: the popup is
-//! closed by invoking `popup` again, or by anything in the list above.
+//! while a popup that grabbed is open**, to hear its keys (the popup grab is
+//! what gives the popup the keyboard: without a grab the compositor keeps
+//! the keyboard where it was, so scoot never moves focus onto a popup that
+//! did not grab — a tooltip is an ordinary `xdg_popup` too, and handing one
+//! the keyboard would steal it from the window being typed into — and an
+//! `invoke`-opened popup has no keyboard at all), and released with it.
+//! Without a grab (an agent's `invoke`) there is no keyboard and no Escape:
+//! the popup is closed by invoking `popup` again, or by anything in the
+//! list above. Escape closes the popup; Up/Down move the hover among its
+//! button rows (clamped at the ends) with the scroll following, and Enter
+//! activates the hovered row. Keybindings of the compositor still win.
 //!
 //! ## Pointer routing
 //!
