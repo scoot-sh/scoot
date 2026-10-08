@@ -179,7 +179,6 @@ jobs:
             -e RUST_TOOLCHAIN \
             "$DISTRO_IMAGE" bash -euo pipefail -c '
               apt-get update -qq
-              apt-get update -qq
               # The release job build inputs (release.yml): the -dev
               # packages the sys crates pkg-config against (the runtime
               # libraries arrive as their dependencies, which is also
@@ -191,7 +190,7 @@ jobs:
                 libpixman-1-dev libwayland-dev wayland-protocols
               # Through the environment (docker -e above), not $0: the
               # $0-passing idiom release.yml uses misfires here (its
-              # toolchain slot received 'lintian' on the arm64 runner).
+              # toolchain slot received the word lintian on the arm64 runner).
               curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs \
                 | sh -s -- -y --default-toolchain "$RUST_TOOLCHAIN" --profile minimal
               export PATH="$HOME/.cargo/bin:$PATH"
@@ -208,7 +207,7 @@ jobs:
               # artifact: any error fails, and a warning fails unless it
               # names an override this tree ships (there are none today:
               # the build is clean or the run is red).
-              # (bookworm's lintian already deprecates
+              # (bookworm lintian already deprecates
               # --no-tag-display-limit, so plain `lintian`: the log
               # keeps every tag).
               lintian /out/*.deb 2>&1 | tee /out/lintian.log
