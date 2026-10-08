@@ -93,6 +93,14 @@ Notes:
 - `%check` in every spec runs only headless-safe probes (`--version`,
   `--print-default-config`, `daemon --check`): the headless smoke test
   needs a runtime, so it runs after install in CI, not in the build.
+- Binaries are stripped in `%install` (the workspace already builds
+  `strip = true`): with `debug_package %{nil}` no find-debuginfo run
+  strips them, and an unstripped build would ship its symtab.
+- Accepted `rpmlint` warnings (errors are zero): `no-manual-page-for-binary`
+  on all four entry points (the project ships no man pages yet, for any
+  distro) and `no-documentation` on `scootbg` (its config surface is the
+  `[wallpaper]` section documented in the `scoot` package's example, so it
+  deliberately ships no `%doc` of its own).
 - No `-debuginfo`/`-debugsource` subpackages (`debug_package %{nil}`):
   the vendored crate sources carry their upstream modes (executable
   `.rs` files plus a `#!` attribute line in one crate that is not a

@@ -30,9 +30,9 @@ BuildRequires:  systemd-rpm-macros
 
 %description
 scootbar is the status bar for the scoot compositor, and runs standalone
-under any compositor speaking standard Wayland protocols. Copy
-/usr/share/doc/scootbar/bar.toml.example to ~/.config/scoot/bar.toml and
-check it with `scootbar daemon --check` (prints `ok`).
+under any compositor speaking standard Wayland protocols. Copy the
+shipped example into ~/.config/scoot/ and check it with `scootbar
+daemon --check` (prints OK).
 
 %prep
 # Same vendored-tarball layout as scoot.spec: ./source/, not ./Name-Version.
@@ -49,6 +49,9 @@ cargo build --release --locked --offline -p scootbar
 cd source
 install -Dm755 target/release/scootbar %{buildroot}%{_bindir}/scootbar
 install -Dm644 packaging/rpm/scootbar.service %{buildroot}%{_userunitdir}/scootbar.service
+
+# Stripped explicitly: see scoot.spec (no find-debuginfo run strips them).
+%{__strip} %{buildroot}%{_bindir}/scootbar
 
 %check
 # Headless-safe: the binary starts, and the shipped example passes --check.

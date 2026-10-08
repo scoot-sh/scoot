@@ -60,9 +60,10 @@ Requires:       scootbg = %{version}-%{release}
 scoot is a scrolling-tiling Wayland compositor that renders on the CPU
 by default, so it runs with no GPU stack installed. This package is the
 compositor binary plus the greeter launcher: pick "scoot" on the login
-screen, or run `scoot --headless` for a headless session. Copy
-/usr/share/doc/scoot/config.toml.example to ~/.config/scoot/config.toml
-to start from the built-in defaults.
+screen, or run `scoot --headless` for a headless session. Copy the
+shipped example into ~/.config/scoot/ to start from the built-in
+defaults (its `[wallpaper]` section drives scootbg, so that package
+ships no separate example).
 
 %prep
 # The vendored tarball unpacks to ./source/ (scripts/vendor-release.sh),
@@ -83,6 +84,13 @@ cd source
 install -Dm755 target/release/scoot %{buildroot}%{_bindir}/scoot
 install -Dm755 resources/scoot-session %{buildroot}%{_bindir}/scoot-session
 install -Dm644 packaging/rpm/scoot.desktop %{buildroot}%{_datadir}/wayland-sessions/scoot.desktop
+
+# Stripped explicitly: with `debug_package %{nil}` above there is no
+# find-debuginfo run, which is what normally strips the binaries, so an
+# unstripped build would ship its symtab (the workspace already builds
+# `strip = true`; this covers the RPM-added flags' debuginfo). Only the
+# ELF binary: scoot-session beside it is a shell script.
+%{__strip} %{buildroot}%{_bindir}/scoot
 
 %check
 # Headless-safe: version and the default-config render (which covers the

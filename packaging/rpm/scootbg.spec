@@ -41,6 +41,9 @@ cargo build --release --locked --offline -p scootbg
 cd source
 install -Dm755 target/release/scootbg %{buildroot}%{_bindir}/scootbg
 
+# Stripped explicitly: see scoot.spec (no find-debuginfo run strips them).
+%{__strip} %{buildroot}%{_bindir}/scootbg
+
 %check
 # Headless-safe: the binary starts and reports its version.
 cd source
