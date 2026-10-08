@@ -147,5 +147,5 @@ full per-feature cycle.
 - [A config file, and rotating through a directory](resolved/config-and-rotation-done.md) — RESOLVED 2026-10-08: the slideshow ships (`scootbg set DIR --every`, PR #514); the config file is split into [config-file](config-file.md), deferred per the ticket's "only if people ask"
 - [A config file with per-output defaults](config-file.md) (split from the above; only if people ask)
 - [More image formats: AVIF, JPEG XL, HEIF](more-formats.md)
-- [Detached `cargo test` hangs the signal test: inherited `SIG_IGN`](signal-disposition-detached-tests.md) — open, low, filed 2026-10-08 from PR #514's review: the daemon relies on default dispositions, which a detached session inherits as ignored; reset them at startup or in the harness
+- [Detached `cargo test` hangs the signal test: inherited `SIG_IGN`](resolved/signal-disposition-detached-tests-done.md) — RESOLVED 2026-10-08: harness resets HUP/INT/QUIT to default in spawned children (PR #540)
 - [Share tests hard-code 4K page rounding](resolved/scootbg-share-tests-page-size-done.md) — RESOLVED 2026-09-30: the tests take the host's page size (verified on the Asahi's 16 KiB pages)
