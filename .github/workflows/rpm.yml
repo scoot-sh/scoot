@@ -210,15 +210,18 @@ jobs:
 
       - name: Install the build and lint tools
         run: |
-          # No desktop-file-utils here: it requires gawk, which conflicts
-          # with the image's busybox-gawk (a git-core dependency, so it
-          # cannot simply be removed), and the solver cancels instead of
-          # resolving. The session entry it would validate is the same
-          # file the Fedora job validates below, so nothing goes
-          # unproven. (Local aarch64 images do not carry the conflict;
-          # this is x86_64-image specific.)
+          # The image ships busybox-gawk, which conflicts with the gawk
+          # that rpm-build itself requires; the solver cancels instead of
+          # resolving, so busybox-gawk goes first. That takes git with it
+          # (a git-core dependency), hence git is reinstalled in the same
+          # transaction below — the checkout above is already done, and
+          # vendor-release.sh below needs git back. (No desktop-file-utils
+          # here either: same gawk conflict. The session entry it would
+          # validate is the same file the Fedora job validates, so
+          # nothing goes unproven.)
+          zypper --non-interactive remove busybox-gawk
           zypper --non-interactive install --no-recommends \
-            cargo dejavu-fonts gcc libinput-devel \
+            cargo dejavu-fonts gcc git libinput-devel \
             libpixman-1-0-devel libxkbcommon-devel rpm-build rpmlint \
             seatd-devel systemd-devel systemd-rpm-macros wayland-devel \
             wayland-protocols-devel

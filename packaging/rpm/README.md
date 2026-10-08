@@ -183,9 +183,9 @@ the ticket's "done when" names — the headless smoke test
 (`scripts/smoke-test.sh`) against the installed binaries. The
 `desktop-file-validate` gate on the session entry also runs in the
 Fedora container only: the file is identical in both jobs, and
-`desktop-file-utils` on Tumbleweed would drag `gawk` into an
-unresolvable conflict with the image's `busybox-gawk` (a `git-core`
-dependency). The one thing CI cannot prove yet: the `Source0` URLs, which
+`rpm-build` itself requires `gawk`, which conflicts with the Tumbleweed
+image's `busybox-gawk` (removed first in CI; `desktop-file-utils` stays
+out for the same reason). The one thing CI cannot prove yet: the `Source0` URLs, which
 404 until the first release is cut; until then the staged tarball is
 placed under the provisional basename, and only the URL part is
 substitution.
