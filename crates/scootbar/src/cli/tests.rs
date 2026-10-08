@@ -374,6 +374,48 @@ fn the_layout_is_what_is_listed() {
 }
 
 #[test]
+#[cfg(all(feature = "clock", feature = "workspaces"))]
+fn a_separator_mark_groups_flag_modules() {
+    let layout = config(&["--left", "clock,|,workspaces"]).layout;
+    assert_eq!(layout.left, ["clock", "|", "workspaces"]);
+    assert!(layout.has_markers(crate::layout::Section::Left));
+    assert!(!layout.has_markers(crate::layout::Section::Center));
+    // A list with no marks behaves as before.
+    let plain = config(&["--left", "clock,workspaces"]).layout;
+    assert!(!plain.has_markers(crate::layout::Section::Left));
+}
+
+#[test]
+fn a_stray_separator_mark_is_refused() {
+    assert_eq!(
+        run(&["daemon", "--left", "|"]),
+        Err(Error::Modules {
+            flag: "--left",
+            error: ModulesError::SeparatorFirst,
+        })
+    );
+    #[cfg(feature = "clock")]
+    {
+        assert_eq!(
+            run(&["daemon", "--left", "clock,|"]),
+            Err(Error::Modules {
+                flag: "--left",
+                error: ModulesError::SeparatorLast,
+            })
+        );
+        assert_eq!(
+            run(&["daemon", "--left", "clock,|,|"]),
+            Err(Error::Modules {
+                flag: "--left",
+                error: ModulesError::SeparatorDoubled,
+            })
+        );
+        let message = run(&["daemon", "--left", "|"]).unwrap_err().to_string();
+        assert!(message.contains("no module before it"), "{message}");
+    }
+}
+
+#[test]
 fn padding_and_spacing() {
     let layout = config(&["--padding", "0", "--spacing", "12"]).layout;
     assert_eq!((layout.padding, layout.spacing), (0, 12));

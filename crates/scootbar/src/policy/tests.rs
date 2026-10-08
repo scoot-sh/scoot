@@ -172,3 +172,28 @@ fn the_start_list_has_every_module_once() {
     };
     assert_eq!(policy.to_start(&none).right, ["clock"]);
 }
+
+#[test]
+fn separator_marks_are_never_started() {
+    use crate::layout::SEPARATOR;
+    let layout = Layout {
+        left: vec!["clock", SEPARATOR, "workspaces"],
+        ..Layout::default()
+    };
+    let policy = Policy {
+        select: Select::All,
+        overrides: vec![Override {
+            modules: Some(Sections {
+                right: vec!["battery", SEPARATOR, "clock"],
+                ..Default::default()
+            }),
+            ..over("A")
+        }],
+    };
+    // The shared marks stay where they are, and the override's marks are
+    // not started either: only modules are.
+    let all = policy.to_start(&layout);
+    assert_eq!(all.left, ["clock", SEPARATOR, "workspaces"]);
+    assert_eq!(all.right, ["battery"]);
+    assert!(!all.right.contains(&SEPARATOR));
+}

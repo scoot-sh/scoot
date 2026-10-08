@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use crate::bar::{self, Edge, Layer, MAX_HEIGHT, Margin, MarginError};
 use crate::color::{Color, ColorError};
 use crate::config::{Config, MAX_FONT_SIZE};
-use crate::layout::{Layout, MAX_GAP, MAX_MODULES, PlacementError};
+use crate::layout::{Layout, MAX_GAP, MAX_MODULES, PlacementError, SEPARATOR};
 use crate::modules::{self, REGISTRY};
 use crate::policy::{self, MAX_OUTPUTS, PolicyError, Select};
 
@@ -96,12 +96,17 @@ fn modules_section() -> String {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
-                           layout: a section not given is empty.";
+                           layout: a section not given is empty. A `|` entry
+                           marks where a separator goes: that section then
+                           draws only there, and a list with none draws every
+                           gap, as before.";
     /// The `--left` lines otherwise.
     const WITHOUT_CLOCK: &str =
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
-     --right IDS          sets the whole layout.";
+     --right IDS          sets the whole layout. A `|` entry marks where a
+                           separator goes: that section then draws only there,
+                           and a list with none draws every gap, as before.";
     /// The whole block when the build has no module at all.
     const NONE: &str = "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. This build has none, so
@@ -960,6 +965,12 @@ pub enum ModulesError {
     /// Placed twice (in one section or across two).
     Twice(&'static str),
     TooMany,
+    /// A `"|"` with no module before it in its section.
+    SeparatorFirst,
+    /// A `"|"` with no module after it in its section.
+    SeparatorLast,
+    /// Two `"|"` marks in a row: no module between them.
+    SeparatorDoubled,
 }
 
 impl fmt::Display for ModulesError {
@@ -981,6 +992,9 @@ impl fmt::Display for ModulesError {
             }
             Self::Twice(id) => write!(f, "{}", PlacementError::Twice(id)),
             Self::TooMany => write!(f, "{}", PlacementError::TooMany),
+            Self::SeparatorFirst => write!(f, "{}", PlacementError::SeparatorFirst),
+            Self::SeparatorLast => write!(f, "{}", PlacementError::SeparatorLast),
+            Self::SeparatorDoubled => write!(f, "{}", PlacementError::SeparatorDoubled),
         }
     }
 }
@@ -1803,17 +1817,27 @@ fn output_list(value: &str) -> Result<Select, OutputsError> {
     Ok(Select::Named(names))
 }
 
-/// A comma-separated list of module ids; empty is no modules.
+/// A comma-separated list of module ids; empty is no modules. A `|`
+/// entry marks where a separator goes (see `crate::layout::SEPARATOR`).
 fn module_list(value: &str) -> Result<Vec<&'static str>, ModulesError> {
     let mut ids = Vec::new();
+    let mut modules = 0usize;
     if value.is_empty() {
         return Ok(ids);
     }
     for id in value.split(',') {
+        if id == SEPARATOR {
+            if ids.len() >= 2 * MAX_MODULES {
+                return Err(ModulesError::TooMany);
+            }
+            ids.push(SEPARATOR);
+            continue;
+        }
         let spec = modules::find(id).ok_or_else(|| ModulesError::Unknown(id.to_owned()))?;
-        if ids.len() >= MAX_MODULES {
+        if modules >= MAX_MODULES {
             return Err(ModulesError::TooMany);
         }
+        modules += 1;
         ids.push(spec.id);
     }
     Ok(ids)
@@ -1826,6 +1850,9 @@ fn check_layout(layout: &Layout) -> Result<(), Error> {
         error: match error {
             PlacementError::Twice(id) => ModulesError::Twice(id),
             PlacementError::TooMany => ModulesError::TooMany,
+            PlacementError::SeparatorFirst => ModulesError::SeparatorFirst,
+            PlacementError::SeparatorLast => ModulesError::SeparatorLast,
+            PlacementError::SeparatorDoubled => ModulesError::SeparatorDoubled,
         },
     })
 }

@@ -9,9 +9,9 @@ use std::rc::Rc;
 use ab_glyph::{FontArc, FontVec};
 use rustix::event::PollFlags;
 
-use super::{Record, Scene, Style, damage, paint};
+use super::{Record, Scene, Style, damage, members, paint};
 use crate::density::Scale;
-use crate::layout::Section;
+use crate::layout::{Layout, SEPARATOR, Section};
 use crate::modules::{Class, Module, OutputView, Placed, Sources, Update, View};
 use crate::outputs::{Frame, Size};
 use crate::paint::{Canvas, Span};
@@ -475,12 +475,14 @@ fn a_scene_shows_only_its_members_in_its_own_sections() {
             module: 0,
             section: Section::Left,
             margin: 0,
+            separator_before: false,
         },
         Member {
             hover: false,
             module: 1,
             section: Section::Right,
             margin: 0,
+            separator_before: false,
         },
     ];
     let b = [Member {
@@ -488,6 +490,7 @@ fn a_scene_shows_only_its_members_in_its_own_sections() {
         module: 1,
         section: Section::Left,
         margin: 0,
+        separator_before: false,
     }];
     let mut scene_a = Scene::with_members(&a);
     let mut scene_b = Scene::with_members(&b);
@@ -537,9 +540,70 @@ fn a_scene_shows_only_its_members_in_its_own_sections() {
             module: 0,
             section: Section::Left,
             margin: 0,
+            separator_before: false,
         }]
     );
     // An empty scene is fine: nothing to lay out, nothing stale.
     let empty = Scene::with_members(&[]);
     assert!(!empty.stale(&bar.placed, &Record::new(0)));
+}
+
+/// A `Placed` with id `id`, showing nothing in particular: `members` only
+/// reads the id and whether it tints under the pointer.
+fn placed_with(id: &'static str) -> Placed {
+    struct Empty;
+    impl Module for Empty {
+        fn sources<'fd>(&'fd self, _: &mut Sources<'_, 'fd>) {}
+        fn on_ready(&mut self, _: usize, _: PollFlags) -> Update {
+            Update::Unchanged
+        }
+        fn view(&self, _: &OutputView<'_>, _: &mut View) {}
+    }
+    Placed {
+        bindings: Default::default(),
+        id,
+        module: Box::new(Empty),
+        revision: 0,
+    }
+}
+
+#[test]
+fn members_mark_only_the_marked_gaps() {
+    let placed = ["a", "b", "c", "d", "e"]
+        .into_iter()
+        .map(placed_with)
+        .collect::<Vec<_>>();
+    let layout = Layout {
+        left: vec!["a", "b", SEPARATOR, "c"],
+        center: vec!["d", "e"],
+        right: Vec::new(),
+        ..Layout::default()
+    };
+    let found = members(&layout, &placed);
+    // Left has a mark: only the gap the mark stands in. Center has none:
+    // every gap, as before.
+    let flags: Vec<bool> = found.iter().map(|m| m.separator_before).collect();
+    assert_eq!(flags, [false, false, true, false, true]);
+    let sections: Vec<Section> = found.iter().map(|m| m.section).collect();
+    assert_eq!(
+        sections,
+        [
+            Section::Left,
+            Section::Left,
+            Section::Left,
+            Section::Center,
+            Section::Center,
+        ]
+    );
+    // A mark beside a module that did not start still marks the visible
+    // gap: `gone` takes no space, so the line goes between `a` and `b`.
+    let layout = Layout {
+        left: vec!["a", SEPARATOR, "gone", "b"],
+        center: Vec::new(),
+        right: Vec::new(),
+        ..Layout::default()
+    };
+    let found = members(&layout, &placed);
+    let flags: Vec<bool> = found.iter().map(|m| m.separator_before).collect();
+    assert_eq!(flags, [false, true]);
 }

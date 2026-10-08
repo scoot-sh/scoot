@@ -12,7 +12,8 @@ fn background() -> [u8; 3] {
     rgb(Theme::default().background)
 }
 
-/// A bar of `modules` with `margins` (logical, per module) for its scene.
+/// A bar of `modules` with `margins` (logical, per module) for its scene,
+/// every gap holding a separator (as a section list with no mark does).
 fn bar_with(modules: &[(Section, &str)], margins: &[u32]) -> Bar {
     let mut bar = Bar::new(modules);
     let members: Vec<Member> = modules
@@ -24,6 +25,7 @@ fn bar_with(modules: &[(Section, &str)], margins: &[u32]) -> Bar {
             module,
             section,
             margin,
+            separator_before: module > 0 && modules[module - 1].0 == section,
         })
         .collect();
     bar.scene = Scene::with_members(&members);
@@ -185,4 +187,129 @@ fn a_module_repaint_leaves_the_separator_alone() {
         assert_eq!(column(&pixels, x), column(&before, x), "column {x}");
     }
     assert_ne!(pixels, before, "the module did change");
+}
+
+#[test]
+fn separators_draw_only_where_a_mark_stands() {
+    // Three on the left, `["1", "2", "|", "3"]`: the first two are one
+    // group (no line), the last gap holds one.
+    let mut bar = bar_with(
+        &[
+            (Section::Left, "1"),
+            (Section::Left, "2"),
+            (Section::Left, "3"),
+        ],
+        &[0, 0, 0],
+    );
+    let members = [
+        Member {
+            hover: false,
+            module: 0,
+            section: Section::Left,
+            margin: 0,
+            separator_before: false,
+        },
+        Member {
+            hover: false,
+            module: 1,
+            section: Section::Left,
+            margin: 0,
+            separator_before: false,
+        },
+        Member {
+            hover: false,
+            module: 2,
+            section: Section::Left,
+            margin: 0,
+            separator_before: true,
+        },
+    ];
+    bar.scene = Scene::with_members(&members);
+    bar.style.spacing = 20;
+    bar.style.separator = 4;
+    let mut pixels = buffer();
+    let mut record = Record::new(3);
+    bar.paint(&mut pixels, &mut record);
+    // 0..50, 70..120, 140..190: the first gap (50..70) is clear, the
+    // second (120..140) holds the line at 128..132.
+    let lines: Vec<u32> = (0..WIDTH)
+        .filter(|&x| column(&pixels, x).contains(&dim()))
+        .collect();
+    assert_eq!(lines, [128, 129, 130, 131]);
+}
+
+#[test]
+fn a_mark_beside_an_empty_module_marks_the_visible_gap() {
+    // `["1", "|", "", "2"]`: the empty middle takes no space, so the line
+    // the mark asks for goes between the two that show.
+    let mut bar = bar_with(
+        &[
+            (Section::Left, "1"),
+            (Section::Left, ""),
+            (Section::Left, "2"),
+        ],
+        &[0, 0, 0],
+    );
+    let members = [
+        Member {
+            hover: false,
+            module: 0,
+            section: Section::Left,
+            margin: 0,
+            separator_before: false,
+        },
+        Member {
+            hover: false,
+            module: 1,
+            section: Section::Left,
+            margin: 0,
+            separator_before: true,
+        },
+        Member {
+            hover: false,
+            module: 2,
+            section: Section::Left,
+            margin: 0,
+            separator_before: false,
+        },
+    ];
+    bar.scene = Scene::with_members(&members);
+    bar.style.spacing = 10;
+    bar.style.separator = 2;
+    let mut pixels = buffer();
+    let mut record = Record::new(3);
+    bar.paint(&mut pixels, &mut record);
+    let lines: Vec<u32> = (0..WIDTH)
+        .filter(|&x| column(&pixels, x).contains(&dim()))
+        .collect();
+    assert_eq!(lines, [54, 55]);
+    // The same bar with no mark anywhere near draws nothing.
+    let members = [
+        Member {
+            hover: false,
+            module: 0,
+            section: Section::Left,
+            margin: 0,
+            separator_before: false,
+        },
+        Member {
+            hover: false,
+            module: 1,
+            section: Section::Left,
+            margin: 0,
+            separator_before: false,
+        },
+        Member {
+            hover: false,
+            module: 2,
+            section: Section::Left,
+            margin: 0,
+            separator_before: false,
+        },
+    ];
+    bar.scene = Scene::with_members(&members);
+    let mut pixels = buffer();
+    let mut record = Record::new(3);
+    bar.paint(&mut pixels, &mut record);
+    assert!(!(0..WIDTH).any(|x| column(&pixels, x).contains(&dim())));
 }

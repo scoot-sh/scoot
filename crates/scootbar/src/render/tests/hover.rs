@@ -268,6 +268,7 @@ fn a_rebuilt_scene_holds_no_hover() {
         section: Section::Left,
         margin: 0,
         hover: true,
+        separator_before: false,
     }];
     let fresh = Scene::with_members(&members);
     assert_eq!(fresh.hover, None);

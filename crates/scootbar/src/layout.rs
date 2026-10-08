@@ -32,6 +32,16 @@ mod tests;
 pub const DEFAULT_PADDING: u32 = 8;
 /// Default space between neighbouring modules, in logical pixels.
 pub const DEFAULT_SPACING: u32 = 0;
+/// A `"|"` entry in a `left`/`center`/`right` list: where a separator goes.
+/// A section list with none draws a line in every gap, as before; a list
+/// with any draws only where a `"|"` stands, between the modules around it
+/// (see [`Layout`]). Never a module id: no module is named `"|"`
+/// (names take letters, digits, `-` and `_`), so it needs no escaping.
+pub const SEPARATOR: &str = "|";
+/// Whether `id` is a [`SEPARATOR`] mark rather than a module.
+pub fn is_separator(id: &str) -> bool {
+    id == SEPARATOR
+}
 /// The most `--padding`, `--spacing`, a module's `margin` and the
 /// separator's width take.
 pub const MAX_GAP: u32 = 1024;
@@ -68,6 +78,15 @@ impl Section {
 }
 
 /// The layout as configured: module ids per section, and the gaps.
+/// Each section list holds module ids in order, with [`SEPARATOR`] (`"|"`)
+/// entries marking where a separator goes: `["load", "|", "cpu"]` draws one
+/// line, between `load` and `cpu`, while `["load", "cpu"]` draws none once
+/// any `"|"` is in that section's list, and every gap when the list has
+/// none (as before). A mark needs a module on both sides of it in its own
+/// section (see [`check_placement`]); it is not a module (it is never
+/// started, takes no space and is not counted in [`MAX_MODULES`]), so an
+/// unstarted module beside one never moves a line: the line goes between
+/// the modules around it that do show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
     pub left: Vec<&'static str>,
@@ -125,6 +144,8 @@ impl Layout {
     }
 
     /// Every placed module, left to right by section: `(section, id)`.
+    /// [`SEPARATOR`] marks are placed too, in order, so the render can see
+    /// where the lines go; starting a layout skips what is no module.
     pub fn placed(&self) -> impl Iterator<Item = (Section, &'static str)> + '_ {
         Section::ALL
             .into_iter()
@@ -133,18 +154,33 @@ impl Layout {
 
     #[cfg(test)]
     pub fn is_empty(&self) -> bool {
-        self.left.is_empty() && self.center.is_empty() && self.right.is_empty()
+        Section::ALL
+            .into_iter()
+            .all(|section| self.section(section).iter().all(|id| is_separator(id)))
+    }
+
+    /// Whether `section`'s list names any [`SEPARATOR`] mark: with none the
+    /// section draws every gap, as before; with any it draws only at marks.
+    pub fn has_markers(&self, section: Section) -> bool {
+        self.section(section).iter().any(|id| is_separator(id))
     }
 }
 
-/// Why placed modules are refused: a duplicate or too many. Unknown ids
-/// are refused earlier, where the list is read (a flag or a file key), so
-/// they name that context.
+/// Why placed modules are refused: a duplicate, too many, or a
+/// [`SEPARATOR`] mark with no module on one side of it. Unknown ids are
+/// refused earlier, where the list is read (a flag or a file key), so they
+/// name that context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlacementError {
     /// Placed twice (in one section or across two).
     Twice(&'static str),
     TooMany,
+    /// A `"|"` with no module before it in its section.
+    SeparatorFirst,
+    /// A `"|"` with no module after it in its section.
+    SeparatorLast,
+    /// Two `"|"` marks in a row: no module between them.
+    SeparatorDoubled,
 }
 
 impl fmt::Display for PlacementError {
@@ -152,17 +188,43 @@ impl fmt::Display for PlacementError {
         match self {
             Self::Twice(id) => write!(f, "`{id}` is placed twice; a module goes in one place"),
             Self::TooMany => write!(f, "at most {MAX_MODULES} modules"),
+            Self::SeparatorFirst => write!(
+                f,
+                "`{SEPARATOR}` separates two modules; it has no module before it"
+            ),
+            Self::SeparatorLast => write!(
+                f,
+                "`{SEPARATOR}` separates two modules; it has no module after it"
+            ),
+            Self::SeparatorDoubled => write!(
+                f,
+                "two `{SEPARATOR}` marks in a row leave no module between them"
+            ),
         }
     }
 }
 
-/// No module twice across the sections, and at most [`MAX_MODULES`].
+/// No module twice across the sections, at most [`MAX_MODULES`] modules,
+/// and every [`SEPARATOR`] mark between two modules of its own section.
 /// `Err` is the offending section and why, for the caller to name its own
-/// context (a flag or a file key).
+/// context (a flag or a file key). Marks take no place: they are not
+/// counted in the most, and one may stand in every gap.
 pub fn check_placement(layout: &Layout) -> Result<(), (Section, PlacementError)> {
     let mut seen: Vec<&str> = Vec::new();
     for section in Section::ALL {
+        let mut have_module = false;
+        let mut need_module = false;
         for &id in layout.section(section) {
+            if is_separator(id) {
+                if need_module {
+                    return Err((section, PlacementError::SeparatorDoubled));
+                }
+                if !have_module {
+                    return Err((section, PlacementError::SeparatorFirst));
+                }
+                need_module = true;
+                continue;
+            }
             if seen.contains(&id) {
                 return Err((section, PlacementError::Twice(id)));
             }
@@ -170,6 +232,11 @@ pub fn check_placement(layout: &Layout) -> Result<(), (Section, PlacementError)>
                 return Err((section, PlacementError::TooMany));
             }
             seen.push(id);
+            have_module = true;
+            need_module = false;
+        }
+        if need_module {
+            return Err((section, PlacementError::SeparatorLast));
         }
     }
     Ok(())

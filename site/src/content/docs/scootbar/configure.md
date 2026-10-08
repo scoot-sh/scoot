@@ -10,6 +10,14 @@ Shape the bar: where it sits, what it looks like, which outputs it covers, and t
 - **Left** modules are packed from the left edge, **right** ones from the
   right edge, in the order listed; **center** ones are packed together and
   centered on the bar.
+- **Groups**: a `"|"` entry in a list marks where a separator goes.
+  `left = ["cpu", "load", "|", "memory"]` draws one line, between `load`
+  and `memory`; `load` sits next to `cpu` with no line inside the group.
+  A list with no `"|"` draws a line in every gap, as before, so an old
+  config looks exactly as it did. A `"|"` needs a module on both sides of
+  it in its own section (leading, trailing and doubled marks are refused,
+  naming the list), and it is never a module: it is not started, takes no
+  space, and an unstarted module beside one never moves the line.
 - Each module is as wide as its content plus `--padding` on both sides;
   `--spacing` separates neighbours, and a module's own `margin` adds room
   on each side of it ([Spacing](./modules.md##spacing)). A module with nothing to show
@@ -405,7 +413,9 @@ larger value is refused, naming both), and the drawn line is cut back to the
 actual gap. The check is against the file's `spacing`: a `--spacing` flag
 given later replaces it and can leave a separator wider than the gap, which
 is then cut to it (drawn narrower, never over a module). There is none between two sections, beside a module with
-nothing to show, or at the bar's ends. `0`, the default, draws none.
+nothing to show, or at the bar's ends. `0`, the default, draws none. In a
+section whose list has a `"|"` mark, only the marked gaps draw (see Layout
+above); a list with none draws every gap, as before.
 
 ```toml
 left = ["workspaces", "clock"]
@@ -418,9 +428,22 @@ separator = 1          # a hairline centered in each 12-pixel gap
 margin = 4             # 4 more either side: the gaps beside it are 20
 ```
 
+Group related modules with no line inside the group and lines between
+groups:
+
+```toml
+left = ["cpu", "load", "|", "memory", "|", "disk"]
+
+[bar]
+spacing = 12
+separator = 1          # one hairline between load and memory, and one between memory and disk
+```
+
 Nothing here costs a frame: the lines are painted with the whole bar, never
 for a module's own repaint, and the layout is worked out only when a width
-or the size changes.
+or the size changes. A reload keeps the flags over the file, as at
+start-up: giving any of `--left`/`--center`/`--right` replaces just that
+section's list (marks included).
 
 
 

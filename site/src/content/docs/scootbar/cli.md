@@ -109,6 +109,9 @@ as at start-up.
 outputs = "all"       # or ["DP-1", "eDP-1"]: see Outputs below
 left = ["workspaces"]
 center = ["clock"]
+# left = ["cpu", "load", "|", "memory"]: a "|" marks where a separator
+# goes (that list then draws only there; a list with none draws every
+# gap, as before)
 
 [bar]
 edge = "top"          # top or bottom
@@ -209,7 +212,8 @@ right = ["clock"]
 string. `radius`, `popup-radius`, `opacity`, `separator`, the modules' `margin` and the
 pill's keys are file-only: they have no flags (see
 [Shape and opacity](./modules.md##shape-and-opacity), [Spacing](./modules.md##spacing) and
-[the pill](./modules.md##the-active-workspaces-pill)). The module lists take the ids in [Modules](./modules.md##modules); giving any
+[the pill](./modules.md##the-active-workspaces-pill)). The module lists take the ids in [Modules](./modules.md##modules), with `"|"`
+entries marking where a separator goes (see [Spacing](./modules.md##spacing)); giving any
 of the three sets the whole layout, as the flags do. An unknown key
 anywhere is a loud error naming it, as is a bad value, which names its
 dotted key (`bar.height`, `colors.background`, `left`, `clock.format`;
