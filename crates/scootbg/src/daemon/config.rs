@@ -67,7 +67,7 @@ use wayland_client::QueueHandle;
 use super::change::{reconcile, sweep};
 use super::restore::{self, Origin};
 use super::wayland::State;
-use crate::choices::Choice;
+use crate::choices::{Choice, WorkspaceChoice};
 use crate::control::ConnId;
 use crate::print::warn;
 use crate::section::Section;
@@ -138,6 +138,7 @@ pub fn apply(
         waiters,
         images,
         transitions,
+        workspaces,
         ..
     } = state;
     // Image `set`s still queued that this made moot are never decoded.
@@ -164,6 +165,10 @@ pub fn apply(
             now,
         );
     }
+    // Mappings the section added need the workspace manager bound from the
+    // next batch (late announcements bind through the registry instead);
+    // the last mapping taken off releases it again, at zero cost.
+    super::workspaces::ensure_bound(workspaces, choices, globals, qh);
     if problems.is_empty() {
         waiters.push(conn, generation);
         return Ok(());
@@ -204,6 +209,10 @@ fn without_downloads(record: &mut Record) {
         _ => true,
     });
     record.named.retain(|(_, pick)| match pick {
+        Pick::Image { fetch, .. } => fetch.is_none(),
+        _ => true,
+    });
+    record.workspaces.retain(|(.., pick, _)| match pick {
         Pick::Image { fetch, .. } => fetch.is_none(),
         _ => true,
     });
@@ -264,7 +273,72 @@ fn recheck(state: &mut State, section: &Section) -> Vec<String> {
             Err(why) => problems.push(format!("{path:?} for {}: {why}", restore::Target(output))),
         }
     }
+    for (output, workspace, pick, spec) in &record.workspaces {
+        let Pick::Image { path, look, fetch } = pick else {
+            continue;
+        };
+        let is_it = |choice: &WorkspaceChoice| {
+            matches!(
+                choice,
+                Some(Wallpaper::Image(image))
+                    if image.path == *path && image.look == *look && image.fetch == *fetch
+            )
+        };
+        let saved = saved_workspace(&state.saved.choices, output.as_deref(), workspace);
+        let Some((saved_choice, saved_spec)) = saved else {
+            continue;
+        };
+        if !is_it(saved_choice) || saved_spec != *spec {
+            // Replaced by a `set --workspace` since (a different image, or
+            // a different transition): the section no longer owns it.
+            continue;
+        }
+        let live = live_workspace(&state.choices, output.as_deref(), workspace);
+        if live.is_some_and(is_it) {
+            continue;
+        }
+        if fetch.is_some() {
+            let restored = saved_choice.clone();
+            state
+                .choices
+                .fill_workspace(output.as_deref(), workspace, restored);
+            continue;
+        }
+        match restore::present(path) {
+            Ok(()) => {
+                let restored = saved_choice.clone();
+                state
+                    .choices
+                    .fill_workspace(output.as_deref(), workspace, restored);
+            }
+            Err(why) => problems.push(format!("{path:?} for workspace {workspace:?}: {why}")),
+        }
+    }
     problems
+}
+
+/// The saved mapping for (`output`, `workspace`): its choice and transition,
+/// if the file names one.
+fn saved_workspace<'a>(
+    saved: &'a crate::choices::Choices,
+    output: Option<&str>,
+    workspace: &str,
+) -> Option<(&'a WorkspaceChoice, crate::transition::Spec)> {
+    saved
+        .workspaces()
+        .find(|(o, w, _, _, _)| *o == output && *w == workspace)
+        .map(|(_, _, choice, _, spec)| (choice, spec))
+}
+
+/// The live mapping for (`output`, `workspace`): its choice, if one stands.
+fn live_workspace<'a>(
+    live: &'a crate::choices::Choices,
+    output: Option<&str>,
+    workspace: &str,
+) -> Option<&'a WorkspaceChoice> {
+    live.workspaces()
+        .find(|(o, w, _, _, _)| *o == output && *w == workspace)
+        .map(|(_, _, choice, _, _)| choice)
 }
 
 /// Switches to `profile`'s state (see the module docs); returns its file's

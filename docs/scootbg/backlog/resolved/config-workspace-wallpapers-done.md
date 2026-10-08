@@ -1,9 +1,10 @@
 ---
 title: "Workspace wallpapers in scoot's [wallpaper] section"
-status: "open"
-area: "scootbg"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-08"
 ---
 
 # Workspace wallpapers in scoot's [wallpaper] section
@@ -39,3 +40,27 @@ table. Preload on apply like the daemon's `configure` hook does.
 
 Rotation (`config-and-rotation.md`) interplay; animated per-workspace
 images (`animated-images.md` covers the format, this covers the mapping).
+
+## Resolution (2026-10-08, PR #542)
+
+Both shapes the ticket offered, since the daemon models `(output,
+workspace)` with output `None` for every output: `workspace."2"` maps a
+workspace on every output, `output."DP-1".workspace."2"` on one output
+alone (winning where both name it). Each table carries the image/color
+keys plus transition keys and stands alone; an empty table clears that
+mapping (`Clear`, as `clear --workspace`); absent tables leave live
+mappings alone (as an absent output table does). `Section::record` feeds
+`Record.workspaces`; `daemon::config` put/recheck keep the
+`set --workspace`-since-wins precedence at the old generation
+(`Choices::fill_workspace`); the canonical encoding and fingerprint gain
+the tables; mapped images preload on apply through the restore path, and
+the manager binds/releases around apply. scoot's `[wallpaper]` accepts,
+resolves and forwards the same tables. Docs in the same PR (site table +
+workspaces page, `docs/scootbg/README`, versioning note, default-config
+comments). Tests, each revert-run-restore proven: four scootbg section
+tests, one choices test, two scoot section tests. Verification: fmt,
+clippy (scootbg + scoot), nextest 636 passed with only load-induced timer
+flakes (rotation set fails identically on main; transition/color pass on
+retry), scoot wallpaper 62 passed, docs-site build, deny, ratchet
+(file +3.6%, .text +1.5%; idle 0 wakeups both sides, RSS +48 kB inside the
+5% noise rule: tie; nothing waived).

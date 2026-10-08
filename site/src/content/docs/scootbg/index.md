@@ -35,6 +35,12 @@ mode = "fill"                    # fill | fit | stretch | center | tile
 
 [wallpaper.output."DP-2"]        # optional, one table per output
 color = "#101014"
+
+[wallpaper.workspace."2"]        # optional, while workspace 2 is active
+image = "~/Pictures/focus.jpg"
+
+[wallpaper.output."DP-1".workspace."2"]  # optional, workspace 2 on one output
+color = "#101014"
 ```
 
 A link works where a path does: `image = "https://example.com/hills.jpg"`
@@ -55,14 +61,18 @@ an image nobody commits. `sha256` pins the download's bytes.
 | `angle` | string (number) | live (re-applied) | A wipe's direction in degrees: `0` from the left, `90` from the top, `180` from the right, `270` from the bottom. |
 | `position` | string (`X,Y`) | live (re-applied) | Where a grow starts, as fractions (`0.5,0.5` is the center). |
 | `output."NAME"` | table | live | The same keys for one output, by connector name (as `scootbg query` lists them). Each output table stands alone: an output's `image` does not take the top level's `mode`. An empty table is nothing on that output. |
+| `workspace."NAME"` | table | live | The same keys while workspace `NAME` is active, on every output (the name is what the compositor announces: `"1"`, `"2"`, ... on scoot). Each workspace table stands alone: it takes no other table's `mode` or `transition`. An empty table takes that mapping back off. Absent tables leave live mappings alone. |
+| `output."NAME".workspace."WS"` | table | live | The same keys while workspace `WS` is active on output `NAME` alone. Within one section, where both it and `workspace."WS"` name one output, this table wins for that output (it applies after the global one). Against `set --workspace` the newest change wins. |
 | `command` | string | live | The `scootbg` to run. Default `"scootbg"` on `PATH`; the Nix modules set it to the installed package's store path. |
 
 **Whichever you changed last wins.** Edit `[wallpaper]` (and start or
-reload scoot): the config's wallpaper shows. Run `scootbg set` after
-that: your pick shows, and keeps showing across restarts and unrelated
-reloads, until you next change `[wallpaper]` itself. The section names no
-per-workspace wallpapers: applying it leaves live `--workspace` mappings
-alone (a follow-up will add section keys for them).
+reload scoot): the config's wallpaper shows, workspace mappings included.
+Run `scootbg set` (or `scootbg set --workspace 2`) after that: your pick
+shows, and keeps showing across restarts and unrelated reloads, until you
+next change `[wallpaper]` itself. A workspace table you remove from the
+section leaves its live mapping alone (write it empty to take it off, as
+`clear --workspace` does); a mapping a `set --workspace` changed since
+keeps showing until the section itself changes.
 
 ## One wallpaper per workspace
 

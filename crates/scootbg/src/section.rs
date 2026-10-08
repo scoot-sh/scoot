@@ -20,11 +20,27 @@
 //! them; without a `transition` the rest are refused, with an explicit
 //! `none` they are ignored. `output` is
 //! an object of per-output tables, by connector name, each the same eleven
-//! keys and nothing else; an empty one means nothing on that output.
+//! keys and nothing else, plus an optional `workspace` object of
+//! per-workspace tables for that output; an empty one means nothing on that
+//! output. `workspace` is an object of per-workspace tables by workspace
+//! name, for every output, each the same eleven keys and nothing else.
 //! **Each table stands alone**, as a `scootbg set` does: an output's image
-//! does not take the top level's `mode`, and an output's change does not
-//! take the top level's `transition`. `command` is scoot's (where to
+//! does not take the top level's `mode`, a workspace's image does not take
+//! its output's or the top level's, and no table's change takes another's
+//! `transition`. `command` is scoot's (where to
 //! find the binary): accepted, and ignored.
+//!
+//! A workspace table is the wallpaper while that workspace is active
+//! (by name, as `scootbg set --workspace` takes it): `workspace."2"` for
+//! every output, `output."DP-1".workspace."2"` for one output alone; where
+//! both name one output within one section the per-output table wins (it is
+//! applied after the global one); against `set --workspace` the newest change
+//! wins, as for every other choice.
+//! An
+//! empty workspace table is no mapping there (the output's own wallpaper
+//! shows): writing one takes a mapping back off, as `scootbg clear
+//! --workspace` does. Absent tables leave live mappings alone, as an
+//! absent output table does for its output.
 //!
 //! **Strict.** Anything else is refused, so a typo is an error rather than a
 //! setting silently not applied: an unknown key (at either level), a key
@@ -34,17 +50,21 @@
 //! not the config's), a URL that is not `http(s)`, a path with a NUL byte or
 //! longer than Linux opens (`PATH_MAX`), a URL past [`crate::fetch::MAX_URL`],
 //! a malformed color or hash, an unknown mode or filter, an empty
-//! output name, more than [`MAX_OUTPUTS`] outputs, or more than
+//! output or workspace name, a workspace name past 256 bytes or with a NUL
+//! byte, more than [`MAX_OUTPUTS`] outputs, more than
+//! [`crate::choices::MAX_WORKSPACES`] workspace mappings in all, or more than
 //! [`MAX_SECTION`] bytes of JSON.
 //!
 //! **The fingerprint** is SHA-256, in lowercase hex, of the canonical
-//! encoding: the section re-encoded as compact JSON, keys in byte order at
-//! both levels, strings as given (a color's case included) and escaped the
-//! way `serde_json` escapes them, `command` left out, and every other key
-//! present in the input present in it (an `output` of `{}` included). So the
-//! sender's key order never matters (scoot's per-output tables come from a
-//! `HashMap`), while a change to any value does, and `command` (a store path
-//! that changes with every upgrade under home-manager) never does.
+//! encoding: the section re-encoded as compact JSON, table keys in byte
+//! order with `output` then `workspace` last at each level that has them,
+//! tables sorted by name, strings as given (a color's case included) and
+//! escaped the way `serde_json` escapes them, `command` left out, and every
+//! other key present in the input present in it (an `output` of `{}` or a
+//! `workspace` of `{}` included). So the sender's key order never matters
+//! (scoot's tables come from sorted maps), while a change to any value
+//! does, and `command` (a store path that changes with every upgrade under
+//! home-manager) never does.
 
 use std::fmt;
 use std::path::Path;
@@ -78,7 +98,18 @@ pub const MAX_PATH: usize = 4095;
 pub struct Section {
     all: Table,
     /// `None` when the section has no `output` key; sorted by name.
-    outputs: Option<Vec<(String, Table)>>,
+    outputs: Option<Vec<(String, OutputTable)>>,
+    /// `None` when the section has no `workspace` key; sorted by name.
+    workspaces: Option<Vec<(String, Table)>>,
+}
+
+/// One per-output table: the wallpaper for that output, and the workspace
+/// wallpapers for that output alone.
+#[derive(Debug, Clone, PartialEq)]
+struct OutputTable {
+    base: Table,
+    /// `None` when the output has no `workspace` key; sorted by name.
+    workspaces: Option<Vec<(String, Table)>>,
 }
 
 /// One table: the strings as given, for the canonical encoding, and what
@@ -196,10 +227,44 @@ struct RawSection {
     #[serde(default, deserialize_with = "present")]
     transition: Option<String>,
     #[serde(default, deserialize_with = "outputs")]
-    output: Option<Vec<(String, Raw)>>,
+    output: Option<Vec<(String, RawOutput)>>,
+    #[serde(default, deserialize_with = "workspaces")]
+    workspace: Option<Vec<(String, Raw)>>,
     /// scoot's; accepted and ignored (never part of the fingerprint).
     #[serde(default, deserialize_with = "present", rename = "command")]
     _command: Option<String>,
+}
+
+/// One per-output table as given: a table's keys, plus `workspace`.
+/// (Spelled out rather than `#[serde(flatten)]`, which does not work with
+/// `deny_unknown_fields`.)
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOutput {
+    #[serde(default, deserialize_with = "present")]
+    angle: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    color: Option<String>,
+    #[serde(default, deserialize_with = "present", rename = "duration-ms")]
+    duration_ms: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    easing: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    fill: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    filter: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    image: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    mode: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    position: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    sha256: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    transition: Option<String>,
+    #[serde(default, deserialize_with = "workspaces")]
+    workspace: Option<Vec<(String, Raw)>>,
 }
 
 /// A string that is there: `null` is refused, not read as absent (only a
@@ -228,21 +293,72 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for Object<T> {
     }
 }
 
-/// `output`: an object of tables, by name, kept sorted by name as they are
-/// read (the canonical order; a binary search finds a name given twice). A
-/// name given twice, an empty name, or more than [`MAX_OUTPUTS`] names is
-/// refused, the last as soon as it is seen, so the work stays bounded.
-fn outputs<'de, D: Deserializer<'de>>(
+/// `workspace`: an object of per-workspace tables, by workspace name, kept
+/// sorted by name as read. A name given twice, an empty name, one past
+/// [`crate::choices::MAX_WORKSPACE_NAME`] bytes or with a NUL byte, or more
+/// than [`crate::choices::MAX_WORKSPACES`] names is refused, the last as
+/// soon as it is seen, so the work stays bounded.
+fn workspaces<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Vec<(String, Raw)>>, D::Error> {
     struct Tables;
     impl<'de> Visitor<'de> for Tables {
         type Value = Vec<(String, Raw)>;
         fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("an object of per-output tables, by connector name")
+            f.write_str("an object of per-workspace tables, by workspace name")
         }
         fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
             let mut tables: Vec<(String, Raw)> = Vec::new();
+            while let Some(name) = map.next_key::<String>()? {
+                if name.is_empty() {
+                    return Err(de::Error::custom("a workspace name is empty"));
+                }
+                if name.len() > crate::choices::MAX_WORKSPACE_NAME {
+                    return Err(de::Error::custom(format_args!(
+                        "the workspace name {name:?} is past {} bytes",
+                        crate::choices::MAX_WORKSPACE_NAME,
+                    )));
+                }
+                if name.contains('\0') {
+                    return Err(de::Error::custom(format_args!(
+                        "the workspace name {name:?} has a NUL byte"
+                    )));
+                }
+                let Err(at) = tables.binary_search_by(|(n, _)| n.as_str().cmp(&name)) else {
+                    return Err(de::Error::custom(format_args!(
+                        "workspace {name:?} is given twice"
+                    )));
+                };
+                if tables.len() == crate::choices::MAX_WORKSPACES {
+                    return Err(de::Error::custom(format_args!(
+                        "more than {} workspace mappings",
+                        crate::choices::MAX_WORKSPACES,
+                    )));
+                }
+                let Object(table) = map.next_value::<Object<Raw>>()?;
+                tables.insert(at, (name, table));
+            }
+            Ok(tables)
+        }
+    }
+    deserializer.deserialize_map(Tables).map(Some)
+}
+
+/// `output`: an object of per-output tables, by connector name, kept sorted
+/// by name as read. Each output table is [`RawOutput`]: the eleven keys plus
+/// an optional nested `workspace` object. A name given twice, an empty name,
+/// or more than [`MAX_OUTPUTS`] names is refused, as for [`workspaces`].
+fn outputs<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Vec<(String, RawOutput)>>, D::Error> {
+    struct OutputTables;
+    impl<'de> Visitor<'de> for OutputTables {
+        type Value = Vec<(String, RawOutput)>;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("an object of per-output tables, by connector name")
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut tables: Vec<(String, RawOutput)> = Vec::new();
             while let Some(name) = map.next_key::<String>()? {
                 if name.is_empty() {
                     return Err(de::Error::custom("an output name is empty"));
@@ -257,13 +373,13 @@ fn outputs<'de, D: Deserializer<'de>>(
                         "more than {MAX_OUTPUTS} outputs"
                     )));
                 }
-                let Object(table) = map.next_value::<Object<Raw>>()?;
+                let Object(table) = map.next_value::<Object<RawOutput>>()?;
                 tables.insert(at, (name, table));
             }
             Ok(tables)
         }
     }
-    deserializer.deserialize_map(Tables).map(Some)
+    deserializer.deserialize_map(OutputTables).map(Some)
 }
 
 /// Why a section was refused, past what JSON parsing itself says.
@@ -312,17 +428,51 @@ pub enum SectionError {
     UrlTooLong(At, usize),
     /// A URL with a NUL byte.
     UrlNul(At),
+    /// More than [`crate::choices::MAX_WORKSPACES`] workspace mappings in
+    /// all (every output's plus each output's own).
+    TooManyWorkspaces(usize),
 }
 
-/// Which table, for a message: the top level, or an output's.
+/// Which table, for a message: the top level, an output's, a workspace's
+/// for every output, or a workspace's for one output.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct At(Option<String>);
+pub struct At {
+    output: Option<String>,
+    workspace: Option<String>,
+}
+
+impl At {
+    fn top() -> Self {
+        Self {
+            output: None,
+            workspace: None,
+        }
+    }
+
+    fn output(name: String) -> Self {
+        Self {
+            output: Some(name),
+            workspace: None,
+        }
+    }
+
+    fn workspace(output: Option<String>, workspace: String) -> Self {
+        Self {
+            output,
+            workspace: Some(workspace),
+        }
+    }
+}
 
 impl fmt::Display for At {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.0 {
-            None => f.write_str("[wallpaper]"),
-            Some(name) => write!(f, "[wallpaper.output.{name:?}]"),
+        match (&self.output, &self.workspace) {
+            (None, None) => f.write_str("[wallpaper]"),
+            (Some(name), None) => write!(f, "[wallpaper.output.{name:?}]"),
+            (None, Some(workspace)) => write!(f, "[wallpaper.workspace.{workspace:?}]"),
+            (Some(name), Some(workspace)) => {
+                write!(f, "[wallpaper.output.{name:?}.workspace.{workspace:?}]")
+            }
         }
     }
 }
@@ -417,6 +567,11 @@ impl fmt::Display for SectionError {
                 crate::fetch::MAX_URL
             ),
             Self::UrlNul(at) => write!(f, "{at}: the image URL has a NUL byte"),
+            Self::TooManyWorkspaces(count) => write!(
+                f,
+                "the section names {count} workspace wallpapers; at most {} are taken",
+                crate::choices::MAX_WORKSPACES,
+            ),
         }
     }
 }
@@ -446,20 +601,81 @@ impl Section {
             sha256: raw.sha256,
             transition: raw.transition,
         };
-        let all = Table::validate(table, At(None))?;
+        let all = Table::validate(table, At::top())?;
         let outputs = match raw.output {
             None => None,
             // Sorted by name as read (`outputs`).
             Some(tables) => {
                 let mut valid = Vec::with_capacity(tables.len());
                 for (name, table) in tables {
-                    let table = Table::validate(table, At(Some(name.clone())))?;
-                    valid.push((name, table));
+                    let at = At::output(name.clone());
+                    let base = Table::validate(
+                        Raw {
+                            angle: table.angle,
+                            color: table.color,
+                            duration_ms: table.duration_ms,
+                            easing: table.easing,
+                            fill: table.fill,
+                            filter: table.filter,
+                            image: table.image,
+                            mode: table.mode,
+                            position: table.position,
+                            sha256: table.sha256,
+                            transition: table.transition,
+                        },
+                        at,
+                    )?;
+                    let nested = match table.workspace {
+                        None => None,
+                        Some(tables) => {
+                            let mut valid = Vec::with_capacity(tables.len());
+                            for (workspace, table) in tables {
+                                let table = Table::validate(
+                                    table,
+                                    At::workspace(Some(name.clone()), workspace.clone()),
+                                )?;
+                                valid.push((workspace, table));
+                            }
+                            Some(valid)
+                        }
+                    };
+                    valid.push((
+                        name,
+                        OutputTable {
+                            base,
+                            workspaces: nested,
+                        },
+                    ));
                 }
                 Some(valid)
             }
         };
-        Ok(Self { all, outputs })
+        let workspaces = match raw.workspace {
+            None => None,
+            Some(tables) => {
+                let mut valid = Vec::with_capacity(tables.len());
+                for (workspace, table) in tables {
+                    let table = Table::validate(table, At::workspace(None, workspace.clone()))?;
+                    valid.push((workspace, table));
+                }
+                Some(valid)
+            }
+        };
+        let count = workspaces.as_ref().map_or(0, Vec::len)
+            + outputs.as_ref().map_or(0, |tables| {
+                tables
+                    .iter()
+                    .map(|(_, table)| table.workspaces.as_ref().map_or(0, Vec::len))
+                    .sum::<usize>()
+            });
+        if count > crate::choices::MAX_WORKSPACES {
+            return Err(SectionError::TooManyWorkspaces(count));
+        }
+        Ok(Self {
+            all,
+            outputs,
+            workspaces,
+        })
     }
 
     /// The canonical encoding (see the module docs).
@@ -476,6 +692,32 @@ impl Section {
                 key(&mut out, &mut first_output, name);
                 out.push('{');
                 let mut first_key = true;
+                table.base.raw.encode(&mut out, &mut first_key);
+                if let Some(workspaces) = &table.workspaces {
+                    key(&mut out, &mut first_key, "workspace");
+                    out.push('{');
+                    let mut first_workspace = true;
+                    for (workspace, table) in workspaces {
+                        key(&mut out, &mut first_workspace, workspace);
+                        out.push('{');
+                        let mut first_table_key = true;
+                        table.raw.encode(&mut out, &mut first_table_key);
+                        out.push('}');
+                    }
+                    out.push('}');
+                }
+                out.push('}');
+            }
+            out.push('}');
+        }
+        if let Some(workspaces) = &self.workspaces {
+            key(&mut out, &mut first, "workspace");
+            out.push('{');
+            let mut first_workspace = true;
+            for (workspace, table) in workspaces {
+                key(&mut out, &mut first_workspace, workspace);
+                out.push('{');
+                let mut first_key = true;
                 table.raw.encode(&mut out, &mut first_key);
                 out.push('}');
             }
@@ -490,10 +732,13 @@ impl Section {
         crate::sha256::hex(self.canonical().as_bytes())
     }
 
-    /// Nothing to show anywhere: no `image` or `color` at the top, and no
-    /// per-output table (`{}`, or only `command`).
+    /// Nothing to show anywhere: no `image` or `color` at the top, no
+    /// per-output table, and no per-workspace table (`{}`, or only
+    /// `command`).
     pub fn is_empty(&self) -> bool {
-        self.all.pick == Chosen::Clear && self.outputs.as_ref().is_none_or(Vec::is_empty)
+        self.all.pick == Chosen::Clear
+            && self.outputs.as_ref().is_none_or(Vec::is_empty)
+            && self.workspaces.as_ref().is_none_or(Vec::is_empty)
     }
 
     /// The transition the table for `output` asks the next change through
@@ -508,15 +753,37 @@ impl Section {
                 .outputs
                 .as_ref()
                 .and_then(|tables| tables.iter().find(|(n, _)| n == name))
-                .map(|(_, table)| table.transition)
+                .map(|(_, table)| table.base.transition)
                 .unwrap_or(self.all.transition),
         }
     }
 
     /// What it chooses, as the state file would record it: the choice for
-    /// every output (nothing, when it names none), then each output's.
+    /// every output (nothing, when it names none), then each output's, then
+    /// each workspace mapping (every output's, then each output's own).
     /// `cache` turns a URL into its file; a file choice needs no cache.
+    /// Each table stands alone, as parsed: a workspace table never takes
+    /// another table's look or transition.
     pub fn record(&self, cache: &Path) -> Record {
+        let mut workspaces = Vec::new();
+        for (workspace, table) in self.workspaces.iter().flatten() {
+            workspaces.push((
+                None,
+                workspace.clone(),
+                table.pick.record(cache),
+                table.transition,
+            ));
+        }
+        for (output, table) in self.outputs.iter().flatten() {
+            for (workspace, table) in table.workspaces.iter().flatten() {
+                workspaces.push((
+                    Some(output.clone()),
+                    workspace.clone(),
+                    table.pick.record(cache),
+                    table.transition,
+                ));
+            }
+        }
         Record {
             profile: None,
             fingerprint: None,
@@ -525,11 +792,9 @@ impl Section {
                 .outputs
                 .iter()
                 .flatten()
-                .map(|(name, table)| (name.clone(), table.pick.record(cache)))
+                .map(|(name, table)| (name.clone(), table.base.pick.record(cache)))
                 .collect(),
-            // Sections name no workspace wallpapers (see the follow-up in
-            // `docs/scootbg/backlog/`): the live mappings stand.
-            workspaces: Vec::new(),
+            workspaces,
         }
     }
 

@@ -628,3 +628,147 @@ fn a_named_table_without_a_transition_key_animates_nothing() {
     .unwrap();
     assert_eq!(section.transition(Some("DP-1")), Spec::none());
 }
+#[test]
+fn workspace_tables_set_change_and_clear_mappings() {
+    let section = parse(
+        "{\"color\":\"#1e1e2e\",\"workspace\":{\"2\":{\"color\":\"#101014\"}},\"output\":{\"DP-1\":{\"color\":\"#000000\",\"workspace\":{\"2\":{\"image\":\"/two.jpg\"}}}}}",
+    )
+    .unwrap();
+    assert!(!section.is_empty());
+    let record = section.record(cache());
+    assert_eq!(record.all, Some(color("#1e1e2e")));
+    assert_eq!(record.named.len(), 1);
+    assert_eq!(record.named[0].0, "DP-1");
+    assert_eq!(record.workspaces.len(), 2);
+    assert_eq!(record.workspaces[0].0, None);
+    assert_eq!(record.workspaces[0].1, "2");
+    assert_eq!(record.workspaces[0].2, color("#101014"));
+    assert_eq!(record.workspaces[1].0, Some("DP-1".to_owned()));
+    assert_eq!(record.workspaces[1].1, "2");
+    match &record.workspaces[1].2 {
+        Pick::Image { path, look, .. } => {
+            assert_eq!(path, "/two.jpg");
+            assert_eq!(look.mode, Mode::default(), "stands alone: no top mode");
+        }
+        other => panic!("not an image: {other:?}"),
+    }
+    let cleared = parse("{\"workspace\":{\"2\":{}}}").unwrap();
+    assert!(!cleared.is_empty());
+    let record = cleared.record(cache());
+    assert_eq!(record.workspaces.len(), 1);
+    assert_eq!(record.workspaces[0].2, Pick::Clear);
+}
+
+#[test]
+fn workspace_tables_carry_transitions_stand_alone() {
+    use crate::transition::{Easing, Kind, Spec};
+    let section = parse(
+        "{\"color\":\"#1e1e2e\",\"transition\":\"fade\",\"duration-ms\":\"800\",\"workspace\":{\"2\":{\"color\":\"#000000\",\"transition\":\"wipe\",\"angle\":\"90\"}},\"output\":{\"DP-1\":{\"color\":\"#111111\",\"workspace\":{\"3\":{\"color\":\"#222222\"}}}}}",
+    )
+    .unwrap();
+    let record = section.record(cache());
+    assert_eq!(record.workspaces.len(), 2);
+    assert_eq!(
+        record.workspaces[0].3,
+        Spec {
+            kind: Kind::Wipe,
+            duration_ms: 500,
+            easing: Easing::EaseOut,
+            angle_deg: 90.0,
+            pos: (0.5, 0.5),
+        }
+    );
+    assert_eq!(record.workspaces[1].3, Spec::none(), "no key: nothing");
+    let again = Section::parse(section.canonical().as_bytes()).unwrap();
+    assert_eq!(again, section);
+    assert_eq!(again.canonical(), section.canonical());
+}
+
+#[test]
+fn workspace_keys_are_canonical_and_fingerprinted() {
+    let a = parse("{\"workspace\":{\"b\":{\"color\":\"#000001\"},\"a\":{\"color\":\"#000002\"}}}")
+        .unwrap();
+    let b = parse("{\"workspace\":{\"a\":{\"color\":\"#000002\"},\"b\":{\"color\":\"#000001\"}}}")
+        .unwrap();
+    assert_eq!(a.canonical(), b.canonical());
+    assert_eq!(a.fingerprint(), b.fingerprint());
+    assert_eq!(
+        a.canonical(),
+        "{\"workspace\":{\"a\":{\"color\":\"#000002\"},\"b\":{\"color\":\"#000001\"}}}"
+    );
+    assert_ne!(
+        a.fingerprint(),
+        parse("{\"workspace\":{\"a\":{\"color\":\"#000002\"}}}")
+            .unwrap()
+            .fingerprint()
+    );
+    assert_ne!(
+        a.fingerprint(),
+        parse("{\"color\":\"#000000\"}").unwrap().fingerprint()
+    );
+    assert!(parse("{\"workspace\":{}}").unwrap().is_empty());
+    assert!(!parse("{\"workspace\":{\"2\":{}}}").unwrap().is_empty());
+    assert_eq!(
+        parse("{\"workspace\":{}}").unwrap().canonical(),
+        "{\"workspace\":{}}"
+    );
+}
+
+#[test]
+fn workspace_tables_are_refused_strictly() {
+    for (json, says) in [
+        ("{\"workspace\":null}", "null"),
+        ("{\"workspace\":[]}", "sequence"),
+        ("{\"workspace\":{\"2\":null}}", "null"),
+        ("{\"workspace\":{\"2\":[]}}", "sequence"),
+        ("{\"output\":{\"DP-1\":{\"workspace\":null}}}", "null"),
+        (
+            "{\"output\":{\"DP-1\":{\"workspace\":{\"2\":{\"colour\":\"#000000\"}}}}}",
+            "unknown field `colour`",
+        ),
+        (
+            "{\"workspace\":{\"2\":{\"command\":\"x\"}}}",
+            "unknown field `command`",
+        ),
+        ("{\"workspaces\":{\"2\":{}}}", "unknown field `workspaces`"),
+        (
+            "{\"workspace\":{\"a\":{},\"a\":{\"color\":\"#000000\"}}}",
+            "given twice",
+        ),
+        ("{\"workspace\":{\"\":{}}}", "empty"),
+        ("{\"output\":{\"DP-1\":{\"workspace\":{\"\":{}}}}}", "empty"),
+        (
+            "{\"output\":{\"DP-1\":{\"workspaces\":{}}}}",
+            "unknown field `workspaces`",
+        ),
+    ] {
+        let message = refused(json);
+        assert!(message.contains(says), "{json}: {message}");
+    }
+    let long = "w".repeat(crate::choices::MAX_WORKSPACE_NAME + 1);
+    let message = refused(&format!("{{\"workspace\":{{\"{long}\":{{}}}}}}"));
+    assert!(message.contains("past"), "{message}");
+    let message = refused("{\"workspace\":{\"a\\u0000b\":{}}}");
+    assert!(message.contains("NUL"), "{message}");
+    let mut json = String::from("{\"workspace\":{");
+    for index in 0..=crate::choices::MAX_WORKSPACES {
+        if index > 0 {
+            json.push(',');
+        }
+        json.push_str(&format!("\"ws{index}\":{{}}"));
+    }
+    json.push_str("}}");
+    let message = refused(&json);
+    assert!(message.contains("workspace"), "{message}");
+    let mut json =
+        String::from("{\"workspace\":{\"only\":{}},\"output\":{\"DP-1\":{\"workspace\":{");
+    for index in 0..crate::choices::MAX_WORKSPACES {
+        if index > 0 {
+            json.push(',');
+        }
+        json.push_str(&format!("\"ws{index}\":{{}}"));
+    }
+    json.push_str("}}}}");
+    let message = refused(&json);
+    assert!(message.contains("workspace"), "{message}");
+}
