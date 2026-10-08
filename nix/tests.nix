@@ -3152,6 +3152,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
   };
   osInputMethodStandalone = evalNixos {
     enable = true;
@@ -3162,6 +3163,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
     desktop.inputMethod.enable = true;
     desktop.inputMethod.package = null;
   };
