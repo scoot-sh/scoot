@@ -453,6 +453,9 @@ pub enum RequestError {
     /// A `shuffle` without a `directory`: it shuffles a slideshow, and this
     /// `set` names none.
     ShuffleWithoutDirectory,
+    /// An `animate` with a `directory`: stilling is per image, and a
+    /// slideshow steps through many (each checked like one `set`).
+    AnimateWithSlideshow,
     /// An image URL with a NUL byte.
     UrlNul,
     /// `apply-config` whose `profile` or `config` is not one (serde's
@@ -552,6 +555,11 @@ impl fmt::Display for RequestError {
             Self::ShuffleWithoutDirectory => write!(
                 f,
                 "`shuffle` shuffles a slideshow, and this `set` names no directory"
+            ),
+            Self::AnimateWithSlideshow => write!(
+                f,
+                "`animate` stills one image, and a slideshow steps through a directory \
+                 (each step checked like one `set`)"
             ),
             Self::UrlNul => write!(f, "the image URL has a NUL byte"),
             Self::BadApply(error) => write!(f, "bad apply-config request: {error}"),
@@ -710,6 +718,12 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
             })
         }
         "set-workspace" => {
+            // A slideshow runs on every output (or one `output`), not per
+            // workspace: refused before the per-image `animate` check, like
+            // the CLI's `--workspace` check wins over `--no-animate`.
+            if envelope.directory.is_some() {
+                return Err(RequestError::SlideshowWithWorkspace);
+            }
             let show = show(
                 envelope.color,
                 envelope.image,
@@ -827,6 +841,9 @@ fn show<'a>(
         }
         let every = every.ok_or(RequestError::EveryMissing)?;
         let every_secs = rotation::parse_every(&every).map_err(RequestError::BadEvery)?;
+        if animate.is_some() {
+            return Err(RequestError::AnimateWithSlideshow);
+        }
         let (mode, fill, filter) = look(mode, fill, filter)?;
         return Ok(Show::Slideshow(SlideshowRequest {
             dir,

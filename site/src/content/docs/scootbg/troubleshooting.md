@@ -13,10 +13,12 @@ description: "Wallpaper symptoms and their fixes — images, links, outputs, res
   or animated WebP holds at most 64 frames and 64 MiB of frames; past
   that the `set` is refused and every output keeps what it showed. Pass
   `--no-animate` to show the first frame as a still instead (playing
-  frame by frame is a follow-up).
+  frame by frame is a follow-up). That still is live-only: after a
+  restart the caps are checked again, so an over-cap animation is refused
+  then and the output loses its wallpaper until the next `set`.
 - *A link won't show.* In order: no `curl` on `PATH`; host unresolvable
   (names curl's exit); HTTP error (`exited 22`); error page ("do not
-  start as a PNG, JPEG or WebP", caches nothing); past 32 MiB (link
+  start as a PNG, JPEG, GIF or WebP", caches nothing); past 32 MiB (link
   something smaller); `sha256` mismatch (prints both hashes — copy the
   actual one in, or drop the pin); unwritable cache dir. Offline at
   startup, the background shows until the next `set`, `apply-config`,

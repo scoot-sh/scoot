@@ -1257,4 +1257,34 @@ fn no_animate_stills_the_image() {
         args(&["set", "#ffffff", "--no-animate"]),
         Err(Error::ImageOnly(_))
     ));
+    // On a link it stills: a download is one image.
+    let Command::Client(Request::Set {
+        show: Show::Image(image),
+        ..
+    }) = args(&["set", "https://example.com/a.gif", "--no-animate"]).unwrap()
+    else {
+        panic!("not an image set");
+    };
+    assert!(!image.animate, "--no-animate stills a link");
+}
+
+#[test]
+fn no_animate_with_every_is_refused() {
+    let dir = slideshow_dir("noanimate");
+    let path = dir.to_str().unwrap().to_owned();
+    // A slideshow steps through many images, each checked like one `set`:
+    // stilling is per image, so `--every` and `--no-animate` do not mix.
+    assert_eq!(
+        args(&["set", &path, "--every", "30m", "--no-animate"]),
+        Err(Error::NoAnimateWithEvery)
+    );
+    let message = Error::NoAnimateWithEvery.to_string();
+    assert!(message.contains("--no-animate"), "{message}");
+    assert!(message.contains("--every"), "{message}");
+    // Without `--every` the directory names its pace, not the still flag.
+    assert_eq!(
+        args(&["set", &path, "--no-animate"]),
+        Err(Error::DirectoryNeedsEvery(path))
+    );
+    std::fs::remove_dir(&dir).unwrap();
 }

@@ -11,9 +11,9 @@
 //! JPEG must also hold at least the data its size needs
 //! ([`jpeg_min_len`]).
 //!
-//! **What is fallible, and what is committed.** Only the pixel buffer
-//! allocated here (the decoded image, and the decoder's RGBA or grey
-//! before it becomes RGB) is fallible: the allocator refusing it is an
+//! **What is fallible, and what is committed.** Only the pixel buffers
+//! are fallible (the decoded image here, the decoder's RGBA or grey
+//! before it becomes RGB, and `animated`'s RGBA canvases): the allocator refusing it is an
 //! error reply. It is also committed only as it is written
 //! (`scootbg_mem::zeroed`), so a file that claims a large size and holds
 //! little costs what it decodes, not what it claims. The decoders' own

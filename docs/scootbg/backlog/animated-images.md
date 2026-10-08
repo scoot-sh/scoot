@@ -51,10 +51,28 @@ the animation stops), the `reconcile` hook order (transition →
 animation → static) in `daemon/change.rs`, the `section.rs` `animate`
 key (strict; fingerprint moves with it), `query`'s per-output `animated`
 bool, loop counts (loop-forever is the conservative default; document
-it), transition-into-animated (first frame transitions, then plays),
-`--every` interaction (moot for stage 1: rotation lives in the
-unmerged `feat/scootbg-config-rotation` PR, not in the tree). Tests for
-each: disposal/blend pixel fixtures, pacing math, cap refusal,
+it), transition-into-animated (first frame transitions, then plays).
+Rotation has since merged (PR #514, `feat/scootbg: rotate through a
+directory on one timer`), so the `--every` interaction is decided, not
+moot — stage 1 behavior, kept by the rebase:
+- Slideshow steps show each animated file's first frame, checked per
+  step like one image's `set` (`drive_due` and the first-file trial
+  both run with the animation checks on): past 64 frames / 64 MiB that
+  step fails like any undecodable file, until the next step.
+- `--every` with `--no-animate` is refused on the CLI
+  (`NoAnimateWithEvery`, exit 2) and on the wire
+  (`AnimateWithSlideshow`): stilling is per image, and a slideshow steps
+  through many.
+- `--no-animate` stills are live-only: the state file (still format v2)
+  never persists `animate`, so after a restart the caps are checked
+  again and an over-cap animation is refused then.
+- The GIF/APNG RGBA canvases allocate through the checked `buffer()`,
+  so exhaustion is a clean `OutOfMemory` refusal (pinned by
+  `tests/animated_oom.rs`), like every other pixel buffer.
+Stage 2 re-decides the slideshow half: whether steps play or still,
+threading `animate` through `SlideshowRequest`/rotation/steps and the
+state file, per-step loop counts, and transition-into-animated-step.
+Tests for each: disposal/blend pixel fixtures, pacing math, cap refusal,
 zero-wakeup-when-static/covered end-to-end on headless scoot,
 replace-mid-animation, DPMS/output-removed mid-animation,
 frame-callback-never-arriving (no spin), plus the ratchet (release

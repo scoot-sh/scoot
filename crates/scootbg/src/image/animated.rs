@@ -276,9 +276,11 @@ pub(crate) fn gif_first_frame<R: BufRead + Seek>(
         ));
     }
     // The first frame composites onto transparency, then flattens over
-    // the fill: exactly what the full decode keeps for frame zero.
+    // the fill: exactly what the full decode keeps for frame zero. The
+    // canvas is fallible like every other pixel buffer: past the address
+    // space, a clean `OutOfMemory` refusal, never an abort.
     let pixels = width as usize * height as usize;
-    let mut canvas = vec![0u8; pixels * 4];
+    let mut canvas = buffer(pixels * 4)?;
     composite_gif_rgba(&mut canvas, frame, width);
     let mut rgb = buffer(pixels * 3)?;
     flatten_rgba_over_fill(&canvas, &mut rgb, fill);
@@ -342,9 +344,9 @@ fn gif<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Option<Animated
     }
     check_caps(width, height, raw.len())?;
     // Composite onto an RGBA canvas, starting transparent (flattened over
-    // the fill per frame).
+    // the fill per frame). Fallible, like every other pixel buffer.
     let pixels = width as usize * height as usize;
-    let mut canvas = vec![0u8; pixels * 4];
+    let mut canvas = buffer(pixels * 4)?;
     let mut frames: Vec<AnimFrame> = Vec::with_capacity(raw.len());
     let mut saved: Option<Vec<u8>> = None;
     for (frame, delay_ms) in &raw {
@@ -499,9 +501,9 @@ fn apng<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Option<Animate
         _ => return Err(DecodeError::NotAnImage),
     };
     // Canvas: RGBA always, so blend works; grey/RGB frames expand on the
-    // way in.
+    // way in. Fallible, like every other pixel buffer.
     let pixels = width as usize * height as usize;
-    let mut canvas = vec![0u8; pixels * 4];
+    let mut canvas = buffer(pixels * 4)?;
     // Seed the canvas with the fill flattened? No: start transparent and
     // flatten per frame (transparent shows the fill). An opaque first
     // frame covers it anyway.

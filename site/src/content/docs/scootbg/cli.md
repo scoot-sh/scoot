@@ -80,7 +80,13 @@ file, not a PNG/JPEG/GIF/WebP, too large, truncated or corrupt — or, for a
 link, no `curl`, no network, an HTTP error, an error page, a file past
 32 MiB, or a `sha256` mismatch: see
 [a wallpaper from a link](./from-url.md#a-wallpaper-from-a-link)) is an error
-saying why, and every output keeps what it showed. **The newest request
+saying why, and every output keeps what it showed. An animated GIF, APNG
+or animated WebP shows its first frame: at most 64 frames and 64 MiB of
+frames, past which the `set` is refused — pass `--no-animate` for the
+first frame as a still instead (playing frame by frame is a follow-up).
+A `--no-animate` still is live-only: after a restart the caps are checked
+again, so an over-cap animation is refused then and the output loses its
+wallpaper until the next `set`. **The newest request
 wins**: a `set` or `clear` sent while an earlier image is still decoding is
 never undone when that image finishes; the earlier `set` changes nothing
 and returns 0 once the newer one is on screen, as a replaced color's `set`
@@ -88,7 +94,9 @@ does. Exit status: 0 done; 1 no daemon running,
 unknown output, image that cannot be shown, or drawing failed
 (`scootbg query`'s `draw_error` says why, as the daemon's stderr does);
 2 usage error, a malformed color, an unknown
-`--mode`/`--filter`, or a refused transition included. A `set` that has to scale the image
+`--mode`/`--filter`, a refused transition, a directory without `--every`,
+an `--every` without a directory, or a `--no-animate` with `--every`
+included. A `set` that has to scale the image
 (`fill`, `fit` or `stretch` when the image's size differs from the output's,
 with any `--filter`) first probes the scaler's whole budget — the output,
 each scaled axis's weight tables, and the row scratch when both axes scale
@@ -109,7 +117,12 @@ showing after the next `set` of the directory. `DURATION` is a number and
 `s`, `m`, `h` or `d`, such as `30m`: at least `1m`, whole minutes, at most
 `7d`. The files go sorted by name, or shuffled once with `--shuffle`;
 `--mode`, `--fill`, `--filter` and `--transition` apply to every file, as
-for one image: each step animates like one image's `set`. At most 10,000 files are listed: a larger directory is
+for one image: each step animates like one image's `set`. An animated
+file shows its first frame, checked per step like one `set`: at most 64
+frames and 64 MiB of frames, past which that step fails (`draw_failed`
+in `query` until the next one) — diagnose with `scootbg set FILE` on the
+file itself. `--no-animate` with `--every` is a usage error (exit 2):
+stilling is per image, so still one file at a time. At most 10,000 files are listed: a larger directory is
 refused outright (exit 1, naming the cap) rather than stalling the
 daemon's loop to list it. So is a directory with an entry that cannot be
 read (exit 1, naming the entry and the operating system's reason). The first file shows before `set` returns, as an image

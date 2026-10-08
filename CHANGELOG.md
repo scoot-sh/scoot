@@ -47,7 +47,13 @@ scoot has not cut a numbered release yet; entries are dated.
   `--no-animate` is passed: at most 64 frames and 64 MiB of frames,
   past which the `set` is refused (every output keeps what it showed)
   and `--no-animate` shows the first frame as a still instead. Playing
-  frame by frame is a follow-up. See [Images and
+  frame by frame is a follow-up. A `--no-animate` still is live-only:
+  after a restart the caps are checked again, so an over-cap animation
+  is refused then. Slideshows step through animated files showing each
+  first frame (checked per step); `--no-animate` with `--every` is
+  refused. With a new daemon and an old client, an over-cap animation
+  that used to show its first frame is now refused (upgrade for
+  `--no-animate`). See [Images and
   color](site/src/content/docs/scootbg/images.md).
 
 

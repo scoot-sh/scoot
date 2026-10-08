@@ -178,7 +178,10 @@ every DURATION, on one timer, without polling the directory. DURATION is a
 number and `s`, `m`, `h` or `d`, such as `30m`: at least `1m`, whole
 minutes, at most `7d`. The files are tried sorted by name, or shuffled
 once with --shuffle; a file that is not an image fails to draw when its
-turn comes (as a `set` of it would) until the next rotation. At most
+turn comes (as a `set` of it would) until the next rotation. An animated
+file shows its first frame, checked per step like one `set` (past 64
+frames or 64 MiB of frames that step fails); `--no-animate` with
+`--every` is a usage error: stilling is per image. At most
 10,000 files are listed: a larger directory is refused, naming the cap,
 rather than stalling the daemon's loop to list it. The first
 file shows before `set` returns, as an image does. A new `set`, a `clear`
@@ -223,7 +226,8 @@ PNG's eXIf chunk).
                      bilinear or nearest (hard pixels, for pixel art)
     --no-animate     show the first frame only: a still with zero idle
                      cost, for an animation past the size cap or where
-                     stillness is wanted (images only; a color takes none)
+                     stillness is wanted (one image only: a color or a
+                     slideshow takes none)
     --sha256 HEX     pin a URL's bytes (64 hex digits, as `sha256sum`
                      prints): anything else fails instead of showing
     --every DURATION rotate through a directory: its files in turn, one
@@ -293,13 +297,17 @@ replaced color does. Prints nothing on success.
 
 The choice is saved and shown again when the daemon next starts (see
 `scootbg daemon --help`): a color at once, an image once it has decoded.
+A `--no-animate` still is live-only: after a restart the animation caps
+are checked again, so an over-cap animation is refused then and the
+output loses its wallpaper until the next `set`.
 
 Exit status: 0 once shown; 1 when no daemon is running, the output is
 unknown, the image cannot be shown, the directory holds no files, holds
 more than 10,000 files, or has an unreadable entry, or
 drawing failed (the daemon's stderr
 says why); 2 for a usage error, such as a malformed color, an unknown
-mode, a directory without --every, or an --every without a directory.
+mode, a directory without --every, an --every without a directory, or a
+--no-animate with --every.
 
 EXAMPLES:
     scootbg set '#1e1e2e'
@@ -593,6 +601,9 @@ pub enum Error {
     /// output (or one `--output`), not per workspace; map images or colors
     /// per workspace instead.
     SlideshowWithWorkspace(String),
+    /// `--no-animate` with `--every`: stilling is per image, and a
+    /// slideshow steps through many (each checked like one `set`).
+    NoAnimateWithEvery,
     /// A URL with a NUL byte.
     UrlNul,
     /// `--workspace` empty, too long, or with a NUL byte.
@@ -713,6 +724,13 @@ impl fmt::Display for Error {
                 "`{target}` is a directory: a slideshow runs on every output (or one \
                  `--output`), not per workspace; map an image or a color with \
                  `--workspace` instead (try `scootbg set --help`)"
+            ),
+            Self::NoAnimateWithEvery => write!(
+                f,
+                "`--no-animate` stills one image, and a slideshow steps through a \
+                 directory (each step checked like one `set`): drop `--every` to \
+                 still a file (try `scootbg set --help`)"
+            ),
             ),
             Self::UrlNul => write!(f, "the image URL has a NUL byte"),
             Self::BadWorkspace { value, reason } => write!(
@@ -1133,7 +1151,8 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         })
     };
     let mut target: Option<String> = None;
-    // Indexed as `flags` (the last, `--no-animate`, is a boolean: no value).
+    // Indexed as `flags`; the last, `--no-animate`, is a boolean handled
+    // above and never lands here (its slot stays `None`).
     let mut values: [Option<String>; 13] = Default::default();
     // `--shuffle` takes no value, so it is kept out of `flags` (whose
     // machinery reads one) and handled here, bare only.
@@ -1311,6 +1330,9 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         }
         let every = every.ok_or_else(|| Error::DirectoryNeedsEvery(argument.clone()))?;
         let every_secs = crate::rotation::parse_every(&every).map_err(Error::BadEvery)?;
+        if no_animate {
+            return Err(Error::NoAnimateWithEvery);
+        }
         let path = absolute(&argument)?;
         return Ok(Command::Client(Request::Set {
             show: Show::Slideshow(SlideshowRequest {

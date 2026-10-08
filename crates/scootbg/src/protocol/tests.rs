@@ -1075,3 +1075,17 @@ fn animate_absent_animates_false_stills_anything_else_refuses() {
         Err(RequestError::AnimateWithClear)
     ));
 }
+
+#[test]
+fn animate_with_a_directory_is_refused() {
+    // A slideshow steps through many images, each checked like one `set`:
+    // `animate` stills one image, so a directory takes none.
+    assert!(matches!(
+        parse(
+            br#"{"protocol":1,"type":"set","directory":"/pics","every":"1800s","animate":"false"}"#
+        ),
+        Err(RequestError::AnimateWithSlideshow)
+    ));
+    let message = RequestError::AnimateWithSlideshow.to_string();
+    assert!(message.contains("slideshow"), "{message}");
+}

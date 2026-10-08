@@ -665,3 +665,163 @@ fn a_slideshow_stops_when_its_directory_goes_away() {
 
     kill(&session, &mut daemon);
 }
+
+/// A two-frame 64×64 GIF: red, then blue.
+fn write_anim_gif(path: &Path) {
+    let palette = [255u8, 0, 0, 0, 0, 255];
+    let file = std::fs::File::create(path).unwrap();
+    let mut encoder = gif::Encoder::new(file, 64, 64, &palette).unwrap();
+    for index in [0u8, 1] {
+        let frame = gif::Frame {
+            width: 64,
+            height: 64,
+            delay: 10,
+            buffer: std::borrow::Cow::Owned(vec![index; 64 * 64]),
+            ..Default::default()
+        };
+        encoder.write_frame(&frame).unwrap();
+    }
+}
+
+/// A 65-frame 16×16 GIF: past the 64-frame animation cap.
+fn write_many_frame_gif(path: &Path) {
+    let palette = [255u8, 0, 0, 0, 0, 255];
+    let file = std::fs::File::create(path).unwrap();
+    let mut encoder = gif::Encoder::new(file, 16, 16, &palette).unwrap();
+    for _ in 0..65 {
+        let frame = gif::Frame {
+            width: 16,
+            height: 16,
+            delay: 10,
+            buffer: std::borrow::Cow::Owned(vec![0u8; 16 * 16]),
+            ..Default::default()
+        };
+        encoder.write_frame(&frame).unwrap();
+    }
+}
+
+/// A slideshow over animated files shows each step's first frame: the
+/// first file's pixels are its first frame, and later steps decode and
+/// draw animated files like one image's `set` (checked per step, stills
+/// with zero wakeups).
+#[test]
+fn a_slideshow_steps_over_animated_files_showing_first_frames() {
+    let Some(session) = Session::start_with("rotation-animated", 1, "") else {
+        return;
+    };
+    let dir = session.runtime_dir().join("wallpapers");
+    std::fs::create_dir_all(&dir).unwrap();
+    let anim = dir.join("01-anim.gif");
+    write_anim_gif(&anim);
+    let anim = path_str(&anim).to_owned();
+    let green = dir.join("02-green.png");
+    write_png(&green, 64, 64, [0, 255, 0]);
+    let green = path_str(&green).to_owned();
+
+    // Without the debug shortening the steps come every 30 minutes, so
+    // the first file is still on screen for the pixel check: it is the
+    // animation's first frame, not its second.
+    let mut daemon = session.daemon_logged(&[]);
+    configured(&session, 1);
+    ok(&session, &["set", path_str(&dir), "--every", "30m"]);
+    assert_eq!(
+        shows(&session)[0]["image"],
+        json!(anim),
+        "the first file shows before `set` returns"
+    );
+    let id = session.scoot_ipc(r#"{"type":"outputs"}"#)["outputs"][0]["id"]
+        .as_u64()
+        .unwrap();
+    let shot = session.scoot_screenshot(id);
+    let at = shot.at(shot.width / 2, shot.height / 2);
+    assert!(
+        at[0] > 200 && at[1] < 60 && at[2] < 60,
+        "the first frame shows (red, not the second frame's blue): {at:?}"
+    );
+    kill(&session, &mut daemon);
+
+    // Debug-shortened to 1 s: the steps advance past the animated file
+    // and cycle back to it, each drawn (never `draw_failed`).
+    let mut daemon = session.daemon_logged(&[("SCOOTBG_DEBUG_ROTATION_EVERY", "1")]);
+    configured(&session, 1);
+    ok(&session, &["set", path_str(&dir), "--every", "1m"]);
+    session.query_until("the step past the animation shows", |o| {
+        o[0]["shows"]["image"] == json!(green) && o[0]["draw_failed"] == false
+    });
+    session.query_until("the rotation cycles back to the animation", |o| {
+        o[0]["shows"]["image"] == json!(anim) && o[0]["draw_failed"] == false
+    });
+    kill(&session, &mut daemon);
+}
+
+/// A slideshow whose first file is past the animation cap still starts
+/// (like any unshowable first file), and the refusal names
+/// `--no-animate`: the first-file trial checks the caps like one image's
+/// `set`.
+#[test]
+fn a_slideshow_first_file_past_the_animation_cap_still_starts() {
+    let Some(session) = Session::start_with("rotation-animcap", 1, "") else {
+        return;
+    };
+    let mut daemon = session.daemon_logged(&[]);
+    configured(&session, 1);
+    let dir = session.runtime_dir().join("wallpapers");
+    std::fs::create_dir_all(&dir).unwrap();
+    let big = dir.join("only.gif");
+    write_many_frame_gif(&big);
+
+    let stderr = fails(&session, 1, &["set", path_str(&dir), "--every", "30m"]);
+    assert!(
+        stderr.contains("--no-animate"),
+        "the refusal names the still flag: {stderr}"
+    );
+    // The show still started: `query` reports the new directory.
+    assert_eq!(
+        rotation(&session),
+        json!({"directory": path_str(&dir), "every_secs": 1800, "shuffle": false, "files": 1})
+    );
+    kill(&session, &mut daemon);
+}
+
+/// A slideshow step over an animation past the cap fails only that
+/// step: the caps are checked per step like one image's `set`
+/// (`drive_due` runs with the checks on), so the over-cap file reports
+/// `draw_failed` until the next step, which draws again.
+#[test]
+fn a_slideshow_step_past_the_animation_cap_fails_only_its_turn() {
+    let Some(session) = Session::start_with("rotation-stepcap", 1, "") else {
+        return;
+    };
+    // Debug-shortened to 1 s, so the failing step comes at once.
+    let mut daemon = session.daemon_logged(&[("SCOOTBG_DEBUG_ROTATION_EVERY", "1")]);
+    configured(&session, 1);
+    let dir = session.runtime_dir().join("wallpapers");
+    std::fs::create_dir_all(&dir).unwrap();
+    let fine = dir.join("01-ok.png");
+    write_png(&fine, 64, 64, [0, 255, 0]);
+    let fine = path_str(&fine).to_owned();
+    let big = dir.join("02-big.gif");
+    write_many_frame_gif(&big);
+
+    ok(&session, &["set", path_str(&dir), "--every", "1m"]);
+    // The over-cap file fails its turn like any undecodable file: the
+    // screen keeps the previous image, flagged `draw_failed` with the
+    // cap refusal naming `--no-animate`. Then the next step draws again.
+    let failed = session.query_until("the over-cap step fails its turn", |o| {
+        o[0]["draw_failed"] == true
+    });
+    let why = failed[0]["draw_error"].as_str().unwrap_or_default();
+    assert!(
+        why.contains("--no-animate"),
+        "the failed step names the still flag: {why}"
+    );
+    assert_eq!(
+        failed[0]["shows"]["image"],
+        json!(fine),
+        "the screen keeps the previous image: {failed:?}"
+    );
+    session.query_until("the next step draws again", |o| {
+        o[0]["shows"]["image"] == json!(fine) && o[0]["draw_failed"] == false
+    });
+    kill(&session, &mut daemon);
+}
