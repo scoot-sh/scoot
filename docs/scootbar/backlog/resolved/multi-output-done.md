@@ -33,7 +33,7 @@ Not built, and why: a per-output **`font-size`** (the em is the same logical
 size everywhere; each bar still draws at its own output's real device
 pixels, so it scales with the output; a per-output size needs the style
 threaded per output, filed as
-[multi-output-font-size](multi-output-font-size.md)); the per-output
+[multi-output-font-size](multi-output-font-size-done.md)); the per-output
 **workspace switch** waits on scoot's
 [output-targeted switch](../../backlog/ipc/workspace-switch-targeted-output.md)
 (open): each bar already shows its own output's workspaces, but only the

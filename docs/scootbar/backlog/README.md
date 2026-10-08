@@ -151,7 +151,7 @@ The [umbrella](resolved/data-source-modules-done.md) holds the rules they share 
 - [Network: a connect or menu command that never exits blocks the next one](resolved/network-child-stuck-done.md) (low) — RESOLVED 2026-10-04 in #428: a second connect/menu replaces the running child (SIGTERM, then SIGKILL), drop ends both; scan list resets on the re-dump's first page (#403 review)
 - [Network: the WiFi picker can list a network twice after a scan handover](resolved/network-scan-refill-duplicates-done.md) (low) — RESOLVED 2026-10-08 in #507: the queued refill owns the handed reset when the in-flight scan consumes or cancels it
 - [Network: flaky menu-file tests race the menu child](resolved/network-menu-file-race-done.md) (high) — RESOLVED 2026-10-04: every `read_to_string` after a menu/connect spawn polls for the expected content (`wait_file`); 18/300 flakes before, 0 after
-- [Per-output font size](multi-output-font-size.md) (low): deferred 2026-10-01 by the maintainer; left M3
+- [Per-output font size](resolved/multi-output-font-size-done.md) (low): deferred 2026-10-01 by the maintainer, left M3; built 2026-10-08
 
 ### Ongoing (no milestone, applies to all)
 - [The resource ratchet](lightest.md) (high)
