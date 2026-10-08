@@ -703,8 +703,8 @@ win), and "did not run" is a daemon that could not start here.
 `scootbg-bilinear` is scootbg with `--filter bilinear`, shown for
 context only and never gated (see the notes). The raw runs, versions,
 store paths and every file weighed are in
-[`bench/2026-09-27-scoot/`](bench/2026-09-27-scoot/), with sway's in
-[`bench/2026-09-27-sway/`](bench/2026-09-27-sway/).
+[`bench/2026-09-27-scoot/`](../../dev/benches/scootbg/2026-09-27-scoot/), with sway's in
+[`bench/2026-09-27-sway/`](../../dev/benches/scootbg/2026-09-27-sway/).
 
 | Row | scootbg | scootbg-bilinear | awww | hyprpaper | swaybg | wbg | wpaperd |
 |---|---|---|---|---|---|---|---|

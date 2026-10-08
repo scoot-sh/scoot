@@ -492,7 +492,7 @@ BCDA, CDAB), each in a fresh session:
   defaults (no config file).
 - **scoot-gles**: the same with `--renderer gles`.
 - **niri-off**: niri with
-  [`scripts/niri-ab/niri-anim-off.kdl`](../scripts/niri-ab/niri-anim-off.kdl),
+  [`scripts/niri-ab/niri-anim-off.kdl`](../../scripts/niri-ab/niri-anim-off.kdl),
   written for this benchmark to match scoot's defaults as far as niri
   allows. It sets 12 px gaps, half-width new columns, a 3 px ring in scoot's
   two colors around every window (niri's `border`; its `focus-ring`, which
@@ -508,7 +508,7 @@ consecutive half-seconds):
 | Scene | What happens |
 |---|---|
 | idle | 20 s with nothing happening |
-| pointer | 1200 absolute pointer motions at 120 Hz for 10 s, alternating between two points in two different windows. They are injected into the **host** by one persistent `zwlr_virtual_pointer_v1` device ([`scripts/niri-ab/vptr`](../scripts/niri-ab/vptr)), so both compositors get the same `wl_pointer` events from the same source. |
+| pointer | 1200 absolute pointer motions at 120 Hz for 10 s, alternating between two points in two different windows. They are injected into the **host** by one persistent `zwlr_virtual_pointer_v1` device ([`scripts/niri-ab/vptr`](../../scripts/niri-ab/vptr)), so both compositors get the same `wl_pointer` events from the same source. |
 | relayout | 200 layout actions at 20 a second, cycling focus left, left, right, right, then move column left and right, through each compositor's own IPC client |
 | shot-ipc | 10 captures through each compositor's own screenshot path, 200 ms apart, pointer omitted |
 | shot-grim | 10 captures by `grim` against the nested session, 200 ms apart |

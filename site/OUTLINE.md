@@ -118,16 +118,16 @@ ever renders. Proposed root:
 
 ```text
 dev/
-  README.md            # "you are a contributor; start here" (from dev/README.md)
+  README.md            # "you are a contributor; start here" (from docs/development.md)
   backlog/             # docs/backlog/** verbatim (open + resolved archive)
   scootbar-backlog/    # docs/scootbar/backlog/** (kept separate: separate README index)
   scootbg-backlog/     # docs/scootbg/backlog/**
   roadmap/             # docs/roadmap/** verbatim
-  benches/             # dev/benches/benchmarks.md + dev/benches/scootbar + dev/benches/scootbg
-  spikes/              # dev/spikes/scootbar/**
-  forks.md             # dev/forks.md verbatim
+  benches/             # docs/benchmarks.md + docs/scootbar/bench + docs/scootbg/bench
+  spikes/              # docs/scootbar/spikes/**
+  forks.md             # docs/forks.md verbatim
   ratchet/             # docs/scootbar/backlog/lightest.md history + resource prose
-  research/            # dev/research/scootbar-research.md + dev/research/scootbar-testing.md + dev/research/scootbg-testing.md
+  research/            # docs/scootbar/research.md + docs/scootbar/testing.md + docs/scootbg/testing.md
 ```
 
 What moves, exactly:
@@ -135,10 +135,10 @@ What moves, exactly:
 - `docs/backlog/**` (all areas + `resolved/` + `claims/`) → `dev/backlog/`
 - `docs/scootbar/backlog/**`, `docs/scootbg/backlog/**` → `dev/scootbar-backlog/`, `dev/scootbg-backlog/`
 - `docs/roadmap/**` → `dev/roadmap/`
-- `dev/benches/benchmarks.md`, `dev/benches/scootbar/**`, `dev/benches/scootbg/**` → `dev/benches/`
-- `dev/spikes/scootbar/**` → `dev/spikes/`
-- `dev/forks.md` → `dev/forks.md`
-- `docs/scootbar/backlog/lightest.md`, `dev/research/scootbar-research.md`, `dev/research/scootbar-testing.md`, `dev/research/scootbg-testing.md`, `dev/README.md` → `dev/ratchet/`, `dev/research/`, `dev/README.md`
+- `docs/benchmarks.md`, `docs/scootbar/bench/**`, `docs/scootbg/bench/**` → `dev/benches/`
+- `docs/scootbar/spikes/**` → `dev/spikes/`
+- `docs/forks.md` → `dev/forks.md`
+- `docs/scootbar/backlog/lightest.md`, `docs/scootbar/research.md`, `docs/scootbar/testing.md`, `docs/scootbg/testing.md`, `docs/development.md` → `dev/ratchet/`, `dev/research/`, `dev/README.md`
 - Stays in `docs/` as site sources (rewritten in place, then published): `configuration.md`, `ipc.md`, `nix.md`, `tty.md`, `protocols.md`, `scootbar/cli.md`, `scootbar/icons.md`, `scootbg/cli.md`, `scootbar/README.md`, `scootbg/README.md`, `examples/**`, `assets/**`
 
 ## Every place that hard-codes those paths
