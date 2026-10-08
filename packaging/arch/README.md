@@ -82,6 +82,10 @@ line to drop if it ever misbehaves.
    commit it (CI fails when the committed file drifts).
 4. Copy each directory's contents into its AUR repo (`scoot`,
    `scootbg`, `scootbar`, `scoot-git`, ...) and push there by hand.
+   Build `scootbg` before `scoot`: scoot's versioned dependency on it
+   resolves against no repository, so it installs from the just-built
+   package (CI does the same; an AUR helper builds the chain in this
+   order on its own).
 
 Rebuilding with the opt-in tiers (`--features gpu-scanout` for the
 GBM scanout path, `--features xwayland` plus the `xwayland` runtime
