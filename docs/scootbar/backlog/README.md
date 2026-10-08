@@ -129,7 +129,7 @@ The [umbrella](resolved/data-source-modules-done.md) holds the rules they share 
 - [Move the tray onto `dbus::link`](resolved/tray-onto-dbus-link-done.md) (low): one copy of the bus lifecycle, and whether the modules should share one connection — RESOLVED 2026-10-03
  - [Icons on every module that shows a value](resolved/module-icons-done.md) (medium): battery, brightness, bluetooth, media and window-title take icons; workspaces takes none — RESOLVED 2026-10-04 in #411
 - [**An icon on exec and push modules**](resolved/payload-icons-done.md) — RESOLVED 2026-10-04: `icon`, `icon-path`, `icon-image` and `show-text` on `exec` and `push`, and a per-update `icon` in the payload (version 1, ignored by older bars) ([cli.md](../cli.md#exec))
-- [Separators between groups of modules](resolved/separator-groups-done.md) (low): a line between groups, not every pair — RESOLVED 2026-10-07
+- [Separators between groups of modules](resolved/separator-groups-done.md) (low): a line between groups, not every pair — RESOLVED 2026-10-07 in #516
 - [Popups that match rounded windows](resolved/popup-corners-done.md) (low): corners for the popups — RESOLVED 2026-10-04 in #429
 - [The help's module list doubles with every module](resolved/cli-help-matrix-done.md) (medium): 519 macro arms after the power module; build it at run time — RESOLVED 2026-10-04 in #417
 - [Network: a second radio's empty scan replaces the real one](resolved/network-multi-radio-scan-done.md) (medium): the last interface's scan dump wins, so a dongle or hotspot interface can empty the list (#403 review) — RESOLVED 2026-10-04 in #422
