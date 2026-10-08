@@ -179,7 +179,7 @@ jobs:
             "$DISTRO_IMAGE" bash -euo pipefail -c '
               apt-get update -qq
               apt-get install -y -qq curl ca-certificates build-essential pkg-config \
-                dpkg-dev lintian desktop-file-utils \
+                dpkg-dev lintian desktop-file-utils python3 \
                 libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0
               curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs \
                 | sh -s -- -y --default-toolchain "$0" --profile minimal
