@@ -310,6 +310,7 @@ falsify. Read `flexwm` there as `scoot`.
 
 ### --tty / backend
 - [Config-file key for the DRM device](./resolved/tty-gpu-config-key-done.md)
+- [Unprivileged `--tty` display stays dead after the seat daemon loses the VT-switch-back master race](./core/seatd-reacquire-after-vt-switch.md) — medium, filed 2026-10-08 from PR #530's review (daily-drive: the VT switch is the recovery path back to a running session): the kernel gates `SET_MASTER` on privilege and seatd never retries its lost re-acquire race, so an unprivileged session stays dark (`live: false`, alive) until a retry wins or the session restarts; candidates are reopen-through-libseat plus rebuild, a seat-side retry, or a privileged helper
 - [Switching back to a scoot `--tty` session fails to reactivate DRM while the greeter holds master](./resolved/vt-switch-back-greeter-master-done.md) — found live during #492's review (daily-drive: a VT switch is the recovery path back to a running session; not the 05b defect)
   — RESOLVED 2026-09-18: `[tty] gpu` names the device `--gpu` would
   (exactly that device, no fallback, fail-closed startup error; `--gpu`

@@ -102,3 +102,21 @@ failure, session alive, greeter untouched. Full recovery of an
 unprivileged session needs seatd to re-acquire (or hand over) master --
 left as a maintainer finding: seatd-as-root *can* take the vacant
 master (proven), it just never retries after losing the race.
+
+## Follow-up (2026-10-08, PR #530 review round 3)
+
+That maintainer finding is now tracked, not just prose: see
+[Unprivileged `--tty` display stays dead after the seat daemon loses
+the VT-switch-back master race](../core/seatd-reacquire-after-vt-switch.md)
+(medium) -- reopen-through-libseat plus rebuild, a seat-side retry, or
+a privileged helper, with the measured evidence and the edges to pin.
+
+Resolving this ticket stays right: its done-condition (retry with a
+bound, then a visible message and a way back, never a silent black
+screen) is met -- every switch back retries, the message names
+holder-or-vacancy, `live: false` is machine-readable, the session stays
+alive, and the docs now state both recoveries plainly (retry the switch
+-- each return is a new race; restart the session if it never comes
+back, since a fresh start re-acquires master through the seat daemon).
+What remains is a recovery improvement with its own ticket, not a
+missing way back.
