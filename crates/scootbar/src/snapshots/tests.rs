@@ -31,6 +31,7 @@ const NAMES: &[&str] = &[
     "bar-rounded-1.5x-alpha",
     "bar-translucent-1x",
     "bar-separated-1x",
+    "bar-separated-groups-1x",
     "bar-hover-1x",
     "bar-hover-1.5x",
     "workspaces-pill-1x",
@@ -139,6 +140,9 @@ struct Look {
     /// The separator's width; with a nonzero one the scene has all three
     /// modules on the left, so there are gaps to draw it in.
     separator: u32,
+    /// Only the gap between the second and third module holds a line (as a
+    /// `["a", "b", "|", "c"]` list does): the first two are one group.
+    grouped: bool,
     /// The middle module's margin.
     margin: u32,
     /// The pointer over the right module: its text in the `hover` token,
@@ -153,6 +157,7 @@ impl Default for Look {
             radius: 0,
             opacity: u8::MAX,
             separator: 0,
+            grouped: false,
             margin: 0,
             hover: false,
         }
@@ -212,14 +217,23 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
         FontVec::try_from_vec(testfont::build()).unwrap(),
     ));
     let together = look.separator > 0;
+    let sections: Vec<Section> = modules
+        .iter()
+        .map(|m| if together { Section::Left } else { m.0 })
+        .collect();
     let members: Vec<Member> = modules
         .iter()
         .enumerate()
-        .map(|(module, m)| Member {
+        .map(|(module, _)| Member {
             hover: look.hover && module == 2,
             module,
-            section: if together { Section::Left } else { m.0 },
+            section: sections[module],
             margin: if module == 1 { look.margin } else { 0 },
+            separator_before: if look.grouped {
+                module == 2
+            } else {
+                module > 0 && sections[module - 1] == sections[module]
+            },
         })
         .collect();
     let mut scene = Scene::with_members(&members);
@@ -337,6 +351,24 @@ fn bar_with_separators_and_a_margin_at_1x() {
     check(
         "bar-separated-1x",
         "the 160x20 bar at scale 1, all modules left, spacing 10, separator 2, middle margin 3",
+        &Image::from_xrgb(&pixels, w, h, true),
+    );
+}
+
+/// Grouped separators: the first two modules are one group (no line), the
+/// mark before the third draws the only line, as a
+/// `["a", "b", "|", "c"]` list does.
+#[test]
+fn bar_with_grouped_separators_at_1x() {
+    let look = Look {
+        separator: 2,
+        grouped: true,
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
+    check(
+        "bar-separated-groups-1x",
+        "the 160x20 bar at scale 1, all modules left, spacing 10, separator 2, one line between the second and third module",
         &Image::from_xrgb(&pixels, w, h, true),
     );
 }

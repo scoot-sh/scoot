@@ -121,23 +121,45 @@ pub struct Member {
     pub margin: u32,
     /// Whether it is tinted under the pointer (`Placed::hoverable`).
     pub hover: bool,
+    /// Whether the gap before it holds a separator's line: in a section
+    /// whose list has no `"|"` mark, every gap but the first; in one with
+    /// marks, only the gaps a mark stands in (see `crate::layout`).
+    pub separator_before: bool,
 }
 
 /// The modules `layout` places, as members, in its order. A module that
-/// did not start (unavailable) is skipped, as it takes no space.
+/// did not start (unavailable) is skipped, as it takes no space; a
+/// [`layout::SEPARATOR`] mark between two modules that do show puts the
+/// line in the gap between them, however many unstarted modules stand in
+/// between. No heap allocation beyond the returned list (cold path: a
+/// settle, a reload).
 pub fn members(layout: &layout::Layout, placed: &[Placed]) -> Vec<Member> {
-    layout
-        .placed()
-        .filter_map(|(section, id)| {
-            let module = placed.iter().position(|p| p.id == id)?;
-            Some(Member {
+    let mut members = Vec::new();
+    for section in Section::ALL {
+        let list = layout.section(section);
+        let marked = layout.has_markers(section);
+        let mut need = false;
+        let mut first = true;
+        for &id in list {
+            if layout::is_separator(id) {
+                need = true;
+                continue;
+            }
+            let Some(module) = placed.iter().position(|p| p.id == id) else {
+                continue;
+            };
+            members.push(Member {
                 module,
                 section,
                 margin: layout.margin_of(id),
                 hover: placed[module].hoverable(),
-            })
-        })
-        .collect()
+                separator_before: if marked { !first && need } else { !first },
+            });
+            need = false;
+            first = false;
+        }
+    }
+    members
 }
 
 /// One output's modules as last measured and laid out. Everything here is
@@ -160,6 +182,10 @@ pub struct Scene {
     next: Vec<Span>,
     /// Which members are tinted under the pointer.
     hoverable: Vec<bool>,
+    /// Whether the gap before each member holds a separator's line (see
+    /// [`Member::separator_before`]). A module's own repaint never reaches
+    /// a gap, so the lines are painted only with the whole bar.
+    separators: Vec<bool>,
     /// The pointer's x on this output's bar, device pixels, while it is
     /// over it.
     pointer: Option<u32>,
@@ -175,7 +201,8 @@ pub struct Scene {
 
 impl Scene {
     /// A scene showing the first `sections.len()` started modules, each in
-    /// its section.
+    /// its section, with every gap holding a separator (as a section list
+    /// with no `"|"` mark does).
     #[cfg(test)]
     pub fn all(sections: &[Section]) -> Self {
         let members: Vec<Member> = sections
@@ -186,6 +213,7 @@ impl Scene {
                 section,
                 margin: 0,
                 hover: false,
+                separator_before: module > 0 && sections[module - 1] == section,
             })
             .collect();
         Self::with_members(&members)
@@ -204,6 +232,7 @@ impl Scene {
                 section,
                 margin: 0,
                 hover,
+                separator_before: module > 0 && sections[module - 1] == section,
             })
             .collect();
         Self::with_members(&members)
@@ -222,6 +251,7 @@ impl Scene {
             spans: vec![Span::default(); count],
             next: vec![Span::default(); count],
             hoverable: members.iter().map(|m| m.hover).collect(),
+            separators: members.iter().map(|m| m.separator_before).collect(),
             pointer: None,
             hover: None,
             sections: members.iter().map(|m| m.section).collect(),
@@ -565,11 +595,14 @@ fn content_width(text: &Text, view: &View, em: f32) -> u32 {
 }
 
 /// The lines between neighbouring modules in a section, in the theme's
-/// `dim` token: one centered in each gap, `style.separator` wide (cut back
-/// to the gap, so a line never touches a module's span, which the
-/// module's own repaint would overwrite), from a quarter of the bar's
-/// height down to three quarters. Painted only with the whole bar: no
-/// module's repaint reaches a gap.
+/// `dim` token: one centered in each gap that asks for one (every gap in a
+/// section whose list has no `"|"` mark; only the marked gaps in one with
+/// any), `style.separator` wide (cut back to the gap, so a line never
+/// touches a module's span, which the module's own repaint would overwrite),
+/// from a quarter of the bar's height down to three quarters. A mark beside
+/// a module that shows nothing still counts: the line goes between the
+/// modules around it that do. Painted only with the whole bar: no module's
+/// repaint reaches a gap.
 fn separators(canvas: &mut Canvas<'_>, scene: &Scene, style: &Style, scale: Scale) {
     let width = device(style.separator, scale);
     if width == 0 {
@@ -578,19 +611,28 @@ fn separators(canvas: &mut Canvas<'_>, scene: &Scene, style: &Style, scale: Scal
     let height = canvas.height();
     let (top, bottom) = (height / 4, height - height / 4);
     let mut previous: Option<(Section, u32)> = None;
-    for (&span, &section) in scene.spans.iter().zip(&scene.sections) {
+    let mut marked = false;
+    for ((&span, &section), &before) in scene
+        .spans
+        .iter()
+        .zip(&scene.sections)
+        .zip(&scene.separators)
+    {
         if span.width == 0 {
+            marked |= before;
             continue;
         }
+        marked |= before;
         if let Some((was, end)) = previous {
             let gap = span.x.saturating_sub(end);
-            if was == section && gap > 0 {
+            if was == section && gap > 0 && marked {
                 let line = width.min(gap);
                 let x = end + (gap - line) / 2;
                 canvas.fill_rect(Span { x, width: line }, top, bottom, style.theme.dim);
             }
         }
         previous = Some((section, span.end()));
+        marked = false;
     }
 }
 

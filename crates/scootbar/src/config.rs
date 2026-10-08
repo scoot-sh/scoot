@@ -20,7 +20,7 @@ use serde::Deserialize;
 
 use crate::bar::{Bar, Edge, Layer, MAX_HEIGHT, Margin};
 use crate::color::Color;
-use crate::layout::{Layout, MAX_GAP, Section, check_placement};
+use crate::layout::{Layout, MAX_GAP, SEPARATOR, Section, check_placement};
 use crate::modules::Settings;
 use crate::policy::Policy;
 use crate::render::Style;
@@ -2579,7 +2579,9 @@ fn color_opt(
 }
 
 /// A `left`/`center`/`right` list: every id must name a module of this
-/// build.
+/// build, or be a [`SEPARATOR`] (`"|"`) mark where a separator goes. Marks
+/// take no place (see [`check_placement`]): they are not counted in the
+/// most, and a list with none draws every gap, as before.
 fn ids(
     path: &Path,
     section: Section,
@@ -2587,7 +2589,21 @@ fn ids(
     known: &[&'static str],
 ) -> Result<Vec<&'static str>, Error> {
     let mut placed = Vec::new();
+    let mut modules = 0usize;
     for id in ids.as_ref().map(Vec::as_slice).unwrap_or_default() {
+        if id == SEPARATOR {
+            // Bounded with the modules: a valid list holds at most one
+            // mark per gap, so anything past twice the most is hostile.
+            if placed.len() >= 2 * crate::layout::MAX_MODULES {
+                return Err(Error::Value {
+                    path: path.to_owned(),
+                    key: section_key(section),
+                    message: format!("at most {} modules", crate::layout::MAX_MODULES),
+                });
+            }
+            placed.push(SEPARATOR);
+            continue;
+        }
         // A built-in module, or one the file defines (`[button.NAME]`, ...).
         let found = crate::modules::find(id)
             .map(|spec| spec.id)
@@ -2614,13 +2630,14 @@ fn ids(
                 ),
             });
         };
-        if placed.len() >= crate::layout::MAX_MODULES {
+        if modules >= crate::layout::MAX_MODULES {
             return Err(Error::Value {
                 path: path.to_owned(),
                 key: section_key(section),
                 message: format!("at most {} modules", crate::layout::MAX_MODULES),
             });
         }
+        modules += 1;
         placed.push(found);
     }
     Ok(placed)

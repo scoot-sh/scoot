@@ -1576,6 +1576,7 @@ fn bar_scene(
         section: Section::Left,
         margin: 0,
         hover: false,
+        separator_before: false,
     }];
     let mut scene = Scene::with_members(&members);
     scene.update(

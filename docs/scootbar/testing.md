@@ -396,7 +396,8 @@ alpha plane (white where the bar is, so the cut shows) at scale 1 with
 radius 6 (`bar-rounded-1x-alpha.pgm`) and at 1.5 with half opacity
 (`bar-rounded-1.5x-alpha.pgm`), the color plane of a translucent bar
 with text blended over it, premultiplied (`bar-translucent-1x.pgm`), the
-separators and a margin (`bar-separated-1x.pgm`), and the workspaces pill
+separators and a margin (`bar-separated-1x.pgm`), separators only between
+groups (`bar-separated-groups-1x.pgm`), and the workspaces pill
 as a pill, a circle around one digit and a circle widened around two,
 at 1 and at 1.5 (`workspaces-pill-1x.pgm`, `workspaces-circle-1x.pgm`,
 `workspaces-circle-two-digits-1x.pgm` and the `-1.5x` ones); and, from

@@ -2,6 +2,8 @@
 //! workspaces pill's shape. Each is bounded, and a hostile value is a loud
 //! refusal naming its key rather than a size the layout must survive.
 
+#[cfg(any(feature = "clock", feature = "workspaces"))]
+use super::tests::MODULE;
 use super::tests::read;
 #[cfg(feature = "workspaces")]
 use crate::modules::workspaces::{Display, Shape};
@@ -12,6 +14,9 @@ fn the_defaults_add_nothing() {
     assert_eq!(config.layout.separator, 0);
     assert!(config.layout.margins.is_empty());
     assert_eq!(config.style().separator, 0);
+    assert!(!config.layout.has_markers(crate::layout::Section::Left));
+    assert!(!config.layout.has_markers(crate::layout::Section::Center));
+    assert!(!config.layout.has_markers(crate::layout::Section::Right));
     #[cfg(feature = "workspaces")]
     assert_eq!(config.modules.workspaces.pill, Default::default());
 }
@@ -33,6 +38,52 @@ fn a_separator_is_a_line_that_fits_in_the_spacing() {
             "{text:?}: {error}"
         );
     }
+}
+
+#[test]
+#[cfg(all(feature = "clock", feature = "workspaces"))]
+fn separator_marks_group_modules_in_a_section() {
+    let config = read("left = [\"clock\", \"|\", \"workspaces\"]\n").unwrap();
+    assert_eq!(config.layout.left, ["clock", "|", "workspaces"]);
+    assert!(config.layout.has_markers(crate::layout::Section::Left));
+    assert!(!config.layout.has_markers(crate::layout::Section::Center));
+    // A list with no marks behaves as before.
+    let plain = read("left = [\"clock\", \"workspaces\"]\n").unwrap();
+    assert!(!plain.layout.has_markers(crate::layout::Section::Left));
+}
+
+#[test]
+#[cfg(any(feature = "clock", feature = "workspaces"))]
+fn a_stray_mark_is_refused_naming_the_list() {
+    for (text, mark) in [
+        (
+            format!("left = [\"|\", \"{MODULE}\"]\n"),
+            "no module before it",
+        ),
+        (
+            format!("left = [\"{MODULE}\", \"|\"]\n"),
+            "no module after it",
+        ),
+        (
+            format!("left = [\"{MODULE}\", \"|\", \"|\"]\n"),
+            "no module between them",
+        ),
+        (
+            format!("center = [\"|\", \"{MODULE}\"]\n"),
+            "no module before it",
+        ),
+    ] {
+        let error = read(&text).unwrap_err().to_string();
+        assert!(
+            error.contains("left") || error.contains("center"),
+            "{text:?}: {error}"
+        );
+        assert!(error.contains(mark), "{text:?}: {error}");
+    }
+    // Unknown ids are still unknown, with the mark named in the build's
+    // list only by its absence.
+    let error = read("left = [\"|\", \"wifi\"]\n").unwrap_err().to_string();
+    assert!(error.contains("no module `wifi`"), "{error}");
 }
 
 #[test]

@@ -112,6 +112,7 @@ fn bar(width: u32, scale: Scale, modules: Vec<Iconic>) -> Image {
             module,
             section: Section::Left,
             margin: 0,
+            separator_before: module > 0,
         })
         .collect();
     let mut scene = Scene::with_members(&members);

@@ -97,19 +97,19 @@ pub const FLAG_DOCS: &[FlagDoc] = &[
         flag: "--left",
         takes: "IDS",
         default: "empty (the clock in the center, in a build with the clock)",
-        description: "the modules along the left, comma-separated, in order",
+        description: "the modules along the left, comma-separated, in order; a `|` entry marks where a separator goes",
     },
     FlagDoc {
         flag: "--center",
         takes: "IDS",
         default: "empty (the clock in the center, in a build with the clock)",
-        description: "the modules along the center, comma-separated, in order",
+        description: "the modules along the center, comma-separated, in order; a `|` entry marks where a separator goes",
     },
     FlagDoc {
         flag: "--right",
         takes: "IDS",
         default: "empty",
-        description: "the modules along the right, comma-separated, in order",
+        description: "the modules along the right, comma-separated, in order; a `|` entry marks where a separator goes",
     },
     FlagDoc {
         flag: "--padding",

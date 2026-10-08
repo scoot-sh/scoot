@@ -22,7 +22,7 @@
 use std::fmt;
 
 use crate::bar::{Bar, Edge, Layer, Margin};
-use crate::layout::{Layout, Section};
+use crate::layout::{Layout, Section, is_separator};
 
 #[cfg(test)]
 mod tests;
@@ -254,7 +254,8 @@ impl Policy {
     /// Every module any output may show, each once, for the one start-up:
     /// the shared layout's, then the overrides' that it lacks, in file
     /// order. The sections are where each was first placed; each output's
-    /// own placement is [`Policy::resolve`]'s.
+    /// own placement is [`Policy::resolve`]'s. A `"|"` mark is not a
+    /// module: it is never started, so it is left out.
     pub fn to_start(&self, layout: &Layout) -> Layout {
         let mut all = layout.clone();
         for over in &self.overrides {
@@ -265,6 +266,9 @@ impl Policy {
                 (Section::Right, &own.right),
             ] {
                 for &id in ids {
+                    if is_separator(id) {
+                        continue;
+                    }
                     if all.placed().any(|(_, placed)| placed == id) {
                         continue;
                     }
