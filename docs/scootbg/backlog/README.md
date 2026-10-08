@@ -103,7 +103,7 @@ full per-feature cycle.
     mostly clean program code the kernel can reclaim, and closing it needs
     a separate daemon binary, which is post-v1. Every other row is a win
     or a tie
-    - [Idle memory above the floor: the daemon's resident code](idle-code-pages.md)
+    - [Idle memory above the floor: the daemon's resident code](resolved/idle-code-pages-done.md)
       — the failing class, waived for v1: where the pages are, the levers
       tried, and the separate daemon binary as the post-v1 option
 12. [**Tests: unit, and end to end on headless scoot**](resolved/testing-done.md)

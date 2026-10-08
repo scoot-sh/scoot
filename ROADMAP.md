@@ -2229,7 +2229,7 @@ medium priority — the effective top of what's actually open.
    holds 1.0–1.5 MiB less (re-run 2026-09-28, after the cheap levers).
    That class is waived for v1 by the user (2026-09-28); the separate
    daemon binary that would close it is post-v1
-   ([plan](docs/scootbg/backlog/idle-code-pages.md)). Item 12
+   ([plan](docs/scootbg/backlog/resolved/idle-code-pages-done.md)). Item 12
    ([record](docs/scootbg/backlog/resolved/testing-done.md)): a `cargo
    fuzz` target over the whole image path on the stable toolchain, its
    corpus replayed in CI by an ordinary test; a live `set` that cannot be

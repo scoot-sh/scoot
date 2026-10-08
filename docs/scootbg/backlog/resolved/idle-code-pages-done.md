@@ -1,9 +1,10 @@
 ---
 title: "Idle memory above the floor: the daemon's resident code"
-status: "open"
-area: "scootbg"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-08"
 ---
 
 # Idle memory above the floor: the daemon's resident code
@@ -283,6 +284,76 @@ processes.) The same prototype without the two libc levers: 2.82 RSS and
 - **Beyond that**: `serde_json` out of the daemon (hand-written JSON, a
   few tens of KiB) would widen the margin; the Wayland crates stay at 3,
   since scoot shares them.
+
+## Re-measurement (2026-10-08): measured and declined
+
+Re-measured on the current tree instead of building the split, and
+declined the split: the prize is about 1 MiB of kernel-reclaimable file
+pages, and every lever that reaches it is machinery out of proportion to
+that saving.
+
+**Method.** Release build of `3634fa4b` (`.text` 1,204,292 B, `.rodata`
+158,120 B, stripped file 1,643,296 B) with its own `CARGO_TARGET_DIR`,
+on the Asahi M2 under `nix develop --offline`, against headless scoot
+from the same tree at 1× 1920×1080: `scootbg daemon`, one `set` of
+`#1e1e2e` or of `site/public/og-cat.jpg`, then 30 s idle. RSS/PSS from
+`/proc/PID/smaps_rollup`, the mapping split from `/proc/PID/smaps`
+(`r-xp`/`r--p` of the `scootbg` mapping, `r-xp` of `libc.so.6`,
+`[heap]`). Own `XDG_RUNTIME_DIR` per run (mode 700), scratch `HOME`,
+nothing in `/run/user/1000`. This box runs 16 KiB pages, so one
+fault-around window is four of them; the Sept attribution ran on 4 KiB
+pages, and the two are compared as KiB resident, not as page counts.
+
+**Numbers** (load average beside each; the box is shared, load 2–10):
+
+| Run | Load (1 min) | RSS, KiB | PSS, KiB | Anonymous, KiB |
+|---|---|---|---|---|
+| color 1 | 2.86 | 3,568 | 2,269 | 368 |
+| color 2 | 2.15 | 3,600 | 2,134 | 384 |
+| color 3 | 2.31 | 3,584 | 1,837 | 368 |
+| image 1 (og-cat, fill) | 6.26 | 12,176 | 6,334 | 656 |
+| image 2 (og-cat, fill) | 6.36 | 12,176 | 6,228 | 656 |
+
+Mapping split at idle (extra runs, same setup; color at load 10.01,
+image at 7.85), KiB resident:
+
+| Mapping | Color | Image |
+|---|---|---|
+| own executable (`r-xp`) | 1,344 | 1,408 |
+| own read-only (`r--p`) | 64 | 64 |
+| `libc.so.6` executable | 1,472 | 1,472 |
+| `[heap]` | 48 | 48 |
+
+Lifetime `voluntary_ctxt_switches` 8–10 after start, one `set`, one
+`query` and the 30 s idle: nothing wakes the idle daemon. The picture
+is the ticket's: nearly all of the daemon's mapped code is resident
+(1,344 KiB of a 1,552 KiB executable mapping with a color), the image
+adds one 64 KiB window of decode path, and RSS minus anonymous
+(3,216 KiB with a color) is file-backed pages the kernel drops under
+pressure and reads back on demand. The unreclaimable part is the
+anonymous 368 KiB (656 with an image).
+
+**Bounds on what is left.** No non-split lever reaches more than a
+fraction of a MiB: the Sept attribution (same `.text` order, 1.29
+against 1.20 MiB now) found 277 KiB of resident decoder/scaler code
+that never runs on the color path plus 113 KiB of never-run backtrace
+code, 390 KiB together, and backtrace code cannot leave a stable
+binary; `serde_json` out is a few tens of KiB for hand-rolled protocol
+parsing; the parked saver thread is 128 KiB of `libc` on the color
+rows only, for a second idle thread. The split's own prototype reached
+1.26 MiB RSS / 0.97 MiB PSS on the color rows — that is the ceiling,
+and it costs a second package, a decode worker with a sealed-memfd
+socket protocol, spawn and version-skew handling, and packaging, CI
+and Nix changes, in a daemon held to the crash-is-data-loss bar. The
+maintainer cancelled a 1,700-line linker scheme for under 0.5 MiB on
+the same grounds; this is the same trade at about twice the bytes and
+several times the lines. So: declined, with the numbers above. The
+`lightest.md` gate keeps its v1 waiver for exactly this class, and the
+page-out fallback below stays the user's call, untouched.
+
+No code changed for this entry, so there is no before/after test to
+revert-run-restore; the verification is the measurement method above
+plus the standard set on the docs-only PR.
 
 ## The fallback that is the user's call
 

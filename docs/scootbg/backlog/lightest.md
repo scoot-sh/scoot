@@ -25,7 +25,11 @@ or a tie. The user waived that class, and only that class, so v1 is not
 held for it; the rule above is otherwise unchanged, and a new loss on any
 other row would still hold v1. The one lever that would close the gap is
 a separate daemon binary, which has real packaging and process costs; it
-is post-v1 ([idle-code-pages.md](idle-code-pages.md)). After v1, every PR
+is post-v1 ([idle-code-pages.md](resolved/idle-code-pages-done.md)).
+Re-measured 2026-10-08 on the current tree and declined: about 1 MiB of
+kernel-reclaimable file pages at most, for a second package plus a decode
+worker, so the machinery stays out (see the resolved entry's numbers).
+After v1, every PR
 that touches decoding, buffers or the event loop still re-runs the
 benchmark and must not regress beyond the margin.
 
@@ -156,13 +160,13 @@ machine has none; on sway it binds `xdg_wm_base` v6 where sway has v5.
     anonymous memory. The daemon runs in a binary
     whose `.text` is 1.23 MiB, holding the decoders and the CLI as well,
     while `awww-daemon`'s `.text` is 0.36 MiB.
-  - Plan: [idle-code-pages.md](idle-code-pages.md).
+  - Plan: [idle-code-pages.md](resolved/idle-code-pages-done.md).
 - The results on sway: [below](#on-sway).
 
 ### Re-run of the idle rows (2026-09-28): still not passed, waived for v1
 
 After the attribution and the cheap levers of
-[idle-code-pages.md](idle-code-pages.md#levers-tried-2026-09-28), the idle
+[idle-code-pages.md](resolved/idle-code-pages-done.md#levers-tried-2026-09-28), the idle
 rows ran again, 5 rounds, on headless scoot and sway, with `35f3a13`
 ([scoot](../bench/2026-09-28-idle-scoot/table.md),
 [sway](../bench/2026-09-28-idle-sway/table.md)). The same 9 losses to awww
@@ -183,7 +187,7 @@ on each; `compare` against the 2026-09-27 runs finds no regression.
 - **Decided (user, 2026-09-28)**: the class is waived for v1, and the
   separate daemon binary, which a prototype showed ties awww on the color
   rows, is post-v1
-  ([the later option](idle-code-pages.md#later-option-a-separate-daemon-binary)).
+  ([the later option](resolved/idle-code-pages-done.md#later-option-a-separate-daemon-binary)).
   The page-out fallback stays the user's call, not a quiet fix.
 
 Won or tied everywhere else. The points where it is closest, or where the
