@@ -1,6 +1,6 @@
 # scootbar: the status bar for the scoot compositor.
 #
-# Built from the bar's own tag (`scootbar-v%{version}`): the bar versions
+# Built from the bar's own tag (`scootbar-v%%{version}`): the bar versions
 # independently of the compositor (docs/versioning.md). The daemon links
 # nothing past the C library, so it carries no system-library dependencies;
 # it speaks standard Wayland protocols, so it needs no versioned dependency

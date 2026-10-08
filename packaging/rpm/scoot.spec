@@ -77,7 +77,6 @@ cd source
 install -Dm755 target/release/scoot %{buildroot}%{_bindir}/scoot
 install -Dm755 resources/scoot-session %{buildroot}%{_bindir}/scoot-session
 install -Dm644 packaging/rpm/scoot.desktop %{buildroot}%{_datadir}/wayland-sessions/scoot.desktop
-desktop-file-validate %{buildroot}%{_datadir}/wayland-sessions/scoot.desktop
 
 %check
 # Headless-safe: version and the default-config render (which covers the

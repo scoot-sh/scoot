@@ -1,6 +1,6 @@
 # scootbg: the wallpaper daemon for the scoot compositor.
 #
-# Built from the same trio tag as `scoot` (`scoot-v%{version}`): the two move
+# Built from the same trio tag as `scoot` (`scoot-v%%{version}`): the two move
 # in lockstep (docs/versioning.md). The daemon links nothing past the C
 # library, so it carries no system-library dependencies. Its `[wallpaper]`
 # section is documented in scoot's example config

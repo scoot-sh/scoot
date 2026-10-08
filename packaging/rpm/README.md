@@ -71,7 +71,12 @@ Notes:
 ## Installed files
 
 - `scoot`: `/usr/bin/scoot`, `/usr/bin/scoot-session` (the in-tree
-  greeter launcher), `/usr/share/wayland-sessions/scoot.desktop`,
+  greeter launcher), `/usr/share/wayland-sessions/scoot.desktop`
+  (`DesktopNames=scoot` is the greeter contract: the NixOS module ships
+  the same key, and so do Fedora's own `gnome.desktop` session files —
+  all of which trip the same `desktop-file-validate` notice, which CI
+  accepts as the one known exception and which is why the spec does not
+  run the validator at build time),
   licenses (`%license`: `LICENSE`, `NOTICE`, `THIRD-PARTY-LICENSES`), and
   the output of `scoot --print-default-config` as `%doc`
   (`config.toml.example`, which documents the `[wallpaper]` handoff, so
