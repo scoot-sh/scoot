@@ -336,10 +336,11 @@ fn workspace_switch_through_fade_animates() {
     let ids = scoot_ids(&session);
     assert_eq!(ids.len(), 1);
 
-    ok(&session, &[red.to_str().unwrap()]);
+    ok(&session, &["set", red.to_str().unwrap()]);
     ok(
         &session,
         &[
+            "set",
             blue.to_str().unwrap(),
             "--workspace",
             "2",
