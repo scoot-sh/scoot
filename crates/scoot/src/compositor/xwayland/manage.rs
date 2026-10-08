@@ -78,7 +78,12 @@
 //!   divided. The one place the scale shows is the X wire limits, which
 //!   are X pixels and so shrink in logical ones ([`x_limits`]).
 //!
-//! What is not honoured yet: `_NET_WM_ICON`; XIM is not provided.
+//! What is deliberately not read: `_NET_WM_ICON` -- an X icon is raw
+//! pixels and IPC carries names only, so an X window reads as icon-less,
+//! exactly the parity a pixel-only xdg client gets (bars resolve X icons
+//! from the `WM_CLASS` class through `.desktop` files -- see
+//! `docs/backlog/resolved/xwayland-net-wm-icon-done.md`). XIM is not
+//! provided.
 //! A client-side titlebar drag (`_NET_WM_MOVERESIZE`) is `moveresize.rs`'s.
 
 use scoot_core::{Action, Edges, Event, Rect, Size, SizeHints, WindowId, WindowInfo};

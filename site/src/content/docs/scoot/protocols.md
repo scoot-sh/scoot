@@ -720,7 +720,12 @@ its startup id by another X client, below.)
   old scale until restarted (its
   size is still right, its contents smaller or larger), and an X menu open
   across the change is drawn offset until it moves or closes.
-- **Not yet:** `_NET_WM_ICON` is not read, and XIM is not provided (see
+- **Window icons:** `_NET_WM_ICON` is deliberately not read — an X icon
+  is raw pixels, never a name, and IPC carries names only, so an X window
+  reads as having no icon: exactly what a pixel-only xdg client gets (see
+  [Window icons](#window-icons-xdg-toplevel-icon-v1)). Bars show X icons
+  from the app id (`WM_CLASS` class) through `.desktop` files. XIM is not
+  provided (see
   [Clipboard, drag-and-drop and input methods](#clipboard-drag-and-drop-and-input-methods)).
 
 ### Focus: X windows ask, scoot decides
@@ -2263,7 +2268,10 @@ reads the name off `scoot msg windows`' `icon` field.
 Two limits: no *preferred icon sizes* are advertised, since nothing in scoot
 draws an icon and so it has no size to prefer; and a client that supplies raw
 pixel buffers instead of a name reads as having no icon, since handing those
-over IPC would mean re-encoding shm buffers to PNG per query.
+over IPC would mean re-encoding shm buffers to PNG per query. An X window's
+icon (`_NET_WM_ICON`) is raw pixels too, never a name, so X windows always
+read as having no icon — the same parity; bars show their icons from the
+app id (`WM_CLASS` class) through `.desktop` files.
 
 The buffer half, for the toolkit author: pixel buffers must be square and
 `wl_shm`-backed (anything else is refused with `invalid_buffer`), and they

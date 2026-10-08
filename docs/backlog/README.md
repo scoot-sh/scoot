@@ -927,7 +927,10 @@ scale/mode) into one hardware session.
   [`_NET_WM_MOVERESIZE`](./resolved/xwayland-net-wm-moveresize-done.md)
   (RESOLVED 2026-09-28: an X app's titlebar drag moves a floating X
   window; its cancel is [split out](./protocols/xwayland-net-wm-moveresize-cancel.md)),
-  [`_NET_WM_ICON`](./protocols/xwayland-net-wm-icon.md),
+  [`_NET_WM_ICON`](./resolved/xwayland-net-wm-icon-done.md)
+  (RESOLVED: deliberately not read -- an X icon is raw pixels and IPC
+  carries names only, the same parity a pixel-only xdg client gets; bars
+  resolve X icons from `WM_CLASS` through `.desktop` files),
   [scale-aware X windows](./resolved/xwayland-scale-aware-done.md)
   (RESOLVED 2026-09-28: X draws at `ceil(scale)`, toolkits told over
   XSETTINGS, live across a reload; follow-up, low:
