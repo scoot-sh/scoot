@@ -95,7 +95,9 @@ control character.
 own file separate from scoot's `config.toml`, so it works on other
 compositors and a bar change never breaks scoot. `--config PATH` reads
 another file instead. A missing file is the defaults; an explicit
-`--config` naming nothing is a refusal.
+`--config` naming nothing is a refusal. The file must be a regular file:
+a FIFO, device or directory is refused rather than read, since reading
+one could hang the daemon (a reload re-reads it on the daemon's loop).
 
 Every section is optional; absent is the default. Precedence is defaults,
 then the file, then the flags: a flag given replaces the file's value for

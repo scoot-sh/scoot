@@ -6,7 +6,8 @@
 //! is the bar's own file, separate from scoot's `config.toml`, so it works
 //! on other compositors and a bar change never breaks scoot. A missing file
 //! is the defaults; a malformed one is a loud refusal, and a bad reload
-//! keeps the running config.
+//! keeps the running config. The file must be a regular file: anything
+//! else (a FIFO, a device, a directory) is refused rather than read.
 //!
 //! Precedence is defaults, then the file, then the flags: giving any of
 //! `--left`/`--center`/`--right` replaces just those sections of the
@@ -287,17 +288,33 @@ pub fn reload(file: Option<&Path>) -> Result<Config, Error> {
 /// Reads and validates `path` in full before returning anything.
 fn read_file(path: &Path) -> Result<Config, Error> {
     use std::io::Read;
-    let file = std::fs::File::open(path).map_err(|error| Error::Read {
+    let read = |error: String| Error::Read {
         path: path.to_owned(),
-        error: error.to_string(),
-    })?;
+        error,
+    };
+    // Opened without blocking and required to be a regular file, as the
+    // font and the image icon are: a FIFO with no writer would otherwise
+    // hang start-up here, and a reload would hang the daemon's whole loop
+    // on it. A symlink is followed and judged by its target; a loop in one
+    // is the kernel's `ELOOP`.
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|errno| read(errno.to_string()))?;
+    let stat = rustix::fs::fstat(&fd).map_err(|errno| read(errno.to_string()))?;
+    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile {
+        return Err(read("not a regular file: refusing to read it".to_owned()));
+    }
     let mut buf = Vec::new();
-    file.take(MAX_FILE + 1)
+    std::fs::File::from(fd)
+        .take(MAX_FILE + 1)
         .read_to_end(&mut buf)
-        .map_err(|error| Error::Read {
-            path: path.to_owned(),
-            error: error.to_string(),
-        })?;
+        .map_err(|error| read(error.to_string()))?;
     if buf.len() as u64 > MAX_FILE {
         return Err(Error::TooLarge {
             path: path.to_owned(),
