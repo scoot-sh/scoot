@@ -74,6 +74,7 @@ jobs:
       - name: Bootstrap git for checkout
         run: |
           dnf install -y git
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
 
       - uses: actions/checkout@v7
 
@@ -197,16 +198,21 @@ jobs:
       - name: Bootstrap git for checkout
         run: |
           zypper --non-interactive install --no-recommends git
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
 
       - uses: actions/checkout@v7
 
       - name: Install the build and lint tools
         run: |
           zypper --non-interactive install --no-recommends \
-            cargo dejavu-fonts desktop-file-utils gcc libinput-devel \
+            cargo dejavu-fonts desktop-file-utils gcc gawk libinput-devel \
             libpixman-1-0-devel libxkbcommon-devel rpm-build rpmlint \
             seatd-devel systemd-devel systemd-rpm-macros wayland-devel \
             wayland-protocols-devel
+          # `gawk` above is load-bearing, not alphabetical: the image
+          # ships busybox-gawk, which conflicts with the gawk that
+          # desktop-file-utils requires, and only an explicit gawk lets
+          # the solver swap them non-interactively.
           # No cargo-deny package on openSUSE (packaging/rpm/README.md):
           # install it with cargo so vendor-release.sh can stage the
           # tarball. It never runs at rpmbuild time.
