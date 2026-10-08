@@ -235,8 +235,11 @@ Reading it role by role:
   40 MB XWayland. niri's recommended stack carries the 52 MB portals,
   the 60 MB ibus stack and a 46 MB XWayland pair. Hyprland carries Qt,
   hyprpaper and its portal backend. scoot carries PipeWire (~40 MB, a
-  campaign-level choice shared by all five) and a 15 MB push-notification
-  distributor nothing uses (see leads).
+  campaign-level choice shared by all five) and, in this campaign, a
+  15 MB push-notification distributor nothing uses — *correction
+  (2026-10-08): that distributor rode along with the harness's
+  system-wide Plasma, not the scoot profile (see lead 4). A pure scoot
+  session carries no push daemon at all.*
 
 Power (screens at 509, 120 s average, valid only while discharging):
 scoot **9.73 W**, niri **9.67 W**. The battery sits at the 80% charge
@@ -277,10 +280,19 @@ quantifies the ticket this benchmark was built to check.
    off-by-one credited a client shm buffer's PSS to `[stack]` (live
    `[stack]` is 128 kB); all three fat rounds hold the same ~29.5 MB
    shm. No compositor change.*
-4. **Mask the Push portal out** ([kunifiedpush-sessions](backlog/packaging/kunifiedpush-sessions.md)):
+4. **The push distributor is Plasma's, not the session's** ([kunifiedpush-sessions](backlog/resolved/kunifiedpush-sessions-done.md)):
    `kunifiedpush-distributor` at ~15 MB in every session for push
    notifications nothing uses — bigger than mako, the bar and the idle
-   daemon combined.
+   daemon combined. *Correction (2026-10-08): it arrives with Plasma 6
+   (`requiredPackages`, unconditional — `excludePackages` only filters
+   `optionalPackages`), started in every graphical session through
+   `graphical-session.target.wants`, not through any portal backend (no
+   installed backend advertises the Push portal, and neither of the two
+   backends the scoot session installs references it). The benchmark
+   enabled Plasma system-wide, so every session carried it; a pure
+   scoot profile installs neither the distributor nor any Push backend,
+   and there is no Push route to mask. On a box that also runs Plasma,
+   masking the user unit reclaims the ~15 MB per session.*
 5. **Wake the bar only when its text changes** ([second-wakeups](scootbar/backlog/resolved/second-wakeups-done.md), resolved 2026-10-05 in #458):
    ~40 wakes/min. The guess at the time (the clock ticking every second)
    was wrong: the clock is minute-aligned and wakes twice a minute. The
