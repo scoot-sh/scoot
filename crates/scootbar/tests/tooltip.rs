@@ -10,8 +10,15 @@
 //! binary (see `common`); `SCOOTBAR_REQUIRE_SCOOT` and
 //! `SCOOTBAR_REQUIRE_SWAY` make that a failure.
 
+// Tooltips are shown by the popup machinery out of a `push` module, so
+// this file exists only where both do (docs/scootbar/testing.md: the
+// feature matrix). The one test that also places the volume module carries
+// its own `volume` gate on top.
+#![cfg(all(feature = "push", feature = "popup"))]
+
 mod common;
 mod lockclient;
+#[cfg(feature = "volume")]
 mod pulse;
 mod vpointer;
 
@@ -28,7 +35,9 @@ const DIM: &str = "#506070";
 const HEIGHT: u32 = 40;
 /// The tooltip's delay, in the bar's config.
 const DELAY: Duration = Duration::from_millis(300);
-/// The volume module, centered on the 1600-pixel output.
+/// The volume module, centered on the 1600-pixel output. Only the
+/// volume-gated test puts it there.
+#[cfg(feature = "volume")]
 const CENTER: (u32, u32) = (800, 20);
 /// Far from the bar and anything under it.
 const AWAY: (u32, u32) = (200, 600);
@@ -682,6 +691,7 @@ fn hiding_the_bar_or_a_bad_reload_takes_it_down_without_harm() {
     rig.clean();
 }
 
+#[cfg(feature = "volume")]
 #[test]
 fn under_a_click_popup_there_is_no_tooltip_and_after_it_there_is() {
     let Some(session) = Session::scoot("tip-popup", 1, "") else {

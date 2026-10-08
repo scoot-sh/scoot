@@ -9,26 +9,39 @@
 //! alone. Skipped without a `scoot` binary (see `common`);
 //! `SCOOTBAR_REQUIRE_SCOOT` makes that a failure.
 
+// The tests place button, push and workspaces modules (gated per test),
+// so this file exists where any of them does (docs/scootbar/testing.md:
+// the feature matrix); helpers used by only one kind carry that gate too.
+#![cfg(any(feature = "button", feature = "push", feature = "workspaces"))]
+
 mod common;
 
 use std::fs;
+#[cfg(feature = "push")]
 use std::io::{BufRead, BufReader};
+#[cfg(any(feature = "button", feature = "push"))]
 use std::path::PathBuf;
+#[cfg(feature = "push")]
 use std::process::{Child, Stdio};
+#[cfg(any(feature = "button", feature = "push"))]
 use std::time::{Duration, Instant};
 
 use common::{Reaper, Session, rgb};
+#[cfg(any(feature = "button", feature = "push"))]
 use serde_json::Value;
 
 const BAR: &str = "#102030";
 const HEIGHT: u32 = 40;
 
 /// Two outputs, the second at 1.5, each 1600x1000 logical before scale.
+/// Only the button-placed fidelity test uses it.
+#[cfg(feature = "button")]
 const SCOOT: &str = "[[outputs]]\nname = \"headless-2\"\nscale = 1.5\n";
 
 struct Rig {
     session: Session,
     bar: Reaper,
+    #[cfg(feature = "button")]
     dir: PathBuf,
 }
 
@@ -47,7 +60,12 @@ impl Rig {
         )
         .unwrap();
         let bar = Reaper(session.bar_with_env(&["--config", file.to_str().unwrap()], &[]));
-        let mut rig = Self { session, bar, dir };
+        let mut rig = Self {
+            session,
+            bar,
+            #[cfg(feature = "button")]
+            dir,
+        };
         rig.session
             .wait_for(&mut rig.bar.0, "the bar drawn", |session| {
                 (session.scoot_screenshot(1).at(0, 0) == rgb(BAR)).then_some(())
@@ -56,6 +74,7 @@ impl Rig {
     }
 
     /// The bar's control socket.
+    #[cfg(feature = "push")]
     fn socket(&self) -> PathBuf {
         self.session
             .runtime_dir()
@@ -71,6 +90,7 @@ impl Rig {
             .unwrap()
     }
 
+    #[cfg(any(feature = "button", feature = "push"))]
     fn json(&self, args: &[&str]) -> Value {
         let out = self.msg(args);
         assert!(
@@ -82,6 +102,7 @@ impl Rig {
             .unwrap_or_else(|e| panic!("{args:?}: {e}: {}", String::from_utf8_lossy(&out.stdout)))
     }
 
+    #[cfg(any(feature = "button", feature = "push"))]
     fn ok(&self, args: &[&str]) {
         let out = self.msg(args);
         assert!(
@@ -91,12 +112,14 @@ impl Rig {
         );
     }
 
+    #[cfg(any(feature = "button", feature = "workspaces"))]
     fn refused(&self, args: &[&str]) -> String {
         let out = self.msg(args);
         assert!(!out.status.success(), "{args:?} was accepted");
         String::from_utf8_lossy(&out.stderr).into_owned()
     }
 
+    #[cfg(feature = "button")]
     fn lines(&self, name: &str) -> Vec<String> {
         fs::read_to_string(self.dir.join(name))
             .unwrap_or_default()
@@ -105,6 +128,7 @@ impl Rig {
             .collect()
     }
 
+    #[cfg(feature = "button")]
     fn wait_lines(&mut self, name: &str, n: usize) -> Vec<String> {
         let path = self.dir.join(name);
         self.session
@@ -118,6 +142,7 @@ impl Rig {
             })
     }
 
+    #[cfg(feature = "button")]
     fn click(&self, x: i64, y: i64) {
         let reply = self.session.scoot_ipc(&format!(
             r#"{{"type":"click","x":{x},"y":{y},"button":"left"}}"#
@@ -126,11 +151,13 @@ impl Rig {
     }
 }
 
+#[cfg(feature = "button")]
 fn append(word: &str) -> String {
     format!("{{ exec = [\"sh\", \"-c\", \"echo {word} >> DIR/clicks\"] }}")
 }
 
 /// Two buttons a few characters wide, each appending its own name.
+#[cfg(feature = "button")]
 fn buttons() -> String {
     format!(
         "[button.alpha]\ntext = \"A\"\non-click = {}\n\
@@ -142,6 +169,7 @@ fn buttons() -> String {
 
 /// Whether the pixel at (`x`, `y`) of `shot` is anything but the bar's
 /// background: drawn ink.
+#[cfg(feature = "button")]
 fn inked(shot: &common::Shot, x: u32, y: u32) -> bool {
     shot.at(x, y) != rgb(BAR)
 }
@@ -150,6 +178,7 @@ fn inked(shot: &common::Shot, x: u32, y: u32) -> bool {
 /// screenshot: a module's rectangle with no ink in it, or a bar column
 /// outside every rectangle with ink in it. Logical to device is
 /// `(x - origin) * scale`, rounded outward.
+#[cfg(feature = "button")]
 fn ink_problem(shot: &common::Shot, output: &Value) -> Option<String> {
     let scale = output["scale"].as_f64().unwrap();
     let origin = output["origin"]["x"].as_i64().unwrap() as f64;
@@ -179,6 +208,7 @@ fn ink_problem(shot: &common::Shot, output: &Value) -> Option<String> {
     None
 }
 
+#[cfg(feature = "button")]
 #[test]
 fn layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales() {
     let Some(mut rig) = Rig::start(
@@ -290,6 +320,7 @@ fn layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales() {
     }
 }
 
+#[cfg(feature = "button")]
 #[test]
 fn a_hidden_bar_has_no_rectangles() {
     let Some(rig) = Rig::start(
@@ -315,6 +346,7 @@ fn a_hidden_bar_has_no_rectangles() {
     assert_eq!(layout["outputs"][0]["modules"], serde_json::json!([]));
 }
 
+#[cfg(feature = "button")]
 #[test]
 fn query_names_one_module_and_refuses_one_that_is_not_placed() {
     let Some(rig) = Rig::start(
@@ -340,6 +372,7 @@ fn query_names_one_module_and_refuses_one_that_is_not_placed() {
     );
 }
 
+#[cfg(feature = "button")]
 #[test]
 fn invoke_runs_the_binding_a_click_would() {
     let bindings = format!(
@@ -384,6 +417,7 @@ fn invoke_runs_the_binding_a_click_would() {
     rig.wait_lines("clicks", 4);
 }
 
+#[cfg(feature = "workspaces")]
 #[test]
 fn invoke_runs_a_module_action_with_its_number() {
     let Some(rig) = Rig::start("agent-invoke-ws", "", 1, "", "right = [\"workspaces\"]\n") else {
@@ -398,11 +432,13 @@ fn invoke_runs_a_module_action_with_its_number() {
 }
 
 /// A `subscribe` child whose lines are read as they come.
+#[cfg(feature = "push")]
 struct Subscriber {
     child: Child,
     lines: BufReader<std::process::ChildStdout>,
 }
 
+#[cfg(feature = "push")]
 impl Subscriber {
     fn start(rig: &Rig, kinds: &[&str]) -> Self {
         Self::try_start(rig, kinds).unwrap_or_else(|said| panic!("not subscribed: {said}"))
@@ -441,6 +477,7 @@ impl Subscriber {
     }
 }
 
+#[cfg(feature = "push")]
 impl Drop for Subscriber {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -448,6 +485,7 @@ impl Drop for Subscriber {
     }
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn a_stream_of_changes_is_told_at_the_frame_rate() {
     use std::io::Write;
@@ -514,6 +552,7 @@ fn a_stream_of_changes_is_told_at_the_frame_rate() {
     );
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn a_subscriber_that_hangs_up_leaves_the_daemon_unharmed_and_idle() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
@@ -530,6 +569,7 @@ fn a_subscriber_that_hangs_up_leaves_the_daemon_unharmed_and_idle() {
     assert!(rig.json(&["version"])["protocol"].is_number());
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn a_subscribed_connection_is_refused_further_requests() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
@@ -564,6 +604,7 @@ fn a_subscribed_connection_is_refused_further_requests() {
     );
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn only_so_many_connections_may_subscribe_and_a_slot_comes_back() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
@@ -601,6 +642,7 @@ fn only_so_many_connections_may_subscribe_and_a_slot_comes_back() {
     }
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn a_subscription_outlives_a_flood_of_other_connections() {
     // More idle connections than the daemon holds: each closes the oldest
@@ -624,6 +666,7 @@ fn a_subscription_outlives_a_flood_of_other_connections() {
     drop(flood);
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn an_idle_bar_with_subscribers_and_queries_wakes_for_nothing() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";

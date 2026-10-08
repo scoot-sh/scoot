@@ -9,6 +9,11 @@
 //! asked. Skipped without a `scoot` binary (see `common`);
 //! `SCOOTBAR_REQUIRE_SCOOT` makes that a failure.
 
+// Every test here places the volume module and opens its popup, so this
+// file exists only where both do (docs/scootbar/testing.md: the feature
+// matrix).
+#![cfg(all(feature = "volume", feature = "popup"))]
+
 mod common;
 mod pulse;
 mod vpointer;

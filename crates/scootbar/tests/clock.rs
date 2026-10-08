@@ -8,6 +8,10 @@
 //! bar, so every segment is 5 whole pixels and the text is read back by
 //! sampling them ([`common::testfont::decode`]).
 
+// Every test here places the clock, so this file exists only where it
+// does (docs/scootbar/testing.md: the feature matrix).
+#![cfg(feature = "clock")]
+
 mod common;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

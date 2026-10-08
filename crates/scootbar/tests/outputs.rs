@@ -7,6 +7,11 @@
 //! Skipped without a `scoot` binary (see `common`);
 //! `SCOOTBAR_REQUIRE_SCOOT` makes that a failure.
 
+// Every test here places the clock (two also place workspaces, gated per
+// test), so this file exists only where it does (docs/scootbar/testing.md:
+// the feature matrix).
+#![cfg(feature = "clock")]
+
 mod common;
 
 use std::process::{Child, Stdio};
@@ -91,6 +96,7 @@ fn pair(id: &str, section: &str) -> (String, String) {
     (id.to_owned(), section.to_owned())
 }
 
+#[cfg(all(feature = "clock", feature = "workspaces"))]
 #[test]
 fn two_outputs_show_different_module_sets_heights_and_edges_from_one_config() {
     let Some(session) = Session::scoot("multi", 2, "") else {
@@ -209,6 +215,7 @@ fn hide_and_show_keep_to_the_list() {
 /// A second output adds a surface and its buffers, not another set of
 /// data sources: the daemon holds the same number of fds with two bars as
 /// with one, and the modules are started once.
+#[cfg(all(feature = "clock", feature = "workspaces"))]
 #[test]
 fn a_second_output_adds_no_fds() {
     let fds = |outputs: u32| {

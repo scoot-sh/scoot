@@ -11,6 +11,10 @@
 //! that runs in a helper thread ([`Toy`]), with its title settable from
 //! the test.
 
+// Every test here places the window-title module, so this file exists
+// only where it does (docs/scootbar/testing.md: the feature matrix).
+#![cfg(feature = "window-title")]
+
 mod common;
 
 use std::io::{BufRead, BufReader};

@@ -9,17 +9,30 @@
 //! Skipped without a `scoot` binary (see `common`);
 //! `SCOOTBAR_REQUIRE_SCOOT` makes that a failure.
 
+// The tests place button, push and exec modules (gated per test), so this
+// file exists where any of them does (docs/scootbar/testing.md: the
+// feature matrix); helpers used by only some kinds carry that gate too.
+#![cfg(any(feature = "button", feature = "push", feature = "exec"))]
+
 mod common;
 
+#[cfg(feature = "exec")]
 use std::collections::BTreeSet;
 use std::fs;
+#[cfg(any(feature = "button", feature = "exec"))]
 use std::path::PathBuf;
+#[cfg(any(feature = "push", feature = "exec"))]
 use std::process::Output;
-use std::time::{Duration, Instant};
+#[cfg(any(feature = "push", feature = "exec"))]
+use std::time::Duration;
+#[cfg(feature = "exec")]
+use std::time::Instant;
 
-use common::{
-    Reaper, Session, Shot, allowed_in_child, inheritable_fds, open_fds, rgb, settled_fds, testfont,
-};
+use common::{Reaper, Session, rgb};
+use common::{Shot, testfont};
+#[cfg(feature = "exec")]
+use common::{allowed_in_child, inheritable_fds, open_fds, settled_fds};
+#[cfg(any(feature = "push", feature = "exec"))]
 use serde_json::Value;
 
 const BAR: &str = "#102030";
@@ -41,7 +54,9 @@ fn config(lists: &str, tables: &str) -> String {
 struct Rig {
     session: Session,
     bar: Reaper,
+    #[cfg(feature = "exec")]
     file: PathBuf,
+    #[cfg(any(feature = "button", feature = "exec"))]
     dir: PathBuf,
 }
 
@@ -61,7 +76,9 @@ impl Rig {
         let mut rig = Self {
             session,
             bar,
+            #[cfg(feature = "exec")]
             file,
+            #[cfg(any(feature = "button", feature = "exec"))]
             dir,
         };
         rig.wait_drawn();
@@ -75,10 +92,12 @@ impl Rig {
             });
     }
 
+    #[cfg(feature = "exec")]
     fn pid(&self) -> u32 {
         self.bar.0.id()
     }
 
+    #[cfg(any(feature = "push", feature = "exec"))]
     fn msg(&self, args: &[&str]) -> Output {
         self.session
             .scootbar()
@@ -88,6 +107,7 @@ impl Rig {
             .unwrap()
     }
 
+    #[cfg(any(feature = "push", feature = "exec"))]
     fn query(&self) -> Value {
         let out = self.msg(&["query"]);
         assert!(out.status.success(), "{out:?}");
@@ -95,6 +115,7 @@ impl Rig {
     }
 
     /// What the bar's text reads back as, on output 1.
+    #[cfg(feature = "push")]
     fn read(&self) -> String {
         read(&self.session.scoot_screenshot(1))
     }
@@ -108,6 +129,7 @@ impl Rig {
     }
 
     /// Waits until `name` in the output directory has at least `n` lines.
+    #[cfg(any(feature = "button", feature = "exec"))]
     fn wait_lines(&mut self, name: &str, n: usize) -> Vec<String> {
         let path = self.dir.join(name);
         self.session
@@ -121,6 +143,7 @@ impl Rig {
             })
     }
 
+    #[cfg(feature = "exec")]
     fn reload(&self) -> Output {
         self.msg(&["reload"])
     }
@@ -145,11 +168,13 @@ fn read(shot: &Shot) -> String {
     testfont::decode(ink, left, right, BASELINE, f64::from(EM))
 }
 
+#[cfg(feature = "exec")]
 fn has_color(shot: &Shot, color: [u8; 3]) -> bool {
     (0..shot.width).any(|x| (0..HEIGHT).any(|y| shot.at(x, y) == color))
 }
 
 /// Whether a process runs with exactly this command line.
+#[cfg(feature = "exec")]
 fn running(cmdline: &str) -> bool {
     for entry in fs::read_dir("/proc").unwrap().flatten() {
         let Ok(raw) = fs::read(entry.path().join("cmdline")) else {
@@ -163,10 +188,12 @@ fn running(cmdline: &str) -> bool {
     false
 }
 
+#[cfg(any(feature = "push", feature = "exec"))]
 fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn an_exec_module_shows_what_its_command_prints() {
     let tables = "[exec.out]\ncommand = [\"sh\", \"-c\", \"echo 12:34; sleep 600\"]\n";
@@ -181,6 +208,7 @@ fn an_exec_module_shows_what_its_command_prints() {
     assert_eq!(module["section"], "right");
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn an_exec_json_line_sets_the_text_and_the_class_color() {
     let tables = "[exec.out]\nformat = \"json\"\ncommand = [\"sh\", \"-c\", \
@@ -196,6 +224,7 @@ fn an_exec_json_line_sets_the_text_and_the_class_color() {
     assert_eq!(rig.query()["modules"][0]["class"], "urgent");
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn push_set_changes_the_bar_and_a_bad_value_changes_nothing() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
@@ -235,6 +264,7 @@ fn push_set_changes_the_bar_and_a_bad_value_changes_nothing() {
     rig.wait_text("");
 }
 
+#[cfg(all(feature = "button", feature = "push"))]
 #[test]
 fn set_names_what_cannot_take_a_value() {
     let tables = "[button.b]\ntext = \"1\"\n[push.p]\n";
@@ -264,6 +294,7 @@ fn set_names_what_cannot_take_a_value() {
     );
 }
 
+#[cfg(feature = "button")]
 #[test]
 fn a_button_click_runs_its_command() {
     let tables = "[button.go]\ntext = \"7\"\n\
@@ -280,6 +311,7 @@ fn a_button_click_runs_its_command() {
     assert_eq!(rig.wait_lines("log", 1), ["pressed"]);
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_flooding_command_costs_the_bar_no_memory_and_no_descriptors() {
     let tables = "[exec.out]\ncommand = [\"yes\", \"flood\"]\n";
@@ -329,6 +361,7 @@ fn a_flooding_command_costs_the_bar_no_memory_and_no_descriptors() {
     assert!(rig.bar.0.try_wait().unwrap().is_none());
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_that_dies_is_started_again_by_the_bar() {
     let tables = "[exec.out]\ncommand = [\"sh\", \"-c\", \"echo run >> DIR/runs\"]\n";
@@ -357,6 +390,7 @@ fn a_command_that_dies_is_started_again_by_the_bar() {
     assert_eq!(zombies, 0);
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_holds_none_of_the_bars_descriptors() {
     let tables = "[exec.out]\ncommand = [\"sh\", \"-c\", \
@@ -396,6 +430,7 @@ fn a_command_holds_none_of_the_bars_descriptors() {
 }
 
 /// The `SigIgn` mask of `pid`.
+#[cfg(feature = "exec")]
 fn ignored_signals(pid: impl std::fmt::Display) -> u64 {
     fs::read_to_string(format!("/proc/{pid}/status"))
         .unwrap()
@@ -405,6 +440,7 @@ fn ignored_signals(pid: impl std::fmt::Display) -> u64 {
         .expect("SigIgn in /proc/PID/status")
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_gets_the_default_sigpipe_not_the_bars_ignored_one() {
     // A Rust program ignores `SIGPIPE`; ignored signals survive `exec`. The
@@ -441,6 +477,7 @@ fn a_command_gets_the_default_sigpipe_not_the_bars_ignored_one() {
     );
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_that_is_not_found_is_one_warning_a_restart_naming_it() {
     let tables = "[exec.out]\ncommand = [\"scootbar-no-such-program\"]\n";
@@ -468,6 +505,7 @@ fn a_command_that_is_not_found_is_one_warning_a_restart_naming_it() {
     assert!(rig.bar.0.try_wait().unwrap().is_none());
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_that_is_not_executable_says_so_once() {
     let tables = "[exec.out]\ncommand = [\"DIR/not-a-program\"]\n";
@@ -490,6 +528,7 @@ fn a_command_that_is_not_executable_says_so_once() {
     );
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_reload_replaces_the_command_and_kills_the_old_one_with_its_workers() {
     let first = "[exec.out]\ncommand = [\"sh\", \"-c\", \"sleep 421 & echo 1; wait\"]\n";
@@ -521,6 +560,7 @@ fn a_reload_replaces_the_command_and_kills_the_old_one_with_its_workers() {
 
 /// Kills the bar with `signal` and waits for its command, a shell loop
 /// that would otherwise run for ever, to be gone.
+#[cfg(feature = "exec")]
 fn a_command_ends_with_a_bar_that_dies_of(tag: &str, signal: rustix::process::Signal) {
     // A shell loop is the command that is not ended by the closing of its
     // pipe: the shell never writes, `date` and `echo` do, and the shell is
@@ -560,11 +600,13 @@ fn a_command_ends_with_a_bar_that_dies_of(tag: &str, signal: rustix::process::Si
     }
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_ends_with_a_bar_that_is_killed() {
     a_command_ends_with_a_bar_that_dies_of("exec-sigkill", rustix::process::Signal::KILL);
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn a_command_ends_with_a_bar_that_is_terminated() {
     // `SIGINT`, `SIGHUP` and a crash (`SIGABRT`, what a panic does under
@@ -575,6 +617,7 @@ fn a_command_ends_with_a_bar_that_is_terminated() {
     a_command_ends_with_a_bar_that_dies_of("exec-sigterm", rustix::process::Signal::TERM);
 }
 
+#[cfg(feature = "push")]
 #[test]
 fn a_burst_of_pushes_in_one_turn_is_a_few_redraws() {
     use std::io::{BufRead, BufReader, Write};
@@ -623,6 +666,7 @@ fn a_burst_of_pushes_in_one_turn_is_a_few_redraws() {
     rig.wait_text("9");
 }
 
+#[cfg(feature = "exec")]
 #[test]
 fn too_many_exec_modules_are_refused_by_name() {
     let Some(session) = Session::scoot("exec-many", 1, "") else {

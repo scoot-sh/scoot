@@ -16,6 +16,12 @@
 //! windows these tests switch between are mapped by a tiny `xdg_toplevel`
 //! client that runs in a helper thread ([`Toy`]).
 
+// Most tests here place the workspaces module (gated per test); the bind
+// tests also place the clock, and one needs only the clock. This file
+// exists where either does (docs/scootbar/testing.md: the feature matrix);
+// helpers used only by workspaces tests carry that gate too.
+#![cfg(any(feature = "clock", feature = "workspaces"))]
+
 mod common;
 
 use std::os::fd::AsFd;
@@ -26,7 +32,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use common::{Reaper, Session, Shot, rgb, testfont};
+use common::{Reaper, Session};
+#[cfg(feature = "workspaces")]
+use common::{Shot, rgb, testfont};
 use rustix::event::{PollFd, PollFlags};
 use rustix::time::Timespec;
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
@@ -41,15 +49,22 @@ use wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface};
 use wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel};
 use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase};
 
+#[cfg(feature = "workspaces")]
 const BAR: &str = "#102030";
+#[cfg(feature = "workspaces")]
 const FG: &str = "#f0f0f0";
+#[cfg(feature = "workspaces")]
 const ACCENT: &str = "#f9e2af";
+#[cfg(feature = "workspaces")]
 const HEIGHT: u32 = 60;
+#[cfg(feature = "workspaces")]
 const EM: u32 = 50;
 /// A 50-pixel line centered in 60 rows: 5 above, baseline at 45.
+#[cfg(feature = "workspaces")]
 const BASELINE: i64 = 45;
 
 /// The workspaces module's flags: on the left, nothing else placed.
+#[cfg(feature = "workspaces")]
 fn workspaces_args() -> Vec<&'static str> {
     vec![
         "--background",
@@ -66,6 +81,7 @@ fn workspaces_args() -> Vec<&'static str> {
 }
 
 /// Which columns hold the pill's accent color.
+#[cfg(feature = "workspaces")]
 fn pill_cols(shot: &Shot) -> Vec<bool> {
     let accent = rgb(ACCENT);
     (0..shot.width)
@@ -76,6 +92,7 @@ fn pill_cols(shot: &Shot) -> Vec<bool> {
 /// Whether `(x, y)` is text: a text-colored pixel anywhere, or a
 /// background-colored pixel inside a pill column (the active number is
 /// drawn in the bar's background on the pill).
+#[cfg(feature = "workspaces")]
 fn is_ink(shot: &Shot, pills: &[bool], x: i64, y: i64) -> bool {
     if x < 0 || y < 0 || (x as u32) >= shot.width || (y as u32) >= HEIGHT {
         return false;
@@ -89,6 +106,7 @@ fn is_ink(shot: &Shot, pills: &[bool], x: i64, y: i64) -> bool {
 
 /// The bar's text read back from the top `HEIGHT` rows of `shot`, spaces
 /// left out (`decode` skips them); empty when there is no ink yet.
+#[cfg(feature = "workspaces")]
 fn read(shot: &Shot) -> String {
     let pills = pill_cols(shot);
     let ink = |x: i64, y: i64| is_ink(shot, &pills, x, y);
@@ -104,6 +122,7 @@ fn read(shot: &Shot) -> String {
 /// The contiguous ink column groups across the bar's rows: one per digit
 /// (spaces split them). The `n`th group's middle is where a click on the
 /// `n`th workspace lands, inside its pill.
+#[cfg(feature = "workspaces")]
 fn groups(shot: &Shot) -> Vec<(u32, u32)> {
     let pills = pill_cols(shot);
     let mut groups = Vec::new();
@@ -126,6 +145,7 @@ fn groups(shot: &Shot) -> Vec<(u32, u32)> {
 }
 
 /// The columns holding the pill's accent color, if any.
+#[cfg(feature = "workspaces")]
 fn pill(shot: &Shot) -> Option<(u32, u32)> {
     let pills = pill_cols(shot);
     let mut first = None;
@@ -140,6 +160,7 @@ fn pill(shot: &Shot) -> Option<(u32, u32)> {
 }
 
 /// Whether the pill covers the `n`th digit group and no other.
+#[cfg(feature = "workspaces")]
 fn pill_on(shot: &Shot, n: usize) -> bool {
     let (Some((lo, hi)), groups) = (pill(shot), groups(shot)) else {
         return false;
@@ -336,6 +357,7 @@ fn toy_main(socket: &PathBuf, stop: &AtomicBool) {
 
 /// Starts scoot with two outputs and a workspaces bar. Each output shows
 /// its own single workspace, active, in a pill.
+#[cfg(feature = "workspaces")]
 fn two_outputs(tag: &str) -> Option<(Session, Reaper)> {
     let session = Session::scoot(tag, 2, "")?;
     let mut bar = Reaper(session.bar(&workspaces_args()));
@@ -349,6 +371,7 @@ fn two_outputs(tag: &str) -> Option<(Session, Reaper)> {
     Some((session, bar))
 }
 
+#[cfg(feature = "workspaces")]
 #[test]
 fn each_output_shows_its_own_workspace_active_in_a_pill() {
     let Some((_session, _bar)) = two_outputs("ws-each") else {
@@ -356,6 +379,7 @@ fn each_output_shows_its_own_workspace_active_in_a_pill() {
     };
 }
 
+#[cfg(feature = "workspaces")]
 #[test]
 fn the_pill_follows_a_switch() {
     let Some((session, mut bar)) = two_outputs("ws-switch") else {
@@ -386,6 +410,7 @@ fn the_pill_follows_a_switch() {
     toy.close(&session, &mut bar);
 }
 
+#[cfg(feature = "workspaces")]
 #[test]
 fn a_click_switches() {
     let Some((session, mut bar)) = two_outputs("ws-click") else {
@@ -423,6 +448,7 @@ fn a_click_switches() {
     toy.close(&session, &mut bar);
 }
 
+#[cfg(feature = "workspaces")]
 #[test]
 fn appearing_and_disappearing_redraw() {
     let Some((session, mut bar)) = two_outputs("ws-appear") else {
@@ -454,6 +480,7 @@ fn appearing_and_disappearing_redraw() {
 }
 
 /// On sway: the workspaces on an output plugged in while the bar runs.
+#[cfg(feature = "workspaces")]
 #[test]
 fn workspaces_follow_a_hotplugged_output_on_sway() {
     let Some(session) = Session::sway("swayws", 1) else {
@@ -486,6 +513,7 @@ fn workspaces_follow_a_hotplugged_output_on_sway() {
 }
 
 /// How many rows of column `x` hold the pill's accent.
+#[cfg(feature = "workspaces")]
 fn accent_rows(shot: &Shot, x: u32) -> u32 {
     (0..HEIGHT)
         .filter(|&y| shot.at(x, y) == rgb(ACCENT))
@@ -493,6 +521,7 @@ fn accent_rows(shot: &Shot, x: u32) -> u32 {
 }
 
 /// The columns holding text-colored pixels (an inactive number).
+#[cfg(feature = "workspaces")]
 fn text_cols(shot: &Shot) -> Vec<u32> {
     (0..shot.width)
         .filter(|&x| (0..HEIGHT).any(|y| shot.at(x, y) == rgb(FG)))
@@ -503,6 +532,7 @@ fn text_cols(shot: &Shot) -> Vec<u32> {
 /// click on another workspace's digit still switches to it: the hit test
 /// follows the shape the draw paints. (`read` is not used: it takes the
 /// background-colored corners inside a round pill's columns for ink.)
+#[cfg(feature = "workspaces")]
 #[test]
 fn a_circle_pill_is_round_and_a_click_still_switches() {
     let Some(session) = Session::scoot("ws-circle", 1, "") else {
@@ -585,6 +615,7 @@ fn a_circle_pill_is_round_and_a_click_still_switches() {
 // live. Read from the bar's own `WAYLAND_DEBUG` trace.
 
 /// How many times the trace binds `interface` from the registry.
+#[cfg(feature = "clock")]
 fn bound(trace: &str, interface: &str) -> usize {
     trace
         .lines()
@@ -597,6 +628,7 @@ fn bound(trace: &str, interface: &str) -> usize {
 /// The trace lines that are the compositor's events on a workspace
 /// protocol object (the manager, a group or a workspace): `<-` marks an
 /// event in the trace.
+#[cfg(feature = "clock")]
 fn workspace_events(trace: &str) -> Vec<&str> {
     trace
         .lines()
@@ -615,6 +647,7 @@ fn workspace_events(trace: &str) -> Vec<&str> {
 
 /// A config file placing `left` in the session's font, a clock in the
 /// center, and the bar 28 high.
+#[cfg(feature = "clock")]
 fn placing(session: &Session, left: &str) -> PathBuf {
     let path = session.runtime_dir().join("binds.toml");
     std::fs::write(
@@ -629,6 +662,7 @@ fn placing(session: &Session, left: &str) -> PathBuf {
 }
 
 /// `scootbar daemon --config PATH` with a protocol trace in the bar log.
+#[cfg(feature = "clock")]
 fn traced_daemon(session: &Session, path: &std::path::Path) -> Reaper {
     let log = std::fs::File::create(session.bar_log()).unwrap();
     let child = session
@@ -644,6 +678,7 @@ fn traced_daemon(session: &Session, path: &std::path::Path) -> Reaper {
     Reaper(child)
 }
 
+#[cfg(all(feature = "clock", feature = "workspaces"))]
 fn reload(session: &Session) {
     let out = session.scootbar().args(["msg", "reload"]).output().unwrap();
     assert!(
@@ -655,6 +690,7 @@ fn reload(session: &Session) {
 
 /// Opens a window, switches to the workspace after it and closes the
 /// window: a batch of workspace changes a bound manager would be sent.
+#[cfg(feature = "clock")]
 fn churn(session: &Session, bar: &mut Reaper) {
     let toy = ToyWindow::open(session.wayland_socket());
     session.wait_for(&mut bar.0, "a window mapped", |session| {
@@ -670,6 +706,7 @@ fn churn(session: &Session, bar: &mut Reaper) {
     std::thread::sleep(Duration::from_millis(300));
 }
 
+#[cfg(feature = "clock")]
 #[test]
 fn a_bar_without_the_module_binds_no_workspace_protocol_and_hears_nothing() {
     let Some(session) = Session::scoot("ws-unplaced", 1, "") else {
@@ -689,6 +726,7 @@ fn a_bar_without_the_module_binds_no_workspace_protocol_and_hears_nothing() {
     assert!(events.is_empty(), "{events:?}");
 }
 
+#[cfg(all(feature = "clock", feature = "workspaces"))]
 #[test]
 fn a_bar_with_the_module_binds_the_protocol_once_and_hears_the_changes() {
     let Some(session) = Session::scoot("ws-placed", 1, "") else {
@@ -706,6 +744,7 @@ fn a_bar_with_the_module_binds_the_protocol_once_and_hears_the_changes() {
     assert!(workspace_events(&trace).len() > 4);
 }
 
+#[cfg(all(feature = "clock", feature = "workspaces"))]
 #[test]
 fn a_reload_binds_and_releases_the_protocol_with_the_module() {
     let Some(session) = Session::scoot("ws-reload", 1, "") else {
