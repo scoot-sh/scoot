@@ -128,7 +128,7 @@ pub struct SlideshowRequest<'a> {
     /// Absolute: the daemon refuses anything else, since its working
     /// directory is not the client's.
     pub dir: Cow<'a, str>,
-    /// Seconds between images: whole minutes, at least one. On the wire as
+    /// Seconds between images: whole minutes, at least one minute. On the wire as
     /// seconds with an `s` (`"1800s"`), read by the same
     /// [`parse_every`](crate::rotation::parse_every) the CLI uses, so one
     /// grammar names every pace.

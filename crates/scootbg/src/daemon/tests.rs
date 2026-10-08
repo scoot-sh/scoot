@@ -278,6 +278,48 @@ fn too_many_waiting_images_is_an_error_now() {
 }
 
 #[test]
+fn an_unreadable_slideshow_entry_is_an_error_now_naming_the_cause() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    fake.refuse = Some(ChangeError::UnreadableDirectory {
+        dir: "/wallpapers".into(),
+        detail: "Too many levels of symbolic links (os error 40)".into(),
+    });
+    let mut responder = Responder::new(&mut fake);
+    let reply = ask(
+        &mut responder,
+        r#"{"protocol":1,"type":"set","directory":"/wallpapers","every":"30m"}"#,
+    );
+    assert_eq!(reply["type"], "error");
+    let message = reply["message"].as_str().unwrap();
+    assert!(message.contains("/wallpapers"), "{message}");
+    assert!(message.contains("symbolic links"), "{message}");
+    assert!(!message.contains("not a directory"), "{message}");
+    assert!(message.contains("nothing was changed"), "{message}");
+}
+
+#[test]
+fn a_slideshow_past_the_listing_cap_is_an_error_now_naming_the_cap() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    fake.refuse = Some(ChangeError::TooManyFiles {
+        dir: "/wallpapers".into(),
+        seen: crate::rotation::MAX_LISTED + 1,
+    });
+    let mut responder = Responder::new(&mut fake);
+    let reply = ask(
+        &mut responder,
+        r#"{"protocol":1,"type":"set","directory":"/wallpapers","every":"30m"}"#,
+    );
+    assert_eq!(reply["type"], "error");
+    let message = reply["message"].as_str().unwrap();
+    assert!(message.contains("/wallpapers"), "{message}");
+    assert!(
+        message.contains(&crate::rotation::MAX_LISTED.to_string()),
+        "{message}"
+    );
+    assert!(message.contains("nothing was changed"), "{message}");
+}
+
+#[test]
 fn the_late_reply_is_ok_or_an_error() {
     let mut out = Vec::new();
     write_ready(&mut out, &Ready::Done(Outcome::Shown));

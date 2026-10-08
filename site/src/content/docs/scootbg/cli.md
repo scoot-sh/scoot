@@ -103,14 +103,42 @@ showing after the next `set` of the directory. `DURATION` is a number and
 `s`, `m`, `h` or `d`, such as `30m`: at least `1m`, whole minutes, at most
 `7d`. The files go sorted by name, or shuffled once with `--shuffle`;
 `--mode`, `--fill`, `--filter` and `--transition` apply to every file, as
-for one image. The first file shows before `set` returns, as an image
+for one image. At most 10,000 files are listed: a larger directory is
+refused outright (exit 1, naming the cap) rather than stalling the
+daemon's loop to list it. The first file shows before `set` returns, as an image
 does; a file that is not an image fails to draw when its turn comes (as a
 `set` of it would, `draw_failed` in `query` saying why) until the next
 rotation. One slideshow runs at a time. A new `set`, a `clear`, or a
 changed `apply-config` stops it (an unchanged section leaves it running,
 like a `set` made since); restarting the daemon shows the last image
-without resuming it. With no slideshow the timer does not exist: no file
+without resuming it. If the directory itself goes away mid-rotation, the
+slideshow stops at the next step — said on the daemon's stderr, and
+`query` no longer reports a `rotation` — instead of failing once a
+minute until stopped; a re-created directory starts with a fresh `set`.
+With no slideshow the timer does not exist: no file
 descriptor, no wakeups. With one, the daemon wakes at most once a minute.
+
+> **Symptom:** *`set` says the directory needs `--every`.*
+> A bare directory is only ever a slideshow: `scootbg set DIR` is a
+> usage error (exit 2) naming `--every`. Diagnose with the pace it
+> suggests, e.g. `scootbg set ~/wallpapers --every 30m`.
+>
+> **Symptom:** *`set` says the directory holds no files.*
+> An empty directory reaches the daemon, which refuses it (exit 1),
+> changing nothing. Diagnose with `ls -la DIR` — hidden files count,
+> subdirectories do not.
+>
+> **Symptom:** *one step shows nothing / `draw_failed` until the next step.*
+> That file is not an image scootbg reads (told apart by content, not
+> name), so its turn fails like a `set` of it would and the next file
+> follows on schedule. Diagnose with `scootbg query` (`draw_error`
+> says why, as the daemon's stderr does) and `scootbg set FILE` on the
+> file itself.
+>
+> **Symptom:** *the slideshow stopped after the directory moved.*
+> That is the design above, not a crash: the daemon says so on stderr
+> and `query` drops `rotation`. Diagnose with `scootbg query` (no
+> `rotation` object) and re-`set` the new path.
 
 ## `apply-config`
 

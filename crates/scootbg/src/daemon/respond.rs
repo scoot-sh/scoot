@@ -63,8 +63,14 @@ pub enum ChangeError {
     Cache(String),
     /// A slideshow's directory is not one any more.
     NotDirectory(String),
+    /// A slideshow's directory is there, but an entry in it could not be
+    /// read: the operating system's reason (permissions, a symlink loop).
+    UnreadableDirectory { dir: String, detail: String },
     /// A slideshow's directory holds no files.
     EmptyDirectory(String),
+    /// A slideshow's directory holds more than
+    /// [`crate::rotation::MAX_LISTED`] files (`seen`: one past the cap).
+    TooManyFiles { dir: String, seen: usize },
 }
 
 /// The reply text for a refused change.
@@ -96,8 +102,21 @@ impl fmt::Display for Refused<'_> {
                     "{dir:?} is not a directory any more; nothing was changed"
                 )
             }
+            ChangeError::UnreadableDirectory { dir, detail } => {
+                write!(
+                    f,
+                    "{dir:?} cannot be fully listed ({detail}); nothing was changed"
+                )
+            }
             ChangeError::EmptyDirectory(dir) => {
                 write!(f, "{dir:?} holds no files; nothing was changed")
+            }
+            ChangeError::TooManyFiles { dir, seen } => {
+                write!(
+                    f,
+                    "{dir:?} holds more than {} files ({seen} seen); nothing was changed",
+                    crate::rotation::MAX_LISTED,
+                )
             }
         }
     }

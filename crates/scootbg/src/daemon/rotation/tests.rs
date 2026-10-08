@@ -114,3 +114,77 @@ fn starting_refuses_what_has_nothing_to_cycle() {
     );
     std::fs::remove_dir(&empty).unwrap();
 }
+
+#[test]
+fn starting_names_an_unreadable_entry_rather_than_the_directory() {
+    // A symlink loop: the directory opens, but stating the entry fails,
+    // however the entries come back.
+    let dir = std::env::temp_dir().join(format!(
+        "sbg-drotation-loop-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ));
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::write(dir.join("fine.png"), b"fake").unwrap();
+    std::os::unix::fs::symlink("loop", dir.join("loop")).unwrap();
+    let error = Rotation::start(
+        dir.to_str().unwrap(),
+        1800,
+        false,
+        None,
+        look(),
+        Spec::none(),
+        std::time::Instant::now(),
+    )
+    .unwrap_err();
+    let message = error.to_string();
+    match &error {
+        super::StartError::Unreadable(detail) => assert!(
+            !detail.is_empty(),
+            "the operating system's reason travels with it"
+        ),
+        other => panic!("an unreadable-entry refusal, not {other:?}"),
+    }
+    assert!(message.contains("nothing was changed"), "{message}");
+    assert!(!message.contains("not a directory"), "{message}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn starting_refuses_past_the_listing_cap() {
+    use crate::rotation::MAX_LISTED;
+
+    let dir = std::env::temp_dir().join(format!(
+        "sbg-drotation-cap-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ));
+    std::fs::create_dir(&dir).unwrap();
+    for i in 0..=MAX_LISTED {
+        std::fs::write(dir.join(format!("{i:05}.png")), b"fake").unwrap();
+    }
+    let error = Rotation::start(
+        dir.to_str().unwrap(),
+        1800,
+        false,
+        None,
+        look(),
+        Spec::none(),
+        std::time::Instant::now(),
+    )
+    .unwrap_err();
+    match error {
+        super::StartError::TooMany { seen } => assert_eq!(seen, MAX_LISTED + 1),
+        other => panic!("a cap refusal, not {other:?}"),
+    }
+    let message = error.to_string();
+    assert!(message.contains(&MAX_LISTED.to_string()), "{message}");
+    assert!(message.contains("nothing was changed"), "{message}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

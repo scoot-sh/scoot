@@ -468,12 +468,17 @@ anything wrong                                                -> {"type":"error"
 
 - **A directory `set` is additive to protocol 1**: `directory` (an
   absolute path), `every` (seconds with an `s`, whole minutes, at least
-  one) and `shuffle` (present only when true) ride a `set` beside the
+  one minute) and `shuffle` (present only when true) ride a `set` beside the
   usual `mode`/`fill`/`filter`/`output`/`transition`. A daemon that
   predates them ignores the unknown fields and refuses the `set` as
   targetless, loudly rather than misread. The first file answers like an
   image `set`; later steps have no reply. `query` reports the slideshow
-  as a top-level `rotation` object, absent while none runs.
+  as a top-level `rotation` object, absent while none runs. Listing refuses
+  past 10,000 files (naming the cap), and an entry that cannot be read
+  (permissions, a symlink loop) is refused naming the operating system's
+  reason rather than as "not a directory". If the directory goes away
+  mid-rotation the slideshow stops at the next step instead of failing
+  once a minute until stopped.
 
 - `set` and `clear` answer once every targeted output shows the change and
   a `wl_display.sync` sent after the commits has come back, so the

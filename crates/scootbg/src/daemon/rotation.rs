@@ -71,15 +71,30 @@ pub enum StartError {
     /// No directory there now (removed between the CLI's check and this
     /// one, or sent over the protocol directly).
     NotDirectory,
+    /// The directory is there but an entry in it could not be read: the
+    /// operating system's reason, such as a permission or a symlink loop.
+    Unreadable(String),
     /// Nothing to cycle through.
     Empty,
+    /// More than [`crate::rotation::MAX_LISTED`] files: refused rather
+    /// than truncated. Holds how many files were seen (one past the cap).
+    TooMany { seen: usize },
 }
 
 impl std::fmt::Display for StartError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotDirectory => write!(f, "not a directory any more; nothing was changed"),
+            Self::Unreadable(detail) => write!(
+                f,
+                "cannot read an entry in the directory ({detail}); nothing was changed"
+            ),
             Self::Empty => write!(f, "the directory holds no files; nothing was changed"),
+            Self::TooMany { seen } => write!(
+                f,
+                "the directory holds more than {} files ({seen} seen); nothing was changed",
+                crate::rotation::MAX_LISTED,
+            ),
         }
     }
 }
@@ -103,8 +118,14 @@ impl Rotation {
         if !std::fs::metadata(dir).is_ok_and(|meta| meta.is_dir()) {
             return Err(StartError::NotDirectory);
         }
-        let listed = crate::rotation::list_dir(std::path::Path::new(dir))
-            .map_err(|_| StartError::NotDirectory)?;
+        let listed =
+            crate::rotation::list_dir(std::path::Path::new(dir)).map_err(|error| match error {
+                crate::rotation::ListError::Open(_) => StartError::NotDirectory,
+                crate::rotation::ListError::Entry(error) => {
+                    StartError::Unreadable(error.to_string())
+                }
+                crate::rotation::ListError::TooMany { seen } => StartError::TooMany { seen },
+            })?;
         if listed.files.is_empty() {
             return Err(StartError::Empty);
         }
@@ -210,12 +231,35 @@ fn seed() -> u64 {
 /// reconciles what it targets. Called every turn of the loop; cheap when
 /// idle (one `Instant` comparison) and a no-op without a slideshow.
 pub fn drive_due(state: &mut State, qh: &QueueHandle<State>, now: Instant) {
+    let due = state
+        .rotation
+        .as_ref()
+        .is_some_and(|rotation| rotation.due(now) && !rotation.files.is_empty());
+    if !due {
+        return;
+    }
+    // The directory went away mid-rotation: every later step would fail
+    // to draw, waking the daemon once a minute for nothing. Stop at the
+    // first step past it instead (one `stat` per step; none while idle or
+    // between steps), said on stderr and visible as `rotation` going away
+    // in `query`. A file deleted on its own still fails only its own step
+    // (`draw_failed` until the next one): only a lost directory stops the
+    // show, and a re-created one starts with a fresh `set`.
+    let dir = state
+        .rotation
+        .as_ref()
+        .map(|rotation| rotation.dir.clone())
+        .unwrap_or_default();
+    if !std::path::Path::new(&dir).is_dir() {
+        state.rotation = None;
+        warn(format_args!(
+            "scootbg: rotation: {dir:?} is not a directory any more; stopping the slideshow"
+        ));
+        return;
+    }
     let Some(rotation) = state.rotation.as_mut() else {
         return;
     };
-    if !rotation.due(now) || rotation.files.is_empty() {
-        return;
-    }
     let file = rotation.files[rotation.index].clone();
     rotation.index = (rotation.index + 1) % rotation.files.len();
     let (output, look, transition, every_secs) = (

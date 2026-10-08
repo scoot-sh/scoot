@@ -177,9 +177,13 @@ every DURATION, on one timer, without polling the directory. DURATION is a
 number and `s`, `m`, `h` or `d`, such as `30m`: at least `1m`, whole
 minutes, at most `7d`. The files are tried sorted by name, or shuffled
 once with --shuffle; a file that is not an image fails to draw when its
-turn comes (as a `set` of it would) until the next rotation. The first
+turn comes (as a `set` of it would) until the next rotation. At most
+10,000 files are listed: a larger directory is refused, naming the cap,
+rather than stalling the daemon's loop to list it. The first
 file shows before `set` returns, as an image does. A new `set`, a `clear`
-or a changed `apply-config` stops the slideshow; restarting the daemon
+or a changed `apply-config` stops the slideshow, as does the directory
+going away (at the next step, said on stderr: restarting the show takes a
+fresh `set`); restarting the daemon
 shows the last image, without resuming it. One slideshow runs at a time.
 
 An `http://` or `https://` URL is downloaded once and cached
@@ -249,7 +253,9 @@ transition, that means once the animation has finished: the reply waits
 for the last frame, not the first. An image that
 cannot be shown (no such file, not an image, too large, truncated or
 corrupt) is an error, and every output keeps what it showed. A directory
-with no files in it is an error too, changing nothing; with files, the
+with no files in it is an error too, as is one past the 10,000-file
+listing cap or with an entry that cannot be read, changing nothing;
+with files, the
 first shows before `set` returns, and the rest follow on the timer. An output
 unplugged meanwhile is left out of that wait; an output whose surface is
 not configured yet is waited for, until a round trip after scootbg made
@@ -265,7 +271,8 @@ The choice is saved and shown again when the daemon next starts (see
 `scootbg daemon --help`): a color at once, an image once it has decoded.
 
 Exit status: 0 once shown; 1 when no daemon is running, the output is
-unknown, the image cannot be shown, the directory holds no files, or
+unknown, the image cannot be shown, the directory holds no files, holds
+more than 10,000 files, or has an unreadable entry, or
 drawing failed (the daemon's stderr
 says why); 2 for a usage error, such as a malformed color, an unknown
 mode, a directory without --every, or an --every without a directory.

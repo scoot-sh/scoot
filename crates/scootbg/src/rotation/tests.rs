@@ -1,4 +1,7 @@
-use super::{EveryError, MAX_EVERY_SECS, list_dir, order, parse_every, shuffle_with_seed};
+use super::{
+    EveryError, ListError, MAX_EVERY_SECS, MAX_LISTED, list_dir, order, parse_every,
+    shuffle_with_seed,
+};
 use std::os::unix::ffi::OsStringExt;
 
 #[test]
@@ -100,7 +103,63 @@ fn listing_a_missing_directory_is_an_error() {
             .unwrap()
             .subsec_nanos()
     ));
-    assert!(list_dir(&missing).is_err());
+    assert!(matches!(list_dir(&missing), Err(ListError::Open(_))));
+}
+
+#[test]
+fn listing_names_an_unreadable_entry_rather_than_the_directory() {
+    // A symlink loop: the directory opens, but stating the entry fails
+    // with ELOOP however the entries come back, and however the tests
+    // run (permissions would not fail for root).
+    let dir = std::env::temp_dir().join(format!(
+        "sbg-rotation-loop-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ));
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::write(dir.join("fine.png"), b"fake").unwrap();
+    std::os::unix::fs::symlink("loop", dir.join("loop")).unwrap();
+    let error = list_dir(&dir).unwrap_err();
+    let detail = error.to_string();
+    assert!(
+        matches!(error, ListError::Entry(_)),
+        "an entry error, not an open error: {detail}"
+    );
+    assert!(
+        detail.contains("entry"),
+        "the message names the entry: {detail}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn listing_refuses_past_the_cap_rather_than_truncating() {
+    let dir = std::env::temp_dir().join(format!(
+        "sbg-rotation-cap-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ));
+    std::fs::create_dir(&dir).unwrap();
+    for i in 0..=MAX_LISTED {
+        std::fs::write(dir.join(format!("{i:05}.png")), b"fake").unwrap();
+    }
+    let started = std::time::Instant::now();
+    let error = list_dir(&dir).unwrap_err();
+    let elapsed = started.elapsed();
+    eprintln!("list_dir past the cap ({MAX_LISTED}+1 files): {elapsed:?}");
+    match error {
+        ListError::TooMany { seen } => assert_eq!(seen, MAX_LISTED + 1),
+        other => panic!("a cap refusal, not {other:?}"),
+    }
+    let message = error.to_string();
+    assert!(message.contains(&MAX_LISTED.to_string()), "{message}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -124,4 +183,31 @@ fn shuffling_replays_with_a_seed_and_keeps_the_set() {
     // Unshuffled stays sorted.
     assert_eq!(order(sorted.clone(), false, 42), sorted);
     assert_eq!(order(sorted.clone(), true, 42), first);
+}
+
+#[test]
+fn listing_follows_links_to_files_but_not_into_directories() {
+    let dir = std::env::temp_dir().join(format!(
+        "sbg-rotation-links-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ));
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::write(dir.join("real.png"), b"fake").unwrap();
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    // A linked image shows; a linked directory does not recurse.
+    std::os::unix::fs::symlink("real.png", dir.join("linked.png")).unwrap();
+    std::os::unix::fs::symlink("sub", dir.join("linked-dir")).unwrap();
+    let listed = list_dir(&dir).unwrap();
+    assert_eq!(
+        listed.files,
+        vec![
+            dir.join("linked.png").to_string_lossy().into_owned(),
+            dir.join("real.png").to_string_lossy().into_owned(),
+        ],
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
 }

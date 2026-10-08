@@ -251,16 +251,23 @@ impl Changes for Control<'_> {
                 )
                 .map_err(|error| match error {
                     StartError::NotDirectory => ChangeError::NotDirectory(request.dir.into_owned()),
+                    StartError::Unreadable(detail) => ChangeError::UnreadableDirectory {
+                        dir: request.dir.into_owned(),
+                        detail,
+                    },
                     StartError::Empty => ChangeError::EmptyDirectory(request.dir.into_owned()),
+                    StartError::TooMany { seen } => ChangeError::TooManyFiles {
+                        dir: request.dir.into_owned(),
+                        seen,
+                    },
                 })?;
-                // Only a started slideshow replaces the running one: a
-                // refused one changes nothing, running one included.
+                // Only an accepted slideshow replaces the running one: a
+                // refused one changes nothing, running one included. The
+                // trial below is what accepts it (too many queued trials
+                // refuses), so the running slideshow stays until that
+                // succeeds: a refused new `set` leaves the old one showing
+                // and advancing.
                 let first = next.first().to_owned();
-                *rotation = Some(next);
-                // The first file goes through the normal image path: it is
-                // decoded before it shows, and the reply waits for it. Too
-                // many queued trials refuses, stopping the slideshow it
-                // just started, so "nothing was changed" stays true.
                 let started = trial_image(
                     outputs,
                     &mut images.jobs,
@@ -272,8 +279,8 @@ impl Changes for Control<'_> {
                     transition,
                     generation,
                 );
-                if started.is_err() {
-                    *rotation = None;
+                if started.is_ok() {
+                    *rotation = Some(next);
                 }
                 return started;
             }
@@ -365,6 +372,9 @@ fn trial_image(
         conn,
         output: output.map(str::to_owned),
     };
+    // Queued first: a refused trial (too many waiting) changes nothing,
+    // not even the outputs' pending transitions.
+    jobs.trial(image, trial).map_err(|_| ChangeError::Busy)?;
     // The transition waits with the trial: the pixels landing starts it.
     for entry in outputs
         .iter_mut()
@@ -372,5 +382,5 @@ fn trial_image(
     {
         entry.output.request_transition(transition, generation);
     }
-    jobs.trial(image, trial).map_err(|_| ChangeError::Busy)
+    Ok(())
 }

@@ -23,6 +23,17 @@ pub const MIN_EVERY_SECS: u64 = 60;
 /// overflow in the timer math.
 pub const MAX_EVERY_SECS: u64 = 7 * 24 * 3600;
 
+/// At most this many files listed for one slideshow: the listing runs
+/// synchronously on the daemon's loop thread (one `read_dir` plus one
+/// `stat` per entry, then a sort), so an unbounded directory would stall
+/// Wayland event dispatch for as long as it takes. Past the cap the `set`
+/// is refused, naming the cap, rather than showing a silent subset: what
+/// shows is exactly the directory, or nothing. 10,000 entries list in
+/// ~14 ms (measured on the Asahi M2), cost ~100 B of file list each, and
+/// no real wallpaper directory is that large: ten times the files would
+/// stall the loop ten times as long, with no bound at all.
+pub const MAX_LISTED: usize = 10_000;
+
 /// Why an `--every` duration was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EveryError {
@@ -98,14 +109,27 @@ pub fn parse_every(text: &str) -> Result<u64, EveryError> {
 /// Why a directory could not be listed.
 #[derive(Debug)]
 pub enum ListError {
-    /// `read_dir` (or a metadata call) failed.
-    Io(std::io::Error),
+    /// Opening the directory failed (`read_dir`): it is gone, or was
+    /// never one.
+    Open(std::io::Error),
+    /// Reading one entry, or stating it, failed (permissions, a symlink
+    /// loop): the directory is there, the entry is not readable.
+    Entry(std::io::Error),
+    /// More than [`MAX_LISTED`] files: refused rather than truncated, so
+    /// what shows is exactly the directory, or nothing. Holds how many
+    /// files were seen (one past the cap).
+    TooMany { seen: usize },
 }
 
 impl std::fmt::Display for ListError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(error) => write!(f, "cannot list the directory: {error}"),
+            Self::Open(error) => write!(f, "cannot list the directory: {error}"),
+            Self::Entry(error) => write!(f, "cannot read an entry in the directory: {error}"),
+            Self::TooMany { seen } => write!(
+                f,
+                "the directory holds more than {MAX_LISTED} files ({seen} seen)"
+            ),
         }
     }
 }
@@ -125,14 +149,20 @@ pub struct Listed {
 /// absolute paths, sorted. A file that is not an image is still listed; it
 /// fails to draw when its turn comes, like a `set` of it would, until the
 /// next rotation. Anything else (a subdirectory, a socket, a name that is
-/// not UTF-8) is left out.
+/// not UTF-8) is left out. Past [`MAX_LISTED`] files the listing stops and
+/// refuses, rather than growing the loop thread's stall and the list
+/// without bound.
 pub fn list_dir(dir: &std::path::Path) -> Result<Listed, ListError> {
-    let entries = std::fs::read_dir(dir).map_err(ListError::Io)?;
+    let entries = std::fs::read_dir(dir).map_err(ListError::Open)?;
     let mut files = Vec::new();
     let mut skipped_non_utf8 = 0;
     for entry in entries {
-        let entry = entry.map_err(ListError::Io)?;
-        let meta = entry.metadata().map_err(ListError::Io)?;
+        let entry = entry.map_err(ListError::Entry)?;
+        // Following links (`std::fs::metadata`, not `DirEntry::metadata`,
+        // which stats the link itself): a symlinked image is listed, and
+        // an unreadable target (a loop, a dangling link, a denied
+        // directory) is an entry error, not a silent skip.
+        let meta = std::fs::metadata(entry.path()).map_err(ListError::Entry)?;
         if !meta.is_file() {
             continue;
         }
@@ -142,6 +172,9 @@ pub fn list_dir(dir: &std::path::Path) -> Result<Listed, ListError> {
             continue;
         };
         files.push(dir.join(name).to_string_lossy().into_owned());
+        if files.len() > MAX_LISTED {
+            return Err(ListError::TooMany { seen: files.len() });
+        }
     }
     files.sort();
     Ok(Listed {

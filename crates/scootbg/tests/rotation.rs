@@ -260,3 +260,213 @@ fn no_slideshow_means_no_wakeups() {
     assert_eq!(switches(pid), last, "the daemon woke up with no slideshow");
     kill(&session, &mut daemon);
 }
+
+/// A refused new slideshow leaves the running one alone: its reply says
+/// nothing was changed, `query` still reports it, and it still advances.
+/// The refusal is forced by filling the trial queue (32 waiting trials)
+/// with bursts of concurrent slideshow `set`s of the same directory
+/// behind a slow first decode, so every accepted one agrees on what runs.
+/// The burst is retried until the probe is refused: the first decode to
+/// land sweeps the queue behind it, so a late probe can miss a drained
+/// queue without saying anything about the fix.
+#[test]
+fn a_refused_second_slideshow_keeps_the_running_one() {
+    let Some(session) = Session::start_with("rotation-busy", 1, "") else {
+        return;
+    };
+    // Debug-shortened to 1 s, so the surviving slideshow steps promptly.
+    let mut daemon = session.daemon_logged(&[("SCOOTBG_DEBUG_ROTATION_EVERY", "1")]);
+    configured(&session, 1);
+    let dir = session.runtime_dir().join("wallpapers");
+    let (red, _) = two_images(&dir);
+    let other = session.runtime_dir().join("elsewhere");
+    let _ = two_images(&other);
+    // A slow first decode: a 12 MP solid image decodes in milliseconds
+    // but scales for hundreds, so every trial queued behind it is still
+    // queued when the refused `set` arrives.
+    let slow = session.runtime_dir().join("slow");
+    std::fs::create_dir_all(&slow).unwrap();
+    write_png(&slow.join("00-big.png"), 4000, 3000, [0, 128, 0]);
+    write_png(&slow.join("01-red.png"), 64, 64, [255, 0, 0]);
+
+    ok(&session, &["set", path_str(&dir), "--every", "1m"]);
+    assert_eq!(shows(&session)[0]["image"], json!(red));
+
+    // Fill the trial queue: far more concurrent slideshow `set`s than the
+    // 32 waiting trials allowed, spawned from threads so the burst lands
+    // inside one slow decode even under load. Every accepted one names
+    // the same directory, so no ordering races; some are refused or lose
+    // their connection on the way, and only the queue matters.
+    let mut fillers = Vec::new();
+    let mut probe_stderr = String::new();
+    for _ in 0..6 {
+        std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for _ in 0..8 {
+                handles.push(scope.spawn(|| {
+                    let mut made = Vec::new();
+                    for _ in 0..5 {
+                        made.push(
+                            session
+                                .scootbg()
+                                .args(["set", path_str(&slow), "--every", "1m"])
+                                .stdout(std::process::Stdio::piped())
+                                .stderr(std::process::Stdio::piped())
+                                .spawn()
+                                .unwrap(),
+                        );
+                    }
+                    made
+                }));
+            }
+            for handle in handles {
+                fillers.extend(handle.join().unwrap());
+            }
+        });
+        // The probe, while the queue is still full: refused, changing
+        // nothing. A probe that missed the burst was accepted instead
+        // (the first decode to land sweeps the queue behind it); blast
+        // again behind it.
+        let out = session.run(&["set", path_str(&other), "--every", "1m"]);
+        probe_stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        if !out.status.success() && probe_stderr.contains("too many images") {
+            break;
+        }
+    }
+    assert!(
+        probe_stderr.contains("too many images"),
+        "never managed a Busy refusal: {probe_stderr}"
+    );
+    // The running slideshow (the fillers' directory) survived the refusal.
+    assert_eq!(
+        rotation(&session)["directory"],
+        json!(path_str(&slow)),
+        "a refused `set` keeps the running slideshow"
+    );
+    for mut filler in fillers {
+        let _ = filler.wait();
+    }
+    // ... and it still steps on its timer. The step is proven through the
+    // state file, not pixels: each step records its file synchronously on
+    // the loop, while pixels wait on the decode worker, which this test
+    // deliberately keeps saturated.
+    let state_file = session.state_home.join("scootbg").join("default");
+    let needle = format!("{}/01-red", path_str(&slow));
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        let text = std::fs::read_to_string(&state_file).unwrap_or_default();
+        if text.contains(&needle) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the surviving slideshow never stepped; state: {text}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = red;
+
+    kill(&session, &mut daemon);
+}
+
+/// An entry the listing cannot read (here a symlink loop) refuses the
+/// `set` naming the operating system's reason, not "not a directory",
+/// and changes nothing. Exit 1: a daemon refusal, not a usage error.
+#[test]
+fn unreadable_entries_are_refused_naming_the_cause() {
+    let Some(session) = Session::start_with("rotation-unreadable", 1, "") else {
+        return;
+    };
+    let mut daemon = session.daemon_logged(&[]);
+    configured(&session, 1);
+    let dir = session.runtime_dir().join("wallpapers");
+    let (red, _) = two_images(&dir);
+    std::os::unix::fs::symlink("loop", dir.join("loop")).unwrap();
+
+    let stderr = fails(&session, 1, &["set", path_str(&dir), "--every", "30m"]);
+    assert!(stderr.contains("nothing was changed"), "{stderr}");
+    assert!(!stderr.contains("not a directory"), "{stderr}");
+    assert_eq!(shows(&session)[0], Value::Null);
+    assert_eq!(rotation(&session), Value::Null);
+    let _ = red;
+
+    kill(&session, &mut daemon);
+}
+
+/// A directory past the listing cap is refused outright (exit 1, naming
+/// the cap), changing nothing.
+#[test]
+fn a_directory_past_the_listing_cap_is_refused() {
+    let Some(session) = Session::start_with("rotation-cap", 1, "") else {
+        return;
+    };
+    let mut daemon = session.daemon_logged(&[]);
+    configured(&session, 1);
+    let dir = session.runtime_dir().join("wallpapers");
+    std::fs::create_dir_all(&dir).unwrap();
+    for i in 0..=scootbg_listing_cap() {
+        std::fs::write(dir.join(format!("{i:05}.png")), b"fake").unwrap();
+    }
+
+    let stderr = fails(&session, 1, &["set", path_str(&dir), "--every", "30m"]);
+    assert!(
+        stderr.contains(&scootbg_listing_cap().to_string()),
+        "{stderr}"
+    );
+    assert!(stderr.contains("nothing was changed"), "{stderr}");
+    assert_eq!(shows(&session)[0], Value::Null);
+    assert_eq!(rotation(&session), Value::Null);
+
+    kill(&session, &mut daemon);
+}
+
+/// The listing cap, as the daemon enforces it: kept beside the test that
+/// needs it so the count cannot drift from the source.
+fn scootbg_listing_cap() -> usize {
+    10_000
+}
+
+/// If the directory goes away mid-rotation, the slideshow stops at the
+/// next step instead of failing once a minute until stopped: `query` no
+/// longer reports one, the stop says why on stderr, and the daemon sleeps
+/// again like with no slideshow at all.
+#[test]
+fn a_slideshow_stops_when_its_directory_goes_away() {
+    let Some(session) = Session::start_with("rotation-gone", 1, "") else {
+        return;
+    };
+    // Debug-shortened to 1 s, so the step past the deletion comes at once.
+    let mut daemon = session.daemon_logged(&[("SCOOTBG_DEBUG_ROTATION_EVERY", "1")]);
+    configured(&session, 1);
+    let dir = session.runtime_dir().join("wallpapers");
+    let (red, _) = two_images(&dir);
+
+    ok(&session, &["set", path_str(&dir), "--every", "1m"]);
+    assert!(rotation(&session).is_object());
+    // The first file is on screen before the directory goes (the `set`
+    // waits for it); whatever follows, no later step draws anything new.
+    assert_eq!(shows(&session)[0]["image"], json!(red));
+    std::fs::remove_dir_all(&dir).unwrap();
+    session.query_until("the slideshow stops", |_| rotation(&session) == Value::Null);
+    // The stop says why on stderr: a vanished directory ends the show
+    // instead of failing once a minute until stopped.
+    let log = std::fs::read_to_string(session.daemon_log()).unwrap_or_default();
+    assert!(log.contains("stopping the slideshow"), "{log}");
+    // And the timer is gone: the daemon settles back to no wakeups.
+    let pid = daemon.id();
+    let deadline = Instant::now() + PATIENCE;
+    let mut last = switches(pid);
+    loop {
+        std::thread::sleep(Duration::from_millis(300));
+        let now = switches(pid);
+        if now == last {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the daemon never settled");
+        last = now;
+    }
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(switches(pid), last, "the daemon woke up after the stop");
+
+    kill(&session, &mut daemon);
+}
