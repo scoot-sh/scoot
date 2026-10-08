@@ -292,6 +292,16 @@ cost. The gated alternative (themed icons behind `icon-image`, default build
 +2,272 B `.text`) was measured and not chosen. Numbers:
 [tray-icon-themes-done](resolved/tray-icon-themes-done.md).
 
+**Maintainer's ruling (2026-10-08, given in chat: "Size trio is approved"):
+the binary-size rows of three scootbar changes are waived**, and only those
+rows: #515 (coalesce a runaway tray item's redraws, release file +1,280 B),
+#520 (per-output font size, +1,344 B) and #523 (session buses on abstract
+sockets, +1,760 B). Each was within the run-to-run size noise but over the
+strict zero-growth reading, so the ruling is recorded here rather than assumed.
+Nothing else is waived: idle wakeups, fds, threads and RSS were measured in each
+PR and stay measurements. This is a one-time ruling for these three, not a
+standing noise margin; the margin question remains open.
+
 **A runaway item.** One item re-announcing its icon as fast as the bar
 re-reads it, for 20 s (`flood.sh` in the PR): the bar read it 434 times
 (the 50 ms floor), used 0.14 CPU-seconds (0.7% of a core), made about 68
