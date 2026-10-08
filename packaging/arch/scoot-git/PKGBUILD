@@ -1,0 +1,52 @@
+# scoot-git: the scrolling-tiling Wayland compositor, tracking main.
+#
+# The `-git` twin of `scoot` (packaging/arch/scoot/PKGBUILD): same files,
+# same dependencies, but built from the tip of main instead of the tagged
+# release tarball. `pkgver` counts main's commits over the crate version,
+# so every rebuild sorts past the last. Conflicts with `scoot`: install
+# one or the other, never both (the versioned `scootbg` dependency stays
+# satisfied by `scootbg-git`, which provides `scootbg`).
+
+pkgname=scoot-git
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc='Scrolling-tiling Wayland compositor (CPU rendering by default, no GPU needed) (git)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/scoot-sh/scoot'
+license=('MIT')
+depends=('gcc-libs' 'glibc' 'libinput' 'libxkbcommon' 'pixman' 'scootbg' 'seatd' 'systemd-libs')
+makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
+optdepends=('mesa: GPU scanout tier (rebuild with --features gpu-scanout)'
+            'libdrm: GPU scanout tier (rebuild with --features gpu-scanout)'
+            'systemd: greeter session login through scoot-session')
+provides=('scoot')
+conflicts=('scoot')
+install=scoot.install
+source=("$pkgname::git+https://github.com/scoot-sh/scoot.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$pkgname"
+  printf '%s.r%s.g%s' \
+    "$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/scoot/Cargo.toml | head -1)" \
+    "$(git rev-list --count HEAD)" \
+    "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$pkgname"
+  cargo build --release --locked -p scoot
+  cargo deny list > THIRD-PARTY-LICENSES
+  ./target/release/scoot --print-default-config > config.toml.example
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 target/release/scoot "$pkgdir/usr/bin/scoot"
+  install -Dm755 resources/scoot-session "$pkgdir/usr/bin/scoot-session"
+  install -Dm644 packaging/arch/scoot/scoot.desktop "$pkgdir/usr/share/wayland-sessions/scoot.desktop"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/scoot/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/scoot/NOTICE"
+  install -Dm644 THIRD-PARTY-LICENSES "$pkgdir/usr/share/licenses/scoot/THIRD-PARTY-LICENSES"
+  install -Dm644 config.toml.example "$pkgdir/usr/share/doc/scoot/config.toml.example"
+}

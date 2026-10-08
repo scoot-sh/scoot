@@ -1,0 +1,44 @@
+# scootbar: the status bar for the scoot compositor (release build).
+#
+# Built from the bar's own tag (`scootbar-v$pkgver`): the bar versions
+# independently of the compositor (docs/versioning.md). The daemon links
+# nothing past the C library, so it carries no system-library
+# dependencies; it speaks standard Wayland protocols, so it needs no
+# versioned dependency on any compositor package. The systemd user unit
+# restarts it on failure (`Restart=on-failure`, the same policy as the
+# Nix home-manager module in nix/modules/scootbar-home.nix).
+#
+# No tag is cut yet, so `sha256sums` is SKIP until the first release;
+# `updpkgsums` fills it then (see packaging/arch/README.md). CI builds
+# this exact file against a same-layout tarball of HEAD.
+
+pkgname=scootbar
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Status bar for the scoot compositor'
+arch=('x86_64' 'aarch64')
+url='https://github.com/scoot-sh/scoot'
+license=('MIT')
+depends=('gcc-libs' 'glibc')
+makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
+optdepends=('systemd: run the bar as a user unit (scootbar.service)'
+            'ttf-dejavu: sans font the bar finds on its own')
+install=scootbar.install
+source=("$pkgname-$pkgver.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/scootbar-v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "scoot-scootbar-v$pkgver"
+  cargo build --release --locked -p scootbar
+  cargo deny list > THIRD-PARTY-LICENSES
+}
+
+package() {
+  cd "scoot-scootbar-v$pkgver"
+  install -Dm755 target/release/scootbar "$pkgdir/usr/bin/scootbar"
+  install -Dm644 packaging/arch/scootbar/scootbar.service "$pkgdir/usr/lib/systemd/user/scootbar.service"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+  install -Dm644 THIRD-PARTY-LICENSES "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-LICENSES"
+  install -Dm644 packaging/arch/scootbar/bar.toml.example "$pkgdir/usr/share/doc/$pkgname/bar.toml.example"
+}

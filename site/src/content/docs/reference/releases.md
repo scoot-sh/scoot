@@ -46,7 +46,7 @@ list, not a guess:
 |---|---|
 | Debian 12 / Ubuntu 24.04 and newer | `apt install libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0` |
 | Fedora 43 and newer | `dnf install libseat libinput libxkbcommon systemd-libs pixman` |
-| Arch | `pacman -S libseat libinput libxkbcommon systemd-libs pixman` |
+| Arch | `pacman -S seatd libinput libxkbcommon systemd-libs pixman` |
 
 Older releases work if they provide the same sonames
 (`libinput.so.10`, `libseat.so.1`, `libudev.so.1`,

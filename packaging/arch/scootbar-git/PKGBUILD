@@ -1,0 +1,46 @@
+# scootbar-git: the status bar, tracking main.
+#
+# The `-git` twin of `scootbar` (packaging/arch/scootbar/PKGBUILD): same
+# files, same unit, same dependencies, built from the tip of main.
+# Conflicts with `scootbar`: install one or the other, never both.
+
+pkgname=scootbar-git
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc='Status bar for the scoot compositor (git)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/scoot-sh/scoot'
+license=('MIT')
+depends=('gcc-libs' 'glibc')
+makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
+optdepends=('systemd: run the bar as a user unit (scootbar.service)'
+            'ttf-dejavu: sans font the bar finds on its own')
+provides=('scootbar')
+conflicts=('scootbar')
+install=scootbar.install
+source=("$pkgname::git+https://github.com/scoot-sh/scoot.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$pkgname"
+  printf '%s.r%s.g%s' \
+    "$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/scootbar/Cargo.toml | head -1)" \
+    "$(git rev-list --count HEAD)" \
+    "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$pkgname"
+  cargo build --release --locked -p scootbar
+  cargo deny list > THIRD-PARTY-LICENSES
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 target/release/scootbar "$pkgdir/usr/bin/scootbar"
+  install -Dm644 packaging/arch/scootbar/scootbar.service "$pkgdir/usr/lib/systemd/user/scootbar.service"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/scootbar/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/scootbar/NOTICE"
+  install -Dm644 THIRD-PARTY-LICENSES "$pkgdir/usr/share/licenses/scootbar/THIRD-PARTY-LICENSES"
+  install -Dm644 packaging/arch/scootbar/bar.toml.example "$pkgdir/usr/share/doc/scootbar/bar.toml.example"
+}

@@ -141,6 +141,13 @@ jobs:
   #                                           cannot alter the built site; the
   #                                           Pages deploy workflow tracks
   #                                           `docs/**` separately.
+  #   packaging/arch/*                       -> nothing here: the Arch
+  #                                           container workflow
+  #                                           (arch.yml) owns those files,
+  #                                           the way the session harness
+  #                                           owns its script above. A
+  #                                           PKGBUILD-only change runs there
+  #                                           and nowhere else.
   #     except its Cargo.toml               -> scoot too, for the flake's
   #     read of its description, as scootbg's
   #   crates/scootbg-mem/                  -> scootbar too: its shm buffer
@@ -240,6 +247,10 @@ jobs:
                 # The same for the Stylix run (fetches two flakes and builds
                 # Stylix's palette generator; docs/scootbar/testing.md).
                 scripts/scootbar-unit-test.sh | scripts/scootbar-stylix-test.sh) ;;
+                # The Arch PKGBUILDs and their README: the Arch container
+                # workflow (arch.yml) owns them, so a change there alone
+                # runs nothing here.
+                packaging/arch/*) ;;
                 # The backlog tool and its tests: only their own job.
                 scripts/backlog | scripts/test_backlog.py)
                   backlog=true ;;

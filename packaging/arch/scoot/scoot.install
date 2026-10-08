@@ -1,0 +1,11 @@
+post_install() {
+  echo 'scoot installed its greeter entry at /usr/share/wayland-sessions/scoot.desktop.'
+  echo 'Pick "scoot" on your login screen (greetd, GDM, SDDM); without a'
+  echo 'systemd user manager it runs the compositor directly with no session'
+  echo 'integration. Copy /usr/share/doc/scoot/config.toml.example to'
+  echo '~/.config/scoot/config.toml to start from the built-in defaults.'
+}
+
+post_upgrade() {
+  post_install
+}

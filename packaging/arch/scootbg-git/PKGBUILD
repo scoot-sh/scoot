@@ -1,0 +1,41 @@
+# scootbg-git: the wallpaper daemon, tracking main.
+#
+# The `-git` twin of `scootbg` (packaging/arch/scootbg/PKGBUILD): same
+# files and dependencies, built from the tip of main. Conflicts with
+# `scootbg`: install one or the other, never both.
+
+pkgname=scootbg-git
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc='Wallpaper daemon for the scoot compositor (git)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/scoot-sh/scoot'
+license=('MIT')
+depends=('gcc-libs' 'glibc')
+makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
+provides=('scootbg')
+conflicts=('scootbg')
+source=("$pkgname::git+https://github.com/scoot-sh/scoot.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$pkgname"
+  printf '%s.r%s.g%s' \
+    "$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/scootbg/Cargo.toml | head -1)" \
+    "$(git rev-list --count HEAD)" \
+    "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$pkgname"
+  cargo build --release --locked -p scootbg
+  cargo deny list > THIRD-PARTY-LICENSES
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 target/release/scootbg "$pkgdir/usr/bin/scootbg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/scootbg/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/scootbg/NOTICE"
+  install -Dm644 THIRD-PARTY-LICENSES "$pkgdir/usr/share/licenses/scootbg/THIRD-PARTY-LICENSES"
+}
