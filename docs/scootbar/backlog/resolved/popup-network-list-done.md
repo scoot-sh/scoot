@@ -36,7 +36,7 @@ Reference: [cli.md](../../cli.md#network) and [cli.md](../../cli.md#popups).
   stays closed, as the picker does.
 - **Out of scope, as filed**: the password prompt (the command's own
   business), and keyboard navigation, filed as
-  [popup-list-keyboard](../popup-list-keyboard.md).
+  [popup-list-keyboard](popup-list-keyboard-done.md).
 
 ### Evidence
 

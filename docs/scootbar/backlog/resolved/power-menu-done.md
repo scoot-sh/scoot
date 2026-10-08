@@ -75,7 +75,7 @@ recorder script and point the logind path at nothing real.
 
 ## Not in this ticket
 
-Keyboard navigation of popup lists ([popup-list-keyboard](popup-list-keyboard.md)).
+Keyboard navigation of popup lists ([popup-list-keyboard](popup-list-keyboard-done.md)).
 Themed/tray-adjacent power affordances. A default lock command.
 
 ## Resolution (2026-10-04, PR #414, code commit `5ce16a556`)
