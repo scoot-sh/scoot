@@ -11,10 +11,10 @@ pkgbase = scootbg-git
 	makedepends = git
 	makedepends = wayland
 	makedepends = wayland-protocols
-	depends = gcc-libs
 	depends = glibc
 	provides = scootbg
 	conflicts = scootbg
+	options = !debug
 	source = scootbg-git::git+https://github.com/scoot-sh/scoot.git
 	sha256sums = SKIP
 

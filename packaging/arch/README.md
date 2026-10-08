@@ -40,9 +40,19 @@ release build: `scoot` 6.5 MB with those five sonames, `scootbg`
 - `libudev.so.1` comes from `systemd-libs`; `libgbm.so.1`/`libdrm.so.2`
   (the `gpu-scanout` feature's extras) from `mesa`/`libdrm`, carried
   as `optdepends` since the shipped build is the default feature set.
+- `bash` is a dependency of the `scoot` packages (the `scoot-session`
+  launcher is a `sh` script); `gcc-libs` is deliberately absent
+  (namcap: `libgcc_s` is implicitly satisfied, the explicit entry
+  unneeded). `glibc` stays: the binaries link it and namcap wants it
+  named.
 - `cargo-deny` generates each package's `THIRD-PARTY-LICENSES` at
   build time (lockfile-only `cargo deny list`, no network); it is in
   `extra` on both architectures.
+
+`namcap` is clean on errors; the remaining warnings are each
+explained, not waived: `scootbg` on the `scoot` packages reads as
+unneeded because it is a spawned program dependency (the lockstep
+pair), not a linked library, which a linkage linter cannot see.
 
 ## Installed files
 
@@ -61,6 +71,14 @@ release build: `scoot` 6.5 MB with those five sonames, `scootbg`
   `graphical-session.target` for standalone use), licenses, and a
   starting `bar.toml.example` (proven valid: `scootbar daemon --check`
   prints `ok`).
+
+Two deliberate packaging choices, both namcap-driven: `options=('!debug')`
+everywhere (the auto-split `-debug` subpackages ship a build-id symlink
+into the main package that a per-package lint reads as dangling, and
+carry no value for AUR users), and the `-git` packages install their
+licenses under their own name (`/usr/share/licenses/scoot-git/`, where
+namcap requires them) while their docs follow the provided name
+(`/usr/share/doc/scoot/`, which the install notes reference).
 
 ## Architectures
 

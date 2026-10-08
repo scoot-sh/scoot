@@ -12,12 +12,12 @@ pkgbase = scootbar-git
 	makedepends = git
 	makedepends = wayland
 	makedepends = wayland-protocols
-	depends = gcc-libs
 	depends = glibc
 	optdepends = systemd: run the bar as a user unit (scootbar.service)
 	optdepends = ttf-dejavu: sans font the bar finds on its own
 	provides = scootbar
 	conflicts = scootbar
+	options = !debug
 	source = scootbar-git::git+https://github.com/scoot-sh/scoot.git
 	sha256sums = SKIP
 

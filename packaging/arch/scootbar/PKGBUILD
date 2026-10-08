@@ -19,11 +19,12 @@ pkgdesc='Status bar for the scoot compositor'
 arch=('x86_64' 'aarch64')
 url='https://github.com/scoot-sh/scoot'
 license=('MIT')
-depends=('gcc-libs' 'glibc')
+depends=('glibc')
 makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
 optdepends=('systemd: run the bar as a user unit (scootbar.service)'
             'ttf-dejavu: sans font the bar finds on its own')
 install=scootbar.install
+options=('!debug')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/scootbar-v$pkgver.tar.gz")
 sha256sums=('SKIP')
 

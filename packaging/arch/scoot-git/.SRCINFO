@@ -12,7 +12,7 @@ pkgbase = scoot-git
 	makedepends = git
 	makedepends = wayland
 	makedepends = wayland-protocols
-	depends = gcc-libs
+	depends = bash
 	depends = glibc
 	depends = libinput
 	depends = libxkbcommon
@@ -25,6 +25,7 @@ pkgbase = scoot-git
 	optdepends = systemd: greeter session login through scoot-session
 	provides = scoot
 	conflicts = scoot
+	options = !debug
 	source = scoot-git::git+https://github.com/scoot-sh/scoot.git
 	sha256sums = SKIP
 
