@@ -1,0 +1,31 @@
+# The "ginger-night" look for scoot: a near-black background, a ginger ring
+# around the focused window and a dark umber one around the rest, rounded
+# corners, and the cat-peeking illustration in this directory. See README.md
+# in this directory.
+#
+#   scoot --config docs/examples/ginger-night/scoot.toml
+#
+# Nothing here is a default: every costly part is opt-in (see "What it costs").
+#
+# The previews were taken at scale 1.5 on a 2560x1664 panel: uncomment to match.
+# [output]
+# scale = 1.5
+
+[layout]
+gap = 20
+
+[appearance]
+background_color = "#0E0E0E"          # shows until the wallpaper is up, and behind it
+corner_radius = 14                    # costs a little per frame: 0 is free
+focus_ring_width = 2                  # the color, not the weight, says which is focused
+focus_ring_inactive_width = 2
+focus_ring_active_color = "#FF9A30"
+focus_ring_inactive_color = "#4E2913"
+
+[wallpaper]
+# A relative path is resolved against this file's directory.
+# `fit` shows all of the image (the cat peeks in from the right edge, so
+# `fill` would crop it on narrower outputs), letterboxed in `fill`.
+image = "wallpaper.png"
+mode = "fit"
+fill = "#0E0E0E"

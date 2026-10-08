@@ -1,0 +1,23 @@
+# The "ginger-night" prompt for starship, in the illustration's palette, for a dark
+# translucent terminal. Point starship at it with STARSHIP_CONFIG, e.g.:
+#
+#   env STARSHIP_CONFIG=docs/examples/ginger-night/starship.toml bash -i
+#
+add_newline = false
+format = "$directory$git_branch$nix_shell$cmd_duration$character"
+[directory]
+style = "bold #E57F29"
+truncation_length = 3
+[git_branch]
+symbol = " "
+style = "#C9A87A"
+format = "[$symbol$branch]($style) "
+[nix_shell]
+symbol = " "
+style = "#8AA8A0"
+format = "[$symbol]($style)"
+[cmd_duration]
+style = "#8F7A63"
+[character]
+success_symbol = "[❯](bold #FFB14B)"
+error_symbol = "[❯](bold #E05A4E)"

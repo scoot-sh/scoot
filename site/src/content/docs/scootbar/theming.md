@@ -14,6 +14,7 @@ yielding to a user value, and to Stylix where present):
 
 | Look | Bar colors |
 |---|---|
+| `ginger-night` (default) | near-black, cream and ginger |
 | `music-desk` | paper, ink and blue |
 | `radial-burst` | plum, yellow and blue |
 | `moonrise` | navy, cream and amber |

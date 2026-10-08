@@ -19,10 +19,12 @@ hero:
 
 ## Looks
 
-Same cat, different wallpaper. Four looks ship with the desktop — picking
-one themes the compositor, the bar and the wallpaper together:
+Same cat, different wallpaper. Five looks ship with the desktop — picking
+one themes the compositor, the bar and the wallpaper together (the
+default is ginger-night):
 
 <div class="looks">
+<a href="./scoot/theming/"><img src="./looks/ginger-night-480.webp" alt="The ginger-night look: a floating translucent bar over two translucent terminal columns, the cat-peeking illustration behind" loading="lazy" decoding="async" /><span>ginger-night (default)</span></a>
 <a href="./scoot/theming/"><img src="./looks/vinyl-sunset-480.webp" alt="The vinyl-sunset look: a floating translucent bar over two translucent terminal columns, a sunset illustration behind" loading="lazy" decoding="async" /><span>vinyl-sunset</span></a>
 <a href="./scoot/theming/"><img src="./looks/moonrise-480.webp" alt="The moonrise look: a calm amber-on-navy desktop" loading="lazy" decoding="async" /><span>moonrise</span></a>
 <a href="./scoot/theming/"><img src="./looks/music-desk-480.webp" alt="The music-desk look: a blue-on-paper desktop" loading="lazy" decoding="async" /><span>music-desk</span></a>

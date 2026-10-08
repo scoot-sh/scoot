@@ -204,8 +204,11 @@ in
     enable = lib.mkEnableOption "the scoot desktop profile: the session wiring plus bar and wallpaper defaults, themed by `look`";
 
     # Null (the default) themes nothing: every value below is a default
-    # the user or Stylix beats per key. An unknown value is an eval error
-    # naming these four (the `enum` type's own message).
+    # the user or Stylix beats per key. With the profile on and no choice,
+    # `home.nix`/`nixos.nix` default it to ginger-night (kept out of this
+    # option default so a look never lands without the profile -- the
+    # refusal in those files keeps firing then). An unknown value is an
+    # eval error naming these five (the `enum` type's own message).
     look = lib.mkOption {
       type = lib.types.nullOr (
         lib.types.enum [
@@ -213,6 +216,7 @@ in
           "music-desk"
           "radial-burst"
           "moonrise"
+          "ginger-night"
         ]
       );
       default = null;
@@ -221,7 +225,9 @@ in
         One of `docs/examples/*`: applies that example's palette to every
         piece the flake owns today (the compositor `[appearance]` colors,
         the bar `colors`, the session wallpaper where one ships in the
-        repository). Null themes nothing. Each value is a default a value
+        repository). Null themes nothing; with the profile on and no
+        choice this defaults to `ginger-night` (the cat-peeking look).
+        Each value is a default a value
         you set in `settings` beats per key, and Stylix beats where
         present (Stylix stays the override path); see site/src/content/docs/scoot/theming.md#stylix.
       '';
@@ -2032,6 +2038,49 @@ in
       wallpaper = {
         image = ../../docs/assets/wallpapers/moonrise.png;
         mode = "fill";
+      };
+    };
+    ginger-night = {
+      appearance = {
+        background_color = "#0E0E0E";
+        focus_ring_active_color = "#FF9A30";
+        focus_ring_inactive_color = "#4E2913";
+      };
+      barColors = {
+        background = "#0E0E0E";
+        foreground = "#F5EAD6";
+        accent = "#E57F29";
+        hover = "#FFB14B";
+        dim = "#8F7A63";
+        urgent = "#E05A4E";
+      };
+      nightTemp = 3300;
+      isDark = true;
+      # `sans` is DejaVu Sans: its open apertures stay legible on this
+      # look's near-black field, while the cream text and ginger glyphs
+      # carry the night mood -- already shipped, so zero closure (see
+      # the vinyl-sunset note above for the `ui`/`sans`/`mono` split).
+      fonts = {
+        ui = "DroidSansM Nerd Font Propo";
+        sans = "DejaVu Sans";
+        mono = "FiraCode Nerd Font";
+      };
+      appFiles = {
+        foot = ../../docs/examples/ginger-night/foot.ini;
+        starship = ../../docs/examples/ginger-night/starship.toml;
+        helixConfig = ../../docs/examples/ginger-night/helix/config.toml;
+        helixTheme = ../../docs/examples/ginger-night/helix/themes/scoot-ginger-night.toml;
+        btopConf = ../../docs/examples/ginger-night/btop/btop.conf;
+        btopTheme = ../../docs/examples/ginger-night/btop/themes/ginger-night.theme;
+        regreetCss = ../../docs/examples/ginger-night/regreet.css;
+      };
+      # `fit` (not `fill`): the cat peeks in from the right edge, so
+      # covering would crop it on narrower outputs; the `fill` letterbox
+      # is the look's own black, so the bars blend with the field.
+      wallpaper = {
+        image = ../../docs/examples/ginger-night/wallpaper.png;
+        mode = "fit";
+        fill = "#0E0E0E";
       };
     };
   };

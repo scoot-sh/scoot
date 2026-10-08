@@ -38,9 +38,10 @@ in
   # the look's -- amber on moonrise, not Adwaita's default blue) and
   # the surfaces they sit on (the bar's background/foreground, so app
   # text contrast equals bar text contrast, already AA -- measured in
-  # `nix/tests.nix`). `accentFg` is the background color: on all four
-  # looks the background on the accent passes AA (6.2-7.0) while the
-  # foreground on the accent fails (1.7-2.3), so dark text sits on the
+  # `nix/tests.nix`). `accentFg` is the background color: on all five
+  # looks the background on the accent passes AA (6.2-7.0, ginger-night
+  # 6.8) while the foreground on the accent fails (1.7-2.4), so dark
+  # text sits on the
   # bright accent -- and a future look that breaks either pairing fails
   # the AA content check loudly instead of shipping pale-on-pale text.
   # Read by the GTK `gtk.css` and the Qt color scheme in

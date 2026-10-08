@@ -11,7 +11,7 @@ enable the desktop profile and pick a look:
 # Home configuration:
 programs.scoot.desktop = {
   enable = true;
-  look = "music-desk";   # "vinyl-sunset" | "radial-burst" | "moonrise" | null (no theming)
+  look = "music-desk";   # "ginger-night" (default) | "vinyl-sunset" | "radial-burst" | "moonrise" | null (no theming)
 };
 ```
 
@@ -271,7 +271,7 @@ there and the whole desktop follows it.
 Two loud refusals instead of silent no-ops: `desktop.enable` without
 `programs.scoot.enable`, and a `look` without `desktop.enable`, each fail
 evaluation naming the missing switch; an unknown `look` fails naming the
-four valid ones.
+five valid ones.
 
 ## Pick a look
 
@@ -280,16 +280,18 @@ the compositor `[appearance]` colors, the bar `colors`, the session
 wallpaper where one ships in the repository, and — through the
 [app theme](#app-theme) — fonts, cursor, GTK/Qt settings, the
 dark-mode preference, the login screen, and the look's terminal,
-prompt, editor and monitor configs:
+prompt, editor and monitor configs. The default is `ginger-night`
+(the cat-peeking look): a profile with no `look` choice renders it.
 
 | Look | Compositor ring / background | Bar | Wallpaper |
 |---|---|---|---|
+| `ginger-night` (default) | ginger ring `#FF9A30`, near-black `#0E0E0E` | black, cream and ginger | ships (copied to the store; `fit` on the look's black, so the cat is never cropped) |
 | `music-desk` | blue ring `#3D579A`, paper `#FCFBFB` | paper, ink and blue | ships (copied to the store) |
 | `radial-burst` | blue ring `#31a9e5`, plum `#241721` | plum, yellow and blue | ships (copied to the store) |
 | `moonrise` | amber ring `#FF9A49`, slate navy `#2B3648` | navy, cream and amber | ships (copied to the store) |
 | `vinyl-sunset` | orange ring `#E59560`, espresso `#271A1F` | espresso, cream and orange | **no image ships**: the illustration's license forbids passing it on standalone, so the session shows the flat espresso `background_color` unless you set `wallpaper` yourself |
 
-`null` (the default) themes nothing. What the look does not theme
+`null` themes nothing (explicit opt-out: `look = null`). What the look does not theme
 stays yours: layout details (gaps, corner radius, column widths — copy
 them from the example's `scoot.toml` if you want the whole look).
 

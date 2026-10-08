@@ -46,7 +46,7 @@ keep working unchanged.
 | `/scoot/configure/*` (one subpage per config section) | The config file: where it lives, reload, then one page each for `layout`, `appearance`, `output`/`outputs`, `binds`, `floating`, `window_rule`, `autostart`, `xwayland`, `renderer`, `tty` | `docs/configuration.md` The config file, Failure semantics, Reloading, per-section headings, Example config |
 | `/scoot/keybindings` | Every default binding plus how to rebind — **sample, working now** | `docs/configuration.md` `[binds]`, Moving across outputs, Default keybindings; `nix/modules` live defaults referenced by `docs/nix.md` Reference: live defaults |
 | `/scoot/outputs` | Outputs, focus/output movement, hotplug | `docs/configuration.md` Moving across outputs, `[output]`/`[[outputs]]`; `docs/tty.md` Hotplug |
-| `/scoot/theming` | Looks: pick one of the three examples, what each file does, what it costs | `docs/examples/{vinyl-sunset,music-desk,radial-burst}/README.md` + `scoot.toml`/`regreet.css` comments; `docs/nix.md` Stylix; `docs/configuration.md#appearance` cost notes |
+| `/scoot/theming` | Looks: pick one of the five examples, what each file does, what it costs | `docs/examples/{ginger-night,vinyl-sunset,music-desk,radial-burst,moonrise}/README.md` + `scoot.toml`/`regreet.css` comments; `docs/nix.md` Stylix; `docs/configuration.md#appearance` cost notes |
 | `/scoot/protocols` (reference) | Which Wayland protocols work and what each means for your apps | `docs/protocols.md` per-protocol sections (user half; measurement prose moves to `dev/`) |
 | `/scoot/troubleshooting` | Compositor symptoms ("black screen", "key not working", "no output") | `docs/tty.md` When nothing works, VT switching; `docs/configuration.md` Failure semantics |
 
