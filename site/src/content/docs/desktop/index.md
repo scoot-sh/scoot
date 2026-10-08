@@ -2494,7 +2494,7 @@ programs.scoot.desktop = {
   enable = true;
   inputMethod.enable = true;
   # Japanese and Korean beside pinyin:
-  # inputMethod.addons = with pkgs.qt6Packages; [ fcitx5-mozc fcitx5-hangul ];
+  # inputMethod.addons = [ pkgs.fcitx5-mozc pkgs.fcitx5-hangul ];
   # The candidate window keeps fcitx5's own theme:
   # theme.targets.inputMethod.enable = false;
 };
