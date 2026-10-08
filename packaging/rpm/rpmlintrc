@@ -1,0 +1,10 @@
+# rpmlint overrides for the scoot RPMs, used by the openSUSE job in
+# .github/workflows/rpm.yml (`rpmlint -r`). Fedora's job does not use
+# this file: its dictionary passes the same lines, and an unused filter
+# would itself fail there.
+#
+# 'config' is the standard term for config files and their ~/.config
+# paths; openSUSE's en_US dictionary flags the bare token (Fedora's
+# does not). Scoped to the exact token so a real typo still fails.
+
+addFilter(r"spelling-error \('config',")

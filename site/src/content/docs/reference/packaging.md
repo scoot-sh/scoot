@@ -13,7 +13,7 @@ recipes still live in the contributor backlog ([deb][deb-pkg],
 
 [arch-pkg]: https://github.com/scoot-sh/scoot/blob/main/packaging/arch/README.md
 [deb-pkg]: https://github.com/scoot-sh/scoot/blob/main/docs/backlog/packaging/deb-package.md
-[rpm-pkg]: https://github.com/scoot-sh/scoot/blob/main/docs/backlog/packaging/rpm-package.md
+[rpm-pkg]: https://github.com/scoot-sh/scoot/blob/main/docs/backlog/resolved/rpm-package-done.md
 
 ## Get the sources
 

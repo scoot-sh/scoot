@@ -147,6 +147,12 @@ jobs:
   #                                           the way the session harness
   #                                           owns its script above. A
   #                                           PKGBUILD-only change runs there
+  #   packaging/rpm/*                        -> nothing here: the Fedora and
+  #                                           openSUSE container workflow
+  #                                           (rpm.yml) owns those files,
+  #                                           the way the session harness
+  #                                           owns its script above. A
+  #                                           spec-only change runs there
   #                                           and nowhere else.
   #     except its Cargo.toml               -> scoot too, for the flake's
   #     read of its description, as scootbg's
@@ -259,6 +265,10 @@ jobs:
                 # sh and python3 -- no seat, no user manager, no nix.
                 resources/scoot-session | resources/systemd/* | scripts/scoot-session-test.sh)
                   session=true ;;
+                # The RPM specs and their support files: the Fedora and
+                # openSUSE container workflow (rpm.yml) owns them, so a
+                # change there alone runs nothing here.
+                packaging/rpm/*) ;;
                 crates/scoot/* | crates/scoot-core/* | crates/scootctl/* | scripts/smoke-test.sh | vm/compositor-deps.nix)
                   scoot=true
                   macos=true ;;
