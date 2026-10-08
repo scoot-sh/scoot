@@ -40,6 +40,7 @@ fn owned(show: Show<'_>) -> Show<'static> {
             mode: image.mode,
             fill: image.fill,
             filter: image.filter,
+            animate: image.animate,
         }),
     }
 }
@@ -228,6 +229,7 @@ fn set_and_clear_change_the_wallpaper_and_answer_later() {
         mode: Mode::Center,
         fill: red,
         filter: Filter::Bilinear,
+        animate: true,
     });
     for request in [
         Request::Set {
@@ -736,6 +738,7 @@ fn a_superseded_image_request_waits_like_a_color() {
             fill: Color { r: 0, g: 0, b: 0 },
             filter: Filter::Lanczos3,
         },
+        animate: true,
         serial: 1,
         fetch: None,
     });

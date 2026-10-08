@@ -249,6 +249,7 @@ fn image(
             mode,
             fill: Color::parse(fill).unwrap(),
             filter,
+            animate: true,
         }),
         output: output.map(|o| o.to_owned().into()),
         transition: crate::transition::Spec::none(),
@@ -272,6 +273,7 @@ fn download(
             mode,
             fill: Color::parse(fill).unwrap(),
             filter,
+            animate: true,
         }),
         output: output.map(|o| o.to_owned().into()),
         transition: crate::transition::Spec::none(),
@@ -1229,4 +1231,30 @@ fn every_with_a_bad_duration_is_refused() {
         Err(Error::ShaImageOnly)
     );
     std::fs::remove_dir(&dir).unwrap();
+}
+
+#[test]
+fn no_animate_stills_the_image() {
+    let Command::Client(Request::Set {
+        show: Show::Image(image),
+        ..
+    }) = args(&["set", "/tmp/a.gif", "--no-animate"]).unwrap()
+    else {
+        panic!("not an image set");
+    };
+    assert!(!image.animate, "--no-animate stills");
+    // Without it, animation checks stay on.
+    let Command::Client(Request::Set {
+        show: Show::Image(image),
+        ..
+    }) = args(&["set", "/tmp/a.gif"]).unwrap()
+    else {
+        panic!("not an image set");
+    };
+    assert!(image.animate);
+    // On a color it is refused: a color has no frames.
+    assert!(matches!(
+        args(&["set", "#ffffff", "--no-animate"]),
+        Err(Error::ImageOnly(_))
+    ));
 }

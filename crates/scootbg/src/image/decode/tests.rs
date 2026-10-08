@@ -200,7 +200,7 @@ fn what_is_not_an_image_says_so() {
     for bytes in [
         &b""[..],
         b"\x89PN",
-        b"GIF89a\x01\x00\x01\x00\x00\x00\x00",
+        b"GIF89",
         b"RIFF\x00\x00\x00\x00WAVE",
         b"BM\x00\x00\x00\x00\x00\x00",
         b"hello, world, this is text",
@@ -433,4 +433,13 @@ fn the_jpeg_size_bound_is_one_bit_per_block() {
         let image = decoded(bytes).unwrap();
         assert!(bytes.len() as u64 >= jpeg_min_len(image.width, image.height));
     }
+}
+
+#[test]
+fn gif_shows_its_first_frame() {
+    let image = decoded(&samples::gif_two_frame()).unwrap();
+    assert_eq!((image.width, image.height), (2, 1));
+    assert_eq!(image.orientation, Orientation::NORMAL);
+    // The first frame (red, green), not the second (green, red).
+    assert_eq!(image.rgb, vec![255, 0, 0, 0, 255, 0]);
 }

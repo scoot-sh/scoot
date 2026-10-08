@@ -54,6 +54,7 @@ fn saving() {
                 fill: Color { r: 0, g: 0, b: 0 },
                 filter: Filter::Lanczos3,
             },
+            animate: true,
             serial: 1,
             fetch: None,
         })))

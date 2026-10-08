@@ -294,3 +294,22 @@ fn crop_in_place_keeps_exactly_the_rectangle() {
         assert!(crop_in_place(&mut rgb, 7, 5, bad).is_err(), "{bad:?}");
     }
 }
+
+/// Every frame renders like its own still: the animation's buffers hold
+/// each frame's pixels in order (red, green, then green, red).
+#[test]
+fn animated_renders_every_frame_like_its_still() {
+    use std::io::Cursor;
+
+    use super::render_animated;
+    use crate::image::animated::decode_animated;
+    use crate::image::samples;
+
+    let animated = decode_animated(Cursor::new(samples::gif_two_frame()), FILL)
+        .unwrap()
+        .expect("two frames");
+    let mut buffers = render_animated(&animated, look(Mode::Stretch), (2, 1)).unwrap();
+    assert_eq!(buffers.len(), 2);
+    assert_eq!(pixels(&mut buffers[0]), [[255, 0, 0], [0, 255, 0]]);
+    assert_eq!(pixels(&mut buffers[1]), [[0, 255, 0], [255, 0, 0]]);
+}

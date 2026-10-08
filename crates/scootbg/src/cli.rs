@@ -28,7 +28,8 @@ mod tests;
 const USAGE_BODY: &str = "\
 scootbg -- wallpaper daemon for Wayland
 
-Early days: colors and images (PNG, JPEG, WebP) work, and the daemon
+Early days: colors and images (PNG, JPEG, GIF, WebP; an animated GIF,
+APNG or animated WebP shows its first frame) work, and the daemon
 shows the last ones again when it next starts.
 
 USAGE:
@@ -159,9 +160,9 @@ scootbg set -- show a color, an image or a rotating directory, on every output, 
 USAGE:
     scootbg set '#rrggbb' [--output NAME] [--workspace NAME] [--transition KIND ...]
     scootbg set PATH [--output NAME] [--workspace NAME] [--mode MODE] [--fill '#rrggbb']
-                     [--filter FILTER] [--transition KIND ...]
+                     [--filter FILTER] [--no-animate] [--transition KIND ...]
     scootbg set URL [--output NAME] [--workspace NAME] [--mode MODE] [--fill '#rrggbb']
-                    [--filter FILTER] [--sha256 HEX] [--transition KIND ...]
+                    [--filter FILTER] [--sha256 HEX] [--no-animate] [--transition KIND ...]
     scootbg set DIR --every DURATION [--shuffle] [--output NAME] [--mode MODE]
                     [--fill '#rrggbb'] [--filter FILTER] [--transition KIND ...]
 
@@ -196,8 +197,11 @@ the error says why; nothing is retried in a loop (a new `set`, a changed
 section, a reconfigured output, or a restart tries again). `file://` and
 other schemes are not fetched. Prefer `https`, and pin `--sha256`.
 
-Anything else is the path of an image: PNG, JPEG or WebP (the first frame
-of an animated one), told apart by content, not by name. It is made
+Anything else is the path of an image: PNG, JPEG, GIF or WebP, told
+apart by content, not by name. An animated GIF, APNG or animated WebP
+shows its first frame (up to 64 frames and 64 MiB of frames; past that
+the `set` is refused and `--no-animate` shows the first frame instead;
+playing frame by frame is a follow-up). It is made
 absolute here, so a relative path means from this directory. A file whose
 name starts with '#' is given as './#name.png'. The file is read when the
 daemon gets the request (and again for an output plugged in later), not
@@ -217,6 +221,9 @@ PNG's eXIf chunk).
                      a transparent one (default '#000000')
     --filter FILTER  the scaling filter: lanczos3 (the default), catmull-rom,
                      bilinear or nearest (hard pixels, for pixel art)
+    --no-animate     show the first frame only: a still with zero idle
+                     cost, for an animation past the size cap or where
+                     stillness is wanted (images only; a color takes none)
     --sha256 HEX     pin a URL's bytes (64 hex digits, as `sha256sum`
                      prints): anything else fails instead of showing
     --every DURATION rotate through a directory: its files in turn, one
@@ -1081,6 +1088,7 @@ const DURATION_MS: &str = "--duration-ms";
 const EASING: &str = "--easing";
 const ANGLE: &str = "--angle";
 const POSITION: &str = "--position";
+const NO_ANIMATE: &str = "--no-animate";
 
 /// `set COLOR|PATH|URL|DIR [--output NAME] [--mode M] [--fill C] [--filter F]
 /// [--sha256 HEX] [--every DURATION] [--shuffle]` and `clear [--output NAME]`,
@@ -1106,6 +1114,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             EASING,
             ANGLE,
             POSITION,
+            NO_ANIMATE,
         ]
     } else {
         &[OUTPUT, WORKSPACE]
@@ -1124,11 +1133,12 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         })
     };
     let mut target: Option<String> = None;
-    // Indexed as `flags`.
-    let mut values: [Option<String>; 12] = Default::default();
+    // Indexed as `flags` (the last, `--no-animate`, is a boolean: no value).
+    let mut values: [Option<String>; 13] = Default::default();
     // `--shuffle` takes no value, so it is kept out of `flags` (whose
     // machinery reads one) and handled here, bare only.
     let mut shuffle = false;
+    let mut no_animate = false;
     let mut first = true;
     while let Some(arg) = args.next() {
         let arg = match arg {
@@ -1161,6 +1171,17 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             }
         });
         if let Some((index, flag, value)) = flag {
+            // `--no-animate` is a boolean: no value, never repeated.
+            if flag == NO_ANIMATE {
+                if value.is_some() {
+                    return Err(unexpected(arg));
+                }
+                if std::mem::replace(&mut no_animate, true) {
+                    return Err(Error::Repeated { command, flag });
+                }
+                first = false;
+                continue;
+            }
             let value = match value {
                 Some(value) => value,
                 None => args
@@ -1196,7 +1217,12 @@ fn change<I: Iterator<Item = Result<String, String>>>(
         easing,
         angle,
         position,
+        no_animate_value,
     ] = values;
+    // `--no-animate` never lands in `values` (handled above as a boolean);
+    // a value there would mean the matching changed.
+    debug_assert!(no_animate_value.is_none());
+    let _ = no_animate_value;
     let output = output.map(Cow::Owned);
     let workspace = workspace.map(check_workspace).transpose()?.map(Cow::Owned);
     if command == "clear" {
@@ -1220,6 +1246,9 @@ fn change<I: Iterator<Item = Result<String, String>>>(
             if given.is_some() {
                 return Err(Error::ImageOnly(flag));
             }
+        }
+        if no_animate {
+            return Err(Error::ImageOnly(NO_ANIMATE));
         }
         if every.is_some() {
             return Err(Error::EveryNeedsDirectory(argument));
@@ -1312,6 +1341,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
                 mode,
                 fill,
                 filter,
+                animate: !no_animate,
             }),
             output,
             workspace,
@@ -1323,6 +1353,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
                 mode,
                 fill,
                 filter,
+                animate: !no_animate,
             }),
             output,
             transition,

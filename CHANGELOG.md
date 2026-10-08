@@ -40,6 +40,17 @@ scoot has not cut a numbered release yet; entries are dated.
   while the display is dead, so check `live` before trusting pixels). See [VT
   switching](site/src/content/docs/scoot/backends.md#hotplug-vt-switching-captures).
 
+### Animated images read as stills, with memory caps (`scootbg`)
+
+- **GIF images now show, and an animated GIF, APNG or animated WebP
+  shows its first frame.** Animation checks are on unless
+  `--no-animate` is passed: at most 64 frames and 64 MiB of frames,
+  past which the `set` is refused (every output keeps what it showed)
+  and `--no-animate` shows the first frame as a still instead. Playing
+  frame by frame is a follow-up. See [Images and
+  color](site/src/content/docs/scootbg/images.md).
+
+
 ### Unreleased — ginger-night, the new default desktop look (behavior change)
 
 - **A desktop profile with no `look` choice now renders the new

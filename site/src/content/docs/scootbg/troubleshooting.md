@@ -6,9 +6,14 @@ description: "Wallpaper symptoms and their fixes — images, links, outputs, res
 ## Symptoms
 
 - *`set` says no such file / not an image / too large.* The file must
-  exist, be a regular file, and start as PNG, JPEG or WebP (told apart
+  exist, be a regular file, and start as PNG, JPEG, GIF or WebP (told apart
   by content, not name); images over 16384×16384 pixels are refused.
   Every output keeps what it showed.
+- *`set` refuses an animation past the size cap.* An animated GIF, APNG
+  or animated WebP holds at most 64 frames and 64 MiB of frames; past
+  that the `set` is refused and every output keeps what it showed. Pass
+  `--no-animate` to show the first frame as a still instead (playing
+  frame by frame is a follow-up).
 - *A link won't show.* In order: no `curl` on `PATH`; host unresolvable
   (names curl's exit); HTTP error (`exited 22`); error page ("do not
   start as a PNG, JPEG or WebP", caches nothing); past 32 MiB (link

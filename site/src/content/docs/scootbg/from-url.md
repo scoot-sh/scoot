@@ -30,7 +30,7 @@ shown as is (re-checked against `sha256` when one is pinned); otherwise
 the worker thread — never the event loop — runs
 `curl --fail --location` (redirects followed, five at most; `http` and
 `https` only), capped at 32 MiB and sixty seconds, verifies the pin when
-given, checks the bytes start as PNG, JPEG or WebP, and renames the
+given, checks the bytes start as PNG, JPEG, GIF or WebP, and renames the
 temporary file into place atomically. Two daemons racing on one entry
 both download; the rename settles it, and the cache never holds a partial
 file. An error page, a file past the cap, a hash mismatch, no network, or
@@ -51,7 +51,7 @@ download, remove the directory (`scootbg` re-creates it). `query`'s
 reason (and the daemon's stderr has it once). No `curl` on `PATH` says
 so; a host nothing resolves or answers names `curl`'s exit; a 404 or
 other HTTP error says `exited 22`; an error page (a login wall, say) says
-the bytes "do not start as a PNG, JPEG or WebP" and caches nothing; a
+the bytes "do not start as a PNG, JPEG, GIF or WebP" and caches nothing; a
 file past 32 MiB says so (link something smaller); a `sha256` mismatch
 prints both hashes (copy the actual one into the config, or drop the
 pin); a cache directory nobody can write names it. Offline at startup,

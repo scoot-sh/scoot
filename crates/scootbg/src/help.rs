@@ -35,7 +35,7 @@ pub const COMMANDS: &[CommandDoc] = &[
     },
     CommandDoc {
         name: "set",
-        usage: "set COLOR|PATH|URL|DIR [--output NAME] [--workspace NAME] [--mode MODE] [--fill COLOR] [--filter FILTER] [--sha256 HEX] [--every DURATION] [--shuffle] [--transition KIND] [--duration-ms MS] [--easing EASING] [--angle DEGREES] [--position X,Y]",
+        usage: "set COLOR|PATH|URL|DIR [--output NAME] [--workspace NAME] [--mode MODE] [--fill COLOR] [--filter FILTER] [--no-animate] [--sha256 HEX] [--every DURATION] [--shuffle] [--transition KIND] [--duration-ms MS] [--easing EASING] [--angle DEGREES] [--position X,Y]",
         description: "show a color, an image or a rotating directory on every output, or on one",
     },
     CommandDoc {

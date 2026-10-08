@@ -13,6 +13,7 @@ fn image(path: &str, serial: u64) -> Wallpaper {
             fill: Color { r: 0, g: 0, b: 0 },
             filter: Filter::Lanczos3,
         },
+        animate: true,
         serial,
         fetch: None,
     }))

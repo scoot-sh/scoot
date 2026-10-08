@@ -43,7 +43,7 @@ an image nobody commits. `sha256` pins the download's bytes.
 
 | Field | Type | Reload | Meaning |
 |---|---|---|---|
-| `image` | string (path or URL) | live (re-applied) | A PNG, JPEG or WebP image. A path: `~` expands against `HOME`, a relative path resolves against the config file's directory. A URL (`http://`/`https://`): downloaded once and cached — see [Wallpaper from a link](./from-url.md). |
+| `image` | string (path or URL) | live (re-applied) | A PNG, JPEG, GIF or WebP image. A path: `~` expands against `HOME`, a relative path resolves against the config file's directory. A URL (`http://`/`https://`): downloaded once and cached — see [Wallpaper from a link](./from-url.md). |
 | `color` | string (`"#rrggbb"`) | live (re-applied) | A solid color. `image` or `color`, never both; neither is nothing (the compositor's own `background_color`). |
 | `mode` | string | live | With an `image` only: `fill` (cover and crop), `fit` (letterbox with `fill`), `stretch`, `center`, `tile`. |
 | `fill` | string (`"#rrggbb"`) | live | With an `image` only: the color around a `fit` or `center` image. |

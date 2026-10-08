@@ -24,6 +24,7 @@ fn image(path: &str) -> Choice {
     Some(Wallpaper::Image(Arc::new(Image {
         path: path.to_owned(),
         look: LOOK,
+        animate: true,
         serial: 1,
         fetch: None,
     })))
@@ -538,6 +539,7 @@ fn downloads_round_trip_and_version_1_still_reads() {
         Some(Wallpaper::Image(Arc::new(Image {
             path: "/cache/9f86d081".to_owned(),
             look: LOOK,
+            animate: true,
             serial: 1,
             fetch: Some(Fetch {
                 url: "https://example.com/a b.png".to_owned(),
@@ -569,6 +571,7 @@ fn downloads_round_trip_and_version_1_still_reads() {
     let unpinned = Some(Wallpaper::Image(Arc::new(Image {
         path: "/cache/aa".to_owned(),
         look: LOOK,
+        animate: true,
         serial: 1,
         fetch: Some(Fetch {
             url: "http://127.0.0.1:1/a.png".to_owned(),

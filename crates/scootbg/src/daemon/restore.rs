@@ -149,6 +149,7 @@ pub fn put(state: &mut State, record: Record, show: bool, origin: Origin) -> Vec
             Pick::Image { path, look, fetch } => Some(Wallpaper::Image(Arc::new(Image {
                 path,
                 look,
+                animate: true,
                 serial: generation,
                 fetch,
             }))),

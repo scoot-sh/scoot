@@ -185,6 +185,39 @@ pub fn render_each(
     each(last, render(Source::Owned(image), look, last));
 }
 
+/// Renders every frame of `animated` at `dims`, in order: one `XRGB8888`
+/// buffer per frame. Each frame goes through the same fit/crop/scale/pack
+/// as a static image, so an animation shows exactly what its first frame
+/// would as a still. A frame that cannot be scaled (the scaler's probe,
+/// a side past its bound) fails the whole animation: a partial animation
+/// that stops mid-loop is worse than a clear `draw_error` naming
+/// `--no-animate`.
+///
+/// Unused until frame playback lands (the follow-up), which drives it:
+/// stills render only the first frame through [`render`].
+#[allow(dead_code)]
+pub fn render_animated(
+    animated: &super::animated::Animated,
+    look: Look,
+    dims: (u32, u32),
+) -> Result<Vec<ShmBuffer>, RenderError> {
+    let mut out = Vec::with_capacity(animated.frames.len());
+    for frame in &animated.frames {
+        // One clone per frame: the frame is borrowed by outputs that share
+        // this size, so it cannot be moved through the in-place crop. The
+        // clone is dropped before the next frame's, so the peak is one
+        // frame, not the animation.
+        let decoded = Decoded {
+            rgb: frame.rgb.clone(),
+            width: animated.width,
+            height: animated.height,
+            orientation: animated.orientation,
+        };
+        out.push(render(Source::Borrowed(&decoded), look, dims)?);
+    }
+    Ok(out)
+}
+
 /// Cuts `rgb`, a `width` × `height` image, down to `crop` in place, and
 /// gives the rest back to the allocator.
 pub fn crop_in_place(

@@ -32,6 +32,14 @@ pub struct Image {
     /// only a name for messages, the state file and the choice comparison.
     pub path: String,
     pub look: Look,
+    /// Whether an animated image goes through the animation caps
+    /// (`--no-animate` makes it false: the first frame only, decoded the
+    /// static way with zero wakeups). Past 64 frames or 64 MiB of frames
+    /// the `set` is refused, naming `--no-animate`. Live-only: the state
+    /// file does not persist it (a restart checks the caps; trivially
+    /// reversible to persisting it in a format v3). Frame-by-frame
+    /// playback is a follow-up: both values show the first frame today.
+    pub animate: bool,
     /// The request's generation (`crate::waiters`): unique to it.
     pub serial: u64,
     /// A download, when the image is a URL: the worker fetches it into

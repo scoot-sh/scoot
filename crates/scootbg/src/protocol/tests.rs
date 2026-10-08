@@ -41,6 +41,7 @@ fn each_request_parses() {
                 mode: Mode::Tile,
                 fill: red(),
                 filter: Filter::Nearest,
+                animate: true,
             }),
             output: Some("DP-1".into()),
             transition: crate::transition::Spec::none(),
@@ -176,6 +177,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
                 mode: Mode::Fill,
                 fill: DEFAULT_FILL,
                 filter: Filter::Lanczos3,
+                animate: true,
             }),
             output: None,
             transition: crate::transition::Spec::none(),
@@ -190,6 +192,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
                 mode: Mode::Center,
                 fill: Color::parse("#abcdef").unwrap(),
                 filter: Filter::Bilinear,
+                animate: true,
             }),
             output: Some("X".into()),
             transition: crate::transition::Spec::none(),
@@ -202,6 +205,7 @@ fn an_image_set_has_defaults_and_checks_every_field() {
             mode: Mode::Fit,
             fill: Color::parse("#101014").unwrap(),
             filter: Filter::Lanczos3,
+            animate: true,
         }),
         output: None,
         transition: crate::transition::Spec::none(),
@@ -585,6 +589,7 @@ fn an_image_shows_its_path_mode_fill_and_filter() {
             fill: Color::parse("#101014").unwrap(),
             filter: Filter::CatmullRom,
         },
+        animate: true,
         serial: 7,
         fetch: None,
     }));
@@ -1002,4 +1007,71 @@ fn a_query_without_a_slideshow_is_byte_for_byte_what_it_was() {
         value["rotation"],
         serde_json::json!({"directory": "/pics", "every_secs": 1800, "shuffle": true, "files": 12})
     );
+}
+
+#[test]
+fn animate_absent_animates_false_stills_anything_else_refuses() {
+    // Absent (and the default-omitted `"true"`) mean checks on; only
+    // `"false"` stills.
+    let request = parse(br##"{"protocol":1,"type":"set","image":"/p/a.gif"}"##).unwrap();
+    let Request::Set {
+        show: Show::Image(image),
+        ..
+    } = request
+    else {
+        panic!("not a set");
+    };
+    assert!(image.animate);
+    let request =
+        parse(br##"{"protocol":1,"type":"set","image":"/p/a.gif","animate":"true"}"##).unwrap();
+    let Request::Set {
+        show: Show::Image(image),
+        ..
+    } = request
+    else {
+        panic!("not a set");
+    };
+    assert!(image.animate);
+    let request =
+        parse(br##"{"protocol":1,"type":"set","image":"/p/a.gif","animate":"false"}"##).unwrap();
+    let Request::Set {
+        show: Show::Image(image),
+        ..
+    } = request
+    else {
+        panic!("not a set");
+    };
+    assert!(!image.animate);
+    // `false` is the only value ever on the wire: it round-trips, and
+    // `true` is omitted (the line never carries it).
+    let line = Request::Set {
+        show: Show::Image(ImageRequest {
+            source: Source::Path("/p/a.gif".into()),
+            mode: Mode::Fill,
+            fill: DEFAULT_FILL,
+            filter: Filter::Lanczos3,
+            animate: false,
+        }),
+        output: None,
+        transition: crate::transition::Spec::none(),
+    }
+    .line();
+    assert!(line.contains("\"animate\":\"false\""), "{line}");
+    assert_eq!(parse(line.trim_end().as_bytes()).unwrap().line(), line);
+    // Anything else is refused, naming the value.
+    let Err(RequestError::BadAnimate(got)) =
+        parse(br##"{"protocol":1,"type":"set","image":"/p/a.gif","animate":"yes"}"##)
+    else {
+        panic!("animate:yes parsed");
+    };
+    assert_eq!(got, "yes");
+    // `animate` on a color or a clear is refused: neither has frames.
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"set","color":"#ffffff","animate":"false"}"##),
+        Err(RequestError::ImageOnly(_))
+    ));
+    assert!(matches!(
+        parse(br##"{"protocol":1,"type":"clear","animate":"false"}"##),
+        Err(RequestError::AnimateWithClear)
+    ));
 }

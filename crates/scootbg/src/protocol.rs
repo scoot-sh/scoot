@@ -171,7 +171,9 @@ pub struct SlideshowRequest<'a> {
 
 /// An image, as a `set` asks for it. On the wire `mode`, `fill` and
 /// `filter` may be left out, for `fill`, `#000000` and `lanczos3`; `sha256`
-/// may be left out whenever no hash is pinned.
+/// may be left out whenever no hash is pinned. `animate` may be left out,
+/// for checking animation caps: `animate:false` shows the first frame
+/// without checking them (`--no-animate`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageRequest<'a> {
     /// A file's path, or the URL, as a download: never confused, so a
@@ -181,6 +183,12 @@ pub struct ImageRequest<'a> {
     /// Behind a letterboxed or centred image, and under transparency.
     pub fill: Color,
     pub filter: Filter,
+    /// Whether an animated image goes through the animation caps (at
+    /// most 64 frames and 64 MiB of frames; past them the `set` is
+    /// refused). Old daemons ignore it (unknown fields) and show the
+    /// first frame, which is what `false` asks for. Frame-by-frame
+    /// playback is a follow-up: every value shows the first frame today.
+    pub animate: bool,
 }
 
 /// Where a requested image comes from.
@@ -259,6 +267,8 @@ impl Request<'_> {
             angle: Option<String>,
             #[serde(skip_serializing_if = "Option::is_none")]
             position: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            animate: Option<&'static str>,
         }
         let mut line = Line {
             protocol: PROTOCOL_VERSION,
@@ -279,6 +289,7 @@ impl Request<'_> {
             easing: None,
             angle: None,
             position: None,
+            animate: None,
         };
         // One `set`'s transition fields, shared by `set` and
         // `set-workspace`: only owned strings and `&'static` names cross
@@ -327,6 +338,9 @@ impl Request<'_> {
                         line.mode = Some(image.mode);
                         line.fill = Some(image.fill);
                         line.filter = Some(image.filter);
+                        if !image.animate {
+                            line.animate = Some("false");
+                        }
                     }
                 }
             }
@@ -365,6 +379,9 @@ impl Request<'_> {
                         line.mode = Some(image.mode);
                         line.fill = Some(image.fill);
                         line.filter = Some(image.filter);
+                        if !image.animate {
+                            line.animate = Some("false");
+                        }
                     }
                 }
             }
@@ -466,6 +483,11 @@ pub enum RequestError {
     /// A `set-workspace` with a slideshow (`directory`/`every`/`shuffle`):
     /// slideshows run on every output (or one `output`), not per workspace.
     SlideshowWithWorkspace,
+    /// A `clear` with `animate`: clearing shows nothing, which has no
+    /// frames.
+    AnimateWithClear,
+    /// An `animate` that is neither `true` nor `false`.
+    BadAnimate(String),
 }
 
 impl fmt::Display for RequestError {
@@ -560,6 +582,16 @@ impl fmt::Display for RequestError {
                 "a slideshow runs on every output (or one `output`), not per workspace; \
                  map an image or a color with `set-workspace` instead"
             ),
+            Self::AnimateWithClear => write!(
+                f,
+                "`clear` shows the compositor's own background at once: there is nothing to \
+                 animate, so it takes no `animate`"
+            ),
+            Self::BadAnimate(text) => write!(
+                f,
+                "`animate` is `true` or `false` (absent animates), not {text:?}"
+            ),
+            ),
         }
     }
 }
@@ -602,6 +634,8 @@ struct Envelope<'a> {
     angle: Option<Cow<'a, str>>,
     #[serde(borrow)]
     position: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    animate: Option<Cow<'a, str>>,
 }
 
 /// Parses one request line (without its newline).
@@ -644,6 +678,7 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
                 envelope.mode,
                 envelope.fill,
                 envelope.filter,
+                envelope.animate,
             )?;
             let transition = transition(
                 envelope.transition,
@@ -667,6 +702,9 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
             {
                 return Err(RequestError::TransitionWithClear);
             }
+            if envelope.animate.is_some() {
+                return Err(RequestError::AnimateWithClear);
+            }
             Ok(Request::Clear {
                 output: envelope.output,
             })
@@ -682,6 +720,7 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
                 envelope.mode,
                 envelope.fill,
                 envelope.filter,
+                envelope.animate,
             )?;
             if matches!(show, Show::Slideshow(_)) {
                 return Err(RequestError::SlideshowWithWorkspace);
@@ -708,6 +747,9 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
                 || envelope.position.is_some()
             {
                 return Err(RequestError::TransitionWithClear);
+            }
+            if envelope.animate.is_some() {
+                return Err(RequestError::AnimateWithClear);
             }
             Ok(Request::ClearWorkspace {
                 output: envelope.output,
@@ -770,6 +812,7 @@ fn show<'a>(
     mode: Option<Cow<'a, str>>,
     fill: Option<Cow<'a, str>>,
     filter: Option<Cow<'a, str>>,
+    animate: Option<Cow<'a, str>>,
 ) -> Result<Show<'a>, RequestError> {
     let shuffle = shuffle.unwrap_or(false);
     if let Some(dir) = directory {
@@ -809,6 +852,7 @@ fn show<'a>(
                 ("fill", &fill),
                 ("filter", &filter),
                 ("sha256", &sha256),
+                ("animate", &animate),
             ] {
                 if given.is_some() {
                     return Err(RequestError::ImageOnly(field));
@@ -843,11 +887,17 @@ fn show<'a>(
                 Source::Path(image)
             };
             let (mode, fill, filter) = look(mode, fill, filter)?;
+            let animate = match animate.as_deref() {
+                None | Some("true") => true,
+                Some("false") => false,
+                Some(other) => return Err(RequestError::BadAnimate(other.to_owned())),
+            };
             Ok(Show::Image(ImageRequest {
                 source,
                 mode,
                 fill,
                 filter,
+                animate,
             }))
         }
     }

@@ -76,7 +76,7 @@ success. **A transition flag without `--transition` is refused** (exit
 `--duration-ms` past `60000`, a non-number `--angle`, a `--position`
 outside `X,Y` fractions — and a `clear` with any of them. How a change
 animates is [Transitions](./transitions.md). **An image that cannot be shown** (no such file, not a regular
-file, not a PNG/JPEG/WebP, too large, truncated or corrupt — or, for a
+file, not a PNG/JPEG/GIF/WebP, too large, truncated or corrupt — or, for a
 link, no `curl`, no network, an HTTP error, an error page, a file past
 32 MiB, or a `sha256` mismatch: see
 [a wallpaper from a link](./from-url.md#a-wallpaper-from-a-link)) is an error

@@ -1,5 +1,5 @@
-//! Test images, made in code where there is an encoder (`png`, and
-//! `image-webp`'s lossless one), else from the tiny fixtures in
+//! Test images, made in code where there is an encoder (`png`, `gif`,
+//! and `image-webp`'s lossless one), else from the tiny fixtures in
 //! `tests/fixtures/` (there is no JPEG encoder in the tree).
 
 use super::exif::tests::block;
@@ -57,6 +57,65 @@ pub fn png(
         }
         writer.write_image_data(data).unwrap();
         writer.finish().unwrap();
+    }
+    out
+}
+
+/// A single-frame GIF, 2×1, red and green: not an animation.
+pub fn gif_single_frame() -> Vec<u8> {
+    let mut out = Vec::new();
+    {
+        let mut encoder = gif::Encoder::new(&mut out, 2, 1, &[255, 0, 0, 0, 255, 0]).unwrap();
+        let frame = gif::Frame {
+            width: 2,
+            height: 1,
+            delay: 10,
+            buffer: std::borrow::Cow::Borrowed(&[0, 1]),
+            ..Default::default()
+        };
+        encoder.write_frame(&frame).unwrap();
+    }
+    out
+}
+
+/// A two-frame GIF, 2×1: red, green, then green, red, 100 ms a frame.
+pub fn gif_two_frame() -> Vec<u8> {
+    let mut out = Vec::new();
+    {
+        let mut encoder = gif::Encoder::new(&mut out, 2, 1, &[255, 0, 0, 0, 255, 0]).unwrap();
+        encoder.set_repeat(gif::Repeat::Infinite).unwrap();
+        for indices in [&[0u8, 1][..], &[1u8, 0][..]] {
+            let frame = gif::Frame {
+                width: 2,
+                height: 1,
+                delay: 10,
+                buffer: std::borrow::Cow::Borrowed(indices),
+                ..Default::default()
+            };
+            encoder.write_frame(&frame).unwrap();
+        }
+    }
+    out
+}
+
+/// A GIF of `frames` 1×1 frames, alternating black and white, 100 ms
+/// each: past the frame cap when asked for more than it keeps.
+pub fn gif_many_frames(frames: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    {
+        let mut encoder = gif::Encoder::new(&mut out, 1, 1, &[0, 0, 0, 255, 255, 255]).unwrap();
+        encoder.set_repeat(gif::Repeat::Infinite).unwrap();
+        for index in 0..frames {
+            let indices = [(index % 2) as u8];
+            let frame = gif::Frame {
+                width: 1,
+                height: 1,
+                delay: 10,
+                buffer: std::borrow::Cow::Borrowed(&indices),
+                ..Default::default()
+            };
+            encoder.write_frame(&frame).unwrap();
+        }
     }
     out
 }
