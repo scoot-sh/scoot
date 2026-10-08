@@ -18,6 +18,7 @@
 
 mod common;
 mod lockclient;
+#[cfg(feature = "volume")]
 mod pulse;
 mod vpointer;
 
@@ -34,7 +35,9 @@ const DIM: &str = "#506070";
 const HEIGHT: u32 = 40;
 /// The tooltip's delay, in the bar's config.
 const DELAY: Duration = Duration::from_millis(300);
-/// The volume module, centered on the 1600-pixel output.
+/// The volume module, centered on the 1600-pixel output. Only the
+/// volume-gated test puts it there.
+#[cfg(feature = "volume")]
 const CENTER: (u32, u32) = (800, 20);
 /// Far from the bar and anything under it.
 const AWAY: (u32, u32) = (200, 600);
