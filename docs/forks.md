@@ -530,6 +530,35 @@ so nothing was added there.
 | seat-loss error (`fdf424d`) | 1 | As recorded below (no surfacing event for a handler; a `catch_unwind` wrapper tried live, still prints through the panic hook and misses the `register` sites; polling/canary races the next dispatch; an in-tree copy is ~300 lines for three call sites). | Record sufficient; no re-exam. |
 | wayland-rs fd-queue cap (`a39311b8`, `70f81e00`) | 1 | As recorded in `wayland-backend-fd-queue-done.md`: per-client attribution (the queued fds never reach scoot's code, so no scoot-side cap can see them) and a kill heuristic (the holder's counted creations stay under grace, so pressure never picks it); the queue itself is a private field of the backend's `BufferedSocket` (`wayland-backend/src/rs/socket.rs:135`), so only the backend can bound it. | Record sufficient; no re-exam. |
 
+## Could it live in scoot? (investigation, 2026-10-08)
+
+[fork-changes-in-scoot](backlog/resolved/fork-changes-in-scoot-done.md)
+(resolved 2026-10-08) checked every carried commit against the pinned fork
+rev (`fdf424d`, read as `~/.cargo/git/checkouts/smithay-*/fdf424d`) and
+scoot's code, asking that ticket's question: what does the change need that
+the dependency does not expose, and can a public API, handler trait or wrapper
+express it? Verdict per commit:
+
+| Commit | What it needs from inside the dependency | Scoot-side route checked | Verdict |
+| --- | --- | --- | --- |
+| `43f50eb2` syncobj `Drop` | `DrmTimelineDeviceSpecific` is a private struct with private fields (`device: WeakDrmDeviceFd`, `syncobj: Handle`); only in-crate code can destroy the handle | an RAII guard in scoot closing the handle itself | **stays**: the handle is unreachable from outside; scoot cannot even name the type |
+| `35c335e0`, `b6bcc47d`, `f864d843` INCR pacing, blocking pipe, backpressure | the transfer event loop and `IncomingTransfer`/`OutgoingTransfer` internals in `xwm/mod.rs` + `xwm/selection.rs`; pacing decisions run where scoot has no hook | an in-tree copy of the selection path | **stays**: ~700 lines coupled to the XWM's calloop/x11rb wiring, with no hook site to attach to |
+| `a1ef7fe7`, `567ac2cc`, `853d305f`, the timeout setter in `53aafc36` (the hooks) | XFixes owner tracking and the drag-veto point inside the XWM's selection handling | a wrapper tracking the same state from events scoot already sees | **stays**: `new_selection` fires only once the owner answers `TARGETS` (`xwm/mod.rs` near `2090`), so a silent owner is invisible to scoot; the drag veto runs before the grab exists, where no callback fires. These four are the minimal fork surface scoot's gates build on (`compositor/xwayland/selection.rs`, `dnd.rs`, `wm.rs`) |
+| `4aca6ef5`, `0d281abf`, `9cc46d1a`, `3c53776f`, `53aafc36`, `0d553527`, `5b575329` transfer bounds, flush, slices, sweeps, shares | the same internals: pending fd/window pairs, per-requestor pace, owner liveness, all inside the XWM | bounds enforced from scoot's `XwmHandler` side | **stays**: scoot sees neither the pending pairs nor the requestor's pace, and `X11Wm.conn` is a private field, so scoot cannot even flush |
+| `74edbf32` pixman `Repeat::Pad` | the `Repeat` mode, set at the single call site inside `PixmanFrame::render_texture_from_to` with no parameter | a custom render element, pre-padding, or Nearest | **stays**: any scoot-side route reimplements Smithay's texture upload for every upscaled surface; a 6-line fork against a renderer copy in scoot |
+| `6e6fe896` XDND proxy-remap flush | a flush on the XWM's own connection (`XWmDnd.selection.conn`; `X11Wm.conn` is private) | a flush from scoot after its own X request | **stays**: a second X connection cannot flush the XWM's write buffer |
+| `7388af13`, `9515d7e5`, `d3a4cd73` XDND offer lifecycle | `XWmDnd.active_offer` / `active_drag` and `XwmOfferState` internals | ending offers from scoot's `DndFocus` side | **stays**: offer state (validated/dropped) never surfaces in a callback, and `d3a4cd73`'s `allow_drag`-gated give-up runs inside the XWM's selection-notify path |
+| `b1ac3ca7`, `7e18b661`, `b16cd6a2` X-drag enter ordering | the enter/leave ordering and delay-until-metadata in generic `DnDGrab` (`input/dnd/grab.rs`) | wait/enter logic from scoot's focus impl | **stays**: the order lives in the grab, unreachable from a `DndFocus` impl; the fork adds the only scoot-reachable surface, defaulted `enter_needs_metadata`, which `compositor/pointer_focus.rs` forwards |
+| `fcf6f314` `set_commits_allowed` | nothing: unused, purely additive | nothing | **delete** at the next rebase (already noted in its entry above and in `crates/scoot/Cargo.toml`) |
+| `e7130254` cached buffer scale/transform | `RendererSurfaceState::{buffer_scale, buffer_transform}`, which are `pub(crate)` | scoot's commit handler applying what the renderer does not | **stays**: an external crate cannot write the cached values; forcing a re-attach would be client-visible protocol churn |
+| `035d447c` XSETTINGS flush | a flush on the XWM's connection inside `XSettings::update` | a flush from scoot after its own `set_xsettings` | **stays**: `X11Wm.conn` is private and scoot holds no handle to that connection (caller: `compositor/xwayland/scale.rs`) |
+| `7ab72d53` `UnderlyingStorage::Dmabuf` | `drm/compositor` and exporter internals | phantom-client `wl_buffer`, exporter wrapper, in-tree `DrmCompositor` copy | **stays**: re-checked; the entry above already rules each out |
+| `fdf424d` `ConnectionLost` | the `dispatch`/`disable` results inside `LibSeatSessionNotifier::process_events` | handler, `catch_unwind` wrapper, health poll, module copy | **stays**: re-checked; the entry above already rules each out |
+| wayland-rs `a39311b8`, `70f81e00` fd-queue cap | the unclaimed-fd queue inside `wayland-backend`'s `server_impl/client.rs`, crate-private; scoot never sees unclaimed fds | attribution, kill heuristic, socket proxy | **stays**: re-checked; ruled out in `backlog/resolved/wayland-backend-fd-queue-done.md` |
+
+No follow-up move tickets were filed: nothing moves. `fcf6f314` needs
+none: it is already "drop at the next rebase" in its entry above.
+
 ## Maintaining a fork
 
 - Rebase the carried commit onto the new upstream base before any dependency

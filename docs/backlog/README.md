@@ -606,7 +606,9 @@ be revisited.
   — RESOLVED 2026-10-07 in #489: fork commit `fdf424d` (repinned) returns `ConnectionLost` instead of panicking; the session shuts down cleanly with exit 1.
 - [Audit the fork decisions](./resolved/fork-decisions-audit-done.md)
   — RESOLVED 2026-10-08 (this PR), docs-only: every carried commit group classified against the fork rule with its constraint re-checked against the pinned fork source (rev `fdf424d`); no decision found wrong, so no code changed. The class 2/3 gaps (XWayland selection + hooks, XDND, pixman edge, buffer scale, XSETTINGS flush) are now recorded with their rejected scoot-side routes in `docs/forks.md`'s "Decision audit" section; all were already priority routes in the entry below.
-- [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
+- [Which fork changes could live in scoot instead](./resolved/fork-changes-in-scoot-done.md)
+  — RESOLVED 2026-10-08: per-commit verdicts against the pinned fork rev, all in `docs/forks.md`; nothing moves (one delete at the next rebase), no follow-up tickets.
+
 - [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
 - [Pointer-button presses don't activate browser modal buttons, and virtual button hold doesn't persist across IPC calls](./resolved/pointer-button-popups-done.md)
   — RESOLVED 2026-10-05, not a defect: a held press across IPC calls drags

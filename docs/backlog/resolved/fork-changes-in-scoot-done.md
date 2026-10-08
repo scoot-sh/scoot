@@ -1,9 +1,10 @@
 ---
 title: "Investigate: which of the carried Smithay and wayland-rs fork changes could live in scoot instead"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-08"
 ---
 
 # Which fork changes could live in scoot instead?
@@ -74,3 +75,23 @@ shrinks to a plain upstream pin and this entry's follow-ups replace it.
 
 Every carried commit has a verdict with evidence from the pinned source, and the
 follow-up tickets exist.
+
+## Resolution (2026-10-08)
+
+Investigated against the pinned fork rev `fdf424d` (read as
+`~/.cargo/git/checkouts/smithay-*/fdf424d` on the Asahi M2) and scoot's code.
+Verdict: **nothing moves**. Every carried Smithay commit needs in-crate state
+or a hook site scoot cannot reach (private `DrmTimelineDeviceSpecific`,
+XWM transfer internals with private `X11Wm.conn`, `pub(crate)`
+`RendererSurfaceState` fields, `DnDGrab` ordering, `LibSeatSessionNotifier`
+internals), and both wayland-rs commits need the crate-private fd queue
+(`wayland-backend-fd-queue-done.md` already ruled out the scoot-side routes).
+The four XWM hooks plus `enter_needs_metadata` are the minimal fork surface
+scoot's gates build on, not movable behavior. `fcf6f314` (`set_commits_allowed`)
+is unused: **delete** at the next rebase, already recorded in `docs/forks.md`
+and `crates/scoot/Cargo.toml`, so no new ticket. No follow-up move tickets
+filed. Per-commit evidence table added to `docs/forks.md` ("Could it live in
+scoot?", 2026-10-08); `CLAUDE.md`'s fork paragraph points at it. Conservative
+call per the brief: no pin change in this PR (dropping `fcf6f314` needs fork
+surgery plus a repin for an additive, zero-cost method), trivially reversible
+docs-only change.
