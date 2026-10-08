@@ -631,13 +631,16 @@ fn a_slideshow_stops_when_its_directory_goes_away() {
     let mut daemon = session.daemon_logged(&[("SCOOTBG_DEBUG_ROTATION_EVERY", "1")]);
     configured(&session, 1);
     let dir = session.runtime_dir().join("wallpapers");
-    let (red, _) = two_images(&dir);
+    let (red, blue) = two_images(&dir);
 
     ok(&session, &["set", path_str(&dir), "--every", "1m"]);
     assert!(rotation(&session).is_object());
     // The first file is on screen before the directory goes (the `set`
-    // waits for it); whatever follows, no later step draws anything new.
-    assert_eq!(shows(&session)[0]["image"], json!(red));
+    // waits for it). On a loaded box the 1 s debug step can already have
+    // advanced to the second file by the time we look, so either image is
+    // the right first reading; what matters is the stop that follows.
+    let first = shows(&session)[0]["image"].clone();
+    assert!(first == json!(red) || first == json!(blue), "{first}");
     std::fs::remove_dir_all(&dir).unwrap();
     session.query_until("the slideshow stops", |_| rotation(&session) == Value::Null);
     // The stop says why on stderr: a vanished directory ends the show
