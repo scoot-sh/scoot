@@ -180,7 +180,12 @@ with `rpmlint`, installs the trio, and runs `scoot --version`,
 `scootbg --version`, `scootbar --version`, `scootbar daemon --check` on
 the shipped example, and — in the Fedora container only, which is what
 the ticket's "done when" names — the headless smoke test
-(`scripts/smoke-test.sh`) against the installed binaries. The one thing
-it cannot prove yet: the `Source0` URLs, which 404 until the first
-release is cut; until then the staged tarball is placed under the
-provisional basename, and only the URL part is substitution.
+(`scripts/smoke-test.sh`) against the installed binaries. The
+`desktop-file-validate` gate on the session entry also runs in the
+Fedora container only: the file is identical in both jobs, and
+`desktop-file-utils` on Tumbleweed would drag `gawk` into an
+unresolvable conflict with the image's `busybox-gawk` (a `git-core`
+dependency). The one thing CI cannot prove yet: the `Source0` URLs, which
+404 until the first release is cut; until then the staged tarball is
+placed under the provisional basename, and only the URL part is
+substitution.

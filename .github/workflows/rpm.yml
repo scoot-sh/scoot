@@ -210,14 +210,15 @@ jobs:
 
       - name: Install the build and lint tools
         run: |
-          # busybox-gawk ships in the image and conflicts with the gawk
-          # desktop-file-utils requires; remove it first so the solver
-          # never faces both in one transaction (it cancels instead).
-          # If a future image drops busybox-gawk, this fails loudly and
-          # the line goes away.
-          zypper --non-interactive remove busybox-gawk
+          # No desktop-file-utils here: it requires gawk, which conflicts
+          # with the image's busybox-gawk (a git-core dependency, so it
+          # cannot simply be removed), and the solver cancels instead of
+          # resolving. The session entry it would validate is the same
+          # file the Fedora job validates below, so nothing goes
+          # unproven. (Local aarch64 images do not carry the conflict;
+          # this is x86_64-image specific.)
           zypper --non-interactive install --no-recommends \
-            cargo dejavu-fonts desktop-file-utils gcc libinput-devel \
+            cargo dejavu-fonts gcc libinput-devel \
             libpixman-1-0-devel libxkbcommon-devel rpm-build rpmlint \
             seatd-devel systemd-devel systemd-rpm-macros wayland-devel \
             wayland-protocols-devel
@@ -288,14 +289,8 @@ jobs:
           fi
           echo "ok: no rpmlint errors on the built RPMs (warnings, if any, are above)"
 
-      # Same known-notice gate as the Fedora job (see its comment).
-      - name: desktop-file-validate the session entry
-        run: |
-          desktop-file-validate packaging/rpm/scoot.desktop 2>&1 | tee "$GITHUB_WORKSPACE/dist/desktop-validate.log"
-          grep -v 'key "DesktopNames"' "$GITHUB_WORKSPACE/dist/desktop-validate.log" | grep -q 'error' \
-            && { echo "::error title=desktop-file-validate errors beyond the known DesktopNames notice::see desktop-validate.log"; exit 1; } \
-            || echo "ok: only the known DesktopNames notice (as on Fedora's own session files)"
-
+      # No desktop-file-validate here (see the install step): the file
+      # is identical in both jobs and the Fedora job gates it.
       - name: Install the trio and prove it
         run: |
           # The opensuse container image excludes `%doc` files
