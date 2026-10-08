@@ -157,8 +157,8 @@ Every token has a `[colors]` key; `bg` and `fg` are `--background` and
   beside it, never under it. The zone is set before the bar's first frame
   is drawn: on scoot, windows move out of the way once, when the bar
   connects, and do not jump again when it draws.
-- **It takes no keyboard focus** (but for the Escape key of an open
-  [popup](./modules.md##popups), for as long as it is open). Pointer clicks on the workspaces
+- **It takes no keyboard focus** (but for the keys of an open
+  [popup](./modules.md##popups) — Escape, arrows, Enter — for as long as it is open). Pointer clicks on the workspaces
   module's numbers switch to them ([above](./modules.md##workspaces)); anywhere else
   clicks do nothing.
 - **It draws at each output's real device pixels**, fractional scales

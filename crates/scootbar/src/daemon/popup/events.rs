@@ -30,6 +30,12 @@ pub struct PopupId(pub(super) u64);
 /// `KEY_ESC` (`linux/input-event-codes.h`): matched as the code it is, so
 /// no keymap is read and the daemon needs no xkb.
 const KEY_ESC: u32 = 1;
+/// `KEY_UP`, `KEY_DOWN`, `KEY_ENTER` and `KEY_KPENTER`: the popup list's
+/// keyboard navigation, matched the same way (no keymap, no xkb).
+const KEY_ENTER: u32 = 28;
+const KEY_KPENTER: u32 = 96;
+const KEY_UP: u32 = 103;
+const KEY_DOWN: u32 = 108;
 /// `BTN_LEFT`: the only button a popup answers.
 const BTN_LEFT: u32 = 0x110;
 
@@ -213,6 +219,37 @@ impl State {
             self.activate_popup(activate);
         }
     }
+
+    /// A keyboard arrow on the open popup: moves the hover among its button
+    /// rows, clamped at the ends, the scroll following so the hovered row
+    /// stays visible. Nothing when no popup is open, when the event names a
+    /// popup that is not the open one, or when the popup has no buttons.
+    fn popup_key(&mut self, id: PopupId, delta: i32) {
+        let Some(open) = self.popup.open.as_mut() else {
+            return;
+        };
+        if open.id != id {
+            return;
+        }
+        let outcome = open
+            .interaction
+            .move_selection(&open.content, &open.layout, delta);
+        open.dirty |= outcome.redraw;
+    }
+
+    /// Enter on the open popup: activates the hovered button row, if any,
+    /// with its `closes` flag honored (exactly as a release over it would).
+    /// Nothing otherwise: no hover, a hover on no button, or a pointer press
+    /// in flight (the pointer owns that click).
+    fn popup_enter(&mut self, id: PopupId) {
+        let activate = match self.popup.open.as_ref() {
+            Some(open) if open.id == id => open.interaction.keyboard_enter(&open.content),
+            _ => None,
+        };
+        if let Some(activate) = activate {
+            self.activate_popup(activate);
+        }
+    }
 }
 
 impl Dispatch<XdgWmBase, ()> for State {
@@ -337,9 +374,12 @@ impl Dispatch<WlSurface, PopupId> for State {
     }
 }
 
-/// The keyboard is taken for Escape only: a key press that is Escape closes
-/// the popup, whatever else is typed is ignored, and the keymap (its fd is
-/// closed as the event drops) is never read.
+/// The keyboard is taken for the popup's own keys: Escape closes it, and
+/// Up/Down move the hover among its button rows (clamped at the ends, the
+/// scroll following so the hovered row stays visible) with Enter activating
+/// the hovered row. Whatever else is typed is ignored, and the keymap (its
+/// fd is closed as the event drops) is never read. Only press events act;
+/// releases are ignored, and repeats act once each, as they arrive.
 impl Dispatch<WlKeyboard, PopupId> for State {
     fn event(
         state: &mut Self,
@@ -357,6 +397,12 @@ impl Dispatch<WlKeyboard, PopupId> for State {
         {
             if key == KEY_ESC {
                 state.close_popup_if(*id);
+            } else if key == KEY_UP {
+                state.popup_key(*id, -1);
+            } else if key == KEY_DOWN {
+                state.popup_key(*id, 1);
+            } else if key == KEY_ENTER || key == KEY_KPENTER {
+                state.popup_enter(*id);
             }
         }
     }

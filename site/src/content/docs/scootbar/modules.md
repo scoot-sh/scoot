@@ -1040,7 +1040,7 @@ on-click = "popup"
 Clicks, scrolls and hover, on every module. The bar never takes the keyboard
 outside a [popup](./modules.md##popups)'s lifetime (its layer surface asks for no
 keyboard interactivity, so it cannot disturb focus; a popup that grabbed
-takes it, for Escape, while it is open), and **touch is ignored**: the bar binds the seat's pointer only, so
+takes it, for Escape, arrows and Enter, while it is open), and **touch is ignored**: the bar binds the seat's pointer only, so
 a touch screen's taps reach nothing here (until a touch design exists,
 they are not translated into clicks).
 
@@ -1199,11 +1199,15 @@ the dmenu-style launcher are still how a click connects); `on-click =
   signal, and the associated one selected. A wheel over the list
   scrolls it a row a notch where it is taller than what the compositor
   configures for it; a row too wide is cut with an ellipsis, as
-  a window title's is. A scan that changes the row count while the list
-  is open reopens it at the new size (above), losing the scroll
-  position. Selecting a row closes the popup and runs
-  `connect N` on the network module. Keyboard navigation (arrows, Enter)
-  is a [separate entry](https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/backlog/popup-list-keyboard.md).
+  a window title's is. **Up and Down move the hovered row** (clamped at
+  the ends, never wrapping; text rows are skipped), the scroll following
+  so the hovered row stays visible, and **Enter connects to it**, exactly
+  as a click would (closing the popup first where `closes` says so). A
+  scan that changes the row count while the list is open reopens it at
+  the new size (above), losing the scroll position. Selecting a row
+  closes the popup and runs `connect N` on the network module. Without
+  a grab (an agent's `invoke`-opened popup) there is no keyboard: the
+  list is pointer-only there.
 - **Opened on the press, not the release.** The one exception to "clicks
   fire on release" ([pointer input](./modules.md##pointer-input)): a compositor may refuse
   a popup grab whose serial is not a button still held (the protocol allows
@@ -1233,13 +1237,21 @@ the dmenu-style launcher are still how a click connects); `on-click =
   says nothing on stderr.
 - **The keyboard.** The bar's layer surface asks for no keyboard and still
   does not. A `wl_keyboard` is taken from the seat **only while a popup that
-  grabbed is open**, to hear Escape (the grab is what gives the popup the
-  keyboard), and released with it. Keybindings of the compositor still win.
+  grabbed is open** (the grab is what gives the popup the keyboard), and
+  released with it: **Escape** closes the popup, **Up/Down** move the hover
+  among its button rows (clamped at the first and last, the scroll following
+  so the hovered row stays visible), and **Enter** activates the hovered row
+  with its `closes` flag honored, exactly as a release over it would.
+  Anything else typed is ignored, and no keymap is ever read (the codes are
+  matched directly, so the bar needs no xkb). Without a grab (an agent's
+  `invoke`-opened popup) there is no keyboard at all. Keybindings of the
+  compositor still win.
 - **Limits.** One popup at a time (a [tooltip](./modules.md##tooltips) is not one: it closes
   when a popup opens, and none shows while one is open). A drag ends when the pointer leaves the
   popup (the compositor's popup grab moves the pointer's focus off it, so
   nothing more of the drag arrives); past the slider's ends but still over the
-  popup it clamps to them. No keyboard navigation but Escape. A compositor
+  popup it clamps to them. Up/Down move the hover among the button rows and
+  Enter activates the hovered one (above). A compositor
   without `xdg_wm_base` refuses `popup` (said on stderr, or to `invoke`);
   the global is bound while some binding in the config names `popup`, and
   by an `invoke` for a bar with none; that one stays bound until the next
