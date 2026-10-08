@@ -36,6 +36,44 @@ pub fn scootbg_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_scootbg"))
 }
 
+/// Reset SIGHUP/SIGINT/SIGQUIT to default in a spawned `scootbg` child.
+///
+/// `cargo test` (unlike nextest) does not sanitize signal dispositions, so a
+/// detached session would otherwise leave a daemon ignoring the signal the
+/// test then sends and hang `a_signal_kills_the_daemon...`: `&` with job
+/// control off ignores SIGINT/SIGQUIT (the ticket's observed `SigIgn`
+/// `...1006`), while `nohup`/detached also ignores SIGHUP. The test controls
+/// its own premise here; the daemon itself keeps default dispositions, and
+/// SIGPIPE stays ignored (the Rust runtime's pipe behavior) while SIGTERM is
+/// untouched (never ignored detached).
+fn reset_hup_int_quit(command: &mut Command) {
+    use std::os::unix::process::CommandExt as _;
+    // SAFETY: `pre_exec` runs after fork before exec; the closure only calls
+    // async-signal-safe `signal(2)` setters and returns a status, with no
+    // allocation or locking. The setters below are syntactically inside this
+    // `unsafe` block (through the closure), which is what makes them checked.
+    unsafe {
+        command.pre_exec(|| {
+            unsafe extern "C" {
+                fn signal(sig: std::os::raw::c_int, handler: usize) -> usize;
+            }
+            const SIG_DFL: usize = 0;
+            const SIGHUP: std::os::raw::c_int = 1;
+            const SIGINT: std::os::raw::c_int = 2;
+            const SIGQUIT: std::os::raw::c_int = 3;
+            // Trivial setters for valid signals; a failure (SIG_ERR) aborts
+            // the spawn loudly rather than hanging the test.
+            if signal(SIGHUP, SIG_DFL) == usize::MAX
+                || signal(SIGINT, SIG_DFL) == usize::MAX
+                || signal(SIGQUIT, SIG_DFL) == usize::MAX
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
 fn sway_bin() -> Option<PathBuf> {
     if let Some(explicit) = std::env::var_os("SCOOTBG_TEST_SWAY").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(explicit));
@@ -351,6 +389,7 @@ impl Session {
     /// the tests run in: a test that wants them sets them itself.
     pub fn scootbg(&self) -> Command {
         let mut command = Command::new(scootbg_bin());
+        reset_hup_int_quit(&mut command);
         command
             .env("XDG_RUNTIME_DIR", &self.scratch.0)
             .env("WAYLAND_DISPLAY", &self.wayland_display)
