@@ -37,12 +37,12 @@ build() {
   cd "$pkgname"
   cargo build --release --locked -p scoot
   cargo deny list > THIRD-PARTY-LICENSES
-  ./target/release/scoot --print-default-config > config.toml.example
+  "${CARGO_TARGET_DIR:-target}/release/scoot" --print-default-config > config.toml.example
 }
 
 package() {
   cd "$pkgname"
-  install -Dm755 target/release/scoot "$pkgdir/usr/bin/scoot"
+  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/scoot" "$pkgdir/usr/bin/scoot"
   install -Dm755 resources/scoot-session "$pkgdir/usr/bin/scoot-session"
   install -Dm644 packaging/arch/scoot/scoot.desktop "$pkgdir/usr/share/wayland-sessions/scoot.desktop"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/scoot/LICENSE"
