@@ -430,7 +430,11 @@ fn a_failed_set_leaves_the_previous_wallpaper() {
         let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
         assert_eq!(out.status.code(), Some(2), "{args:?}: {stderr}");
         assert!(stderr.contains("--every"), "{stderr}");
-        assert_eq!(shows(&session), before, "a bare directory changed what shows");
+        assert_eq!(
+            shows(&session),
+            before,
+            "a bare directory changed what shows"
+        );
     }
     // A relative path sent straight to the socket (the CLI never does).
     let stream = UnixStream::connect(session.socket()).unwrap();
