@@ -186,7 +186,9 @@ jobs:
               export PATH="$HOME/.cargo/bin:$PATH"
               echo "--- toolchain and glibc floor ---"
               rustc --version
-              ldd --version | head -1
+              # `|| true`: ldd prints several lines and head closes early,
+              # which is SIGPIPE (141) under pipefail, not a failure.
+              ldd --version | head -n 1 || true
               cp -a /pkg /tmp/pkg
               chmod +x /tmp/pkg/deb/build-deb.sh /tmp/pkg/deb/make-repo-index.sh
               /tmp/pkg/deb/build-deb.sh --source /src --out /out
