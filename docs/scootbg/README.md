@@ -609,7 +609,7 @@ Against the competitors: [below](#against-the-other-daemons).
 **The release gate does not pass.** Its one failing class, idle memory
 above the floor (9 rows on each compositor), is waived for v1 by the
 user (2026-09-28); the lever that would close it, a separate daemon
-binary, is post-v1 ([idle-code-pages.md](backlog/idle-code-pages.md)).
+binary, is post-v1 ([idle-code-pages.md](backlog/resolved/idle-code-pages-done.md)).
 On headless scoot, in the re-run of the idle rows on 2026-09-28
 ([below](#idle-rows-re-run-2026-09-28)), after attributing the resident
 pages and trying the cheap levers, awww beats scootbg on idle memory
@@ -624,7 +624,7 @@ rest is anonymous memory, which the kernel cannot drop: a little with a
 color, and with an image about 0.24 MiB more, nearly all of it the
 decode thread's malloc arena. On every other row both can do, scootbg wins or ties, on scoot
 and on sway ([below](#on-sway)).
-[idle-code-pages.md](backlog/idle-code-pages.md) has where the pages are,
+[idle-code-pages.md](backlog/resolved/idle-code-pages-done.md) has where the pages are,
 what was tried, and what is left. The full table below is the first
 run, of 2026-09-27, which gave the same 9 losses (by 1.1–1.6 MiB of RSS
 and 1.0–1.5 MiB of PSS).
