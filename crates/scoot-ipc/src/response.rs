@@ -93,6 +93,9 @@ pub struct WindowSnapshot {
     /// `None` means the client set no *name*: it may have set none at all, or
     /// have supplied raw pixel buffers instead, which this protocol allows
     /// and scoot does not expose (see the compositor's `toplevel_icon.rs`).
+    /// An X window always reports `None`: `_NET_WM_ICON` is raw pixels,
+    /// never a name (bars resolve X icons from the app id through
+    /// `.desktop` files).
     ///
     /// Defaulted rather than required, like `OutputSnapshot::scale` above and
     /// `Response::Ok`'s `locked`, and for the same wire reason: adding a
