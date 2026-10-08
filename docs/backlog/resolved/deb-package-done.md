@@ -47,7 +47,7 @@ A stock Debian stable and Ubuntu LTS container installs from the signed
 repository and passes the smoke test, with `lintian` clean or every warning
 explained.
 
-## Resolved (PR #PENDING, 2026-10-08; no tags, releases, uploads or keys)
+## Resolved (PR #528, 2026-10-08; no tags, releases, uploads or keys)
 
 `packaging/deb/` plus `.github/workflows/deb.yml` (mirrors the
 arch-package shape in `packaging/arch`, PR #517): three `.deb`s
