@@ -451,6 +451,16 @@ fn output_entries_have_a_fixed_shape() {
 }
 
 #[test]
+fn a_workspace_slideshow_is_refused() {
+    assert!(matches!(
+        parse(
+            br##"{"protocol":1,"type":"set-workspace","workspace":"2","directory":"/pics","every":"1800s"}"##
+        ),
+        Err(RequestError::SlideshowWithWorkspace)
+    ));
+}
+
+#[test]
 fn workspace_requests_need_a_good_name() {
     // Missing.
     assert!(matches!(
@@ -968,14 +978,16 @@ fn a_query_without_a_slideshow_is_byte_for_byte_what_it_was() {
     assert_eq!(
         reply_string(&Reply::Outputs {
             outputs: &[] as &[OutputEntry<'_>; 0],
+            workspaces: &[] as &[WorkspaceEntry<'_>; 0],
             saving: true,
             profile: "default",
             rotation: None,
         }),
-        "{\"type\":\"outputs\",\"outputs\":[],\"saving\":true,\"profile\":\"default\"}\n"
+        "{\"type\":\"outputs\",\"outputs\":[],\"workspaces\":[],\"saving\":true,\"profile\":\"default\"}\n"
     );
     let line = reply_string(&Reply::Outputs {
         outputs: &[] as &[OutputEntry<'_>; 0],
+        workspaces: &[] as &[WorkspaceEntry<'_>; 0],
         saving: true,
         profile: "default",
         rotation: Some(RotationInfo {

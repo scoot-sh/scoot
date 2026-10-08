@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -273,5 +274,52 @@ fn a_result_for_another_job_is_discarded() {
         std::thread::sleep(Duration::from_millis(5));
     };
     assert_eq!(done.unwrap().len(), 1, "the job's own result");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// EAGAIN under parallel load retries rather than failing the `set`: a
+/// spawn that fails twice with EAGAIN (os error 11) then succeeds still
+/// starts, and its result arrives. (The reviewer saw the scaler margin
+/// test fail once with EAGAIN on a decoding thread spawn under load.)
+static EAGAIN_COUNT: AtomicU32 = AtomicU32::new(0);
+
+fn eagain_twice_then_spawn(job: Box<dyn FnOnce() + Send>) -> std::io::Result<()> {
+    if EAGAIN_COUNT.fetch_add(1, Ordering::SeqCst) < 2 {
+        Err(std::io::Error::from_raw_os_error(11)) // EAGAIN on Linux
+    } else {
+        super::spawn_thread(job)
+    }
+}
+
+#[test]
+fn eagain_retries_then_starts() {
+    EAGAIN_COUNT.store(0, Ordering::SeqCst);
+    let dir = scratch("eagain");
+    let file = dir.join("q.jpg");
+    std::fs::write(&file, samples::QUADRANTS_JPEG).unwrap();
+    let [a] = ids(1)[..] else { unreachable!() };
+    let mut worker = Worker::with_spawn(eagain_twice_then_spawn).unwrap();
+    worker
+        .start(
+            Arc::new(image(&file, Mode::Fill)),
+            vec![Target {
+                output: a,
+                dims: (16, 16),
+            }],
+        )
+        .expect("two EAGAINs then a thread");
+    assert_eq!(EAGAIN_COUNT.load(Ordering::SeqCst), 3, "retried twice");
+    assert!(readable(&worker, 20), "the retried job wakes the loop");
+    let done = worker.take().expect("a result").expect("decoded");
+    assert_eq!(done.len(), 1);
+    let thread = LAST_THREAD
+        .with(|last| last.borrow_mut().take())
+        .expect("the retry started a thread");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !thread.is_finished() {
+        assert!(Instant::now() < deadline, "the decoding thread stayed");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    thread.join().expect("the decoding thread ended cleanly");
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -66,8 +66,15 @@ showing one image (the second output costs a `wl_buffer`, not the
 pixels). Four workspaces with four 4K images hold about 132 MB over the
 floor; unmapped workspaces hold nothing, and `clear --workspace` frees
 its image's buffers at once. Colors cost nothing anywhere (no shared
-memory on compositors with single-pixel buffers). Past 64 mappings a
-`set --workspace` is refused — clear one first.
+memory on compositors with single-pixel buffers). Past 64 live mappings
+a `set --workspace` is refused naming the cap — clear one first.
+
+Mapping the same file on two workspaces decodes and holds it twice (one
+buffer per mapping per size): 64 mappings of one 4K file hold about
+64 × 33 MB. Each `set` re-reads the file (it may have changed), so the
+daemon never shares pixels between mappings by path; the 64-mapping cap
+bounds the worst case. Map colors, or fewer images, where memory is
+tight.
 
 Without the compositor's workspace protocol (sway has none), mappings
 are recorded and saved all the same, and apply once a compositor with

@@ -1165,6 +1165,19 @@ fn every_without_a_directory_is_refused() {
 }
 
 #[test]
+fn a_slideshow_with_a_workspace_is_refused() {
+    let dir = slideshow_dir("wsslide");
+    let path = dir.to_str().unwrap().to_owned();
+    assert_eq!(
+        args(&["set", &path, "--every", "30m", "--workspace", "2"]),
+        Err(Error::SlideshowWithWorkspace(path.clone()))
+    );
+    let message = Error::SlideshowWithWorkspace(path).to_string();
+    assert!(message.contains("--workspace"), "{message}");
+    std::fs::remove_dir(&dir).unwrap();
+}
+
+#[test]
 fn shuffle_without_every_is_refused() {
     assert_eq!(
         args(&["set", "/a", "--shuffle"]),

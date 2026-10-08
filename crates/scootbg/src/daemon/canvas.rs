@@ -428,6 +428,14 @@ impl Canvas {
             .retain(|stashed| stashed.memory().content != content);
     }
 
+    /// Drops every stashed workspace image: adopting a profile whose file
+    /// says nothing of the old mappings (`daemon::config`), so no switch
+    /// will ever want any of them. Stashes hold only workspace images
+    /// (`images::offer` keeps them only for mappings), so nothing else goes.
+    pub fn drop_all_stash(&mut self) {
+        self.stash.clear();
+    }
+
     /// Drops everything stashed at another size than `dims`: the output
     /// was reconfigured, and a switch draws at its size now. Stashes for
     /// the output's own size stay (other mappings may still want them).
@@ -754,5 +762,22 @@ fn clamp(value: u32) -> i32 {
 pub fn destroy_viewport(viewport: Option<WpViewport>) {
     if let Some(viewport) = viewport {
         viewport.destroy();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Canvas;
+
+    /// Adopting another profile drops every stash: an output that mapped N
+    /// workspace images holds N stashes, and after the adopt holds none.
+    /// Stashes hold only workspace images, so dropping all is dropping
+    /// exactly the cleared mappings' buffers (see `drop_all_stash`).
+    #[test]
+    fn dropping_all_stash_returns_buffer_accounting_to_base() {
+        let mut canvas = Canvas::default();
+        assert_eq!(canvas.stash.len(), 0, "no mapping: no stash");
+        canvas.drop_all_stash();
+        assert_eq!(canvas.stash.len(), 0, "adopt with none mapped drops none");
     }
 }

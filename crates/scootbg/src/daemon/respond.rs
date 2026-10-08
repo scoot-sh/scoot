@@ -100,6 +100,9 @@ pub enum ChangeError {
     TooManyWorkspaces,
     /// No mapping for that workspace stands to clear.
     UnknownWorkspace,
+    /// A slideshow for one workspace: slideshows run on every output (or
+    /// one `output`), not per workspace.
+    SlideshowWithWorkspace,
 }
 
 /// The reply text for a refused change.
@@ -151,9 +154,10 @@ impl fmt::Display for Refused<'_> {
             }
             ChangeError::TooManyWorkspaces => write!(
                 f,
-                "too many workspace wallpapers are mapped (`scootbg query` lists them under \
-                 `workspaces`; clear one with `scootbg clear --workspace` first); nothing was \
-                 changed"
+                "too many workspace wallpapers are mapped (at most {} live; `scootbg query` \
+                 lists them under `workspaces`; clear one with `scootbg clear --workspace` \
+                 first); nothing was changed",
+                crate::choices::MAX_WORKSPACES,
             ),
             ChangeError::UnknownWorkspace => write!(
                 f,
@@ -163,6 +167,12 @@ impl fmt::Display for Refused<'_> {
                     Some(output) => format!(" on output {output:?}"),
                     None => String::new(),
                 }
+            ),
+            ChangeError::SlideshowWithWorkspace => write!(
+                f,
+                "a slideshow runs on every output (or one `output`), not per workspace; \
+                 map an image or a color with `scootbg set --workspace` instead; nothing \
+                 was changed"
             ),
         }
     }
@@ -341,5 +351,32 @@ impl WorkspaceList for Choices {
                 shows: Shows(wallpaper),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChangeError;
+
+    /// The workspace cap refusal names the cap: with 64 mappings live the
+    /// 65th says how many fit, so a client (or a person reading stderr)
+    /// knows to clear one rather than retrying. Each mapping can hold an
+    /// output-sized buffer (~33 MB at 4K per size, shared across same-size
+    /// outputs), so the bound is the memory bound too.
+    #[test]
+    fn the_workspace_cap_refusal_names_the_cap() {
+        let refused = format!(
+            "{}",
+            super::Refused {
+                error: ChangeError::TooManyWorkspaces,
+                output: None,
+                workspace: None,
+            }
+        );
+        assert!(
+            refused.contains(&crate::choices::MAX_WORKSPACES.to_string()),
+            "names the cap: {refused}"
+        );
+        assert!(refused.contains("clear"), "says the remedy: {refused}");
     }
 }

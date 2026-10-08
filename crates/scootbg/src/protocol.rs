@@ -304,6 +304,16 @@ impl Request<'_> {
                 fill_transition(&mut line, transition);
                 match show {
                     Show::Color(color) => line.color = Some(*color),
+                    Show::Slideshow(slideshow) => {
+                        line.directory = Some(&slideshow.dir);
+                        line.every = Some(format!("{}s", slideshow.every_secs));
+                        if slideshow.shuffle {
+                            line.shuffle = Some(true);
+                        }
+                        line.mode = Some(slideshow.mode);
+                        line.fill = Some(slideshow.fill);
+                        line.filter = Some(slideshow.filter);
+                    }
                     Show::Image(image) => {
                         match &image.source {
                             Source::Path(path) => line.image = Some(path),
@@ -453,6 +463,9 @@ pub enum RequestError {
     /// A `set-workspace` or `clear-workspace` with a `workspace` holding
     /// a NUL byte.
     WorkspaceNul,
+    /// A `set-workspace` with a slideshow (`directory`/`every`/`shuffle`):
+    /// slideshows run on every output (or one `output`), not per workspace.
+    SlideshowWithWorkspace,
 }
 
 impl fmt::Display for RequestError {
@@ -542,6 +555,11 @@ impl fmt::Display for RequestError {
                 write!(f, "the `workspace` is past {MAX_WORKSPACE_NAME} bytes")
             }
             Self::WorkspaceNul => write!(f, "the `workspace` has a NUL byte"),
+            Self::SlideshowWithWorkspace => write!(
+                f,
+                "a slideshow runs on every output (or one `output`), not per workspace; \
+                 map an image or a color with `set-workspace` instead"
+            ),
         }
     }
 }
@@ -657,11 +675,17 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
             let show = show(
                 envelope.color,
                 envelope.image,
+                envelope.directory,
+                envelope.every,
+                envelope.shuffle,
                 envelope.sha256,
                 envelope.mode,
                 envelope.fill,
                 envelope.filter,
             )?;
+            if matches!(show, Show::Slideshow(_)) {
+                return Err(RequestError::SlideshowWithWorkspace);
+            }
             let transition = transition(
                 envelope.transition,
                 envelope.duration_ms,

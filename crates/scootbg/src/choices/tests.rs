@@ -362,3 +362,68 @@ fn the_switch_transition_is_the_winning_mapping() {
     assert_eq!(spec.kind, Kind::Fade);
     assert_eq!(shown(&choices, "DP-1", Some("2")), c("#101014"));
 }
+
+/// Adopting another profile clears every workspace mapping, and the buffer
+/// accounting with it: what `adopt` (`daemon::config`) does before it drops
+/// the stashes. The stash drop itself is `Canvas::drop_all_stash`
+/// (`daemon::canvas`); this pins the choices half so a later change cannot
+/// leave mappings behind while claiming to have adopted.
+#[test]
+fn clearing_workspaces_returns_buffer_accounting_to_base() {
+    let mut choices = Choices::default();
+    choices.set(None, c("#c03020"), 1);
+    assert!(choices.set_workspace(None, "2", image(2), crate::transition::Spec::none(), 2));
+    assert!(choices.set_workspace(None, "3", image(3), crate::transition::Spec::none(), 3));
+    assert!(choices.has_workspace_mappings());
+    assert_eq!(choices.workspace_images_for(None).len(), 2);
+    choices.clear_workspaces();
+    assert!(!choices.has_workspace_mappings());
+    assert_eq!(
+        choices.workspace_images_for(None).len(),
+        0,
+        "no mapping: no buffer to keep"
+    );
+    assert_eq!(
+        choices.workspace_images_for(Some("DP-1")).len(),
+        0,
+        "no mapping on any output either"
+    );
+}
+
+/// A slideshow step and a workspace mapping share one timeline: the newer
+/// wins, whichever it is. A step is a base `set` at a newer generation
+/// (`daemon::rotation` records and chooses exactly like a restored image);
+/// a mapping set after a step wins until the next step, which covers it
+/// again. `clear` (base) stops the show and wins outright; `clear
+/// --workspace` only takes one mapping off.
+#[test]
+fn slideshow_steps_and_workspace_mappings_share_one_timeline() {
+    let mut choices = Choices::default();
+    // Base first, then a workspace mapping: the mapping shows there.
+    choices.set(None, c("#c03020"), 1);
+    assert!(choices.set_workspace(None, "2", image(2), crate::transition::Spec::none(), 2));
+    assert_eq!(shown(&choices, "DP-1", Some("2")), image(2));
+    assert_eq!(shown(&choices, "DP-1", Some("1")), c("#c03020"));
+    // A slideshow step (a base image at a newer generation) covers the
+    // older mapping until a still newer mapping.
+    choices.set(None, image(3), 3);
+    assert_eq!(
+        shown(&choices, "DP-1", Some("2")),
+        image(3),
+        "the step is newer than the mapping"
+    );
+    // A mapping set after the step wins until the next step.
+    assert!(choices.set_workspace(None, "2", image(4), crate::transition::Spec::none(), 4));
+    assert_eq!(shown(&choices, "DP-1", Some("2")), image(4));
+    // The next step covers it again.
+    choices.set(None, image(5), 5);
+    assert_eq!(
+        shown(&choices, "DP-1", Some("2")),
+        image(5),
+        "the next step is newest again"
+    );
+    // A base `clear` wins outright (and stops the show in the daemon); a
+    // workspace clear only takes one mapping off.
+    choices.set(None, None, 6);
+    assert_eq!(shown(&choices, "DP-1", Some("2")), None);
+}

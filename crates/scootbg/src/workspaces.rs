@@ -174,8 +174,8 @@ impl Tracker {
                 continue;
             };
             // Exactly one live group per connector: a second group
-            // carrying the same output makes it ambiguous, so neither
-            // reports. (A HashMap insert would let the last win; the
+            // carrying the same output makes it ambiguous, so it reports
+            // away. (A HashMap insert would let the last win; the
             // protocol forbids an output in two groups, so any duplicate
             // is a compositor bug worth silence rather than a guess.)
             let output = output.as_str();

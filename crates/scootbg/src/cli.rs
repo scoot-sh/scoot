@@ -582,6 +582,10 @@ pub enum Error {
     DirectoryNeedsEvery(String),
     /// `--shuffle` without `--every`: it shuffles a slideshow.
     ShuffleNeedsEvery,
+    /// `--workspace` with a directory slideshow: slideshows run on every
+    /// output (or one `--output`), not per workspace; map images or colors
+    /// per workspace instead.
+    SlideshowWithWorkspace(String),
     /// A URL with a NUL byte.
     UrlNul,
     /// `--workspace` empty, too long, or with a NUL byte.
@@ -696,6 +700,12 @@ impl fmt::Display for Error {
                 f,
                 "`--shuffle` shuffles a slideshow, and there is none: add `--every` \
                  (try `scootbg set --help`)"
+            ),
+            Self::SlideshowWithWorkspace(target) => write!(
+                f,
+                "`{target}` is a directory: a slideshow runs on every output (or one \
+                 `--output`), not per workspace; map an image or a color with \
+                 `--workspace` instead (try `scootbg set --help`)"
             ),
             Self::UrlNul => write!(f, "the image URL has a NUL byte"),
             Self::BadWorkspace { value, reason } => write!(
@@ -1115,7 +1125,7 @@ fn change<I: Iterator<Item = Result<String, String>>>(
     };
     let mut target: Option<String> = None;
     // Indexed as `flags`.
-    let mut values: [Option<String>; 11] = Default::default();
+    let mut values: [Option<String>; 12] = Default::default();
     // `--shuffle` takes no value, so it is kept out of `flags` (whose
     // machinery reads one) and handled here, bare only.
     let mut shuffle = false;
@@ -1266,6 +1276,9 @@ fn change<I: Iterator<Item = Result<String, String>>>(
     } else if std::fs::metadata(&argument).is_ok_and(|meta| meta.is_dir()) {
         if sha256.is_some() {
             return Err(Error::ShaImageOnly);
+        }
+        if workspace.is_some() {
+            return Err(Error::SlideshowWithWorkspace(argument));
         }
         let every = every.ok_or_else(|| Error::DirectoryNeedsEvery(argument.clone()))?;
         let every_secs = crate::rotation::parse_every(&every).map_err(Error::BadEvery)?;

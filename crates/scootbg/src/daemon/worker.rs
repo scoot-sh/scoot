@@ -146,34 +146,53 @@ impl Worker {
     /// return value, the one place it is reported. (The guard that
     /// reports a thread that died is made inside the thread, so a spawn
     /// that never ran cannot leave a result behind.)
+    ///
+    /// Under parallel load thread creation can fail with EAGAIN (out of
+    /// threads, not out of memory): retried a few times with a short
+    /// sleep, so a momentary spike does not fail the `set`. Anything else,
+    /// or EAGAIN that persists, is returned for the reply.
     pub fn start(&mut self, image: Arc<Image>, targets: Vec<Target>) -> Result<(), JobError> {
         // 2^64 jobs cannot happen; wrapping keeps it panic-free.
         self.ticket = self.ticket.wrapping_add(1);
         let ticket = self.ticket;
-        let results = self.results.clone();
-        let wake = Arc::clone(&self.wake);
-        let job = Box::new(move || {
-            let mut guard = Guard {
-                ticket,
-                results,
-                wake,
-                sent: false,
-            };
-            let done = work(&image, &targets);
-            // The source and every buffer not handed over are gone by
-            // here; what is sent is what the outputs keep.
-            guard.send(done);
-        });
-        match (self.spawn)(job) {
-            Ok(()) => {
-                self.awaited = Some(ticket);
-                Ok(())
-            }
-            Err(error) => {
-                self.awaited = None;
-                Err(JobError::Spawn(error))
+        // EAGAIN consumes the boxed job (it moved into the failed spawn),
+        // so each attempt rebuilds it from clones: the image is shared
+        // either way, and the targets are small.
+        for attempt in 0..5 {
+            let results = self.results.clone();
+            let wake = Arc::clone(&self.wake);
+            let image = Arc::clone(&image);
+            let targets = targets.clone();
+            let job = Box::new(move || {
+                let mut guard = Guard {
+                    ticket,
+                    results,
+                    wake,
+                    sent: false,
+                };
+                let done = work(&image, &targets);
+                // The source and every buffer not handed over are gone by
+                // here; what is sent is what the outputs keep.
+                guard.send(done);
+            });
+            match (self.spawn)(job) {
+                Ok(()) => {
+                    self.awaited = Some(ticket);
+                    return Ok(());
+                }
+                Err(error)
+                    if error.raw_os_error() == Some(11) // EAGAIN on Linux
+                        && attempt < 4 =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => {
+                    self.awaited = None;
+                    return Err(JobError::Spawn(error));
+                }
             }
         }
+        unreachable!("the loop returns on every path");
     }
 
     /// The awaited job's result, if it has come. Resets the eventfd.

@@ -13,7 +13,7 @@
 
 mod common;
 
-use common::{PATIENCE, Session, wait_exit};
+use common::{PATIENCE, Session, rgb, wait_exit};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
@@ -289,6 +289,103 @@ fn workspace_mappings_restore() {
     let ids = scoot_ids(&session);
     switch_to(&session, &ids, 1, "2");
     assert_screenshot(&session, ids[0].0, SECOND);
+
+    close_windows(&mut windows);
+    session.run(&["kill"]);
+    assert!(wait_exit(&mut daemon).success());
+}
+
+/// Writes a solid-color PNG at `path`.
+fn write_png(path: &std::path::Path, rgb: [u8; 3]) {
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, 64, 64);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&rgb.repeat(64 * 64)).unwrap();
+        writer.finish().unwrap();
+    }
+    std::fs::write(path, out).unwrap();
+}
+
+/// Polls until every output reports `transition` null: the animation is
+/// over on screen, not just answered.
+fn wait_still(session: &Session, what: &str) {
+    session.query_until(what, |o| o.iter().all(|o| o["transition"].is_null()));
+}
+
+/// A workspace switch through the mapping's fade animates: mid-flight the
+/// pixels blend the two images, and at the end the mapped image shows.
+/// The switch-time `request_transition` path was wired but never
+/// pixel-proven (colors switch at once); this runs it with real images.
+#[test]
+fn workspace_switch_through_fade_animates() {
+    let Some(session) = Session::start_with("perws-fade", 1, "") else {
+        return;
+    };
+    let Some(mut windows) = open_windows(&session, 1) else {
+        return;
+    };
+    let mut daemon = session.daemon();
+    configured(&session, 1);
+    let red = session.scratch.0.join("red.png");
+    let blue = session.scratch.0.join("blue.png");
+    write_png(&red, [0xc0, 0x30, 0x20]);
+    write_png(&blue, [0x10, 0x10, 0x14]);
+    let ids = scoot_ids(&session);
+    assert_eq!(ids.len(), 1);
+
+    ok(&session, &[red.to_str().unwrap()]);
+    ok(
+        &session,
+        &[
+            blue.to_str().unwrap(),
+            "--workspace",
+            "2",
+            "--transition",
+            "fade",
+            "--duration-ms",
+            "4000",
+        ],
+    );
+    switch_to(&session, &ids, 0, "1");
+    // Workspace 2 is empty (the window stays on 1): full-screen pixels.
+    switch_to(&session, &ids, 1, "2");
+    // Mid-flight the mapping's fade runs: query says so, and the pixels
+    // are neither endpoint.
+    session.query_until("fading", |o| o.iter().all(|o| o["transition"] == "fade"));
+    let red_px = rgb("#c03020");
+    let blue_px = rgb("#101014");
+    let deadline = Instant::now() + PATIENCE;
+    let blended = loop {
+        let shot = session.scoot_screenshot(ids[0].0);
+        if shot.colors().iter().any(|c| *c != red_px && *c != blue_px) {
+            break shot;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "never blended; samples {:?}",
+            shot.samples()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        blended
+            .colors()
+            .iter()
+            .any(|c| *c != red_px && *c != blue_px),
+        "blended pixels: {:?}",
+        blended.samples()
+    );
+    // At the end the mapped image shows, and nothing still runs.
+    wait_still(&session, "settled");
+    let shot = session.scoot_screenshot(ids[0].0);
+    assert!(
+        shot.pixels().iter().all(|p| *p == blue_px),
+        "final frame is the mapped image; samples {:?}",
+        shot.samples()
+    );
 
     close_windows(&mut windows);
     session.run(&["kill"]);

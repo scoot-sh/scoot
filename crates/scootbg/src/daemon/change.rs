@@ -430,6 +430,9 @@ impl Changes for Control<'_> {
                 None
             }
             Some(Show::Color(color)) => Some(Wallpaper::Color(color)),
+            Some(Show::Slideshow(_)) => {
+                return Err(ChangeError::SlideshowWithWorkspace);
+            }
             Some(Show::Image(request)) => {
                 // As a base image `set`: nothing changes until it has
                 // decoded, and the transition waits with the trial.
