@@ -624,7 +624,7 @@ be revisited.
   the Asahi M2 Air's eDP-1 + DP-1 (`Asahi.md` Test 16). `apply`/`test` stay
   refused.
 - [Per-output position, and a live mode change on reload](./resolved/output-position-and-live-mode-done.md)
-  — RESOLVED 2026-10-08 in #PR: `position = [x, y]` per `[[outputs]]` entry (placed startup/hotplug/reload, overlaps and gaps allowed) and live mode changes (headless resize, `--tty` hotplug-path `NewMode`, `--nested` still refused).
+  — RESOLVED 2026-10-08 in #525: `position = [x, y]` per `[[outputs]]` entry (placed startup/hotplug/reload, overlaps and gaps allowed) and live mode changes (headless resize, `--tty` hotplug-path `NewMode`, `--nested` still refused).
 - [Usable area is one pixel narrower than the output after a scale reload](./resolved/usable-area-shrinks-after-rescale-done.md)
   — RESOLVED 2026-10-03 in #395: reload files the Space (ceil) geometry when no layer reserves space (Smithay ceil vs round).
 - [Workspace shortcuts: no numbered bind, and no move-to-index action at all](./resolved/workspace-index-keybindings-done.md)

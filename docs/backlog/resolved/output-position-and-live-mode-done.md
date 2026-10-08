@@ -58,7 +58,7 @@ Two halves `[[outputs]]` deliberately left out.
 condition in the [resolved spec](../resolved/per-output-scale-mode-done.md)
 (section 3) -- position and live mode are its prerequisites, not it.
 
-## Resolution (2026-10-08, PR #XXX)
+## Resolution (2026-10-08, PR #525)
 
 Both halves landed, following this ticket's own recommendations.
 
