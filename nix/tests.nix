@@ -5884,7 +5884,8 @@ let
   themeFootGinger = hmThemeGinger.config.xdg.configFile."foot/foot.ini".source;
   themeStarshipGinger = hmThemeGinger.config.xdg.configFile."starship.toml".source;
   themeHelixGingerConf = hmThemeGinger.config.xdg.configFile."helix/config.toml".source;
-  themeHelixGingerTheme = hmThemeGinger.config.xdg.configFile."helix/themes/scoot-ginger-night.toml".source;
+  themeHelixGingerTheme =
+    hmThemeGinger.config.xdg.configFile."helix/themes/scoot-ginger-night.toml".source;
   themeBtopGingerConf = hmThemeGinger.config.xdg.configFile."btop/btop.conf".source;
   themeFontsConf = hmTheme.config.xdg.configFile."fontconfig/conf.d/10-scoot-look.conf".source;
   themeFootConf = hmTheme.config.xdg.configFile."foot/foot.ini".source;
