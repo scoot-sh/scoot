@@ -504,18 +504,23 @@ socket is one more source in the `poll` loop), which is the
   registered before the bar started are found by listing the bus's names
   at connect (an item behind a plain unique name registers explicitly, and
   is only seen if it registers after the bar is up: the KDE watcher's own
-  limit). With no session bus the module shows nothing and waits on the
-  bus socket's directory (one inotify watch, no polling), and a bus that
+  limit). With no session bus the module shows nothing and waits for it
+  (one inotify watch on the bus socket's directory for a `unix:path=`
+  address, no polling; one retry timer polling the name every 30 seconds
+  for a `unix:abstract=` address, which has no directory to watch), and a
+  bus that
   dies mid-run drops every icon at once and dials once more. A bus that
   takes the bar in and drops it within five seconds, three times running,
   is not dialled again at once (a refusing bus must not spin the bar): it
   is tried once more after 30 seconds, and again each time that try dies
-  the same way, or as soon as its socket is made anew. Only the bus's own
+  the same way, or as soon as its socket is made anew (for an abstract
+  address, at the next 30-second poll). Only the bus's own
   `NameOwnerChanged` is believed (a peer's, addressed to the bar, removes
   nothing), and when hosting only the watcher hosted against speaks for it.
-  The address is `DBUS_SESSION_BUS_ADDRESS`'s `unix:path=` (`%xx` escapes
-  decoded), else `$XDG_RUNTIME_DIR/bus` when it is not set; an address
-  with no path (`unix:abstract=`, `tcp:`, `autolaunch:`) is refused with a
+  The address is `DBUS_SESSION_BUS_ADDRESS`'s `unix:path=` or
+  `unix:abstract=` (`%xx` escapes decoded; a path wins when the address
+  names both), else `$XDG_RUNTIME_DIR/bus` when it is not set; an address
+  that names neither (`tcp:`, `autolaunch:`) is refused with a
   line on stderr and no tray, not replaced by another bus that happens to
   be at the default place. A bus that refuses the bar the watcher name (a
   policy that denies `own`) is said once on stderr, and the bar hosts.
@@ -655,10 +660,13 @@ socket is one more source in the `poll` loop), which is the
   set-up (auth and `Hello`) is blocking, bounded to 2 seconds in total.
   The parser is fuzzed (`crates/scootbar/fuzz`, target `dbus`).
 - **Cost.** One fd (the bus socket, with `OUT` only while a write or a
-  staged message waits), or one inotify fd while there is no bus, and a
+  staged message waits), or one inotify fd while there is no bus at a
+  `unix:path=` address (one retry timer polling every 30 seconds at a
+  `unix:abstract=` address, which has no directory to watch), and a
   one-shot timer only while an item waits out its 50 ms floor between
   reads or after the bus kept dropping the bar. Measured (dev VM, one
-  60 s idle window per row): **zero wakeups** with no bus, with a bus and
+  60 s idle window per row, `unix:path=` addresses): **zero wakeups** with
+  no bus, with a bus and
   no items, and with one and with eight items on it; RSS 4156 kB with the
    tray alone and no bus or no items, 4352 kB with one item, 4388 kB with
    eight (differences under about 130 kB are within one run's resolution;
@@ -746,8 +754,11 @@ Cargo feature (`media`), on by default; the smallest build
   position, never wakes the bar (tested against a real `dbus-daemon`). A
   track change is one signal carrying the value (no round trip); a player
   that only invalidates a property is read once, no oftener than every
-  50 ms. With no bus the module waits on the bus socket's directory (one
-  inotify watch); a bus that goes away drops every player at once and dials
+  50 ms. With no bus the module waits for it (one inotify watch on the
+  bus socket's directory for a `unix:path=` address; one retry timer
+  polling the name every 30 seconds for a `unix:abstract=` address, which
+  has no directory to watch); a bus that goes away drops every player at
+  once and dials
   once more, and one that keeps dropping the bar is left alone for 30
   seconds, said once on stderr and again at each 30 s retry that dies the
   same way (the [tray's](./modules.md##tray) rules, in `src/dbus/link.rs`).
@@ -799,11 +810,14 @@ Cargo feature (`media`), on by default; the smallest build
   fuzzed with the D-Bus client's (`crates/scootbar/fuzz`, target `dbus`), and
   checked against what sd-bus marshals.
 - **Cost.** One fd (the bus socket, with `OUT` only while a write or a
-  staged message waits), or one inotify fd while there is no bus, and a
+  staged message waits), or one inotify fd while there is no bus at a
+  `unix:path=` address (one retry timer polling every 30 seconds at a
+  `unix:abstract=` address, which has no directory to watch), and a
   one-shot timer only while a player waits out its 50 ms floor between reads,
   while a change of title waits out its 100 ms between draws, or (30 s) after
   the bus kept dropping the bar.
-  Measured (dev VM, one 60 s idle window per row): **zero wakeups** with no
+  Measured (dev VM, one 60 s idle window per row, `unix:path=` addresses):
+  **zero wakeups** with no
   bus, with a bus and no player, with one player paused, with one playing,
   with eight playing, and with a real mpv (its MPRIS script) playing a file;
   one thread throughout; RSS 4156 kB with a bus and no player, 4388 kB with

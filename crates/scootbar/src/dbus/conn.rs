@@ -85,6 +85,58 @@ pub const BUS_PATH: &str = "/org/freedesktop/DBus";
 pub const BUS_INTERFACE: &str = "org.freedesktop.DBus";
 
 /// Where the session bus listens: `DBUS_SESSION_BUS_ADDRESS` when it
+/// names something this client dials (`unix:path=...` or
+/// `unix:abstract=...`, `%xx` escapes decoded, parameters after `,`
+/// and further `;`-separated addresses ignored), else the runtime
+/// directory's `bus` when no address is set at all. A filesystem path
+/// wins over an abstract name when the address names both (the rule
+/// before abstract names were dialled); an address that names neither
+/// (`tcp:`, `autolaunch:`) is `Err(())`: refused, never silently
+/// replaced by another bus that happens to exist at the default place.
+/// An abstract name that is empty or holds a NUL is no name, so it is
+/// refused the same way. The argument is the address (the env lookup is
+/// the caller's), so tests never touch the environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BusAddr {
+    /// The socket's filesystem path.
+    Path(PathBuf),
+    /// The socket's Linux abstract-namespace name (without the leading
+    /// NUL the kernel adds).
+    Abstract(Vec<u8>),
+}
+
+pub fn bus_addr_for(address: Option<&std::ffi::OsStr>) -> Result<BusAddr, ()> {
+    use std::os::unix::ffi::OsStrExt;
+    let Some(address) = address.filter(|address| !address.is_empty()) else {
+        return Ok(BusAddr::Path(runtime_dir().join("bus")));
+    };
+    let mut abstract_name: Option<Vec<u8>> = None;
+    for part in address.as_encoded_bytes().split(|byte| *byte == b';') {
+        let Some(unix) = part.strip_prefix(b"unix:") else {
+            continue;
+        };
+        for param in unix.split(|byte| *byte == b',') {
+            if let Some(path) = param.strip_prefix(b"path=") {
+                let path = unescape(path);
+                if !path.is_empty() {
+                    return Ok(BusAddr::Path(PathBuf::from(std::ffi::OsStr::from_bytes(
+                        &path,
+                    ))));
+                }
+            } else if abstract_name.is_none() {
+                if let Some(name) = param.strip_prefix(b"abstract=") {
+                    let name = unescape(name);
+                    if !name.is_empty() && !name.contains(&0) {
+                        abstract_name = Some(name);
+                    }
+                }
+            }
+        }
+    }
+    abstract_name.map(BusAddr::Abstract).ok_or(())
+}
+
+/// Where the session bus listens: `DBUS_SESSION_BUS_ADDRESS` when it
 /// names a filesystem path (`unix:path=...`, `%xx` escapes decoded,
 /// parameters after `,` and further `;`-separated addresses ignored),
 /// else the runtime directory's `bus` when no address is set at all.
@@ -94,24 +146,10 @@ pub const BUS_INTERFACE: &str = "org.freedesktop.DBus";
 /// is the address (the env lookup is the caller's), so tests never touch
 /// the environment.
 pub fn bus_path_for(address: Option<&std::ffi::OsStr>) -> Result<PathBuf, ()> {
-    use std::os::unix::ffi::OsStrExt;
-    let Some(address) = address.filter(|address| !address.is_empty()) else {
-        return Ok(runtime_dir().join("bus"));
-    };
-    for part in address.as_encoded_bytes().split(|byte| *byte == b';') {
-        let Some(unix) = part.strip_prefix(b"unix:") else {
-            continue;
-        };
-        for param in unix.split(|byte| *byte == b',') {
-            if let Some(path) = param.strip_prefix(b"path=") {
-                let path = unescape(path);
-                if !path.is_empty() {
-                    return Ok(PathBuf::from(std::ffi::OsStr::from_bytes(&path)));
-                }
-            }
-        }
+    match bus_addr_for(address) {
+        Ok(BusAddr::Path(path)) => Ok(path),
+        _ => Err(()),
     }
-    Err(())
 }
 
 /// A D-Bus address value with its `%xx` escapes decoded (a malformed
@@ -134,9 +172,9 @@ fn unescape(value: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The session bus's path from the environment.
-pub fn bus_path() -> Result<PathBuf, ()> {
-    bus_path_for(std::env::var_os("DBUS_SESSION_BUS_ADDRESS").as_deref())
+/// The session bus's address from the environment.
+pub fn bus_addr() -> Result<BusAddr, ()> {
+    bus_addr_for(std::env::var_os("DBUS_SESSION_BUS_ADDRESS").as_deref())
 }
 
 /// The well-known system bus socket: what BlueZ listens on.
@@ -974,6 +1012,17 @@ impl Conn {
 /// Connects the session bus at `path`: dials, then runs [`setup`].
 pub fn connect(path: &Path) -> Result<Conn, SetupError> {
     setup(UnixStream::connect(path)?)
+}
+
+/// Connects the session bus at the abstract name `name` (without the
+/// leading NUL): dials in the Linux abstract namespace, then runs
+/// [`setup`]. A name the kernel refuses (empty, NUL, too long) is a
+/// refusal, said where the dial is retried.
+pub fn connect_abstract(name: &[u8]) -> Result<Conn, SetupError> {
+    use std::os::linux::net::SocketAddrExt;
+    let addr = std::os::unix::net::SocketAddr::from_abstract_name(name)
+        .map_err(|_| SetupError::Refused("a bad abstract bus name"))?;
+    setup(UnixStream::connect_addr(&addr)?)
 }
 
 /// Runs the blocking set-up on an open stream: authenticates (`EXTERNAL`

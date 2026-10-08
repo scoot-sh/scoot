@@ -1,10 +1,11 @@
 ---
 title: "Tray: session buses on abstract sockets"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M6"
+resolved: "2026-10-08"
 ---
 
 # Tray: session buses on abstract sockets
@@ -37,3 +38,23 @@ bluetooth modules share the rule through the same client.
 ## Not in this ticket
 
 Everything else in [tray](resolved/tray-done.md); the system bus (a fixed path).
+
+## Status (2026-10-08): landed (PR #523)
+
+`unix:abstract=` session addresses are dialled: `bus_addr_for` parses
+them (`%xx` escapes decoded; a path still wins when the address names
+both, as before; empty and NUL-holding names refused like `tcp:`),
+`connect_abstract` dials in the abstract namespace, and the tray and
+media modules start on either address form through `Addr::Abstract`.
+The system bus is untouched (a fixed path, out of scope). Truly
+undialable transports (`tcp:`, `autolaunch:`) are still refused loudly,
+as before. Re-dialing waits on the retry timer only (30 s one-shot; an
+abstract socket has no directory to inotify, and a runtime-directory
+watch would wake on unrelated files without ever seeing the socket): a
+poll that finds no bus resets the quick-death count, the latch is
+unchanged. Evidence in the PR body: 4 new tests (each proven to fail
+with the fix toggled off), the full clippy matrix, nextest and cargo
+test (only the sway-missing environmental failures), `cargo deny`,
+release sizes (file +0 B, `.text` +1,760 B reported unwaived), and idle
+RSS/wakeups (path rows 0 wakeups both sides; abstract polls at 2–3
+wakeups per 60 s).

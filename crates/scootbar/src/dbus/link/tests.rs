@@ -96,6 +96,17 @@ fn scratch(tag: &str) -> PathBuf {
     dir
 }
 
+/// A unique abstract bus name: the abstract namespace is host-global,
+/// and other agents may test on the same machine at once.
+fn abstract_name(tag: &str) -> String {
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
+    format!(
+        "scootbar-link-{tag}-{}-{}",
+        std::process::id(),
+        COUNT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 fn fds(link: &Link<Probe>) -> usize {
     let mut count = 0;
     link.watch(&mut |_, _| count += 1);
@@ -211,6 +222,57 @@ fn a_bus_that_goes_away_drops_the_session_and_comes_back_when_it_does() {
     until(&mut link, |link| link.live().is_some());
     drop(second);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_abstract_bus_is_dialled_at_once_and_heals_after_a_restart() {
+    let name = abstract_name("heal");
+    let Some(daemon) = Daemon::spawn_abstract_on(&name) else {
+        return;
+    };
+    let mut link = Link::start("test", Addr::Abstract(name.as_bytes().to_vec()), probe);
+    assert!(link.live().is_some(), "dials at once when the bus is there");
+    let unique = link.live().unwrap().conn().unique().to_owned();
+    assert!(unique.starts_with(":1."), "{unique}");
+    drop(daemon);
+    until(&mut link, |link| link.live().is_none());
+    // Waiting on the retry timer alone: one source, no directory watch.
+    assert_eq!(fds(&link), 1, "the retry timer, nothing else");
+    assert_eq!(link.source_count(), 1);
+    // A new bus at the same name: the poll connects again.
+    let Some(second) = Daemon::spawn_abstract_on(&name) else {
+        return;
+    };
+    until(&mut link, |link| link.live().is_some());
+    drop(second);
+}
+
+#[test]
+fn with_no_abstract_bus_it_polls_the_name_on_the_retry_timer() {
+    let name = abstract_name("absent");
+    let mut link = Link::start("test", Addr::Abstract(name.as_bytes().to_vec()), probe);
+    assert!(link.live().is_none());
+    assert_eq!(fds(&link), 1, "the retry timer, nothing else");
+    assert_eq!(link.source_count(), 1);
+    // The timer fires and dials again: still nothing, still waiting (one
+    // failed dial a retry, not a spin).
+    let start = Instant::now();
+    let mut fired = false;
+    while start.elapsed() < Duration::from_secs(5) {
+        if turn(&mut link, Duration::from_millis(100)).is_some() {
+            fired = true;
+            break;
+        }
+    }
+    assert!(fired, "the retry timer fires while the bus is absent");
+    assert!(link.live().is_none());
+    assert_eq!(fds(&link), 1);
+    // The bus appears later at the same name: the poll connects.
+    let Some(daemon) = Daemon::spawn_abstract_on(&name) else {
+        return;
+    };
+    until(&mut link, |link| link.live().is_some());
+    drop(daemon);
 }
 
 #[test]

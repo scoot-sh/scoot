@@ -18,7 +18,9 @@
 //!
 //! ## States
 //!
-//! `Waiting` owns an inotify fd on the bus socket's directory and shows
+//! `Waiting` owns an inotify fd on the bus socket's directory for a
+//! filesystem path, or the retry timer alone for an abstract bus
+//! address, and shows
 //! nothing: no bus, no items, one watch. `Live` owns the bus socket and
 //! shows what registered, in `service + path` order (the KDE watcher's
 //! id format). A dead connection drops back to waiting with nothing
@@ -184,12 +186,13 @@ pub struct Settings {}
 #[cfg(feature = "tray")]
 pub fn init(settings: &super::Settings) -> Init {
     let _ = settings;
-    let addr = match conn::bus_path() {
-        Ok(path) => Addr::Path(path),
+    let addr = match conn::bus_addr() {
+        Ok(conn::BusAddr::Path(path)) => Addr::Path(path),
+        Ok(conn::BusAddr::Abstract(name)) => Addr::Abstract(name),
         Err(()) => {
             crate::print::warn(format_args!(
-                "scootbar: tray: DBUS_SESSION_BUS_ADDRESS names no filesystem path \
-                 (abstract and other transports are not dialled); no tray"
+                "scootbar: tray: DBUS_SESSION_BUS_ADDRESS names no dialable transport \
+                 (tcp and autolaunch are not dialled); no tray"
             ));
             Addr::Unusable
         }
