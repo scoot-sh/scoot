@@ -272,8 +272,9 @@ jobs:
             scootbar --version
             # Fonts before --check: the example names no --font, so the
             # bar probes the usual paths (DejaVu first) and --check
-            # refuses without one.
-            apt-get install -y -qq foot jq imagemagick wayland-utils fonts-dejavu-core
+            # refuses without one. procps too: the smoke test finds its
+            # client with pgrep, and slim images do not ship it.
+            apt-get install -y -qq foot jq imagemagick wayland-utils fonts-dejavu-core procps
             scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
             mkdir -p /tmp/deb-smoke-xdg
             chmod 700 /tmp/deb-smoke-xdg
