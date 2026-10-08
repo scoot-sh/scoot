@@ -562,19 +562,57 @@ socket is one more source in the `poll` loop), which is the
   are the names of the interaction keys, and `msg invoke` reads them as
   those.) `Activate` and `SecondaryActivate` are sent with position `(0,
   0)` (a bar has no screen coordinates to give), and a wheel action sends
-  `Scroll(n, "vertical")` with `n` the notch count clamped to 64, negative
-  for `wheel-up` and positive for `wheel-down`. The sign is GTK's,
-  measured 2026-10-07 against a real item: pasystray 0.8.2
-  (libayatana-appindicator maps a positive vertical delta to scroll-down,
-  so wheel-up must send negative; verified on the wire as `Scroll(-1)`),
-  and matching Waybar (which sends −1 for up, from its source). The SNI
-  spec is silent on the sign. Plasma sends Qt's convention instead (its
-  tray forwards `+angleDelta`: up positive at 120 a notch) and kmix turns
-  the volume up on positive deltas — so KDE volume items need Qt-scale
-  deltas this bar does not send; with one unit a notch no sign satisfies
-  them, and the GTK side (the items that observably respond) decides it.
-  Bound to a key (`on-scroll-up = "wheel-up 0"`)
-  the notch count of the scroll itself is what is sent.
+  `Scroll(n, "vertical")`: `"gtk"` (the default) sends the notch count
+  clamped to 64, negative for `wheel-up` and positive for `wheel-down`.
+  The default sign is GTK's, measured 2026-10-07 against a real item:
+  pasystray 0.8.2 (libayatana-appindicator maps a positive vertical delta
+  to scroll-down — `delta >= 0` is `GDK_SCROLL_DOWN` in its `Scroll`
+  method handler, which then passes `ABS(delta)` as the step count — so
+  wheel-up must send negative; verified on the wire as `Scroll(-1)`), and
+  matching Waybar (which sends −1 for up, from its source). The SNI spec
+  is silent on the sign and the scale. KDE items speak Qt's convention
+  instead: Plasma's tray forwards `+angleDelta` (up positive at 120 a
+  notch), `KStatusNotifierItem` hands that delta to the app unchanged as
+  `scrollRequested`, and kmix turns the volume up on positive deltas,
+  accumulating in steps of 120 (`KMixDockWidget::trayWheelEvent` reads
+  `decrease = delta < 0`). One sign cannot serve both stacks, and no
+  per-item detector survives a same-user peer lying about its toolkit
+  (service names, paths and every item property are self-reported, and
+  method probing needs an introspection the bar never does) — so the
+  convention is one choice for the whole tray, GTK unless asked:
+
+  ```toml
+  [tray]
+  scroll-convention = "qt"   # KDE items like kmix; default "gtk" for GTK/Ayatana items
+  ```
+
+  `"gtk"` (the default) counts notches with up negative; `"qt"` sends
+  wheel units with up positive at 120 a notch (one notch is one kmix
+  step), scaling the clamped notch count, so a touchpad flood stays one
+  bounded call either way (at most 7680). It applies on `scootbar msg
+  reload`, like every file option. With `"qt"`, GTK/Ayatana items scroll
+  inverted (they read positive vertical as scroll-down): a tray mixing
+  KDE and GTK volume items cannot satisfy both at once. To see what the
+  bar sends, watch the wire while scrolling the item:
+
+  ```sh
+  dbus-monitor "interface='org.kde.StatusNotifierItem',member='Scroll'"
+  ```
+
+  > **Symptom:** the KDE volume item (kmix) goes quieter on scroll-up, or
+  > does not move at all.
+  > Set `scroll-convention = "qt"` under `[tray]` and reload the bar. Each
+  > notch then arrives as one 120-unit step in the direction Plasma sends.
+  >
+  > **Symptom:** after switching, a GTK item (pasystray) scrolls the wrong
+  > way.
+  > That is the trade-off above, not a bug in the item: one sign cannot
+  > serve both stacks. Keep `"gtk"` (the default) where the GTK items
+  > matter and `"qt"` where the KDE ones do.
+  >
+  > Bound to a key (`on-scroll-up = "wheel-up 0"`)
+  > the notch count of the scroll itself is what is sent, scaled the same
+  > way.
 - **Menus.** An item's menu (`ContextMenu`, the DBusMenu protocol) opens
   in a [popup](./modules.md##popups): the bar reads it with its DBusMenu client
   (`GetLayout`, `Event`, `AboutToShow`, the `LayoutUpdated` and
@@ -616,10 +654,11 @@ socket is one more source in the `poll` loop), which is the
 - **`query`** reports `{ "watcher": "owner" | "host", "items": [{ "id",
   "title", "status", "shown" }] }` while any item is tracked, and nothing
   while none is.
-- **Margin and keys.** `[tray]` takes `margin` and the five
+- **Margin, convention and keys.** `[tray]` takes `margin`,
+  `scroll-convention` (`"gtk"` by default, `"qt"` for KDE items like
+  kmix: see Clicks above for what each sends) and the five
   [interaction keys](./modules.md##pointer-input) (`on-click`, `on-right-click`,
-  `on-middle-click`, `on-scroll-up`, `on-scroll-down`); the module has no
-  options of its own. A binding replaces the default for its trigger, as
+  `on-middle-click`, `on-scroll-up`, `on-scroll-down`). A binding replaces the default for its trigger, as
   on every module.
 - **Bounds, for a hostile or broken item.** Everything an item says is
   untrusted bytes from a same-user peer: a message past 1 MiB (the spec

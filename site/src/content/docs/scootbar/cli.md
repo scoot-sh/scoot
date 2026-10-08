@@ -193,6 +193,10 @@ margin = 0            # as the clock's
 menu-command = ["fuzzel", "--dmenu"]   # the device picker, fed the device list on stdin
 margin = 0            # as the clock's
 
+[tray]
+scroll-convention = "gtk"   # or "qt" for KDE items like kmix: see Tray
+margin = 0            # as the clock's
+
 [button.launcher]     # modules the file defines, placed by name in the lists above
 icon = "\U000f0e65"
 on-click = { exec = ["scootlaunch"] }

@@ -178,10 +178,78 @@ const DRAW_GAP: std::time::Duration = std::time::Duration::from_millis(100);
 /// flood is one bounded call, never an accumulated one.
 const MAX_SCROLL_DELTA: u32 = 64;
 
-/// The module's options: none of its own yet, so the table holds the
-/// margin and the interaction keys like every module's.
+/// Qt wheel units per notch: a Qt `QWheelEvent::angleDelta` is in eighths
+/// of a degree, and most wheels step 15 degrees, so one notch is 120.
+/// Plasma's tray forwards the angle delta as the `Scroll` delta, and kmix
+/// accumulates it in steps of 120 (`KMixDockWidget::trayWheelEvent`).
+pub const QT_UNITS_PER_NOTCH: i32 = 120;
+
+/// Which stack's scroll convention `Scroll` deltas use. The SNI spec is
+/// silent on both the sign and the scale, and the two stacks disagree on
+/// both, so one convention serves the whole tray, chosen in the config.
+/// No per-item detector is attempted: service names, paths and every KSN
+/// property are self-reported by same-user peers, and method probing needs
+/// an introspection the bar deliberately never does, so any detector a
+/// peer can lie to would silently invert a user's volume.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScrollConvention {
+    /// GTK/Ayatana: up negative, one unit a notch, as Waybar sends (`-1`
+    /// for up). The default: the items that observably respond need this
+    /// sign (libayatana-appindicator maps a positive vertical delta to
+    /// scroll-down and forwards `ABS(delta)` as the step count, so the
+    /// direction comes from the sign alone; pasystray turns volume up on
+    /// scroll-up).
+    #[default]
+    Gtk,
+    /// Qt/KDE: up positive at [`QT_UNITS_PER_NOTCH`] a notch, as Plasma's
+    /// tray forwards `+angleDelta` and kmix reads it (positive is louder,
+    /// accumulated in steps of 120). With this set, GTK/Ayatana items
+    /// scroll inverted: one sign cannot serve both stacks.
+    Qt,
+}
+
+impl ScrollConvention {
+    /// The value in the config file.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "gtk" => Some(Self::Gtk),
+            "qt" => Some(Self::Qt),
+            _ => None,
+        }
+    }
+}
+
+/// The `Scroll` delta for a wheel action: `up` says the action is
+/// `wheel-up`, `steps` is the notch count the scroll counted. The count is
+/// clamped to [`MAX_SCROLL_DELTA`] first, so a touchpad flood stays one
+/// bounded call; Qt scales the clamped count to wheel units. Pure
+/// arithmetic: no allocation, and no overflow (64 * 120 fits an `i32`
+/// thousands of times over).
+pub fn scroll_delta(convention: ScrollConvention, up: bool, steps: u32) -> i32 {
+    let notches = steps.min(MAX_SCROLL_DELTA) as i32;
+    match convention {
+        ScrollConvention::Gtk => {
+            if up {
+                -notches
+            } else {
+                notches
+            }
+        }
+        ScrollConvention::Qt => {
+            let units = notches * QT_UNITS_PER_NOTCH;
+            if up { units } else { -units }
+        }
+    }
+}
+
+/// The module's options: the scroll convention; the table otherwise holds
+/// the margin and the interaction keys like every module's.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Settings {}
+pub struct Settings {
+    /// Which stack's scroll convention `Scroll` deltas use: GTK/Ayatana
+    /// by default, Qt/KDE for items like kmix when the user asks for it.
+    pub scroll_convention: ScrollConvention,
+}
 
 #[cfg(feature = "tray")]
 pub fn init(settings: &super::Settings) -> Init {
@@ -197,7 +265,7 @@ pub fn init(settings: &super::Settings) -> Init {
             Addr::Unusable
         }
     };
-    Init::Available(start_with(addr))
+    Init::Available(start_with(addr, settings.tray.clone()))
 }
 
 /// Tests only: the module started as if the probe had found a bus — a
@@ -217,9 +285,10 @@ pub(super) fn stand_in(settings: &super::Settings) -> Box<dyn Module> {
 /// when the bus is there, wait on its directory when it is not).
 /// Always available: a bus may appear at any time, and waiting costs one
 /// inotify fd at most.
-fn start_with(addr: Addr) -> Box<dyn Module> {
+fn start_with(addr: Addr, settings: Settings) -> Box<dyn Module> {
     Box::new(Tray {
         link: Link::start("tray", addr, setup),
+        settings,
     })
 }
 
@@ -229,12 +298,23 @@ fn start_with(addr: Addr) -> Box<dyn Module> {
 /// so the link watches a fixed nonexistent path for it.
 #[cfg(test)]
 fn start_connected(stream: std::os::unix::net::UnixStream) -> Box<dyn Module> {
-    start_with(Addr::Stream(stream))
+    start_with(Addr::Stream(stream), Settings::default())
+}
+
+/// Starts the module on an already-open stream with the convention named:
+/// the Qt wire tests' way in.
+#[cfg(test)]
+fn start_with_convention(
+    stream: std::os::unix::net::UnixStream,
+    scroll_convention: ScrollConvention,
+) -> Box<dyn Module> {
+    start_with(Addr::Stream(stream), Settings { scroll_convention })
 }
 
 /// The module: the bus session, held across the bus coming and going.
 struct Tray {
     link: Link<Live>,
+    settings: Settings,
 }
 impl Tray {
     /// The item index `x` (device pixels from the span's left, `padding`
@@ -535,13 +615,16 @@ impl Module for Tray {
                 if steps == 0 {
                     return Ok(Update::Unchanged);
                 }
-                // The step count, clamped: a touchpad flood is one bounded
-                // call. Up is negative, down positive, as GTK/Ayatana
-                // items read it (a positive vertical delta is a scroll
-                // down to them) and as Waybar sends it; the SNI spec is
-                // silent on the sign, and Plasma/Qt use the opposite.
-                let delta = steps.min(MAX_SCROLL_DELTA) as i32;
-                body.i32(if name == "wheel-up" { -delta } else { delta });
+                // The step count, clamped, in the configured convention:
+                // GTK counts notches with up negative (as Waybar sends,
+                // and as GTK/Ayatana items read a positive vertical delta
+                // as scroll-down); Qt counts wheel units with up positive
+                // (as Plasma's tray forwards `+angleDelta`, and as kmix
+                // reads it). A touchpad flood is one bounded call either
+                // way.
+                let delta =
+                    scroll_delta(self.settings.scroll_convention, name == "wheel-up", steps);
+                body.i32(delta);
                 body.str("vertical");
                 ("Scroll", "is")
             }
