@@ -156,7 +156,10 @@ jobs:
       # headless smoke test with the installed scoot and scootbg.
       - name: Install the trio and prove it
         run: |
-          dnf install -y "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/*.rpm
+          # The fedora container image sets `tsflags=nodocs`, which would
+          # skip the example configs this step checks: clear it, so the
+          # installed files are the whole package.
+          dnf install -y --setopt=tsflags= "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/*.rpm
           scoot --version
           scootbg --version
           scootbar --version
