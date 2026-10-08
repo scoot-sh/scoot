@@ -525,7 +525,7 @@ Found while building it, each measured first (fail-first records in
 All the fork commits (seven, then four more from review round 1 and two
 more from review round 2 — thirteen XWayland commits, `35c335e0`..`5b575329`)
 are on `scoot-sh/smithay` branch `scoot/xwayland-selection-dnd` (`5b575329`),
-listed in `docs/forks.md`;
+listed in `dev/forks.md`;
 upstream master `79bbed5e1` has none of them.
 
 **Drag-and-drop**: X → Wayland works, live (`mousepad` over X into a

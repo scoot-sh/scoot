@@ -1,5 +1,5 @@
 //! Pins for the received-fd queue cap scoot gets from its wayland-backend
-//! fork (`docs/forks.md`, root `Cargo.toml`'s `[patch.crates-io]`), below
+//! fork (`dev/forks.md`, root `Cargo.toml`'s `[patch.crates-io]`), below
 //! every line of scoot's own code.
 //!
 //! wayland-backend keeps the fds that arrive with a client's bytes in a

@@ -22,7 +22,7 @@ querying the compositor over IPC](docs/assets/screenshot.png)
   computer use needs: typing, clicking, screenshots, window positions, and
   "wait until the screen settles." scoot's own tests drive it this way.
 - **It stays out of the way.** An idle scoot doesn't wake up at all, and
-  it used less memory than niri in [our benchmarks](docs/benchmarks.md).
+  it used less memory than niri in [our benchmarks](dev/benches/benchmarks.md).
 
 If you want the most mature scrolling compositor, use
 [niri](https://github.com/niri-wm/niri). It's great, and it inspired this
@@ -254,10 +254,10 @@ It's early. More in [docs/scootbg/README.md](docs/scootbg/README.md).
 | [protocols](https://www.scoot.sh/scoot/protocols.md) | writing a bar, launcher or other tool for scoot |
 | [backends](https://www.scoot.sh/scoot/backends.md) | real hardware: devices, monitors, the GPU tier |
 | [the scoot desktop](https://www.scoot.sh/desktop/) | the flake and the NixOS and home-manager modules |
-| [benchmarks.md](docs/benchmarks.md) | measured CPU and memory, next to niri |
+| [benchmarks](dev/benches/benchmarks.md) | measured CPU and memory, next to niri |
 | [scootbg/](docs/scootbg/README.md) | the wallpaper daemon |
 | [scootbar](https://www.scoot.sh/scootbar/) | the status bar: every module, option and popup |
-| [development.md](docs/development.md) | building, testing and contributing |
+| [contributing](dev/README.md) | building, testing and contributing |
 
 What changed is in [CHANGELOG.md](CHANGELOG.md), and what's next in
 [ROADMAP.md](ROADMAP.md).

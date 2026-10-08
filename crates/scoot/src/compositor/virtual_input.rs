@@ -9,7 +9,7 @@
 //! (its `Dispatch2` delivers straight to seat focus with no lock gate, no
 //! per-source teardown and no activity announcement), so both live here
 //! against the server bindings Smithay re-exports -- no new dependency, no
-//! fork change (see `docs/forks.md` for what would justify one).
+//! fork change (see `dev/forks.md` for what would justify one).
 //!
 //! ## Gating
 //!

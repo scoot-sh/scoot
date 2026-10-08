@@ -10,7 +10,7 @@ resolved: "2026-10-05"
 # scoot stack mapping reports 17 MB PSS at idle
 
 Filed 2026-10-05 from the five-desktop idle benchmark (Asahi M2,
-`docs/benchmarks.md`). Serves **daily-drive** (if 17 MB of stack is
+`dev/benches/benchmarks.md`). Serves **daily-drive** (if 17 MB of stack is
 really touched, that is a quarter of the compositor's footprint; if it
 is a measurement artifact, the benchmark's mapping story is wrong).
 

@@ -1,6 +1,6 @@
 # scootbar M0 spikes (throwaway)
 
-The code behind [the M0 record](../../backlog/resolved/dependencies-done.md),
+The code behind [the M0 record](../../../../docs/scootbar/backlog/resolved/dependencies-done.md),
 kept so its numbers can be re-derived. **Not product code**: none of it is a
 workspace member (each crate has its own empty `[workspace]`), CI does not
 build it (the classify job ignores `docs/*`), and nothing links to it but the

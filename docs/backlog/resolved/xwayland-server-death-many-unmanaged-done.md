@@ -223,7 +223,7 @@ these runs after it claimed one).
 ## What a fix would need to decide
 
 Whether the death is an XWayland bug worth carrying a fork workaround for
-(`docs/forks.md` — the project already carries a scoot-sh Smithay fork,
+(`dev/forks.md` — the project already carries a scoot-sh Smithay fork,
 but XWayland itself is nixpkgs-pinned, a different kind of carry), a
 resource limit worth documenting, or something scoot's spawn should harden
 against (restart? refuse maps past a scoot-side total?). Do not implement

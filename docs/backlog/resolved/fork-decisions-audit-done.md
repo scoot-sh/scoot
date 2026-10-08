@@ -30,7 +30,7 @@ to trust?
 ## Method
 
 For each fork (`scoot-sh/smithay`, `scoot-sh/wayland-rs`) and each group of carried
-commits in `docs/forks.md`, read its resolved record and classify the evidence:
+commits in `dev/forks.md`, read its resolved record and classify the evidence:
 
 1. **Alternatives listed and ruled out with measurement or a concrete
    constraint.** Fine; note where the evidence lives.
@@ -47,7 +47,7 @@ verify-against-fork rule) counted at the time?
 
 ## Starting notes (from a keyword search only: not findings)
 
-- `wayland-backend-fd-queue-done.md` and `docs/forks.md` say scoot-side alternatives
+- `wayland-backend-fd-queue-done.md` and `dev/forks.md` say scoot-side alternatives
   (per-client attribution, a kill heuristic, a socket proxy) were evaluated and ruled
   out, with evidence on the dev VM. Likely class 1; confirm.
 - `syncobj-handle-leak-done.md` has a section "Why it could not be fixed in scoot
@@ -60,10 +60,10 @@ verify-against-fork rule) counted at the time?
 ## Output
 
 - A short findings table (per commit group: class 1 to 4, where the evidence is,
-  and a verdict on whether it needs re-examining) in `docs/forks.md`.
+  and a verdict on whether it needs re-examining) in `dev/forks.md`.
 - Every class 2 or 3 item added to the priority list of
   [fork-changes-in-scoot](../resolved/fork-changes-in-scoot-done.md).
-- **A process fix** (**done 2026-09-29**): `docs/forks.md` and the fork rule in
+- **A process fix** (**done 2026-09-29**): `dev/forks.md` and the fork rule in
   `CLAUDE.md` now require that any new fork or carried commit states the scoot-side
   alternatives considered and why each was rejected, so the next fork cannot skip it.
   What is left is holding the existing entries to it.
@@ -83,10 +83,10 @@ changed: docs-only.
 
 - **Class 1, record already sufficient:** syncobj `Drop` (three alternatives
   in `syncobj-handle-leak-done.md`), compositor-owned dma-buf scanout and
-  seat-loss error (alternatives inline in `docs/forks.md`), wayland-rs
+  seat-loss error (alternatives inline in `dev/forks.md`), wayland-rs
   fd-queue cap (extensive evidence in `wayland-backend-fd-queue-done.md`).
 - **Class 2/3 gaps, re-derived to 4 against the pinned source, evidence added
-  to the new "Decision audit" section in `docs/forks.md`:** the thirteen
+  to the new "Decision audit" section in `dev/forks.md`:** the thirteen
   XWayland selection commits plus the XWM hooks, the seven XDND commits, the
   pixman `Repeat::Pad` fix, the buffer-scale fix, and the XSETTINGS flush.
   In each case the scoot-side route fails on state private to the dependency

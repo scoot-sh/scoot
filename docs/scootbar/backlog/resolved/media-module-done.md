@@ -42,7 +42,7 @@ PR #393 (`feat(scootbar): media module, now playing and controls over
 MPRIS`), code commit `4d2207598` (`crates/` tree
 `c5a935bdbccedcf7eed359182362b998bbb38aa1`); every number below was taken
 at it, on the dev VM, and the raw runs, scripts and screenshots are in
-[`bench/m6-media-vm`](../../bench/m6-media-vm/README.md). The reference is
+[`bench/m6-media-vm`](../../../../dev/benches/scootbar/m6-media-vm/README.md). The reference is
 [cli.md](../../cli.md#media); the cost table is in the
 [resource ratchet](../lightest.md#m6-media-module-level-cost-measured-2026-10-03).
 

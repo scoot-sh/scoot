@@ -18,7 +18,7 @@
 
 // Most tests here place the workspaces module (gated per test); the bind
 // tests also place the clock, and one needs only the clock. This file
-// exists where either does (docs/scootbar/testing.md: the feature matrix);
+// exists where either does (dev/research/scootbar-testing.md: the feature matrix);
 // helpers used only by workspaces tests carry that gate too.
 #![cfg(any(feature = "clock", feature = "workspaces"))]
 

@@ -8,7 +8,7 @@
 //! scale-1 buffer on a scale-2 output -- used to get a semi-transparent
 //! 1-px edge (and faded corners) instead of keeping its edge pixels. The fix
 //! is a commit on the `scoot-sh/smithay` fork (`Repeat::Pad`; see
-//! `docs/forks.md`), and these tests pin the framebuffer contract it
+//! `dev/forks.md`), and these tests pin the framebuffer contract it
 //! restores: corners, edge midpoints and centre exactly the fill color.
 //!
 //! There is deliberately no scoot-side implementation here: the defect and

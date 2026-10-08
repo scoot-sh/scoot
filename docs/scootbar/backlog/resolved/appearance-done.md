@@ -56,7 +56,7 @@ each on screenshots; the measured fill costs in
   [cli.md](../../cli.md#margins). The default look is unchanged: flush, square
   and opaque; making it floating stays a product call.
 - **`scripts/scootbar-appearance-hw-test.sh`**, the hardware test, and its
-  method in [testing.md](../../testing.md#the-appearance-hardware-test).
+  method in [testing.md](../../../../dev/research/scootbar-testing.md#the-appearance-hardware-test).
   Rehearsed on `--headless` and `--nested` (14 PASS, 0 FAIL, the pixel,
   zone, protocol and click checks).
 
@@ -116,7 +116,7 @@ are [multi-output](multi-output-done.md).
   coverage, no supersampling; edge pixels cached, not recomputed per frame.
   The rounded rectangle lands with **snapshot tests** at 1x and a
   fractional scale (a scene in `crates/scootbar/src/snapshots/tests.rs`;
-  [testing](../../testing.md#snapshots)): [testing-and-ci](testing-and-ci-done.md)
+  [testing](../../../../dev/research/scootbar-testing.md#snapshots)): [testing-and-ci](testing-and-ci-done.md)
   asked for them, but the canvas had no rounded shape to snapshot yet.
 - **Opacity**: bar background alpha in the ARGB buffer (premultiplied). No
   blur, no gradients, no shadows.

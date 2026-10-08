@@ -19,7 +19,7 @@ shape the entry proposed held, with the differences below. One fork
 change, found in review: Smithay's `XSettings::update` never flushed, so
 the `READY`-time settings write could sit unsent and an X app started
 right after read no scale (`tests/scale.rs` failed 2 runs in 20). The fork
-flushes it (`035d447c`, see [docs/forks.md](../../forks.md)); 20 in 20
+flushes it (`035d447c`, see [dev/forks.md](../../../dev/forks.md)); 20 in 20
 since. Everything else is on the fork rev before it (`e7130254`), and the
 coordinate audit below holds on `035d447c`, which touches only
 `src/xwayland/xwm/settings.rs`.

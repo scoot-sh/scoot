@@ -46,7 +46,8 @@ on:
   push:
     branches: [main]
     # Docs-only pushes (a merged docs PR, a backlog claim commit under
-    # docs/backlog/claims/) start nothing. The workflow is skipped only when
+    # docs/backlog/claims/, anything under the unpublished dev/ tree)
+    # start nothing. The workflow is skipped only when
     # EVERY changed path matches, so a commit that also touches code runs in
     # full. This is a workflow-level filter, which pull_request must not use
     # (a workflow that never starts leaves a required check waiting forever;
@@ -54,10 +55,11 @@ on:
     # on a push to main. It replaces asking every commit message to say
     # `[skip ci]`, a token GitHub honors anywhere in the message, including
     # in a body that merely mentions it. Keep it in step with the classify
-    # job's `*.md | docs/*` case.
+    # job's `*.md | docs/* | dev/*` case.
     paths-ignore:
       - '**.md'
       - 'docs/**'
+      - 'dev/**'
 
 permissions:
   contents: read
@@ -73,7 +75,7 @@ concurrency:
 jobs:
   # Which parts of the repository a pull request changes, so a PR that
   # touches only one side does not rebuild and test the other: a docs-only
-  # PR (every changed path a `*.md` file or under `docs/`) runs nothing,
+  # PR (every changed path a `*.md` file or under `docs/` or `dev/`) runs nothing,
   # since nothing in the build or the tests reads those files (if a crate
   # ever does, say an `include_str!` of a README, narrow the pattern
   # below). The split, from docs/scootbg/backlog/resolved/crate-and-daemon-done.md:
@@ -125,22 +127,23 @@ jobs:
   #                                           publish = false -- so a drift
   #                                           anywhere fails here.
   #   site/*, EXCEPT site content that is also matched above (nothing is:
-  #   `*.md | docs/*` does not match `site/`, whose pages live in the tree
-  #   since the move)                         -> docs-site=true (docs-site job:
+  #   `*.md | docs/* | dev/*` does not match `site/`, whose pages live in
+  #   the tree since the move)                   -> docs-site=true (docs-site job:
   #                                           `nix build .#docs-site`, which
   #                                           also runs the llms, page-link,
   #                                           asset and snippet gates). `nix/docs-site.nix` and
   #                                           `flake.nix`/`flake.lock` fall to
   #                                           the catch-all below and run
   #                                           everything, site included.
-  #                                           `docs/**` does NOT set it: since
+  #                                           `docs/**` and `dev/**` do NOT set it: since
   #                                           the move the site builds only
   #                                           from `site/` (user pages were
   #                                           carried into the tree, not
   #                                           symlinked), so a docs-only change
   #                                           cannot alter the built site; the
   #                                           Pages deploy workflow tracks
-  #                                           `docs/**` separately.
+  #                                           `docs/**` separately, and `dev/`
+  #                                           never deploys.
   #   packaging/rpm/*                        -> nothing here: the Fedora and
   #                                           openSUSE container workflow
   #                                           (rpm.yml) owns those files,
@@ -226,7 +229,7 @@ jobs:
                 # content-only site change must still build the site.
                 site/*)
                   docs_site=true ;;
-                *.md | docs/*) ;;
+                *.md | docs/* | dev/*) ;;
                 # The version tool and its tests: only the version jobs.
                 scripts/version | scripts/test_version.py)
                   version=true ;;
@@ -250,9 +253,9 @@ jobs:
                   scootbar=true
                   version=true ;;
                 # Needs a real `systemd --user`, which CI has none of: run by hand
-                # (docs/scootbar/testing.md), so a change to it alone runs nothing.
+                # (dev/research/scootbar-testing.md), so a change to it alone runs nothing.
                 # The same for the Stylix run (fetches two flakes and builds
-                # Stylix's palette generator; docs/scootbar/testing.md).
+                # Stylix's palette generator; dev/research/scootbar-testing.md).
                 scripts/scootbar-unit-test.sh | scripts/scootbar-stylix-test.sh) ;;
                 # The Arch PKGBUILDs and their README: the Arch container
                 # workflow (arch.yml) owns them, so a change there alone
@@ -1012,7 +1015,7 @@ jobs:
       # scootbg-mem: this checks
       # scoot (its Linux halves cfg'd out: a Mac `scoot` is the `scoot msg`
       # client), the client library, scoot-ipc and scoot-core. The same
-      # command on a Mac is in docs/development.md.
+      # command on a Mac is in dev/README.md.
       - name: cargo check
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --all-targets

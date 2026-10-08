@@ -96,7 +96,7 @@ about 2.4 MB an axis. They matter to the options:
   destination with its fallible `scootbg_mem::zeroed_bytes`, as the
   decoders' buffers are. Per the project's fork rule (root `CLAUDE.md`):
   one upstream commit plus the fewest carried commits, pinned by rev,
-  listed in `docs/forks.md`, and no upstream PR from here. The scaler's
+  listed in `dev/forks.md`, and no upstream PR from here. The scaler's
   own row scratch stays infallible, but it is a few rows, not an image.
 - **(d) Switch scalers** to one with a fallible or caller-provided
   destination. The choice of `pic-scale-safe` was measured

@@ -33,7 +33,7 @@ revision but saves CI nothing. Moving the Rust builds to crane
 (`buildDepsOnly` → a dependency-artifacts derivation keyed on `Cargo.lock`
 and the dependency sources, forks included) puts the compiled dependencies
 in their own store path, which Cachix keeps and every build reuses until
-`Cargo.lock` or a fork rev changes (rare by design: `docs/forks.md`).
+`Cargo.lock` or a fork rev changes (rare by design: `dev/forks.md`).
 
 ## What to do
 

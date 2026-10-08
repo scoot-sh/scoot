@@ -24,7 +24,7 @@ license inventory, and to know what is forked.
   that is the part most likely to break, so test an offline build from the
   tarball in CI.
 - **A for-packagers document** (`docs/packaging.md`): the fork list and why
-  (`docs/forks.md`), the pinned revs, what the optional `gpu-scanout` feature
+  (`dev/forks.md`), the pinned revs, what the optional `gpu-scanout` feature
   adds, and the system libraries each feature links, derived from `ldd` of a
   release build rather than written from memory. When the Smithay repin lands
   ([smithay-fork-repin](../core/smithay-fork-repin.md)) this gets simpler.

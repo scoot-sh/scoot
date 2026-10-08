@@ -26,7 +26,7 @@ browser path. Nothing in the backlog covered it.
 ## What to do
 
 - Implement both managers (check what the pinned Smithay fork already
-  provides first; a `docs/forks.md` entry only as the last resort, per
+  provides first; a `dev/forks.md` entry only as the last resort, per
   CLAUDE.md). Virtual keyboards bring their own keymap: handle a keymap that
   differs from the seat's without corrupting the physical keyboard's state.
 - Security first, decided and written in `docs/protocols.md`: any client

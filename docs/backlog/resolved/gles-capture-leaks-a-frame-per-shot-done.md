@@ -248,7 +248,7 @@ Kept for the diagnosis history. Its open questions are answered above.
 
 ### GLES captures on a static screen grow memory by one frame each
 
-Found 2026-09-24 by the scoot/niri A/B (`docs/benchmarks.md`), on the dev VM
+Found 2026-09-24 by the scoot/niri A/B (`dev/benches/benchmarks.md`), on the dev VM
 (llvmpipe), release build of `fe41921`, `scoot --nested --renderer gles` at
 1600x1000 inside cage. pixman is not affected.
 

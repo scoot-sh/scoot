@@ -40,6 +40,6 @@ opt-level = 3
 # wayland-server and wayland-client all reach wayland-backend from
 # crates.io; `wayland-sys` moves to the fork's source with it (a path
 # dependency inside that repository). Why, the evidence, and when to drop
-# it: `docs/forks.md`. Verify claims about wayland-backend against this rev.
+# it: `dev/forks.md`. Verify claims about wayland-backend against this rev.
 [patch.crates-io]
 wayland-backend = { git = "https://github.com/scoot-sh/wayland-rs", rev = "70f81e005179463fb4d46ac68045a7f21eb5aff2" }

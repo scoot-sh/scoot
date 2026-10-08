@@ -67,7 +67,7 @@ before it (the audit below says where); this one adds the coverage-guided
 fuzz target, the live `set` that cannot be drawn, the one precedence case
 left, and records what cannot be tested here. **The suites are not done:
 they grow with every later milestone** (transitions, animation, more
-formats each bring their own), and [testing.md](../../testing.md) is the
+formats each bring their own), and [testing.md](../../../../dev/research/scootbg-testing.md) is the
 map of where each kind of test lives.
 
 ### What landed
@@ -146,7 +146,7 @@ map of where each kind of test lives.
   section with a table for each output and a `command`, a `set`, a
   restart whose section differs only in `command`: the `set` is restored
   on both outputs, over both tables.
-- **Docs:** [docs/scootbg/testing.md](../../testing.md) (how to run the
+- **Docs:** [dev/research/scootbg-testing.md](../../../../dev/research/scootbg-testing.md) (how to run the
   suites, what covers what, and the gaps below), the fuzz crate's
   `README.md` (how to run it, what to do with a crash, keeping its
   lockfile in step), `draw_error` in [cli.md](../../cli.md#query), the
@@ -339,7 +339,7 @@ pairs:
 
 Medians, three rounds for the first run and five for the others; the
 JPEG's range overlaps in every pair (base 591–806, head 603–869 ms).
-Against the published [2026-09-28 idle run](../../bench/2026-09-28-idle-scoot/table.md),
+Against the published [2026-09-28 idle run](../../../../dev/benches/scootbg/2026-09-28-idle-scoot/table.md),
 base and head alike show the same 0.8 MiB more PSS on the same ten rows:
 that run had every daemon up at once, sharing library pages, and these
 ran scootbg alone, so it is the method, not the code. The CPU here is

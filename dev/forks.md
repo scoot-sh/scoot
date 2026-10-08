@@ -16,7 +16,7 @@ another layer), each with why it was rejected and the evidence. A hard constrain
 is checked against the pinned fork's source. If the line is missing, the entry is
 incomplete, and "the fork was simpler" is not a reason. (Rule added 2026-09-29; the
 existing entries are being checked against it by
-[the decision audit](backlog/resolved/fork-decisions-audit-done.md).)
+[the decision audit](../docs/backlog/resolved/fork-decisions-audit-done.md).)
 
 | Fork | Upstream | Based on | Carried commits | Pinned in scoot | Why |
 | --- | --- | --- | --- | --- | --- |
@@ -505,7 +505,7 @@ existing entries are being checked against it by
 
 ## Decision audit (2026-10-08)
 
-Audit for [fork-decisions-audit](backlog/resolved/fork-decisions-audit-done.md). Each
+Audit for [fork-decisions-audit](../docs/backlog/resolved/fork-decisions-audit-done.md). Each
 carried commit group is classified by that ticket's method: **1**,
 alternatives listed and ruled out with measurement or a concrete
 constraint; **2**, mentioned without evidence; **3**, none recorded;
@@ -532,7 +532,7 @@ so nothing was added there.
 
 ## Could it live in scoot? (investigation, 2026-10-08)
 
-[fork-changes-in-scoot](backlog/resolved/fork-changes-in-scoot-done.md)
+[fork-changes-in-scoot](../docs/backlog/resolved/fork-changes-in-scoot-done.md)
 (resolved 2026-10-08) checked every carried commit against the pinned fork
 rev (`fdf424d`, read as `~/.cargo/git/checkouts/smithay-*/fdf424d`) and
 scoot's code, asking that ticket's question: what does the change need that

@@ -2,7 +2,7 @@
 
 How scootbar is tested, what CI runs for it, and how it is benchmarked.
 The layers, the CI jobs and the benchmark script landed with
-[testing-and-ci](backlog/resolved/testing-and-ci-done.md); each later
+[testing-and-ci](../../docs/scootbar/backlog/resolved/testing-and-ci-done.md); each later
 entry adds its own tests through them.
 
 ## Running it
@@ -264,7 +264,7 @@ popup (the volume module has one).
   and `hit_target` for the click), and every config bound
   (`config/spacing_tests.rs`).
 
-- **Pointer input** (M4's [pointer-and-interactions](backlog/resolved/pointer-and-interactions-done.md)),
+- **Pointer input** (M4's [pointer-and-interactions](../../docs/scootbar/backlog/resolved/pointer-and-interactions-done.md)),
   pure: the pointer state machine in every order it can see (`pointer`:
   a click fires on release and only over the module it was armed on, a
   release after the pointer left or slid off or on another output is
@@ -309,7 +309,7 @@ popup (the volume module has one).
   pointer. Touch cannot be injected, so it is covered by the pure test.
 
 - **The `button`, `push` and `exec` modules** (M4's
-  [exec-push-button-modules](backlog/resolved/exec-push-button-modules-done.md)):
+  [exec-push-button-modules](../../docs/scootbar/backlog/resolved/exec-push-button-modules-done.md)):
   the payload (`modules/payload`: every refusal named and leaving what was
   shown, the text and tooltip cut at the bound on a character boundary, every
   control character a space, JSON nested past the depth refused before it is
@@ -338,7 +338,7 @@ popup (the volume module has one).
   count placed and defined, a table nothing places never started); the control
   socket reading `"value": null` as a value.
 - **The agent interface** (M4's
-  [agent-interface](backlog/resolved/agent-interface-done.md)): the requests on
+  [agent-interface](../../docs/scootbar/backlog/resolved/agent-interface-done.md)): the requests on
   the wire (`control/subscribe_tests.rs`: `query ID`, `invoke` with its number
   and output and every refusal, `subscribe` naming kinds, each request
   round-tripping through its own line); a subscribed connection (answers
@@ -447,11 +447,11 @@ the same `check`.
 ## The appearance hardware test
 
 `scripts/scootbar-appearance-hw-test.sh` is what real hardware adds to the
-headless tests above: the four looks of [appearance](backlog/resolved/appearance-done.md)
+headless tests above: the four looks of [appearance](../../docs/scootbar/backlog/resolved/appearance-done.md)
 (flush-opaque, rounded-opaque, rounded-translucent, floating), each on a real
 compositor, in one run that ends in a PASS/FAIL/INFO table. Nothing in the
 CI runs it; **the maintainer runs it on hardware, and the numbers go into
-the [resource ratchet](backlog/lightest.md#appearance-looks-flush-against-floating)**.
+the [resource ratchet](../../docs/scootbar/backlog/lightest.md#appearance-looks-flush-against-floating)**.
 
 ```sh
 cargo build --release -p scoot -p scootbar
@@ -524,7 +524,7 @@ ratchet), the cursor sweep's compositor cost, and the whole point of `--tty`,
 which is that the corners and the blend are what a real display shows. The
 pixel, zone, protocol and click checks are the same everywhere and pass on
 `--headless` and `--nested` (rehearsed for this entry, see the results in
-[appearance](backlog/resolved/appearance-done.md#landed-and-remaining)). The CPU
+[appearance](../../docs/scootbar/backlog/resolved/appearance-done.md#landed-and-remaining)). The CPU
 differences are small next to the 10 ms jiffy: a difference of one jiffy over
 a run is noise, and the table says so; a change is worth quoting when it
 holds across two runs.
@@ -583,12 +583,12 @@ scootbg): the `macos` job's `cargo check` leaves both out, with
 scootbg-mem, and no change to them alone starts it.
 
 `nix-build.yml` builds `.#scootbar` on `main` only
-([nix-package](backlog/resolved/nix-package-done.md)).
+([nix-package](../../docs/scootbar/backlog/resolved/nix-package-done.md)).
 
 ## Benchmark
 
 `scripts/scootbar-bench/bench.py` measures scootbar against yambar and
-Waybar for the [resource ratchet](backlog/lightest.md), and against ironbar
+Waybar for the [resource ratchet](../../docs/scootbar/backlog/lightest.md), and against ironbar
 and ashell as informational extras (below). It reuses
 `scripts/scootbg-bench`'s runner (the headless compositor and its
 protocol trace, per-run cgroup CPU accounting and `/proc` readings, the
@@ -693,7 +693,7 @@ and radio ones, so a throttle there shows only as a cap or a falling clock.
   bar's round trips alike, so these times are larger than M0's (which
   read the bar's own debug output): compare them within a run or with
   another run of this script, not with the tables in the
-  [README](README.md#baselines).
+  [README](../../docs/scootbar/README.md#baselines).
 - *Idle*: a fresh start, its first frame awaited, a fixed settle, then a
   window: RSS, PSS, heap (`RssAnon`) and peak (`VmHWM`) at its end;
   **wakeups** as voluntary context switches over every thread (the
@@ -708,7 +708,7 @@ and radio ones, so a throttle there shows only as a cap or a falling clock.
   compositor's churn costs a bystander.
 - *Size*: the stripped binary plus its non-glibc `ldd` closure, gated; the
   bare executable beside it, not gated (the ruling in
-  [lightest](backlog/lightest.md#decisions)).
+  [lightest](../../docs/scootbar/backlog/lightest.md#decisions)).
 - scootbar's own lines of Rust and direct dependencies, reported.
 
 **The gates** use scootbg's noise rule (a side wins only by more than the
@@ -717,7 +717,7 @@ each exits 1 when its rule fails: `report` lists every gated row on which
 a competitor beats scootbar (rule 2), and every gated row a competitor has
 and scootbar does not (its runs failed, or it was not run), since a gate
 that cannot be judged has not been passed; `compare` lists every row on
-which scootbar is worse than an earlier run (rule 1). Each milestone's run is kept in [`bench/`](bench/README.md),
+which scootbar is worse than an earlier run (rule 1). Each milestone's run is kept in [`bench/`](../benches/scootbar/README.md),
 never overwritten. **A baseline is only comparable when it came from the same
 machine**: `bench/m1-clock` was measured on a Claude Code cloud sandbox VM (4-vCPU Xeon, not hardware the maintainer owns) with a
 debug scoot, so M3's rule-1 check was made **like for like** instead: the
@@ -730,10 +730,10 @@ regresses in every pairing; a row that flags in some is reported as noise
 with its counts, and a run compared with its own rerun shows what the rule's
 false-positive rate is (at 16 KiB pages one page of `RssAnon` is enough to
 flag when a row has a single idle sample). M3's is
-[`bench/m3-asahi-*`](bench/README.md), and its table is in the
-[README](README.md#m3-clock-and-workspaces-on-the-asahi-m2); `m1-clock` stays
+[`bench/m3-asahi-*`](../benches/scootbar/README.md), and its table is in the
+[README](../../docs/scootbar/README.md#m3-clock-and-workspaces-on-the-asahi-m2); `m1-clock` stays
 as the published M1 record, and its table is in the
-[README](README.md#m1-like-for-like-by-the-benchmark-script).
+[README](../../docs/scootbar/README.md#m1-like-for-like-by-the-benchmark-script).
 
 ## Not covered
 

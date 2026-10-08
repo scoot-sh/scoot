@@ -4,8 +4,11 @@
 > as the primary path, three front doors) and PR B (`docs/site-move`)
 > executed the move. The sidebar in `site/astro.config.mjs` is the live
 > structure; this file stays as the mapping record (which `docs/*.md`
-> sections fed each page) and the `dev/` plan for the contributor tree,
-> whose move is still open. One deliberate deviation: `scootbar/modules`
+> sections fed each page) and the `dev/` plan for the contributor tree.
+> Status 2026-10-08: the contributor half landed (backlogs, `docs/roadmap/`
+> and `ROADMAP.md` stay in `docs/` per PR B; benches, spikes, `forks.md`,
+> the contributor guide and the research/testing notes moved to `dev/`).
+> One deliberate deviation: `scootbar/modules`
 > is one searchable page rather than thirteen (see the PR).
 
 This is the draft page outline the `docs-site` ticket asks the maintainer to
@@ -102,9 +105,9 @@ Hotplug, VT switching; `docs/configuration.md` Failure semantics;
 - `scootlock` (future; `docs/backlog/packaging/desktop-idle-lock.md:47` names the swap) → `/scootlock/` section when the design lands.
 - Remote desktop (`scootremote` / `scootview`; research `docs/backlog/protocols/native-remote-scene-streaming.md`, `docs/backlog/testing/moonlight-sunshine-on-m2.md`, `docs/backlog/protocols/virtual-input-remote-control.md`) → a remote section only once the research becomes an app; until then it lives in `dev/`.
 
-Deliberately **not** pages: `docs/benchmarks.md` (dated measurements →
-`dev/benches`), `docs/forks.md` (→ `dev/`, linked from the site footer
-colophon at most), `docs/development.md` (→ `dev/` contributor guide),
+Deliberately **not** pages: `dev/benches/benchmarks.md` (dated measurements →
+`dev/benches`), `dev/forks.md` (→ `dev/`, linked from the site footer
+colophon at most), `dev/README.md` (→ `dev/` contributor guide),
 `ROADMAP.md` (stays, linked from `dev/`).
 
 ## Contributor tree (`dev/`, unpublished)
@@ -143,12 +146,12 @@ What moves, exactly:
 The move PR must update all of these (this list is the audit; agents cannot
 edit `.claude/*`, so those two are flagged for the maintainer):
 
-1. `CLAUDE.md` — "Backlog" section (`docs/backlog/`, `docs/scootbg/backlog/`, `docs/scootbar/backlog/`), "Commits and CI" (`docs/backlog/packaging/independent-versioning.md`, `paths-ignore` note naming `docs/`), Smithay-fork note (`docs/backlog/resolved/syncobj-handle-leak-done.md`, `docs/backlog/core/smithay-fork-repin.md`, `docs/forks.md` ×2), protocol inventory (`docs/backlog/protocols/`), roadmap worked example (`docs/roadmap/05b-vt-switch-eperm.md`), per-feature-cycle docs rule (restate to target the user pages).
+1. `CLAUDE.md` — "Backlog" section (`docs/backlog/`, `docs/scootbg/backlog/`, `docs/scootbar/backlog/`), "Commits and CI" (`docs/backlog/packaging/independent-versioning.md`, `paths-ignore` note naming `docs/`), Smithay-fork note (`docs/backlog/resolved/syncobj-handle-leak-done.md`, `docs/backlog/core/smithay-fork-repin.md`, `dev/forks.md` ×2), protocol inventory (`docs/backlog/protocols/`), roadmap worked example (`docs/roadmap/05b-vt-switch-eperm.md`), per-feature-cycle docs rule (restate to target the user pages).
 2. `.claude/agents/scoot-implementer.md` — "Update the docs" paragraph (names `docs/` files: `configuration.md`, `ipc.md`, `protocols.md`, `tty.md`, `scootbg/cli.md`). **Maintainer edit (protected path).**
 3. `.claude/agents/scoot-reviewer.md` — "User-facing documentation" paragraph (names the same `docs/` references). **Maintainer edit (protected path).**
 4. `.claude/skills/backlog/SKILL.md` — every `scripts/backlog` example path (`docs/backlog`, `docs/scootbg/backlog`, `docs/scootbar/backlog`, README links). Either the skill moves with the tool or the tool learns `dev/` roots. **Maintainer edit (protected path).**
 5. `scripts/backlog` — `BACKLOGS` map (lines 38–46), `RESOLVED` (47–52), `INDEXES` (53–58), `CLAIMS_DIR = "docs/backlog/claims"` (line 177), the `ls-tree` paths in claim (278–279). Mechanical: repoint roots at `dev/`.
-6. `.github/workflows/ci.yml` — `paths-ignore` (`**.md`, `docs/**`), classify `*.md | docs/*)` case + its long comment, backlog comment (`docs/backlog/claims/`, `docs/scootbar/testing.md` ×2). The site job added in phase 1 (`site/*` → `docs-site`) gains `docs/*` once docs feed the site.
+6. `.github/workflows/ci.yml` — `paths-ignore` (`**.md`, `docs/**`), classify `*.md | docs/*)` case + its long comment, backlog comment (`docs/backlog/claims/`, `dev/research/scootbar-testing.md` ×2). The site job added in phase 1 (`site/*` → `docs-site`) gains `docs/*` once docs feed the site.
 7. `docs/backlog/README.md`, `docs/scootbar/backlog/README.md`, `docs/scootbg/backlog/README.md` — index links per entry (move with the entries; re-verify with `scripts/backlog check` + the `git diff origin/main...HEAD` line-count check from the brief).
 8. In-prose links: `docs/nix.md` ↔ `docs/scootbar/cli.md#fonts`, `docs/configuration.md` ↔ `docs/scootbg/README.md`, example READMEs (`../../nix.md`, `../../configuration.md`, `../../tty.md`, `../../scootbg/README.md`, `../../scootbar/backlog/lightest.md`), `NOTICE` (names `docs/assets/` previews), `README.md` Documentation section, `ROADMAP.md` (links backlog entries throughout).
 9. `flake.nix` comments naming `docs/` (nix.md, `docs/backlog/resolved/nix-crane-done.md`, `docs/scootbg/backlog/resolved/dependencies-done.md`) — comments only, but fix them in the move PR so they don't rot.

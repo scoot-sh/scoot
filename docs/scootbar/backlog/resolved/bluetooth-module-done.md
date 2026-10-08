@@ -69,7 +69,7 @@ item by item (every code fix below has a test that failed before it;
   `menu-command` with the device list; 100 ms draw throttle (at most two
   draws for 400 flips). Config `[bluetooth]`, help, registry, `cli.md`
   (`## Bluetooth`, table, query, config), `testing.md`, fuzz README.
-- **Idle cost** (`docs/scootbar/bench/m6-bluetooth-vm/`): zero wakeups
+- **Idle cost** (`dev/benches/scootbar/m6-bluetooth-vm/`): zero wakeups
   with no bus, bus without BlueZ, and idle scripted BlueZ showing
   `Headset 72%`; +65,536 B on disk (+66,224 B loaded) over `main`,
   feature-off +3,032 B loaded. `Cargo.lock` unchanged.

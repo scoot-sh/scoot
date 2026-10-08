@@ -44,7 +44,7 @@ not, and may block a good PR or wave through a bad one.
   `config::tests::an_unwritable_parent_is_a_loud_refusal` probes its premise.
   Tests that are not about volume must not fail for its absence: leave volume
   out of their layouts.
-- Document any remaining prerequisite in `docs/scootbar/testing.md`.
+- Document any remaining prerequisite in `dev/research/scootbar-testing.md`.
 
 ## Not in this ticket
 
@@ -87,7 +87,7 @@ What landed (`test(scootbar)`, in one commit):
   when the binary is absent, proven), and CI's integration job — which
   sets `REQUIRE_SCOOT`/`REQUIRE_SWAY` — now also runs `--test visibility
   --test workspaces`, the two failing suites it never ran.
-- `docs/scootbar/testing.md` documents the sandbox, the stub, and the
+- `dev/research/scootbar-testing.md` documents the sandbox, the stub, and the
   skip-vs-fail choice.
 
 Proof on the M2 (real `bar.toml` present, built `scoot`, no sound server,

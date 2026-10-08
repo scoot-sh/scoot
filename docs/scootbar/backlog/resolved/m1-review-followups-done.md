@@ -71,7 +71,7 @@ that compiles in scootbar and fails only there.
 Verified 2026-09-29 against `.github/workflows/ci.yml`: the `scootbar`
 job's "Fuzz targets, a fixed budget" step builds and runs both targets
 (`format` 1,000,000 runs, `tzif` 5,000,000, seed 1) after `cargo fetch
---locked` of the fuzz workspace, and `docs/scootbar/testing.md` documents
+--locked` of the fuzz workspace, and `dev/research/scootbar-testing.md` documents
 it. Nothing to do.
 
 ## 4. "A warm tick allocates nothing" is read, not measured

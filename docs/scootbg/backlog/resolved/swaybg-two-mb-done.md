@@ -17,7 +17,7 @@ worth the tradeoff).
 
 ## The gap
 
-The five-desktop idle benchmark (Asahi M2, `docs/benchmarks.md`) puts
+The five-desktop idle benchmark (Asahi M2, `dev/benches/benchmarks.md`) puts
 swaybg at 2.0 MB total PSS in the same role where scootbg, wallpaper
 up, holds its output-sized floor (~12.3 MB PSS shared with the
 compositor here: two output-sized `wl_shm` pools). scootbg-lean's

@@ -7,6 +7,8 @@
 # that same value plus the DNS/API steps in site/README.md ("Moving to
 # scoot.sh"). Not a docs move: `docs/**` is in `push.paths` so the deploy
 # tracks the sources the site will be built from once pages move there.
+# `dev/**` is deliberately absent: the contributor tree is never deployed,
+# so a dev-only push deploys nothing.
 name: Docs site deploy
 
 on:

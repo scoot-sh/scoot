@@ -32,7 +32,7 @@ rule 2), and exits 1 when a competitor beats scootbar on a gated row or a
 gated row has no scootbar value to judge; ``compare`` checks scootbar
 against an earlier results directory (the last milestone's), the
 ratchet's rule 1, and exits 1 on a regression. The method is in
-docs/scootbar/testing.md.
+dev/research/scootbar-testing.md.
 """
 
 import argparse

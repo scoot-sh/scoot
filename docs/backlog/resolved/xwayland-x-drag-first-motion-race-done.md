@@ -51,7 +51,7 @@ the method from `PointerFocus` (the X arm to the `X11Surface`, everything
 else to the `WlSurface`, which keeps the default). Wayland-origin drags
 and drags onto Wayland windows keep today's order and gate. Repinned in
 `crates/scoot/Cargo.toml`, `Cargo.lock`, `flake.nix` and
-[`docs/forks.md`](../../forks.md).
+[`dev/forks.md`](../../../dev/forks.md).
 
 **Fail-first.** The three pins in
 `compositor/xwayland/tests/first_motion.rs` (now un-ignored) fail on every
@@ -307,6 +307,6 @@ at `d3a4cd73`; the whole `--features xwayland` suite, 1869 passed, 25
 skipped; and the live table's right column.
 
 To land it: commit the patch to the fork, repin (`crates/scoot/Cargo.toml`,
-`Cargo.lock`, `flake.nix`, `docs/forks.md`), forward the method in
+`Cargo.lock`, `flake.nix`, `dev/forks.md`), forward the method in
 `pointer_focus.rs` (both arms, to the `X11Surface` and the `WlSurface`),
 and un-ignore the three pins.

@@ -60,7 +60,7 @@ window layout OmniWM-style through the Accessibility API.
   an `UnderlyingStorage::Dmabuf` so scoot's drawn cursor can ride an
   overlay plane where there is no cursor plane; and a `ConnectionLost`
   error so a dead seat shuts scoot down instead of panicking in libseat (see
-  `docs/forks.md`, which since 2026-10-08 carries a per-commit verdict on
+  `dev/forks.md`, which since 2026-10-08 carries a per-commit verdict on
   whether each change could live in scoot instead: all stay except the
   unused `set_commits_allowed`, dropped at the next rebase). Make
   verify-against-source claims against the fork rev (its checkout is
@@ -72,11 +72,11 @@ window layout OmniWM-style through the Accessibility API.
   not to open up a pull request upstream.") No agent opens upstream PRs,
   issues or comments on any dependency. A fork is one upstream commit plus
   the fewest carried commits, pinned by rev, and listed in
-  [`docs/forks.md`](docs/forks.md) in the same PR that adds or changes it.
+  [`dev/forks.md`](dev/forks.md) in the same PR that adds or changes it.
   **A fork is the last resort, and the PR that adds one or carries another
   commit must say so with evidence:** the scoot-side alternatives considered (a
   handler or wrapper in scoot, an in-tree copy of the module, a workaround at
-  another layer) and why each was rejected, in the `docs/forks.md` entry. A
+  another layer) and why each was rejected, in the `dev/forks.md` entry. A
   hard constraint (state private to the dependency, a hook that runs where scoot
   cannot) is checked against the pinned fork's source, not asserted. "The fork
   was simpler" is not a reason.
@@ -391,7 +391,7 @@ it, the way scootbg's is, and its jobs run only when its files (or something it
 depends on: `scoot-ipc`, the workspace `Cargo.toml`/`Cargo.lock`, the flake) change.
 No package gets an always-run job. A change to shared code fans out to its
 dependents and nothing more. **Docs-only pushes to main (any `*.md`, anything under
-`docs/`, which includes the backlog claim files) start no workflow**: both workflows
+`docs/` or the unpublished `dev/`, which includes the backlog claim files) start no workflow**: both workflows
 have a `paths-ignore` on `push`, so a commit that touches only those runs nothing
 and a commit that also touches code runs in full. Do not write `[skip ci]` in
 commit messages: GitHub honors it anywhere in the message, including in a body that

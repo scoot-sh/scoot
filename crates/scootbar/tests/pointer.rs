@@ -14,7 +14,7 @@
 //! arithmetic), which are unit tests.
 
 // Every test here places the clock alone, so this file exists only where
-// it does (docs/scootbar/testing.md: the feature matrix).
+// it does (dev/research/scootbar-testing.md: the feature matrix).
 #![cfg(feature = "clock")]
 
 mod common;

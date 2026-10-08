@@ -4,7 +4,7 @@ The resource ratchet (docs/scootbar/backlog/lightest.md, rule 2) compares
 scootbar with the competitors *at the milestone's own scope*: a bar that
 shows only a clock is compared with bars showing only a clock. So every bar
 here shows ``SCOPES[scope]`` and nothing else, with the look M0's baselines
-used (docs/scootbar/spikes/m0/results/bar-configs): a 26-pixel bar along
+used (dev/spikes/scootbar/m0/results/bar-configs): a 26-pixel bar along
 the top, DejaVu Sans at 14 pixels, ``#1e1e2e`` behind ``#cdd6f4``, the
 clock on the right as ``%a %d %b %H:%M``, updated each minute where the bar
 has the option (Waybar's ``interval``; yambar and scootbar follow the

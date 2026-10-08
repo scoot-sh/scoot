@@ -146,7 +146,7 @@
 //!   0.3.17 kept them for the connection's life; review of PR #236 measured
 //!   one idle client taking scoot from 18 to 999 fds that way, newcomers and
 //!   `scoot msg` shed, the client never killed. scoot now builds against a
-//!   scoot-sh fork (`docs/forks.md`) that disconnects a client leaving more
+//!   scoot-sh fork (`dev/forks.md`) that disconnects a client leaving more
 //!   than its cap unclaimed at a point where every complete request has been
 //!   parsed, with `wl_display.error` `invalid_method` ("too many file
 //!   descriptors queued"), closing them. The cap is one eighth of the soft

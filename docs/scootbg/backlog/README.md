@@ -114,7 +114,7 @@ full per-feature cycle.
     `draw_error` saying why; the precedence rule across a restart with
     two per-output overrides and a new `command`; hotplug on headless
     scoot recorded as a gap (covered on sway). The suites keep growing
-    with every later milestone: [testing.md](../testing.md) says where
+    with every later milestone: [testing.md](../../../dev/research/scootbg-testing.md) says where
     each kind of test lives
     - [The scaler's output allocation aborts the daemon when memory is refused](resolved/scaler-oom-abort-done.md)
       — RESOLVED 2026-10-07: probe-then-refuse plus docs — `scale` probes

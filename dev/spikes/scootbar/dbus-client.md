@@ -1,6 +1,6 @@
 # D-Bus client spike: hand-rolled vs `zbus` vs libdbus
 
-Measured 2026-10-02 for [a-shared-d-bus-client](../backlog/resolved/dbus-client-done.md).
+Measured 2026-10-02 for [a-shared-d-bus-client](../../../docs/scootbar/backlog/resolved/dbus-client-done.md).
 Three throwaway binaries doing the ticket's own job — own a well-known
 name, install match rules, receive a signal — one per option, timed and
 sized on real buses. The spike crates are removed after; this file is the
@@ -10,9 +10,9 @@ record (as with the [config-parser spike](config-parser.md)).
 is the only option that fits the bar's doctrine** (one single-threaded
 `poll(2)` loop, no async runtime, no C library outside libc/libm). **It was
 built with the tray**, as this record said to, since a client with no
-consumer is dead code; the [ticket](../backlog/resolved/dbus-client-done.md)
+consumer is dead code; the [ticket](../../../docs/scootbar/backlog/resolved/dbus-client-done.md)
 records what landed ([What landed](#what-landed), below) and the cost the
-bar pays for it is in the [resource ratchet](../backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02).
+bar pays for it is in the [resource ratchet](../../../docs/scootbar/backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02).
 
 ## What was run
 

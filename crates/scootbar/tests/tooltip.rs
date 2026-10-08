@@ -11,7 +11,7 @@
 //! `SCOOTBAR_REQUIRE_SWAY` make that a failure.
 
 // Tooltips are shown by the popup machinery out of a `push` module, so
-// this file exists only where both do (docs/scootbar/testing.md: the
+// this file exists only where both do (dev/research/scootbar-testing.md: the
 // feature matrix). The one test that also places the volume module carries
 // its own `volume` gate on top.
 #![cfg(all(feature = "push", feature = "popup"))]

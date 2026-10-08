@@ -106,7 +106,7 @@ rustix = { version = "1", default-features = false, features = ["std", "event", 
 ab_glyph = "0.2"
 # The config file (`bar.toml`) and the control socket's line-framed JSON:
 # the workspace's existing versions, chosen by measurement
-# (docs/scootbar/spikes/config-parser.md, docs/scootbg's dependency
+# (dev/spikes/scootbar/config-parser.md, docs/scootbg's dependency
 # record §5). `toml` adds no new package to the tree (`scoot` pins it).
 serde.workspace = true
 serde_json.workspace = true

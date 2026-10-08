@@ -26,7 +26,7 @@ composable shell.
 > ships M1's `nix run`: a clock you can run in one command. Its
 > [testing and CI](backlog/resolved/testing-and-ci-done.md) closes M1:
 > snapshot, harness and fuzz layers, a CI path of the bar's own, and the
-> benchmark script ([testing.md](testing.md)). M0, the
+> benchmark script ([testing.md](../../dev/research/scootbar-testing.md)). M0, the
 > measuring milestone, is done: the competitor baselines below, and the
 > font rasterizer and clock choices, recorded in
 > [the dependency record](backlog/resolved/dependencies-done.md). M6's
@@ -224,13 +224,13 @@ MIT; ashell and i3status-rust are GPL, and were only run as binaries.
 ### M1, like for like, by the benchmark script
 
 From M1 on, each milestone's numbers come from
-[`scripts/scootbar-bench`](testing.md#benchmark), with every bar showing
+[`scripts/scootbar-bench`](../../dev/research/scootbar-testing.md#benchmark), with every bar showing
 exactly what scootbar shows: here the clock alone (`%a %d %b %H:%M`), so
 yambar and Waybar run without their workspaces. Same machine, same stage
 as above; release scootbar (identical to `main`'s), a debug scoot, sway
 1.12, one idle and one switching run per bar, startup the median of 5
 [with the range]. The raw run is kept as the next milestone's baseline in
-[`bench/m1-clock`](bench/m1-clock/table.md). Startup is timed where the
+[`bench/m1-clock`](../../dev/benches/scootbar/m1-clock/table.md). Startup is timed where the
 compositor receives the frame, with the compositor printing its protocol,
 so it is slower for every bar than the tables above and is compared only
 within this run. **No competitor beats scootbar on any gated row.**
@@ -257,7 +257,7 @@ it was not traced again here.
 
 ### M3, clock and workspaces, on the Asahi M2
 
-The M3 ratchet run, by [`scripts/scootbar-bench`](testing.md#benchmark) at
+The M3 ratchet run, by [`scripts/scootbar-bench`](../../dev/research/scootbar-testing.md#benchmark) at
 `--scope clock-workspaces` (scootbar `--left workspaces --right clock`;
 Waybar's `ext/workspaces` on scoot and `sway/workspaces` on sway; yambar's
 `i3` module on sway). **Machine**: the maintainer's Asahi MacBook Air, Apple
@@ -267,7 +267,7 @@ M2 (4 Blizzard + 4 Avalanche cores, 16 KiB pages), Linux 7.1.13 aarch64,
 the code is the same) under headless scoot (release, same binary for
 every run) and sway 1.12, yambar 1.11.0 and Waybar 0.15.0 from the pinned
 nixpkgs. Raw runs, with `meta.json` (every reading of the machine) and
-`run.log`: [`bench/m3-asahi-clock-workspaces`](bench/m3-asahi-clock-workspaces/table.md).
+`run.log`: [`bench/m3-asahi-clock-workspaces`](../../dev/benches/scootbar/m3-asahi-clock-workspaces/table.md).
 A fanless machine: the readings the kernel gives are in
 [the record](#what-the-machine-did), none shows a throttle.
 
@@ -285,7 +285,7 @@ A fanless machine: the readings the kernel gives are in
 
 **yambar is not compared on scoot**: 1.11.0 has no ext-workspace-v1 module,
 so it cannot show workspaces there, and the harness neither runs it nor
-invents a number ([testing.md](testing.md#benchmark)). **No competitor beats
+invents a number ([testing.md](../../dev/research/scootbar-testing.md#benchmark)). **No competitor beats
 scootbar on any gated row** (the bare stripped yambar executable, 396 kB, is smaller than scootbar's 1.25 MB; the gated size row counts the closure, where yambar is 20.95 MB on nixpkgs' default features): three ties, each within the noise
 rule (startup against yambar, idle wakeups against yambar and Waybar, both on
 sway; scootbar's 2 a minute meets the ratified target). The rule's second
@@ -362,7 +362,7 @@ alone) or 37 minutes (clock and workspaces, three bars). The cores are not
 pinned: a bar's CPU rows can differ with which cluster it landed on, which
 is what the repeated runs and the rule's margin are for.
 
-Runs, all under [`bench/`](bench/README.md): `m3-asahi-m1-baseline-clock` and
+Runs, all under [`bench/`](../../dev/benches/scootbar/README.md): `m3-asahi-m1-baseline-clock` and
 `-rerun` (M1's scootbar), `m3-asahi-clock` and `-rerun` (M3's), and
 `m3-asahi-clock-workspaces`.
 
@@ -378,7 +378,7 @@ the extra two (they cannot lose a row for scootbar, and a pair they cannot
 show is not "not compared"), and whether to promote them into the rule is the
 maintainer's call. They run as the binaries nixpkgs builds (ironbar 0.19.0,
 MIT; ashell 0.10.0, GPL-3.0-or-later), and their configs set only the keys
-that give the common look ([testing.md](testing.md#benchmark)).
+that give the common look ([testing.md](../../dev/research/scootbar-testing.md#benchmark)).
 
 **Machine and commit**: the same Asahi MacBook Air as above (Apple M2, 8
 cores, 16 KiB pages, Linux 7.1.13 aarch64, `schedutil`, on mains power with
@@ -392,7 +392,7 @@ identical to `main` at `90a96ca0` (M3's code).
 and is not in it**: it drops the workspace-manager bind when the bar places no
 workspaces module, which only matters at the `clock` scope, not at this one,
 where scootbar shows workspaces. Raw runs, `meta.json` and `run.log`:
-[`bench/m3-asahi-clock-workspaces-all`](bench/m3-asahi-clock-workspaces-all/table.md).
+[`bench/m3-asahi-clock-workspaces-all`](../../dev/benches/scootbar/m3-asahi-clock-workspaces-all/table.md).
 
 | scoot / sway | scootbar | yambar 1.11.0 | Waybar 0.15.0 | ironbar 0.19.0 (info) | ashell 0.10.0 (info) |
 |---|---|---|---|---|---|
@@ -462,7 +462,7 @@ to flatter anyone:
 The resource ratchet's first run on hardware for M4's stack: three draft PRs
 (#364 pointer input, #366 `button`/`push`/`exec`, #367 the agent interface),
 each layer's tip, against `main` and against M3's post-fix run
-([`m3-asahi-clock-bindfix`](bench/m3-asahi-clock-bindfix/table.md)).
+([`m3-asahi-clock-bindfix`](../../dev/benches/scootbar/m3-asahi-clock-bindfix/table.md)).
 `scripts/scootbar-bench` at `--scope clock --bars scootbar`, the defaults (5
 startup rounds, 30 s settle, a 300 s idle window, 240 switches at 4 Hz), the
 same machine as M3 (Apple M2, 8 cores, 16 KiB pages, Linux 7.1.13,
@@ -483,7 +483,7 @@ run (no bar, compositor or cgroup of anyone's), load average at most 0.28 at
 any start. The raw runs, each with `meta.json`, `runs.jsonl`, `table.md` and
 `run.log`, are `bench/m4-asahi-clock-*` (`-rerun` is the second round, `both`
 the third). Every `compare` as it ran, and the pooled verdicts with the script
-that computed them, are in [`bench/m4-asahi-compares.md`](bench/m4-asahi-compares.md).
+that computed them, are in [`bench/m4-asahi-compares.md`](../../dev/benches/scootbar/m4-asahi-compares.md).
 The stack's tips are those at the time of the run: `meta.json` records #364
 `47b413a99`, #366 `cdb9936bd` and #367 `b6dee9710`; #367's tip has since gained
 one docs-only commit (its `crates/` tree is identical).
@@ -669,11 +669,11 @@ tip `d0c4f35d1`, `main` again** (A-B-A, so drift shows), 2026-10-01 on the same
 Asahi M2, **scoot and sway** in every run, the harness's defaults (5 startup
 rounds, 30 s settle, 300 s idle, 240 switches at 4 Hz), `--scope clock --bars
 scootbar`, 180 s of cool-down between runs, each run about 13 minutes. Raw runs:
-[`m4-asahi-final-main`](bench/m4-asahi-final-main/table.md),
-[`-pr367`](bench/m4-asahi-final-pr367/table.md),
-[`-main-rerun`](bench/m4-asahi-final-main-rerun/table.md); every `compare` and the
+[`m4-asahi-final-main`](../../dev/benches/scootbar/m4-asahi-final-main/table.md),
+[`-pr367`](../../dev/benches/scootbar/m4-asahi-final-pr367/table.md),
+[`-main-rerun`](../../dev/benches/scootbar/m4-asahi-final-main-rerun/table.md); every `compare` and the
 pooled verdicts, as run, in
-[`bench/m4-asahi-final-compares.md`](bench/m4-asahi-final-compares.md).
+[`bench/m4-asahi-final-compares.md`](../../dev/benches/scootbar/m4-asahi-final-compares.md).
 
 **What differs from the earlier M4 runs, stated plainly:**
 

@@ -1,6 +1,6 @@
 # M6 bluetooth on the dev VM
 
-Module-level cost of the bluetooth module ([the entry](../../backlog/lightest.md#m6-bluetooth-module-level-cost-measured-2026-10-03)):
+Module-level cost of the bluetooth module ([the entry](../../../../docs/scootbar/backlog/lightest.md#m6-bluetooth-module-level-cost-measured-2026-10-03)):
 one 60 s idle window per row, release builds, a headless `scoot`, a private
 `dbus-daemon` as the system bus, and BlueZ a scripted peer.
 

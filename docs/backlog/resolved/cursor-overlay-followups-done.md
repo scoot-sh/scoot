@@ -44,7 +44,7 @@ as it was before #485. The full review is in the #485 thread.
    Correct `gpu-overlay-window-candidates.md:74` to match.
 4. **The fork's unused import without pixman.** In fork
    `drm/compositor/mod.rs:162`, `ImportDma` is used only under
-   `renderer_pixman`. Fix it at the next fork rebase (see `docs/forks.md`).
+   `renderer_pixman`. Fix it at the next fork rebase (see `dev/forks.md`).
 5. **Doc nits.**
    - `Asahi.md:2997` and `:3000`, the edge table: 23 px should be 22 px, and
      "20 px tall" should be 2 px (hotspot (3,1)).
@@ -88,7 +88,7 @@ note are in the same PR; item 6 did not reproduce (below).
   two-overlay behavior unchanged (pinned by the extended existing test).
   Test `a_marked_window_keeps_the_only_overlay` fails/passes as above.
   `gpu-overlay-window-candidates.md:74` corrected to match.
-- **Item 4**: no fork change; `docs/forks.md` records the pixman-only
+- **Item 4**: no fork change; `dev/forks.md` records the pixman-only
   `ImportDma` for the next rebase (scoot-side fix impossible).
 - **Item 5**: Asahi.md 23 px → 22 px, 20 px tall → 2 px; `render.rs`
   twin comment corrected.

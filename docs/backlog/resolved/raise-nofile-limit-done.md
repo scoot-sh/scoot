@@ -113,7 +113,7 @@ XWayland), so the restore must cover every spawn path.
    arithmetic and docs.
 4. Raise the fork's `MAX_QUEUED_FDS` to libwayland parity (1024, its
    default `fds_in` bound) with a new commit on `scoot-sh/wayland-rs`
-   (update `docs/forks.md`), so no client libwayland would serve is
+   (update `dev/forks.md`), so no client libwayland would serve is
    disconnected. Keep the per-client ledger (#239) as the real bound.
 5. Handle a hard limit that's already 1024 (containers): everything keeps
    working at today's margins, with a startup log line saying so.

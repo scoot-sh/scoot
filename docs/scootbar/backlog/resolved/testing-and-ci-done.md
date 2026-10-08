@@ -58,7 +58,7 @@ and sway with `SCOOTBAR_REQUIRE_*`, the `scootbar` path filter, both test
 runners, clippy, fmt, `--no-default-features`, the `libc`-crate and `ldd`
 checks, the fuzz targets and their corpus); this entry adds what was
 missing and makes the rest hold for modules not written yet. How to run all
-of it: [testing.md](../../testing.md).
+of it: [testing.md](../../../../dev/research/scootbar-testing.md).
 
 ### What landed
 
@@ -114,9 +114,9 @@ of it: [testing.md](../../testing.md).
   `report` (the noise rule) and `daemons.nix_resolve`; the bars, stage,
   rows and tables are its own (`bars.py`, `stage.py`, `measure.py`,
   `tables.py`), with unit tests of that logic. M1's run is checked in as
-  the baseline, `docs/scootbar/bench/m1-clock/`, as M0 kept its raw
+  the baseline, `dev/benches/scootbar/m1-clock/`, as M0 kept its raw
   results.
-- **Docs**: [testing.md](../../testing.md) (snapshots, the harness, fuzzing
+- **Docs**: [testing.md](../../../../dev/research/scootbar-testing.md) (snapshots, the harness, fuzzing
   in CI, the CI jobs, the benchmark), both fuzz READMEs,
   [appearance](appearance-done.md) (the rounded-rectangle snapshots),
   [the M1 follow-ups](m1-review-followups-done.md) (item 3 done), and the
@@ -288,7 +288,7 @@ $ devenv shell -- python3 scripts/scootbar-bench/bench.py run --out .../bench-m1
     --scoot /tmp/impl-testci-target/debug/scoot --scootctl /tmp/impl-testci-target/debug/scootctl
 ```
 
-Kept as it came out in [`docs/scootbar/bench/m1-clock`](../../bench/m1-clock/table.md)
+Kept as it came out in [`dev/benches/scootbar/m1-clock`](../../../../dev/benches/scootbar/m1-clock/table.md)
 (`report` re-renders its `table.md` byte for byte; `compare` of it against
 itself: 0 regressions); summarized in [the README](../../README.md#m1-like-for-like-by-the-benchmark-script).
 The raw idle and switching records:
@@ -355,4 +355,4 @@ as it was; what changed:
 - **The fuzz step checks its lock file** (`cargo fetch --locked`; cargo-fuzz
   has no `--locked` of its own), so a stale `fuzz/Cargo.lock` fails.
 
-How to run it: [testing.md](../../testing.md).
+How to run it: [testing.md](../../../../dev/research/scootbar-testing.md).

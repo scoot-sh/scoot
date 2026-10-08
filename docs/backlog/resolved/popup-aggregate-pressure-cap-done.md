@@ -128,7 +128,7 @@ Two Smithay-side scans stay, both verified against the pinned rev and
 both linear-per-op with small constants: `PopupManager::commit`'s
 `position` scan of the unmapped list, and the `xdg_popup` destructor's
 `known_popups` search (~76 ms of the ~281 ms at 5120). A further index
-would be a Smithay fork change (`docs/forks.md`); with no seconds-scale
+would be a Smithay fork change (`dev/forks.md`); with no seconds-scale
 stall left, that is not justified now. If connection counts ever make
 the destroy-side quadratic matter, that fork index is the follow-up.
 

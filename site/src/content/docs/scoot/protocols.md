@@ -134,7 +134,7 @@ keep one; AGX shows that expectation cannot be assumed.
   while the compositor was busy). 1024 is libwayland-server's default
   limit, the one compositors built on it (mutter, KWin, sway, weston) apply
   unless they raise it. This
-  limit lives in scoot's fork of wayland-backend ([forks.md](https://github.com/scoot-sh/scoot/tree/main/docs/forks.md)).
+  limit lives in scoot's fork of wayland-backend ([forks.md](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md)).
 - **Object limits on top**, unchanged: 512 live `wl_buffer`s, 128 live
   `wl_shm_pool`s, 32 planes added to params objects not yet made into a
   buffer (see [GPU-rendering clients](#gpu-rendering-clients-zwp_linux_dmabuf_v1)),
@@ -941,7 +941,7 @@ still drop on a Wayland app. Upstream Smithay queues the requests that
 show it again but never flushes them to the X server, so they sat unsent
 until some unrelated request went out, and an X drag that had crossed an X
 window could not drop on a Wayland one; scoot's Smithay fork flushes them
-(`6e6fe896`, [forks.md](https://github.com/scoot-sh/scoot/tree/main/docs/forks.md))
+(`6e6fe896`, [forks.md](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md))
 ([`backlog/resolved/xwayland-pointer-focus-x11-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/xwayland-pointer-focus-x11-done.md)).
 
 A quick drag straight from one X app onto another lands too, released on
@@ -973,7 +973,7 @@ An input method's keyboard grab does pre-empt an X window's keyboard like
 any other: while it holds the grab, keys go to it, not to the X window.
 
 **Most of the bounds above, and the hooks the rules need, live in scoot's
-Smithay fork**, each measured first and listed in [forks.md](https://github.com/scoot-sh/scoot/tree/main/docs/forks.md):
+Smithay fork**, each measured first and listed in [forks.md](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md):
 upstream, large transfers were cut to 64 KiB both ways, a stuck reader made
 the compositor buffer a whole selection, an owner appending without waiting
 was re-read on every append, transfers of either direction piled up without

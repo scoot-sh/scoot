@@ -17,7 +17,7 @@ three commits under PROGRESS below), and the last piece -- X-origin drags
 remap (`X11Surface`'s `DndFocus::leave`, `let _ = xwm.conn.flush();` after
 the `configure_window`, as `enter` does after its unmap). The fork is
 repinned there (`crates/scoot/Cargo.toml`, `Cargo.lock`, `flake.nix`,
-[`docs/forks.md`](../../forks.md)), and after review to `9515d7e5`, then
+[`dev/forks.md`](../../../dev/forks.md)), and after review to `9515d7e5`, then
 `d3a4cd73` (see the two review sections below).
 
 - **The gate is gone.** An X focus now goes to Smithay's X target with an
@@ -257,7 +257,7 @@ see the top section):
   and the gate removed, at `7366568`, all nine drop tests (the four
   ignored X-origin ones included) and the four drag-gate tests pass -- but
   it is not pushed: this session had no mandate to push to the fork. Pin
-  it, add it to `docs/forks.md`.
+  it, add it to `dev/forks.md`.
 - Drop the X-origin gate in `pointer_focus.rs` (`from_x` in `enter`, and
   let offer-less X foci reach the X target), and un-ignore the four
   X-origin tests in `drop.rs` (X → X, in-window, proxy back on leave,

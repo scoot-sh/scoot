@@ -100,7 +100,7 @@
             (builtins.fromTOML (builtins.readFile ./crates/scootbar/Cargo.toml)).package.version;
           workspaceVersion = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
           # Scoped to exactly what the build reads, so doc-only edits
-          # (README/ROADMAP/CLAUDE, docs/, vm/, scripts/) -- and, worse,
+          # (README/ROADMAP/CLAUDE, docs/, dev/, vm/, scripts/) -- and, worse,
           # the whole working-tree copy this replaced, which dragged
           # target/ (~1GB in-store) and .git along -- no longer bust the
           # derivation's cache and force a full rebuild. Everything else
@@ -148,7 +148,7 @@
             # needs the lock even when it only sees dummy sources.
             cargoLock = ./Cargo.lock;
             # Two dependencies come from git, both scoot-sh forks pinned by
-            # rev (docs/forks.md): Smithay (crates/scoot/Cargo.toml, upstream
+            # rev (dev/forks.md): Smithay (crates/scoot/Cargo.toml, upstream
             # `0ff00983` plus twenty-seven commits) and wayland-backend (the root
             # Cargo.toml's `[patch.crates-io]`, the 0.3.17 release plus two
             # commits). A git source carries no crates.io checksum to vendor

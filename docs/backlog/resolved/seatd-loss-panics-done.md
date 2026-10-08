@@ -29,7 +29,7 @@ code. Check both.
   dev VM): start `--tty` scoot, kill seatd, and see the panic.
 - Find where the error surfaces. If it is Smithay's own `unwrap`, decide
   between a scoot-side guard (catching the session event and shutting
-  down cleanly) and a fork commit, with the evidence `docs/forks.md`
+  down cleanly) and a fork commit, with the evidence `dev/forks.md`
   requires.
 - The behavior to aim for: a clean, logged shutdown, or a session pause
   with a later resume if libseat supports reconnecting. Never a panic.
@@ -56,13 +56,13 @@ code. Check both.
   the behavior is a clean, logged shutdown.
 - **Fix: one fork commit**, `fdf424d` on
   `scoot/cursor-dmabuf-storage`, repinned in `crates/scoot/Cargo.toml`
-  (+ `flake.nix` `outputHashes`, `docs/forks.md`). `dispatch`/`disable`
+  (+ `flake.nix` `outputHashes`, `dev/forks.md`). `dispatch`/`disable`
   failures now return a new `Error::ConnectionLost`, which the event loop
   propagates out of `run`: exit 1 with `scoot: ... Lost the seat
   connection...`, no panic. A scoot-side guard was tried first (a
   `catch_unwind` `EventSource` wrapper, spiked and reverted): the exit
   was clean but the panic hook still prints, and it could not cover the
-  `register` sites — full evidence in `docs/forks.md`. Shipped as PR
+  `register` sites — full evidence in `dev/forks.md`. Shipped as PR
   #489.
 - **Proof:** recorded live repros on the M2, same steps both times
   (private seatd + `openvt`, `--tty`, kill seatd once up): before, panic

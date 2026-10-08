@@ -70,7 +70,7 @@ tree or an already-recorded measurement cited by path.
 - **`grim` still captures into `wl_shm`.** Derivation, not
   recollection: scoot's capture constraints offer shm only
   (`Xrgb8888`/`Argb8888`), and `grim` 1.5.0 captures succeed against
-  scoot everywhere it is measured (`docs/benchmarks.md` shot-grim
+  scoot everywhere it is measured (`dev/benches/benchmarks.md` shot-grim
   rows, `CHANGELOG.md`, the `gles-capture-leaks-a-frame-per-shot`
   record). A client needing dmabuf buffers could not complete a
   single one of those captures.
@@ -107,7 +107,7 @@ tree or an already-recorded measurement cited by path.
   `6ab8b4a2` was pinned briefly on the side branch
   `scoot/buffer-scale-without-new-buffer` and nothing pins it now —
   `e7130254` is content-identical for the fix it carried
-  (`docs/forks.md`, `buffer-scale-without-new-buffer-done.md`). Every
+  (`dev/forks.md`, `buffer-scale-without-new-buffer-done.md`). Every
   fork claim above was verified at the `e7130254` checkout
   (`~/.cargo/git/checkouts/smithay-*/e713025`), not at `6ab8b4a2`.
 - **`(b)` widened** (the `dmabuf_render_formats() → None` second and

@@ -1,9 +1,9 @@
 # M6 media module: dev VM evidence
 
 The raw runs behind the
-[media module's cost table](../../backlog/lightest.md#m6-media-module-level-cost-measured-2026-10-03)
-and the PR that landed the [module](../../backlog/resolved/media-module-done.md)
-on the [D-Bus client](../../backlog/resolved/dbus-client-done.md). Not a
+[media module's cost table](../../../../docs/scootbar/backlog/lightest.md#m6-media-module-level-cost-measured-2026-10-03)
+and the PR that landed the [module](../../../../docs/scootbar/backlog/resolved/media-module-done.md)
+on the [D-Bus client](../../../../docs/scootbar/backlog/resolved/dbus-client-done.md). Not a
 `scripts/scootbar-bench` run (that harness needs its compositor lane and has
 no D-Bus player): a handful of shell scripts and one Python player, written
 for the dev VM (`ssh -p 2222 dev@localhost`, aarch64, 6 CPUs, rustc 1.97.1,

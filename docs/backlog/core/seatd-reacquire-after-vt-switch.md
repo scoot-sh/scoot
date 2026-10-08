@@ -59,7 +59,7 @@ Pick one of the candidate fixes and pin the edges below:
 - **Seat-side retry.** Teach seatd to retry the re-acquire after losing
   the race (bounded, a little after the VT activation, not a spin).
   seatd is a dependency, so this goes through the fork policy in
-  `CLAUDE.md` (scoot-sh fork, last resort, listed in `docs/forks.md`
+  `CLAUDE.md` (scoot-sh fork, last resort, listed in `dev/forks.md`
   with the rejected alternatives) -- or wait on upstream.
 - **A privileged helper.** A helper that takes master on the session's
   behalf. Check the pid gate first: `drm_master_check_perm` wants

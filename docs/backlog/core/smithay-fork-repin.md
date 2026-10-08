@@ -3,7 +3,7 @@ title: "Repin Smithay from the scoot-sh fork back to upstream once its fixes lan
 status: "open"
 area: "core"
 priority: "low"
-blocked: "needs an upstream Smithay rev carrying a Drop for the imported syncobj timeline and equivalents of the thirteen XWayland selection/drag commits; nothing is filed upstream from this project (the maintainer decides later, see docs/forks.md)"
+blocked: "needs an upstream Smithay rev carrying a Drop for the imported syncobj timeline and equivalents of the thirteen XWayland selection/drag commits; nothing is filed upstream from this project (the maintainer decides later, see dev/forks.md)"
 ---
 
 # Repin Smithay from the scoot-sh fork back to upstream
@@ -18,7 +18,7 @@ when this was filed): a `Drop` for
 leaking a kernel handle
 ([resolved record](../resolved/syncobj-handle-leak-done.md)), and thirteen
 XWayland selection and drag fixes and hooks, each listed with its
-measurement in [`docs/forks.md`](../../forks.md).
+measurement in [`dev/forks.md`](../../../dev/forks.md).
 
 The fork is debt:
 
@@ -28,7 +28,7 @@ The fork is debt:
 
 ## What to do
 
-Once an upstream Smithay rev carries the fixes (nothing is filed upstream from this project; see `docs/forks.md`) -- all fourteen, or a subset with the rest re-carried on a fresh fork branch:
+Once an upstream Smithay rev carries the fixes (nothing is filed upstream from this project; see `dev/forks.md`) -- all fourteen, or a subset with the rest re-carried on a fresh fork branch:
 
 1. Pin `crates/scoot/Cargo.toml` back to `github.com/Smithay/smithay` at a
    rev that has it. Take whatever other upstream changes that rev brings
