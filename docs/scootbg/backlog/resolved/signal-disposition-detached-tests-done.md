@@ -1,9 +1,10 @@
 ---
 title: "Detached cargo test hangs a_signal_kills_the_daemon: inherited SIG_IGN on SIGINT"
-status: "open"
-area: "scootbg"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-08"
 ---
 
 # Detached cargo test hangs a_signal_kills_the_daemon: inherited SIG_IGN on SIGINT
@@ -49,3 +50,28 @@ behavior (the suite stays green both runners, foreground and detached).
 
 The slideshow/transition work that surfaced this (PR #514); any broader
 signal-handling design for the daemon.
+
+## Resolved 2026-10-08 (PR #540)
+
+Harness fix, the ticket's second bullet (test controls its own premise):
+`Session::scootbg()` (`crates/scootbg/tests/common/mod.rs`) resets
+SIGHUP/SIGINT/SIGQUIT to `SIG_DFL` in the child via `pre_exec` before exec,
+covering every session spawn including daemons started through
+`apply-config`. Direct `signal(2)` without the `libc` crate; SIGPIPE stays
+ignored, SIGTERM untouched. SIGHUP goes beyond the ticket's SIGINT/SIGQUIT
+because `nohup`/detached also ignores HUP and the brief requires a
+`nohup`/detached verification (an INT/QUIT-only fix still hung on the HUP
+iteration under `nohup`). No product change, foreground behavior unchanged,
+trivially reversible.
+
+Revert-run-restore on the Asahi M2 (loads recorded in the PR report):
+before, detached `cargo test` (forced `SIG_IGN` via `trap "" INT QUIT`)
+FAILED in 20.06 s ("the daemon did not exit within 20s"); after, the same
+run passes in 0.15 s, foreground `cargo test` in 0.12 s, detached and
+foreground `nextest` in 0.123 s / 0.121 s. `/proc` showed the fixed daemon
+with `SigIgn: ...1001` (only HUP+PIPE from `nohup`/runtime) instead of
+ignoring INT/QUIT. Full `nextest -p scootbg -p scootbg-mem --no-fail-fast`:
+638 passed, 2 failed (rotation load flakes, both pass alone), 3 skipped;
+`clippy -D warnings` clean, `fmt --check` clean, `cargo deny check` ok,
+`backlog check` the 3 pre-existing problems only. Release `scootbg`
+1,839,904 B file / 1,759,705 B `.text`: test-only, no product bytes changed.
