@@ -33,6 +33,19 @@ After v1, every PR
 that touches decoding, buffers or the event loop still re-runs the
 benchmark and must not regress beyond the margin.
 
+**Maintainer's ruling (2026-10-08, given in chat: "Sounds good", accepting the
+recommendation below): the idle-memory rows of #529 and #531 are waived, and the
+two #531 color rows are accepted.** The release benchmark
+([2026-10-08-pr529-pr531](../bench/2026-10-08-pr529-pr531/README.md)) put
+#529's two idle-PSS-above-the-floor rows (+0.13 to +0.14 MiB) and four of #531's
+six gated idle rows (+0.13 to +0.17 MiB) in the class waived on 2026-09-28; the
+other two gated rows on #531 are total-with-floor color rows where scootbg still
+beats every competitor by 7 MiB or more, accepted on that ground. This is a
+ruling on those rows only. The Restore CPU JPEG row against awww (a tie on
+base, a loss in the #529 and #531 runs, with scootbg's own number unchanged) is
+not waived: it is re-measured at idle load first, and the PRs merge on that
+result.
+
 ## What is measured
 
 On the same machine and outputs, published in `docs/scootbg/README.md`:
