@@ -80,20 +80,31 @@ asserted in CI, so one build runs on trixie, noble and newer.
 - `scoot`: `/usr/bin/scoot`, `/usr/bin/scoot-session` (the in-tree
   greeter launcher; degrades to `exec scoot --tty` with no systemd
   user manager), `/usr/share/wayland-sessions/scoot.desktop`,
-  copyright and the deny-generated `THIRD-PARTY-LICENSES` under
-  `/usr/share/doc/scoot/`, a `README.Debian`, and the output of
+  copyright, the deny-generated `THIRD-PARTY-LICENSES`, a
+  `changelog.Debian.gz` (required: our versions carry a Debian
+  revision, so the packages are non-native and lintian fails without
+  one; its entry points at the per-package release notes, where this
+  tree's history lives) and a `README.Debian` under
+  `/usr/share/doc/scoot/`, and the output of
   `scoot --print-default-config` as
   `/usr/share/doc/scoot/config.toml.example` (it documents the
   `[wallpaper]` handoff, so `scootbg` ships no separate example).
   Nothing is written to a user's home; with no conffiles and no
   maintainer scripts, removal leaves nothing behind.
-- `scootbg`: `/usr/bin/scootbg` plus its licenses.
+- `scootbg`: `/usr/bin/scootbg` plus its licenses and changelog.
 - `scootbar`: `/usr/bin/scootbar`, the `scootbar.service` user unit
   (`Restart=on-failure`, the same policy as
   `nix/modules/scootbar-home.nix`, bound to the shared
   `graphical-session.target` for standalone use), licenses, a
-  `README.Debian`, and a starting `bar.toml.example` (proven valid:
-  `scootbar daemon --check` prints `ok`).
+  changelog, a `README.Debian`, and a starting `bar.toml.example`
+  (proven valid: `scootbar daemon --check` prints `ok`).
+
+Lintian posture: no errors; the one standing warning is
+`no-manual-page` on each binary (explained, not overridden -- the
+binaries' `--help` plus the site reference are the documentation;
+manpages are a later addition, not this ticket). `Standards-Version`
+is deliberately absent from the binary control: it belongs in source
+packaging, and bookworm's lintian flags it as `unknown-field` there.
 
 `Maintainer` names the upstream copyright holder's public commit
 identity (`deb-meta.py`); the signing key below is separate from it.

@@ -85,6 +85,18 @@ class ControlTest(unittest.TestCase):
             self.assertNotIn("window manager", p.stdout.lower())
             self.assertNotIn("colour", p.stdout.lower())
 
+    def test_no_source_only_fields_in_a_binary_control(self):
+        # Standards-Version lives in debian/control, not in an
+        # installed binary control: bookworm lintian flags it as
+        # `unknown-field` there.
+        p = run_meta(
+            "control", "--package", "scoot", "--source", str(REPO),
+            "--arch", "amd64", "--depends", "libc6",
+            "--scootbg-version", "0.1.0-1",
+        )
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("Standards-Version", p.stdout)
+
 
 class ShlibdepsTest(unittest.TestCase):
     # A realistic bookworm shlibdeps line for the compositor; the gate

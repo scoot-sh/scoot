@@ -154,6 +154,27 @@ for pkg in scoot scootbg scootbar; do
         --scootbg-version "$SCOOTBG_VERSION-$REVISION" \
         >"$STAGE/DEBIAN/control"
 
+    # Non-native packages (our versions carry a Debian revision) must
+    # ship changelog.Debian.gz or lintian fails with no-changelog. The
+    # entry points at the per-package release notes (the user-visible
+    # history) and the license inventory, which is where this tree's
+    # history lives -- there is no Debian revision history to recount.
+    # Both names come from the rendered control, so they cannot skew.
+    UPSTREAM=$(sed -n 's/^Version: //p' "$STAGE/DEBIAN/control" | sed "s/-$REVISION\$//")
+    CONTACT=$(sed -n 's/^Maintainer: //p' "$STAGE/DEBIAN/control")
+    {
+        echo "$pkg ($UPSTREAM-$REVISION) stable; urgency=medium"
+        echo
+        echo "  * Upstream release $UPSTREAM."
+        echo "    User-visible changes are in the release notes at"
+        echo "    https://github.com/scoot-sh/scoot/releases; every third-party"
+        echo "    crate in the build is listed in"
+        echo "    /usr/share/doc/$pkg/THIRD-PARTY-LICENSES."
+        echo
+        echo " -- $CONTACT  $(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S %z')"
+    } >"$STAGE/usr/share/doc/$pkg/changelog.Debian"
+    gzip -9n "$STAGE/usr/share/doc/$pkg/changelog.Debian"
+
     VER=$(sed -n 's/^Version: //p' "$STAGE/DEBIAN/control")
     dpkg-deb --build "$STAGE" "$OUT/${pkg}_${VER}_${ARCH}.deb"
     ls -l "$OUT/${pkg}_${VER}_${ARCH}.deb"

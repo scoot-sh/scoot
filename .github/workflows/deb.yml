@@ -204,7 +204,10 @@ jobs:
               # artifact: any error fails, and a warning fails unless it
               # names an override this tree ships (there are none today:
               # the build is clean or the run is red).
-              lintian --no-tag-display-limit /out/*.deb 2>&1 | tee /out/lintian.log
+              # (bookworm's lintian already deprecates
+              # --no-tag-display-limit, so plain `lintian`: the log
+              # keeps every tag).
+              lintian /out/*.deb 2>&1 | tee /out/lintian.log
               if grep -q "^E: " /out/lintian.log; then
                 echo "::error title=lintian errors::see lintian.log in the debs artifact."
                 exit 1

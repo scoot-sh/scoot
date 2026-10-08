@@ -25,7 +25,6 @@ MAINTAINER = "Steve Yackey <steveyackey@gmail.com>"
 HOMEPAGE = "https://github.com/scoot-sh/scoot"
 SECTION = "x11"
 PRIORITY = "optional"
-STANDARDS_VERSION = "4.7.2"
 DEBIAN_REVISION = "1"
 
 # Runtime sonames per binary, from `ldd` of a release build (the site
@@ -121,8 +120,10 @@ def check_depends(package, shlibdeps_output):
     Returns (depends, problems): the `Depends` value to render (the
     shlibdeps entries verbatim, derived not remembered) plus the list
     of names outside the table. A missing allow-list entry is fine (a
-    feature dropped a library); an extra shlibdeps name is a build
-    failure with the README table to update.
+    feature dropped a library -- the install proof, `scoot --version`
+    and the smoke test on the bare base, catches a dropped library
+    instead); an extra shlibdeps name is a build failure with the
+    README table to update.
     """
     names = parse_shlibdeps(shlibdeps_output)
     problems = [n for n, _ in names if n not in ALLOW[package]]
@@ -152,6 +153,9 @@ def parse_shlibdeps(output):
 def render_control(package, source, arch, depends, scootbg_version=None,
                     revision=DEBIAN_REVISION):
     """Render the full DEBIAN/control text for one package."""
+    # Note: no Standards-Version. That field lives in source
+    # packaging (debian/control), not in an installed binary control:
+    # bookworm's lintian flags it as `unknown-field` there.
     lines = [
         f"Package: {package}",
         f"Version: {deb_version(source, package, revision)}",
@@ -160,7 +164,6 @@ def render_control(package, source, arch, depends, scootbg_version=None,
         f"Section: {SECTION}",
         f"Priority: {PRIORITY}",
         f"Homepage: {HOMEPAGE}",
-        f"Standards-Version: {STANDARDS_VERSION}",
     ]
     dep_list = [depends] if depends else []
     if package == "scoot":
