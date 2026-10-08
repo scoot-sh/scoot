@@ -47,7 +47,7 @@ commands at packaging time, names move:
 | `libudev.so.1` | `systemd-libs` / `systemd-devel` | `libudev1` (minimal images: `libudev-mini1`) / `systemd-devel` |
 | `libpixman-1.so.0` | `pixman` / `pixman-devel` | `libpixman-1-0` / `libpixman-1-0-devel` |
 | `libxkbcommon.so.0` | `libxkbcommon` / `libxkbcommon-devel` | `libxkbcommon0` / `libxkbcommon-devel` |
-| `libgbm.so.1` / `libdrm.so.2` (`gpu-scanout` only) | `mesa-libgbm` / `libdrm` | same sonames, `optdepends`-equivalent: not required (see below) |
+| `libgbm.so.1` / `libdrm.so.2` (`gpu-scanout` only) | `mesa-libgbm` / `libdrm` | not probed (not shipped; see below) |
 
 Notes:
 
@@ -63,10 +63,10 @@ Notes:
   (staged by `scripts/vendor-release.sh`) and the specs only install it.
   CI stages the tarball with `vendor-release.sh` itself, which does need
   `cargo-deny` — on openSUSE via `cargo install cargo-deny --locked`.
-- The bar's `--check` on the shipped example needs a font present only
-  to prove text shaping end to end: `dejavu-sans-fonts` on Fedora,
-  `dejavu-fonts` on openSUSE (both provide a path the bar's fallback
-  list already probes: `crates/scootbar/src/font.rs`).
+- The bar's `--check` on the shipped example needs a font to pass:
+  `dejavu-sans-fonts` on Fedora, `dejavu-fonts` on openSUSE (each
+  provides a path the bar's fallback list already probes:
+  `crates/scootbar/src/font.rs`).
 
 ## Installed files
 
