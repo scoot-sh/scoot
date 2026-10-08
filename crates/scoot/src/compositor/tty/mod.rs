@@ -1456,7 +1456,7 @@ impl Tty {
     /// `activate(true)` then runs `reset_state()`'s atomic commit without
     /// master and fails with `EACCES`. Retrying `activate()` alone cannot
     /// fix that -- it re-issues the same commit on the same master-less fd.
-    /// See `docs/backlog/core/vt-switch-back-greeter-master.md`.
+    /// See `docs/backlog/resolved/vt-switch-back-greeter-master-done.md`.
     ///
     /// What the single explicit `SET_MASTER` does depends on privilege.
     /// Measured live on the M2 (see the ticket): a privileged process
@@ -1500,7 +1500,11 @@ impl Tty {
                     true
                 }
                 Err(error) => {
-                    tracing::error!(%error, "{}", master_loss_guidance(true));
+                    // The probe just took master, so no holder to blame:
+                    // this is a modeset or commit failure on our own master
+                    // fd. Both errors are logged -- the master-loss failure
+                    // that entered the probe, and the retry's own.
+                    tracing::error!(%first, %error, "{}", reactivation_retry_guidance());
                     false
                 }
             },
@@ -1545,11 +1549,28 @@ fn master_loss_guidance(held: bool) -> String {
     };
     format!(
         "could not reactivate the drm device: {holder} -- see \
-         docs/backlog/core/vt-switch-back-greeter-master.md. The session is still alive: \
+         site/src/content/docs/scoot/backends.md#hotplug-vt-switching-captures. The session is still alive: \
          the keyboard works and `scoot msg` answers (check `outputs` -- a dead display reports \
          live=false there), so switch VTs away and back (Ctrl+Alt+F1..F12) to retry the \
-         reactivation; each switch back tries again"
+         reactivation; each switch back tries again. If it never comes back, restart the \
+         session: a fresh start re-acquires master through the seat daemon"
     )
+}
+
+/// The actionable half of a reactivation that still fails *after* the
+/// probe retook DRM master: no holder to name (the successful `SET_MASTER`
+/// proves this fd holds master), so this is a modeset or commit failure on
+/// our own master, not a lost race. A pure function so headless tests can
+/// pin its wording apart from [`master_loss_guidance`]'s holder language --
+/// the ioctl half needs real DRM hardware, this half must not rot silently.
+fn reactivation_retry_guidance() -> String {
+    "could not reactivate the drm device even after retaking DRM master: \
+     this is a modeset or commit failure on our own master, not another session \
+     holding it -- see \
+     site/src/content/docs/scoot/backends.md#hotplug-vt-switching-captures. The session is still alive: \
+     the keyboard works and `scoot msg` answers, so switch VTs away and back (Ctrl+Alt+F1..F12) \
+     to retry; if it never comes back, restart the session"
+        .to_owned()
 }
 
 /// Largest CRTC LUT length `zwlr_gamma_control_v1` can sanely advertise:
@@ -2246,10 +2267,10 @@ mod tests {
 
     #[test]
     fn only_a_permission_denied_access_error_is_a_stealable_master_loss() {
-        // The fail-first pin for the steal gate: `DrmMasterFailed` (Smithay
+        // The fail-first pin for the probe gate: `DrmMasterFailed` (Smithay
         // could not acquire master itself) and `DeviceInactive` must never
-        // route into the steal loop -- retrying a steal there is either
-        // meaningless or aimed at a device that is gone. An `Access` error
+        // route into the probe -- retrying an explicit `SET_MASTER` there
+        // is either meaningless or aimed at a device that is gone. An `Access` error
         // needs a real DRM fd to construct, so its arm is proven live on
         // hardware (see the ticket); these arms prove the gate says no.
         assert!(!is_master_loss(&DrmError::DrmMasterFailed));
@@ -2269,6 +2290,22 @@ mod tests {
             assert!(guidance.contains("scoot msg"), "{guidance}");
             assert!(guidance.contains("live=false"), "{guidance}");
             assert!(guidance.contains("Ctrl+Alt"), "{guidance}");
+            // The pointer must exist in the merged tree: this string once
+            // cited `docs/backlog/core/vt-switch-back-greeter-master.md`,
+            // which the same PR moved to `resolved/`, so the log pointed
+            // at thin air. The user reading a log has the docs site, not
+            // the repo, so both variants cite the site section.
+            assert!(
+                guidance.contains("backends.md#hotplug-vt-switching-captures"),
+                "{guidance}"
+            );
+            assert!(
+                !guidance.contains("docs/backlog/core/vt-switch-back"),
+                "{guidance}"
+            );
+            // The restart fallback is the way back when retrying never
+            // recovers: a fresh start re-acquires master through seatd.
+            assert!(guidance.contains("restart the"), "{guidance}");
         }
         assert!(
             master_loss_guidance(true).contains("the greeter on tty1"),
@@ -2293,5 +2330,33 @@ mod tests {
         // differs (wait for the holder vs seatd must hand it over), so a
         // refactor that merges the branches trips here.
         assert_ne!(master_loss_guidance(true), master_loss_guidance(false));
+    }
+
+    #[test]
+    fn the_post_probe_retry_failure_names_no_holder() {
+        // The fail-first pin for the retry arm: once the probe's
+        // `SET_MASTER` has succeeded this fd holds master, so a second
+        // `activate(true)` failure is a modeset or commit failure on our
+        // own master -- blaming "another session is still holding it"
+        // there misdiagnoses. Point the arm back at
+        // `master_loss_guidance(true)` and this fails.
+        let guidance = reactivation_retry_guidance();
+        assert!(
+            !guidance.contains("another session is still holding it"),
+            "{guidance}"
+        );
+        assert!(!guidance.contains("still holding it"), "{guidance}");
+        assert!(guidance.contains("after retaking DRM master"), "{guidance}");
+        assert!(guidance.contains("modeset or commit failure"), "{guidance}");
+        assert!(guidance.contains("keyboard"), "{guidance}");
+        assert!(guidance.contains("scoot msg"), "{guidance}");
+        assert!(guidance.contains("Ctrl+Alt"), "{guidance}");
+        assert!(guidance.contains("restart the"), "{guidance}");
+        assert!(
+            guidance.contains("backends.md#hotplug-vt-switching-captures"),
+            "{guidance}"
+        );
+        assert_ne!(guidance, master_loss_guidance(true));
+        assert_ne!(guidance, master_loss_guidance(false));
     }
 }

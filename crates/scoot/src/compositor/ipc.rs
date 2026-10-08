@@ -970,8 +970,10 @@ impl State {
                 // there is no DRM master to lose, so always `true`; under
                 // `--tty` this is the session's master state -- `false`
                 // after a VT switch back seatd failed to re-acquire master
-                // for, until a later switch back steals it back (see
-                // `tty::reacquire_master`). An agent reading pixels must
+                // for, until a later switch back retries the acquisition
+                // (see `tty::reacquire_master`; only a privileged session
+                // retakes master itself -- an unprivileged one waits on the
+                // seat daemon winning it a race). An agent reading pixels must
                 // check this first: the composited frame outlives master,
                 // so a screenshot of a `live: false` output is stale.
                 live: self.tty.as_ref().is_none_or(Tty::is_active),

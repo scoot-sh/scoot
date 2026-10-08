@@ -19,7 +19,9 @@ description: "Compositor symptoms and their fixes — picture, keys, config, out
 - *`--tty` display stays dark after a VT switch back.* The session is
   usually alive: `scoot msg outputs` answers with `live: false`, and the
   log names the holder scoot could not take DRM master from. Switch VTs
-  away and back -- each return retries. See [VT
+  away and back -- each return retries, and any one of them may win the
+  race. If it never recovers, restart the session (a fresh start
+  re-acquires master through the seat daemon). See [VT
   switching](./backends.md#hotplug-vt-switching-captures).
 
 ## Keys
