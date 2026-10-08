@@ -81,7 +81,7 @@ jobs:
         run: |
           dnf install -y \
             cargo cargo-deny desktop-file-utils dejavu-sans-fonts foot gcc \
-            ImageMagick jq libinput-devel libseat-devel libxkbcommon-devel pixman-devel \
+            diffutils ImageMagick jq libinput-devel libseat-devel libxkbcommon-devel pixman-devel \
             procps-ng rpm-build rpmdevtools rpmlint systemd-devel systemd-rpm-macros \
             wayland-devel wayland-protocols-devel wayland-utils
           mkdir -p "$GITHUB_WORKSPACE/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS} \
