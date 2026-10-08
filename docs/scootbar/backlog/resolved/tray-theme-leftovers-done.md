@@ -9,20 +9,6 @@ resolved: "2026-10-08"
 
 # Tray themed icons: small leftovers from the #497 and #502 reviews
 
-Filed 2026-10-07. Serves **daily-drive** / **computer use** (pick one, say why).
-
-## The gap
-
-What is wrong or missing, with evidence (file paths, measured numbers).
-
-## What to do
-
-The proposed shape, and the edge cases to pin.
-
-## Not in this ticket
-
-What is deliberately out of scope.
-
 Filed 2026-10-07 from the independent reviews of #497 (themed icon names)
 and #502 (its hardening). Serves **daily-drive**. None of these is a
 defect that bites a real desktop today; each is a doc or a hardening step
