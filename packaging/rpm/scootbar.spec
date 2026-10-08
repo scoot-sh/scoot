@@ -14,6 +14,8 @@
 Name:           scootbar
 Version:        0.1.0
 Release:        1%{?dist}
+# No -debuginfo/-debugsource subpackages: see scoot.spec.
+%global         debug_package %{nil}
 Summary:        Status bar for the scoot compositor
 License:        MIT
 URL:            https://github.com/scoot-sh/scoot

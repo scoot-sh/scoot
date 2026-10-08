@@ -93,6 +93,14 @@ Notes:
 - `%check` in every spec runs only headless-safe probes (`--version`,
   `--print-default-config`, `daemon --check`): the headless smoke test
   needs a runtime, so it runs after install in CI, not in the build.
+- No `-debuginfo`/`-debugsource` subpackages (`debug_package %{nil}`):
+  the vendored crate sources carry their upstream modes (executable
+  `.rs` files plus a `#!` attribute line in one crate that is not a
+  shebang), which fails `brp-mangle-shebangs` over `/usr/src/debug`.
+  The revisit, if distro-grade inclusion ever wants debuginfo, is a
+  mode-normalizing `find vendor -type f -exec chmod a-x {} +` in `%prep`
+  (cargo checks content hashes, not modes, so the build is unaffected)
+  — not yet proven, so not yet shipped.
 
 ## Architectures
 
