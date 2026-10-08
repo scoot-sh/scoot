@@ -18,9 +18,10 @@ use rustix::time::{
 use super::Update;
 use super::item::{Fingerprint, Item, fill, get_all_body, is_item_name};
 use super::menu::{MENU_IFACE, MenuOpen, about_body, event_body, fill_menu, get_layout_body};
+use super::timer::OneShot;
 use super::{
-    FLIGHT_TTL, ITEM_DEFAULT_PATH, ITEM_FDO, ITEM_KDE, ITEM_PROPERTIES, MAX_ITEMS, MAX_PER_SERVICE,
-    MIN_REFRESH_GAP, PROTOCOL_VERSION, WATCHER_FDO, WATCHER_KDE, WATCHER_PATH,
+    DRAW_GAP, FLIGHT_TTL, ITEM_DEFAULT_PATH, ITEM_FDO, ITEM_KDE, ITEM_PROPERTIES, MAX_ITEMS,
+    MAX_PER_SERVICE, MIN_REFRESH_GAP, PROTOCOL_VERSION, WATCHER_FDO, WATCHER_KDE, WATCHER_PATH,
 };
 use crate::dbus::conn::{self, Conn, Event};
 use crate::dbus::link::Session;
@@ -33,6 +34,11 @@ pub(super) struct Live {
     /// [`MIN_REFRESH_GAP`] to be read again: no item waiting, no timer,
     /// no wakeups.
     pub(super) coalesce: Option<OwnedFd>,
+    /// When a content change was last reported to the bar.
+    pub(super) drawn: Option<Instant>,
+    /// Armed while a content change waits out [`DRAW_GAP`]: the view the
+    /// bar asks for when it fires is the latest, whatever came meanwhile.
+    pub(super) held: Option<OneShot>,
     pub(super) conn: Conn,
     pub(super) mode: Mode,
     /// The KDE watcher name's owner while in host mode: who item lists
@@ -387,6 +393,37 @@ impl Live {
         }
     }
 
+    /// Reports a content change to the bar now: the module appearing or
+    /// emptying, the first change after a quiet spell, and the held change
+    /// when its timer fires. Drawing draws the latest state, so whatever
+    /// was held is shown with it.
+    pub(super) fn draw_now(&mut self) -> Update {
+        self.held = None;
+        self.drawn = Some(Instant::now());
+        Update::Changed
+    }
+
+    /// Reports a content change that is not the module appearing or
+    /// emptying: at once after a quiet spell, else held for one timer
+    /// ([`DRAW_GAP`] since the last report), however many follow.
+    pub(super) fn changed(&mut self) -> Update {
+        if self.held.is_some() {
+            return Update::Unchanged;
+        }
+        let wait = self
+            .drawn
+            .map(|at| DRAW_GAP.saturating_sub(at.elapsed()))
+            .filter(|wait| !wait.is_zero());
+        match wait.and_then(OneShot::after) {
+            Some(timer) => {
+                self.held = Some(timer);
+                Update::Unchanged
+            }
+            // Past the gap, or no timer to wait with: now.
+            None => self.draw_now(),
+        }
+    }
+
     /// An item's `GetAll` came back (answered or errored): it may be
     /// asked again, and whether a signal arrived meanwhile.
     pub(super) fn finish_fetch(&mut self, id: &str) -> bool {
@@ -515,6 +552,7 @@ impl Live {
         if self.menu.as_ref().is_none_or(|menu| menu.item != id) {
             return Update::Unchanged;
         }
+        let was_empty = self.menu.as_ref().is_some_and(|menu| menu.root.is_empty());
         let parsed = proto::read_menu_layout(signature, body).ok();
         let moved = match parsed {
             None => {
@@ -542,7 +580,14 @@ impl Live {
             self.refresh_menu();
         }
         if moved {
-            Update::Changed
+            // The menu newly filled or newly lost opens or closes its
+            // popup: at once. New rows on one already shown wait out the
+            // draw gap, like item icons.
+            if was_empty {
+                self.draw_now()
+            } else {
+                self.changed()
+            }
         } else {
             Update::Unchanged
         }
@@ -736,7 +781,7 @@ impl Live {
                 menu.stale = true;
             }
             if closed {
-                return Update::Changed;
+                return self.draw_now();
             }
             return Update::Unchanged;
         }
@@ -755,7 +800,7 @@ impl Live {
                 // `on_menu_layout`).
                 self.finish_menu_fetch(&item);
                 if self.close_menu_if_empty(&item) {
-                    return Update::Changed;
+                    return self.draw_now();
                 }
             }
             _ => {}
@@ -777,7 +822,7 @@ impl Live {
             Op::MenuLayout { item, .. } => {
                 self.finish_menu_fetch(&item);
                 if self.close_menu_if_empty(&item) {
-                    Update::Changed
+                    self.draw_now()
                 } else {
                     Update::Unchanged
                 }
@@ -816,11 +861,19 @@ impl Live {
             return Update::Unchanged;
         }
         let before = Fingerprint::of(&self.items[index]);
+        let was = self.items[index].shown();
         if !fill(&mut self.items[index], body) {
             return Update::Unchanged;
         }
         if Fingerprint::of(&self.items[index]) != before {
-            Update::Changed
+            // An item newly shown or hidden moves the bar's layout: at
+            // once, like an item arriving or leaving. A new icon or title
+            // on one already shown waits out the draw gap.
+            if self.items[index].shown() != was {
+                self.draw_now()
+            } else {
+                self.changed()
+            }
         } else {
             Update::Unchanged
         }
@@ -892,7 +945,7 @@ impl Live {
         // Newcomers arrive empty and fill in from their `GetAll`: the
         // view moves when one was added, and again when each answers.
         if added {
-            Update::Changed
+            self.draw_now()
         } else {
             Update::Unchanged
         }
@@ -955,7 +1008,7 @@ impl Live {
             moved = true;
         }
         if moved {
-            Update::Changed
+            self.draw_now()
         } else {
             Update::Unchanged
         }
@@ -1035,7 +1088,7 @@ impl Live {
             if self.mode == Mode::Owner {
                 self.emit_unregistered(&name);
             }
-            return Update::Changed;
+            return self.draw_now();
         }
         for (id, owner) in refresh {
             // The name changed hands: signals now come from the new
@@ -1066,7 +1119,7 @@ impl Live {
         if ours {
             self.mode = Mode::Owner;
             self.enumerate();
-            return Update::Changed;
+            return self.draw_now();
         }
         if new.is_none() {
             // Nobody owns it: take it back (answered later).
@@ -1085,11 +1138,11 @@ impl Live {
                     Op::RequestKde,
                 );
             }
-            return Update::Changed;
+            return self.draw_now();
         }
         self.mode = Mode::Host;
         self.refresh_watcher();
-        Update::Changed
+        self.draw_now()
     }
 
     /// Works a watcher-name answer: ours means owner mode (matches,
@@ -1113,7 +1166,7 @@ impl Live {
                 self.mode = Mode::Host;
                 self.read_watcher_owner();
             }
-            return Update::Changed;
+            return self.draw_now();
         }
         Update::Unchanged
     }
@@ -1385,7 +1438,7 @@ impl Live {
             let mut get = Writer::new();
             get.str(&service);
             let Some(bytes) = get.take_body() else {
-                return Update::Changed;
+                return self.draw_now();
             };
             self.issue(
                 conn::BUS_NAME,
@@ -1401,7 +1454,7 @@ impl Live {
         if self.mode == Mode::Owner {
             self.emit_registered(&id);
         }
-        Update::Changed
+        self.draw_now()
     }
 
     /// Drops the item with `id` (or every id under a vanished service),
@@ -1421,7 +1474,7 @@ impl Live {
         if self.mode == Mode::Owner {
             self.emit_unregistered(id);
         }
-        Update::Changed
+        self.draw_now()
     }
 
     pub(super) fn set_owner(&mut self, id: &str, owner: String) {
@@ -1671,6 +1724,8 @@ pub(super) fn setup(conn: Conn) -> Live {
         items: Vec::new(),
         flights: Vec::new(),
         coalesce: None,
+        drawn: None,
+        held: None,
         // Our own host is first: `IsStatusNotifierHostRegistered` holds
         // from the start in owner mode.
         hosts: Vec::new(),

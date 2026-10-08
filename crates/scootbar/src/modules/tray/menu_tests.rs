@@ -285,6 +285,64 @@ fn events(fake: &mut Fake) -> Vec<i32> {
         .collect()
 }
 
+/// The scripted menu's layout at generation `n`: one row, a new label,
+/// so every re-read moves what the popup shows.
+fn tree_label(n: usize) -> Vec<u8> {
+    fake::layout_reply(n as u32 + 1, &|w| {
+        fake::layout_node(w, 0, &|_| {}, &|w| {
+            fake::layout_kid(w, &|w| {
+                fake::layout_node(w, 10, &label(&format!("Row{n}")), &|_| {});
+            });
+        });
+    })
+}
+
+/// A menu flooding `LayoutUpdated` while open is re-filled ten times a
+/// second at most, not once per re-read: layout changes past the first
+/// wait out the draw gap the same way item icons do.
+#[test]
+fn a_flooding_menu_is_redrawn_ten_times_a_second_at_most() {
+    let (mut harness, mut fake) = started();
+    until_shown(&mut harness, &mut fake);
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("menu", Some(0)), 1),
+        Ok(Update::Changed)
+    );
+    until_rows(&mut harness, &mut fake, &root_rows());
+    // A new label a turn, as a menu flooding updates while open is heard
+    // when the bar keeps up: a re-fill each, were they not held.
+    let mut drawn = 0;
+    let mut n = 0;
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_millis(600) {
+        n += 1;
+        fake.add_menu(SERVICE, MENU, tree_label(n));
+        fake.send_layout_updated(OWNER, MENU, n as u32 + 1);
+        fake.pump();
+        if harness.wait(Duration::from_millis(5)) == Some(Update::Changed) {
+            drawn += 1;
+        }
+        fake.pump();
+    }
+    // One a gap: six in 600 ms, a little over for a gap's rounding,
+    // never one per floor window.
+    assert!((1..=9).contains(&drawn), "{drawn} re-fills");
+    // And the run ends on its last label, once the held one is drawn.
+    let last = format!("Row{n}");
+    drive(&mut harness, &mut fake, |harness| {
+        rows(harness)
+            .is_some_and(|rows| rows.first().is_some_and(|row| row.ends_with(last.as_str())))
+    });
+    // The held re-fill lands on the draw timer: drain, then nothing is held.
+    let drained = std::time::Instant::now();
+    while drained.elapsed() < Duration::from_millis(250) {
+        fake.pump();
+        harness.wait(Duration::from_millis(5));
+        fake.pump();
+    }
+    assert_eq!(harness.source_count(), 1, "no timer once nothing is held");
+}
+
 #[test]
 fn a_menu_opens_from_invoke_and_a_row_click_sends_clicked() {
     let (mut harness, mut fake) = started();
