@@ -372,6 +372,116 @@ fn a_click_activates_and_a_scroll_scrolls() {
     );
 }
 
+/// The `Scroll` delta in each convention, with real KDE values: Qt sends
+/// wheel units at 120 a notch with up positive (what Plasma's tray
+/// forwards as `+angleDelta`, and what kmix accumulates in steps of 120
+/// with positive louder); GTK counts notches with up negative (what
+/// Waybar sends, `-1` for up, and what libayatana-appindicator reads a
+/// positive vertical delta as scroll-down against).
+#[test]
+fn scroll_deltas_match_each_stacks_units() {
+    use super::{QT_UNITS_PER_NOTCH, ScrollConvention, scroll_delta};
+    assert_eq!(QT_UNITS_PER_NOTCH, 120);
+    // GTK: notch counts, up negative.
+    assert_eq!(scroll_delta(ScrollConvention::Gtk, true, 1), -1);
+    assert_eq!(scroll_delta(ScrollConvention::Gtk, false, 3), 3);
+    // Qt: wheel units, up positive.
+    assert_eq!(scroll_delta(ScrollConvention::Qt, true, 1), 120);
+    assert_eq!(scroll_delta(ScrollConvention::Qt, false, 1), -120);
+    assert_eq!(scroll_delta(ScrollConvention::Qt, true, 3), 360);
+    assert_eq!(scroll_delta(ScrollConvention::Qt, false, 3), -360);
+    // A touchpad flood clamps at 64 notches before scaling: 64 * 120.
+    assert_eq!(scroll_delta(ScrollConvention::Gtk, true, 1000), -64);
+    assert_eq!(scroll_delta(ScrollConvention::Gtk, false, 1000), 64);
+    assert_eq!(scroll_delta(ScrollConvention::Qt, true, 1000), 7680);
+    assert_eq!(scroll_delta(ScrollConvention::Qt, false, 1000), -7680);
+    // No steps is no delta (the caller sends no call at all for zero).
+    assert_eq!(scroll_delta(ScrollConvention::Gtk, true, 0), 0);
+    assert_eq!(scroll_delta(ScrollConvention::Qt, false, 0), 0);
+    // The config values, and the default the wire keeps.
+    assert_eq!(ScrollConvention::parse("gtk"), Some(ScrollConvention::Gtk));
+    assert_eq!(ScrollConvention::parse("qt"), Some(ScrollConvention::Qt));
+    assert_eq!(ScrollConvention::parse("QT"), None);
+    assert_eq!(ScrollConvention::parse(""), None);
+    assert_eq!(ScrollConvention::default(), ScrollConvention::Gtk);
+}
+
+/// With the Qt convention a wheel-up sends `+120` a notch (one kmix step)
+/// and a wheel-down `-120` a notch, clamped at 64 notches (7680):
+/// Plasma's convention on the wire.
+#[test]
+fn a_qt_scroll_sends_wheel_units_up_positive() {
+    let (stream, mut fake) = Fake::pair();
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(
+            "Player",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+        ),
+    );
+    let mut harness = Harness::new(super::start_with_convention(
+        stream,
+        super::ScrollConvention::Qt,
+    ));
+    until_shown(&mut harness, &mut fake, 1);
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("wheel-up", Some(0)), 1),
+        Ok(Update::Unchanged)
+    );
+    fake.pump();
+    harness.wait(Duration::from_millis(200));
+    fake.pump();
+    let calls = fake.calls();
+    let scroll = calls
+        .iter()
+        .find(|call| call.member == "Scroll")
+        .expect("no Scroll call");
+    assert_eq!(scroll.signature, "is");
+    let mut reader = crate::dbus::proto::Reader::le(&scroll.body);
+    assert_eq!(reader.i32().unwrap(), 120);
+    assert_eq!(reader.str().unwrap(), "vertical");
+
+    // Down is negative: three notches down is three kmix steps down.
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("wheel-down", Some(0)), 3),
+        Ok(Update::Unchanged)
+    );
+    fake.pump();
+    harness.wait(Duration::from_millis(200));
+    fake.pump();
+    let calls = fake.calls();
+    let scroll = calls
+        .iter()
+        .rfind(|call| call.member == "Scroll")
+        .expect("no Scroll call");
+    assert_eq!(
+        crate::dbus::proto::Reader::le(&scroll.body).i32().unwrap(),
+        -360
+    );
+
+    // A touchpad flood is one bounded call: 64 notches at 120 units.
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("wheel-up", Some(0)), 1000),
+        Ok(Update::Unchanged)
+    );
+    fake.pump();
+    harness.wait(Duration::from_millis(200));
+    fake.pump();
+    let calls = fake.calls();
+    let scroll = calls
+        .iter()
+        .rfind(|call| call.member == "Scroll")
+        .expect("no Scroll call");
+    assert_eq!(
+        crate::dbus::proto::Reader::le(&scroll.body).i32().unwrap(),
+        7680
+    );
+}
+
 #[test]
 fn icons_draw_from_the_cache() {
     use rustix::event::PollFlags;
@@ -609,7 +719,10 @@ fn waiting_without_a_bus_costs_nothing_and_shows_nothing() {
         std::thread::current().id()
     ));
     let _ = std::fs::remove_file(&path);
-    let harness = Harness::new(super::start_with(super::Addr::Path(path)));
+    let harness = Harness::new(super::start_with(
+        super::Addr::Path(path),
+        Settings::default(),
+    ));
     assert!(harness.source_count() <= 1);
     assert!(harness.view().is_empty());
     assert!(harness.value_on(None).is_none());
@@ -1220,7 +1333,7 @@ fn a_bus_that_keeps_dropping_us_is_not_redialled_forever() {
 }
 
 fn start_with_path(path: std::path::PathBuf) -> Box<dyn crate::modules::Module> {
-    start_with(Addr::Path(path))
+    start_with(Addr::Path(path), Settings::default())
 }
 
 /// What a watcher announces: the id form (KDE's, and ours), and what a

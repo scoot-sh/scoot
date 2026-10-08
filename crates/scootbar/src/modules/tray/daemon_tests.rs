@@ -7,7 +7,7 @@
 use std::time::{Duration, Instant};
 
 use super::fake::{item_body, item_body_with, solid};
-use super::start_with;
+use super::{Settings, start_with};
 use crate::dbus::conn::{self, Conn, Event};
 use crate::dbus::link::Addr;
 use crate::dbus::proto::Writer;
@@ -211,7 +211,7 @@ fn an_app_registers_is_clicked_and_crashes() {
     let Some(daemon) = Daemon::spawn() else {
         return;
     };
-    let mut harness = Harness::new(start_with(Addr::Path(daemon.path())));
+    let mut harness = Harness::new(start_with(Addr::Path(daemon.path()), Settings::default()));
     // The bar owns the watcher name once its `RequestName` is answered.
     let mut app = Item::new(&daemon, "org.kde.StatusNotifierItem-4242-1", "Weather");
     drive(&mut harness, &mut [&mut app], |harness| {
@@ -253,7 +253,7 @@ fn an_item_listed_on_the_bus_before_the_bar_is_found() {
         return;
     };
     let mut app = Item::new(&daemon, "org.kde.StatusNotifierItem-77-1", "Early");
-    let mut harness = Harness::new(start_with(Addr::Path(daemon.path())));
+    let mut harness = Harness::new(start_with(Addr::Path(daemon.path()), Settings::default()));
     drive(&mut harness, &mut [&mut app], |harness| {
         shown(harness) == ["Early"]
     });
@@ -301,7 +301,7 @@ fn watcher_owner(harness: &mut Harness, app: &mut Item) -> String {
 /// The scene the hostile-peer tests share: the bar on the daemon, one
 /// ordinary item `Steady` shown, and who owns the watcher name.
 fn scene(daemon: &Daemon) -> (Harness, Item, String) {
-    let mut harness = Harness::new(start_with(Addr::Path(daemon.path())));
+    let mut harness = Harness::new(start_with(Addr::Path(daemon.path()), Settings::default()));
     let mut steady = Item::new(daemon, "org.kde.StatusNotifierItem-1-1", "Steady");
     drive(&mut harness, &mut [&mut steady], |harness| {
         harness
@@ -478,7 +478,7 @@ fn a_name_that_changes_hands_follows_its_new_owner() {
     let Some(daemon) = Daemon::spawn() else {
         return;
     };
-    let mut harness = Harness::new(start_with(Addr::Path(daemon.path())));
+    let mut harness = Harness::new(start_with(Addr::Path(daemon.path()), Settings::default()));
     let name = "org.kde.StatusNotifierItem-5-1";
     // The first owner allows replacement (1), the second replaces (2).
     let mut first = Item::named(&daemon, name, "First", 1);
@@ -516,7 +516,7 @@ fn a_bus_that_denies_the_watcher_name_does_not_crash_the_tray() {
     ) else {
         return;
     };
-    let mut harness = Harness::new(start_with(Addr::Path(daemon.path())));
+    let mut harness = Harness::new(start_with(Addr::Path(daemon.path()), Settings::default()));
     let mut app = Item::new(&daemon, "org.kde.StatusNotifierItem-3-3", "Orphan");
     for _ in 0..40 {
         let _ = harness.wait(Duration::from_millis(20));
@@ -588,7 +588,7 @@ fn a_menu_opens_clicks_and_updates_over_the_daemon() {
     let Some(daemon) = Daemon::spawn() else {
         return;
     };
-    let mut harness = Harness::new(start_with(Addr::Path(daemon.path())));
+    let mut harness = Harness::new(start_with(Addr::Path(daemon.path()), Settings::default()));
     let mut app = Item::new(&daemon, "org.kde.StatusNotifierItem-6-6", "Dished");
     app.layout = Some(layout(1, "Open"));
     drive(&mut harness, &mut [&mut app], |harness| {

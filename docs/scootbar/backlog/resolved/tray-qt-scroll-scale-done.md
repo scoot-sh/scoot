@@ -1,10 +1,11 @@
 ---
 title: "Tray: Qt-scale scroll deltas for KDE items"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M6"
+resolved: "2026-10-08"
 ---
 
 # Tray: Qt-scale scroll deltas for KDE items
@@ -47,3 +48,36 @@ way, or not at all, under that choice.
 
 The sign itself (closed in [tray-real-apps](resolved/tray-real-apps-done.md));
 themed icons ([tray-icon-themes](tray-icon-themes.md)).
+
+## Status (2026-10-08): Qt convention as an opt-in
+
+Decision: no automatic per-item detection, the default wire behavior
+unchanged (GTK sign, ±notches, Waybar parity), and `[tray]
+scroll-convention = "qt"` for KDE items (up positive at 120 a notch,
+clamped to 64 notches, at most 7680). The most conservative option, and
+trivially reversible (one config line, or one small revert). Rationale,
+each point verified against source:
+
+- libayatana-appindicator's `Scroll` method handler maps `delta >= 0` to
+  `GDK_SCROLL_DOWN` and emits `ABS(delta)` as the step count, so the
+  direction comes from the sign alone; Waybar sends `-1` for up (its
+  `Item::handleScroll` maps `GDK_SCROLL_UP` to `dy = -1`).
+- `KStatusNotifierItemDBus::Scroll` forwards the delta unchanged as
+  `scrollRequested`; kmix's `KMixDockWidget::trayWheelEvent` reads
+  `decrease = delta < 0` and accumulates in steps of 120.
+- Every candidate detector is self-reported by same-user peers (service
+  names, paths, every KSN property) or needs an introspection the bar
+  never does (and Electron does not answer), so auto-detection would
+  silently invert a user's volume on a lie. An explicit user choice is
+  spoof-proof.
+
+`scroll_delta` is pure arithmetic (no allocation; no overflow: 64 * 120);
+unit-tested with real KDE values (120/notch, up positive, clamp to
+7680), plus wire tests in both conventions and config parse/refusal
+tests. The default behavior is unchanged on the wire (the existing
+scroll test passes unmodified).
+
+Ratchet (release, Asahi M2, same toolchain): file +0 B, `.text` −24 B,
+`.rodata` +64 B; idle 60 s windows 0 wakeups on both sides, RSS level
+(4672 kB; one 80 kB reclaim dip in one branch run under host load), 1
+thread, 8 fds. No row regresses; nothing waived.

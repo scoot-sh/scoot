@@ -921,6 +921,13 @@ struct TrayFile {
     /// Extra logical pixels on each side of the module.
     #[cfg(feature = "tray")]
     margin: Option<u32>,
+    /// Which stack's scroll convention `Scroll` deltas use: `gtk`
+    /// (the default: up negative, one unit a notch, as Waybar sends) or
+    /// `qt` (up positive at 120 a notch, as Plasma's tray forwards
+    /// `+angleDelta` and kmix reads it).
+    #[cfg(feature = "tray")]
+    #[serde(rename = "scroll-convention")]
+    scroll_convention: Option<String>,
     /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
     /// or `{ scoot = "..." }`.
     #[cfg(feature = "tray")]
@@ -1577,7 +1584,7 @@ impl File {
         }
         #[cfg(feature = "tray")]
         {
-            apply_tray(path, &self.tray, &mut modules.bindings)?;
+            apply_tray(path, &self.tray, &mut modules.tray, &mut modules.bindings)?;
         }
         #[cfg(feature = "media")]
         {
@@ -2109,14 +2116,25 @@ const TRAY_KEYS: [&str; 5] = [
     "tray.on-scroll-down",
 ];
 
-/// The `[tray]` table: the interaction keys into the module's bindings.
-/// The module holds no options of its own.
+/// The `[tray]` table: `scroll-convention` and the interaction keys,
+/// into the module's settings and bindings.
 #[cfg(feature = "tray")]
 fn apply_tray(
     path: &Path,
     table: &TrayFile,
+    settings: &mut crate::modules::tray::Settings,
     bindings: &mut Vec<(&'static str, crate::action::Bindings)>,
 ) -> Result<(), Error> {
+    if let Some(text) = table.scroll_convention.as_deref() {
+        settings.scroll_convention = crate::modules::tray::ScrollConvention::parse(text)
+            .ok_or_else(|| {
+                value(
+                    path,
+                    "tray.scroll-convention",
+                    format_args!("takes gtk or qt, not `{}`", text.escape_debug()),
+                )
+            })?;
+    }
     let read = bindings::read(
         crate::modules::tray::ID,
         [

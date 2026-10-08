@@ -1132,6 +1132,16 @@ fn a_tray_section_is_read_whole() {
     assert!(config.layout.left.contains(&"tray"));
     let bindings = config.modules.bindings_of("tray");
     assert!(!bindings.is_empty());
+    // The scroll convention defaults to GTK and reads `qt`.
+    assert_eq!(
+        config.modules.tray.scroll_convention,
+        crate::modules::tray::ScrollConvention::Gtk
+    );
+    let config = read("[tray]\nscroll-convention = \"qt\"\n").unwrap();
+    assert_eq!(
+        config.modules.tray.scroll_convention,
+        crate::modules::tray::ScrollConvention::Qt
+    );
 }
 
 #[test]
@@ -1143,6 +1153,10 @@ fn a_tray_section_is_refused_loudly() {
         ("[tray]\non-click = \"activate\"\n", "tray.on-click"),
         ("[tray]\non-click = \"frobnicate 0\"\n", "tray.on-click"),
         ("[tray]\nmargin = 99999\n", "tray.margin"),
+        (
+            "[tray]\nscroll-convention = \"kde\"\n",
+            "tray.scroll-convention",
+        ),
     ] {
         let error = read(text).unwrap_err().to_string();
         assert!(error.contains(key), "{text:?}: {error}");
