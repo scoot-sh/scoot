@@ -495,6 +495,7 @@ fn a_module_moved_between_outputs_keeps_running() {
     policy.overrides.push(Override {
         name: "DP-1".into(),
         bar: BarOverride::default(),
+        font_size: None,
         modules: Some(Sections {
             left: vec![],
             center: vec![],

@@ -383,7 +383,8 @@ impl State {
         };
         let style = self.content.style;
         let mut content = Content::default();
-        let em = render::em(style.font_size, scale);
+        // The popup hangs off this output's bar, so it measures in its em.
+        let em = render::em(entry.objects.font_size, scale);
         let mut layout = Layout::default();
         let pad = render::device(style.padding, scale);
         let frame = render::device(1, scale).max(1);

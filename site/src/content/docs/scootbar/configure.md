@@ -245,20 +245,31 @@ left = []
 right = ["clock"]
 ```
 
+A 4K panel next to a 1080p one wants a different em, not only the same em
+at its own device pixels: give the denser output its own size.
+
+```toml
+[output."DP-1"]                 # the 4K panel: larger text, same bar
+font-size = 20                  # 1 to 256, as [bar] font-size; absent is the shared value
+```
+
 - **`outputs`** is `"all"` (the default) or a list of names: only those
   outputs get a bar. An output plugged in later that is listed gets one; one
   that leaves loses its bar (and nothing else). An output the compositor
   never named (a `wl_output` older than version 4) matches only `all`.
   Names are compared byte for byte. The flag is `--outputs all` or
   `--outputs DP-1,eDP-1`; given, it replaces the file's list.
-- **`[output."NAME"]`** takes `edge`, `layer`, `exclusive`, `height`, `margin`
-  (the same values as `[bar]`) and `left`/`center`/`right`. A key not given
+- **`[output."NAME"]`** takes `edge`, `layer`, `exclusive`, `height`, `margin`,
+  `font-size` (the same values as `[bar]`, 1 to 256 for the size) and `left`/`center`/`right`. A key not given
   keeps the shared value. Giving any of the three lists sets that output's
   whole layout, as at the top level: a list not given is empty, and
-  `left = []` alone is a bar with nothing on it. Colors, the font, `padding`,
+  `left = []` alone is a bar with nothing on it. Colors, the font file, `padding`,
   `spacing`, `radius`, `opacity` and each module's own options are shared by
   every bar. An output table wins over a flag for its output (`--height 40`
-  is the height of every output that does not set its own).
+  is the height of every output that does not set its own, and
+  `--font-size 14` the em of every output without its own `font-size`). A
+  bad `font-size` (0, past 256, not a whole number) is refused naming
+  `output."NAME".font-size`, and the running bar stands on a bad reload.
 - **Refused, naming the key:** `outputs = []` (hide the bar with `msg hide`
   instead), a name listed twice, an empty or over-long (128 bytes) name or one
   with a control character, more than 32 names or tables, an
@@ -280,9 +291,22 @@ right = ["clock"]
   for the switching limit). There is no "primary" output: to put a module
   on one output only, name that output in its table.
 - **Scale.** Each bar is drawn at its own output's real device pixels
-  (fractional scales included), so text and pill scale with their output. A
-  per-output `font-size` is not built; the em is the same logical size
-  everywhere.
+  (fractional scales included), so text and pill scale with their output.
+  An output with its own `font-size` measures, paints and hit-tests at
+  that em: its modules take the room the larger (or smaller) text needs,
+  clicks land on what that output shows, and its popups and tooltips
+  measure in it too. The glyph cache is keyed by size, so a second size
+  costs its glyphs only. A reload that changes an output's size remakes
+  that output's measures and paints it again; its surface stays (the
+  geometry did not change), and `padding` and `spacing` stay shared.
+  Check it live: `scootbar msg layout` prints each module's rectangle per
+  output — the same module is wider on the output with the larger em.
+
+> **Symptom:** the text is the right size on one monitor and too small (or
+> too large) on the other. Give that output its own `font-size` (above)
+> and `scootbar msg reload`. If the wrong output changed, the compositor's
+> name for it is not the one in the table: compare with
+> `scoot msg outputs` on scoot (`swaymsg -t get_outputs` on sway).
 - **`radius`** is shared and at most half the shared height: on an output
   whose own `height` is smaller the corners are cut back to what that bar
   holds (`radius` is 0 to half the height at the file level).

@@ -231,3 +231,77 @@ fn a_second_output_adds_no_fds() {
     };
     assert_eq!(one, two, "a second output added fds");
 }
+
+/// The clock's rectangle on `output` in the `layout` reply's logical
+/// pixels: its width grows with the em.
+fn module_width(session: &Session, output: &str) -> u64 {
+    let reply = msg(session, "layout");
+    for shown in reply["outputs"].as_array().unwrap() {
+        if shown["output"] == output {
+            let modules = shown["modules"].as_array().unwrap();
+            assert_eq!(modules.len(), 1, "{reply:?}");
+            return modules[0]["width"].as_u64().unwrap();
+        }
+    }
+    panic!("no layout for {output}: {reply:?}");
+}
+
+/// Each output draws at its own `font-size`: one config gives two outputs
+/// different ems, and a reload that changes one output's size moves only
+/// that output's modules (the surfaces stay, nothing leaks).
+#[test]
+fn two_outputs_draw_at_their_own_font_size() {
+    let Some(session) = Session::scoot("fontsize", 2, "") else {
+        return;
+    };
+    let names = names(&session);
+    assert_eq!(names.len(), 2, "{names:?}");
+    let path = config(
+        &session,
+        "center = [\"clock\"]",
+        &format!(
+            "[clock]\nformat = \"MMMM\"\n[output.\"{}\"]\nfont-size = 28\n",
+            names[1]
+        ),
+    );
+    let mut bar = daemon(&session, &path);
+    session.wait_for(&mut bar.0, "a bar on each output", |session| {
+        (usable(session, 0) == (28, HEIGHT - 28) && usable(session, 1) == (28, HEIGHT - 28))
+            .then_some(())
+    });
+    let narrow = module_width(&session, &names[0]);
+    let wide = module_width(&session, &names[1]);
+    assert!(wide > narrow, "{narrow} against {wide}");
+    let pid = bar.0.id();
+    let fds = settled_fds(pid);
+
+    // Only the second output's size changes: only its modules move.
+    config(
+        &session,
+        "center = [\"clock\"]",
+        &format!(
+            "[clock]\nformat = \"MMMM\"\n[output.\"{}\"]\nfont-size = 20\n",
+            names[1]
+        ),
+    );
+    assert_eq!(msg(&session, "reload")["type"], "ok");
+    let middle = session.wait_for(&mut bar.0, "the resized output's redraw", |session| {
+        let width = module_width(session, &names[1]);
+        (width != wide).then_some(width)
+    });
+    assert!(
+        middle > narrow && middle < wide,
+        "{narrow}, {middle}, {wide}"
+    );
+    assert_eq!(
+        module_width(&session, &names[0]),
+        narrow,
+        "the other output moved"
+    );
+    // The same surfaces: no geometry changed, nothing leaked.
+    assert_eq!(usable(&session, 0), (28, HEIGHT - 28));
+    assert_eq!(usable(&session, 1), (28, HEIGHT - 28));
+    assert_eq!(settled_fds(pid), fds, "a reload leaked fds");
+    assert_buffers(pid, 2);
+    assert!(bar.0.try_wait().unwrap().is_none());
+}

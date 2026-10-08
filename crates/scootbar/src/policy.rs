@@ -10,10 +10,12 @@
 //!   a monitor plugged in later is judged the same way as one there at
 //!   start-up.
 //! - **Overrides.** An output named in `[output."NAME"]` may change its bar's
-//!   `edge`, `layer`, `exclusive`, `height` and `margin`, and set its own
+//!   `edge`, `layer`, `exclusive`, `height` and `margin`, its own em
+//!   (`font-size`), and set its own
 //!   module lists. An override is more specific than any flag: `--height`
-//!   sets the height of the outputs that override none. Style (colors, font,
-//!   padding, spacing) and each module's own options stay shared by every
+//!   sets the height of the outputs that override none. Colors, the font
+//!   file, padding, spacing and each module's own options stay shared by
+//!   every
 //!   bar, as does the one set of started modules: an override chooses which
 //!   of them an output shows and where, never starts a second one.
 //! - **What a name is.** Anything the compositor calls an output, as text:
@@ -111,6 +113,10 @@ pub struct Sections {
 pub struct Override {
     pub name: String,
     pub bar: BarOverride,
+    /// The output's own em, in logical pixels, 1 to
+    /// [`crate::config::MAX_FONT_SIZE`]; `None` keeps the shared
+    /// `[bar] font-size`.
+    pub font_size: Option<u32>,
     pub modules: Option<Sections>,
 }
 
@@ -160,16 +166,22 @@ impl fmt::Display for PolicyError {
 pub struct Resolved {
     pub selected: bool,
     pub bar: Bar,
+    /// The output's em, in logical pixels: its own `font-size`, or the
+    /// shared `[bar] font-size`.
+    pub font_size: u32,
     /// The modules it shows and where (its own lists, or the shared ones);
     /// the gaps are the shared ones.
     pub layout: Layout,
 }
 
-/// The shared bar and layout, and the policy over them: everything that
-/// decides what one output gets, as the daemon keeps it.
+/// The shared bar, em and layout, and the policy over them: everything
+/// that decides what one output gets, as the daemon keeps it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Placement {
     pub bar: Bar,
+    /// The shared em, in logical pixels: what an output without its own
+    /// `font-size` draws at.
+    pub font_size: u32,
     pub layout: Layout,
     pub policy: Policy,
 }
@@ -178,7 +190,8 @@ impl Placement {
     /// What the output called `name` (if the compositor named it) gets.
     /// Cold path: a settle, a reload.
     pub fn resolve(&self, name: Option<&str>) -> Resolved {
-        self.policy.resolve(name, &self.bar, &self.layout)
+        self.policy
+            .resolve(name, &self.bar, self.font_size, &self.layout)
     }
 }
 
@@ -229,13 +242,20 @@ impl Policy {
         self.overrides.iter().find(|over| over.name == name)
     }
 
-    /// What the output called `name` gets, given the shared `bar` and
-    /// `layout`. Cold path: a settle, a reload.
-    pub fn resolve(&self, name: Option<&str>, bar: &Bar, layout: &Layout) -> Resolved {
+    /// What the output called `name` gets, given the shared `bar`,
+    /// `font_size` and `layout`. Cold path: a settle, a reload.
+    pub fn resolve(
+        &self,
+        name: Option<&str>,
+        bar: &Bar,
+        font_size: u32,
+        layout: &Layout,
+    ) -> Resolved {
         let over = self.override_for(name);
         Resolved {
             selected: self.selects(name),
             bar: over.map_or(*bar, |over| over.bar.apply(bar)),
+            font_size: over.and_then(|over| over.font_size).unwrap_or(font_size),
             layout: match over.and_then(|over| over.modules.as_ref()) {
                 Some(own) => Layout {
                     left: own.left.clone(),

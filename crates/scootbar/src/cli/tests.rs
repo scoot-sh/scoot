@@ -1007,6 +1007,7 @@ fn the_flag_and_the_files_tables_are_checked_together() {
             overrides: vec![Override {
                 name: "DP-2".into(),
                 bar: BarOverride::default(),
+                font_size: None,
                 modules: None,
             }],
         },

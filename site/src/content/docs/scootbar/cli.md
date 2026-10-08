@@ -73,7 +73,7 @@ Each flag at most once, as `--flag VALUE` or `--flag=VALUE`.
 | `--background` | `'#rrggbb'` | `'#1e1e2e'` | The bar's color, six hex digits in either case. Quote it: the shell reads `#` as a comment. Its opacity is the file's `[bar] opacity`: see [Shape and opacity](./modules.md##shape-and-opacity). |
 | `--foreground` | `'#rrggbb'` | `'#cdd6f4'` | The text's color (the theme's `fg` token: see [Colors](./modules.md##colors)). |
 | `--font` | a path | the first [well-known font](./modules.md##fonts) found | The font file, TrueType or OpenType (`.ttf`, `.otf`; a collection's first face). Any bytes: a path need not be UTF-8. |
-| `--font-size` | 1 to 256 | 14 | The text's size, the em, in logical pixels; drawn at the output's real pixels like the bar. |
+| `--font-size` | 1 to 256 | 14 | The text's size, the em, in logical pixels; drawn at the output's real pixels like the bar. An `[output."NAME"]` table's `font-size` overrides it for that output only. |
 | `--left`, `--center`, `--right` | module ids, comma-separated, or empty | the clock in the center | The modules along each part of the bar, in order. Giving any of the three sets the whole layout: a part not given is empty, so `--right clock` moves the clock rather than adding a second one. `--center ''` places nothing: a plain bar that needs no font. See [Layout](./modules.md##layout). |
 | `--padding` | 0 to 1024 | 8 | Logical pixels either side of each module's content. |
 | `--spacing` | 0 to 1024 | 0 | Logical pixels between neighbouring modules. |
@@ -205,6 +205,7 @@ icon = "\U000f0e65"     # as the exec's
 
 [output."eDP-1"]      # what differs on one output: see Outputs below
 height = 36
+font-size = 20        # this output's em, 1 to 256; absent is [bar] font-size
 right = ["clock"]
 ```
 
@@ -214,7 +215,10 @@ pill's keys are file-only: they have no flags (see
 [Shape and opacity](./modules.md##shape-and-opacity), [Spacing](./modules.md##spacing) and
 [the pill](./modules.md##the-active-workspaces-pill)). The module lists take the ids in [Modules](./modules.md##modules), with `"|"`
 entries marking where a separator goes (see [Spacing](./modules.md##spacing)); giving any
-of the three sets the whole layout, as the flags do. An unknown key
+of the three sets the whole layout, as the flags do. An `[output."NAME"]`
+table takes `edge`, `layer`, `exclusive`, `height`, `margin`,
+`font-size` (1 to 256, as `[bar] font-size`; absent is the shared value)
+and the three module lists — see [Outputs](./modules.md##outputs). An unknown key
 anywhere is a loud error naming it, as is a bad value, which names its
 dotted key (`bar.height`, `colors.background`, `left`, `clock.format`;
 `output."eDP-1".height` in an output table).

@@ -9,6 +9,7 @@ fn over(name: &str) -> Override {
     Override {
         name: name.to_owned(),
         bar: BarOverride::default(),
+        font_size: None,
         modules: None,
     }
 }
@@ -104,17 +105,18 @@ fn an_override_changes_only_what_it_names() {
                 edge: Some(Edge::Bottom),
                 ..Default::default()
             },
+            font_size: None,
             modules: Some(Sections {
                 right: vec!["clock"],
                 ..Default::default()
             }),
         }],
     };
-    let plain = policy.resolve(Some("DP-1"), &bar, &layout);
+    let plain = policy.resolve(Some("DP-1"), &bar, 14, &layout);
     assert_eq!(plain.bar, bar);
     assert_eq!(plain.layout, layout);
     assert!(plain.selected);
-    let own = policy.resolve(Some("eDP-1"), &bar, &layout);
+    let own = policy.resolve(Some("eDP-1"), &bar, 14, &layout);
     assert_eq!(own.bar.height, 40);
     assert_eq!(own.bar.edge, Edge::Bottom);
     assert_eq!(own.bar.layer, bar.layer);
@@ -124,7 +126,7 @@ fn an_override_changes_only_what_it_names() {
     assert!(own.layout.center.is_empty());
     assert_eq!(own.layout.padding, layout.padding);
     // An unnamed output gets the shared values, never an override.
-    assert_eq!(policy.resolve(None, &bar, &layout).bar, bar);
+    assert_eq!(policy.resolve(None, &bar, 14, &layout).bar, bar);
 }
 
 #[test]
@@ -196,4 +198,26 @@ fn separator_marks_are_never_started() {
     assert_eq!(all.left, ["clock", SEPARATOR, "workspaces"]);
     assert_eq!(all.right, ["battery"]);
     assert!(!all.right.contains(&SEPARATOR));
+}
+
+#[test]
+fn an_override_font_size_replaces_the_shared_em_for_that_output_only() {
+    let bar = Bar::default();
+    let layout = Layout::default();
+    let policy = Policy {
+        select: Select::All,
+        overrides: vec![Override {
+            font_size: Some(20),
+            ..over("eDP-1")
+        }],
+    };
+    assert_eq!(
+        policy.resolve(Some("eDP-1"), &bar, 14, &layout).font_size,
+        20
+    );
+    assert_eq!(
+        policy.resolve(Some("DP-1"), &bar, 14, &layout).font_size,
+        14
+    );
+    assert_eq!(policy.resolve(None, &bar, 14, &layout).font_size, 14);
 }

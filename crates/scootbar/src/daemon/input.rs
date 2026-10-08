@@ -231,12 +231,15 @@ impl State {
         let output = OutputView {
             name: entry.output.info().name.as_deref(),
         };
+        // The click is measured in the output's own em, as its bar was
+        // drawn: a press lands on what that output shows.
+        let font_size = entry.objects.font_size;
         let at = ClickCtx {
             output,
             x: x.saturating_sub(span.x),
             view,
             text,
-            em: render::em(style.font_size, scale),
+            em: render::em(font_size, scale),
             padding: render::device(style.padding, scale),
             span_width: span.width,
             height,

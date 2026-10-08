@@ -80,6 +80,28 @@ fn an_output_table_overrides_the_bar_keys_it_names() {
 }
 
 #[test]
+fn an_output_table_overrides_the_font_size_it_names() {
+    let config = read("[output.\"eDP-1\"]\nfont-size = 20\n").unwrap();
+    let [over] = &config.outputs.overrides[..] else {
+        panic!("{:?}", config.outputs);
+    };
+    assert_eq!((over.name.as_str(), over.font_size), ("eDP-1", Some(20)));
+    // The shared em is untouched.
+    assert_eq!(config.font_size, crate::config::DEFAULT_FONT_SIZE);
+}
+
+#[test]
+fn a_bad_output_font_size_names_the_table_and_key() {
+    for text in ["font-size = 0", "font-size = 257"] {
+        let message = refused(&format!("[output.\"DP-1\"]\n{text}\n"));
+        assert!(
+            message.contains("'output.\"DP-1\".font-size'"),
+            "{text}: {message}"
+        );
+    }
+}
+
+#[test]
 fn a_bad_output_value_names_the_table_and_key() {
     for (text, key) in [
         ("height = 0", "height"),

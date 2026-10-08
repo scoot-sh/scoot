@@ -239,6 +239,7 @@ impl Responder<'_> {
         self.state.replace_placement(
             Placement {
                 bar: config.bar,
+                font_size: config.font_size,
                 layout: config.layout,
                 policy: config.outputs,
             },

@@ -11,7 +11,7 @@ use serde::Deserialize;
 #[cfg(test)]
 mod tests;
 
-use super::{Error, ids, parse_margin};
+use super::{Error, MAX_FONT_SIZE, ids, parse_margin};
 use crate::bar::{Edge, Layer, MAX_HEIGHT};
 use crate::layout::{Section, check_placement};
 use crate::policy::{
@@ -28,6 +28,8 @@ pub(super) struct OutputFile {
     exclusive: Option<bool>,
     height: Option<u32>,
     margin: Option<toml::Value>,
+    #[serde(rename = "font-size")]
+    font_size: Option<u32>,
     left: Option<Vec<String>>,
     center: Option<Vec<String>>,
     right: Option<Vec<String>>,
@@ -166,6 +168,21 @@ fn over(
                 .map_err(|message| refusal(path, name, "margin", format_args!("{message}")))?,
         ),
     };
+    let font_size = match table.font_size {
+        None => None,
+        Some(size) if (1..=MAX_FONT_SIZE).contains(&size) => Some(size),
+        Some(size) => {
+            return Err(refusal(
+                path,
+                name,
+                "font-size",
+                format_args!(
+                    "takes a whole number of logical pixels from 1 to {MAX_FONT_SIZE}, \
+                     not `{size}`"
+                ),
+            ));
+        }
+    };
     let modules = if table.left.is_none() && table.center.is_none() && table.right.is_none() {
         None
     } else {
@@ -200,6 +217,7 @@ fn over(
             height,
             margin,
         },
+        font_size,
         modules,
     })
 }
