@@ -115,3 +115,17 @@ this ticket only when the site is live on `scoot.sh` (not yet).
 ## Not in this ticket
 
 API docs for the internal crates (rustdoc stays local), translations.
+
+## Status (2026-10-07, hygiene pass — ticket stays open)
+
+Live at https://www.scoot.sh/ (homepage + `/llms.txt` with small/full and
+per-section sets fetched 2026-10-07; `DEPLOY_TARGET = 'www'` in
+`site/astro.config.mjs`). User-facing reference moved to `site/` (the eight
+`docs/*.md` are stubs pointing there); gates green in `nix/docs-site.nix`
+(`check-llms`, `check-md-links`, `test-snippets`, `check-nix`) with the
+path-filtered CI job and the Pages deploy workflow. What keeps this ticket
+open: the contributor-tree half (`dev/` move + repo-wide link updates,
+`.claude/` agent files need the maintainer — split to
+`docs-contributor-tree.md`) and the asset check (its own open entry
+`docs-site-asset-check.md`). The "(not yet)" notes above are stale and kept
+for history.

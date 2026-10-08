@@ -1,9 +1,10 @@
 ---
 title: "Paved path to a full lightweight desktop from the flake (epic)"
-status: "open"
-area: "packaging"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-07"
 ---
 
 # Paved path to a full lightweight desktop from the flake (epic)
@@ -135,3 +136,54 @@ Implementation (this epic files the plan only); compositor-side protocol
 work (all needed protocols exist); distro packages (see the
 `arch/deb/rpm-package` entries); the `scootnotify`/`scootlaunch` builds
 themselves (pointer entries in `docs/scootbar/backlog/`).
+
+## Resolution (2026-10-07)
+
+Fourteen of fifteen children resolved, each in its own merged PR; every one
+of the 19 inventory rows is shipped (row 16 was explicitly optional and is
+covered opt-in). The remainder is exactly one open entry,
+`desktop-input-method` (low, off by default; a reserved `configSlot` plus a
+docs row already exist for it), which stays open on its own.
+
+Inventory rows to merged PRs (all commits on `origin/main`, verified by
+`git log` 2026-10-07; modules in `nix/modules/`, user docs in
+`site/src/content/docs/desktop/index.md`, eval pins in `nix/tests.nix`):
+
+| # | Piece | Shipped in |
+|---|---|---|
+| 1 | Session + greeter | provided pre-epic (`nix/modules/nixos.nix` session/greeter options) |
+| 2 | Lock screen | PR #435 `e11400785` (swaylock over `ext-session-lock-v1`, `idle.lock.daemon`) |
+| 3 | Idle policy | PR #435 (swayidle dim/lock/off, media inhibit, lock-before-sleep) |
+| 4 | Notifications | PR #441 `3293ad680` (mako now, scootnotify later; bar feed) |
+| 5 | Launcher | PR #451 `aee00c434` (fuzzel now, scootlaunch later) |
+| 6 | Portals + capture | PR #459 `4409cfb14` (portal backends, grim/slurp, screenshot keys) |
+| 7 | Polkit agent | PR #477 `da790e8e2` (polkit-gnome) |
+| 8 | Secrets/keyring | PR #477 (gnome-keyring, D-Bus activated) |
+| 9 | Audio/brightness/media keys + OSD | PR #471 `893957bba` (PipeWire baseline, keymap binds, OSD) |
+| 10 | Screenshots on keys | PR #459 (grim/slurp binds) |
+| 11 | Clipboard persistence + history | PR #443 `98cfc442f` (cliphist, picker, lock policy) |
+| 12 | Night light | PR #472 `9d0c65eae` (wlsunset user unit) |
+| 13 | Power | PR #465 `476cda70a` (power-profiles-daemon, logind policy, charge limit) |
+| 14 | Fonts/cursor/GTK/Qt/dark mode from the look | PR #474 `d65e62c7e` (per-target opt-outs, Stylix precedence) |
+| 15 | Terminal | PR #484 `ae456f7e0` (foot installed + themed) |
+| 16 | File manager (optional) | PR #484 (opt-in pcmanfm) |
+| 17 | Network/Bluetooth UI | PR #484 (keyboard WiFi/Bluetooth pickers) |
+| 18 | Automount | PR #484 (trayless udiskie over udisks2) |
+| 19 | XWayland | provided pre-epic (`scoot-xwayland` packages, `[xwayland] enabled`) |
+
+Profile shell, keymap and displays (the design's cross-cutting pieces):
+
+| Child | Resolved | Landed in |
+|---|---|---|
+| `desktop-profile` | 2026-10-04 | PR #432 `85cbe326a` (`desktop.enable` + `look`, future slots) |
+| `desktop-keys` | 2026-10-05 | PR #442 `26e6c48f7` (one default keymap) |
+| `desktop-displays` | 2026-10-06 | PR #482 `622169331` (scoot-native display profiles over IPC) |
+
+Plus `desktop-idle-lock` 2026-10-04, `desktop-notifications` 2026-10-05,
+`desktop-launcher` 2026-10-05, `desktop-capture` 2026-10-05,
+`desktop-clipboard` 2026-10-05, `desktop-power` 2026-10-05,
+`desktop-audio-osd` 2026-10-06, `desktop-nightlight` 2026-10-06,
+`desktop-theme-look` 2026-10-06, `desktop-auth-secrets` 2026-10-06,
+`desktop-apps` 2026-10-06 (each file in `docs/backlog/resolved/` names its
+PR). The known `WAYLAND_DISPLAY`-import blocker from the brief is gone:
+`fix/nix` `380cf0ba6` binds the profile units to `scoot-session.target`.

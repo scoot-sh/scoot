@@ -13,8 +13,9 @@ Serves **daily-drive** for users who type CJK or rely on an IME.
 
 ## The gap
 
-The compositor implements `text-input-v1` and `input-method-v2`
-(`docs/protocols.md`, table and "input methods" section), but nothing on the
+The compositor implements `text-input-v3` and `input-method-v2`
+(`site/src/content/docs/scoot/protocols.md`, table and "Input methods"
+section), but nothing on the
 paved path installs or starts an engine, so the protocols have no client.
 
 ## What to do
