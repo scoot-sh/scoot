@@ -52,7 +52,8 @@ animation → static) in `daemon/change.rs`, the `section.rs` `animate`
 key (strict; fingerprint moves with it), `query`'s per-output `animated`
 bool, loop counts (loop-forever is the conservative default; document
 it), transition-into-animated (first frame transitions, then plays),
-`--every` interaction (moot: no slideshow exists in the tree). Tests for
+`--every` interaction (moot for stage 1: rotation lives in the
+unmerged `feat/scootbg-config-rotation` PR, not in the tree). Tests for
 each: disposal/blend pixel fixtures, pacing math, cap refusal,
 zero-wakeup-when-static/covered end-to-end on headless scoot,
 replace-mid-animation, DPMS/output-removed mid-animation,
