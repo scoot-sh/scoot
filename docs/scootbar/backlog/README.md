@@ -149,7 +149,7 @@ The [umbrella](resolved/data-source-modules-done.md) holds the rules they share 
 - [Documented exec recipes for CPU/memory/pressure readouts](exec-stats-recipes.md) (low, split out of system-stats-decision 2026-10-07): the decision's "ship documented recipes" half has no artifact yet
 - [drive_placed pidfile-vs-pipe race flakes the exec keep tests](resolved/exec-keep-pidfile-race-done.md) (low) — RESOLVED 2026-10-03 in #402: waits on shown text, pidfile as identity check only
 - [Network: a connect or menu command that never exits blocks the next one](resolved/network-child-stuck-done.md) (low) — RESOLVED 2026-10-04 in #428: a second connect/menu replaces the running child (SIGTERM, then SIGKILL), drop ends both; scan list resets on the re-dump's first page (#403 review)
-- [Network: the WiFi picker can list a network twice after a scan handover](network-scan-refill-duplicates.md) (low): two rare orderings from #428's review leave a queued refill without its reset; transient, never the wrong connection
+- [Network: the WiFi picker can list a network twice after a scan handover](resolved/network-scan-refill-duplicates-done.md) (low) — RESOLVED 2026-10-08 in #507: the queued refill owns the handed reset when the in-flight scan consumes or cancels it
 - [Network: flaky menu-file tests race the menu child](resolved/network-menu-file-race-done.md) (high) — RESOLVED 2026-10-04: every `read_to_string` after a menu/connect spawn polls for the expected content (`wait_file`); 18/300 flakes before, 0 after
 - [Per-output font size](multi-output-font-size.md) (low): deferred 2026-10-01 by the maintainer; left M3
 

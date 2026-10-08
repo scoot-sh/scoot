@@ -194,7 +194,13 @@ pub fn station(signal: i8) -> Vec<u8> {
 
 /// One `NLMSG_ERROR` carrying `errno` (negative, as the kernel sends).
 pub fn error(errno: i32) -> Vec<u8> {
-    framed(netlink::NLMSG_ERROR, 0, &errno.to_ne_bytes())
+    error_seq(0, errno)
+}
+
+/// One `NLMSG_ERROR` answering the dump request with `seq`: a refused
+/// scan is dropped, any other failure re-queued.
+pub fn error_seq(seq: u32, errno: i32) -> Vec<u8> {
+    framed(netlink::NLMSG_ERROR, seq, &errno.to_ne_bytes())
 }
 
 /// One `NLMSG_DONE` answering the dump request with `seq`: every dump

@@ -375,8 +375,10 @@ struct Nets {
     /// Whether the in-flight scan dump owns [`Nets::scan_reset`]: bound
     /// at send, or handed over by the arm to the unspent scan already
     /// in flight for the same target. Consumed by its first page or its
-    /// terminator. A scan that went out before the arm and already
-    /// refilled never owns it again, however late its pages are.
+    /// terminator — handed on to the queued refill instead of spent
+    /// where one waits beside it (see [`Nets::scan_queued`]). A scan that
+    /// went out before the arm and already refilled never owns it again,
+    /// however late its pages are.
     scan_reset_live: bool,
     /// Whether the in-flight scan already carried out a reset: its late
     /// pages only complete the refill, and a new arm queues the next
@@ -666,6 +668,16 @@ impl Nets {
         netlink::interface_request(&mut self.out_genl, self.family.id, seq, index);
     }
 
+    /// Whether a scan refill waits behind the in-flight dump: the dump
+    /// that owns [`Nets::scan_reset`] hands it over instead of spending
+    /// or cancelling it, so the refill's first page — or its terminator
+    /// where it found nothing — starts the new list.
+    fn scan_queued(&self) -> bool {
+        self.genl_dumps
+            .iter()
+            .any(|dump| matches!(dump, GenlDump::Scan(_)))
+    }
+
     fn on_addr(&mut self, event: &AddrEvent, present: bool) {
         let Some(iface) = self.find(event.index) else {
             return;
@@ -840,12 +852,19 @@ impl Nets {
                         // resets (bound at send by `pump_genl`, or handed
                         // over by the arm to the scan already in flight),
                         // so a mid-refill dump's late pages never clear
-                        // what the refill already listed.
+                        // what the refill already listed. Where the arm
+                        // handed the reset to this dump while a refill
+                        // queued beside it, the refill owns what is left
+                        // of it: its first page (or terminator) starts the
+                        // new list instead of appending after this dump's
+                        // tail (see `scan_queued`).
                         if self.scan_reset && self.scan_reset_live {
-                            self.scan_reset = false;
                             self.scan_reset_live = false;
                             self.scan_reset_spent = true;
                             self.scan_n = 0;
+                            if !self.scan_queued() {
+                                self.scan_reset = false;
+                            }
                         }
                         let mut fresh = [Bss::default(); MAX_SCAN];
                         let n = netlink::fold_scan(msg.body, &mut fresh);
@@ -936,7 +955,11 @@ impl Nets {
     /// arrives with its reset still owed found nothing: the kept list
     /// clears instead of outliving an empty dump. Only the owning dump's
     /// terminator clears: a mid-refill dump ending after a second re-dump
-    /// was queued leaves the refill alone.
+    /// was queued leaves the refill alone. Where the arm handed the reset
+    /// to this dump while a refill queued beside it, the refill keeps
+    /// what is left of it: the terminator clears the stale list and the
+    /// refill still starts the new one (the zero-page heal: this dump
+    /// ending with no pages and the refill filling the cleared list).
     fn done_genl(&mut self, seq: u32) {
         if self.genl_busy.is_some_and(|(busy, _)| busy == seq) {
             let was_scan = self
@@ -946,9 +969,11 @@ impl Nets {
             self.scan_reset_spent = false;
             self.genl_failures = 0;
             if was_scan && self.scan_reset && self.scan_reset_live {
-                self.scan_reset = false;
                 self.scan_reset_live = false;
                 self.scan_n = 0;
+                if !self.scan_queued() {
+                    self.scan_reset = false;
+                }
             }
         }
     }
@@ -978,9 +1003,10 @@ impl Nets {
     }
 
     /// A refused generic dump is dropped, not re-queued — and a refused
-    /// owning scan's owed reset with it: no page of it will ever arrive
-    /// to start the list. A refused earlier scan leaves a queued refill's
-    /// reset alone.
+    /// owning scan's owed reset with it, unless a refill queued beside
+    /// it: the refill keeps what is left of the handed reset, or it
+    /// appends onto the stale pre-arm list. A refused earlier scan leaves
+    /// a queued refill's reset alone.
     fn drop_genl(&mut self, seq: u32) {
         if self.genl_busy.is_some_and(|(busy, _)| busy == seq) {
             let was_scan = self
@@ -990,8 +1016,10 @@ impl Nets {
             self.scan_reset_spent = false;
             self.genl_failures = 0;
             if was_scan && self.scan_reset_live {
-                self.scan_reset = false;
                 self.scan_reset_live = false;
+                if !self.scan_queued() {
+                    self.scan_reset = false;
+                }
             }
         }
     }
