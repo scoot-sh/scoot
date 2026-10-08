@@ -16,7 +16,7 @@ another layer), each with why it was rejected and the evidence. A hard constrain
 is checked against the pinned fork's source. If the line is missing, the entry is
 incomplete, and "the fork was simpler" is not a reason. (Rule added 2026-09-29; the
 existing entries are being checked against it by
-[the decision audit](resolved/fork-decisions-audit-done.md).)
+[the decision audit](backlog/resolved/fork-decisions-audit-done.md).)
 
 | Fork | Upstream | Based on | Carried commits | Pinned in scoot | Why |
 | --- | --- | --- | --- | --- | --- |
