@@ -56,6 +56,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLay
 
 use super::images::Images;
 use super::respond::Ready;
+use super::rotation::Rotation;
 use super::surfaces::{Objects, XdgOutputs};
 use super::transition::Transitions;
 use crate::choices::Choices;
@@ -165,6 +166,10 @@ pub struct State {
     /// The transitions running on outputs (`daemon::transition`), and the
     /// timer pacing them: empty and disarmed while idle.
     pub transitions: Transitions,
+    /// The slideshow running now (`daemon::rotation`), if any: one
+    /// directory's files in turn, paced by the loop's poll timeout. `None`
+    /// is no timeout at all: no wakeups beyond what the loop had.
+    pub rotation: Option<Rotation>,
 }
 
 pub struct Wayland {
@@ -240,6 +245,7 @@ impl Wayland {
             saved,
             retired: Vec::new(),
             transitions: Transitions::default(),
+            rotation: None,
         };
         let registry = list.registry().clone();
         list.contents().with_list(|advertised| {

@@ -116,6 +116,13 @@ pub fn apply(
     let fingerprint = section.fingerprint();
     let changed = state.saved.fingerprint() != Some(fingerprint.as_str());
     let adopted = (*state.saved.profile() != profile).then(|| adopt(state, profile));
+    // A changed section, or a newly adopted profile, stops a running
+    // slideshow: whichever changed last wins, and this did. An unchanged
+    // section for the same profile leaves it running, like a `set` made
+    // since.
+    if changed || adopted.is_some() {
+        state.rotation = None;
+    }
     let problems = if state.saved.fingerprint() == Some(fingerprint.as_str()) {
         if let Some(record) = adopted {
             restore::apply(state, record, true);

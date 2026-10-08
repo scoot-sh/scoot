@@ -5,7 +5,8 @@ use std::fmt;
 use crate::control::{Answer, ConnId, Handler};
 use crate::outputs::{Outputs, Size};
 use crate::protocol::{
-    self, OutputEntry, OutputList, PROTOCOL_VERSION, Reply, Request, Show, Shows, SurfaceEntry,
+    self, OutputEntry, OutputList, PROTOCOL_VERSION, Reply, Request, RotationInfo, Show, Shows,
+    SurfaceEntry,
 };
 use crate::section::Section;
 use crate::state::Profile;
@@ -22,6 +23,9 @@ pub trait Changes {
 
     /// The profile restored and saved (`query`'s `profile`).
     fn profile(&self) -> &str;
+
+    /// The slideshow running now (`query`'s `rotation`), if any.
+    fn rotation(&self) -> Option<RotationInfo<'_>>;
 
     /// `apply-config`: adopts `profile` and applies `section` if it changed
     /// since it was last applied (`daemon::config`), registering `conn` to
@@ -57,6 +61,10 @@ pub enum ChangeError {
     Busy,
     /// A download, with nowhere to cache it.
     Cache(String),
+    /// A slideshow's directory is not one any more.
+    NotDirectory(String),
+    /// A slideshow's directory holds no files.
+    EmptyDirectory(String),
 }
 
 /// The reply text for a refused change.
@@ -82,6 +90,15 @@ impl fmt::Display for Refused<'_> {
                 f,
                 "cannot cache the download ({error}); nothing was changed"
             ),
+            ChangeError::NotDirectory(dir) => {
+                write!(
+                    f,
+                    "{dir:?} is not a directory any more; nothing was changed"
+                )
+            }
+            ChangeError::EmptyDirectory(dir) => {
+                write!(f, "{dir:?} holds no files; nothing was changed")
+            }
         }
     }
 }
@@ -136,6 +153,7 @@ impl Handler for Responder<'_> {
                         outputs: self.wallpaper.outputs(),
                         saving: self.wallpaper.saving(),
                         profile: self.wallpaper.profile(),
+                        rotation: self.wallpaper.rotation(),
                     },
                 );
                 return Answer::Now;

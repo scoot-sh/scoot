@@ -20,6 +20,14 @@ type Choice = Option<Show<'static>>;
 fn owned(show: Show<'_>) -> Show<'static> {
     match show {
         Show::Color(color) => Show::Color(color),
+        Show::Slideshow(slideshow) => Show::Slideshow(crate::protocol::SlideshowRequest {
+            dir: Cow::Owned(slideshow.dir.into_owned()),
+            every_secs: slideshow.every_secs,
+            shuffle: slideshow.shuffle,
+            mode: slideshow.mode,
+            fill: slideshow.fill,
+            filter: slideshow.filter,
+        }),
         Show::Image(image) => Show::Image(ImageRequest {
             source: match image.source {
                 Source::Path(path) => Source::Path(Cow::Owned(path.into_owned())),
@@ -69,6 +77,10 @@ impl Changes for Fake<'_> {
 
     fn profile(&self) -> &str {
         "default"
+    }
+
+    fn rotation(&self) -> Option<crate::protocol::RotationInfo<'_>> {
+        None
     }
 
     fn apply_config(

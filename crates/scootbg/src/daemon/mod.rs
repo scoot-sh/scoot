@@ -44,6 +44,7 @@ mod images;
 mod listen;
 mod respond;
 mod restore;
+mod rotation;
 mod surfaces;
 mod transition;
 mod wayland;
@@ -264,6 +265,13 @@ impl Daemon {
                     Instant::now(),
                 );
             }
+            // A slideshow whose step is due: the poll timeout woke the
+            // loop for it, or a turn passed. Cheap when idle (one clock
+            // comparison, or none without a slideshow).
+            {
+                let state = &mut self.wayland.state;
+                rotation::drive_due(state, &self.wayland.qh, Instant::now());
+            }
             self.flush_wayland()?;
             let Some(guard) = self.wayland.queue.prepare_read() else {
                 // Events arrived for our queue meanwhile: dispatch them.
@@ -281,6 +289,20 @@ impl Daemon {
             // and `control`'s module docs). Resting keeps its slot, with no
             // events asked for, so the indices below stay fixed.
             let (listen, timeout) = self.listening.poll_plan(Instant::now);
+            // A running slideshow wakes the loop for its next step: the
+            // sooner of the two timeouts. Without one the timeout is what
+            // it was, so an idle daemon sleeps exactly as before.
+            let now = Instant::now();
+            let rotation_timeout = self
+                .wayland
+                .state
+                .rotation
+                .as_ref()
+                .map(|rotation| rotation.remaining(now));
+            let timeout = match (timeout, rotation_timeout) {
+                (Some(rest), Some(next)) => Some(rest.min(next)),
+                (rest, next) => rest.or(next),
+            };
             let listener_events = if listen {
                 PollFlags::IN
             } else {

@@ -444,6 +444,8 @@ object per line each way, each request naming the protocol it speaks.
                                                               -> {"type":"ok"}
 {"protocol":1,"type":"set","image":"https://example.com/a.jpg","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}
                                                               -> {"type":"ok"}
+{"protocol":1,"type":"set","directory":"/abs/wallpapers","every":"1800s","shuffle":true}
+                                                              -> {"type":"ok"}
 {"protocol":1,"type":"clear"}                                 -> {"type":"ok"}
 {"protocol":1,"type":"clear","output":"DP-1"}                 -> {"type":"ok"}
 {"protocol":1,"type":"query"}                                 -> {"type":"outputs","outputs":[...],"saving":true,"profile":"default"}
@@ -463,6 +465,15 @@ anything wrong                                                -> {"type":"error"
   answers like a `set`, once every output shows what it should, or at once
   with an error when an image in the section is not a file (the rest is
   applied).
+
+- **A directory `set` is additive to protocol 1**: `directory` (an
+  absolute path), `every` (seconds with an `s`, whole minutes, at least
+  one) and `shuffle` (present only when true) ride a `set` beside the
+  usual `mode`/`fill`/`filter`/`output`/`transition`. A daemon that
+  predates them ignores the unknown fields and refuses the `set` as
+  targetless, loudly rather than misread. The first file answers like an
+  image `set`; later steps have no reply. `query` reports the slideshow
+  as a top-level `rotation` object, absent while none runs.
 
 - `set` and `clear` answer once every targeted output shows the change and
   a `wl_display.sync` sent after the commits has come back, so the
