@@ -100,7 +100,15 @@ Notes:
   on all four entry points (the project ships no man pages yet, for any
   distro) and `no-documentation` on `scootbg` (its config surface is the
   `[wallpaper]` section documented in the `scoot` package's example, so it
-  deliberately ships no `%doc` of its own).
+  deliberately ships no `%doc` of its own). One documented override file,
+  `packaging/rpm/rpmlintrc`, used only by the openSUSE job: openSUSE's
+  en_US dictionary flags the bare token `config` (config files and their
+  `~/.config` paths), Fedora's does not — the filter is scoped to that
+  exact token, and it is load-bearing, so a stale filter fails the lint
+  instead of passing silently.
+- `%doc` lands under `/usr/share/doc/` on Fedora and
+  `/usr/share/doc/packages/` on openSUSE; the prove steps check the
+  example at each distro's own path.
 - No `-debuginfo`/`-debugsource` subpackages (`debug_package %{nil}`):
   the vendored crate sources carry their upstream modes (executable
   `.rs` files plus a `#!` attribute line in one crate that is not a
