@@ -5,11 +5,13 @@ description: "Build scoot from vendored sources with no network: toolchain, syst
 
 Build scoot the way a distro builder does: from a source tree that
 needs no network, with a toolchain and system libraries you provide.
-Start here if you maintain the Arch, deb or rpm package; the per-distro
-recipes ([arch][arch-pkg], [deb][deb-pkg], [rpm][rpm-pkg]) build on
-this page and live in the contributor backlog until they land.
+Start here if you maintain the Arch, deb or rpm package. The Arch
+PKGBUILDs (release and `-git`) have landed in
+[`packaging/arch/`][arch-pkg] and build on this page; the deb and rpm
+recipes still live in the contributor backlog ([deb][deb-pkg],
+[rpm][rpm-pkg]).
 
-[arch-pkg]: https://github.com/scoot-sh/scoot/blob/main/docs/backlog/packaging/arch-package.md
+[arch-pkg]: https://github.com/scoot-sh/scoot/blob/main/packaging/arch/README.md
 [deb-pkg]: https://github.com/scoot-sh/scoot/blob/main/docs/backlog/packaging/deb-package.md
 [rpm-pkg]: https://github.com/scoot-sh/scoot/blob/main/docs/backlog/packaging/rpm-package.md
 
