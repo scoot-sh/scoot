@@ -270,8 +270,11 @@ jobs:
             scoot --version
             scootbg --version
             scootbar --version
-            scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
+            # Fonts before --check: the example names no --font, so the
+            # bar probes the usual paths (DejaVu first) and --check
+            # refuses without one.
             apt-get install -y -qq foot jq imagemagick wayland-utils fonts-dejavu-core
+            scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
             mkdir -p /tmp/deb-smoke-xdg
             chmod 700 /tmp/deb-smoke-xdg
             export XDG_RUNTIME_DIR=/tmp/deb-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
@@ -292,6 +295,8 @@ jobs:
             scoot --version
             scootbg --version
             scootbar --version
+            # Same font requirement as the bookworm --check above.
+            apt-get install -y -qq fonts-dejavu-core
             scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
           '
 
