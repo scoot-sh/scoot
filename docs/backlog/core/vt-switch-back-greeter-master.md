@@ -54,3 +54,50 @@ the seat reports active. It fails before any of the lit-gate logic runs.
   bound, then a visible message and a way back, never a silent black screen.
 - A test that fails before the fix if the activate path can be driven
   against a fake device; otherwise a recorded live repro.
+
+## Resolution (2026-10-08, PR #TBD)
+
+Diagnosed live on the M2 (round 1, recorded in the coordinator's
+scratchpad): seatd's single re-acquire attempt on switch-back races
+logind's release and loses (`seat.c:516 ... Device or resource busy`),
+hands the client a master-less fd, never retries; scoot's
+`reactivate()` → `reset_state()` then fails `EACCES`, `Tty.active`
+stays false, no render is requested. A bounded retry of `activate()`
+cannot fix it (nothing re-acquires master).
+
+Round 2 measured what `SET_MASTER` from scoot's own fd actually returns
+(private seatd + `openvt`, VT2, three `chvt` cycles): on a genuinely
+vacant master (all `master n` in `debugfs dri/2/clients`) an
+unprivileged process gets `EACCES` -- the kernel gates `SET_MASTER` on
+privilege, not vacancy (a root probe takes and drops the same vacant
+master cleanly). So scoot-as-steve can never steal master back itself;
+`EBUSY` from the probe means genuinely held (usually the greeter),
+`EACCES` means vacant-but-untakeable (seatd lost the race).
+
+Shipped accordingly, all in scoot (no Smithay fork change -- nothing
+private to Smithay blocks the probe ioctl):
+
+- `Tty::reacquire_master` (`crates/scoot/src/compositor/tty/mod.rs`):
+  on a master-loss-shaped `activate` failure (`Access` + `EACCES`) it
+  tries one explicit `SET_MASTER` (recovers privileged/root-run
+  sessions outright) and retries the activation, then logs loudly and
+  precisely -- holder vs vacancy -- with the way back (session alive,
+  retry on the next switch back). `active`/`session_paused` semantics
+  unchanged (`change_vt` still gated on `session_paused` only, per 05b).
+- `scoot msg outputs` gains a defaulted `live` field per output
+  (`crates/scoot-ipc`, no `PROTOCOL_VERSION` bump per the `powered`
+  precedent): `false` while `--tty` has lost master. Screenshots go
+  stale while dead -- check `live` before trusting pixels.
+- Headless unit tests pin the guidance wording (both variants) and the
+  steal gate; the ioctl half is proven by the recorded live A/B below.
+- Docs: `site/.../scoot/backends.md` VT-switching section + symptom
+  box, `troubleshooting.md` symptom, `msg/requests.md` `live` row,
+  CHANGELOG entry.
+
+Proof: before/after live repros on the M2 (same pattern, this branch's
+own debug builds): before fails 2/3 cycles with the exact ticket error;
+after logs the vacancy diagnosis with `live: false` over IPC on every
+failure, session alive, greeter untouched. Full recovery of an
+unprivileged session needs seatd to re-acquire (or hand over) master --
+left as a maintainer finding: seatd-as-root *can* take the vacant
+master (proven), it just never retries after losing the race.

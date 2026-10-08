@@ -58,7 +58,7 @@ use super::State;
 use super::drawn::drawn_rect;
 use super::fd_pressure::{IPC_RESERVE_FDS, Table};
 use super::headless::FRAME_INTERVAL;
-use super::tty::VtSwitchOutcome;
+use super::tty::{Tty, VtSwitchOutcome};
 
 /// A `wait-idle` request that hasn't been answered yet.
 ///
@@ -966,6 +966,15 @@ impl State {
                 // for an id this side does not have, the same unreachable
                 // case the name covers (an absent output is never off).
                 powered: !self.output_power.is_off(id),
+                // Whether the output is being driven right now. Off `--tty`
+                // there is no DRM master to lose, so always `true`; under
+                // `--tty` this is the session's master state -- `false`
+                // after a VT switch back seatd failed to re-acquire master
+                // for, until a later switch back steals it back (see
+                // `tty::reacquire_master`). An agent reading pixels must
+                // check this first: the composited frame outlives master,
+                // so a screenshot of a `live: false` output is stale.
+                live: self.tty.as_ref().is_none_or(Tty::is_active),
             })
             .collect()
     }

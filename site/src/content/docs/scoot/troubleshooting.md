@@ -16,6 +16,11 @@ description: "Compositor symptoms and their fixes — picture, keys, config, out
   `scoot msg outputs` shows whether scoot sees it. Only what the kernel
   reports is followed: a disconnect the kernel never reports leaves
   scoot driving a screen that is no longer there.
+- *`--tty` display stays dark after a VT switch back.* The session is
+  usually alive: `scoot msg outputs` answers with `live: false`, and the
+  log names the holder scoot could not take DRM master from. Switch VTs
+  away and back -- each return retries. See [VT
+  switching](./backends.md#hotplug-vt-switching-captures).
 
 ## Keys
 
