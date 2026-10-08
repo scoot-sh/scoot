@@ -798,10 +798,11 @@ fn scale_reload_decides_apply_agree_and_nested_refusal() {
 }
 
 #[test]
-fn output_refusals_refuse_everything_nested_and_only_modes_elsewhere() {
+fn output_refusals_refuse_everything_nested_and_nothing_elsewhere() {
     let entries = EntriesDiff {
         scales: vec!["DP-1".to_owned()],
         modes: vec!["DP-1".to_owned(), "eDP-1".to_owned()],
+        positions: vec!["DP-1".to_owned()],
     };
     let nested = output_refusals(&ScaleReload::RefuseNested, &entries, true);
     let names: Vec<&str> = nested
@@ -814,7 +815,8 @@ fn output_refusals_refuse_everything_nested_and_only_modes_elsewhere() {
             "output.scale",
             "outputs.DP-1.scale",
             "outputs.DP-1.mode",
-            "outputs.eDP-1.mode"
+            "outputs.eDP-1.mode",
+            "outputs.DP-1.position"
         ]
     );
     assert!(
@@ -822,17 +824,9 @@ fn output_refusals_refuse_everything_nested_and_only_modes_elsewhere() {
         "{nested:?}"
     );
 
-    // Elsewhere a scale applies and only the modes refuse, pending restart.
-    let tty = output_refusals(&ScaleReload::Apply, &entries, false);
-    assert_eq!(
-        tty,
-        [
-            "outputs.DP-1.mode (takes effect on restart: a reload does not modeset a running \
-             output; kept the mode the session started with)",
-            "outputs.eDP-1.mode (takes effect on restart: a reload does not modeset a running \
-             output; kept the mode the session started with)",
-        ]
-    );
+    // Elsewhere scales, modes and positions all apply live: nothing refuses.
+    let live = output_refusals(&ScaleReload::Apply, &entries, false);
+    assert!(live.is_empty(), "{live:?}");
     // Nothing changed, nothing refused, on either.
     let none = EntriesDiff::default();
     assert!(output_refusals(&ScaleReload::Agree, &none, true).is_empty());
@@ -2310,4 +2304,356 @@ fn an_xwayland_fractional_reload_applies_and_a_bad_one_is_refused() {
     assert_eq!(fixture.state.xwayland_fractional, XwaylandFractional::Sharp);
     let response = fixture.reload();
     assert!(applied(&response).is_empty() && refused(&response).is_empty());
+}
+
+// -------------------------------------------------------------------------
+// Per-output position and live mode changes
+// -------------------------------------------------------------------------
+
+/// A reloaded `[[outputs]]` `mode` resizes a headless output live: the
+/// render target, the `Space` geometry and the core's area all follow the
+/// new size, reported under `outputs.<name>.mode` -- and a second reload
+/// of the same file is silent.
+#[test]
+fn reload_applies_an_output_mode_live_by_resizing() {
+    let mut fixture = Fixture::with_config("");
+    let second = headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    assert_eq!(origin_of(&fixture.state, second), (CANVAS, 0));
+
+    fixture.rewrite("[[outputs]]\nname = \"headless-2\"\nmode = \"300x150\"\n");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &["outputs.headless-2.mode".to_owned()],
+        "the new mode should apply: {response:?}"
+    );
+    assert!(
+        refused(&response).is_empty(),
+        "nothing here should refuse: {response:?}"
+    );
+    // The render target follows the mode, like a host resize.
+    let backend = fixture
+        .state
+        .backends
+        .get(&second)
+        .expect("the second output's target");
+    assert_eq!(backend.size(), (300, 150));
+    let output = fixture.state.outputs.get(second).expect("the output");
+    let geometry = fixture
+        .state
+        .space
+        .output_geometry(output)
+        .expect("a mapped output's geometry");
+    assert_eq!((geometry.size.w, geometry.size.h), (300, 150));
+    // The core lays out against the resized area, at the packed origin.
+    let areas = fixture.state.world.outputs();
+    let (_, area) = areas
+        .iter()
+        .find(|(id, _)| *id == second)
+        .expect("the core knows the second output");
+    assert_eq!((area.x, area.y, area.w, area.h), (CANVAS, 0, 300, 150));
+
+    // Same file again: nothing differed, so nothing reports.
+    let again = fixture.reload();
+    assert!(
+        applied(&again).is_empty() && refused(&again).is_empty(),
+        "an identical reload changed nothing it was asked to: {again:?}"
+    );
+}
+
+/// A reloaded `[[outputs]]` `position` moves a headless output live: the
+/// placed output goes exactly to its entry while the primary stays at the
+/// origin, reported under `outputs.<name>.position` -- and a second reload
+/// is silent.
+#[test]
+fn reload_applies_an_output_position_live() {
+    let mut fixture = Fixture::with_config("");
+    let second = headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+
+    fixture.rewrite("[[outputs]]\nname = \"headless-2\"\nposition = [-200, 0]\n");
+    fixture.state.needs_render = false;
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &["outputs.headless-2.position".to_owned()],
+        "the new position should apply: {response:?}"
+    );
+    assert!(
+        refused(&response).is_empty(),
+        "nothing here should refuse: {response:?}"
+    );
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+    assert_eq!(origin_of(&fixture.state, second), (-CANVAS, 0));
+    // The core files the moved rectangle, position included.
+    let areas = fixture.state.world.outputs();
+    let (_, area) = areas
+        .iter()
+        .find(|(id, _)| *id == second)
+        .expect("the core knows the second output");
+    assert_eq!(
+        (area.x, area.y, area.w, area.h),
+        (-CANVAS, 0, CANVAS, CANVAS)
+    );
+    assert!(
+        fixture.state.needs_render,
+        "a moved output reloaded without requesting a render"
+    );
+
+    fixture.state.needs_render = false;
+    let again = fixture.reload();
+    assert!(
+        applied(&again).is_empty() && refused(&again).is_empty(),
+        "an identical reload changed nothing it was asked to: {again:?}"
+    );
+    assert!(!fixture.state.needs_render);
+}
+
+/// Placed outputs hold their entries while unplaced ones repack behind
+/// them: the middle output placed far right does not shove the primary
+/// aside, and the third output lands past the placed one rather than
+/// overlapping it.
+#[test]
+fn placed_outputs_hold_while_unplaced_repack_behind_them() {
+    let mut fixture = Fixture::with_config("");
+    let second = headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    let third = headless::add_output(&mut fixture.state, "headless-3", CANVAS, CANVAS)
+        .expect("a third headless output");
+
+    fixture.rewrite("[[outputs]]\nname = \"headless-2\"\nposition = [400, 0]\n");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &["outputs.headless-2.position".to_owned()],
+        "{response:?}"
+    );
+    // The primary never moves aside for a later placed output; the
+    // unplaced third packs past the placed second's right edge.
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+    assert_eq!(origin_of(&fixture.state, second), (400, 0));
+    assert_eq!(origin_of(&fixture.state, third), (600, 0));
+}
+
+/// Overlaps are allowed, not refused or clamped: two outputs on the same
+/// origin each keep their own strip, and stepping binds still ring them.
+#[test]
+fn overlapping_positions_are_allowed_and_announced() {
+    let mut fixture = Fixture::with_config("");
+    let second = headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+
+    fixture.rewrite("[[outputs]]\nname = \"headless-2\"\nposition = [0, 0]\n");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &["outputs.headless-2.position".to_owned()],
+        "an overlapping position applies like any other: {response:?}"
+    );
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+    assert_eq!(origin_of(&fixture.state, second), (0, 0));
+    // Both rectangles reach the core, identically.
+    let areas = fixture.state.world.outputs();
+    assert_eq!(areas.len(), 2);
+    assert_eq!((areas[0].1.x, areas[0].1.y), (0, 0));
+    assert_eq!((areas[1].1.x, areas[1].1.y), (0, 0));
+}
+
+/// A negative origin is a real layout, not a clamp: the monitor left of
+/// the primary sits left of it, and the pointer clamp covers the union
+/// rather than pinning the pointer to `[0, extent)`.
+#[test]
+fn a_negative_origin_lays_out_left_of_the_primary() {
+    let mut fixture = Fixture::with_config("");
+    let second = headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+
+    fixture.rewrite("[[outputs]]\nname = \"headless-2\"\nposition = [-200, -100]\n");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &["outputs.headless-2.position".to_owned()],
+        "{response:?}"
+    );
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+    assert_eq!(origin_of(&fixture.state, second), (-CANVAS, -100));
+}
+
+/// A replugged placed monitor comes back exactly on its entry while its
+/// neighbours stay where they are: adding an output never moves an
+/// existing one.
+#[test]
+fn a_replugged_placed_output_lands_on_its_entry() {
+    let mut fixture =
+        Fixture::with_config("[[outputs]]\nname = \"headless-2\"\nposition = [-200, 0]\n");
+    // The fixture builds its outputs directly, so the entry is stored the
+    // way a startup with this file would store it.
+    fixture.state.output_entries = crate::compositor::output_config::OutputEntries::from_toml(
+        "[[outputs]]\nname = \"headless-2\"\nposition = [-200, 0]\n",
+    );
+    let second = headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    assert_eq!(origin_of(&fixture.state, second), (-CANVAS, 0));
+
+    // Unplug it: the primary stays, and nothing else moves.
+    assert!(fixture.state.remove_output(second));
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+
+    // Plug it back: exactly on its entry, neighbours untouched.
+    let back = headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("the replugged output");
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+    assert_eq!(origin_of(&fixture.state, back), (-CANVAS, 0));
+}
+
+/// A rescale keeps placed outputs exactly on their entries: only the
+/// unplaced packing follows the new logical widths.
+#[test]
+fn rescale_keeps_placed_outputs_on_their_entries() {
+    let mut fixture =
+        Fixture::with_config("[[outputs]]\nname = \"headless-2\"\nposition = [-200, 0]\n");
+    fixture.state.output_entries = crate::compositor::output_config::OutputEntries::from_toml(
+        "[[outputs]]\nname = \"headless-2\"\nposition = [-200, 0]\n",
+    );
+    let second = headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    assert_eq!(origin_of(&fixture.state, second), (-CANVAS, 0));
+
+    fixture.rewrite(
+        "[[outputs]]\nname = \"headless-2\"\nposition = [-200, 0]\n\n[output]\nscale = 2.0\n",
+    );
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &["output.scale".to_owned()],
+        "only the scale moved: {response:?}"
+    );
+    // Halved logical widths, but the placed output never left its entry.
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+    assert_eq!(origin_of(&fixture.state, second), (-CANVAS, 0));
+    let output = fixture.state.outputs.get(second).expect("the output");
+    let geometry = fixture
+        .state
+        .space
+        .output_geometry(output)
+        .expect("a mapped output's geometry");
+    assert_eq!((geometry.size.w, geometry.size.h), (CANVAS / 2, CANVAS / 2));
+}
+
+/// A mode for a monitor that is not connected is stored, reported applied,
+/// and applies when it is plugged in -- the scale precedent, not a refusal.
+#[test]
+fn reload_stores_a_mode_for_an_unconnected_output() {
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite("[[outputs]]\nname = \"DP-1\"\nmode = \"300x150\"\n");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &["outputs.DP-1.mode".to_owned()],
+        "an unconnected output's mode stores like a scale does: {response:?}"
+    );
+    assert!(
+        refused(&response).is_empty(),
+        "nothing here should refuse: {response:?}"
+    );
+    assert_eq!(
+        fixture.state.output_entries.mode_for("DP-1"),
+        Some((300, 150))
+    );
+    // Plugging it in later sizes it from the stored entry, as startup does.
+    let id =
+        headless::add_output(&mut fixture.state, "DP-1", 300, 150).expect("the plugged-in output");
+    let output = fixture.state.outputs.get(id).expect("the output");
+    let mode = output.current_mode().expect("a current mode");
+    assert_eq!((mode.size.w, mode.size.h), (300, 150));
+
+    // Same file again: silent -- the stored entry agrees with the file.
+    let again = fixture.reload();
+    assert!(
+        applied(&again).is_empty() && refused(&again).is_empty(),
+        "{again:?}"
+    );
+}
+
+/// Removing an entry's mode resizes back to the session default: the mode
+/// the file stops asking for stops applying, the way a removed scale
+/// reverts.
+#[test]
+fn removing_a_mode_reverts_to_the_session_default() {
+    let mut fixture =
+        Fixture::with_config("[[outputs]]\nname = \"headless\"\nmode = \"300x150\"\n");
+    fixture.state.default_size = Some((CANVAS, CANVAS));
+    fixture.state.output_entries = crate::compositor::output_config::OutputEntries::from_toml(
+        "[[outputs]]\nname = \"headless\"\nmode = \"300x150\"\n",
+    );
+    assert!(fixture.state.resize_output(300, 150));
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+
+    fixture.rewrite("");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &["outputs.headless.mode".to_owned()],
+        "dropping the entry reverts its mode: {response:?}"
+    );
+    let output = fixture
+        .state
+        .outputs
+        .primary()
+        .expect("the headless output")
+        .clone();
+    let mode = output.current_mode().expect("a current mode");
+    assert_eq!((mode.size.w, mode.size.h), (CANVAS, CANVAS));
+}
+
+/// A sole output placed away from the origin clamps the pointer to its own
+/// rectangle, not to `[0, extent)`: relative motion remembers the origin
+/// the layout filed.
+#[test]
+fn a_placed_sole_output_clamps_the_pointer_to_itself() {
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite("[[outputs]]\nname = \"headless\"\nposition = [-200, -100]\n");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &["outputs.headless.position".to_owned()],
+        "{response:?}"
+    );
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (-CANVAS, -100));
+    assert_eq!(fixture.state.primary_origin, (-CANVAS, -100));
+
+    // Miles past the far corner: clamped into the placed rectangle.
+    fixture
+        .state
+        .pointer_move_relative(10_000.0, 10_000.0, 10_000.0, 10_000.0);
+    let location = fixture
+        .state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    assert_eq!(
+        (location.x, location.y),
+        (
+            f64::from(-CANVAS + CANVAS - 1),
+            f64::from(-100 + CANVAS - 1)
+        ),
+        "the pointer escaped the placed sole output"
+    );
+    // And miles back past the origin: clamped to its near corner.
+    fixture
+        .state
+        .pointer_move_relative(-10_000.0, -10_000.0, -10_000.0, -10_000.0);
+    let location = fixture
+        .state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    assert_eq!(
+        (location.x, location.y),
+        (f64::from(-CANVAS), f64::from(-100)),
+        "the pointer escaped the placed sole output"
+    );
 }

@@ -18,11 +18,17 @@ fn entries(toml_text: &str) -> OutputEntries {
     OutputEntries::resolve(file.outputs)
 }
 
-fn entry(name: &str, scale: Option<f64>, mode: Option<(u16, u16)>) -> OutputEntry {
+fn entry(
+    name: &str,
+    scale: Option<f64>,
+    mode: Option<(u16, u16)>,
+    position: Option<(i32, i32)>,
+) -> OutputEntry {
     OutputEntry {
         name: name.to_owned(),
         scale,
         mode,
+        position,
     }
 }
 
@@ -32,6 +38,7 @@ fn no_entries_is_empty_and_everything_takes_the_default() {
     assert!(resolved.is_empty());
     assert_eq!(resolved.scale_for("eDP-1", 1.5), 1.5);
     assert_eq!(resolved.mode_for("eDP-1"), None);
+    assert_eq!(resolved.position_for("eDP-1"), None);
 }
 
 #[test]
@@ -48,6 +55,7 @@ fn an_entry_overrides_its_own_output_only() {
     // An output with no entry is untouched.
     assert_eq!(resolved.scale_for("HDMI-A-1", 1.5), 1.5);
     assert_eq!(resolved.mode_for("HDMI-A-1"), None);
+    assert_eq!(resolved.position_for("HDMI-A-1"), None);
 }
 
 #[test]
@@ -126,6 +134,7 @@ fn the_first_entry_for_a_name_wins_and_empty_names_are_skipped() {
     assert_eq!(resolved.scale_for("DP-1", 1.0), 2.0);
     // The second entry's mode is not merged into the first.
     assert_eq!(resolved.mode_for("DP-1"), None);
+    assert_eq!(resolved.position_for("DP-1"), None);
     assert_eq!(resolved.scale_for("", 1.0), 1.0);
 }
 
@@ -185,38 +194,129 @@ fn the_reload_diff_names_each_changed_field_once() {
     // scale and mode both moved, HDMI-A-1 is new and sets only a scale.
     assert_eq!(diff.scales, ["eDP-1", "DP-1", "HDMI-A-1"]);
     assert_eq!(diff.modes, ["DP-1"]);
+    assert!(diff.positions.is_empty(), "{diff:?}");
 }
 
 #[test]
-fn a_reload_stores_the_new_scales_with_the_live_modes() {
+fn the_reload_diff_names_a_changed_position() {
+    let live = entries(
+        "[[outputs]]\nname = \"DP-1\"\nposition = [-1920, 0]\n\
+          [[outputs]]\nname = \"eDP-1\"\nscale = 2\n",
+    );
+    // Unchanged: nothing, in no list.
+    assert_eq!(live.diff(&live.clone()), EntriesDiff::default());
+
+    // Only the position moves: only it reports.
+    let moved = entries(
+        "[[outputs]]\nname = \"DP-1\"\nposition = [0, -1080]\n\
+          [[outputs]]\nname = \"eDP-1\"\nscale = 2\n",
+    );
+    let diff = live.diff(&moved);
+    assert!(diff.scales.is_empty(), "{diff:?}");
+    assert!(diff.modes.is_empty(), "{diff:?}");
+    assert_eq!(diff.positions, ["DP-1"]);
+
+    // The entry goes away: its position reverts to packed, which reports.
+    let dropped = entries("[[outputs]]\nname = \"eDP-1\"\nscale = 2\n");
+    let diff = live.diff(&dropped);
+    assert_eq!(diff.positions, ["DP-1"]);
+}
+
+#[test]
+fn a_position_places_an_output_including_negative_origins() {
+    let resolved = entries(
+        "[[outputs]]\nname = \"DP-1\"\nposition = [-1920, 0]\n\
+          [[outputs]]\nname = \"HDMI-A-1\"\nposition = [0, -1080]\n\
+          [[outputs]]\nname = \"eDP-1\"\nscale = 2\n",
+    );
+    assert_eq!(resolved.position_for("DP-1"), Some((-1920, 0)));
+    assert_eq!(resolved.position_for("HDMI-A-1"), Some((0, -1080)));
+    // An entry that sets only a scale leaves packing alone.
+    assert_eq!(resolved.position_for("eDP-1"), None);
+}
+
+#[test]
+fn a_mistyped_position_costs_only_the_position() {
+    // A string, a lone number, a triple, a float and an out-of-range
+    // integer each drop the position with a warning, never the entry and
+    // never the file: the scale beside it still resolves.
+    for bad in [
+        "position = \"left\"",
+        "position = 5",
+        "position = [0]",
+        "position = [0, 0, 0]",
+        "position = [0.5, 0]",
+        "position = [2147483648, 0]",
+    ] {
+        let resolved = entries(&format!("[[outputs]]\nname = \"a\"\nscale = 2\n{bad}\n"));
+        assert_eq!(
+            resolved.position_for("a"),
+            None,
+            "{bad:?} parsed as a position"
+        );
+        // The rest of the entry stands.
+        assert_eq!(resolved.scale_for("a", 1.0), 2.0, "{bad:?} cost the scale");
+    }
+    // The widest pair an i32 axis holds is accepted.
+    let resolved = entries("[[outputs]]\nname = \"a\"\nposition = [-2147483648, 2147483647]\n");
+    assert_eq!(resolved.position_for("a"), Some((i32::MIN, i32::MAX)));
+}
+
+#[test]
+fn an_entry_that_sets_only_a_position_is_kept() {
+    // Like a mode-only entry: the position alone makes it an entry.
+    let resolved = entries("[[outputs]]\nname = \"DP-1\"\nposition = [-1920, 0]\n");
+    assert_eq!(resolved.iter().count(), 1);
+    assert_eq!(resolved.position_for("DP-1"), Some((-1920, 0)));
+}
+
+#[test]
+fn a_reload_stores_the_fresh_entries_whole_modes_included() {
+    // Modes apply live now, so there is nothing to hold back: what a
+    // reload stores is the fresh list itself, and a second reload of the
+    // same file diffs nothing against it.
     let live = entries(
         "[[outputs]]\nname = \"DP-1\"\nscale = 1\nmode = \"1280x720\"\n\
-         [[outputs]]\nname = \"HDMI-A-1\"\nmode = \"800x600\"\n\
-         [[outputs]]\nname = \"eDP-1\"\nscale = 2\n",
+         [[outputs]]\nname = \"HDMI-A-1\"\nmode = \"800x600\"\n",
     );
     let fresh = entries(
         "[[outputs]]\nname = \"DP-1\"\nscale = 1.5\nmode = \"1920x1080\"\n\
-         [[outputs]]\nname = \"eDP-1\"\nmode = \"2560x1600\"\n\
-         [[outputs]]\nname = \"new\"\nscale = 3\nmode = \"640x480\"\n",
+         [[outputs]]\nname = \"eDP-1\"\nposition = [-1920, 0]\n",
     );
-    let stored = fresh.with_modes_of(&live);
     assert_eq!(
-        stored.iter().cloned().collect::<Vec<_>>(),
+        fresh.iter().cloned().collect::<Vec<_>>(),
         [
-            // New scale, the live mode kept.
-            entry("DP-1", Some(1.5), Some((1280, 720))),
-            // (eDP-1: its scale gone and its new mode refused, nothing is
-            // left, so it is dropped.) A new entry's scale applies; its
-            // mode waits for a restart.
-            entry("new", Some(3.0), None),
-            // Dropped from the file, but its mode stays until a restart.
-            entry("HDMI-A-1", None, Some((800, 600))),
+            entry("DP-1", Some(1.5), Some((1920, 1080)), None),
+            entry("eDP-1", None, None, Some((-1920, 0))),
         ]
     );
-    // Stored like this, the next reload of the same file differs only in
-    // the modes it already refused -- never in a scale -- so it refuses
-    // them again, the way a field that is never in effect always does.
-    let again = stored.diff(&fresh);
-    assert!(again.scales.is_empty(), "{again:?}");
-    assert_eq!(again.modes, ["DP-1", "new", "HDMI-A-1", "eDP-1"]);
+    assert_eq!(fresh.diff(&fresh.clone()), EntriesDiff::default());
+    // Against the live list every field that moved reports, once.
+    let diff = live.diff(&fresh);
+    assert_eq!(diff.scales, ["DP-1"]);
+    assert_eq!(diff.modes, ["DP-1", "HDMI-A-1"]);
+    assert_eq!(diff.positions, ["eDP-1"]);
+}
+
+#[test]
+fn mode_requests_follow_a_reload_while_the_flag_default_stays() {
+    // `--tty`'s stored requests after a reload: the flag half is untouched
+    // (no reload re-reads a flag), the per-output half is the fresh list.
+    let live = entries("[[outputs]]\nname = \"DP-1\"\nmode = \"1280x720\"\n");
+    let mut requests = ModeRequests::new(Some((1920, 1080)), &live);
+    assert_eq!(requests.for_output("DP-1"), Some((1280, 720)));
+
+    let fresh = entries(
+        "[[outputs]]\nname = \"DP-1\"\nmode = \"1920x1080\"\n\
+         [[outputs]]\nname = \"eDP-1\"\nmode = \"2560x1600\"\n",
+    );
+    requests.update(&fresh);
+    assert_eq!(requests.for_output("DP-1"), Some((1920, 1080)));
+    assert_eq!(requests.for_output("eDP-1"), Some((2560, 1600)));
+    // The flag still covers the output with no entry.
+    assert_eq!(requests.for_output("HDMI-A-1"), Some((1920, 1080)));
+
+    // Dropping every entry returns to the flag everywhere.
+    requests.update(&OutputEntries::default());
+    assert_eq!(requests.for_output("DP-1"), Some((1920, 1080)));
 }

@@ -187,12 +187,6 @@ impl Outputs {
         self.entries.first().map(|entry| (entry.id, &entry.output))
     }
 
-    /// The most recently added output -- where `headless::add_output` measures
-    /// the next one's position from.
-    pub(crate) fn last(&self) -> Option<&Output> {
-        self.entries.last().map(|entry| &entry.output)
-    }
-
     /// The output `id` names, if this compositor has one.
     pub(crate) fn get(&self, id: OutputId) -> Option<&Output> {
         self.entries

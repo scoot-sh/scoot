@@ -41,7 +41,7 @@ mod dumb;
 mod flip_tracker;
 mod gpu;
 mod head;
-mod hotplug;
+pub(crate) mod hotplug;
 #[cfg(feature = "gpu-scanout")]
 mod layout_exporter;
 mod present_retry;
@@ -154,15 +154,18 @@ pub struct Tty {
     /// freeze that screen, the worse of the two mistakes.
     stale_vblanks: StaleVblanks,
     /// `--mode WxH` and every `[[outputs]]` entry's `mode`, exactly as the
-    /// session started with them, kept so a hotplug -- and a VT switch back,
-    /// and any unrelated uevent -- re-runs the same choice startup made
-    /// rather than silently demoting either to a startup-only preference: a
-    /// re-probe that forgot an entry's mode would plan `NewMode` and
-    /// re-modeset that monitor back to `--mode` or its preferred mode. A
-    /// connector with neither takes its preferred mode, at startup and at
-    /// every re-probe alike. Applies to every connector independently, by
-    /// name (see `gpu::find_all`). Never changed after startup: a reload
-    /// refuses a changed mode (see `output_config.rs`).
+    /// session started with them -- until a reload swaps the per-output
+    /// half for its fresh list (see `hotplug::apply_reloaded_modes`). Kept
+    /// so a hotplug -- and a VT switch back, and any unrelated uevent --
+    /// re-runs the same choice the session runs with rather than silently
+    /// demoting either to a startup-only preference: a re-probe that forgot
+    /// an entry's mode would plan `NewMode` and re-modeset that monitor back
+    /// to `--mode` or its preferred mode. A connector with neither takes its
+    /// preferred mode, at startup and at every re-probe alike. Applies to
+    /// every connector independently, by name (see `gpu::find_all`). The
+    /// `--mode` default never changes after startup (a flag no reload
+    /// re-reads); only the per-entry half moves, on a reload that changed
+    /// one (see `output_config.rs`).
     modes: ModeRequests,
     /// Whether the last probe of this device found *nothing* `Connected`.
     ///
