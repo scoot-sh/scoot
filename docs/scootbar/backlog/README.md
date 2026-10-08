@@ -145,7 +145,7 @@ The [umbrella](resolved/data-source-modules-done.md) holds the rules they share 
 - [`scootnotify`: the notification daemon](scootnotify.md) (low, pointer)
 
 ### Unscheduled (until someone asks)
-- [Gate integration tests on module features, tidy the unit-test script](scootbar-test-gating-and-script-hygiene.md) (low)
+- [Gate integration tests on module features, tidy the unit-test script](resolved/scootbar-test-gating-and-script-hygiene-done.md) (low) — RESOLVED 2026-10-08 in #527
 - [Documented exec recipes for CPU/memory/pressure readouts](resolved/exec-stats-recipes-done.md) (low) — RESOLVED 2026-10-08 in #519: CPU, memory and PSI-stall exec recipes beside the exec module, each with cost and reload behavior
 - [drive_placed pidfile-vs-pipe race flakes the exec keep tests](resolved/exec-keep-pidfile-race-done.md) (low) — RESOLVED 2026-10-03 in #402: waits on shown text, pidfile as identity check only
 - [Network: a connect or menu command that never exits blocks the next one](resolved/network-child-stuck-done.md) (low) — RESOLVED 2026-10-04 in #428: a second connect/menu replaces the running child (SIGTERM, then SIGKILL), drop ends both; scan list resets on the re-dump's first page (#403 review)
