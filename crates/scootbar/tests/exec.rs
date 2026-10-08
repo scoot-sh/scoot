@@ -19,6 +19,7 @@ mod common;
 #[cfg(feature = "exec")]
 use std::collections::BTreeSet;
 use std::fs;
+#[cfg(any(feature = "button", feature = "exec"))]
 use std::path::PathBuf;
 #[cfg(any(feature = "push", feature = "exec"))]
 use std::process::Output;

@@ -19,6 +19,7 @@ mod common;
 use std::fs;
 #[cfg(feature = "push")]
 use std::io::{BufRead, BufReader};
+#[cfg(any(feature = "button", feature = "push"))]
 use std::path::PathBuf;
 #[cfg(feature = "push")]
 use std::process::{Child, Stdio};
@@ -26,6 +27,7 @@ use std::process::{Child, Stdio};
 use std::time::{Duration, Instant};
 
 use common::{Reaper, Session, rgb};
+#[cfg(any(feature = "button", feature = "push"))]
 use serde_json::Value;
 
 const BAR: &str = "#102030";
