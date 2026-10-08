@@ -885,7 +885,9 @@ both exist), PipeWire running for the cast, `grim` plus `slurp` for
 the screenshot binds, and the output chooser xdpw asks through before
 each cast. The portals start on demand over D-Bus and hold nothing
 until a cast asks — no daemon, no memory, no wakeups when you are
-not sharing.
+not sharing. Push notifications need nothing: the profile installs no
+Push backend, and no installed backend advertises the Push portal, so
+a pure scoot session runs no push daemon at all.
 
 Three binds, each plain (fire once, never behind the lock screen):
 
@@ -988,6 +990,15 @@ Troubleshooting, by symptom:
   (also the profile's, for sessions without home-manager) — read the
   user one first. A hand-written file in either place wins over both
   only if it sorts earlier in the lookup; don't.
+- *`kunifiedpush-distributor` sits in the session at ~15 MB.* It rode
+  in with Plasma 6, not this profile: nixpkgs installs it
+  unconditionally beside Plasma and it starts in every graphical
+  session. A pure scoot session never installs it. If this box also
+  runs Plasma, `systemctl --user mask kunifiedpush-distributor.service`
+  stops it (`unmask` restores it); nothing the session needs breaks —
+  no Push backend exists in this closure. The mask is per-user, so it
+  covers that user's Plasma sessions too, where push would stop with
+  it.
 
 ## Sound, brightness keys and the on-screen display
 
