@@ -21,7 +21,7 @@ Add explicit opt-in, default off, `[virtual_input] binds = true`: virtual-keyboa
 
 ## Not in this ticket
 
-Per-client allow-list (`docs/backlog/protocols/virtual-input-allow-list.md`); virtual-pointer binds (pointers have none); live reload of the flag.
+Per-client allow-list (`docs/backlog/resolved/virtual-input-allow-list-done.md`); virtual-pointer binds (pointers have none); live reload of the flag.
 
 ## Resolution (2026-10-07, PR #494)
 
