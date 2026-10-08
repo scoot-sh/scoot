@@ -66,7 +66,7 @@ cd source
 %{_bindir}/scootbar
 %{_userunitdir}/scootbar.service
 %license source/LICENSE source/NOTICE source/THIRD-PARTY-LICENSES
-%doc packaging/rpm/bar.toml.example
+%doc source/packaging/rpm/bar.toml.example
 
 %changelog
 * Thu Oct 08 2026 scoot-sh <packages@scoot.sh> - 0.1.0-1
