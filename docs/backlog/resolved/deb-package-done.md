@@ -75,6 +75,11 @@ and no `debian/` source package (the ticket's level 2, on demand).
 CI installs from the unsigned index on bookworm (full proof:
 `--version` × 3, bar `--check`, headless smoke test) and noble
 (glibc-forward install). Proven on the Asahi M2 (arm64) except the
-final compile-to-smoke chain, which CI owns: vendored staging,
-all-three release compile, control rendering, the shlibdeps gate both
-ways, lintian, index, install, purge-to-clean, desktop validation.
+final compile-to-smoke chain: vendored staging, all-three release
+compile, control rendering, the shlibdeps gate both ways, lintian,
+index, install, purge-to-clean, desktop validation. CI has since
+proven the whole chain green on both architectures (PR #528 head
+`a2d0e006a`, deb workflow run 37759835767: `scoot_0.1.0-1_amd64.deb`
+and `_arm64` siblings, Depends exactly the allow-list, lintian 0
+errors with only the two documented warnings, install + smoke green
+on bookworm and noble).
