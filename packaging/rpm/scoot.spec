@@ -40,7 +40,6 @@ BuildRequires:  libpixman-1-0-devel
 BuildRequires:  libxkbcommon-devel
 BuildRequires:  wayland-devel
 BuildRequires:  wayland-protocols-devel
-BuildRequires:  desktop-file-utils
 BuildRequires:  systemd-rpm-macros
 %else
 BuildRequires:  libinput-devel
@@ -50,7 +49,6 @@ BuildRequires:  pixman-devel
 BuildRequires:  libxkbcommon-devel
 BuildRequires:  wayland-devel
 BuildRequires:  wayland-protocols-devel
-BuildRequires:  desktop-file-utils
 BuildRequires:  systemd-rpm-macros
 %endif
 # The coupled pair installs at one version (docs/versioning.md).

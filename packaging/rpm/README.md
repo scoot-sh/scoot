@@ -55,9 +55,11 @@ Notes:
   set, same as the Arch packages): rebuilding with `--features
   gpu-scanout` is a local `rpmbuild` edit (the feature on the `cargo
   build` line, the two `-devel` packages beside it), not a separate spec.
-- Toolchain floor: Fedora 43 ships rust 1.90, Tumbleweed rust 1.98
-  (checked with the same queries); both clear the workspace floor
-  (`rust-version = "1.87"`). No rustup needed in the build containers.
+- Toolchain floor: both distros clear the workspace floor
+  (`rust-version = "1.87"`), so no rustup is needed in the build
+  containers — Fedora 43 resolves rust 1.98.1, Tumbleweed ships rust
+  1.98.1 (both re-measured 2026-10-08 with the same queries;
+  toolchains move, so re-check at build time).
 - `cargo-deny` exists on Fedora but has no openSUSE package, so no spec
   runs it: `THIRD-PARTY-LICENSES` arrives inside the vendored tarball
   (staged by `scripts/vendor-release.sh`) and the specs only install it.
