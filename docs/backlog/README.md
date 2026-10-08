@@ -428,7 +428,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [Publish: binaries on Cachix, the flake on FlakeHub](resolved/nix-publishing-done.md) (medium) — RESOLVED 2026-10-04 in #410
 - [Nix: crane, so compiled dependencies are cached](./resolved/nix-crane-done.md) — medium: was ready once Cachix received pushes — RESOLVED 2026-10-04 in #420
 - [A user-facing docs site, with internal notes moved out of docs/](packaging/docs-site.md) (medium): Astro Starlight with llms.txt from the start (decided 2026-10-04); an outline for the maintainer first
-- [The docs-site build stays green when a referenced asset is missing](./packaging/docs-site-asset-check.md) (low, filed 2026-10-06 from #466's review): resolve every asset url/src/srcset in dist/
+- [The docs-site build stays green when a referenced asset is missing](./resolved/docs-site-asset-check-done.md) (low) — RESOLVED 2026-10-07 in #504: `check-assets` gate (every asset url/src/srcset in `dist/`, base-aware) plus the missing-font-plus-image fixture
 - [Theme follow-ups: upstream gtk/qt win, QT_PLUGIN_PATH composes, bar font from the look](./resolved/theme-precedence-followups-done.md) (high, filed 2026-10-06 from #474's review)
 - [Docs site HTML links to raw `.md` twins instead of pages](./resolved/site-md-links-done.md) (high) — RESOLVED 2026-10-06 in #476: post-build rewrite of relative `.md` links in `*.html` only, plus the `check-md-links` gate
 - [A systemd session for scoot](resolved/scoot-systemd-session-done.md) (medium) — RESOLVED 2026-10-04 in #416: greeter-started sessions get `graphical-session.target`, the activation environment and a clean shutdown
