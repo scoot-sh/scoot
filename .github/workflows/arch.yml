@@ -83,6 +83,11 @@ jobs:
 
       - name: Install the build, lint and smoke tools
         run: |
+          # The image's pacman.conf skips docs on install (NoExtract),
+          # which would leave the shipped example configs off disk even
+          # though the packages own them: install everything, so the
+          # --check below reads the installed files, not just the db.
+          sed -i -e '/^NoExtract/d' /etc/pacman.conf
           pacman -Syu --noconfirm --needed \
             base-devel cargo cargo-deny desktop-file-utils foot git imagemagick \
             jq namcap sudo ttf-dejavu wayland wayland-protocols wayland-utils
