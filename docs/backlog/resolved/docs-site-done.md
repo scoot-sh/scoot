@@ -1,9 +1,10 @@
 ---
 title: "A user-facing docs site, with internal notes moved out of docs/"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-08"
 ---
 
 # A user-facing docs site, with internal notes moved out of docs/
@@ -129,3 +130,55 @@ open: the contributor-tree half (`dev/` move + repo-wide link updates,
 `docs-contributor-tree.md`) and the asset check (its own open entry
 `docs-site-asset-check.md`). The "(not yet)" notes above are stale and kept
 for history.
+
+## Resolution (verify-first pass, 2026-10-08 — ticket done, resolving)
+
+Re-checked every "What to do" bullet against the site as built and as
+deployed; everything this ticket asked for is landed. The two remainders
+named in the status above both live elsewhere now: the contributor-tree
+half is `docs-contributor-tree.md` (a separate open ticket, not this
+one), and the asset check resolved 2026-10-07 in #504
+(`resolved/docs-site-asset-check-done.md`). No new work in this PR —
+docs-only resolve.
+
+- Split by audience (user half): `site/src/content/docs/` holds 49
+  pages across Start, desktop, scoot (13 pages), msg (6), scootbar (6),
+  scootbg (9), agents, troubleshooting, reference (6); the eight
+  `docs/*.md` are stubs pointing there. Contributor half: untouched
+  here, tracked by `docs-contributor-tree.md`.
+- Task-first pages with screenshots: three front doors on the home
+  page (desktop / compositor / agents-headless-webtop), Looks strip,
+  GPU chooser and cheat-sheet pages live; `msg/screenshots.md`
+  documents the reproducible IPC screenshot path.
+- History out of user pages: `CLAUDE.md`'s docs rule targets the site
+  pages. Dated measurement prose still inside user pages is
+  `docs-contributor-tree.md`'s to move, not this ticket's.
+- Generator: Astro Starlight (Starlight v0.42.5 on the live home
+  page), pnpm via `fetchPnpmDeps` + `pnpmConfigHook` in
+  `nix/docs-site.nix` (Rust jobs untouched), own CI path filter
+  (`site/*` → `docs-site` in `ci.yml`; `*.md | docs/*` starts
+  nothing), dark-only scoot theme (`custom.css`, no stock Starlight).
+- LLM support: live `/llms.txt` (index + small/full + 9 per-section
+  custom sets, fetched 2026-10-08), per-page `*.md` twins via
+  `src/pages/[page].md.ts`, gates `check-llms` (49 pages with twins),
+  `check-md-links` (347 page links), `check-assets` (550 refs),
+  `test-snippets`, `check-nix` (49 blocks) — all green in
+  `nix build .#docs-site` on the M2 2026-10-08 (exit 0).
+- Hosting: `docs-site-deploy.yml` pushes to Pages on `site/**`,
+  `docs/**`, `nix/docs-site.nix` (the explicit `docs/**` trigger the
+  ticket required); `DEPLOY_TARGET = 'www'`, live at
+  https://www.scoot.sh/ with Starlight search (the live site serves
+  `/pagefind/pagefind.js`, Pagefind v1.5.2, and the home page carries
+  `site-search` + `data-pagefind-body`). A local `nix build .#docs-site` on a
+  16K-page host such as the Asahi M2 builds the site but emits no search index
+  (Pagefind's jemalloc refuses that page size); the deployed site is built on
+  4K-page CI runners and is unaffected.
+- README points at the site throughout (install, desktop, IPC,
+  keybindings, protocols links to `www.scoot.sh`).
+
+Evidence: `nix build -L .#docs-site` exit 0; `nix flake show
+--all-systems --json --no-write-lock-file` exit 0; `scripts/backlog
+check` shows only the 3 known pre-existing problems
+(`protocol-gaps-general.md`, `protocol-gaps-niche.md`,
+`multi-output-foundation-done.md`); `cargo deny check` —
+advisories/bans/licenses/sources ok.
