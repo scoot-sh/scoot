@@ -57,7 +57,10 @@ jobs:
     name: makepkg + namcap + install + smoke (x86_64)
     runs-on: ubuntu-latest
     container: archlinux:base
-    timeout-minutes: 60
+    # Six release-profile workspace builds, each from its own srcdir
+    # (cargo fingerprints by path, so they share the registry but not
+    # compiled deps), plus two headless smoke runs.
+    timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -145,10 +148,14 @@ jobs:
           sys.exit(1 if bad else 0)
           EOF
 
-      - name: makepkg all six packages (shared cargo target dir)
+      - name: makepkg all six packages (one cargo target dir for the disk budget)
         run: |
           # Passed through sudo with env: sudo's env_reset would drop
           # shell exports, so they ride on the command line instead.
+          # One CARGO_TARGET_DIR keeps six target trees out of the
+          # srcdirs (each PKGBUILD rebuilds: cargo fingerprints by
+          # absolute path, so nothing is shared between them but the
+          # registry in the builder's home).
           for p in scoot scootbg scootbar scoot-git scootbg-git scootbar-git; do
             sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
               bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/$p' && makepkg -s --noconfirm"
