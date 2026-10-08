@@ -2365,6 +2365,202 @@ mod popup_list {
     }
 
     #[test]
+    fn a_handover_between_pages_does_not_double_a_network() {
+        // R1 (network-scan-refill-duplicates): a retarget scan D1 is in
+        // flight with pages pending; one page lands; the menu opens (arms
+        // the reset, hands it to unspent D1, queues D2); D1's next page
+        // consumes the reset. D2 still owns one of its own, or it
+        // appends its full scan after D1's tail and the handover page
+        // lists twice.
+        const DONGLE: u32 = 4;
+        let (command, dir, file) = record_menu("handover-pages");
+        let settings = Settings {
+            menu_command: command,
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        for (index, name, ssid) in [
+            (WLAN0, "wlan0", &b"Wimbly"[..]),
+            (DONGLE, "wlan1", &b"FarAway"[..]),
+        ] {
+            fake.rt(&fake::link(16, index, UP, 6, name, None));
+            fake.rt(&fake::addr(20, index, 2));
+            fake.genl(&fake::interface(index, name, Some(ssid)));
+        }
+        route_via(&fake, WLAN0);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        // Settle the shown scan and its station, so D1 below is the only
+        // dump in flight.
+        let (_, genl) = fake.sent();
+        assert_eq!(scan_targets(&genl), [WLAN0]);
+        let scan = request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_SCAN,
+        );
+        fake.genl(&fake::scan(&[(b"Wimbly", -5400, true)]));
+        fake.genl(&fake::done_seq(scan));
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let (_, genl) = fake.sent();
+        fake.genl(&fake::station(-54));
+        fake.genl(&fake::done_seq(request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_STATION,
+        )));
+        assert_eq!(drive(&mut harness), Update::Unchanged);
+        let (_, genl) = fake.sent();
+        assert!(scan_targets(&genl).is_empty());
+        // The route moves: the dongle's scan D1 goes out with the move,
+        // owing no reset (a retarget, not a refill).
+        route_via(&fake, DONGLE);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        assert!(harness.view().text().starts_with("FarAway"));
+        let (_, genl) = fake.sent();
+        assert_eq!(scan_targets(&genl), [DONGLE]);
+        let d1 = request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_SCAN,
+        );
+        // D1's first page lands: appended, with no reset to consume.
+        fake.genl(&fake::scan(&[(b"FarAway", -6000, true)]));
+        let _ = drive(&mut harness);
+        // The menu opens, fed the first page; its refresh arms the reset,
+        // hands it to unspent D1 and queues D2 beside D1's station.
+        let menu = ModuleAction::new("menu", None);
+        let output = crate::modules::OutputView { name: None };
+        assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+        let _ = drive(&mut harness);
+        wait_file(&file, "FarAway\n");
+        // D1's next page consumes the handed reset...
+        fake.genl(&fake::scan(&[(b"Elsewhere", -7000, false)]));
+        let _ = drive(&mut harness);
+        // ...and D1 ends. The stations queued beside both scans complete
+        // so D2 goes out.
+        fake.genl(&fake::done_seq(d1));
+        let _ = drive(&mut harness);
+        let (_, genl) = fake.sent();
+        fake.genl(&fake::station(-60));
+        fake.genl(&fake::done_seq(request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_STATION,
+        )));
+        let _ = drive(&mut harness);
+        let (_, genl) = fake.sent();
+        let d2 = request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_SCAN,
+        );
+        // D2's full scan: without the handed-over reset it appends after
+        // D1's tail and Elsewhere lists twice.
+        fake.genl(&fake::scan(&[
+            (b"FarAway", -6000, true),
+            (b"Elsewhere", -7000, false),
+        ]));
+        fake.genl(&fake::done_seq(d2));
+        let _ = drive(&mut harness);
+        assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+        let _ = drive(&mut harness);
+        wait_file(&file, "FarAway\nElsewhere\n");
+        std::fs::remove_dir_all(&dir).ok();
+        let _ = fake.sent();
+    }
+
+    #[test]
+    fn a_refused_handover_scan_keeps_the_queued_refill_s_reset() {
+        // R2 (network-scan-refill-duplicates): the same handover, but the
+        // kernel refuses D1: `drop_genl` cancels the reset D1 owned while
+        // D2 stays queued with nothing owed, so D2 appends onto the stale
+        // pre-arm list and FarAway lists twice.
+        const DONGLE: u32 = 4;
+        let (command, dir, file) = record_menu("handover-refused");
+        let settings = Settings {
+            menu_command: command,
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        for (index, name, ssid) in [
+            (WLAN0, "wlan0", &b"Wimbly"[..]),
+            (DONGLE, "wlan1", &b"FarAway"[..]),
+        ] {
+            fake.rt(&fake::link(16, index, UP, 6, name, None));
+            fake.rt(&fake::addr(20, index, 2));
+            fake.genl(&fake::interface(index, name, Some(ssid)));
+        }
+        route_via(&fake, WLAN0);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        // Settle the shown scan and its station, so D1 below is the only
+        // dump in flight.
+        let (_, genl) = fake.sent();
+        assert_eq!(scan_targets(&genl), [WLAN0]);
+        let scan = request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_SCAN,
+        );
+        fake.genl(&fake::scan(&[(b"Wimbly", -5400, true)]));
+        fake.genl(&fake::done_seq(scan));
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let (_, genl) = fake.sent();
+        fake.genl(&fake::station(-54));
+        fake.genl(&fake::done_seq(request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_STATION,
+        )));
+        assert_eq!(drive(&mut harness), Update::Unchanged);
+        let (_, genl) = fake.sent();
+        assert!(scan_targets(&genl).is_empty());
+        // The route moves: the dongle's scan D1 goes out with the move,
+        // owing no reset (a retarget, not a refill).
+        route_via(&fake, DONGLE);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        assert!(harness.view().text().starts_with("FarAway"));
+        let (_, genl) = fake.sent();
+        assert_eq!(scan_targets(&genl), [DONGLE]);
+        let d1 = request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_SCAN,
+        );
+        // D1's first page lands: appended, with no reset to consume.
+        fake.genl(&fake::scan(&[(b"FarAway", -6000, true)]));
+        let _ = drive(&mut harness);
+        // The menu opens, fed the first page; its refresh arms the reset,
+        // hands it to unspent D1 and queues D2 beside D1's station.
+        let menu = ModuleAction::new("menu", None);
+        let output = crate::modules::OutputView { name: None };
+        assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+        let _ = drive(&mut harness);
+        wait_file(&file, "FarAway\n");
+        // The kernel refuses D1 outright: no page of it will ever arrive
+        // to start the list, but D2 still owns the reset.
+        fake.genl(&fake::error_seq(d1, -1));
+        let _ = drive(&mut harness);
+        // The stations queued beside both scans complete so D2 goes out.
+        let (_, genl) = fake.sent();
+        fake.genl(&fake::station(-60));
+        fake.genl(&fake::done_seq(request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_STATION,
+        )));
+        let _ = drive(&mut harness);
+        let (_, genl) = fake.sent();
+        let d2 = request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_SCAN,
+        );
+        // D2's full scan: without the kept reset it appends onto the
+        // stale pre-arm list and FarAway lists twice.
+        fake.genl(&fake::scan(&[
+            (b"FarAway", -6000, true),
+            (b"Elsewhere", -7000, false),
+        ]));
+        fake.genl(&fake::done_seq(d2));
+        let _ = drive(&mut harness);
+        assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+        let _ = drive(&mut harness);
+        wait_file(&file, "FarAway\nElsewhere\n");
+        std::fs::remove_dir_all(&dir).ok();
+        let _ = fake.sent();
+    }
+
+    #[test]
     fn dropping_the_module_ends_both_running_children() {
         // A reload while a connect and a menu both run: neither child
         // outlives the module, unreaped.
