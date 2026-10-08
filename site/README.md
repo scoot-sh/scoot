@@ -57,6 +57,20 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
   bundles keep their `.md` links for agents (a remark/rehype plugin cannot:
   the bundles render through the same markdown pipeline, so the rewrite
   would leak into them; verified 2026-10-06).
+- `pnpm check-assets` (`scripts/check-assets.mjs`): fails the build if any
+  CSS `url()` (`dist/**/*.css`, plus `<style>` blocks and `style=""`
+  attributes in `dist/**/*.html`) or any HTML `src`/`href`/`srcset` naming
+  an asset (images, fonts, CSS/JS, icons) resolves to no file in `dist/`.
+  Resolution is base-aware (root-absolute URLs resolve under the built
+  base, inferred from the `/_astro/` prefix; page-relative URLs against
+  the linking file, CSS-relative against the stylesheet). Intentional
+  `.md` twin links are excluded (the llms gate covers those), as are
+  `.txt` bundles, feeds, page links and external/data URLs. Vite leaves a
+  CSS `url()` untouched when its file is absent and still exits 0 (PR
+  #466 shipped an `@font-face` that would 404 this way), so without this
+  gate a missing font or image is a green build. `pnpm test-check-assets`
+  pins the fixture (`scripts/fixtures/check-assets/`): one missing font
+  plus one missing image must fail, the all-present twin must pass.
 - `pnpm test-snippets`: toml/sh soundness + the "color"/"compositor"
   wording rules, over the whole tree. Executing snippets against headless
   scoot is the recorded next step (needs the Linux binary; both runners

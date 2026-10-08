@@ -128,8 +128,8 @@ jobs:
   #   `*.md | docs/*` does not match `site/`, whose pages live in the tree
   #   since the move)                         -> docs-site=true (docs-site job:
   #                                           `nix build .#docs-site`, which
-  #                                           also runs the llms and snippet
-  #                                           gates). `nix/docs-site.nix` and
+  #                                           also runs the llms, page-link,
+  #                                           asset and snippet gates). `nix/docs-site.nix` and
   #                                           `flake.nix`/`flake.lock` fall to
   #                                           the catch-all below and run
   #                                           everything, site included.
@@ -380,9 +380,12 @@ jobs:
   # Rust). `nix build .#docs-site` renders the static site and runs the
   # gates inside the sandbox — `check-llms` (llms.txt covers every page,
   # every `.md` twin exists), `check-md-links` (no built HTML page links a
-  # raw `.md` twin, every rewritten link resolves), `test-snippets` (fenced
-  # toml/sh blocks are sound) and `test-nix` (fenced nix blocks parse) — so
-  # a red gate fails this job, not the deploy. Runs when `site/**` changes
+  # raw `.md` twin, every rewritten link resolves), `check-assets` (every
+  # asset url/src/srcset resolves to a file in `dist/`, base-aware, with
+  # its missing-font-plus-image fixture pinned by `test-check-assets`),
+  # `test-snippets` (fenced toml/sh blocks are sound) and `test-nix`
+  # (fenced nix blocks parse) — so a red gate fails this job, not the
+  # deploy. Runs when `site/**` changes
   # (checked before `*.md`, since the site's own pages are Markdown), on the
   # catch-all, and on every push to main; fail open like the other jobs
   # (only an explicit `false` skips). No store cache: the pnpm dependencies
@@ -404,7 +407,7 @@ jobs:
         run: |
           git ls-files -z '*.nix' | xargs -0 nix fmt -- --check
 
-      - name: nix build .#docs-site (builds the site, runs the llms and snippet gates)
+      - name: nix build .#docs-site (builds the site, runs the llms, page-link, asset and snippet gates)
         run: nix build -L --no-link .#docs-site
 
   linux:
