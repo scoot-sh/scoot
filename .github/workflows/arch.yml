@@ -188,7 +188,8 @@ jobs:
           scootbg --version
           scootbar --version
           scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
-          mkdir -p -m 700 /tmp/arch-smoke-xdg
+          mkdir -p /tmp/arch-smoke-xdg
+          chmod 700 /tmp/arch-smoke-xdg
           export XDG_RUNTIME_DIR=/tmp/arch-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
           export SMOKE_PREFIX=/tmp/arch-smoke-release SMOKE_REQUIRE_SCOOTBG=1
           scripts/smoke-test.sh

@@ -181,7 +181,7 @@ jobs:
       scootbg: ${{ steps.classify.outputs.scootbg }}
       scootbar: ${{ steps.classify.outputs.scootbar }}
       backlog: ${{ steps.classify.outputs.backlog }}
-      docs-site: ${{ steps.classify.outputs.docs-site }}
+      docs-site: ${{ steps.classify.outputs.docs_site }}
       session: ${{ steps.classify.outputs.session }}
       version: ${{ steps.classify.outputs.version }}
     steps:
@@ -404,7 +404,7 @@ jobs:
   docs-site:
     name: Docs site (Starlight + llms.txt)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_site != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.docs-site != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -456,7 +456,8 @@ jobs:
       # mean to test. Exported for every later step, not just this one.
       - name: Create XDG_RUNTIME_DIR
         run: |
-          mkdir -p -m 700 "$RUNNER_TEMP/xdg"
+          mkdir -p "$RUNNER_TEMP/xdg"
+          chmod 700 "$RUNNER_TEMP/xdg"
           echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
 
       # Split restore/save rather than `actions/cache`: the combined action
@@ -747,7 +748,8 @@ jobs:
       # `/run/user/<uid>`.
       - name: Create XDG_RUNTIME_DIR
         run: |
-          mkdir -p -m 700 "$RUNNER_TEMP/xdg"
+          mkdir -p "$RUNNER_TEMP/xdg"
+          chmod 700 "$RUNNER_TEMP/xdg"
           echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
 
       # Restore-only, from the `linux` job's entries: every dependency but
