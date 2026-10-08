@@ -60,7 +60,9 @@ window layout OmniWM-style through the Accessibility API.
   an `UnderlyingStorage::Dmabuf` so scoot's drawn cursor can ride an
   overlay plane where there is no cursor plane; and a `ConnectionLost`
   error so a dead seat shuts scoot down instead of panicking in libseat (see
-  `docs/forks.md`). Make
+  `docs/forks.md`, which since 2026-10-08 carries a per-commit verdict on
+  whether each change could live in scoot instead: all stay except the
+  unused `set_commits_allowed`, dropped at the next rebase). Make
   verify-against-source claims against the fork rev (its checkout is
   `~/.cargo/git/checkouts/smithay-*/fdf424d`), and repin to upstream once
   a Smithay rev carries the fixes (`docs/backlog/core/smithay-fork-repin.md`).

@@ -15,7 +15,7 @@ debt, and serves the project's own standard: a fork is a cost that has to earn i
 place with evidence.
 
 This is a **look backward at how each decision was made**. It is separate from
-[fork-changes-in-scoot](fork-changes-in-scoot.md), which looks forward at which
+[fork-changes-in-scoot](../resolved/fork-changes-in-scoot-done.md), which looks forward at which
 carried commits could move into scoot. The audit's output feeds that
 investigation: any commit whose record is thin becomes a priority candidate there.
 
@@ -62,7 +62,7 @@ verify-against-fork rule) counted at the time?
 - A short findings table (per commit group: class 1 to 4, where the evidence is,
   and a verdict on whether it needs re-examining) in `docs/forks.md`.
 - Every class 2 or 3 item added to the priority list of
-  [fork-changes-in-scoot](fork-changes-in-scoot.md).
+  [fork-changes-in-scoot](../resolved/fork-changes-in-scoot-done.md).
 - **A process fix** (**done 2026-09-29**): `docs/forks.md` and the fork rule in
   `CLAUDE.md` now require that any new fork or carried commit states the scoot-side
   alternatives considered and why each was rejected, so the next fork cannot skip it.
