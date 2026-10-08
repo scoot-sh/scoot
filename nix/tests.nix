@@ -1600,6 +1600,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
+    desktop.look = null;
     desktop.keys.enable = false;
   };
   # ...keys only (policy and locker off): an empty lock action still
