@@ -25,7 +25,7 @@ Filed 2026-09-29; split into one entry per module 2026-09-29. Serves
 **Not built in, by decision**: CPU, memory, temperature and disk
 ([system-stats-decision](../system-stats-decision.md)). **Keyboard layout**, the most
 requested module of all, is blocked on scoot: no standard protocol carries it, so
-it needs [an IPC event](../../../backlog/ipc/keyboard-layout-event.md) first.
+it needs [an IPC event](../../../backlog/resolved/keyboard-layout-event-done.md) first.
 
 ## Rules for every module
 
