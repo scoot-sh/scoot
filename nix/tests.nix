@@ -1485,6 +1485,25 @@ let
     desktop.enable = true;
     desktop.look = "moonrise";
   };
+  # Ginger-night, the default look: the cat-peeking palette plus its
+  # shipped wallpaper (`fit` on the look's black, so the cat at the
+  # right edge is never cropped).
+  hmDeskLookGinger = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "ginger-night";
+  };
+  # Explicitly unthemed: `look = null` opts out of the default look
+  # (no appearance, no wallpaper, every themed slot inert).
+  hmDeskLookNull = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = null;
+  };
   # A user value beside a look wins per key; the rest stays the look's.
   hmDeskUserWins = evalHome {
     enable = true;
@@ -1533,6 +1552,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...every future slot on: all twenty-three binds render, the slot
   # scripts beside them.
@@ -1580,6 +1600,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
+    desktop.look = null;
     desktop.keys.enable = false;
   };
   # ...keys only (policy and locker off): an empty lock action still
@@ -1608,6 +1629,7 @@ let
   hmIdleNoLook = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...the policy off (each of the three switches back off: the
   # profile turns the set on, and the lock and inhibitor refuse to run
@@ -1745,6 +1767,7 @@ let
   hmNotifNoLook = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...the daemon off (the profile turns it on, like the idle policy;
   # each switch back off disables just its half).
@@ -1876,6 +1899,7 @@ let
   hmClipNoLook = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...the slot off (the profile turns it on, like the idle policy;
   # each switch back off disables just its half).
@@ -2019,6 +2043,7 @@ let
   hmAppsNoLook = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...the file manager on: its package on PATH and the directory
   # association answering through it.
@@ -2458,6 +2483,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
   };
   osClipOff = evalNixos {
     enable = true;
@@ -2494,6 +2520,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
   };
   osAppsFiles = evalNixos {
     enable = true;
@@ -2582,6 +2609,7 @@ let
   hmLaunchNoLook = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...the slot off (the profile turns it on, like the idle policy;
   # the switch back off disables just its half).
@@ -2620,6 +2648,11 @@ let
     desktop.enable = true;
     desktop.look = "moonrise";
   };
+  hmLaunchLookGinger = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "ginger-night";
+  };
   # Refusals: the slot with no launcher to run it (pinned by message
   # in `_launchPins`)...
   hmLaunchNoPkg = evalHome {
@@ -2643,6 +2676,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
   };
   osLaunchOff = evalNixos {
     enable = true;
@@ -2671,6 +2705,7 @@ let
   hmCaptureNoLook = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...the slot off (the profile turns it on; the switch back off
   # disables just its half: no tools, no chooser file, no binds).
@@ -2773,6 +2808,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
   };
   osCaptureOff = evalNixos {
     enable = true;
@@ -2853,6 +2889,7 @@ let
   hmNightNoLook = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...the slot off (the profile turns it on, like the idle policy;
   # the switch back off disables just its half: no tool, no unit).
@@ -2888,6 +2925,7 @@ let
   hmNightLocated = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
     desktop.nightlight.latitude = 37.33;
     desktop.nightlight.longitude = -121.89;
   };
@@ -2895,6 +2933,7 @@ let
   hmNightGamma = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
     desktop.nightlight.daemon = "gammastep";
     desktop.nightlight.latitude = 37.33;
     desktop.nightlight.longitude = -121.89;
@@ -2989,6 +3028,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
   };
   osNightOff = evalNixos {
     enable = true;
@@ -3017,6 +3057,7 @@ let
   hmAuth = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...one per remaining agent (the default rides on `hmAuth`)...
   hmAuthLxqt = evalHome {
@@ -3076,6 +3117,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
   };
   osAuthOff = evalNixos {
     enable = true;
@@ -3131,6 +3173,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
+    desktop.look = null;
     desktop.power.enable = true;
   };
   # ...standalone (no profile): the switch and the CLI run unthemed.
@@ -3233,6 +3276,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
     desktop.power.enable = true;
   };
   # ...standalone (no profile): the policy without the session entry.
@@ -3705,6 +3749,7 @@ let
   hmAudioNoLook = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...the slot off (the profile turns it on; the switch back off
   # disables just its half: no OSD, no scripts, the binds run silent).
@@ -3795,11 +3840,18 @@ let
     desktop.enable = true;
     desktop.look = "moonrise";
   };
+  # ...ginger-night (ginger accent, dark): the default look's pins.
+  hmThemeGinger = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.look = "ginger-night";
+  };
   # ...without a look: the slot is inert (no theme files, no theme
   # packages, no cursor keys in the compositor config).
   hmThemeNoLook = evalHome {
     enable = true;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...the slot off beside a look: inert the same way.
   hmThemeOff = evalHome {
@@ -4156,6 +4208,13 @@ let
     desktop.look = "moonrise";
     greeter.enable = true;
   } greeterUser;
+  osThemeGreeterGinger = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.look = "ginger-night";
+    greeter.enable = true;
+  } greeterUser;
   # ...vinyl-sunset: no shippable backdrop (license-barred), so the
   # backdrop stays alone while the rest themes.
   osThemeGreeterVinyl = evalNixosRegreet {
@@ -4179,6 +4238,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
     greeter.enable = true;
   } greeterUser;
 
@@ -4419,6 +4479,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...the policy off: the rule untouched, no PAM, the profile's own
   # packages only.
@@ -4476,6 +4537,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
+    desktop.look = null;
   };
   # ...the daemon off: the profile's own packages only.
   osNotifOff = evalNixos {
@@ -4602,6 +4664,13 @@ let
     wallpaper.package = fakeBg;
     desktop.enable = true;
     desktop.look = "moonrise";
+  } { package = fakeBar; };
+  hmDeskBarGinger = evalHomeDesktop {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    desktop.look = "ginger-night";
   } { package = fakeBar; };
   osDeskBar = evalNixosDesktop {
     enable = true;
@@ -5762,6 +5831,7 @@ let
   hmDeskMusicToml = hmDeskLookMusic.config.xdg.configFile."scoot/config.toml".source;
   hmDeskVinylToml = hmDeskLookVinyl.config.xdg.configFile."scoot/config.toml".source;
   hmDeskMoonToml = hmDeskLookMoon.config.xdg.configFile."scoot/config.toml".source;
+  hmDeskGingerToml = hmDeskLookGinger.config.xdg.configFile."scoot/config.toml".source;
   # The documented standalone home-manager desktop renders the moonrise
   # look (site/desktop/index.md's home.nix snippet, end to end).
   hmDocsDesktopToml = hmDocsDesktopPure.config.xdg.configFile."scoot/config.toml".source;
@@ -5770,6 +5840,7 @@ let
   keysPowerToml = hmPower.config.xdg.configFile."scoot/config.toml".source;
   hmDeskBarToml = hmDeskBar.config.programs.scootbar.configFile;
   hmDeskBarMoonToml = hmDeskBarMoon.config.programs.scootbar.configFile;
+  hmDeskBarGingerToml = hmDeskBarGinger.config.programs.scootbar.configFile;
   osDeskBarToml = osDeskBar.config.programs.scootbar.configFile;
   # The idle policy's generated files: the swayidle config (timeouts,
   # sleep lock, lock event) and the swaylock config (themed leaves),
@@ -5808,6 +5879,14 @@ let
   gtkCssDark = hmThemeDark.config.xdg.configFile."gtk-4.0/gtk.css".source;
   gtkCssBurst = hmThemeBurst.config.xdg.configFile."gtk-4.0/gtk.css".source;
   gtkCssMoon = hmThemeMoon.config.xdg.configFile."gtk-4.0/gtk.css".source;
+  gtkCssGinger = hmThemeGinger.config.xdg.configFile."gtk-4.0/gtk.css".source;
+  qtSchemeGinger = hmThemeGinger.config.xdg.configFile."qt6ct/colors/scoot-look.conf".source;
+  themeFootGinger = hmThemeGinger.config.xdg.configFile."foot/foot.ini".source;
+  themeStarshipGinger = hmThemeGinger.config.xdg.configFile."starship.toml".source;
+  themeHelixGingerConf = hmThemeGinger.config.xdg.configFile."helix/config.toml".source;
+  themeHelixGingerTheme =
+    hmThemeGinger.config.xdg.configFile."helix/themes/scoot-ginger-night.toml".source;
+  themeBtopGingerConf = hmThemeGinger.config.xdg.configFile."btop/btop.conf".source;
   themeFontsConf = hmTheme.config.xdg.configFile."fontconfig/conf.d/10-scoot-look.conf".source;
   themeFootConf = hmTheme.config.xdg.configFile."foot/foot.ini".source;
   themeStarshipConf = hmTheme.config.xdg.configFile."starship.toml".source;
@@ -5862,6 +5941,7 @@ let
   captureRegionNoLook = slotScriptBin hmCaptureNoLook "scoot-capture-region";
   captureClipboardScript = slotScriptBin hmCapture "scoot-capture-clipboard";
   launchMoon = slotScriptBin hmLaunchLookMoon "scoot-launcher";
+  launchGinger = slotScriptBin hmLaunchLookGinger "scoot-launcher";
   # The power policy's generated files: the switch script as the
   # keymap runs it, the charge script as the service runs it (the
   # `sync` verb stripped), the merged udev rules, and the charge
@@ -6117,8 +6197,9 @@ let
   # assertions refuse loudly (pinned in `_darwinIdlePins` below), so
   # these pins run only where the policy can run.
   _desktopPins = lib.optionals isLinux [
-    # The profile alone (no bar module): assertions hold, portals on, and
-    # nothing themed without a look...
+    # The profile alone (no bar module): assertions hold, portals on,
+    # and the default look resolves to ginger-night (an empty desktop
+    # config themes; `look = null` below opts out)...
     (
       assert allAssertionsHold hmDesk.config;
       true
@@ -6128,11 +6209,54 @@ let
       true
     )
     (
-      assert !(hmDesk.config.programs.scoot.settings ? appearance);
+      assert hmDesk.config.programs.scoot.desktop.look == "ginger-night";
+      true
+    )
+    # ...and without the profile the look stays null (the default is
+    # profile-gated, so non-desktop configs keep evaluating unthemed)...
+    (
+      assert hmEmpty.config.programs.scoot.desktop.look == null;
       true
     )
     (
-      assert !(hmDesk.config.programs.scoot.settings ? wallpaper);
+      assert
+        hmDesk.config.programs.scoot.settings.appearance == {
+          background_color = "#0E0E0E";
+          focus_ring_active_color = "#FF9A30";
+          focus_ring_inactive_color = "#4E2913";
+          cursor_theme = "Vanilla-DMZ";
+          cursor_size = 24;
+        };
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.settings.wallpaper.mode == "fit";
+      true
+    )
+    (
+      assert hmDesk.config.programs.scoot.settings.wallpaper.fill == "#0E0E0E";
+      true
+    )
+    # ...while an explicit `look = null` themes nothing (no appearance,
+    # no wallpaper, every themed slot inert)...
+    (
+      assert allAssertionsHold hmDeskLookNull.config;
+      true
+    )
+    (
+      assert hmDeskLookNull.config.programs.scoot.desktop.look == null;
+      true
+    )
+    (
+      assert !(hmDeskLookNull.config.programs.scoot.settings ? appearance);
+      true
+    )
+    (
+      assert !(hmDeskLookNull.config.programs.scoot.settings ? wallpaper);
+      true
+    )
+    (
+      assert !hmDeskLookNull.config.programs.scoot.wallpaper.enable;
       true
     )
     # ...and the idle policy on with the profile (the
@@ -6306,8 +6430,10 @@ let
       assert hmDesk.config.programs.scoot.desktop.nightlight.dayTemp == 6500;
       true
     )
+    # ...and the night warms to the default look's own temperature
+    # (ginger-night: 3300 K).
     (
-      assert hmDesk.config.programs.scoot.desktop.nightlight.nightTemp == 3500;
+      assert hmDesk.config.programs.scoot.desktop.nightlight.nightTemp == 3300;
       true
     )
     (
@@ -6558,6 +6684,46 @@ let
       assert hmDeskLookMoon.config.programs.scoot.wallpaper.enable;
       true
     )
+    # ginger-night (the default): the cat-peeking palette, `fit` on the
+    # look's black so the right-edge cat is never cropped...
+    (
+      assert allAssertionsHold hmDeskLookGinger.config;
+      true
+    )
+    (
+      assert
+        hmDeskLookGinger.config.programs.scoot.settings.appearance == {
+          background_color = "#0E0E0E";
+          focus_ring_active_color = "#FF9A30";
+          focus_ring_inactive_color = "#4E2913";
+          cursor_theme = "Vanilla-DMZ";
+          cursor_size = 24;
+        };
+      true
+    )
+    (
+      assert hmDeskLookGinger.config.programs.scoot.settings.wallpaper.mode == "fit";
+      true
+    )
+    (
+      assert hmDeskLookGinger.config.programs.scoot.settings.wallpaper.fill == "#0E0E0E";
+      true
+    )
+    (
+      assert lib.hasSuffix "wallpaper.png"
+        hmDeskLookGinger.config.programs.scoot.settings.wallpaper.image;
+      true
+    )
+    # ...which is what installs scootbg for it.
+    (
+      assert hmDeskLookGinger.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    # ...and an explicit older look still resolves to itself.
+    (
+      assert hmDeskLookMusic.config.programs.scoot.desktop.look == "music-desk";
+      true
+    )
     # A user value beside a look wins per key; the rest stays the look's.
     (
       assert hmDeskUserWins.config.programs.scoot.settings.appearance.background_color == "#123456";
@@ -6617,7 +6783,7 @@ let
       true
     )
     # ...and an unknown look, an enum type error (verified by hand to name
-    # the four valid values).
+    # the five valid values).
     (
       assert !hmDeskUnknownLook.success;
       true
@@ -6882,6 +7048,19 @@ let
           hover = "#FFD54A";
           dim = "#9C8B95";
           urgent = "#E87F6A";
+        };
+      true
+    )
+    # ...and ginger-night themes it from the cat-peeking palette.
+    (
+      assert
+        hmDeskBarGinger.config.programs.scootbar.settings.colors == {
+          background = "#0E0E0E";
+          foreground = "#F5EAD6";
+          accent = "#E57F29";
+          hover = "#FFB14B";
+          dim = "#8F7A63";
+          urgent = "#E05A4E";
         };
       true
     )
@@ -7543,6 +7722,15 @@ let
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
+          # ...and the default look's theme seven (cursor, icon, all
+          # three faces, qt6ct and its Adwaita style).
+          pkgs.vanilla-dmz
+          pkgs.adwaita-icon-theme
+          pkgs.nerd-fonts.droid-sans-mono
+          pkgs.dejavu_fonts.minimal
+          pkgs.nerd-fonts.fira-code
+          pkgs.qt6Packages.qt6ct
+          pkgs.adwaita-qt6
         ];
       true
     )
@@ -7567,8 +7755,9 @@ let
       assert !(hmLockOff.config.xdg.configFile ? "swaylock/config");
       true
     )
+    # 39 slot packages plus the default look's theme seven.
     (
-      assert builtins.length hmLockOff.config.home.packages == 39;
+      assert builtins.length hmLockOff.config.home.packages == 46;
       true
     )
     # The inhibitor off: the policy without the audio hold (four
@@ -7587,8 +7776,9 @@ let
       assert !(hmInhibitOff.config.systemd.user.services ? scoot-audio-inhibit);
       true
     )
+    # 39 slot packages plus the default look's theme seven.
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 39;
+      assert builtins.length hmInhibitOff.config.home.packages == 46;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -9559,6 +9749,10 @@ let
       assert allAssertionsHold hmLaunchLookMoon.config;
       true
     )
+    (
+      assert allAssertionsHold hmLaunchLookGinger.config;
+      true
+    )
     # Refusals: the slot with no launcher to run it...
     (
       assert builtins.length (failing hmLaunchNoPkg.config) == 1;
@@ -10570,6 +10764,18 @@ let
       assert hmThemeMoon.config.xdg.configFile ? "qt6ct/colors/scoot-look.conf";
       true
     )
+    (
+      assert hmThemeGinger.config.xdg.configFile ? "gtk-4.0/gtk.css";
+      true
+    )
+    (
+      assert hmThemeGinger.config.xdg.configFile ? "qt6ct/colors/scoot-look.conf";
+      true
+    )
+    (
+      assert allAssertionsHold hmThemeGinger.config;
+      true
+    )
     # ...the dark-mode signal libadwaita follows (`prefer-dark` for a
     # dark look, `prefer-light` for the light one)...
     (
@@ -11141,6 +11347,37 @@ let
     (
       assert lib.hasSuffix "moonrise.png" (
         toString osThemeGreeterMoon.config.programs.scoot.greeter.background
+      );
+      true
+    )
+    # ...ginger-night: the cat-peeking backdrop behind the same dark
+    # login card...
+    (
+      assert allAssertionsHold osThemeGreeterGinger.config;
+      true
+    )
+    (
+      assert osThemeGreeterGinger.config.services.displayManager.regreet.enable;
+      true
+    )
+    (
+      assert
+        osThemeGreeterGinger.config.services.displayManager.regreet.settings.GTK.application_prefer_dark_theme;
+      true
+    )
+    (
+      assert lib.hasSuffix "regreet.css" (
+        toString osThemeGreeterGinger.config.services.displayManager.regreet.extraCss
+      );
+      true
+    )
+    (
+      assert osThemeGreeterGinger.config.services.displayManager.regreet.font.name == "DejaVu Sans";
+      true
+    )
+    (
+      assert lib.hasSuffix "wallpaper.png" (
+        toString osThemeGreeterGinger.config.programs.scoot.greeter.background
       );
       true
     )
@@ -11727,6 +11964,15 @@ let
           desktop.enable = true;
           desktop.look = "moonrise";
         }).config.programs.scoot.desktop.nightlight.nightTemp == 3400;
+      true
+    )
+    (
+      assert
+        (evalHome {
+          enable = true;
+          desktop.enable = true;
+          desktop.look = "ginger-night";
+        }).config.programs.scoot.desktop.nightlight.nightTemp == 3300;
       true
     )
     (
@@ -13943,6 +14189,27 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   ' ${hmDeskBarMoonToml}
   echo "ok: desktop look renders moonrise into the bar config"
 
+  # 10e. Desktop profile, ginger-night: the cat-peeking palette in the
+  #      compositor config (`fit` on the look's black, so the right-edge
+  #      cat is never cropped) beside the injected scootbg command, and
+  #      the same palette in the bar file.
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got["appearance"] == {"background_color": "#0E0E0E", "focus_ring_active_color": "#FF9A30", "focus_ring_inactive_color": "#4E2913", "cursor_theme": "Vanilla-DMZ", "cursor_size": 24}, got["appearance"]
+  assert got["wallpaper"]["mode"] == "fit", got["wallpaper"]
+  assert got["wallpaper"]["fill"] == "#0E0E0E", got["wallpaper"]
+  assert got["wallpaper"]["image"].endswith("wallpaper.png"), got["wallpaper"]
+  assert got["wallpaper"]["command"].endswith("/bin/scootbg"), got["wallpaper"]
+  ' ${hmDeskGingerToml}
+  echo "ok: desktop look renders ginger-night plus its wallpaper"
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got["colors"] == {"background": "#0E0E0E", "foreground": "#F5EAD6", "accent": "#E57F29", "hover": "#FFB14B", "dim": "#8F7A63", "urgent": "#E05A4E"}, got["colors"]
+  ' ${hmDeskBarGingerToml}
+  echo "ok: desktop look renders ginger-night into the bar config"
+
   # 11-12c. Idle policy and locker content (Linux only: every line
   # below names a Linux-only tool's store path, and the files
   # themselves exist only where the policy runs -- off Linux the
@@ -14193,6 +14460,13 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -x "@define-color window_bg_color #2B3648;" ${gtkCssMoon}
     grep -F -x "@define-color view_bg_color #2B3648;" ${gtkCssMoon}
     grep -F -x "@define-color headerbar_bg_color #2B3648;" ${gtkCssMoon}
+    grep -F -x "@define-color accent_bg_color #E57F29;" ${gtkCssGinger}
+    grep -F -x "@define-color accent_color #E57F29;" ${gtkCssGinger}
+    grep -F -x "@define-color accent_fg_color #0E0E0E;" ${gtkCssGinger}
+    grep -F -x "@define-color window_bg_color #0E0E0E;" ${gtkCssGinger}
+    grep -F -x "@define-color window_fg_color #F5EAD6;" ${gtkCssGinger}
+    grep -F -x "@define-color view_bg_color #0E0E0E;" ${gtkCssGinger}
+    grep -F -x "@define-color headerbar_bg_color #0E0E0E;" ${gtkCssGinger}
     echo "ok: GTK named colors carry each look's accent"
 
     # 13l2b. The `:root` vars beside the names: what libadwaita
@@ -14203,6 +14477,11 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -x "  --window-bg-color: #2B3648;" ${gtkCssMoon}
     grep -F -x "  --view-bg-color: #2B3648;" ${gtkCssMoon}
     grep -F -x "  --headerbar-bg-color: #2B3648;" ${gtkCssMoon}
+    grep -F -x "  --accent-bg-color: #E57F29;" ${gtkCssGinger}
+    grep -F -x "  --accent-fg-color: #0E0E0E;" ${gtkCssGinger}
+    grep -F -x "  --window-bg-color: #0E0E0E;" ${gtkCssGinger}
+    grep -F -x "  --view-bg-color: #0E0E0E;" ${gtkCssGinger}
+    grep -F -x "  --headerbar-bg-color: #0E0E0E;" ${gtkCssGinger}
     grep -F -x "  --accent-bg-color: #3D579A;" ${gtkCssLight}
     grep -F -x "  --window-bg-color: #FCFBFB;" ${gtkCssLight}
     echo "ok: GTK root vars carry each look's accent"
@@ -14221,6 +14500,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q "#ff3d579a, #fffcfbfb" ${qtSchemeLight}
     grep -F -q "active_colors=#fffdef1d, #ff241721" ${qtSchemeBurst}
     grep -F -q "active_colors=#fff1e3c6, #ff271a1f" ${qtSchemeDark}
+    grep -F -q "active_colors=#fff5ead6, #ff0e0e0e" ${qtSchemeGinger}
+    grep -F -q "#ffe57f29, #ff0e0e0e" ${qtSchemeGinger}
     echo "ok: Qt schemes carry each look's palette and polarity"
 
     # 13l4. Contrast, measured from the generated files (WCAG AA: text
@@ -14247,7 +14528,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
         assert on_accent >= 4.5, (path, "accent text", on_accent)
         assert accent >= 3.0, (path, "accent swatch", accent)
         print("ok: %s text=%.2f on-accent=%.2f accent=%.2f" % (path.split("/")[-1], text, on_accent, accent))
-    ' ${gtkCssLight} ${gtkCssDark} ${gtkCssBurst} ${gtkCssMoon}
+    ' ${gtkCssLight} ${gtkCssDark} ${gtkCssBurst} ${gtkCssMoon} ${gtkCssGinger}
     echo "ok: every look's app colors pass AA"
 
     # 13m. The look's static app files apply from the flake (foot
@@ -14259,6 +14540,12 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q 'theme = "scoot-light"' ${themeHelixConf}
     grep -F -q '"ui.background" = {}' ${themeHelixTheme}
     grep -F -q "theme_background = False" ${themeBtopConf}
+    grep -F -q "background=0e0e0e" ${themeFootGinger}
+    grep -F -q "foreground=f5ead6" ${themeFootGinger}
+    grep -F -q 'style = "bold #E57F29"' ${themeStarshipGinger}
+    grep -F -q 'theme = "scoot-ginger-night"' ${themeHelixGingerConf}
+    grep -F -q '"ui.background" = {}' ${themeHelixGingerTheme}
+    grep -F -q 'color_theme = "ginger-night"' ${themeBtopGingerConf}
     echo "ok: the look's app files apply from the flake"
 
     # 13n. The bar font follows `theme.fonts.uiPackage`: with the
@@ -14688,7 +14975,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     if grep -q "clipboard_unlocked" ${launchThemed}; then echo "lock probe in the launcher script" >&2; exit 1; fi
     echo "ok: the launcher runs fuzzel on overlay, themed, passing args through"
 
-    # 19b. Every look themes it (music-desk above; the other three
+    # 19b. Every look themes it (music-desk above; the other four
     #      here: each background role as its opaque flag).
     grep -F -q -- "--background-color=271A1Fff" ${launchVinyl}
     grep -F -q -- "--text-color=F1E3C6ff" ${launchVinyl}
@@ -14696,7 +14983,10 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "--match-color=31a9e5ff" ${launchBurst}
     grep -F -q -- "--background-color=2B3648ff" ${launchMoon}
     grep -F -q -- "--text-color=F6EEDCff" ${launchMoon}
-    echo "ok: all four looks theme the launcher"
+    grep -F -q -- "--background-color=0E0E0Eff" ${launchGinger}
+    grep -F -q -- "--text-color=F5EAD6ff" ${launchGinger}
+    grep -F -q -- "--selection-color=E57F29ff" ${launchGinger}
+    echo "ok: all five looks theme the launcher"
 
     # 19c. Lookless (or opted out): no themed flag at all -- the
     #      layer and the passthrough stay (behavior, not theme), and

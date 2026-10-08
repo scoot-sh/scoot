@@ -493,6 +493,15 @@ in
       programs.scoot.settings.xwayland.enabled = lib.mkDefault true;
     })
 
+    # The default look, with the profile only: ginger-night when enabled
+    # without a choice (a value the user sets wins over this default,
+    # including an explicit null to theme nothing). It lives here and on
+    # the NixOS side rather than as the option default, so a look never
+    # lands without the profile (the refusal below keeps firing then).
+    (lib.mkIf cfg.desktop.enable {
+      programs.scoot.desktop.look = lib.mkDefault "ginger-night";
+    })
+
     # A look without the profile is a silent no-op; refuse it loudly
     # instead (kept outside `desktop.enable` so it still fires then, the
     # way the greeter's assertions sit outside `enable`).

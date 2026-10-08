@@ -59,7 +59,7 @@ first `look` values.
 ```nix
 programs.scoot.desktop = {
   enable = true;
-  look = "vinyl-sunset";   # one of docs/examples/*, default null (no theming)
+  look = "vinyl-sunset";   # one of docs/examples/*, default ginger-night (the cat-peeking look); null themes nothing
 };
 # Every piece individually overridable / disable-able:
 # programs.scoot.desktop.idle.lock.enable = false;

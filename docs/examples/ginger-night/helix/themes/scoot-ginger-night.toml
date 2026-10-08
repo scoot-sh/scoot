@@ -1,0 +1,64 @@
+# The "ginger-night" Helix theme: the illustration's palette, background left
+# transparent for a translucent terminal. Copy to
+# ~/.config/helix/themes/scoot-ginger-night.toml.
+"ui.background" = {}
+"ui.text" = "ink"
+"ui.text.focus" = { fg = "ink", modifiers = ["bold"] }
+"ui.linenr" = "mist"
+"ui.linenr.selected" = { fg = "blue", modifiers = ["bold"] }
+"ui.cursor" = { fg = "paper", bg = "blue" }
+"ui.cursor.primary" = { fg = "paper", bg = "blue" }
+"ui.cursorline.primary" = { bg = "#241a12" }
+"ui.selection" = { bg = "#4a2c17" }
+"ui.statusline" = { fg = "ink", bg = "#1a1512" }
+"ui.statusline.inactive" = { fg = "mist", bg = "#161210" }
+"ui.statusline.normal" = { fg = "paper", bg = "blue", modifiers = ["bold"] }
+"ui.statusline.insert" = { fg = "paper", bg = "green", modifiers = ["bold"] }
+"ui.statusline.select" = { fg = "paper", bg = "purple", modifiers = ["bold"] }
+"ui.virtual.indent-guide" = "#33261a"
+"ui.virtual.ruler" = { bg = "#161210" }
+"ui.menu" = { fg = "ink", bg = "#161210" }
+"ui.menu.selected" = { fg = "paper", bg = "blue" }
+"ui.popup" = { bg = "#161210" }
+"ui.help" = { bg = "#161210" }
+"ui.window" = "mist"
+keyword = { fg = "red", modifiers = ["bold"] }
+"keyword.control" = "red"
+function = "blue"
+"function.macro" = "teal"
+type = "purple"
+"type.builtin" = "purple"
+constructor = "purple"
+string = "green"
+"constant.character" = "green"
+constant = "yellow"
+"constant.numeric" = "yellow"
+"constant.builtin" = "yellow"
+comment = { fg = "mist", modifiers = ["italic"] }
+variable = "ink"
+"variable.parameter" = "teal"
+"variable.other.member" = "ink"
+operator = "red"
+punctuation = "slate"
+namespace = "teal"
+attribute = "teal"
+label = "purple"
+special = "red"
+"markup.heading" = { fg = "blue", modifiers = ["bold"] }
+"diagnostic.error" = { underline = { color = "red", style = "curl" } }
+"diagnostic.warning" = { underline = { color = "yellow", style = "curl" } }
+error = "red"
+warning = "yellow"
+info = "blue"
+hint = "teal"
+[palette]
+ink = "#f5ead6"
+slate = "#c9b8a3"
+mist = "#8f7a63"
+paper = "#0e0e0e"
+blue = "#e57f29"
+red = "#e05a4e"
+green = "#a9b98f"
+yellow = "#ffb14b"
+purple = "#c08a7a"
+teal = "#8aa8a0"

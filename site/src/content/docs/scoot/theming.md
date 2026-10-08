@@ -1,6 +1,6 @@
 ---
 title: Theming
-description: "Pick one of the four looks, see what each file does, and make your own."
+description: "Pick one of the five looks, see what each file does, and make your own."
 ---
 
 Make the whole desktop match one look: compositor ring and
@@ -12,12 +12,17 @@ profile](../desktop/index.md#pick-a-look):
 ```nix
 programs.scoot.desktop = {
   enable = true;
-  look = "music-desk";   # "vinyl-sunset" | "radial-burst" | "moonrise" | null (no theming)
+  look = "music-desk";   # "ginger-night" (default) | "vinyl-sunset" | "radial-burst" | "moonrise" | null (no theming)
 };
 ```
 
+The default is `ginger-night` (the cat-peeking look): an empty
+`desktop` config themes. Set `look = null` explicitly to theme
+nothing.
+
 | Look | Ring / background | Wallpaper | |
 |---|---|---|---|
+| `ginger-night` | ginger `#FF9A30` on near-black `#0E0E0E` | ships (`fit` on the look's black, so the cat is never cropped) | ![ginger-night](../../../assets/ginger-night-preview.png) |
 | `music-desk` | blue `#3D579A` on paper `#FCFBFB` | ships | ![music-desk](../../../assets/music-desk-preview.png) |
 | `radial-burst` | blue `#31a9e5` on plum `#241721` | ships | ![radial-burst](../../../assets/radial-burst-preview.png) |
 | `moonrise` | amber `#FF9A49` on slate navy `#2B3648` | ships | ![moonrise](../../../assets/moonrise-preview.png) |
@@ -42,6 +47,7 @@ compositor: layout, appearance, binds), `bar.toml` (the bar),
 `regreet.css` (the login screen), plus terminal and tool configs that
 follow the palette:
 
+- [ginger-night](https://github.com/scoot-sh/scoot/tree/main/docs/examples/ginger-night)
 - [vinyl-sunset](https://github.com/scoot-sh/scoot/tree/main/docs/examples/vinyl-sunset)
 - [music-desk](https://github.com/scoot-sh/scoot/tree/main/docs/examples/music-desk)
 - [radial-burst](https://github.com/scoot-sh/scoot/tree/main/docs/examples/radial-burst)
@@ -164,13 +170,23 @@ at it, or leave the section to find `scootbg` on `PATH`).
 ## Make a look
 
 A look is data, so new ones are cheap: one directory with the same
-shape as the four above — palette, `scoot.toml`, `bar.toml`,
-`regreet.css`, and a wallpaper (an image, or a palette color for a
-license-clean look like vinyl-sunset's flat espresso). Wire its six
-roles plus its dark/light polarity and its three font faces (bar,
-proportional sans, terminal mono) into the
-flake's look registry (`nix/modules/desktop.nix`), and a check
-renders every look into every target and fails on a missing role.
+shape as the five above — palette, `scoot.toml`, `bar.toml`,
+`regreet.css`, the terminal/shell/editor/monitor files where the look
+has its own (the registry holds `null` where it has none, and that
+target goes inert for it), and a wallpaper (an image, or a palette
+color for a license-clean look like vinyl-sunset's flat espresso;
+edge art like ginger-night's right-edge cat wants `mode = "fit"` with
+`fill` set to the look's background color — `fill` crops it on
+narrower outputs). Wire it into the flake's look registry
+(`nix/modules/desktop.nix`): the name in the `look` enum plus its
+`appearance` (3 colors), `barColors` (6 roles), `isDark` polarity,
+`fonts` (bar, proportional sans, terminal mono), `nightTemp`,
+`appFiles` and `wallpaper`. Then mirror the per-look pins in
+`nix/tests.nix` (appearance, wallpaper mode/fill, bar colors,
+launcher flags, GTK/Qt, greeter, night temperature), the rows in the
+tables on this page and the [desktop page](../desktop/index.md#pick-a-look),
+and a reproducible IPC screenshot below — a check renders every look
+into every target and fails on a missing role.
 
 Where looks are headed (the standing direction, not all of it
 shipped): the look list reads from a registry rather than a

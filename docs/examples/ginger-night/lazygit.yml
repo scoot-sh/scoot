@@ -1,0 +1,20 @@
+# The "ginger-night" lazygit colors: the illustration's palette, rounded borders, no
+# fetch and no update checks. Copy to ~/.config/lazygit/config.yml (lazygit
+# also reads ~/.config/lazygit/config.yaml).
+gui:
+  nerdFontsVersion: "3"
+  showBottomLine: false
+  showRandomTip: false
+  border: rounded
+  theme:
+    activeBorderColor: ["#E57F29", bold]
+    inactiveBorderColor: ["#8F7A63"]
+    selectedLineBgColor: ["#4A2C17"]
+    optionsTextColor: ["#E57F29"]
+    unstagedChangesColor: ["#E05A4E"]
+    defaultFgColor: ["#F5EAD6"]
+git:
+  autoFetch: false
+  autoRefresh: false
+update:
+  method: never

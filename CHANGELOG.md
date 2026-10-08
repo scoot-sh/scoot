@@ -9,6 +9,25 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### Unreleased — ginger-night, the new default desktop look (behavior change)
+
+- **A desktop profile with no `look` choice now renders the new
+  `ginger-night` look** (the cat-peeking image: ginger text-glyph art on
+  near-black, ginger ring `#FF9A30` on `#0E0E0E`, cream text at 16.2:1).
+  Previously the default was `null` (nothing themed). Every piece the
+  profile owns follows for a default user: the compositor ring and
+  background, the bar colors, the session wallpaper (`fit` on the look's
+  black, so the cat at the right edge is never cropped), the greeter
+  backdrop and dark setting, the lock screen, mako, the fuzzel pickers,
+  the OSD, foot/starship/Helix/btop configs, GTK/Qt and dark mode, the
+  cursor and the fonts. To keep the old unthemed desktop, set
+  `look = null` explicitly. An explicit older look (e.g.
+  `look = "music-desk"`) still resolves to itself.
+- **New `ginger-night` example** in `docs/examples/ginger-night/`
+  (compositor, bar, foot, starship, Helix, btop, lazygit, ReGreet CSS and
+  the wallpaper, a byte-identical copy of the maintainer's own
+  `docs/assets/CatPeeking.png`, MIT like the repo). See [Theming](site/src/content/docs/scoot/theming.md).
+
 ### 2026-10-07 — opt-in keybindings for virtual keyboards
 
 - **Virtual keyboards can now run compositor keybindings when you ask:
