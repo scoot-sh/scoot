@@ -1508,6 +1508,145 @@ module shows text alone, as before.
 
 
 
+#### CPU, memory and pressure-stall recipes
+
+There is no built-in CPU, memory, temperature or disk module, on purpose:
+`/proc/stat`, `/proc/meminfo`, thermal zones and `statvfs` are state with
+no change notification, so the only way to show them live is to sample on a
+timer ([the decision](https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/backlog/system-stats-decision.md)).
+Each of these is one `exec` module instead: a user who wants a CPU readout
+writes the loop with the interval they choose, and pays for it knowingly.
+Place them by name like any module:
+
+```toml
+right = ["cpu", "mem", "pressure", "clock"]
+```
+
+Edits apply on `scootbar msg reload`: changing a recipe's table restarts
+that script (its line clears until it prints again), while an unchanged one
+keeps running across the reload.
+
+**CPU use**, from `/proc/stat`: two samples a second apart, shown once a
+minute (`CPU 42%`). The loop prints first and sleeps after, so the module
+shows its line at once instead of after the first sleep; the one-second
+sample means the first line lands about a second after the bar starts:
+
+```toml
+[exec.cpu]
+command = ["sh", "-c", "while :; do set -- $(awk '/^cpu /{print $2+$3+$4, $2+$3+$4+$5}' /proc/stat); sleep 1; awk -v b1=\"$1\" -v t1=\"$2\" '/^cpu /{t=$2+$3+$4+$5; u=(t>t1)?($2+$3+$4-b1)*100/(t-t1):0; if(u<0)u=0; printf \"CPU %.0f%%\\n\", u}' /proc/stat; sleep 60; done"]
+format = "text"
+placeholder = "..."
+```
+
+- **Cost.** Two `awk` reads a minute and two sleeps: a few short-lived
+  processes, and the bar itself wakes only when a line arrives (once a
+  minute) plus the compositor's release. Sampling every second instead
+  would cost sixty times the spawns for a number that jitters: keep it
+  coarse.
+
+**Memory use**, from `/proc/meminfo`: the used share of what is there
+(`MEM 75%`), shown once a minute. `MemAvailable` where the kernel has it,
+`MemFree` where it does not:
+
+```toml
+[exec.mem]
+command = ["sh", "-c", "while :; do awk '/^MemTotal:/{t=$2} /^MemFree:/{f=$2} /^MemAvailable:/{a=$2} END{if(a==\"\")a=f; if(t>0) printf \"MEM %.0f%%\\n\", (t-a)*100/t}' /proc/meminfo; sleep 60; done"]
+format = "text"
+placeholder = "..."
+```
+
+- **Cost.** One `awk` a minute; the bar wakes once a minute with it. An
+  unreadable `meminfo` prints nothing that tick and the module keeps its
+  last line.
+
+**Pressure stalls**, from `/proc/pressure/memory`: no timer at all. PSI
+takes a stall-threshold trigger that `poll(2)` waits on, so this script
+prints `pressure ok` once, then blocks in the kernel and prints one line
+per stall (`stall memory 0.35`), at most one a minute while pressure lasts.
+Save it first:
+
+```sh
+mkdir -p ~/.config/scoot
+cat > ~/.config/scoot/pressure.py <<'EOF'
+#!/usr/bin/env python3
+"""Print one line when pressure stalls pass the trigger, then wait again."""
+import select
+import sys
+import time
+
+SOURCE = sys.argv[1] if len(sys.argv) > 1 else "memory"
+if SOURCE not in ("cpu", "memory", "io"):
+    print(f"pressure.py wants cpu, memory or io, not {SOURCE!r}", file=sys.stderr)
+    sys.exit(2)
+PATH = f"/proc/pressure/{SOURCE}"
+TRIGGER = "some 150000 1000000\n"  # 150 ms stalled in a 1 s window
+
+
+def wait_forever():
+    # No PSI here (or no trigger): block with no timer and no wakeups
+    # until the bar ends us. Exiting instead would restart us on backoff.
+    select.poll().poll(None)
+
+
+try:
+    f = open(PATH, "r+")
+except OSError as e:
+    print(f"cannot open {PATH}: {e.strerror}", file=sys.stderr, flush=True)
+    print("pressure n/a", flush=True)
+    wait_forever()
+
+try:
+    f.write(TRIGGER)
+    f.flush()
+except OSError as e:
+    print(f"cannot arm {PATH}: {e.strerror}", file=sys.stderr, flush=True)
+    print("pressure n/a", flush=True)
+    wait_forever()
+
+print("pressure ok", flush=True)
+watcher = select.poll()
+watcher.register(f, select.POLLPRI)
+while True:
+    watcher.poll(None)  # blocks: the kernel wakes us past the trigger
+    f.seek(0)
+    some = f.readline().split()
+    # "some avg10=0.12 avg60=0.03 avg300=0.01 total=12345": numbers only,
+    # so the line is short and carries no control characters.
+    avg10 = some[1].split("=", 1)[1] if len(some) > 1 and "=" in some[1] else "?"
+    print(f"stall {SOURCE} {avg10}", flush=True)
+    f.seek(0)
+    f.readline()  # consume, so the level trigger re-arms
+    time.sleep(60)  # one line a minute at most while pressure lasts
+EOF
+```
+
+```toml
+[exec.pressure]
+command = ["sh", "-c", "exec python3 \"$HOME/.config/scoot/pressure.py\" memory"]
+format = "text"
+placeholder = "..."
+```
+
+- **Cost.** One `python3` that sleeps in `poll` while nothing stalls: zero
+  wakeups idle, one line per stall event. `memory` watches allocation
+  stalls; swap it for `cpu` or `io` to watch those, and tune the
+  `150000 1000000` in the script (the kernel's
+  `Documentation/accounting/psi.rst` names the shape). Anything but those
+  three is refused on stderr (exit 2) rather than opening a path it should
+  not.
+- **Without PSI** in the kernel (or a trigger the kernel refuses) the
+  module shows `pressure n/a` and the script blocks with no timer until
+  the bar ends it.
+
+**Bounds.** Every recipe prints only numbers its own `printf` formats (a
+dozen bytes, no control characters), far inside what the bar takes: a line
+past 4096 bytes is dropped whole, text and tooltip are cut at 256 bytes on
+a character boundary, and every control character becomes a space
+([above](./modules.md##exec)). A `format = "json"` recipe gets the same
+treatment per line ([below](./modules.md##the-update-payload)).
+
+
+
 ### The update payload
 
 What a `push` takes and an `exec` in `json` mode prints per line, scootbar's
