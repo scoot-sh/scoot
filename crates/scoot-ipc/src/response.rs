@@ -66,6 +66,23 @@ pub struct OutputSnapshot {
     /// screens were always on).
     #[serde(default = "default_powered")]
     pub powered: bool,
+    /// Whether the output is currently being driven: `false` while a
+    /// `--tty` session has lost DRM master (most often a VT switch back
+    /// seatd failed to re-acquire master for -- see
+    /// `site/src/content/docs/scoot/backends.md`'s VT-switching section).
+    /// The composited frame still exists, so `screenshot` answers -- but
+    /// with a stale picture of a screen showing nothing new, which is why
+    /// an agent deciding from pixels must read this first.
+    ///
+    /// Defaulted rather than required, like `powered` above and for the
+    /// same wire reason, so no `PROTOCOL_VERSION` bump. Read it
+    /// asymmetrically: `false` is always truthful (only a server new
+    /// enough to lose master sends it), while `true` means "driven, or a
+    /// server predating the field" (whose outputs were always driven).
+    /// Always `true` off `--tty`: headless and nested outputs have no DRM
+    /// master to lose.
+    #[serde(default = "default_live")]
+    pub live: bool,
 }
 
 /// The `scale` an [`OutputSnapshot`] carries when the server predates the
@@ -77,6 +94,12 @@ fn default_scale() -> f64 {
 /// The `powered` an [`OutputSnapshot`] carries when the server predates the
 /// field. `true` because such a server could never power a screen off.
 fn default_powered() -> bool {
+    true
+}
+
+/// The `live` an [`OutputSnapshot`] carries when the server predates the
+/// field. `true` because such a server always drove what it reported.
+fn default_live() -> bool {
     true
 }
 

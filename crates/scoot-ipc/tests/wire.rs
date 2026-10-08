@@ -622,6 +622,7 @@ fn an_output_snapshot_carries_its_scale_on_the_wire() {
             height: 1200,
         },
         powered: true,
+        live: true,
     };
     assert_eq!(
         json_of(&snapshot),
@@ -632,6 +633,7 @@ fn an_output_snapshot_carries_its_scale_on_the_wire() {
             "scale": 1.5,
             "usable": { "x": 0, "y": 0, "width": 1920, "height": 1200 },
             "powered": true,
+            "live": true,
         })
     );
     assert_eq!(
@@ -659,6 +661,7 @@ fn an_output_snapshot_carries_its_usable_rect_on_the_wire() {
             height: 1170,
         },
         powered: true,
+        live: true,
     };
     assert_eq!(
         json_of(&snapshot),
@@ -669,6 +672,7 @@ fn an_output_snapshot_carries_its_usable_rect_on_the_wire() {
             "scale": 1.0,
             "usable": { "x": 0, "y": 30, "width": 1920, "height": 1170 },
             "powered": true,
+            "live": true,
         })
     );
 }
@@ -713,6 +717,36 @@ fn an_output_snapshot_from_before_powered_still_decodes() {
     let raw = r#"{"id":1,"name":"headless","powered":false}"#;
     let old: OldSnapshot = decode(raw).unwrap();
     assert_eq!(old, OldSnapshot { id: 1 });
+}
+
+/// `live` is additive and defaulted like `powered` before it: an older
+/// server's output snapshot still decodes (as "driven" -- such a server
+/// always drove what it reported), and a master-less snapshot still decodes
+/// for an older client (serde ignores the unknown field) -- which is what
+/// keeps the field off the `PROTOCOL_VERSION`-bump list.
+#[test]
+fn an_output_snapshot_from_before_live_still_decodes() {
+    let snapshot: OutputSnapshot =
+        decode(r#"{"id":1,"name":"headless","rect":{"x":0,"y":0,"width":1920,"height":1200}}"#)
+            .unwrap();
+    assert!(snapshot.live);
+
+    #[derive(serde::Deserialize, PartialEq, Debug)]
+    struct OldSnapshot {
+        id: u64,
+    }
+    let raw = r#"{"id":1,"name":"headless","live":false}"#;
+    let old: OldSnapshot = decode(raw).unwrap();
+    assert_eq!(old, OldSnapshot { id: 1 });
+}
+
+#[test]
+fn a_master_less_output_snapshot_carries_live_false_on_the_wire() {
+    let snapshot: OutputSnapshot = decode(
+        r#"{"id":1,"name":"DP-1","rect":{"x":0,"y":0,"width":1920,"height":1080},"live":false}"#,
+    )
+    .unwrap();
+    assert!(!snapshot.live);
 }
 
 #[test]

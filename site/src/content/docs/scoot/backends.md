@@ -179,7 +179,32 @@ the config loads and always winning over a colliding file bind (with a
 warning naming what they displaced) — on real hardware that is the one
 recovery path, so it cannot silently lose to a typo. They keep working
 under fullscreen grabs and the session lock, and a reload cannot strip
-them.
+them. Switching back re-acquires DRM master and re-modesets every
+output before the next frame: if the seat daemon lost the re-acquire
+race with the previous VT's owner (a login greeter holding master
+through logind), scoot probes master itself with one explicit
+`SET_MASTER` -- which also recovers root-run sessions outright -- and
+names the outcome: master genuinely held elsewhere, or master vacant
+with only the seat daemon able to re-acquire it. When master genuinely
+cannot be had, the session stays alive (keyboard and `scoot msg` keep
+answering) and every output reports `live: false` in `scoot msg
+outputs` until a later switch back succeeds -- check that field before
+trusting a screenshot, which goes stale while the display is dead.
+Each switch back is a new race the seat daemon may win this time; if
+it never recovers, restart the session -- a fresh start re-acquires
+master through the seat daemon, which is how every session gets its
+display in the first place.
+
+> **Symptom:** `--tty` display stays dark after switching back to it.
+> The compositor is usually alive underneath -- `scoot msg outputs`
+> answers, with `live: false` on every output, and the log names the
+> holder it could not take master from. Switch VTs away and back
+> (`Ctrl+Alt+F1`…`F12`); each return retries the re-acquisition, and
+> any one of them may win the race. If it never recovers, restart the
+> session -- a fresh start re-acquires master through the seat daemon.
+> The seat daemon (not scoot) is losing the master race every time --
+> `sudo cat /sys/kernel/debug/dri/N/clients` shows who holds `master`
+> while your VT is displayed.
 
 **Losing the seat.** If the seat daemon dies under a running session
 (seatd killed, logind restarted — both reach scoot through libseat), the

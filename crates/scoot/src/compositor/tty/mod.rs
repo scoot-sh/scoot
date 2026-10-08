@@ -58,12 +58,13 @@ pub(crate) use self::gpu::{ExplicitGpu, resolve};
 pub(crate) use self::scanout::ForceComposite;
 
 use std::error::Error;
+use std::io;
 use std::path::Path;
 use std::time::Instant;
 
 use scoot_ipc::PointerButton;
 use smithay::backend::drm::{
-    DrmDevice, DrmDeviceFd, DrmDeviceNotifier, DrmEvent, DrmEventMetadata,
+    DrmDevice, DrmDeviceFd, DrmDeviceNotifier, DrmError, DrmEvent, DrmEventMetadata,
 };
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, ButtonState, Event, InputEvent, KeyboardKeyEvent,
@@ -1408,10 +1409,7 @@ impl Tty {
     fn reactivate(&mut self) -> bool {
         let drm_active = match self.drm.activate(true) {
             Ok(()) => true,
-            Err(error) => {
-                tracing::error!(%error, "could not reactivate the drm device");
-                false
-            }
+            Err(error) => self.reacquire_master(error),
         };
         if self.libinput.resume().is_err() {
             tracing::warn!("could not resume libinput after reactivation");
@@ -1442,6 +1440,137 @@ impl Tty {
         self.active = drm_active;
         drm_active
     }
+
+    /// Tries once to take DRM master back after a failed `drm.activate`,
+    /// then retries the activation -- the VT-switch-back path `reactivate`
+    /// runs on.
+    ///
+    /// Why this exists: on the libseat path scoot's DRM fd is permanently
+    /// unprivileged (seatd-as-root holds master on that open file, so the
+    /// fd's own `SET_MASTER` gets `EBUSY` and Smithay records
+    /// `privileged = false`), which makes Smithay's `pause()`/`activate()`
+    /// skip `SET_MASTER`/`DROP_MASTER` entirely -- master ownership lives
+    /// only in seatd. When seatd's own single re-acquire attempt on a VT
+    /// switch back races logind's release of the previous VT's master and
+    /// loses, it hands the client a master-less fd anyway and never retries;
+    /// `activate(true)` then runs `reset_state()`'s atomic commit without
+    /// master and fails with `EACCES`. Retrying `activate()` alone cannot
+    /// fix that -- it re-issues the same commit on the same master-less fd.
+    /// See `docs/backlog/resolved/vt-switch-back-greeter-master-done.md`.
+    ///
+    /// What the single explicit `SET_MASTER` does depends on privilege.
+    /// Measured live on the M2 (see the ticket): a privileged process
+    /// takes vacant master (a root probe takes and drops it cleanly), so a
+    /// privileged session that reaches the probe while master is vacant
+    /// recovers here. An unprivileged process never takes master itself --
+    /// the kernel refuses with `EACCES` even when *nobody* holds master
+    /// (all `master n` in `debugfs dri/N/clients`) -- but the refusal is
+    /// still evidence: `EBUSY` means master is genuinely held elsewhere
+    /// (usually the greeter on tty1 through logind), while `EACCES` means
+    /// master is vacant and only the seat daemon (running as root) can
+    /// re-acquire it, i.e. seatd lost the race. Either way the outcome is
+    /// loud and precise rather than the old cryptic line.
+    ///
+    /// If master cannot be had, `active` stays `false` (the same safe state
+    /// as before: `present()` keeps refusing flips, libinput and IPC stay
+    /// alive), the failure names the holder (or the vacancy) and the way
+    /// back, every output reports `live: false` over IPC, and the next VT
+    /// activation event retries the whole path again -- never a silent
+    /// black screen.
+    fn reacquire_master(&mut self, first: DrmError) -> bool {
+        if !is_master_loss(&first) {
+            // A privileged `acquire` failure still names its holder: a
+            // privileged fd takes vacant master (measured live), so
+            // `DrmMasterFailed` can only mean genuinely held. Anything
+            // else keeps the old terse line.
+            if matches!(first, DrmError::DrmMasterFailed) {
+                tracing::error!(%first, "{}", master_loss_guidance(true));
+            } else {
+                tracing::error!(%first, "could not reactivate the drm device");
+            }
+            return false;
+        }
+        // `Device` (not `DrmControl`): `acquire_master_lock` lives on
+        // the base `drm::Device` trait, and this module's own
+        // `struct Device` takes the bare name -- hence fully qualified.
+        match smithay::reexports::drm::Device::acquire_master_lock(&self.drm) {
+            Ok(()) => match self.drm.activate(true) {
+                Ok(()) => {
+                    tracing::info!("reacquired drm master after a VT switch; the display is back");
+                    true
+                }
+                Err(error) => {
+                    // The probe just took master, so no holder to blame:
+                    // this is a modeset or commit failure on our own master
+                    // fd. Both errors are logged -- the master-loss failure
+                    // that entered the probe, and the retry's own.
+                    tracing::error!(%first, %error, "{}", reactivation_retry_guidance());
+                    false
+                }
+            },
+            Err(steal) => {
+                let held = steal.kind() == io::ErrorKind::ResourceBusy;
+                if held {
+                    tracing::warn!(
+                        %steal,
+                        "drm master is still held by another session after a VT switch"
+                    );
+                }
+                tracing::error!(%first, "{}", master_loss_guidance(held));
+                false
+            }
+        }
+    }
+}
+
+/// Whether `error` is the master-less-fd shape [`Tty::reacquire_master`]
+/// can say something precise about: Smithay's `activate(true)` ran
+/// `reset_state()`'s atomic commit without DRM master and the kernel
+/// refused it with `EACCES` (non-master callers fail atomic commits with
+/// `EACCES`, never `EPERM` -- see `Tty`'s `Drop` doc). Anything else (a
+/// Smithay-side master failure, a wedged device, an inactive device) skips
+/// the steal probe and takes the old loud-error path.
+fn is_master_loss(error: &DrmError) -> bool {
+    matches!(error, DrmError::Access(access) if access.source.kind() == io::ErrorKind::PermissionDenied)
+}
+
+/// The actionable half of a failed reactivation: what holds master (or the
+/// vacancy, when `held` is false), what still works, and the way back. A
+/// pure function (rather than inline format args at the log site) so
+/// headless tests can pin its wording -- the ioctl half needs real DRM
+/// hardware, this half must not rot silently.
+fn master_loss_guidance(held: bool) -> String {
+    let holder = if held {
+        "another session is still holding it (usually the greeter on tty1 through logind)"
+    } else {
+        "no session holds it right now, but this process may not take it itself \
+         (DRM master needs privilege; only the seat daemon, running as root, can re-acquire it), \
+         i.e. seatd lost the re-acquire race on the switch back"
+    };
+    format!(
+        "could not reactivate the drm device: {holder} -- see \
+         site/src/content/docs/scoot/backends.md#hotplug-vt-switching-captures. The session is still alive: \
+         the keyboard works and `scoot msg` answers (check `outputs` -- a dead display reports \
+         live=false there), so switch VTs away and back (Ctrl+Alt+F1..F12) to retry the \
+         reactivation; each switch back tries again. If it never comes back, restart the \
+         session: a fresh start re-acquires master through the seat daemon"
+    )
+}
+
+/// The actionable half of a reactivation that still fails *after* the
+/// probe retook DRM master: no holder to name (the successful `SET_MASTER`
+/// proves this fd holds master), so this is a modeset or commit failure on
+/// our own master, not a lost race. A pure function so headless tests can
+/// pin its wording apart from [`master_loss_guidance`]'s holder language --
+/// the ioctl half needs real DRM hardware, this half must not rot silently.
+fn reactivation_retry_guidance() -> String {
+    "could not reactivate the drm device even after retaking DRM master: \
+     this is a modeset or commit failure on our own master, not another session \
+     holding it -- see \
+     site/src/content/docs/scoot/backends.md#hotplug-vt-switching-captures. The session is still alive: \
+     the keyboard works and `scoot msg` answers, so switch VTs away and back (Ctrl+Alt+F1..F12) \
+     to retry; if it never comes back, restart the session"
+        .to_owned()
 }
 
 /// Largest CRTC LUT length `zwlr_gamma_control_v1` can sanely advertise:
@@ -2134,5 +2263,100 @@ mod tests {
         // on that basis would be the one-way-door silence `IgnoredPaused`
         // exists to prevent. The paused gate in `change_vt` owns this case.
         assert!(!same_vt_noop(true, 1, Some(1)));
+    }
+
+    #[test]
+    fn only_a_permission_denied_access_error_is_a_stealable_master_loss() {
+        // The fail-first pin for the probe gate: `DrmMasterFailed` (Smithay
+        // could not acquire master itself) and `DeviceInactive` must never
+        // route into the probe -- retrying an explicit `SET_MASTER` there
+        // is either meaningless or aimed at a device that is gone. An `Access` error
+        // needs a real DRM fd to construct, so its arm is proven live on
+        // hardware (see the ticket); these arms prove the gate says no.
+        assert!(!is_master_loss(&DrmError::DrmMasterFailed));
+        assert!(!is_master_loss(&DrmError::DeviceInactive));
+    }
+
+    #[test]
+    fn the_master_loss_guidance_names_the_holder_and_the_way_back() {
+        // The loud-error half must not rot into vagueness: a user staring
+        // at a dead display needs the likely holder, proof the session is
+        // alive, where to see the dead state, and the retry. Drop any of
+        // those phrases and this fails. Both variants: master genuinely
+        // held, and master vacant but untakeable without privilege.
+        for held in [true, false] {
+            let guidance = master_loss_guidance(held);
+            assert!(guidance.contains("keyboard"), "{guidance}");
+            assert!(guidance.contains("scoot msg"), "{guidance}");
+            assert!(guidance.contains("live=false"), "{guidance}");
+            assert!(guidance.contains("Ctrl+Alt"), "{guidance}");
+            // The pointer must exist in the merged tree: this string once
+            // cited `docs/backlog/core/vt-switch-back-greeter-master.md`,
+            // which the same PR moved to `resolved/`, so the log pointed
+            // at thin air. The user reading a log has the docs site, not
+            // the repo, so both variants cite the site section.
+            assert!(
+                guidance.contains("backends.md#hotplug-vt-switching-captures"),
+                "{guidance}"
+            );
+            assert!(
+                !guidance.contains("docs/backlog/core/vt-switch-back"),
+                "{guidance}"
+            );
+            // The restart fallback is the way back when retrying never
+            // recovers: a fresh start re-acquires master through seatd.
+            assert!(guidance.contains("restart the"), "{guidance}");
+        }
+        assert!(
+            master_loss_guidance(true).contains("the greeter on tty1"),
+            "{}",
+            master_loss_guidance(true)
+        );
+        assert!(
+            master_loss_guidance(false).contains("no session holds it"),
+            "{}",
+            master_loss_guidance(false)
+        );
+        assert!(
+            master_loss_guidance(false).contains("seatd lost the re-acquire race"),
+            "{}",
+            master_loss_guidance(false)
+        );
+    }
+
+    #[test]
+    fn the_two_guidance_variants_disagree_about_the_holder() {
+        // Held vs vacant must not collapse into one message: the recovery
+        // differs (wait for the holder vs seatd must hand it over), so a
+        // refactor that merges the branches trips here.
+        assert_ne!(master_loss_guidance(true), master_loss_guidance(false));
+    }
+
+    #[test]
+    fn the_post_probe_retry_failure_names_no_holder() {
+        // The fail-first pin for the retry arm: once the probe's
+        // `SET_MASTER` has succeeded this fd holds master, so a second
+        // `activate(true)` failure is a modeset or commit failure on our
+        // own master -- blaming "another session is still holding it"
+        // there misdiagnoses. Point the arm back at
+        // `master_loss_guidance(true)` and this fails.
+        let guidance = reactivation_retry_guidance();
+        assert!(
+            !guidance.contains("another session is still holding it"),
+            "{guidance}"
+        );
+        assert!(!guidance.contains("still holding it"), "{guidance}");
+        assert!(guidance.contains("after retaking DRM master"), "{guidance}");
+        assert!(guidance.contains("modeset or commit failure"), "{guidance}");
+        assert!(guidance.contains("keyboard"), "{guidance}");
+        assert!(guidance.contains("scoot msg"), "{guidance}");
+        assert!(guidance.contains("Ctrl+Alt"), "{guidance}");
+        assert!(guidance.contains("restart the"), "{guidance}");
+        assert!(
+            guidance.contains("backends.md#hotplug-vt-switching-captures"),
+            "{guidance}"
+        );
+        assert_ne!(guidance, master_loss_guidance(true));
+        assert_ne!(guidance, master_loss_guidance(false));
     }
 }

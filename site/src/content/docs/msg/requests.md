@@ -114,6 +114,7 @@ for its modifier only when no key on the layout can hold it.
 | `usable` | The full output minus whatever a bar reserved at its edges (layer-shell exclusive zones) — where windows actually go. "Where can a window be." |
 | `scale` | This output's own scale -- outputs need not share one (see [`[[outputs]]`](../scoot/outputs.md); `rect` and `usable` are logical, screenshots are physical. |
 | `powered` | Whether the output is powered on — `false` while `output-power` (or `wlopm` over `zwlr_output_power_v1`) has it switched off. A powered-off output does no render work and takes no screenshots (refused, naming the recovery). |
+| `live` | Whether the output is currently being driven — `false` while a `--tty` session has lost DRM master (usually a VT switch back seatd failed to re-acquire master for; see [VT switching](../scoot/backends.md#hotplug-vt-switching-captures)). Always `true` off `--tty`, and on servers predating the field. Read this before trusting pixels: the composited frame outlives master, so a screenshot of a `live: false` output is stale. |
 
 **`windows`**, one entry per window, in layout order:
 

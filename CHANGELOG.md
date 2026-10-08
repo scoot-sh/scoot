@@ -25,6 +25,20 @@ scoot has not cut a numbered release yet; entries are dated.
   running size, and the reload reply says so
   (`outputs.DP-1.mode (could not switch to 1920x1080; kept 1600x900)`).
   See [Outputs](site/src/content/docs/scoot/outputs.md).
+### Unreleased — `--tty` names the DRM-master loser after a VT switch (bug fix)
+
+- **Switching back to a `--tty` session no longer fails silently.**
+  The seat daemon sometimes loses the DRM-master re-acquire race with
+  the previous VT's owner (a login greeter holding master through
+  logind) and hands the session a master-less device; scoot now probes
+  master itself with one explicit `SET_MASTER` (which recovers root-run
+  sessions outright) and logs precisely what holds it -- a session, or
+  a vacancy only the seat daemon can fill. When master genuinely
+  cannot be had, the session stays alive -- keyboard and `scoot msg`
+  keep answering -- and `scoot msg outputs` reports `live: false` on
+  every output until a later switch back succeeds (screenshots go stale
+  while the display is dead, so check `live` before trusting pixels). See [VT
+  switching](site/src/content/docs/scoot/backends.md#hotplug-vt-switching-captures).
 
 ### Unreleased — ginger-night, the new default desktop look (behavior change)
 
