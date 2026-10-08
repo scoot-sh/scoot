@@ -118,7 +118,7 @@ fn caps_are_checked() {
 /// (checked, then drawn the static way through the same open).
 #[test]
 fn an_animation_check_opens_the_file_once() {
-    use rustix::fs::inotify::{CreateFlags, ReadFlags, WatchFlags, Reader, add_watch, init};
+    use rustix::fs::inotify::{CreateFlags, ReadFlags, Reader, WatchFlags, add_watch, init};
 
     fn checked_opens(file: &std::path::Path, run: impl FnOnce()) -> usize {
         let watch = init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK).unwrap();
