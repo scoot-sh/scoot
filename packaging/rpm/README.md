@@ -108,7 +108,11 @@ Notes:
   instead of passing silently.
 - `%doc` lands under `/usr/share/doc/` on Fedora and
   `/usr/share/doc/packages/` on openSUSE; the prove steps check the
-  example at each distro's own path.
+  example at each distro's own path. Both container images skip docs by
+  default (Fedora: `tsflags=nodocs`; openSUSE: a vendor
+  `excludedocs.conf`), so both install steps override that — otherwise
+  the `--check` on the installed example would test a file the package
+  owns but the container never wrote.
 - No `-debuginfo`/`-debugsource` subpackages (`debug_package %{nil}`):
   the vendored crate sources carry their upstream modes (executable
   `.rs` files plus a `#!` attribute line in one crate that is not a

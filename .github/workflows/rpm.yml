@@ -278,6 +278,13 @@ jobs:
 
       - name: Install the trio and prove it
         run: |
+          # The opensuse container image excludes `%doc` files
+          # (/usr/etc/zypp/zypp.conf.d/excludedocs.conf), which would
+          # skip the example this step checks: override it. The `zz-`
+          # name matters: snippets merge alphabetically, so it must
+          # sort after the vendor file.
+          mkdir -p /etc/zypp/zypp.conf.d
+          printf '[main]\nrpm.install.excludedocs = no\n' > /etc/zypp/zypp.conf.d/zz-scoot-docs.conf
           zypper --non-interactive --no-gpg-checks install --allow-unsigned-rpm \
             "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/*.rpm
           scoot --version
