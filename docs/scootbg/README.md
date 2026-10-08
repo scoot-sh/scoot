@@ -868,7 +868,9 @@ VM, which this container cannot reach.
     mislead because swaybg unmaps its buffer once committed, so the
     pixels live on only in the compositor and its RSS shows none of them.
     On sway, the compositor had not even read that buffer yet: the pages
-    existed in no process's RSS.
+    existed in no process's RSS. The full mechanism and the proof that
+    the floor persists under a pixman compositor anyway are in
+    [swaybg-two-mb](backlog/resolved/swaybg-two-mb-done.md).
   - **Above the floor** is the daemon's RSS or PSS less its mappings of
     those files; any other shared memory it keeps stays in.
   - **Total** is PSS above the floor, plus the floor, plus any growth of

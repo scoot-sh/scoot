@@ -127,10 +127,12 @@ full per-feature cycle.
     misclassified shm pools (same `smaps.sh` off-by-one), and the lean
     cohort never drew the wallpaper (its image file was unreadable, so the
     compositor's background showed). Pinned by `tests/retention.rs`.
-14. [**How swaybg shows the same wallpaper at 2.0 MB PSS**](swaybg-two-mb.md)
-    — open, low, filed 2026-10-05 from PR #455's review: measure
-    swaybg's buffers (size, compositor-side scaling, release under the
-    GLES tier) before any redesign of scootbg's kept on-screen pool.
+14. [**How swaybg shows the same wallpaper at 2.0 MB PSS**](resolved/swaybg-two-mb-done.md)
+    — RESOLVED 2026-10-08 as a measured don't-build: swaybg drops its
+    pool and buffer right after commit (source + `smaps`: 0 client maps),
+    but under a pixman compositor the pool persists there at full size —
+    the floor is an identical 8112 kB both sides, 3/3 rounds each — so
+    adopting it would only move PSS, at a re-decode cost per re-commit.
 
 ## Milestone 2: motion
 
