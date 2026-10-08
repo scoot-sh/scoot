@@ -47,7 +47,7 @@ calls the spec left open or that the tree changed:
   (`output.scale` / `outputs.<name>.scale`); a changed `mode` is refused by
   name pending a restart -- a live modeset on a driven head was never
   proven on hardware, and is the
-  [follow-up](../core/output-position-and-live-mode.md) with position.
+  [follow-up](./output-position-and-live-mode-done.md) with position.
 - **`--tty` re-probes keep the entry modes:** `Tty::requested_mode`
   became `Tty::modes` (`ModeRequests`), consulted by name at startup and at
   every re-probe (hotplug, VT switch back), so no uevent re-modesets a

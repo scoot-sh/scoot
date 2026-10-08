@@ -591,7 +591,7 @@ be revisited.
   2026-09-25, `--tty` drives every connected monitor), and the one remaining
   surface is the [remainder](./core/multi-output-remainder.md) below (open,
   high: its scale/mode surface landed 2026-09-29; position and a live mode
-  change are the [follow-up](./core/output-position-and-live-mode.md)).
+  change are the [follow-up](./resolved/output-position-and-live-mode-done.md)).
 - [Cycle outputs left and right, wrapping](./resolved/output-cycle-binds-done.md)
   — RESOLVED 2026-10-03 in #400: `focus-output-left/right` + `move-window-to-output-left/right` (wrapping ring in scoot-core); defaults retargeted.
 - [Nested scoot waits forever at startup against a host that accepts but never answers](./resolved/nested-startup-wedge-done.md)
@@ -623,9 +623,8 @@ be revisited.
   output's scale (live on reload) and mode (startup and replug), proven on
   the Asahi M2 Air's eDP-1 + DP-1 (`Asahi.md` Test 16). `apply`/`test` stay
   refused.
-- [Per-output position, and a live mode change on reload](./core/output-position-and-live-mode.md)
-  — low, filed 2026-09-29: outputs still pack left to right, and a reload
-  refuses a changed `mode` pending a restart
+- [Per-output position, and a live mode change on reload](./resolved/output-position-and-live-mode-done.md)
+  — RESOLVED 2026-10-08 in #PR: `position = [x, y]` per `[[outputs]]` entry (placed startup/hotplug/reload, overlaps and gaps allowed) and live mode changes (headless resize, `--tty` hotplug-path `NewMode`, `--nested` still refused).
 - [Usable area is one pixel narrower than the output after a scale reload](./resolved/usable-area-shrinks-after-rescale-done.md)
   — RESOLVED 2026-10-03 in #395: reload files the Space (ceil) geometry when no layer reserves space (Smithay ceil vs round).
 - [Workspace shortcuts: no numbered bind, and no move-to-index action at all](./resolved/workspace-index-keybindings-done.md)
@@ -898,7 +897,7 @@ scale/mode) into one hardware session.
   per-output render scheduling parked as not-planned (~1 pp optimisation).
   The [per-output scale/mode](./resolved/per-output-scale-mode-done.md)
   entry landed 2026-09-29; left: [position and a live mode
-  change](./core/output-position-and-live-mode.md).
+  change](./resolved/output-position-and-live-mode-done.md).
 - [XWayland: drops onto X windows do not land](./resolved/xwayland-pointer-focus-x11-done.md)
   — RESOLVED (filed by XWayland Phase 4, PR #246). The pointer focus has
   an X arm, and with the fork's proxy-remap flush (`6e6fe896`) drops work

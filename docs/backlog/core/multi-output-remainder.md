@@ -15,7 +15,7 @@ cross-output moves). This entry tracks everything left before the README
 scale/mode surface was its own entry
 ([per-output-scale-mode](../resolved/per-output-scale-mode-done.md)) and
 landed last (2026-09-29); what it left out -- position, a live mode change
--- is [output-position-and-live-mode](./output-position-and-live-mode.md).
+-- is [output-position-and-live-mode](../resolved/output-position-and-live-mode-done.md).
 
 ## E1 — TTY multi-CRTC enumeration + output registration — DONE 2026-09-25 (`b782b06`)
 
@@ -216,7 +216,7 @@ stale `multi-output.md:50-113` body (A–D as future) is superseded by this
 triage (`../resolved/multi-output-superseded.md`, milestone 19
 authoritative). The [scale/mode surface](../resolved/per-output-scale-mode-done.md)
 landed 2026-09-29; left: [position and a live mode
-change](./output-position-and-live-mode.md), and the README bullet is
+change](../resolved/output-position-and-live-mode-done.md), and the README bullet is
 narrowed to **Monitor placement** accordingly.
 When it lands, the README "Not yet" bullet — already narrowed to
 **Per-monitor settings** ("Multiple monitors work, but they share one

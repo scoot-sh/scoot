@@ -1,9 +1,10 @@
 ---
 title: "Per-output position, and a live mode change on reload"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-08"
 ---
 
 # Per-output position, and a live mode change on reload
@@ -56,3 +57,39 @@ Two halves `[[outputs]]` deliberately left out.
 `wlr-output-management` `apply`/`test`: still refused, with the landing
 condition in the [resolved spec](../resolved/per-output-scale-mode-done.md)
 (section 3) -- position and live mode are its prerequisites, not it.
+
+## Resolution (2026-10-08, PR #XXX)
+
+Both halves landed, following this ticket's own recommendations.
+
+- **Position.** `[[outputs]]` gains `position = [x, y]` in logical pixels
+  (either axis may be negative; a mistyped value warns and packs that
+  output, costing only the value). Placed outputs go exactly to their
+  entries -- at startup, on hotplug add, and on reload; outputs without
+  one pack left to right in creation order from the origin, stepping over
+  placed ones, so a placed output never shoves an earlier output aside
+  and the primary stays at the origin. Overlaps and gaps are allowed
+  (each output renders its own strip; the pointer clamp already covers
+  the bounding box, including negative origins -- a sole placed output
+  clamps and centres on its own rectangle). A replugged placed monitor
+  lands back on its entry while neighbours stay put; rescale, removal,
+  mode change and position reloads repack the unplaced outputs behind
+  it. `focus-output-left/right` needed no change (already geometry
+  order); the X `INT16` bound and the IPC/output-management positions
+  already read live geometry. Reported as `outputs.<name>.position`.
+- **Live mode.** A changed `mode` applies per backend: `resize_output_of`
+  under `--headless`, stored-requests swap plus `Tty::reconfigure`
+  (the hotplug `NewMode` arm) under `--tty`, refused under `--nested`.
+  A mode no connector offers -- or a failed switch -- keeps the running
+  size and the reply says so (`outputs.DP-1.mode (could not switch to
+  WxH; kept AxB)`). Entries for unconnected monitors store, report
+  applied, and apply on plug; removals revert to the session default.
+- **Proof.** Unit + reload suites (positions, modes, overlap, negative
+  origins, replug, revert, clamp); headless two-output `scoot msg`
+  proof (placed startup rect, live mode+position reload reply and rects,
+  stored unconnected entry, screenshot); full `nextest --workspace`
+  4555 passed; `cargo test` 2214 passed with two unrelated load flakes
+  (each passing in isolation); clippy workspace + `gpu-scanout` clean;
+  `xwayland` check clean; smoke 36 ok; docs-site build green. The `--tty`
+  live modeset on a real panel is hardware-only: exact steps for the
+  maintainer are in the PR body, not claimed here.
