@@ -1,0 +1,8 @@
+scootbar for Debian/Ubuntu
+-------------------------
+
+The bar ships a systemd user unit (scootbar.service). To run it as a
+user service: copy /usr/share/doc/scootbar/bar.toml.example to
+~/.config/scoot/bar.toml, then systemctl --user enable --now scootbar.
+A config change does not restart the unit; run `scootbar msg reload`
+instead.

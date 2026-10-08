@@ -1,0 +1,292 @@
+# scoot deb packages: the three .debs for scoot, scootbg and scootbar
+# (docs/backlog/packaging/deb-package.md).
+#
+# WHAT IT DOES: stages the vendored tree (`scripts/vendor-release.sh`,
+# the same entry point the release job uses), builds all three .debs
+# with `packaging/deb/build-deb.sh` --release --locked --offline inside
+# a `debian:bookworm-slim` container with the pinned rustup toolchain
+# (the distro toolchain predates the workspace floor; the README says
+# why), derives Depends from dpkg-shlibdeps against the ldd-derived
+# allow-list, lints with lintian, builds the unsigned repository index
+# (`make-repo-index.sh`), installs from it in plain bookworm-slim and
+# Ubuntu 24.04 containers, and runs every --version, the bar's --check
+# on its shipped example, and the headless smoke test
+# (`scripts/smoke-test.sh`) against the installed binaries. That is the
+# ticket's proof the packages work.
+#
+# WHAT IT DOES NOT DO: publish anything. No repository upload, no
+# signature (there is no key yet), no tag, no release. The signed
+# repository stays a maintainer step (packaging/deb/README.md).
+#
+# NO TARBALL SUBSTITUTION: unlike the Arch release PKGBUILDs (whose
+# source URLs 404 until the first tag), the deb builder takes a source
+# directory, so CI builds the vendor-staged tree of HEAD -- the same
+# layout the published tarball unpacks to -- and nothing is rewritten.
+#
+# Path filters (the CLAUDE.md rule: CI runs only what changed): a PR or
+# a push to main runs this only when the deb tooling, the smoke script
+# they run, or this workflow could have changed. `packaging/deb` is
+# claimed as a no-op in ci.yml's classify job, so a deb-only change
+# runs here and nowhere else. Docs-only pushes start nothing: the
+# README is negated below and every other doc path never matches.
+
+name: deb packages (.debs in a Debian container)
+
+on:
+  pull_request:
+    paths:
+      - 'packaging/deb/**'
+      - '!packaging/deb/README.md'
+      - 'scripts/smoke-test.sh'
+      - 'scripts/vendor-release.sh'
+      - '.github/workflows/deb.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packaging/deb/**'
+      - '!packaging/deb/README.md'
+      - 'scripts/smoke-test.sh'
+      - 'scripts/vendor-release.sh'
+      - '.github/workflows/deb.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The deb tooling's own tests (stdlib python over fixtures and the
+  # real manifests -- no seat, no container): control rendering, the
+  # coupled scoot/scootbg pin, and the shlibdeps allow-list including
+  # its refusal cases.
+  tool-tests:
+    name: deb-meta unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: packaging/deb/test_deb.py
+        run: python3 packaging/deb/test_deb.py
+
+  # The vendored source tree the .debs compile: `git archive HEAD` plus
+  # `cargo vendor` (both scoot-sh git forks included). Arch-independent,
+  # staged once; both arch builds below compile this exact tree
+  # offline, which is the same proof the release job relies on.
+  vendor:
+    name: Vendored tree for the deb builds
+    needs: tool-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+
+      - name: Stage the tree (no offline check here -- the container builds are it)
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          scripts/vendor-release.sh --out "$RUNNER_TEMP/vendor-release"
+          ls -l "$RUNNER_TEMP/vendor-release"
+
+      - name: Stage the vendor artifact (single directory)
+        run: |
+          STAGE="$RUNNER_TEMP/stage-vendor"
+          mkdir -p "$STAGE"
+          cp -a "$RUNNER_TEMP"/vendor-release/scoot-*-vendored/source "$STAGE/source"
+          test -f "$STAGE/source/.cargo/config.toml" || { echo "::error title=Staged source has no .cargo/config.toml::vendor-release.sh did not stage intact."; exit 1; }
+          ls -l "$STAGE"
+
+      - name: Upload the staged source
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vendor-source
+          path: ${{ runner.temp }}/stage-vendor
+          # The staged tree carries `source/.cargo/config.toml`, and
+          # upload-artifact v4.4+ drops hidden files unless told otherwise
+          # (the build's intact check would then fail on every run).
+          include-hidden-files: true
+          retention-days: 7
+
+  # One build per architecture, on that architecture's native runner (no
+  # cross, no emulation -- the same runner pair the releases use): cargo
+  # --release --locked --offline from the staged source inside
+  # `debian:bookworm-slim`, so the glibc floor is the base's (2.36),
+  # stated, not accidental.
+  build:
+    name: Build, lint and prove the .debs (${{ matrix.arch }})
+    needs: vendor
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          # Free for public repos; the same runner the release
+          # aarch64 builds already use (release.yml).
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      # Pinned together: the base sets the glibc floor, the toolchain
+      # must be new enough for the tree (let-chains need >= 1.88; the
+      # workspace floor predates them, so this pin is load-bearing --
+      # the same pin release.yml uses).
+      DISTRO_IMAGE: debian:bookworm-slim
+      RUST_TOOLCHAIN: 1.97.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the staged source
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: vendor-source
+          path: ${{ runner.temp }}/vendor
+
+      # The .deb versions must name their crates' versions (the trio
+      # together, the bar on its own); the scoot control must pin the
+      # scootbg version the same run builds.
+      - name: deb versions track their crate manifests
+        env:
+          VENDOR_SOURCE: ${{ runner.temp }}/vendor/source
+        run: |
+          python3 - <<'EOF'
+          import os, subprocess
+          source = os.environ["VENDOR_SOURCE"]
+          out = subprocess.run(
+              ["python3", "packaging/deb/deb-meta.py", "versions",
+               "--source", source],
+              capture_output=True, text=True, check=True,
+          ).stdout
+          got = dict(line.split() for line in out.splitlines())
+          assert got["scoot"] == got["scootbg"], f"trio skew in staged tree: {got}"
+          print(f"staged tree: scoot/scootbg {got['scoot']} (lockstep ok), scootbar {got['scootbar']}")
+          EOF
+
+      - name: Build the .debs in the distro container
+        env:
+          VENDOR_SOURCE: ${{ runner.temp }}/vendor/source
+        run: |
+          src="$VENDOR_SOURCE"
+          test -f "$src/.cargo/config.toml" || { echo "::error title=Staged source has no .cargo/config.toml::the vendor artifact did not download intact."; exit 1; }
+          mkdir -p "$RUNNER_TEMP/debs"
+          docker run --rm \
+            -v "$src:/src:ro" -v "$GITHUB_WORKSPACE/packaging:/pkg:ro" \
+            -v "$RUNNER_TEMP/debs:/out" \
+            -e CARGO_TARGET_DIR=/tmp/target \
+            "$DISTRO_IMAGE" bash -euo pipefail -c '
+              apt-get update -qq
+              apt-get install -y -qq curl ca-certificates build-essential pkg-config \
+                dpkg-dev lintian desktop-file-utils \
+                libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs \
+                | sh -s -- -y --default-toolchain "$0" --profile minimal
+              export PATH="$HOME/.cargo/bin:$PATH"
+              echo "--- toolchain and glibc floor ---"
+              rustc --version
+              ldd --version | head -1
+              cp -a /pkg /tmp/pkg
+              chmod +x /tmp/pkg/deb/build-deb.sh /tmp/pkg/deb/make-repo-index.sh
+              /tmp/pkg/deb/build-deb.sh --source /src --out /out
+              ls -l /out/*.deb
+            ' "$RUST_TOOLCHAIN"
+
+      # The floor the packages promise: the build ran on bookworm
+      # (glibc 2.36) with only runtime libraries installed, so a user
+      # installing the documented dependencies gets binaries that
+      # start. lintian's judgment on the side: any error fails, and a
+      # warning fails unless it names an override this tree ships
+      # (there are none today: the build is clean or the run is red).
+      - name: lintian the built packages
+        run: |
+          ls -l "$RUNNER_TEMP/debs"/*.deb
+          docker run --rm -v "$RUNNER_TEMP/debs:/debs:ro" "$DISTRO_IMAGE" bash -euo pipefail -c '
+            apt-get update -qq
+            apt-get install -y -qq lintian
+            lintian --no-tag-display-limit /debs/*.deb 2>&1 | tee /tmp/lintian.log
+            if grep -q "^E: " /tmp/lintian.log; then
+              echo "::error title=lintian errors::see the log above."
+              exit 1
+            fi
+            echo "ok: lintian reports no errors (warnings, if any, are above)"
+          '
+
+      - name: desktop-file-validate the session entry
+        run: |
+          docker run --rm -v "$RUNNER_TEMP/debs:/debs:ro" "$DISTRO_IMAGE" bash -euo pipefail -c '
+            apt-get update -qq
+            apt-get install -y -qq desktop-file-utils
+            tmp=$(mktemp -d)
+            dpkg-deb --fsys-tarfile /debs/scoot_*.deb | tar -x -C "$tmp" ./usr/share/wayland-sessions/scoot.desktop
+            desktop-file-validate "$tmp/usr/share/wayland-sessions/scoot.desktop"
+            echo "ok: session entry validates"
+          '
+
+      # The repository metadata without any key: proves the Packages /
+      # Release shape CI installs from below. Unsigned by design (there
+      # is no key yet); the install steps say [trusted=yes] and only
+      # they do.
+      - name: Build the unsigned repository index
+        run: |
+          docker run --rm -v "$RUNNER_TEMP/debs:/debs:ro" -v "$RUNNER_TEMP/repo:/repo" \
+            -v "$GITHUB_WORKSPACE/packaging:/pkg:ro" \
+            "$DISTRO_IMAGE" bash -euo pipefail -c '
+            apt-get update -qq
+            apt-get install -y -qq dpkg-dev
+            cp /pkg/deb/make-repo-index.sh /tmp/
+            chmod +x /tmp/make-repo-index.sh
+            /tmp/make-repo-index.sh --debs /debs --out /repo --codename bookworm
+          '
+          find "$RUNNER_TEMP/repo" -type f | sort
+
+      # Twice per arch: the oldest supported pair (bookworm, glibc 2.36;
+      # noble, glibc 2.39) installs from the index and proves it. The
+      # bookworm round runs the ticket's full proof against the
+      # installed files (every --version, the bar's --check, the
+      # headless smoke test); the noble round proves the glibc-forward
+      # install (start + check), since the smoke run is backend logic,
+      # not distro userland.
+      - name: Install from the index on bookworm and prove it
+        run: |
+          docker run --rm -v "$RUNNER_TEMP/repo:/repo:ro" \
+            -v "$GITHUB_WORKSPACE:/ws:ro" \
+            "$DISTRO_IMAGE" bash -euo pipefail -c '
+            printf "Types: deb\nURIs: file:/repo\nSuites: bookworm\nComponents: main\nTrusted: yes\n" \
+              >/etc/apt/sources.list.d/scoot.sources
+            apt-get update -qq
+            apt-get install -y -qq scoot scootbg scootbar
+            scoot --version
+            scootbg --version
+            scootbar --version
+            scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
+            apt-get install -y -qq foot jq imagemagick wayland-utils fonts-dejavu-core
+            mkdir -p /tmp/deb-smoke-xdg
+            chmod 700 /tmp/deb-smoke-xdg
+            export XDG_RUNTIME_DIR=/tmp/deb-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
+            export SMOKE_PREFIX=/tmp/deb-smoke SMOKE_REQUIRE_SCOOTBG=1
+            /ws/scripts/smoke-test.sh
+          '
+
+      - name: Install from the index on Ubuntu 24.04 (glibc-forward check)
+        run: |
+          docker run --rm -v "$RUNNER_TEMP/repo:/repo:ro" ubuntu:24.04 bash -euo pipefail -c '
+            printf "Types: deb\nURIs: file:/repo\nSuites: bookworm\nComponents: main\nTrusted: yes\n" \
+              >/etc/apt/sources.list.d/scoot.sources
+            apt-get update -qq
+            apt-get install -y -qq scoot scootbg scootbar
+            scoot --version
+            scootbg --version
+            scootbar --version
+            scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
+          '
+
+      - name: Upload the built packages and the index
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: debs-${{ matrix.arch }}
+          path: ${{ runner.temp }}/debs
+          include-hidden-files: true
+          retention-days: 7

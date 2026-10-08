@@ -1,0 +1,12 @@
+scoot for Debian/Ubuntu
+----------------------
+
+The greeter entry lives at /usr/share/wayland-sessions/scoot.desktop:
+pick "scoot" on your login screen (greetd, GDM, SDDM). Without a systemd
+user manager scoot-session runs the compositor directly with no session
+integration.
+
+Copy /usr/share/doc/scoot/config.toml.example to ~/.config/scoot/config.toml
+to start from the built-in defaults (it documents the [wallpaper]
+handoff to scootbg, which ships in the scootbg package at the same
+version -- the two install as a pair).
