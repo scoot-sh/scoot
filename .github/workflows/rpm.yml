@@ -85,11 +85,18 @@ jobs:
             diffutils ImageMagick jq libinput-devel libseat-devel libxkbcommon-devel pixman-devel \
             procps-ng rpm-build rpmdevtools rpmlint systemd-devel systemd-rpm-macros \
             wayland-devel wayland-protocols-devel wayland-utils
-          mkdir -p "$GITHUB_WORKSPACE/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS} \
-            "$GITHUB_WORKSPACE/dist" "$GITHUB_WORKSPACE/.rpm-vendor"
+
+      # Stage FIRST, before any step writes to the checkout:
+      # vendor-release.sh refuses a dirty tree, and even an untracked
+      # scratch dir counts. Nothing above touches the working tree.
+      - name: Stage the vendored tarball
+        run: |
+          scripts/vendor-release.sh --out "$RUNNER_TEMP/rpm-vendor"
+          ls -l "$RUNNER_TEMP/rpm-vendor"
 
       - name: rpmlint the spec files
         run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
           rpmlint packaging/rpm/*.spec 2>&1 | tee "$GITHUB_WORKSPACE/dist/rpmlint-spec.log"
           if grep -q ' E: ' "$GITHUB_WORKSPACE/dist/rpmlint-spec.log"; then
             echo "::error title=rpmlint errors on a spec file::see rpmlint-spec.log"
@@ -100,7 +107,7 @@ jobs:
       # The spec `Version` must name its crate's version (the trio
       # together, the bar on its own); the staged tarball is placed
       # under the provisional Source0 basename naming that version.
-      - name: Spec versions track their crate manifests, stage the tarball
+      - name: Spec versions track their crate manifests, place the tarball
         run: |
           python3 - <<'EOF'
           import re
@@ -115,13 +122,12 @@ jobs:
               print(f"{spec}.spec: Version={spec_ver} crate={crate_ver} tag={tag}-v{crate_ver} {status}")
               assert spec_ver == crate_ver, f"{spec}.spec Version {spec_ver} != crate {crate_ver}"
           EOF
-          scripts/vendor-release.sh --out "$GITHUB_WORKSPACE/.rpm-vendor"
-          ls -l "$GITHUB_WORKSPACE/.rpm-vendor"
+          mkdir -p "$GITHUB_WORKSPACE/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
           scoot_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scoot.spec)
           bar_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scootbar.spec)
-          cp "$GITHUB_WORKSPACE"/.rpm-vendor/scoot-*-vendored.tar.gz \
+          cp "$RUNNER_TEMP"/rpm-vendor/scoot-*-vendored.tar.gz \
             "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scoot-$scoot_ver-vendored.tar.gz"
-          cp "$GITHUB_WORKSPACE"/.rpm-vendor/scoot-*-vendored.tar.gz \
+          cp "$RUNNER_TEMP"/rpm-vendor/scoot-*-vendored.tar.gz \
             "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scootbar-$bar_ver-vendored.tar.gz"
           ls -l "$GITHUB_WORKSPACE/rpmbuild/SOURCES"
 
@@ -204,25 +210,34 @@ jobs:
 
       - name: Install the build and lint tools
         run: |
+          # busybox-gawk ships in the image and conflicts with the gawk
+          # desktop-file-utils requires; remove it first so the solver
+          # never faces both in one transaction (it cancels instead).
+          # If a future image drops busybox-gawk, this fails loudly and
+          # the line goes away.
+          zypper --non-interactive remove busybox-gawk
           zypper --non-interactive install --no-recommends \
-            cargo dejavu-fonts desktop-file-utils gcc gawk libinput-devel \
+            cargo dejavu-fonts desktop-file-utils gcc libinput-devel \
             libpixman-1-0-devel libxkbcommon-devel rpm-build rpmlint \
             seatd-devel systemd-devel systemd-rpm-macros wayland-devel \
             wayland-protocols-devel
-          # `gawk` above is load-bearing, not alphabetical: the image
-          # ships busybox-gawk, which conflicts with the gawk that
-          # desktop-file-utils requires, and only an explicit gawk lets
-          # the solver swap them non-interactively.
           # No cargo-deny package on openSUSE (packaging/rpm/README.md):
           # install it with cargo so vendor-release.sh can stage the
           # tarball. It never runs at rpmbuild time.
           cargo install cargo-deny --locked
           echo "$HOME/.cargo/bin" >>"$GITHUB_PATH"
-          mkdir -p "$GITHUB_WORKSPACE/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS} \
-            "$GITHUB_WORKSPACE/dist" "$GITHUB_WORKSPACE/.rpm-vendor"
+
+      # Stage FIRST, before any step writes to the checkout:
+      # vendor-release.sh refuses a dirty tree, and even an untracked
+      # scratch dir counts. Nothing above touches the working tree.
+      - name: Stage the vendored tarball
+        run: |
+          scripts/vendor-release.sh --out "$RUNNER_TEMP/rpm-vendor"
+          ls -l "$RUNNER_TEMP/rpm-vendor"
 
       - name: rpmlint the spec files
         run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
           rpmlint packaging/rpm/*.spec 2>&1 | tee "$GITHUB_WORKSPACE/dist/rpmlint-spec.log"
           if grep -q ' E: ' "$GITHUB_WORKSPACE/dist/rpmlint-spec.log"; then
             echo "::error title=rpmlint errors on a spec file::see rpmlint-spec.log"
@@ -230,7 +245,7 @@ jobs:
           fi
           echo "ok: no rpmlint errors on the spec files (warnings, if any, are above)"
 
-      - name: Spec versions track their crate manifests, stage the tarball
+      - name: Spec versions track their crate manifests, place the tarball
         run: |
           python3 - <<'EOF'
           import re
@@ -245,13 +260,12 @@ jobs:
               print(f"{spec}.spec: Version={spec_ver} crate={crate_ver} tag={tag}-v{crate_ver} {status}")
               assert spec_ver == crate_ver, f"{spec}.spec Version {spec_ver} != crate {crate_ver}"
           EOF
-          scripts/vendor-release.sh --out "$GITHUB_WORKSPACE/.rpm-vendor"
-          ls -l "$GITHUB_WORKSPACE/.rpm-vendor"
+          mkdir -p "$GITHUB_WORKSPACE/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
           scoot_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scoot.spec)
           bar_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scootbar.spec)
-          cp "$GITHUB_WORKSPACE"/.rpm-vendor/scoot-*-vendored.tar.gz \
+          cp "$RUNNER_TEMP"/rpm-vendor/scoot-*-vendored.tar.gz \
             "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scoot-$scoot_ver-vendored.tar.gz"
-          cp "$GITHUB_WORKSPACE"/.rpm-vendor/scoot-*-vendored.tar.gz \
+          cp "$RUNNER_TEMP"/rpm-vendor/scoot-*-vendored.tar.gz \
             "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scootbar-$bar_ver-vendored.tar.gz"
           ls -l "$GITHUB_WORKSPACE/rpmbuild/SOURCES"
 
