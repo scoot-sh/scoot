@@ -73,11 +73,12 @@ contract, enforced where a mismatch would misbehave:
   `clear-workspace` are new request types it answers with `unknown
   request`, which the CLI reports as such. A newer daemon reading an
   older client's `set` sees no new fields and behaves as before.
-  Scoot's own `[wallpaper]` `apply-config` carries no workspace keys
-  (per-workspace config is a deferred follow-up,
-  `docs/scootbg/backlog/config-workspace-wallpapers.md`): applying it
-  leaves live workspace mappings alone, and adopting another profile
-  clears them with their buffers (see `daemon::config::adopt`).
+  Scoot's own `[wallpaper]` `apply-config` carries workspace keys
+  (`workspace."NAME"`, `output."NAME".workspace."WS"`, resolved in
+  `docs/scootbg/backlog/resolved/config-workspace-wallpapers-done.md`): a
+  section without a workspace table leaves that live mapping alone (an
+  empty one clears it), and adopting another profile clears them with
+  their buffers (see `daemon::config::adopt`).
 - **`scootbar` / `scoot`: standard protocols only**, plus the optional
   IPC feature guarded by the IPC protocol number. A bar from one
   release works against a compositor from another as long as both speak

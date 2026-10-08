@@ -111,9 +111,17 @@ ignored (the base shows there) rather than guessed.
 Every `set --workspace` and `clear --workspace` is saved in the
 profile's state file like any choice (version 3: an older scootbg reads
 nothing from such a file, and never writes it away), and restored at
-the next start — transition included. The `[wallpaper]` section does
-not manage workspace wallpapers: `apply-config` leaves the mappings
-alone, and a profile adopted from it keeps the file's mappings.
+the next start — transition included.
+
+Scoot's `[wallpaper]` section manages the same mappings: `[wallpaper.workspace."2"]`
+for every output, `[wallpaper.output."DP-1".workspace."2"]` for one output
+alone, each with the same image/color keys plus transition keys as any
+other table, each standing alone. An empty workspace table takes that
+mapping back off; a workspace table you remove from the section leaves its
+live mapping alone. Whichever you changed last wins: a `set --workspace`
+made since keeps showing until the section itself changes, and an unchanged
+reload repairs a mapping whose file came back. Mapped images are preloaded
+on apply, so the first switch is instant — see [the section](./index.md#the-wallpaper-section).
 
 > **Symptom:** *the workspace wallpaper never appears; the base stays.*
 > The compositor has no `ext-workspace-v1` (the daemon says so once on

@@ -35,13 +35,15 @@
 //!
 //! scoot checks what it owns: the keys (`image`, `color`, `mode`, `fill`,
 //! `filter`, `sha256`, `transition`, `duration-ms`, `easing`, `angle`,
-//! `position`, `output` and `command`; each output table the first
-//! eleven), that each value is a string (the output list a table of tables),
-//! and the paths it resolves: an `image` with a `scheme://` is a link and
-//! passes through untouched. It does not check the values' meaning (a
-//! color's syntax, a mode's name, a URL's scheme, a hash's shape): scootbg
-//! validates the section strictly and refuses it with exit status 2, which
-//! the reaper logs. One parser for those rules, not two that can disagree.
+//! `position`, `output`, `workspace` and `command`; each output table the
+//! first eleven plus `workspace`, each workspace table the eleven), that
+//! each value is a string (the output and workspace lists tables of
+//! tables), and the paths it resolves: an `image` with a `scheme://` is a
+//! link and passes through untouched. It does not check the values' meaning
+//! (a color's syntax, a mode's name, a URL's scheme, a hash's shape, a
+//! workspace name's length): scootbg validates the section strictly and
+//! refuses it with exit status 2, which the reaper logs. One parser for
+//! those rules, not two that can disagree.
 //!
 //! # Only the keys the user wrote
 //!
@@ -119,6 +121,17 @@ pub struct Table {
     pub position: Option<String>,
 }
 
+/// One `[wallpaper.output."NAME"]` table as the file has it: the
+/// wallpaper for that output, and the workspace wallpapers for that output
+/// alone.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct OutputConfig {
+    pub table: Table,
+    /// `[wallpaper.output."NAME".workspace."WS"]` tables, by workspace name.
+    /// `Some` whenever `workspace` was written, empty or not.
+    pub workspaces: Option<BTreeMap<String, Table>>,
+}
+
 /// `[wallpaper]` as the file has it. Never fails to deserialize: see the
 /// module doc. `problems` lists what was wrong, in file order.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -130,7 +143,10 @@ pub struct WallpaperConfig {
     /// section as written. A `BTreeMap` so the JSON is the same bytes on
     /// every run (scootbg does not need that, it re-sorts; the reload diff
     /// and the log do).
-    pub outputs: Option<BTreeMap<String, Table>>,
+    pub outputs: Option<BTreeMap<String, OutputConfig>>,
+    /// `[wallpaper.workspace."NAME"]` tables, by workspace name, for every
+    /// output. `Some` whenever `workspace` was written, empty or not.
+    pub workspaces: Option<BTreeMap<String, Table>>,
     pub problems: Vec<String>,
 }
 
@@ -191,13 +207,41 @@ impl WallpaperConfig {
         let output = match self.outputs {
             None => None,
             Some(outputs) => {
-                let mut resolved = BTreeMap::new();
-                for (name, table) in outputs {
+                let mut resolved: BTreeMap<String, OutputJson> = BTreeMap::new();
+                for (name, entry) in outputs {
                     let at = format!("wallpaper.output.{}", quoted(&name));
-                    let table = paths.table(table, &at)?;
-                    resolved.insert(name, table);
+                    let table = paths.table(entry.table, &at)?;
+                    let workspaces = match entry.workspaces {
+                        None => None,
+                        Some(tables) => {
+                            let mut done = BTreeMap::new();
+                            for (workspace, table) in tables {
+                                let wat = format!("{}.workspace.{}", at, quoted(&workspace));
+                                done.insert(workspace, paths.table(table, &wat)?);
+                            }
+                            Some(done)
+                        }
+                    };
+                    resolved.insert(
+                        name,
+                        OutputJson {
+                            base: table,
+                            workspace: workspaces,
+                        },
+                    );
                 }
                 Some(resolved)
+            }
+        };
+        let workspace = match self.workspaces {
+            None => None,
+            Some(tables) => {
+                let mut done = BTreeMap::new();
+                for (workspace, table) in tables {
+                    let at = format!("wallpaper.workspace.{}", quoted(&workspace));
+                    done.insert(workspace, paths.table(table, &at)?);
+                }
+                Some(done)
             }
         };
         let json = serde_json::to_string(&Json {
@@ -213,6 +257,7 @@ impl WallpaperConfig {
             angle: top.angle.as_deref(),
             position: top.position.as_deref(),
             output: output.as_ref(),
+            workspace: workspace.as_ref(),
         })
         .map_err(|error| format!("the [wallpaper] section cannot be encoded as JSON: {error}"))?;
         if json.len() > MAX_JSON {
@@ -225,8 +270,18 @@ impl WallpaperConfig {
     }
 }
 
+/// One per-output table in the JSON: its keys, plus `workspace`.
+#[derive(Serialize)]
+struct OutputJson {
+    #[serde(flatten)]
+    base: Table,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace: Option<BTreeMap<String, Table>>,
+}
+
 /// The JSON object scootbg reads: the top-level table's keys beside
-/// `output`. Borrowed, so encoding copies each string once, into the JSON.
+/// `output` and `workspace`. Borrowed, so encoding copies each string once,
+/// into the JSON.
 #[derive(Serialize)]
 struct Json<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -252,7 +307,9 @@ struct Json<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     position: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    output: Option<&'a BTreeMap<String, Table>>,
+    output: Option<&'a BTreeMap<String, OutputJson>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace: Option<&'a BTreeMap<String, Table>>,
 }
 
 /// A TOML key as the user would write it in a dotted path: bare when TOML
@@ -405,6 +462,11 @@ impl<'de> Visitor<'de> for SectionVisitor {
                     config.problems.extend(outputs.problems);
                     config.outputs = outputs.tables;
                 }
+                "workspace" => {
+                    let workspaces = map.next_value_seed(WorkspaceList { at: "wallpaper" })?;
+                    config.problems.extend(workspaces.problems);
+                    config.workspaces = workspaces.tables;
+                }
                 _ => {
                     if !read_table_key(
                         &mut map,
@@ -417,7 +479,7 @@ impl<'de> Visitor<'de> for SectionVisitor {
                         config.problems.push(format!(
                             "unknown key `wallpaper.{}` (expected image, color, mode, fill, \
                              filter, sha256, transition, duration-ms, easing, angle, position, \
-                             output or command)",
+                             output, workspace or command)",
                             quoted(&key)
                         ));
                     }
@@ -571,7 +633,7 @@ impl<'de> Visitor<'de> for TextVisitor {
 
 /// `output`: a table of per-output tables, with its own problems.
 struct Outputs {
-    tables: Option<BTreeMap<String, Table>>,
+    tables: Option<BTreeMap<String, OutputConfig>>,
     problems: Vec<String>,
 }
 
@@ -661,7 +723,7 @@ struct OutputSeed<'p> {
 }
 
 impl<'de> de::DeserializeSeed<'de> for OutputSeed<'_> {
-    type Value = Option<Table>;
+    type Value = Option<OutputConfig>;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
         deserializer.deserialize_any(self)
@@ -669,7 +731,7 @@ impl<'de> de::DeserializeSeed<'de> for OutputSeed<'_> {
 }
 
 impl OutputSeed<'_> {
-    fn wrong(self, what: &str) -> Option<Table> {
+    fn wrong(self, what: &str) -> Option<OutputConfig> {
         self.problems
             .push(format!("`{}` must be a table, not {what}", self.at));
         None
@@ -677,10 +739,202 @@ impl OutputSeed<'_> {
 }
 
 impl<'de> Visitor<'de> for OutputSeed<'_> {
-    type Value = Option<Table>;
+    type Value = Option<OutputConfig>;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a per-output wallpaper table")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut table = Table::default();
+        let mut workspaces: Option<BTreeMap<String, Table>> = None;
+        let mut workspace_problems = Vec::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if key == TOML_DATETIME {
+                map.next_value_seed(Drain::TOP)?;
+                return Ok(self.wrong("a date/time"));
+            }
+            if key == "workspace" {
+                let list = map.next_value_seed(WorkspaceList { at: self.at })?;
+                workspace_problems.extend(list.problems);
+                workspaces = list.tables;
+                continue;
+            }
+            if !read_table_key(&mut map, &key, self.at, &mut table, self.problems)? {
+                map.next_value_seed(Drain::TOP)?;
+                self.problems.push(format!(
+                    "unknown key `{}.{}` (an output's table takes image, color, mode, fill, \
+                     filter, sha256, transition, duration-ms, easing, angle, position and \
+                     workspace)",
+                    self.at,
+                    quoted(&key)
+                ));
+            }
+        }
+        self.problems.extend(workspace_problems);
+        Ok(Some(OutputConfig { table, workspaces }))
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+        Drain::TOP.visit_seq(seq)?;
+        Ok(self.wrong("an array"))
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> {
+        Ok(self.wrong("a boolean"))
+    }
+
+    fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> {
+        Ok(self.wrong("a number"))
+    }
+
+    fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E> {
+        Ok(self.wrong("a number"))
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> {
+        Ok(self.wrong("a number"))
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
+        Ok(self.wrong("a string"))
+    }
+}
+
+/// A `workspace` table of per-workspace tables, with its own problems.
+/// `at` is the table holding it (`wallpaper`, or `wallpaper.output.NAME`),
+/// for messages.
+struct WorkspaceList<'p> {
+    at: &'p str,
+}
+
+struct Workspaces {
+    tables: Option<BTreeMap<String, Table>>,
+    problems: Vec<String>,
+}
+
+impl<'de> de::DeserializeSeed<'de> for WorkspaceList<'_> {
+    type Value = Workspaces;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'p> WorkspaceList<'p> {
+    fn table_at(&self, name: &str) -> String {
+        format!("{}.workspace.{}", self.at, quoted(name))
+    }
+}
+
+impl<'de> Visitor<'de> for WorkspaceList<'_> {
+    type Value = Workspaces;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a table of per-workspace tables")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut tables = BTreeMap::new();
+        let mut problems = Vec::new();
+        while let Some(name) = map.next_key::<String>()? {
+            if name == TOML_DATETIME {
+                map.next_value_seed(Drain::TOP)?;
+                return Ok(self.wrong("a date/time"));
+            }
+            let at = self.table_at(&name);
+            let table = map.next_value_seed(WorkspaceSeed {
+                at: &at,
+                problems: &mut problems,
+            })?;
+            if let Some(table) = table {
+                tables.insert(name, table);
+            }
+        }
+        Ok(Workspaces {
+            tables: Some(tables),
+            problems,
+        })
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+        Drain::TOP.visit_seq(seq)?;
+        Ok(self.wrong("an array"))
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> {
+        Ok(self.wrong("a boolean"))
+    }
+
+    fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> {
+        Ok(self.wrong("a number"))
+    }
+
+    fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E> {
+        Ok(self.wrong("a number"))
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> {
+        Ok(self.wrong("a number"))
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
+        Ok(self.wrong("a string"))
+    }
+}
+
+impl<'p> WorkspaceList<'p> {
+    fn wrong(self, what: &str) -> Workspaces {
+        let expect = if self.at == "wallpaper" {
+            "`wallpaper.workspace` must be a table of tables ([wallpaper.workspace.\"NAME\"]), not "
+        } else {
+            "must be a table of tables"
+        };
+        // For a nested workspace the full `at` is already in the message
+        // through the caller; keep it short but named.
+        let message = if self.at == "wallpaper" {
+            format!("{expect}{what}")
+        } else {
+            format!(
+                "`{}.workspace` must be a table of tables ([{}.workspace.\"NAME\"]), not {what}",
+                self.at, self.at
+            )
+        };
+        Workspaces {
+            tables: None,
+            problems: vec![message],
+        }
+    }
+}
+
+/// One per-workspace table: `None` (with a problem) when it is not a table
+/// at all.
+struct WorkspaceSeed<'p> {
+    at: &'p str,
+    problems: &'p mut Vec<String>,
+}
+
+impl<'de> de::DeserializeSeed<'de> for WorkspaceSeed<'_> {
+    type Value = Option<Table>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl WorkspaceSeed<'_> {
+    fn wrong(self, what: &str) -> Option<Table> {
+        self.problems
+            .push(format!("`{}` must be a table, not {what}", self.at));
+        None
+    }
+}
+
+impl<'de> Visitor<'de> for WorkspaceSeed<'_> {
+    type Value = Option<Table>;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a per-workspace wallpaper table")
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
@@ -693,7 +947,7 @@ impl<'de> Visitor<'de> for OutputSeed<'_> {
             if !read_table_key(&mut map, &key, self.at, &mut table, self.problems)? {
                 map.next_value_seed(Drain::TOP)?;
                 self.problems.push(format!(
-                    "unknown key `{}.{}` (an output's table takes image, color, mode, fill, \
+                    "unknown key `{}.{}` (a workspace's table takes image, color, mode, fill, \
                      filter, sha256, transition, duration-ms, easing, angle and position)",
                     self.at,
                     quoted(&key)

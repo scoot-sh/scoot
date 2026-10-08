@@ -428,3 +428,22 @@ fn slideshow_steps_and_workspace_mappings_share_one_timeline() {
     choices.set(None, None, 6);
     assert_eq!(shown(&choices, "DP-1", Some("2")), None);
 }
+
+#[test]
+fn fill_workspace_puts_back_the_sections_image_at_its_generation() {
+    use crate::transition::Spec;
+    let mut choices = Choices::default();
+    assert!(choices.set_workspace(None, "2", image(7), Spec::none(), 7));
+    // Live lost it (a missing file at apply time shows the base): fill puts
+    // the saved one back without making it newer.
+    assert!(choices.fill_workspace(None, "2", image(7)));
+    assert_eq!(
+        choices
+            .workspaces()
+            .find(|(o, w, ..)| o.is_none() && *w == "2")
+            .map(|(_, _, c, m, _)| (c.clone(), m)),
+        Some((image(7), 7))
+    );
+    assert!(!choices.fill_workspace(None, "nope", image(7)));
+    assert!(!choices.fill_workspace(Some("DP-1"), "2", image(7)));
+}

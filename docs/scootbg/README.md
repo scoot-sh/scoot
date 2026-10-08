@@ -299,40 +299,50 @@ scootbg apply-config --profile scoot '{}'     # the section is gone: clear
 | `mode`, `fill`, `filter` | with an `image` only, as `scootbg set` takes them: `fill`/`fit`/`stretch`/`center`/`tile`, `#rrggbb`, `lanczos3`/`catmull-rom`/`bilinear`/`nearest` |
 | `transition`, `duration-ms`, `easing`, `angle`, `position` | how the next change arrives, as `scootbg set` takes them: `none`/`fade`/`wipe`/`grow`, milliseconds as digits, an easing curve, a wipe's degrees, a grow's `X,Y`; without a `transition` refused, with an explicit `none` ignored |
 | `sha256` | with a URL `image` only: 64 hex digits pinning the download's bytes |
-| `output` | per-output tables by connector name, each with the six keys above and nothing else; an empty table is nothing on that output |
+| `output` | per-output tables by connector name, each with the keys above plus an optional `workspace` object, and nothing else; an empty table is nothing on that output |
+| `workspace` | per-workspace tables by workspace name (as `scootbg set --workspace` takes it), for every output, each with the keys above and nothing else; an empty table takes that mapping back off, as `clear --workspace` does |
+| `output."NAME".workspace` | per-workspace tables for that output alone, by workspace name; where both name one output, the per-output mapping wins for it |
 | `command` | scoot's (where to find `scootbg`): accepted, ignored, and never part of the fingerprint |
 
 - **Each table stands alone**, as a `scootbg set` does: an output's own
-  `image` does not take the top level's `mode`, and an output's change
-  does not take the top level's `transition` (an output with no table of
-  its own follows the top level, as for the wallpaper itself).
+  `image` does not take the top level's `mode`, a workspace's `image` takes
+  neither its output's nor the top level's, and no table's change takes
+  another's `transition` (an output with no table of its own follows the top
+  level, as for the wallpaper itself; a workspace table absent from the
+  section leaves its live mapping alone).
 - **Strict.** Refused, as a usage error (exit 2) that starts and changes
   nothing, so a typo is never a setting silently not applied: an unknown
-  key at either level, a key given twice, `null` or a value of the wrong
+  key at any level, a key given twice, `null` or a value of the wrong
   type, an array where an object belongs, a relative path, a non-`http(s)`
   URL, a path with a NUL byte or over 4095 bytes, a URL over 4096 bytes or
   with a NUL byte, a malformed color or hash, an unknown mode or
-  filter, an empty output name, more than 256 outputs, more than 63 KiB
-  (64,512 bytes) of JSON, JSON that is not UTF-8.
+  filter, an empty output or workspace name, a workspace name past 256 bytes
+  or with a NUL byte, more than 256 outputs, more than 64 workspace mappings
+  in all, more than 63 KiB (64,512 bytes) of JSON, JSON that is not UTF-8.
 
 **Whichever you changed last wins.** The section is applied only when it
 changed since the last `apply-config` for that profile:
 
 - **The fingerprint** is SHA-256, in lowercase hex, of a canonical
-  encoding of the section: compact JSON, keys in byte order at both levels,
-  strings as given (a color's case included) and escaped as `serde_json`
-  escapes them, `command` left out, every other key present in the input
-  present in it. The sender's key order never matters (scoot's per-output
-  tables come from a hash map); a change to any value does, and so does
+  encoding of the section: compact JSON, table keys in byte order with
+  `output` then `workspace` last at each level that has them, tables sorted
+  by name, strings as given (a color's case included) and escaped as
+  `serde_json` escapes them, `command` left out, every other key present in
+  the input present in it. The sender's key order never matters (scoot's
+  tables come from sorted maps); a change to any value does, and so does
   writing out a default (`mode = "fill"`), since the section is compared
   as written. It is kept in the profile's state file
   ([Restore](#restore)), which only `apply-config` writes it to.
 - **Different** (or never applied): the section is applied like a `set`
   of everything (the top level for every output, replacing every
-  per-output choice, then each output's table) and its fingerprint
-  recorded in the same write. **The same:** what shows stays, so a
-  `scootbg set` made since keeps showing, across restarts and unchanged
-  reloads, until the section itself changes.
+  per-output choice, then each output's table, then each workspace mapping)
+  and its fingerprint recorded in the same write; mapped images are decoded
+  in the background at set time, so the first switch is instant. **The
+  same:** what shows stays, so a `scootbg set` (or `set --workspace`) made
+  since keeps showing, across restarts and unchanged reloads, until the
+  section itself changes. An unchanged section still checks each mapped
+  image that is saved as its own but not showing, and puts it back when its
+  file is there now.
 
 | Sequence | Result |
 |---|---|

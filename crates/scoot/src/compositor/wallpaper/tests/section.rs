@@ -744,3 +744,60 @@ position = "0,0"
         "{got}"
     );
 }
+
+#[test]
+fn workspace_tables_reach_the_json_and_resolve() {
+    let got = json(
+        r##"
+[wallpaper]
+color = "#1e1e2e"
+
+[wallpaper.workspace."2"]
+color = "#101014"
+
+[wallpaper.output."DP-1"]
+color = "#000000"
+
+[wallpaper.output."DP-1".workspace."2"]
+image = "~/Pictures/two.jpg"
+"##,
+    );
+    assert_eq!(got["workspace"]["2"]["color"], "#101014");
+    assert_eq!(got["output"]["DP-1"]["color"], "#000000");
+    assert_eq!(
+        got["output"]["DP-1"]["workspace"]["2"]["image"],
+        "/home/me/Pictures/two.jpg"
+    );
+    // Each table stands alone: the workspace image takes no mode.
+    assert!(
+        got["output"]["DP-1"]["workspace"]["2"]
+            .get("mode")
+            .is_none()
+    );
+    // A relative workspace image resolves against the config file.
+    let got = json("[wallpaper.workspace.\"3\"]\nimage = \"w.png\"\n");
+    assert_eq!(
+        got["workspace"]["3"]["image"],
+        "/home/me/.config/scoot/w.png"
+    );
+    // An empty workspace table is kept (clearing that mapping).
+    let got = json("[wallpaper.workspace.\"2\"]\n");
+    assert_eq!(got["workspace"]["2"], serde_json::json!({}));
+}
+
+#[test]
+fn workspace_keys_are_refused_by_name() {
+    let got = problem("[wallpaper.workspace.\"2\"]\ncommand = \"x\"\n");
+    assert!(got.contains("wallpaper.workspace.2.command"), "{got}");
+    let got = problem("[wallpaper]\nworkspaces = 3\n");
+    assert!(got.contains("unknown key `wallpaper.workspaces`"), "{got}");
+    let got = problem("[wallpaper.output.X]\nworkspaces = 3\n");
+    assert!(got.contains("workspaces"), "{got}");
+    let got = problem("[wallpaper.workspace.\"2\"]\nimage = 3\n");
+    assert!(
+        got.contains("wallpaper.workspace.2.image") && got.contains("must be a string"),
+        "{got}"
+    );
+    let got = problem("[wallpaper.output.\"DP-1\".workspace.\"2\"]\nimage = 3\n");
+    assert!(got.contains("must be a string"), "{got}");
+}

@@ -1050,6 +1050,8 @@ pub fn default_config_toml() -> String {
     out.push_str("# command = \"scootbg\"              # found on PATH unless a path is given\n");
     out.push_str("# [wallpaper.output.\"DP-2\"]        # optional, per output\n");
     out.push_str("# color = \"#101014\"\n");
+    out.push_str("# [wallpaper.workspace.\"2\"]       # optional, while workspace 2 is active\n");
+    out.push_str("# image = \"~/Pictures/focus.jpg\"\n");
 
     out.push_str("\n# [[window_rule]] -- repeat the table for more rules. Each rule names at\n");
     out.push_str("# least one whole-string glob (* any run, ? one character, case-sensitive)\n");

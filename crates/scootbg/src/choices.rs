@@ -365,6 +365,30 @@ impl Choices {
         }
     }
 
+    /// Replaces the value of the workspace mapping for (`output`,
+    /// `workspace`), keeping its generation, so it is as new as it was and
+    /// no newer: for putting back an image `apply-config` chose but could
+    /// not show then (`daemon::config`). Returns whether there was such a
+    /// mapping.
+    pub fn fill_workspace(
+        &mut self,
+        output: Option<&str>,
+        workspace: &str,
+        choice: Choice,
+    ) -> bool {
+        match self
+            .workspaces
+            .iter_mut()
+            .find(|entry| entry.output.as_deref() == output && entry.workspace == workspace)
+        {
+            Some(entry) => {
+                entry.choice = choice;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Drops the choice for `name`, as if none had been made: for the
     /// saved table only (`crate::state`), when the file has no room for it.
     pub fn forget(&mut self, name: &str) {
