@@ -172,7 +172,9 @@ shows it again when it starts.
   two sharing one share it, the last change winning.
 - **What is saved** is the daemon's choices as `set` and `clear` made them:
   the one for every output, and each one made with `--output NAME`, by
-  connector name, plugged in now or not. A color or a `clear` is saved as
+  connector name, plugged in now or not — and each workspace wallpaper
+  made with `set --workspace NAME` (every output, or one output's), with
+  the transition its switches arrive through. A color or a `clear` is saved as
   soon as the daemon has it, an image once it has decoded (one that
   cannot be shown changes nothing, so saves nothing). A request superseded
   by a newer one before it landed saves nothing: the file follows the
@@ -219,12 +221,14 @@ shows it again when it starts.
 chose it over TOML, 180 KB lighter):
 
 ```text
-scootbg-state 2
+scootbg-state 3
 profile default
 fingerprint 9c1e…
 all color #1e1e2e
 output DP-1 image /home/me/My%20Pictures/hills.jpg fill #000000 lanczos3
 output HDMI-A-1 clear
+workspace 2 color #101014 transition fade 500 ease-out 0 0.5,0.5
+workspace-output DP-1 2 image /home/me/two.jpg fill #000000 lanczos3
 ```
 
 - The first line is `scootbg-state` and the version. Each other line is a
@@ -233,13 +237,19 @@ output HDMI-A-1 clear
   absolute), with a download's link and pin after that: `image PATH MODE
   FILL FILTER url URL`, and `image PATH MODE FILL FILTER url URL sha256
   HEX` when the hash is pinned (PATH is the cache file; the URL is what
-  re-downloads it). `profile` names the profile the file belongs to (the
+  re-downloads it). `workspace WS` is the wallpaper for workspace `WS` on
+  every output, `workspace-output OUTPUT WS` the one for that workspace
+  on that output alone, each the same choice grammar with the transition
+  it arrives through after it (`transition KIND DURATION_MS EASING ANGLE
+  X,Y`, omitted for an instant one). `profile` names the profile the file belongs to (the
   file name is the authority; a mismatch is a warning). `fingerprint` is the
   fingerprint of the last `[wallpaper]` section `apply-config` applied for
   this profile ([below](#apply-config-scoots-wallpaper-section)): only
   `apply-config` writes it, and every other save keeps it as read.
   Version 2 adds the `url` (and `sha256`) trailer; a version-1 file still
-  reads (its `image` lines have no trailer).
+  reads (its `image` lines have no trailer). Version 3 adds the
+  `workspace` lines; a version-2 reader restores nothing from (and never
+  writes over) a version-3 file, so it can never write the mappings away.
 - **Fields are escaped:** `%`, space and every ASCII control byte (newline
   and tab included) are written `%XX`, so any path or connector name
   round-trips exactly, `#` and spaces included. Other bytes, UTF-8
@@ -259,11 +269,11 @@ output HDMI-A-1 clear
   two cases **saving is off until the daemon restarts**: stderr says at
   start-up which file to remove or fix, then restart, to save again, and
   `query` reports `"saving":false` meanwhile.
-- **Compatibility:** within version 2 a key may be added only if a reader
+- **Compatibility:** within one version a key may be added only if a reader
   that skips it (with its warning) loses nothing it needs; anything else
   bumps the version. `profile` and `fingerprint` are read and kept from
   version 1 on, so the scoot integration writes them with no bump; version
-  1 files read under version 2 with no bump either.
+  1 files read under versions 2 and 3 with no bump either.
 
 ## `apply-config`: scoot's `[wallpaper]` section
 
@@ -442,13 +452,18 @@ object per line each way, each request naming the protocol it speaks.
                                                               -> {"type":"ok"}
 {"protocol":1,"type":"set","color":"#101014","transition":"fade","duration-ms":"800","easing":"ease-out"}
                                                               -> {"type":"ok"}
+{"protocol":1,"type":"set-workspace","workspace":"2","color":"#1e1e2e"}
+                                                              -> {"type":"ok"}
+{"protocol":1,"type":"set-workspace","workspace":"2","image":"/abs/a.jpg","output":"DP-1"}
+                                                              -> {"type":"ok"}
+{"protocol":1,"type":"clear-workspace","workspace":"2"}       -> {"type":"ok"}
 {"protocol":1,"type":"set","image":"https://example.com/a.jpg","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}
                                                               -> {"type":"ok"}
 {"protocol":1,"type":"set","directory":"/abs/wallpapers","every":"1800s","shuffle":true}
                                                               -> {"type":"ok"}
 {"protocol":1,"type":"clear"}                                 -> {"type":"ok"}
 {"protocol":1,"type":"clear","output":"DP-1"}                 -> {"type":"ok"}
-{"protocol":1,"type":"query"}                                 -> {"type":"outputs","outputs":[...],"saving":true,"profile":"default"}
+{"protocol":1,"type":"query"}                                 -> {"type":"outputs","outputs":[...],"workspaces":[...],"saving":true,"profile":"default"}
 {"protocol":1,"type":"version"}                               -> {"type":"version","protocol":1,"version":"..."}
 {"protocol":1,"type":"kill"}                                  -> {"type":"ok"}
 {"protocol":1,"type":"apply-config","profile":"scoot","config":{"color":"#1e1e2e"}}
@@ -483,6 +498,23 @@ anything wrong                                                -> {"type":"error"
   reason rather than as "not a directory". If the directory goes away
   mid-rotation the slideshow stops at the next step instead of failing
   once a minute until stopped.
+- **`set-workspace` and `clear-workspace` are additive to protocol 1**,
+  like `apply-config` was: new request types, no existing one changed. A
+  daemon that predates them answers `unknown request`, which the CLI
+  reports as such — a `workspace` field on `set` would instead have been
+  silently ignored into a wallpaper for every output. `set-workspace`
+  takes what `set` takes plus the `workspace` (the name the compositor
+  announces: `"1"`, `"2"`, ... on scoot), and shows it on that workspace
+  (every output, or `output`'s) while it is active, arriving through its
+  transition when the workspace turns active; `clear-workspace` takes the
+  mapping off and refuses transition fields like `clear` does. The reply
+  waits like a `set`'s: at once where the workspace is not active,
+  otherwise once the outputs that are active show it. The daemon follows
+  `ext-workspace-v1` (bound only while a mapping exists), so this works
+  on any compositor with it; without it the mapping waits, recorded and
+  saved. `query` reports the active workspace per output (`"workspace"`)
+  and the live mappings (`"workspaces"`, each with its `output`, its
+  `workspace`, and what it shows).
 
 - `set` and `clear` answer once every targeted output shows the change and
   a `wl_display.sync` sent after the commits has come back, so the

@@ -34,6 +34,7 @@ mod state;
 mod transition;
 mod waiters;
 mod wallpaper;
+mod workspaces;
 
 use std::process::ExitCode;
 
@@ -69,14 +70,16 @@ fn main() -> ExitCode {
         }
         cli::Command::ApplyConfig(options) => return ExitCode::from(apply::run(options)),
         cli::Command::Client(request) => match client::send(&request) {
-            // `kill`, `set` and `clear` print nothing on success; the
-            // others print the reply.
+            // `kill`, `set`, `clear` and the workspace mapping commands
+            // print nothing on success; the others print the reply.
             Ok(_)
                 if matches!(
                     request,
                     protocol::Request::Kill
                         | protocol::Request::Set { .. }
                         | protocol::Request::Clear { .. }
+                        | protocol::Request::SetWorkspace { .. }
+                        | protocol::Request::ClearWorkspace { .. }
                 ) =>
             {
                 Ok(())

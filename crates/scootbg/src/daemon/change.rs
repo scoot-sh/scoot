@@ -32,7 +32,7 @@ use crate::jobs::{Jobs, Target, Trial};
 use crate::outputs::{Entry, Output, Outputs};
 use crate::paint::{self, Plan};
 use crate::print::warn;
-use crate::protocol::{OutputList, Show, Source};
+use crate::protocol::{OutputList, Show, Source, WorkspaceList};
 use crate::transition::Spec;
 use crate::waiters::{self, Waiters};
 use crate::wallpaper::{Image, Wallpaper};
@@ -54,7 +54,7 @@ pub fn reconcile(
         return committed;
     }
     let info = entry.output.info();
-    let wanted = choices.for_output(info.name.as_deref());
+    let wanted = choices.for_output(info.name.as_deref(), entry.output.active_workspace());
     // A render waiting for an image no longer wanted here is dropped now,
     // whether or not anything can be drawn.
     let serial = wanted.and_then(Wallpaper::image).map(|image| image.serial);
@@ -78,6 +78,25 @@ pub fn reconcile(
                 Ok(Drew::Stalled) => false,
                 Ok(Drew::NeedsRender(dims)) => {
                     if let Wallpaper::Image(image) = &target.content {
+                        // Stashed for a workspace switch that came: attach
+                        // at once rather than decoding again.
+                        if objects.canvas.revive(image.serial, dims) {
+                            match objects.canvas.show(globals, qh, id, layer, &target) {
+                                Ok(Drew::Committed) => {
+                                    entry.output.drew(target);
+                                    return true;
+                                }
+                                Ok(_) => {}
+                                Err(error) => {
+                                    warn(format_args!(
+                                        "scootbg: cannot draw on {}: {error}",
+                                        entry.output.label()
+                                    ));
+                                    entry.output.draw_failed(error.to_string());
+                                    return false;
+                                }
+                            }
+                        }
                         jobs.render(image, Target { output: id, dims });
                     }
                     false
@@ -143,7 +162,8 @@ pub fn progress(state: &mut State, conn: &Connection, qh: &QueueHandle<State>) {
             generation,
             outputs.iter().map(|entry| {
                 let output = &entry.output;
-                let wanted = choices.for_output(output.info().name.as_deref());
+                let wanted =
+                    choices.for_output(output.info().name.as_deref(), output.active_workspace());
                 let scale = paint::scale_for(path, wanted, output.scale());
                 (output.stamp(), output.progress(wanted, scale))
             }),
@@ -174,6 +194,10 @@ pub struct Control<'a> {
 impl Changes for Control<'_> {
     fn outputs(&self) -> &dyn OutputList {
         &self.state.outputs
+    }
+
+    fn workspaces(&self) -> &dyn WorkspaceList {
+        &self.state.choices
     }
 
     fn saving(&self) -> bool {
@@ -351,6 +375,152 @@ impl Changes for Control<'_> {
         waiters.push(conn, generation);
         Ok(())
     }
+
+    fn change_workspace(
+        &mut self,
+        conn: ConnId,
+        output: Option<&str>,
+        workspace: &str,
+        show: Option<Show<'_>>,
+        transition: Spec,
+    ) -> Result<(), ChangeError> {
+        let State {
+            globals,
+            outputs,
+            choices,
+            waiters,
+            images,
+            saved,
+            transitions,
+            workspaces,
+            ..
+        } = &mut *self.state;
+        let targets = |entry: &Entry<Objects>| {
+            output.is_none_or(|name| entry.output.info().name.as_deref() == Some(name))
+        };
+        if output.is_some() && !outputs.iter().any(targets) {
+            return Err(ChangeError::UnknownOutput);
+        }
+        // At most one workspace image decodes at a time, like any image;
+        // the bound is on live mappings, checked as they are made
+        // (cleared ones do not count).
+        if show.is_some()
+            && !choices
+                .workspaces()
+                .any(|(o, w, ..)| o == output && w == workspace)
+            && choices
+                .workspaces()
+                .filter(|(_, _, choice, ..)| choice.is_some())
+                .count()
+                >= crate::choices::MAX_WORKSPACES
+        {
+            return Err(ChangeError::TooManyWorkspaces);
+        }
+        let generation = waiters.next_generation();
+        let choice: Choice = match show {
+            None => {
+                // Taking the mapping back off: refusing when none stands,
+                // so a typo answers loudly rather than clearing nothing.
+                let stands = choices
+                    .workspaces()
+                    .any(|(o, w, choice, ..)| o == output && w == workspace && choice.is_some());
+                if !stands {
+                    return Err(ChangeError::UnknownWorkspace);
+                }
+                None
+            }
+            Some(Show::Color(color)) => Some(Wallpaper::Color(color)),
+            Some(Show::Slideshow(_)) => {
+                return Err(ChangeError::SlideshowWithWorkspace);
+            }
+            Some(Show::Image(request)) => {
+                // As a base image `set`: nothing changes until it has
+                // decoded, and the transition waits with the trial.
+                let (path, fetch) = match request.source {
+                    Source::Path(path) => (path.into_owned(), None),
+                    Source::Url { url, sha256 } => {
+                        let fetch = crate::fetch::Fetch {
+                            url: url.into_owned(),
+                            sha256,
+                        };
+                        let path = crate::fetch::dir()
+                            .map(|dir| crate::fetch::cached_path(&dir, &fetch.url))
+                            .map_err(|error| ChangeError::Cache(error.to_string()))?;
+                        let path = path.to_string_lossy().into_owned();
+                        (path, Some(fetch))
+                    }
+                };
+                let image = Arc::new(Image {
+                    path,
+                    look: crate::image::render::Look {
+                        mode: request.mode,
+                        fill: request.fill,
+                        filter: request.filter,
+                    },
+                    serial: generation,
+                    fetch,
+                });
+                let trial = Trial {
+                    conn,
+                    output: output.map(str::to_owned),
+                    slideshow: None,
+                    workspace: Some(workspace.to_owned()),
+                    transition,
+                };
+                for entry in outputs.iter_mut().filter(|entry| targets(entry)) {
+                    entry.output.request_transition(transition, generation);
+                }
+                images
+                    .jobs
+                    .trial(image, trial)
+                    .map_err(|_| ChangeError::Busy)?;
+                // The mapping lands with the trial: bound by then, so the
+                // manager's batches are already arriving when it does.
+                super::workspaces::ensure_bound(workspaces, choices, globals, self.qh);
+                return Ok(());
+            }
+        };
+        // Pixels stashed for the image this replaces will never be
+        // switched to: drop them everywhere now, not when memory runs
+        // short. A `None` choice stashes nothing, so clearing one drops
+        // nothing.
+        if let Some(serial) = choices.workspace_serial(output, workspace) {
+            let replaced = choice
+                .as_ref()
+                .and_then(Wallpaper::image)
+                .map(|image| image.serial != serial)
+                .unwrap_or(true);
+            if replaced {
+                for entry in outputs.iter_mut() {
+                    entry.objects.canvas.drop_stash_serial(serial);
+                }
+            }
+        }
+        // Always recorded: nothing is newer than a request made now.
+        saved.record_workspace(output, workspace, &choice, transition, generation);
+        choices.set_workspace(output, workspace, choice, transition, generation);
+        sweep(&mut images.jobs, choices, waiters);
+        let now = Instant::now();
+        for entry in outputs.iter_mut().filter(|entry| targets(entry)) {
+            entry.output.want(generation);
+            entry.output.request_transition(transition, generation);
+            reconcile(
+                globals,
+                choices,
+                &mut images.jobs,
+                transitions,
+                entry,
+                self.qh,
+                now,
+            );
+        }
+        super::workspaces::ensure_bound(workspaces, choices, globals, self.qh);
+        // Answered by `progress` at the top of the next loop turn: at once
+        // where the workspace is not active (nothing new shows), once the
+        // outputs that are active show it otherwise.
+        waiters.push(conn, generation);
+        Ok(())
+    }
 }
 
 /// Queues an image trial: nothing changes until it has decoded, and the
@@ -379,6 +549,8 @@ fn trial_image(
         conn,
         output: output.map(str::to_owned),
         slideshow,
+        workspace: None,
+        transition,
     };
     // Queued first: a refused trial (too many waiting) changes nothing,
     // not even the outputs' pending transitions.

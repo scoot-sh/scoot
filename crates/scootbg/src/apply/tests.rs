@@ -116,6 +116,7 @@ fn an_empty_section_makes_a_missing_file() {
         Some(&empty().fingerprint()),
         Some(&None),
         &[],
+        &[],
     );
     assert_eq!(text, want);
     // Nowhere to keep state: nothing to do, and no error.

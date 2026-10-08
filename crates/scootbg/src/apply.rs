@@ -327,6 +327,7 @@ fn record_clear(dir: Option<&Path>, profile: &Profile, section: &Section) -> Res
         Some(&fingerprint),
         Some(&None),
         &[],
+        &[],
     );
     saver::write_atomic(&file, text.as_bytes())
         .map_err(|error| format!("cannot write the state file {}: {error}", file.display()))

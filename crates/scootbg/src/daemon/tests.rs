@@ -8,7 +8,8 @@ use crate::color::Color;
 use crate::control::{Answer, ConnId, Handler};
 use crate::image::{Filter, Mode};
 use crate::protocol::{
-    ImageRequest, OutputEntry, OutputList, PROTOCOL_VERSION, Request, Show, Source,
+    ImageRequest, OutputEntry, OutputList, PROTOCOL_VERSION, Request, Show, Source, WorkspaceEntry,
+    WorkspaceList,
 };
 use crate::section::Section;
 use crate::state::Profile;
@@ -44,11 +45,14 @@ fn owned(show: Show<'_>) -> Show<'static> {
 }
 
 const NO_OUTPUTS: &[OutputEntry<'static>; 0] = &[];
+const NO_WORKSPACES: &[WorkspaceEntry<'static>; 0] = &[];
 
 /// Records the changes asked for, or refuses them all with `refuse`.
 struct Fake<'a> {
     outputs: &'a dyn OutputList,
+    workspaces: &'a dyn WorkspaceList,
     changes: Vec<(u64, Option<String>, Choice, crate::transition::Spec)>,
+    workspace_changes: Vec<(u64, Option<String>, String, Choice, crate::transition::Spec)>,
     refuse: Option<ChangeError>,
     applied: Vec<(u64, Profile, Section)>,
     refuse_apply: Option<String>,
@@ -58,7 +62,9 @@ impl<'a> Fake<'a> {
     fn new(outputs: &'a dyn OutputList) -> Self {
         Self {
             outputs,
+            workspaces: NO_WORKSPACES,
             changes: Vec::new(),
+            workspace_changes: Vec::new(),
             refuse: None,
             applied: Vec::new(),
             refuse_apply: None,
@@ -69,6 +75,10 @@ impl<'a> Fake<'a> {
 impl Changes for Fake<'_> {
     fn outputs(&self) -> &dyn OutputList {
         self.outputs
+    }
+
+    fn workspaces(&self) -> &dyn WorkspaceList {
+        self.workspaces
     }
 
     fn saving(&self) -> bool {
@@ -112,6 +122,28 @@ impl Changes for Fake<'_> {
             .push((id, output.map(str::to_owned), show.map(owned), transition));
         Ok(())
     }
+
+    fn change_workspace(
+        &mut self,
+        conn: ConnId,
+        output: Option<&str>,
+        workspace: &str,
+        show: Option<Show<'_>>,
+        transition: crate::transition::Spec,
+    ) -> Result<(), ChangeError> {
+        if let Some(error) = self.refuse.clone() {
+            return Err(error);
+        }
+        let id = if conn == ConnId::for_test(1) { 1 } else { 0 };
+        self.workspace_changes.push((
+            id,
+            output.map(str::to_owned),
+            workspace.to_owned(),
+            show.map(owned),
+            transition,
+        ));
+        Ok(())
+    }
 }
 
 fn ask(responder: &mut Responder, line: &str) -> serde_json::Value {
@@ -130,7 +162,7 @@ fn query_answers_an_empty_output_list() {
     let reply = ask(&mut responder, Request::Query.line().trim_end());
     assert_eq!(
         reply,
-        serde_json::json!({"type": "outputs", "outputs": [], "saving": true, "profile": "default"})
+        serde_json::json!({"type": "outputs", "outputs": [], "workspaces": [], "saving": true, "profile": "default"})
     );
     assert!(!responder.stop);
 }
@@ -242,6 +274,60 @@ fn set_and_clear_change_the_wallpaper_and_answer_later() {
     assert!(
         fake.changes.iter().all(|(conn, ..)| *conn == 1),
         "the asking connection"
+    );
+}
+
+#[test]
+fn workspace_requests_reach_change_workspace_and_answer_later() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
+    let red = Color::parse("#c03020").unwrap();
+    for request in [
+        Request::SetWorkspace {
+            show: Show::Color(red),
+            output: None,
+            workspace: "2".into(),
+            transition: crate::transition::Spec::none(),
+        },
+        Request::SetWorkspace {
+            show: Show::Color(red),
+            output: Some("DP-2".into()),
+            workspace: "web".into(),
+            transition: crate::transition::Spec::none(),
+        },
+        Request::ClearWorkspace {
+            output: None,
+            workspace: "2".into(),
+        },
+        Request::ClearWorkspace {
+            output: Some("DP-2".into()),
+            workspace: "web".into(),
+        },
+    ] {
+        let mut out = Vec::new();
+        let line = request.line();
+        let answer = responder.handle(ConnId::for_test(1), line.trim_end().as_bytes(), &mut out);
+        assert_eq!(answer, Answer::Later, "{line}");
+        assert!(out.is_empty(), "nothing written yet: {line}");
+    }
+    assert!(fake.changes.is_empty(), "not the base change");
+    let changes: Vec<_> = fake
+        .workspace_changes
+        .iter()
+        .map(|(_, o, w, c, _)| (o.clone(), w.clone(), c.clone()))
+        .collect();
+    assert_eq!(
+        changes,
+        [
+            (None, "2".to_owned(), Some(Show::Color(red))),
+            (
+                Some("DP-2".to_owned()),
+                "web".to_owned(),
+                Some(Show::Color(red))
+            ),
+            (None, "2".to_owned(), None),
+            (Some("DP-2".to_owned()), "web".to_owned(), None),
+        ]
     );
 }
 
@@ -555,6 +641,7 @@ fn query_reports_each_output_and_its_surface() {
                 "draw_failed": true,
                 "draw_error": "shared memory: out of it",
                 "shows": null,
+                "workspace": null,
                 "transition": null,
             },
             {
@@ -568,6 +655,7 @@ fn query_reports_each_output_and_its_surface() {
                 "draw_failed": false,
                 "draw_error": null,
                 "shows": null,
+                "workspace": null,
                 "transition": null,
             },
             {
@@ -581,9 +669,10 @@ fn query_reports_each_output_and_its_surface() {
                 "draw_failed": false,
                 "draw_error": null,
                 "shows": null,
+                "workspace": null,
                 "transition": null,
             },
-        ], "saving": true, "profile": "default"})
+        ], "workspaces": [], "saving": true, "profile": "default"})
     );
     // Removing one updates the next reply.
     let _ = outputs.remove_global(4);
@@ -656,6 +745,8 @@ fn a_superseded_image_request_waits_like_a_color() {
             conn,
             output: None,
             slideshow: None,
+            workspace: None,
+            transition: crate::transition::Spec::none(),
         },
     )
     .unwrap();

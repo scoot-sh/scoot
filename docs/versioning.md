@@ -66,6 +66,18 @@ contract, enforced where a mismatch would misbehave:
   Compatibility rule: **same protocol required (enforced), version
   mismatch tolerated with a warning**. The trio's lockstep makes even
   the warning rare: both halves ship together.
+  New `scootbg` fields stay inside protocol 1, so an older daemon never
+  misreads them: a slideshow's `directory`/`every`/`shuffle` on a `set`
+  are unknown fields it ignores, refusing the `set` as targetless
+  (loudly, not as the wrong wallpaper); `set-workspace` and
+  `clear-workspace` are new request types it answers with `unknown
+  request`, which the CLI reports as such. A newer daemon reading an
+  older client's `set` sees no new fields and behaves as before.
+  Scoot's own `[wallpaper]` `apply-config` carries no workspace keys
+  (per-workspace config is a deferred follow-up,
+  `docs/scootbg/backlog/config-workspace-wallpapers.md`): applying it
+  leaves live workspace mappings alone, and adopting another profile
+  clears them with their buffers (see `daemon::config::adopt`).
 - **`scootbar` / `scoot`: standard protocols only**, plus the optional
   IPC feature guarded by the IPC protocol number. A bar from one
   release works against a compositor from another as long as both speak

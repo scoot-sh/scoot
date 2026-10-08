@@ -292,6 +292,19 @@ fn adopt(state: &mut State, profile: Profile) -> Record {
     let (mut saved, record) = restore::load(profile);
     let generation = state.waiters.next_generation();
     state.choices.set(None, None, generation);
+    // The new profile's file says what its workspace mappings are (see
+    // `restore::apply` below): nothing of the old profile's carries over.
+    // Their stashed buffers go with them now, not at the next resize:
+    // serials are generations, never reused, so nothing would ever reclaim
+    // them by key (`change_workspace` drops the replaced serial the same
+    // way; here every mapping goes, so every stash does).
+    state.choices.clear_workspaces();
+    for entry in state.outputs.iter_mut() {
+        entry.objects.canvas.drop_all_stash();
+        // A render waiting for a cleared mapping can never show: dropped
+        // now, so it holds no output-sized buffer either.
+        entry.objects.canvas.forget_ready_unless(None);
+    }
     // Writers with nothing left to write are dropped: they have nothing to
     // lose. One still stuck on this profile (the wait above ran out) is
     // taken back rather than a second one started (`Saved::take_writer`),

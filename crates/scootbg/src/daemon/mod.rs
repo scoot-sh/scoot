@@ -49,6 +49,7 @@ mod surfaces;
 mod transition;
 mod wayland;
 mod worker;
+mod workspaces;
 
 #[cfg(test)]
 mod tests;
@@ -160,6 +161,14 @@ fn serve(options: DaemonOptions, start: Option<&Start>) -> Result<(), Error> {
     match start {
         None => restore::apply(&mut wayland.state, record, options.restore),
         Some(start) => config::start(&mut wayland.state, record, start),
+    }
+    // Mappings restored from the state file, or from the section a
+    // started daemon carries, need the manager bound from the first loop
+    // turn (late announcements bind through the registry instead).
+    {
+        let state = &mut wayland.state;
+        let qh = wayland.qh.clone();
+        workspaces::ensure_bound(&mut state.workspaces, &state.choices, &state.globals, &qh);
     }
     for interface in missing {
         warn(format_args!(

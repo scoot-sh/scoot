@@ -60,7 +60,18 @@ an image nobody commits. `sha256` pins the download's bytes.
 **Whichever you changed last wins.** Edit `[wallpaper]` (and start or
 reload scoot): the config's wallpaper shows. Run `scootbg set` after
 that: your pick shows, and keeps showing across restarts and unrelated
-reloads, until you next change `[wallpaper]` itself.
+reloads, until you next change `[wallpaper]` itself. The section names no
+per-workspace wallpapers: applying it leaves live `--workspace` mappings
+alone (a follow-up will add section keys for them).
+
+## One wallpaper per workspace
+
+While one workspace is active, its outputs can show one wallpaper, and
+another elsewhere: `scootbg set ... --workspace 2` maps one, `scootbg
+clear --workspace 2` takes it off, and switching workspaces switches
+the wallpaper (through the mapping's transition). It follows the
+standard `ext-workspace-v1` protocol, preloaded so the switch is
+instant — see [A wallpaper per workspace](./workspaces.md).
 
 **When it fails, the session carries on** with its `background_color`:
 scootbg not installed (a warning naming the command; the next reload

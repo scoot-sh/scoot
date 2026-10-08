@@ -359,7 +359,7 @@ fn a_section_starts_the_daemon() {
     wait_for_state(&shared.0, "scoot", &format!("all color {RED}"));
     let text = state_text(&shared.0, "scoot");
     assert!(
-        text.starts_with("scootbg-state 2\nprofile scoot\nfingerprint "),
+        text.starts_with("scootbg-state 3\nprofile scoot\nfingerprint "),
         "{text}"
     );
     assert!(text.contains(&format!("all color {RED}\n")), "{text}");

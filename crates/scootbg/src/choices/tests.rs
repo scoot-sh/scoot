@@ -37,15 +37,15 @@ impl Seq {
     }
 
     fn get(&self, name: Option<&str>) -> Option<Wallpaper> {
-        self.0.for_output(name).cloned()
+        self.0.for_output(name, None).cloned()
     }
 }
 
 #[test]
 fn nothing_is_chosen_at_first() {
     let choices = Choices::default();
-    assert_eq!(choices.for_output(Some("DP-1")), None);
-    assert_eq!(choices.for_output(None), None);
+    assert_eq!(choices.for_output(Some("DP-1"), None), None);
+    assert_eq!(choices.for_output(None, None), None);
 }
 
 #[test]
@@ -106,8 +106,11 @@ fn an_older_request_landing_late_never_overrides_a_newer_one() {
     assert!(choices.set(Some("DP-2"), c("#101014"), 2));
     assert!(!choices.supersedes(None, 1));
     assert!(choices.set(None, image(1), 1));
-    assert_eq!(choices.for_output(Some("DP-1")).cloned(), image(1));
-    assert_eq!(choices.for_output(Some("DP-2")).cloned(), c("#101014"));
+    assert_eq!(choices.for_output(Some("DP-1"), None).cloned(), image(1));
+    assert_eq!(
+        choices.for_output(Some("DP-2"), None).cloned(),
+        c("#101014")
+    );
 
     // A newer every-output choice supersedes any older request entirely.
     let mut choices = Choices::default();
@@ -116,11 +119,14 @@ fn an_older_request_landing_late_never_overrides_a_newer_one() {
     assert!(choices.supersedes(Some("DP-1"), 4));
     assert!(!choices.set(None, image(4), 4));
     assert!(!choices.set(Some("DP-1"), image(3), 3));
-    assert_eq!(choices.for_output(Some("DP-1")).cloned(), c("#222222"));
+    assert_eq!(
+        choices.for_output(Some("DP-1"), None).cloned(),
+        c("#222222")
+    );
     // But not a newer one.
     assert!(!choices.supersedes(Some("DP-1"), 6));
     assert!(choices.set(Some("DP-1"), image(6), 6));
-    assert_eq!(choices.for_output(Some("DP-1")).cloned(), image(6));
+    assert_eq!(choices.for_output(Some("DP-1"), None).cloned(), image(6));
 
     // A newer choice by name supersedes an older one for that name only.
     let mut choices = Choices::default();
@@ -129,8 +135,11 @@ fn an_older_request_landing_late_never_overrides_a_newer_one() {
     assert!(!choices.supersedes(Some("DP-2"), 7));
     assert!(!choices.set(Some("DP-1"), image(7), 7));
     assert!(choices.set(Some("DP-2"), image(7), 7));
-    assert_eq!(choices.for_output(Some("DP-1")).cloned(), c("#333333"));
-    assert_eq!(choices.for_output(Some("DP-2")).cloned(), image(7));
+    assert_eq!(
+        choices.for_output(Some("DP-1"), None).cloned(),
+        c("#333333")
+    );
+    assert_eq!(choices.for_output(Some("DP-2"), None).cloned(), image(7));
     assert_eq!(choices.named_len(), 2);
 }
 
@@ -182,4 +191,239 @@ fn exact_does_not_fall_back_and_fill_keeps_the_generation() {
     assert!(choices.fill(None, None));
     assert_eq!(choices.exact(None), Some(&None));
     assert_eq!(choices.named_len(), 1, "filling every output drops nothing");
+}
+
+/// Records workspace mappings in generation order, as the daemon does.
+fn workspace(
+    choices: &mut Choices,
+    generation: &mut u64,
+    output: Option<&str>,
+    name: &str,
+    choice: Option<Wallpaper>,
+) {
+    *generation += 1;
+    assert!(choices.set_workspace(
+        output,
+        name,
+        choice,
+        crate::transition::Spec::none(),
+        *generation
+    ));
+}
+
+fn shown(choices: &Choices, output: &str, active: Option<&str>) -> Option<Wallpaper> {
+    choices.for_output(Some(output), active).cloned()
+}
+
+#[test]
+fn a_workspace_mapping_shows_only_while_its_workspace_is_active() {
+    let mut choices = Choices::default();
+    let mut generation = 0;
+    generation += 1;
+    choices.set(None, c("#c03020"), generation);
+    workspace(&mut choices, &mut generation, None, "2", c("#101014"));
+    // Inactive: the base shows.
+    assert_eq!(shown(&choices, "DP-1", None), c("#c03020"));
+    assert_eq!(shown(&choices, "DP-1", Some("2")), c("#101014"));
+    // Another workspace, or none: back to base.
+    assert_eq!(shown(&choices, "DP-1", Some("1")), c("#c03020"));
+    assert_eq!(shown(&choices, "DP-1", None), c("#c03020"));
+    // Another output never left base.
+    assert_eq!(shown(&choices, "HDMI-A-1", Some("2")), c("#101014"));
+    assert_eq!(shown(&choices, "HDMI-A-1", None), c("#c03020"));
+}
+
+#[test]
+fn the_newest_of_base_and_workspace_wins() {
+    let mut choices = Choices::default();
+    let mut generation = 0;
+    // Workspace first, base after: the base covers it while newest.
+    workspace(&mut choices, &mut generation, None, "2", c("#101014"));
+    generation += 1;
+    choices.set(None, c("#c03020"), generation);
+    assert_eq!(shown(&choices, "DP-1", Some("2")), c("#c03020"));
+    // And a still newer workspace mapping wins again.
+    workspace(&mut choices, &mut generation, None, "2", c("#202020"));
+    assert_eq!(shown(&choices, "DP-1", Some("2")), c("#202020"));
+}
+
+#[test]
+fn an_output_mapping_beats_a_global_one_when_newer_and_vice_versa() {
+    let mut choices = Choices::default();
+    let mut generation = 0;
+    generation += 1;
+    choices.set(None, c("#c03020"), generation);
+    workspace(&mut choices, &mut generation, None, "2", c("#101014"));
+    workspace(
+        &mut choices,
+        &mut generation,
+        Some("DP-1"),
+        "2",
+        c("#202020"),
+    );
+    assert_eq!(shown(&choices, "DP-1", Some("2")), c("#202020"));
+    assert_eq!(shown(&choices, "HDMI-A-1", Some("2")), c("#101014"));
+}
+
+#[test]
+fn an_older_workspace_request_landing_late_changes_nothing() {
+    let mut choices = Choices::default();
+    assert!(choices.set_workspace(None, "2", c("#101014"), crate::transition::Spec::none(), 9));
+    // Older: refused.
+    assert!(!choices.set_workspace(None, "2", c("#202020"), crate::transition::Spec::none(), 4));
+    assert_eq!(shown(&choices, "DP-1", Some("2")), c("#101014"));
+}
+
+#[test]
+fn a_cleared_mapping_is_not_brought_back_by_an_older_image() {
+    let mut choices = Choices::default();
+    choices.set(None, c("#c03020"), 1);
+    assert!(choices.set_workspace(None, "2", c("#101014"), crate::transition::Spec::none(), 9));
+    // Cleared at 11: the mapping is gone, and an image request of 7
+    // landing after cannot bring it back.
+    assert!(choices.set_workspace(None, "2", None, crate::transition::Spec::none(), 11));
+    assert!(!choices.set_workspace(None, "2", c("#303030"), crate::transition::Spec::none(), 7));
+    assert_eq!(shown(&choices, "DP-1", Some("2")), c("#c03020"));
+    assert!(
+        !choices.has_workspace_mappings(),
+        "cleared ones do not count"
+    );
+}
+
+#[test]
+fn more_than_max_workspaces_is_refused() {
+    let mut choices = Choices::default();
+    for index in 0..super::MAX_WORKSPACES {
+        assert!(
+            choices.set_workspace(
+                None,
+                &format!("ws-{index}"),
+                c("#101014"),
+                crate::transition::Spec::none(),
+                index as u64 + 1
+            ),
+            "key {index} fits"
+        );
+    }
+    assert!(
+        !choices.set_workspace(
+            None,
+            "one-too-many",
+            c("#101014"),
+            crate::transition::Spec::none(),
+            1000
+        ),
+        "a new key past the bound is refused"
+    );
+    // Updating a key held already still works, and cleared keys do not
+    // count: clearing one frees a slot.
+    assert!(choices.set_workspace(
+        None,
+        "ws-0",
+        c("#101014"),
+        crate::transition::Spec::none(),
+        1001
+    ));
+    assert!(choices.set_workspace(None, "ws-1", None, crate::transition::Spec::none(), 1002));
+    assert!(choices.set_workspace(
+        None,
+        "one-more",
+        c("#101014"),
+        crate::transition::Spec::none(),
+        1003
+    ));
+    assert!(choices.has_workspace_mappings());
+}
+
+#[test]
+fn the_switch_transition_is_the_winning_mapping() {
+    use crate::transition::{Kind, Spec};
+    let mut choices = Choices::default();
+    let mut generation = 0;
+    generation += 1;
+    choices.set(None, c("#c03020"), generation);
+    generation += 1;
+    assert!(choices.set_workspace(
+        None,
+        "2",
+        c("#101014"),
+        Spec {
+            kind: Kind::Fade,
+            ..Spec::none()
+        },
+        generation
+    ));
+    assert_eq!(
+        choices.transition_for(Some("DP-1"), None),
+        Spec::none(),
+        "inactive: at once, like the base"
+    );
+    let spec = choices.transition_for(Some("DP-1"), Some("2"));
+    assert_eq!(spec.kind, Kind::Fade);
+    assert_eq!(shown(&choices, "DP-1", Some("2")), c("#101014"));
+}
+
+/// Adopting another profile clears every workspace mapping, and the buffer
+/// accounting with it: what `adopt` (`daemon::config`) does before it drops
+/// the stashes. The stash drop itself is `Canvas::drop_all_stash`
+/// (`daemon::canvas`); this pins the choices half so a later change cannot
+/// leave mappings behind while claiming to have adopted.
+#[test]
+fn clearing_workspaces_returns_buffer_accounting_to_base() {
+    let mut choices = Choices::default();
+    choices.set(None, c("#c03020"), 1);
+    assert!(choices.set_workspace(None, "2", image(2), crate::transition::Spec::none(), 2));
+    assert!(choices.set_workspace(None, "3", image(3), crate::transition::Spec::none(), 3));
+    assert!(choices.has_workspace_mappings());
+    assert_eq!(choices.workspace_images_for(None).len(), 2);
+    choices.clear_workspaces();
+    assert!(!choices.has_workspace_mappings());
+    assert_eq!(
+        choices.workspace_images_for(None).len(),
+        0,
+        "no mapping: no buffer to keep"
+    );
+    assert_eq!(
+        choices.workspace_images_for(Some("DP-1")).len(),
+        0,
+        "no mapping on any output either"
+    );
+}
+
+/// A slideshow step and a workspace mapping share one timeline: the newer
+/// wins, whichever it is. A step is a base `set` at a newer generation
+/// (`daemon::rotation` records and chooses exactly like a restored image);
+/// a mapping set after a step wins until the next step, which covers it
+/// again. `clear` (base) stops the show and wins outright; `clear
+/// --workspace` only takes one mapping off.
+#[test]
+fn slideshow_steps_and_workspace_mappings_share_one_timeline() {
+    let mut choices = Choices::default();
+    // Base first, then a workspace mapping: the mapping shows there.
+    choices.set(None, c("#c03020"), 1);
+    assert!(choices.set_workspace(None, "2", image(2), crate::transition::Spec::none(), 2));
+    assert_eq!(shown(&choices, "DP-1", Some("2")), image(2));
+    assert_eq!(shown(&choices, "DP-1", Some("1")), c("#c03020"));
+    // A slideshow step (a base image at a newer generation) covers the
+    // older mapping until a still newer mapping.
+    choices.set(None, image(3), 3);
+    assert_eq!(
+        shown(&choices, "DP-1", Some("2")),
+        image(3),
+        "the step is newer than the mapping"
+    );
+    // A mapping set after the step wins until the next step.
+    assert!(choices.set_workspace(None, "2", image(4), crate::transition::Spec::none(), 4));
+    assert_eq!(shown(&choices, "DP-1", Some("2")), image(4));
+    // The next step covers it again.
+    choices.set(None, image(5), 5);
+    assert_eq!(
+        shown(&choices, "DP-1", Some("2")),
+        image(5),
+        "the next step is newest again"
+    );
+    // A base `clear` wins outright (and stops the show in the daemon); a
+    // workspace clear only takes one mapping off.
+    choices.set(None, None, 6);
+    assert_eq!(shown(&choices, "DP-1", Some("2")), None);
 }

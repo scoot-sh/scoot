@@ -59,6 +59,7 @@ use super::respond::Ready;
 use super::rotation::Rotation;
 use super::surfaces::{Objects, XdgOutputs};
 use super::transition::Transitions;
+use super::workspaces::Workspaces;
 use crate::choices::Choices;
 use crate::control::{ConnId, MAX_CONNECTIONS};
 use crate::jobs::MAX_TRIALS;
@@ -109,6 +110,9 @@ pub struct Globals {
     /// The connection's `wl_display`, for round trips sent where there is
     /// no `Connection` to hand (`LayerObjects::create`).
     pub display: WlDisplay,
+    /// The registry, for binding globals advertised after start-up (the
+    /// workspace manager: `daemon::workspaces` binds it lazily).
+    pub registry: WlRegistry,
     pub compositor: WlCompositor,
     pub layer_shell: ZwlrLayerShellV1,
     pub shm: WlShm,
@@ -170,6 +174,10 @@ pub struct State {
     /// directory's files in turn, paced by the loop's poll timeout. `None`
     /// is no timeout at all: no wakeups beyond what the loop had.
     pub rotation: Option<Rotation>,
+    /// `ext-workspace-v1`: which workspace is active where, and the
+    /// manager binding that says so. Unbound (and empty) while no
+    /// workspace wallpaper is mapped: zero cost (`daemon::workspaces`).
+    pub workspaces: Workspaces,
 }
 
 pub struct Wayland {
@@ -220,6 +228,7 @@ impl Wayland {
         let path = Path::choose(viewporter.is_some(), single_pixel.is_some(), forced_path());
         let globals = Globals {
             display: conn.display(),
+            registry: list.registry().clone(),
             compositor,
             layer_shell,
             shm,
@@ -246,6 +255,7 @@ impl Wayland {
             retired: Vec::new(),
             transitions: Transitions::default(),
             rotation: None,
+            workspaces: Workspaces::default(),
         };
         let registry = list.registry().clone();
         list.contents().with_list(|advertised| {
@@ -360,7 +370,7 @@ impl wayland_client::Dispatch<WlRegistry, GlobalListContents> for State {
                 state.xdg.advertised(&interface, name, version);
                 state.global(registry, conn, qh, &interface, name, version);
             }
-            wl_registry::Event::GlobalRemove { name } => state.global_remove(name),
+            wl_registry::Event::GlobalRemove { name } => state.global_remove(name, qh),
             _ => {}
         }
     }

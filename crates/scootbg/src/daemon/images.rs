@@ -75,11 +75,23 @@ impl Images {
 
 /// Whether `entry` should show `image` (it is the choice there).
 fn wants(choices: &Choices, entry: &Entry<Objects>, image: &Image) -> bool {
-    let name = entry.output.info().name.as_deref();
+    let output = &entry.output;
+    let name = output.info().name.as_deref();
     choices
-        .for_output(name)
+        .for_output(name, output.active_workspace())
         .and_then(Wallpaper::image)
         .is_some_and(|wanted| wanted.serial == image.serial)
+}
+
+/// Whether a render of `image` for `entry` is still worth running: shown
+/// there, or stashed there for a workspace switch that may come.
+fn wanted(choices: &Choices, entry: &Entry<Objects>, image: &Image, dims: (u32, u32)) -> bool {
+    if wants(choices, entry, image) {
+        return true;
+    }
+    let output = &entry.output;
+    choices.workspace_image_for(output.info().name.as_deref(), image.serial)
+        && image_dims(output) == Some(dims)
 }
 
 /// Starts the next job if the worker is free, after serving what it can
@@ -97,8 +109,8 @@ pub fn pump(state: &mut State, qh: &QueueHandle<State>) -> bool {
         |image, target| {
             outputs.iter().any(|entry| {
                 entry.output.id() == target.output
-                    && wants(choices, entry, image)
                     && image_dims(&entry.output) == Some(target.dims)
+                    && wanted(choices, entry, image, target.dims)
             })
         },
         |trial| trial_targets(outputs, trial),
@@ -207,6 +219,7 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
         ready,
         saved,
         transitions,
+        workspaces,
         ..
     } = &mut *state;
     let Some(job) = images.jobs.finished() else {
@@ -302,6 +315,54 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
     let generation = image.serial;
     let output = trial.output.as_deref();
     let choice = Some(Wallpaper::Image(Arc::clone(&image)));
+    if let Some(workspace) = trial.workspace.as_deref() {
+        // A workspace mapping: recorded as such (and saved by the same
+        // newest-wins rule), stashed for instant switches, and drawn
+        // where its workspace is already active.
+        let transition = trial.transition;
+        saved.record_workspace(output, workspace, &choice, transition, generation);
+        if !choices.set_workspace(output, workspace, choice, transition, generation) {
+            // Superseded while it decoded: `rendered` is dropped, after
+            // it was checked for stashing nothing... it cannot be
+            // stashed (nothing maps this serial now). Answered, as a
+            // superseded color is, once what replaced it is on screen.
+            waiters.push(trial.conn, generation);
+            return;
+        }
+        super::workspaces::ensure_bound(workspaces, choices, globals, qh);
+        // Older image requests this one covers need not be decoded at all.
+        sweep(&mut images.jobs, choices, waiters);
+        let applies = |entry: &Entry<Objects>| {
+            output.is_none_or(|name| entry.output.info().name.as_deref() == Some(name))
+                && wants(choices, entry, &image)
+        };
+        for entry in outputs.iter_mut().filter(|entry| applies(entry)) {
+            entry.output.want(generation);
+        }
+        offer(
+            globals,
+            qh,
+            outputs,
+            choices,
+            &image,
+            &job.targets,
+            rendered,
+        );
+        let now = Instant::now();
+        for entry in outputs.iter_mut().filter(|entry| applies(entry)) {
+            reconcile(
+                globals,
+                choices,
+                &mut images.jobs,
+                transitions,
+                entry,
+                qh,
+                now,
+            );
+        }
+        waiters.push(trial.conn, generation);
+        return;
+    }
     // Saved by the same newest-wins rule the choices follow, so it is
     // saved exactly when it is recorded below.
     saved.record(output, &choice, generation);
@@ -350,7 +411,9 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
 /// Hands each rendered size to the job's targets of that size that are
 /// still there, still want this image, and are still that size: wrapped
 /// for the compositor once, and shared by all of them (a buffer nobody
-/// takes is dropped). Reports a draw that failed.
+/// takes is dropped). A workspace image is also stashed on its targeted
+/// outputs, so a switch to its workspace attaches at once rather than
+/// decoding. Reports a draw that failed.
 fn offer(
     globals: &Globals,
     qh: &QueueHandle<State>,
@@ -370,8 +433,17 @@ fn offer(
         // Still that size: a buffer for a size gone stale is dropped.
         let takes =
             |entry: &Entry<Objects>| targeted(entry) && image_dims(&entry.output) == Some(dims);
+        // Mapped for a workspace on this output (shown now or not): keep
+        // the pixels for an instant switch.
+        let keeps = |entry: &Entry<Objects>| {
+            targets
+                .iter()
+                .any(|t| t.output == entry.output.id() && t.dims == dims)
+                && image_dims(&entry.output) == Some(dims)
+                && choices.workspace_image_for(entry.output.info().name.as_deref(), image.serial)
+        };
         let shared = match result {
-            Ok(buffer) if outputs.iter().any(takes) => {
+            Ok(buffer) if outputs.iter().any(|entry| takes(entry) || keeps(entry)) => {
                 canvas::pixels(globals, qh, buffer, Content::Image(image.serial))
                     .map_err(|error| error.to_string())
             }
@@ -382,6 +454,9 @@ fn offer(
             Ok(pixels) => {
                 for entry in outputs.iter_mut().filter(|entry| takes(entry)) {
                     entry.objects.canvas.offer(Rc::clone(&pixels));
+                }
+                for entry in outputs.iter_mut().filter(|entry| keeps(entry)) {
+                    entry.objects.canvas.stash(Rc::clone(&pixels));
                 }
             }
             Err(message) => {

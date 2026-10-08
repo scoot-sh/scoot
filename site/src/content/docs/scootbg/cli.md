@@ -32,8 +32,10 @@ scootbg set ~/wallpapers --every 30m --shuffle
 scootbg set '#101014' --transition fade --duration-ms 800
 scootbg set city.png --transition wipe --angle 90
 scootbg set grid.png --transition grow --position 0,0 --output DP-1
+scootbg set ~/Pictures/focus.jpg --workspace 2  # one workspace, while it is active
 scootbg clear                         # back to the compositor's own background
 scootbg clear --output DP-2           # ... on one output
+scootbg clear --workspace 2           # ... one workspace mapping off
 scootbg query                         # each output, its surface and what it shows, one JSON line
 scootbg version                       # the running daemon's version and protocol
 scootbg kill                          # stop it; returns once a new daemon can start
@@ -55,10 +57,14 @@ and filters, exit codes and environment — see
 **`set` and `clear` return once it is on screen:** every targeted output
 shows the change and the compositor has processed it (a `wl_display.sync`
 round trip after the commits), so a screenshot taken straight after shows
-it. With `--transition`, that means once the animation has finished: the
+it. `set --workspace` returns once the mapping is preloaded — shown at
+once where its workspace is already active, recorded otherwise — or with
+why its image cannot be shown. With `--transition`, that means once the animation has finished: the
 reply waits for the last frame, not the first. A newer `set`
 mid-transition starts from the frame showing then (no queue), and the
-earlier reply arrives once what replaced it is on screen. An output unplugged meanwhile is left out of that wait; one whose
+earlier reply arrives once what replaced it is on screen. A workspace
+switch itself answers nothing (no request is in flight): it lands through
+the mapping's transition. An output unplugged meanwhile is left out of that wait; one whose
 surface is not configured yet is waited for, but only until a round trip
 after scootbg made that surface: one the compositor has not configured
 by then no longer holds up the reply (the daemon says so on stderr) and
@@ -223,7 +229,8 @@ simply waits. `scootbg query` answers, on one line (wrapped here):
  "surface":{"state":"configured","size":{"width":2560,"height":1440},
             "scale":1.5,"pixels":{"width":3840,"height":2160}},
  "draw_failed":false,"draw_error":null,"shows":{"color":"#1e1e2e"},
- "transition":null}],
+ "workspace":"1","transition":null}],
+ "workspaces":[{"output":null,"workspace":"2","shows":{"color":"#101014"}}],
  "saving":true,"profile":"default"}
 ```
 
@@ -265,7 +272,12 @@ follows `profile`: `{"directory":"/home/me/wallpapers","every_secs":1800,
 "shuffle":false,"files":12}` — what it cycles, every how many seconds, in
 what order, and how many files that is. Which file shows now is each
 output's `shows`, as for a `set`. Absent while no slideshow runs, so a
-static wallpaper's reply is what it was. `saving`
+static wallpaper's reply is what it was. `workspace` names the workspace active on the output now (`"1"`, `"2"`,
+... on scoot), or `null` while unknown — no mapping, no workspace
+protocol, or no events yet. After the outputs, `workspaces` lists the
+live per-workspace mappings: each with its `output` (`null` for every
+output), its `workspace`, and what it shows while that workspace is
+active (see [A wallpaper per workspace](./workspaces.md)). `saving`
 (after the list) is `false` while `set` and `clear` are not saved for
 the next start (see [Restore](./restore.md#restore)), and `profile` is the profile
 whose state is restored and saved. New keys
