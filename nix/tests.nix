@@ -12498,47 +12498,12 @@ let
       true
     )
     # ...in the look's own roles (moonrise: cream text on slate, the
-    # amber accent selecting, its ring on the border)...
-    (
-      assert lib.hasInfix "NormalColor=#F6EEDC" (
-        builtins.readFile
-          hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
-      );
-      true
-    )
-    (
-      assert lib.hasInfix "Color=#2B3648" (
-        builtins.readFile
-          hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
-      );
-      true
-    )
-    (
-      assert lib.hasInfix "Color=#FFA45C" (
-        builtins.readFile
-          hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
-      );
-      true
-    )
-    (
-      assert lib.hasInfix "BorderColor=#FF9A49" (
-        builtins.readFile
-          hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
-      );
-      true
-    )
-    (
-      assert lib.hasInfix "Theme=scoot-look" (
-        builtins.readFile hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source
-      );
-      true
-    )
-    (
-      assert lib.hasInfix "DarkTheme=scoot-look" (
-        builtins.readFile hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source
-      );
-      true
-    )
+    # amber accent selecting, its ring on the border -- pinned by
+    # content in the check script below, not here: reading a
+    # derivation output at eval builds it, which breaks evaluating
+    # this system's checks from another platform (gh #486's
+    # FlakeHub gate), so file bytes are asserted at build time
+    # instead).
     # ...opted out of candidate theming: the engine runs unthemed
     # (both files gone, the unit staying)...
     (
@@ -16757,6 +16722,35 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       if grep -v ' /dev/null$' "$A/stdins"; then echo "bluetoothctl read a stdin other than /dev/null (23r)" >&2; exit 1; fi
       echo "ok: only the scan carries --timeout, no --agent, stdin /dev/null"
     ''}
+
+  ${lib.optionalString isLinux ''
+    # 24. Input-method slot content: the candidate theme carries the
+    # look's own roles (moonrise: cream text on slate, the amber
+    # accent selecting, its ring on the border) and the classic UI
+    # names it on both the light and the dark path. Build-time greps,
+    # not eval asserts: an eval-time read of these derivations builds
+    # them, which breaks evaluating this system's checks from another
+    # platform (the FlakeHub `--all-systems` gate).
+    grep -F -q "NormalColor=#F6EEDC" ${
+      hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+    }
+    grep -F -q "Color=#2B3648" ${
+      hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+    }
+    grep -F -q "Color=#FFA45C" ${
+      hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+    }
+    grep -F -q "BorderColor=#FF9A49" ${
+      hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+    }
+    grep -F -x -q "Theme=scoot-look" ${
+      hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source
+    }
+    grep -F -x -q "DarkTheme=scoot-look" ${
+      hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source
+    }
+    echo "ok: candidate window wears the look, both classic UI paths name it"
+  ''}
 
   touch $out
   echo "scoot-modules: all file-content checks passed"
