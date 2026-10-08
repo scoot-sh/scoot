@@ -615,6 +615,7 @@ fn a_circle_pill_is_round_and_a_click_still_switches() {
 // live. Read from the bar's own `WAYLAND_DEBUG` trace.
 
 /// How many times the trace binds `interface` from the registry.
+#[cfg(feature = "clock")]
 fn bound(trace: &str, interface: &str) -> usize {
     trace
         .lines()
@@ -627,6 +628,7 @@ fn bound(trace: &str, interface: &str) -> usize {
 /// The trace lines that are the compositor's events on a workspace
 /// protocol object (the manager, a group or a workspace): `<-` marks an
 /// event in the trace.
+#[cfg(feature = "clock")]
 fn workspace_events(trace: &str) -> Vec<&str> {
     trace
         .lines()
@@ -645,6 +647,7 @@ fn workspace_events(trace: &str) -> Vec<&str> {
 
 /// A config file placing `left` in the session's font, a clock in the
 /// center, and the bar 28 high.
+#[cfg(feature = "clock")]
 fn placing(session: &Session, left: &str) -> PathBuf {
     let path = session.runtime_dir().join("binds.toml");
     std::fs::write(
@@ -659,6 +662,7 @@ fn placing(session: &Session, left: &str) -> PathBuf {
 }
 
 /// `scootbar daemon --config PATH` with a protocol trace in the bar log.
+#[cfg(feature = "clock")]
 fn traced_daemon(session: &Session, path: &std::path::Path) -> Reaper {
     let log = std::fs::File::create(session.bar_log()).unwrap();
     let child = session
@@ -686,6 +690,7 @@ fn reload(session: &Session) {
 
 /// Opens a window, switches to the workspace after it and closes the
 /// window: a batch of workspace changes a bound manager would be sent.
+#[cfg(feature = "clock")]
 fn churn(session: &Session, bar: &mut Reaper) {
     let toy = ToyWindow::open(session.wayland_socket());
     session.wait_for(&mut bar.0, "a window mapped", |session| {

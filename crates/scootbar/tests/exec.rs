@@ -20,14 +20,18 @@ mod common;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
+#[cfg(any(feature = "push", feature = "exec"))]
 use std::process::Output;
-use std::time::{Duration, Instant};
+#[cfg(any(feature = "push", feature = "exec"))]
+use std::time::Duration;
+#[cfg(feature = "exec")]
+use std::time::Instant;
 
 use common::{Reaper, Session, rgb};
-#[cfg(any(feature = "push", feature = "exec"))]
 use common::{Shot, testfont};
 #[cfg(feature = "exec")]
 use common::{allowed_in_child, inheritable_fds, open_fds, settled_fds};
+#[cfg(any(feature = "push", feature = "exec"))]
 use serde_json::Value;
 
 const BAR: &str = "#102030";
@@ -35,7 +39,6 @@ const FG: &str = "#f0f0f0";
 const URGENT: &str = "#ff0000";
 const HEIGHT: u32 = 60;
 const EM: u32 = 50;
-#[cfg(any(feature = "push", feature = "exec"))]
 const BASELINE: i64 = 45;
 
 /// The bar's config: the look, `lists` (`right = ["x"]`), and `tables`.
@@ -50,7 +53,9 @@ fn config(lists: &str, tables: &str) -> String {
 struct Rig {
     session: Session,
     bar: Reaper,
+    #[cfg(feature = "exec")]
     file: PathBuf,
+    #[cfg(any(feature = "button", feature = "exec"))]
     dir: PathBuf,
 }
 
@@ -70,7 +75,9 @@ impl Rig {
         let mut rig = Self {
             session,
             bar,
+            #[cfg(feature = "exec")]
             file,
+            #[cfg(any(feature = "button", feature = "exec"))]
             dir,
         };
         rig.wait_drawn();
@@ -84,10 +91,12 @@ impl Rig {
             });
     }
 
+    #[cfg(feature = "exec")]
     fn pid(&self) -> u32 {
         self.bar.0.id()
     }
 
+    #[cfg(any(feature = "push", feature = "exec"))]
     fn msg(&self, args: &[&str]) -> Output {
         self.session
             .scootbar()
@@ -97,6 +106,7 @@ impl Rig {
             .unwrap()
     }
 
+    #[cfg(any(feature = "push", feature = "exec"))]
     fn query(&self) -> Value {
         let out = self.msg(&["query"]);
         assert!(out.status.success(), "{out:?}");
@@ -104,6 +114,7 @@ impl Rig {
     }
 
     /// What the bar's text reads back as, on output 1.
+    #[cfg(feature = "push")]
     fn read(&self) -> String {
         read(&self.session.scoot_screenshot(1))
     }
@@ -117,6 +128,7 @@ impl Rig {
     }
 
     /// Waits until `name` in the output directory has at least `n` lines.
+    #[cfg(any(feature = "button", feature = "exec"))]
     fn wait_lines(&mut self, name: &str, n: usize) -> Vec<String> {
         let path = self.dir.join(name);
         self.session
@@ -130,13 +142,13 @@ impl Rig {
             })
     }
 
+    #[cfg(feature = "exec")]
     fn reload(&self) -> Output {
         self.msg(&["reload"])
     }
 }
 
 /// The bar's text read back from the top rows of `shot`, spaces left out.
-#[cfg(any(feature = "push", feature = "exec"))]
 fn read(shot: &Shot) -> String {
     let background = rgb(BAR);
     let ink = |x: i64, y: i64| {

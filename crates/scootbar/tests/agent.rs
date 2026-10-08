@@ -39,6 +39,7 @@ const SCOOT: &str = "[[outputs]]\nname = \"headless-2\"\nscale = 1.5\n";
 struct Rig {
     session: Session,
     bar: Reaper,
+    #[cfg(feature = "button")]
     dir: PathBuf,
 }
 
@@ -57,7 +58,12 @@ impl Rig {
         )
         .unwrap();
         let bar = Reaper(session.bar_with_env(&["--config", file.to_str().unwrap()], &[]));
-        let mut rig = Self { session, bar, dir };
+        let mut rig = Self {
+            session,
+            bar,
+            #[cfg(feature = "button")]
+            dir,
+        };
         rig.session
             .wait_for(&mut rig.bar.0, "the bar drawn", |session| {
                 (session.scoot_screenshot(1).at(0, 0) == rgb(BAR)).then_some(())
@@ -66,6 +72,7 @@ impl Rig {
     }
 
     /// The bar's control socket.
+    #[cfg(feature = "push")]
     fn socket(&self) -> PathBuf {
         self.session
             .runtime_dir()
@@ -81,6 +88,7 @@ impl Rig {
             .unwrap()
     }
 
+    #[cfg(any(feature = "button", feature = "push"))]
     fn json(&self, args: &[&str]) -> Value {
         let out = self.msg(args);
         assert!(
@@ -92,6 +100,7 @@ impl Rig {
             .unwrap_or_else(|e| panic!("{args:?}: {e}: {}", String::from_utf8_lossy(&out.stdout)))
     }
 
+    #[cfg(any(feature = "button", feature = "push"))]
     fn ok(&self, args: &[&str]) {
         let out = self.msg(args);
         assert!(
@@ -101,12 +110,14 @@ impl Rig {
         );
     }
 
+    #[cfg(any(feature = "button", feature = "workspaces"))]
     fn refused(&self, args: &[&str]) -> String {
         let out = self.msg(args);
         assert!(!out.status.success(), "{args:?} was accepted");
         String::from_utf8_lossy(&out.stderr).into_owned()
     }
 
+    #[cfg(feature = "button")]
     fn lines(&self, name: &str) -> Vec<String> {
         fs::read_to_string(self.dir.join(name))
             .unwrap_or_default()
@@ -115,6 +126,7 @@ impl Rig {
             .collect()
     }
 
+    #[cfg(feature = "button")]
     fn wait_lines(&mut self, name: &str, n: usize) -> Vec<String> {
         let path = self.dir.join(name);
         self.session
@@ -128,6 +140,7 @@ impl Rig {
             })
     }
 
+    #[cfg(feature = "button")]
     fn click(&self, x: i64, y: i64) {
         let reply = self.session.scoot_ipc(&format!(
             r#"{{"type":"click","x":{x},"y":{y},"button":"left"}}"#
