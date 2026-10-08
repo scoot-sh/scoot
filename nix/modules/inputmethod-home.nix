@@ -134,8 +134,7 @@ in
         }
       ];
 
-      home.packages =
-        lib.optional (im.package != null) im.package ++ im.addons;
+      home.packages = lib.optional (im.package != null) im.package ++ im.addons;
 
       systemd.user.services.scoot-input-method = lib.mkIf toolsReady {
         Unit = {

@@ -12381,7 +12381,8 @@ let
       true
     )
     (
-      assert hmInputMethod.config.programs.scoot.desktop.inputMethod.package.drvPath == pkgs.fcitx5.drvPath;
+      assert
+        hmInputMethod.config.programs.scoot.desktop.inputMethod.package.drvPath == pkgs.fcitx5.drvPath;
       true
     )
     (
@@ -12418,7 +12419,8 @@ let
     # ...retried like the bar's unit, and gated on the display the
     # way mako's unit is...
     (
-      assert hmInputMethod.config.systemd.user.services.scoot-input-method.Service.Restart == "on-failure";
+      assert
+        hmInputMethod.config.systemd.user.services.scoot-input-method.Service.Restart == "on-failure";
       true
     )
     (
@@ -12498,33 +12500,43 @@ let
     # ...in the look's own roles (moonrise: cream text on slate, the
     # amber accent selecting, its ring on the border)...
     (
-      assert lib.hasInfix "NormalColor=#F6EEDC" (builtins.readFile
-        hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source);
+      assert lib.hasInfix "NormalColor=#F6EEDC" (
+        builtins.readFile
+          hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+      );
       true
     )
     (
-      assert lib.hasInfix "Color=#2B3648" (builtins.readFile
-        hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source);
+      assert lib.hasInfix "Color=#2B3648" (
+        builtins.readFile
+          hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+      );
       true
     )
     (
-      assert lib.hasInfix "Color=#FFA45C" (builtins.readFile
-        hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source);
+      assert lib.hasInfix "Color=#FFA45C" (
+        builtins.readFile
+          hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+      );
       true
     )
     (
-      assert lib.hasInfix "BorderColor=#FF9A49" (builtins.readFile
-        hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source);
+      assert lib.hasInfix "BorderColor=#FF9A49" (
+        builtins.readFile
+          hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
+      );
       true
     )
     (
-      assert lib.hasInfix "Theme=scoot-look" (builtins.readFile
-        hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source);
+      assert lib.hasInfix "Theme=scoot-look" (
+        builtins.readFile hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source
+      );
       true
     )
     (
-      assert lib.hasInfix "DarkTheme=scoot-look" (builtins.readFile
-        hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source);
+      assert lib.hasInfix "DarkTheme=scoot-look" (
+        builtins.readFile hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source
+      );
       true
     )
     # ...opted out of candidate theming: the engine runs unthemed
@@ -12588,8 +12600,9 @@ let
       true
     )
     (
-      assert lib.any (p: (p.pname or "") == "fcitx5")
-        osInputMethodStandalone.config.environment.systemPackages;
+      assert lib.any (
+        p: (p.pname or "") == "fcitx5"
+      ) osInputMethodStandalone.config.environment.systemPackages;
       true
     )
     # ...and the refusal names the switch on this side as well.
@@ -12598,7 +12611,9 @@ let
       true
     )
     (
-      assert lib.hasInfix "inputMethod.package is null" (builtins.head (failing osInputMethodNoPkg.config));
+      assert lib.hasInfix "inputMethod.package is null" (
+        builtins.head (failing osInputMethodNoPkg.config)
+      );
       true
     )
     # Home-manager refusal: no engine beside `enable`...
@@ -12607,7 +12622,9 @@ let
       true
     )
     (
-      assert lib.hasInfix "inputMethod.package is null" (builtins.head (failing hmInputMethodNoPkg.config));
+      assert lib.hasInfix "inputMethod.package is null" (
+        builtins.head (failing hmInputMethodNoPkg.config)
+      );
       true
     )
     # ...and an unknown engine fails at the option type.
