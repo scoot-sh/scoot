@@ -1,9 +1,10 @@
 ---
 title: "Contributor tree: internal notes out of docs/ into dev/, links updated"
-status: "open"
-area: "packaging"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-08"
 ---
 
 # Contributor tree: internal notes out of docs/ into dev/, links updated
@@ -49,3 +50,25 @@ write, so that half needs the maintainer.
 The `docs-site` ticket itself (site build, gates, hosting); the
 `docs-site-asset-check` entry (its own open ticket); backlogs/roadmap
 placement (decided in PR B).
+
+## Resolution (2026-10-08, PR #545)
+
+Conservative reading: backlogs, `docs/roadmap/` and `ROADMAP.md` stay
+where PR B left them; only benches, spikes, `forks.md`, the contributor
+guide and the research/testing notes moved to `dev/` (history-preserving
+`git mv`; full list in the PR body). Every inbound reference updated
+(relative Markdown links recomputed per file; prose, code comments, site
+absolute URLs, flake/CI comments; `dev/**` added to the docs-only
+push filters so dev-only pushes start no workflow; deploy workflow
+deliberately not tracking `dev/`). `scripts/backlog` unchanged (roots
+stay). The eight stubs stay until the maintainer repoints the protected
+`.claude/` agent files (edits listed in the PR body). Ratchet history
+(`scootbar/backlog/lightest.md`, open and ongoing) stays with the
+backlog by the same stand-down; dated-measurement prose extraction out
+of the staying user READMEs is follow-up, not this move.
+
+Evidence: relative-`.md` link check over all 585 `*.md` files — 133
+unique broken before, 133 after (delta only the two pre-existing broken
+targets that moved with their files; zero broken involve `dev/`);
+`scripts/backlog check` shows only its 3 pre-existing problems;
+`nix build .#docs-site` exit 0 on the Asahi M2; CI green on the PR head.
