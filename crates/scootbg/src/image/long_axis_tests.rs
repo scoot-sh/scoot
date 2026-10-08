@@ -32,7 +32,7 @@ fn grey_png(width: u32, height: u32) -> Vec<u8> {
 }
 
 fn decoded(width: u32, height: u32) -> Decoded {
-    decode(Cursor::new(grey_png(width, height)), FILL).unwrap()
+    decode(&mut Cursor::new(grey_png(width, height)), FILL).unwrap()
 }
 
 /// A tall image made straight into its decoded form: a PNG 17 million

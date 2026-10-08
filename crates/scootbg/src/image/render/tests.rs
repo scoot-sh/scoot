@@ -305,7 +305,7 @@ fn animated_renders_every_frame_like_its_still() {
     use crate::image::animated::decode_animated;
     use crate::image::samples;
 
-    let animated = decode_animated(Cursor::new(samples::gif_two_frame()), FILL)
+    let animated = decode_animated(&mut Cursor::new(samples::gif_two_frame()), FILL)
         .unwrap()
         .expect("two frames");
     let mut buffers = render_animated(&animated, look(Mode::Stretch), (2, 1)).unwrap();

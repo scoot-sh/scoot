@@ -130,7 +130,7 @@ fn one_job(data: &[u8]) {
         }
     }
 
-    let Ok(mut image) = decode(Cursor::new(file), fill) else {
+    let Ok(mut image) = decode(&mut Cursor::new(file), fill) else {
         return;
     };
     if orientation != 0 {

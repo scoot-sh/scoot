@@ -29,6 +29,7 @@ serde = "1"
 zune-jpeg = "0.5"
 zune-core = "0.5"
 png = "0.18"
+gif = { version = "0.14", default-features = false, features = ["std"] }
 image-webp = "0.2"
 pic-scale-safe = "0.1"
 

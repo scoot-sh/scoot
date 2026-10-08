@@ -7,7 +7,7 @@ use crate::image::samples;
 const FILL: Color = Color { r: 0, g: 0, b: 0 };
 
 fn animated(bytes: &[u8]) -> Option<super::Animated> {
-    decode_animated(Cursor::new(bytes), FILL).unwrap()
+    decode_animated(&mut Cursor::new(bytes), FILL).unwrap()
 }
 
 #[test]
@@ -109,4 +109,65 @@ fn caps_are_checked() {
     // A 4K frame is 24.9 MB; two fit, three do not.
     let per_4k = 3840usize * 2160 * 3;
     assert_eq!(MAX_ANIMATED_BYTES / per_4k, 2);
+}
+
+/// An animation check opens the file once, not once to check it and
+/// again to draw it: the daemon decodes once (the `Opens` counter in
+/// `tests/restore.rs` pins this end to end). Both ways through: an
+/// animated GIF (checked, then drawn from the check) and a static PNG
+/// (checked, then drawn the static way through the same open).
+#[test]
+fn an_animation_check_opens_the_file_once() {
+    use rustix::fs::inotify::{CreateFlags, ReadFlags, WatchFlags, Reader, add_watch, init};
+
+    fn checked_opens(file: &std::path::Path, run: impl FnOnce()) -> usize {
+        let watch = init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK).unwrap();
+        // Closes watched too, though not counted: inotify merges an event
+        // into the one before it when they are identical and the first is
+        // unread, so two opens back to back would read as one; with each
+        // open's close between them, no two in a row are alike.
+        add_watch(&watch, file, WatchFlags::OPEN | WatchFlags::CLOSE_NOWRITE).unwrap();
+        run();
+        let mut buf = [std::mem::MaybeUninit::uninit(); 4096];
+        let mut reader = Reader::new(&watch, &mut buf);
+        let mut opens = 0;
+        while let Ok(event) = reader.next() {
+            if event.events().contains(ReadFlags::OPEN) {
+                opens += 1;
+            }
+        }
+        opens
+    }
+
+    let dir = std::env::temp_dir().join(format!("sbg-anim-once-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // Animated: checked, and drawn from the check.
+    let gif = dir.join("two.gif");
+    std::fs::write(&gif, samples::gif_two_frame()).unwrap();
+    let opens = checked_opens(&gif, || {
+        let checked = super::decode_checked(&gif, FILL).unwrap();
+        assert!(matches!(checked, super::Checked::Animated(_)));
+    });
+    assert_eq!(opens, 1, "one open to check and draw the animation");
+    // Static: checked, then drawn the static way through the same open.
+    let png = dir.join("still.png");
+    std::fs::write(
+        &png,
+        samples::png(
+            2,
+            1,
+            png::ColorType::Rgb,
+            png::BitDepth::Eight,
+            &[10, 20, 30, 40, 50, 60],
+            None,
+        ),
+    )
+    .unwrap();
+    let opens = checked_opens(&png, || {
+        let checked = super::decode_checked(&png, FILL).unwrap();
+        assert!(matches!(checked, super::Checked::Static(_)));
+    });
+    assert_eq!(opens, 1, "one open to check and draw the still");
+    std::fs::remove_dir_all(&dir).unwrap();
 }

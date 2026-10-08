@@ -140,12 +140,18 @@ pub enum AnimKind {
 
 /// Decodes an animated image, or returns `None` when the image is static
 /// (a JPEG, a single-frame GIF/PNG/WebP). Animated past the caps is
-/// refused with a message naming `--no-animate`.
+/// refused with a message naming `--no-animate`. The reader is borrowed
+/// and always sniffed from the start, so a caller that checked first
+/// hands over the same open and the image is read once.
 pub fn decode_animated<R: BufRead + Seek>(
-    mut reader: R,
+    reader: &mut R,
     fill: Color,
 ) -> Result<Option<Animated>, DecodeError> {
     use std::io::SeekFrom;
+    // From the start, whatever a previous read left the position at.
+    reader
+        .seek(SeekFrom::Start(0))
+        .map_err(DecodeError::Unreadable)?;
     let mut magic = [0; 12];
     let mut got = 0;
     while got < magic.len() {
@@ -201,18 +207,34 @@ fn buffer(len: usize) -> Result<Vec<u8>, DecodeError> {
     scootbg_mem::zeroed_bytes(len).ok_or(DecodeError::OutOfMemory(len))
 }
 
-/// Decodes the animated image at `path`, or returns `None` when the
-/// image is static. Same open rules as
-/// [`crate::image::decode::decode_file`]: regular files only.
-pub fn decode_animated_file(path: &Path, fill: Color) -> Result<Option<Animated>, DecodeError> {
-    decode_animated(crate::image::decode::open(path)?, fill)
+/// What an animation check found: the still to draw, or the animation
+/// (whose first frame the worker draws until playback lands).
+pub enum Checked {
+    Static(Decoded),
+    Animated(Animated),
+}
+
+/// Decodes the image at `path`, animated or static, opening the file
+/// once: an animation check that fell through to the static decode must
+/// not read (and open) the file twice — the daemon decodes once.
+pub fn decode_checked(path: &Path, fill: Color) -> Result<Checked, DecodeError> {
+    let mut reader = crate::image::decode::open(path)?;
+    match decode_animated(&mut reader, fill)? {
+        Some(animated) => Ok(Checked::Animated(animated)),
+        None => Ok(Checked::Static(crate::image::decode::decode(
+            &mut reader,
+            fill,
+        )?)),
+    }
 }
 
 // --- GIF ---
 
 /// Starts a GIF decode: RGBA frames, the byte cap as the decoder's own
 /// memory limit, and the header size checked against the pixel budget.
-fn gif_decoder<R: BufRead + Seek>(reader: R) -> Result<(gif::Decoder<R>, u32, u32), DecodeError> {
+fn gif_decoder<R: BufRead + Seek>(
+    reader: &mut R,
+) -> Result<(gif::Decoder<&mut R>, u32, u32), DecodeError> {
     use gif::ColorOutput;
     let corrupt = |error: gif::DecodingError| DecodeError::Corrupt(error.to_string());
     let mut options = gif::DecodeOptions::new();
@@ -233,7 +255,7 @@ fn gif_decoder<R: BufRead + Seek>(reader: R) -> Result<(gif::Decoder<R>, u32, u3
 /// (the caller checked them, or was asked for a still with
 /// `--no-animate`). Transparent pixels show `fill`.
 pub(crate) fn gif_first_frame<R: BufRead + Seek>(
-    reader: R,
+    reader: &mut R,
     fill: Color,
 ) -> Result<Decoded, DecodeError> {
     let corrupt = |error: gif::DecodingError| DecodeError::Corrupt(error.to_string());
@@ -268,7 +290,7 @@ pub(crate) fn gif_first_frame<R: BufRead + Seek>(
     })
 }
 
-fn gif<R: BufRead + Seek>(reader: R, fill: Color) -> Result<Option<Animated>, DecodeError> {
+fn gif<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Option<Animated>, DecodeError> {
     let corrupt = |error: gif::DecodingError| DecodeError::Corrupt(error.to_string());
     let (mut decoder, width, height) = gif_decoder(reader)?;
     // First pass: collect frames (RGBA at their rects) without compositing,
@@ -429,7 +451,7 @@ fn flatten_rgba_over_fill(canvas: &[u8], rgb: &mut [u8], fill: Color) {
 
 // --- APNG ---
 
-fn apng<R: BufRead + Seek>(reader: R, fill: Color) -> Result<Option<Animated>, DecodeError> {
+fn apng<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Option<Animated>, DecodeError> {
     let corrupt = |error: png::DecodingError| match error {
         png::DecodingError::IoError(error) if error.kind() != std::io::ErrorKind::UnexpectedEof => {
             DecodeError::Unreadable(error)
@@ -635,7 +657,7 @@ fn composite_apng_subframe(
 
 // --- Animated WebP ---
 
-fn webp<R: BufRead + Seek>(reader: R, fill: Color) -> Result<Option<Animated>, DecodeError> {
+fn webp<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Option<Animated>, DecodeError> {
     let corrupt = |error: image_webp::DecodingError| DecodeError::Corrupt(error.to_string());
     let mut decoder = image_webp::WebPDecoder::new(reader).map_err(corrupt)?;
     if !decoder.is_animated() {

@@ -8,7 +8,7 @@ use crate::image::samples::{self, QUADRANT_COLORS};
 const FILL: Color = Color { r: 0, g: 0, b: 0 };
 
 fn decoded(bytes: &[u8]) -> Result<Decoded, DecodeError> {
-    decode(Cursor::new(bytes), FILL)
+    decode(&mut Cursor::new(bytes), FILL)
 }
 
 fn pixel(image: &Decoded, x: u32, y: u32) -> [u8; 3] {
@@ -145,7 +145,7 @@ fn transparency_is_flattened_over_the_fill() {
         &[255, 255, 255, 0],
         None,
     );
-    let over = |fill| decode(Cursor::new(&bytes), fill).unwrap().rgb;
+    let over = |fill| decode(&mut Cursor::new(&bytes), fill).unwrap().rgb;
     assert_eq!(
         over(Color {
             r: 16,
@@ -155,7 +155,7 @@ fn transparency_is_flattened_over_the_fill() {
         [16, 32, 48]
     );
     let webp = samples::webp(1, 1, &[0, 0, 0, 0], true, None);
-    let image = decode(Cursor::new(&webp), Color { r: 1, g: 2, b: 3 }).unwrap();
+    let image = decode(&mut Cursor::new(&webp), Color { r: 1, g: 2, b: 3 }).unwrap();
     assert_eq!(image.rgb, [1, 2, 3]);
 }
 

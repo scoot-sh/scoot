@@ -118,8 +118,9 @@ impl fmt::Display for DecodeError {
 }
 
 /// Decodes the image at `path`, transparency flattened over `fill`.
+/// The file is opened once; the sniff and the decode share the open.
 pub fn decode_file(path: &Path, fill: Color) -> Result<Decoded, DecodeError> {
-    decode(open(path)?, fill)
+    decode(&mut open(path)?, fill)
 }
 
 /// Opens `path` for decoding: `O_NONBLOCK`, refused unless it is a
@@ -139,8 +140,15 @@ pub(crate) fn open(path: &Path) -> Result<BufReader<File>, DecodeError> {
     Ok(BufReader::new(file))
 }
 
-/// Decodes an image from `reader`, sniffing its format.
-pub fn decode<R: BufRead + Seek>(mut reader: R, fill: Color) -> Result<Decoded, DecodeError> {
+/// Decodes an image from `reader`, sniffing its format. The reader is
+/// borrowed, so a caller that peeked at the format first (an animation
+/// check) hands over the same open, and the image is read once.
+pub fn decode<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Decoded, DecodeError> {
+    // From the start, whatever a previous check left the position at: a
+    // caller that peeked at the format first hands over the same open.
+    reader
+        .seek(SeekFrom::Start(0))
+        .map_err(DecodeError::Unreadable)?;
     let mut magic = [0; 12];
     let mut got = 0;
     while got < magic.len() {
@@ -197,7 +205,7 @@ fn buffer(len: usize) -> Result<Vec<u8>, DecodeError> {
     scootbg_mem::zeroed_bytes(len).ok_or(DecodeError::OutOfMemory(len))
 }
 
-fn jpeg<R: BufRead + Seek>(mut reader: R) -> Result<Decoded, DecodeError> {
+fn jpeg<R: BufRead + Seek>(mut reader: &mut R) -> Result<Decoded, DecodeError> {
     let corrupt = |error: zune_jpeg::errors::DecodeErrors| DecodeError::Corrupt(error.to_string());
     // No size limit of zune's own (the format's is 65535 a side): the
     // budget below is the limit. Strict, so a truncated file is an error
@@ -299,7 +307,7 @@ fn jpeg_ended<R: Read + Seek>(reader: &mut R) -> io::Result<bool> {
     Ok(window[..got].windows(2).any(|pair| pair == [0xff, 0xd9]))
 }
 
-fn png<R: BufRead + Seek>(reader: R, fill: Color) -> Result<Decoded, DecodeError> {
+fn png<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Decoded, DecodeError> {
     let corrupt = |error: png::DecodingError| match error {
         png::DecodingError::IoError(error) if error.kind() != io::ErrorKind::UnexpectedEof => {
             DecodeError::Unreadable(error)
@@ -351,7 +359,7 @@ fn png<R: BufRead + Seek>(reader: R, fill: Color) -> Result<Decoded, DecodeError
     })
 }
 
-fn webp<R: BufRead + Seek>(reader: R, fill: Color) -> Result<Decoded, DecodeError> {
+fn webp<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Decoded, DecodeError> {
     let corrupt = |error: image_webp::DecodingError| DecodeError::Corrupt(error.to_string());
     let mut decoder = image_webp::WebPDecoder::new(reader).map_err(corrupt)?;
     let (width, height) = decoder.dimensions();

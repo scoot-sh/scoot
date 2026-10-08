@@ -30,7 +30,7 @@ use rustix::io::Errno;
 use scootbg_mem::ShmBuffer;
 
 use crate::image::DECODE_STACK;
-use crate::image::animated::{Animated, decode_animated_file};
+use crate::image::animated::{Animated, Checked, decode_checked};
 use crate::image::decode::{DecodeError, Decoded, decode_file};
 use crate::image::render::render_each;
 use crate::jobs::Target;
@@ -262,11 +262,12 @@ impl Drop for Guard {
 /// value, so it is dropped before that buffer is allocated.
 ///
 /// An animated image with animation checks on goes through
-/// [`decode_animated_file`] first: past the frame/byte caps the job fails
-/// with a refusal naming `--no-animate`, within them its first frame is
-/// drawn (frame-by-frame playback is a follow-up). With `--no-animate`
-/// (`animate` false) it decodes the static way, first frame only, with no
-/// animation caps. Either way what shows is a still, with zero wakeups.
+/// [`decode_checked`] first: one open for the check and the draw, past
+/// the frame/byte caps the job fails with a refusal naming `--no-animate`,
+/// within them its first frame is drawn (frame-by-frame playback is a
+/// follow-up). With `--no-animate` (`animate` false) it decodes the
+/// static way, first frame only, with no animation caps. Either way what
+/// shows is a still, with zero wakeups.
 pub fn work(image: &Image, targets: &[Target]) -> Done {
     let path;
     let file = match &image.fetch {
@@ -277,9 +278,9 @@ pub fn work(image: &Image, targets: &[Target]) -> Done {
         }
     };
     let decoded = if image.animate {
-        match decode_animated_file(file, image.look.fill).map_err(JobError::Decode)? {
-            Some(animated) => first_frame(animated)?,
-            None => decode_file(file, image.look.fill).map_err(JobError::Decode)?,
+        match decode_checked(file, image.look.fill).map_err(JobError::Decode)? {
+            Checked::Animated(animated) => first_frame(animated)?,
+            Checked::Static(decoded) => decoded,
         }
     } else {
         decode_file(file, image.look.fill).map_err(JobError::Decode)?
