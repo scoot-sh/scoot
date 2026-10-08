@@ -62,6 +62,7 @@ use super::buffers::BufferPool;
 use super::head::Head;
 use super::{State, Tty, crtc_gamma_size, crtcs, gpu};
 use crate::compositor::headless;
+use crate::compositor::output_config::OutputEntries;
 use crate::compositor::render::ScanoutHandoff;
 
 /// Handles one udev event for the DRM subsystem.
@@ -127,12 +128,39 @@ pub(super) enum Change {
     },
 }
 
+/// A config reload that changed an `[[outputs]]` mode: swaps the stored
+/// mode requests for `entries` and re-runs the connector/mode choice
+/// against what the device says now, applying whatever differs through
+/// [`apply`] -- so a changed mode is a [`Plan::NewMode`] like any re-probe,
+/// and the next hotplug, VT switch back or unrelated uevent re-runs the
+/// reloaded choice rather than the startup one.
+///
+/// Runs where a reload runs (the event loop, holding `&mut State`), which
+/// is why this funnels through the same [`apply`] the udev and
+/// session-event paths use -- including the power re-apply (a mode change
+/// on an output that is off re-modesets behind the power state, then comes
+/// back off) and the `!active` early return (a reload with no DRM master
+/// stores the requests and applies them on the next reactivation, like a
+/// hotplug that fired while switched away).
+pub(crate) fn apply_reloaded_modes(state: &mut State, entries: &OutputEntries) {
+    let changes = {
+        let Some(tty) = &mut state.tty else {
+            return;
+        };
+        tty.modes.update(entries);
+        tty.reconfigure()
+    };
+    apply(state, changes);
+}
+
 /// Hands every [`Change`] of one re-probe to the rest of `State`, in the
 /// order that keeps each step meaningful: existing outputs follow their new
 /// modes first, removed outputs go next (so a CRTC or position they freed is
-/// free for what follows), and new outputs are created last, side by side to
-/// the right of what remains. Called from [`udev_event`] and from
-/// `session_event`'s reactivation arm.
+/// free for what follows), and new outputs are created last -- at their
+/// `[[outputs]]` positions when the file places them, else side by side to
+/// the right of what remains. Called from [`udev_event`], from
+/// `session_event`'s reactivation arm, and from a config reload that changed
+/// a mode (see [`apply_reloaded_modes`]).
 pub(super) fn apply(state: &mut State, changes: Vec<Change>) {
     let mut removed = Vec::new();
     let mut added = Vec::new();
@@ -241,8 +269,8 @@ pub(super) enum Reconfigured {
 impl Reconfigured {
     /// Does whatever this outcome owes the rest of `State` for output `id`
     /// (the head it happened to). Called once, after the `&mut Tty` borrow
-    /// that produced it has ended -- from [`udev_event`] and from
-    /// `session_event`'s reactivation arm.
+    /// that produced it has ended -- from [`udev_event`], from
+    /// `session_event`'s reactivation arm, and from [`apply_reloaded_modes`].
     pub(super) fn finish(self, state: &mut State, id: OutputId) {
         match self {
             Self::Nothing => {}

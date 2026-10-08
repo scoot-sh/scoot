@@ -9,6 +9,23 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### Unreleased — per-output position and live mode changes (behavior change)
+
+- **Monitors can be arranged with `position = [x, y]` in `[[outputs]]`**,
+  in logical pixels — `[-1920, 0]` puts a 1080p monitor left of the
+  primary, `[0, -1080]` stacks one above it. Outputs without a `position`
+  pack left to right past the placed ones, so the primary stays at the
+  origin. Overlaps and gaps are allowed; a replugged monitor lands back on
+  its entry. Positions apply on reload, reported as
+  `outputs.<name>.position`.
+- **A changed `[[outputs]]` `mode` now applies on reload instead of
+  refusing pending a restart.** Under `--headless` the output resizes;
+  under `--tty` the connector re-modesets through the hotplug path (an
+  output that is off comes back off). A mode no connector offers keeps the
+  running size, and the reload reply says so
+  (`outputs.DP-1.mode (could not switch to 1920x1080; kept 1600x900)`).
+  See [Outputs](site/src/content/docs/scoot/outputs.md).
+
 ### Unreleased — ginger-night, the new default desktop look (behavior change)
 
 - **A desktop profile with no `look` choice now renders the new

@@ -430,11 +430,12 @@ pub struct State {
     pub default_scale: f64,
     /// The `[[outputs]]` entries this session runs with (see
     /// `output_config.rs`): per-output scale (applied through
-    /// [`State::configured_scale`], and re-applied live by a reload) and
-    /// per-output mode (read at startup, and by `--tty` through
-    /// `Tty::modes` on every re-probe; a reload refuses a changed mode, so
-    /// the modes here stay the ones the session started with). Empty under
-    /// `--nested`, which ignores every entry, and for a file with none.
+    /// [`State::configured_scale`], and re-applied live by a reload),
+    /// per-output mode (read at startup, re-read by `--tty` on every
+    /// re-probe, and applied live by a reload), and per-output position
+    /// (read wherever outputs are placed, and applied live by a reload).
+    /// Empty under `--nested`, which ignores every entry, and for a file
+    /// with none.
     pub output_entries: OutputEntries,
     /// Live per-output scales set over IPC (`output-scale`), by connector
     /// name -- runtime state like [`Self::output_power`]'s off set, not
@@ -445,6 +446,13 @@ pub struct State {
     /// file's scales). Keyed by name rather than id for exactly the
     /// replug reason: ids are never reused, names do not move.
     pub runtime_scales: HashMap<String, f64>,
+    /// The size a `--headless` output without an `[[outputs]]` mode of its
+    /// own is created at (`--width` by `--height`): what a reload that
+    /// removes an entry's mode resizes its output back to. Recorded once in
+    /// `run`, beside [`Self::output_entries`]. `None` until then -- and in
+    /// every test harness, which builds its outputs directly -- where a
+    /// removed mode keeps the size it has.
+    pub(super) default_size: Option<(i32, i32)>,
     /// Whether the outputs currently run at more than one scale -- only
     /// ever true with `[[outputs]]` entries or live `output-scale`
     /// scales. Gates `apply()`'s per-window
@@ -456,6 +464,16 @@ pub struct State {
     /// outputs or their scales changes (an output added or removed, a
     /// reload's or an `output-scale` request's rescale), and nowhere else.
     pub mixed_scales: bool,
+    /// Where the primary output sits: its `Space` origin with exactly one
+    /// output, `(0, 0)` otherwise. What the single-output pointer paths
+    /// clamp and centre against without a `Space` lookup per motion (see
+    /// `input.rs`'s `clamp_to_output_union`): a placed sole output lives
+    /// away from the origin, and clamping it into `[0, extent)` would pin
+    /// the pointer to a screen it is not on. Recomputed by
+    /// `State::note_primary_origin` wherever outputs appear, move or go
+    /// away (see `headless.rs`); read on the pointer motion path, so it is
+    /// a plain pair, never an allocation.
+    pub(super) primary_origin: (i32, i32),
     /// Which renderer [`Self::backends`]' entries composite with, resolved once from
     /// `--renderer`/`[renderer] backend` (see `render::resolve`) and fixed
     /// for the process's lifetime. Kept here rather than read back off the
@@ -1332,7 +1350,9 @@ impl State {
             default_scale: scale,
             output_entries: OutputEntries::default(),
             runtime_scales: HashMap::new(),
+            default_size: None,
             mixed_scales: false,
+            primary_origin: (0, 0),
             renderer,
             backends: HashMap::new(),
             host: None,

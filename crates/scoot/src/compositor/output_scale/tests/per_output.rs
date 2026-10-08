@@ -314,38 +314,39 @@ fn a_reload_of_an_absent_outputs_entry_stores_it_and_moves_nothing() {
     assert_eq!(scale_of(output), 3.0);
 }
 
-/// A changed `mode` is refused by name and not applied -- the output keeps
-/// its size -- and is refused again on every reload that still asks for it,
-/// since it is never in effect. The scale beside it applies.
+/// A changed `mode` applies live -- the output resizes to it -- beside the
+/// scale that applies with it, and a second reload of the same file is
+/// silent, since the stored entries agree with it now.
 #[test]
-fn a_reload_refuses_a_changed_mode_by_name_and_applies_the_scale() {
+fn a_reload_applies_a_changed_mode_by_resizing() {
     let mut fixture = Fixture::with_outputs(1.0, SECOND_AT_2, &["headless-2"]);
     fixture.install_config(SECOND_AT_2);
     let file = "[[outputs]]\nname = \"headless-2\"\nscale = 1.0\nmode = \"100x80\"\n";
-    for round in 0..2 {
-        let response = fixture.reload_with(file);
-        let Response::Reloaded { applied, refused } = response else {
-            panic!("a valid reload should report, not error: {response:?}");
-        };
-        if round == 0 {
-            assert_eq!(applied, ["outputs.headless-2.scale"]);
-        } else {
-            assert!(applied.is_empty(), "round {round}: {applied:?}");
-        }
-        assert_eq!(refused.len(), 1, "round {round}: {refused:?}");
-        assert!(
-            refused[0].starts_with("outputs.headless-2.mode (takes effect on restart"),
-            "round {round}: {refused:?}"
-        );
-        let second = fixture.state.outputs.get(OutputId(2)).expect("output 2");
-        let mode = second.current_mode().expect("a mode");
-        assert_eq!(
-            (mode.size.w, mode.size.h),
-            (CANVAS, CANVAS),
-            "round {round}: the refused mode must not apply"
-        );
-        assert_eq!(scale_of(second), 1.0, "round {round}");
-    }
+    let response = fixture.reload_with(file);
+    let Response::Reloaded { applied, refused } = response else {
+        panic!("a valid reload should report, not error: {response:?}");
+    };
+    assert_eq!(
+        applied,
+        ["outputs.headless-2.scale", "outputs.headless-2.mode"]
+    );
+    assert!(refused.is_empty(), "{refused:?}");
+    let second = fixture.state.outputs.get(OutputId(2)).expect("output 2");
+    let mode = second.current_mode().expect("a mode");
+    assert_eq!(
+        (mode.size.w, mode.size.h),
+        (100, 80),
+        "the reloaded mode must resize the output"
+    );
+    assert_eq!(scale_of(second), 1.0);
+
+    // Same file again: stored entries agree, so nothing reports.
+    let response = fixture.reload_with(file);
+    let Response::Reloaded { applied, refused } = response else {
+        panic!("a valid reload should report, not error: {response:?}");
+    };
+    assert!(applied.is_empty(), "{applied:?}");
+    assert!(refused.is_empty(), "{refused:?}");
 }
 
 /// Scales stop mixing when the only output at another scale goes away: its

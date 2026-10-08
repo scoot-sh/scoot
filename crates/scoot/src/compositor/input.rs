@@ -522,7 +522,11 @@ impl State {
     /// `session_event`'s reactivation arm).
     pub(super) fn place_pointer_at_output_centre(&mut self) {
         let (width, height) = self.outputs.primary().map(logical_size).unwrap_or((0, 0));
-        self.pointer_move_quietly(f64::from(width) / 2.0, f64::from(height) / 2.0);
+        let (origin_x, origin_y) = self.primary_origin;
+        self.pointer_move_quietly(
+            f64::from(origin_x) + f64::from(width) / 2.0,
+            f64::from(origin_y) + f64::from(height) / 2.0,
+        );
     }
 
     /// Puts the pointer back inside the desktop after the outputs changed
@@ -1414,15 +1418,21 @@ impl State {
     fn clamp_to_output_union(&self, x: f64, y: f64) -> (f64, f64) {
         if self.outputs.len() == 1 {
             // The fast path, and the one-screen `--tty` shape: relative motion
-            // is `--tty` libinput's. The old expression exactly -- the
-            // primary's logical extent through `clamp_to_extent` -- so the
-            // single-output motion path keeps its measured cost (release, dev
-            // VM, 200k `pointer_move_relative` x5: 561ns/event median before,
+            // is `--tty` libinput's. The old expression exactly when the
+            // primary sits at the origin -- and shifted by its remembered
+            // origin (`State::primary_origin`, no `Space` lookup) when the
+            // file placed the sole output elsewhere -- so the single-output
+            // motion path keeps its measured cost (release, dev VM, 200k
+            // `pointer_move_relative` x5: 561ns/event median before,
             // 665ns without this branch, back to overlapping after) as well as
             // its behavior. The branch predicts perfectly in production: the
             // output count only changes on a hotplug.
             let (width, height) = self.outputs.primary().map(logical_size).unwrap_or((0, 0));
-            return (clamp_to_extent(x, width), clamp_to_extent(y, height));
+            let (origin_x, origin_y) = self.primary_origin;
+            return (
+                clamp_to_extent(x - f64::from(origin_x), width) + f64::from(origin_x),
+                clamp_to_extent(y - f64::from(origin_y), height) + f64::from(origin_y),
+            );
         }
         let Some(union) = self.output_union() else {
             // No output yet: the old path read a `(0, 0)` extent here, which

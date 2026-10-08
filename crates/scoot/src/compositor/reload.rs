@@ -47,11 +47,24 @@
 //!   not connected (the value is stored, and applies when it is). Under
 //!   `--nested` any change refuses -- the host owns the scale there --
 //!   rather than applying.
-//! - `[[outputs]]` `mode`: refused by name (`outputs.<name>.mode`), pending a
-//!   restart. Applying it live would be a modeset on a driven head, which
-//!   no reload does (see `output_config.rs`); the session keeps the mode it
-//!   started with, and that is also the mode a replugged monitor comes back
-//!   at.
+//! - `[[outputs]]` `mode`: applied live, per backend. Under `--headless`
+//!   the output's render target is resized through the same
+//!   `resize_output_of` a host resize uses; under `--tty` the stored mode
+//!   requests are swapped for the fresh list and the device re-probed, so
+//!   a changed mode is the hotplug path's `NewMode` on a driven head (see
+//!   `output_config.rs`), with the power state re-applied behind it -- an
+//!   output that is off comes back off. A mode no connector offers, or a
+//!   resize the target refuses, keeps the running size, and the reply says
+//!   so (`outputs.<name>.mode (could not switch to WxH; kept AxB)`) rather
+//!   than reporting it applied. An entry for a monitor that is not
+//!   connected is stored, reported applied, and applies when it is plugged
+//!   in. Under `--nested` any change refuses -- the host owns the size
+//!   there -- rather than applying.
+//! - `[[outputs]]` `position`: applied live -- placed outputs move to
+//!   their entries while unplaced ones repack behind them (see
+//!   `headless.rs`'s layout), reported per field
+//!   (`outputs.<name>.position`), even when the output it names is not
+//!   connected (the value is stored, and applies when it is).
 //! - `[binds]`: rebuilt from defaults plus the file (see
 //!   [`keybindings_for`](super::config::keybindings_for)), with the `--tty`
 //!   `Ctrl+Alt+F1..F12` recovery bindings layered on last when this session
@@ -145,7 +158,11 @@
 //! surfaces are reconfigured to their output's new logical size, exactly as
 //! a `--tty` hotplug resize does) and re-sends config-derived scale values
 //! to surfaces that keep showing the blanked frame -- no client pixels move
-//! across the lock boundary. Refusing under lock
+//! across the lock boundary. A mode change resizes through that same
+//! resize path (lock surfaces reconfigured to the new size, power state
+//! re-applied behind it), and a position change only moves origins (lock
+//! surfaces are sized, not placed) -- neither discloses anything either.
+//! Refusing under lock
 //! would strand an agent that edits the file mid-lock with an error for a
 //! request that is safe to serve.
 //!
@@ -162,12 +179,13 @@
 //! a pure removal, or nothing new at all -- stays silent even under lock;
 //! there is nothing actionable to skip.)
 
-use scoot_core::Action;
+use scoot_core::{Action, OutputId};
 use scoot_ipc::Response;
 
 use super::State;
 use super::config::{self, LoadedConfig};
 use super::output_config::EntriesDiff;
+use super::tty::Tty;
 use super::wallpaper::Reloaded;
 
 #[cfg(test)]
@@ -192,7 +210,8 @@ mod field {
     pub const CURSOR_HIDE: &str = "appearance.cursor_hide_after_ms";
     pub const PREFER_NO_CSD: &str = "appearance.prefer_no_csd";
     pub const SCALE: &str = "output.scale";
-    /// `outputs.<name>.scale` / `outputs.<name>.mode`: per output, so the
+    /// `outputs.<name>.scale` / `outputs.<name>.mode` /
+    /// `outputs.<name>.position`: per output, so the
     /// name is built from the entry (see `output_field`).
     pub const OUTPUTS: &str = "outputs";
     pub const GPU: &str = "tty.gpu";
@@ -296,7 +315,7 @@ impl State {
                 || name == field::RING_INACTIVE
                 || name == field::BACKGROUND
                 || name == field::CORNER_RADIUS
-        }) || report.rescaled
+        }) || report.relayout
         {
             self.apply();
         }
@@ -461,18 +480,18 @@ impl State {
     }
 
     /// `[output] scale` and `[[outputs]]`: every output's scale re-decided
-    /// and re-applied live, a changed entry mode refused (see the module
-    /// doc). Compared against the live [`State::default_scale`] and
-    /// [`State::output_entries`], and what is stored is exactly what was
-    /// compared (with the live modes kept), so a second reload agrees
+    /// and re-applied live, every changed mode resized live, every changed
+    /// position moved live (see the module doc). Compared against the live
+    /// [`State::default_scale`] and [`State::output_entries`], and what is
+    /// stored is exactly what was compared, so a second reload agrees
     /// silently. `fresh` is already load-clamped (including the non-finite
     /// fallbacks), so an out-of-range value applies as its clamped self,
     /// never as a refusal.
     ///
-    /// The outputs are re-laid-out only when an output's scale actually
-    /// moves: a changed entry for a monitor that is not connected, or a
-    /// default every connected output overrides, is stored and reported
-    /// without re-announcing anything.
+    /// The outputs are re-laid-out only when a connected output's scale,
+    /// mode or position actually moves: a changed entry for a monitor that
+    /// is not connected, or a default every connected output overrides, is
+    /// stored and reported without re-announcing anything.
     ///
     /// Every live `output-scale` scale ([`State::runtime_scales`]) is
     /// dropped here, file changed or not: a reload means "the file's
@@ -513,17 +532,25 @@ impl State {
             .map(|(name, _)| name)
             .collect();
         dropped.sort_unstable();
-        if default == ScaleReload::Agree && entries.scales.is_empty() && dropped.is_empty() {
+        if default == ScaleReload::Agree
+            && entries.scales.is_empty()
+            && entries.modes.is_empty()
+            && entries.positions.is_empty()
+            && dropped.is_empty()
+        {
             return;
         }
         self.default_scale = fresh.scale;
-        self.output_entries = fresh.outputs.with_modes_of(&self.output_entries);
+        self.output_entries = fresh.outputs.clone();
         if default == ScaleReload::Apply {
             report.applied.push(field::SCALE.to_owned());
         }
         for name in entries.scales.iter().chain(&dropped) {
             report.applied.push(output_field(name, "scale"));
         }
+        // Modes first: physical sizes settle before the logical layout
+        // below is re-derived from them.
+        self.apply_mode_reload(fresh, &entries, report);
         let moved = self.outputs.iter().any(|output| {
             self.configured_scale(&output.name()) != super::output_scale::scale_of(output)
         });
@@ -532,7 +559,117 @@ impl State {
             // (see `xwayland/scale.rs`).
             self.rescale_outputs();
             self.resend_output_scale();
-            report.rescaled = true;
+            report.relayout = true;
+        }
+        // Positions: a changed entry for a connected output moves it (and
+        // may shift the unplaced outputs packed behind it); one for a
+        // monitor that is not connected was stored above, and applies when
+        // it is plugged in. Heads re-announce (positions moved on the
+        // wire), the X layout re-fits (the union moved), and the pointer
+        // comes home (it may sit in a fresh gap) -- the same tail a resize
+        // runs, minus the size-dependent steps, which a pure move has none
+        // of.
+        for name in &entries.positions {
+            report.applied.push(output_field(name, "position"));
+        }
+        if !entries.positions.is_empty() && self.repack_outputs() {
+            self.refresh_output_heads();
+            #[cfg(feature = "xwayland")]
+            self.refit_xwayland();
+            self.rehome_pointer();
+            report.relayout = true;
+        }
+    }
+
+    /// `[[outputs]]` `mode`: applied live, per backend (see the module doc
+    /// for what each backend does and what the reply says when a mode does
+    /// not move its output).
+    ///
+    /// Runs after the fresh entries are stored, so every path below -- a
+    /// `--tty` re-probe, a hotplug add, the headless resize's own repack --
+    /// reads the reloaded file rather than the startup one.
+    fn apply_mode_reload(
+        &mut self,
+        fresh: &LoadedConfig,
+        entries: &EntriesDiff,
+        report: &mut Report,
+    ) {
+        if entries.modes.is_empty() {
+            return;
+        }
+        if self.tty.is_some() {
+            // `--tty`: swap the stored requests and re-probe, so a changed
+            // mode is a `NewMode` like any re-probe (see
+            // `hotplug::apply_reloaded_modes`). With no DRM master the
+            // re-probe declines and the requests wait for the next
+            // reactivation -- as a hotplug that fired while switched away
+            // would -- so every changed entry reports applied: stored, and
+            // effective then. A hotplug racing this reload needs no lock:
+            // both are event-loop callbacks, so one runs fully before the
+            // other starts, and both read the same stored requests --
+            // whichever runs second plans `Unchanged` against what the
+            // first applied.
+            let active = self.tty.as_ref().is_some_and(Tty::is_active);
+            super::tty::hotplug::apply_reloaded_modes(self, &fresh.outputs);
+            for name in &entries.modes {
+                let requested = fresh
+                    .outputs
+                    .mode_for(name)
+                    .map(|(width, height)| (i32::from(width), i32::from(height)));
+                match (requested, connected_size(self, name)) {
+                    (Some(requested), Some((_, actual))) if requested == actual || !active => {
+                        report.applied.push(output_field(name, "mode"));
+                    }
+                    (Some(requested), Some((_, actual))) => {
+                        report.refused.push(unapplied_mode(name, requested, actual));
+                    }
+                    // Not connected: stored above, applies when it is
+                    // plugged in (the next re-probe reads these requests).
+                    _ => {
+                        report.applied.push(output_field(name, "mode"));
+                    }
+                }
+            }
+            return;
+        }
+        // `--headless` (`--nested` never gets here: it refused above): the
+        // output's render target is resized through the same
+        // `resize_output_of` a host resize uses -- proven -- which repacks
+        // the outputs behind it and re-runs the arrangement itself.
+        for name in &entries.modes {
+            let requested = match fresh
+                .outputs
+                .mode_for(name)
+                .map(|(width, height)| (i32::from(width), i32::from(height)))
+            {
+                Some(requested) => requested,
+                // The entry went away: back to the session default every
+                // fresh output is created at. Unknown only to a session
+                // that bypassed `run` (every test harness); there the size
+                // stays, and the removal is still stored above for the
+                // outputs to come.
+                None => match self.default_size {
+                    Some(size) => size,
+                    None => {
+                        report.applied.push(output_field(name, "mode"));
+                        continue;
+                    }
+                },
+            };
+            let Some((id, actual)) = connected_size(self, name) else {
+                // Not connected: stored above, applies when it is plugged in.
+                report.applied.push(output_field(name, "mode"));
+                continue;
+            };
+            if actual == requested {
+                report.applied.push(output_field(name, "mode"));
+                continue;
+            }
+            if self.resize_output_of(id, requested.0, requested.1) {
+                report.applied.push(output_field(name, "mode"));
+            } else {
+                report.refused.push(unapplied_mode(name, requested, actual));
+            }
         }
     }
 
@@ -793,45 +930,40 @@ impl State {
 struct Report {
     applied: Vec<String>,
     refused: Vec<String>,
-    /// Whether an output's scale actually moved, so the arrangement must be
-    /// re-derived: not the same question as "a scale field applied", which
-    /// can store a value no connected output runs at.
-    rescaled: bool,
+    /// Whether an output's geometry actually moved -- a scale, mode or
+    /// position -- so the arrangement must be re-derived: not the same
+    /// question as "an output field applied", which can store a value no
+    /// connected output runs at.
+    relayout: bool,
 }
 
 /// What a reload of `[output] scale` and `[[outputs]]` refuses, in reply
 /// order: under `--nested` every difference (the host owns the one window's
-/// size and scale); elsewhere only each changed entry `mode` (a reload does
-/// not modeset -- see `output_config.rs`). Pure, so both halves pin without a
-/// host connection, which no test harness can fake.
+/// size and scale); elsewhere nothing -- scales, modes and positions all
+/// apply live (see the module doc). Pure, so the `--nested` refusal pins
+/// without a host connection, which no test harness can fake.
 fn output_refusals(default: &ScaleReload, entries: &EntriesDiff, nested: bool) -> Vec<String> {
     let mut refusals = Vec::new();
-    if nested {
-        if *default == ScaleReload::RefuseNested {
-            refusals.push(refused(
-                field::SCALE,
-                "refused under --nested: the host compositor owns the window's scale",
-            ));
-        }
-        for (name, key) in entries
-            .scales
-            .iter()
-            .map(|name| (name, "scale"))
-            .chain(entries.modes.iter().map(|name| (name, "mode")))
-        {
-            refusals.push(refused(
-                &output_field(name, key),
-                "refused under --nested: the host compositor owns the window's size and scale",
-            ));
-        }
-    } else {
-        for name in &entries.modes {
-            refusals.push(refused(
-                &output_field(name, "mode"),
-                "takes effect on restart: a reload does not modeset a running output; \
-                 kept the mode the session started with",
-            ));
-        }
+    if !nested {
+        return refusals;
+    }
+    if *default == ScaleReload::RefuseNested {
+        refusals.push(refused(
+            field::SCALE,
+            "refused under --nested: the host compositor owns the window's scale",
+        ));
+    }
+    for (name, key) in entries
+        .scales
+        .iter()
+        .map(|name| (name, "scale"))
+        .chain(entries.modes.iter().map(|name| (name, "mode")))
+        .chain(entries.positions.iter().map(|name| (name, "position")))
+    {
+        refusals.push(refused(
+            &output_field(name, key),
+            "refused under --nested: the host compositor owns the window's size and scale",
+        ));
     }
     refusals
 }
@@ -839,6 +971,35 @@ fn output_refusals(default: &ScaleReload, entries: &EntriesDiff, nested: bool) -
 /// The reply name for one `[[outputs]]` entry's `key`: `outputs.DP-1.scale`.
 fn output_field(name: &str, key: &str) -> String {
     format!("{}.{name}.{key}", field::OUTPUTS)
+}
+
+/// The refusal for an `[[outputs]]` mode that did not move its output: no
+/// connector offers the requested size, or the switch failed (the log names
+/// the cause) -- so the output keeps the size it runs at.
+fn unapplied_mode(name: &str, requested: (i32, i32), kept: (i32, i32)) -> String {
+    refused(
+        &output_field(name, "mode"),
+        &format!(
+            "could not switch to {}x{}; kept {}x{}",
+            requested.0, requested.1, kept.0, kept.1
+        ),
+    )
+}
+
+/// The connected output `name` names and the physical size it runs at now,
+/// or `None` when no connected output has that name: what a reloaded mode
+/// is answered against. Pure over live state, so both backends share the
+/// "stored, applies on plug" answer for an absent monitor.
+fn connected_size(state: &State, name: &str) -> Option<(OutputId, (i32, i32))> {
+    state
+        .outputs
+        .iter_with_ids()
+        .find(|(_, output)| output.name() == name)
+        .and_then(|(id, output)| {
+            output
+                .current_mode()
+                .map(|mode| (id, (mode.size.w, mode.size.h)))
+        })
 }
 
 /// What a reloaded `[output] scale` (the session default) does: applies

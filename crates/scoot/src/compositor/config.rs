@@ -881,9 +881,9 @@ pub fn default_config_toml() -> String {
          # appearance fields, binds, [floating] and [[window_rule]], new\n\
          # [autostart] spawn entries, [wallpaper] and [xwayland] fractional\n\
          # re-apply live with `scoot msg reload`; [tty] gpu, [renderer]\n\
-         # backend, [xwayland] enabled, [virtual_input] enabled,\n\
-         # [virtual_input] binds and an [[outputs]] mode take effect on\n\
-         # restart and a reload refuses them with a message.\n",
+         # backend, [xwayland] enabled, [virtual_input] enabled and\n\
+         # [virtual_input] binds take effect on restart and a reload\n\
+         # refuses them with a message.\n",
     );
 
     out.push_str("\n[layout]\n");
@@ -960,11 +960,12 @@ pub fn default_config_toml() -> String {
     out.push_str(
         "\n# Per-output overrides of [output] scale (and of --mode, or --width/--height\n\
          # under --headless), one table per output, matched by the name\n\
-         # `scoot msg outputs` lists. Scale re-applies on reload; mode on restart.\n\
+         # `scoot msg outputs` lists. Scale, mode and position re-apply on reload.\n\
          # [[outputs]]\n\
          # name = \"eDP-1\"\n\
          # scale = 2.0\n\
-         # mode = \"2560x1600\"\n",
+         # mode = \"2560x1600\"\n\
+         # position = [-1920, 0]\n",
     );
 
     out.push_str("\n[renderer]\n");
@@ -4229,7 +4230,7 @@ mod tests {
     }
 
     /// The emitted `[[outputs]]` example is commented out for the same
-    /// reason; uncommented, it must be one usable entry with both keys.
+    /// reason; uncommented, it must be one usable entry with all three keys.
     #[test]
     fn the_emitted_outputs_example_is_one_usable_entry_uncommented() {
         let emitted = default_config_toml();
@@ -4248,6 +4249,11 @@ mod tests {
         assert_eq!(
             loaded.outputs.mode_for("eDP-1"),
             Some((2560, 1600)),
+            "{example}"
+        );
+        assert_eq!(
+            loaded.outputs.position_for("eDP-1"),
+            Some((-1920, 0)),
             "{example}"
         );
     }

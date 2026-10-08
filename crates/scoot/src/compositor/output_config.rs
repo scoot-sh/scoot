@@ -1,4 +1,4 @@
-//! `[[outputs]]`: a scale and a mode per output, by output name.
+//! `[[outputs]]`: a scale, a mode and a position per output, by output name.
 //!
 //! `[output] scale` (and `--mode`, and `--width`/`--height`) stay the session
 //! default. An `[[outputs]]` entry names one output and overrides that
@@ -30,11 +30,28 @@
 //!   fall-back-to-preferred when the connector does not offer it); under
 //!   `--headless` it is the virtual output's size. One spelling, parsed by
 //!   the same function `--mode` uses, and nothing to disagree with itself.
-//! - **Mode takes effect at startup and when a monitor is plugged in, not on
-//!   a reload.** A live mode change on `--tty` is a modeset on a driven head
-//!   through the hotplug path's `NewMode` arm, which has not been proven as a
-//!   runtime change on hardware; a reload refuses a changed `mode` by name
-//!   (`outputs.<name>.mode`) and keeps the running one. Scale reloads live.
+//! - **A `position = [x, y]` in logical pixels per output** (either axis
+//!   may be negative, to put a monitor left of or above the origin). An
+//!   output without one packs left to right in creation order from the
+//!   origin, stepping over placed outputs, so a placed output never shoves
+//!   an earlier output aside and the primary stays at the origin (see
+//!   `headless.rs`'s layout). Overlaps are allowed -- each output still
+//!   renders its own strip -- and gaps are allowed too: the pointer clamp
+//!   covers the bounding box of every output, so it can rest in a gap,
+//!   exactly as it already can over uneven heights. A replugged monitor
+//!   comes back at its entry's position while its neighbours stay where
+//!   they are; the next full layout (a rescale, a removal, a mode change,
+//!   or a reload that moves a position) restores the packed order behind
+//!   it.
+//! - **Mode and position take effect at startup, when a monitor is plugged
+//!   in, and on reload.** A changed `mode` is a live resize: under
+//!   `--headless` the output's render target is rebuilt at the new size
+//!   through the same `resize_output_of` a host resize uses; under `--tty`
+//!   the stored requests are swapped and the hotplug path's `NewMode` arm
+//!   (`Head::retarget`) modesets the driven head, exactly as a re-probe
+//!   after a replug would. A mode no connector offers keeps the running
+//!   one with a warning, and the reload reply says so rather than reporting
+//!   it applied. Scale and position reload live too.
 //! - **`--nested` ignores every entry**, with a warning at startup and a
 //!   refusal on reload: the host compositor owns the one window's size and
 //!   scale there (the output is named `headless` too, so an entry for it
@@ -55,6 +72,11 @@ mod tests;
 
 /// One `[[outputs]]` table as the file spells it. `name` is required: an
 /// entry with nothing to match is not an entry.
+///
+/// `position` is a `toml::Value`, not a fixed pair, so one entry's
+/// mistyped position (a string, a single number, a triple) costs that
+/// value only -- a warning naming the entry -- rather than failing the
+/// whole file's parse the way a mistyped scalar would.
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(super) struct OutputEntryConfig {
@@ -63,16 +85,21 @@ pub(super) struct OutputEntryConfig {
     pub(super) scale: Option<f64>,
     #[serde(default)]
     pub(super) mode: Option<String>,
+    #[serde(default)]
+    pub(super) position: Option<toml::Value>,
 }
 
 /// One resolved `[[outputs]]` entry: its scale already clamped and resolved
 /// to 120ths exactly as `[output] scale` is (see `output_scale::clamp_scale`),
-/// its mode already parsed. `None` in either means "the session default".
+/// its mode already parsed, its position already validated. `None` in any
+/// means "the session default" (the default scale, the default mode, packed
+/// after the placed outputs).
 #[derive(Clone, Debug, PartialEq)]
 pub struct OutputEntry {
     pub name: String,
     pub scale: Option<f64>,
     pub mode: Option<(u16, u16)>,
+    pub position: Option<(i32, i32)>,
 }
 
 /// Every usable `[[outputs]]` entry, in file order, at most one per name.
@@ -91,7 +118,8 @@ impl OutputEntries {
     /// left with nothing to set. A `scale` that is not a finite number is
     /// dropped from its entry -- the output keeps the session default -- and
     /// one out of range is clamped, both with a warning; a `mode` that is not
-    /// `WxH` is dropped from its entry with a warning.
+    /// `WxH` is dropped from its entry with a warning; a `position` that is
+    /// not two integers is dropped from its entry with a warning.
     pub(super) fn resolve(raw: Vec<OutputEntryConfig>) -> Self {
         let mut entries: Vec<OutputEntry> = Vec::with_capacity(raw.len());
         for (index, entry) in raw.into_iter().enumerate() {
@@ -126,11 +154,15 @@ impl OutputEntries {
                 }
                 parsed
             });
-            if scale.is_none() && mode.is_none() {
+            let placed = entry
+                .position
+                .as_ref()
+                .and_then(|value| resolve_position(&entry.name, value));
+            if scale.is_none() && mode.is_none() && placed.is_none() {
                 tracing::warn!(
                     entry = position,
                     output = %entry.name,
-                    "an [[outputs]] entry sets neither scale nor mode; ignoring it"
+                    "an [[outputs]] entry sets neither scale nor mode nor position; ignoring it"
                 );
                 continue;
             }
@@ -138,6 +170,7 @@ impl OutputEntries {
                 name: entry.name,
                 scale,
                 mode,
+                position: placed,
             });
         }
         Self(entries)
@@ -185,12 +218,19 @@ impl OutputEntries {
         self.get(name).and_then(|entry| entry.mode)
     }
 
+    /// Where output `name` is placed: its entry's `position`, else `None`
+    /// (packed after the placed outputs -- see `headless.rs`'s layout).
+    pub fn position_for(&self, name: &str) -> Option<(i32, i32)> {
+        self.get(name).and_then(|entry| entry.position)
+    }
+
     /// What a reload of `fresh` over these (the live) entries changes, per
     /// output name, in the order the names first appear (live entries
-    /// first, then fresh ones): the names whose entry `scale` differs, and
-    /// the names whose entry `mode` differs. An entry added or removed
-    /// counts as a difference in each field it sets. Pure, and on the reload
-    /// path only (it allocates the two small lists).
+    /// first, then fresh ones): the names whose entry `scale` differs, those
+    /// whose entry `mode` differs, and those whose entry `position` differs.
+    /// An entry added or removed counts as a difference in each field it
+    /// sets. Pure, and on the reload path only (it allocates the small
+    /// lists).
     pub(super) fn diff(&self, fresh: &Self) -> EntriesDiff {
         let mut diff = EntriesDiff::default();
         let mut seen: Vec<&str> = Vec::with_capacity(self.0.len() + fresh.0.len());
@@ -208,53 +248,31 @@ impl OutputEntries {
             if live.and_then(|entry| entry.mode) != new.and_then(|entry| entry.mode) {
                 diff.modes.push(name.to_owned());
             }
-        }
-        diff
-    }
-
-    /// `self` (a freshly reloaded list) with every `mode` replaced by the one
-    /// `live` has for the same name: what a reload stores, since it applies
-    /// scales and refuses mode changes (see the module doc). A live entry the
-    /// fresh list dropped keeps its mode (and loses its scale); an entry
-    /// left with neither is dropped, as it would be at load.
-    pub(super) fn with_modes_of(&self, live: &Self) -> Self {
-        let mut entries: Vec<OutputEntry> = self
-            .0
-            .iter()
-            .map(|entry| OutputEntry {
-                name: entry.name.clone(),
-                scale: entry.scale,
-                mode: live.mode_for(&entry.name),
-            })
-            .collect();
-        for entry in &live.0 {
-            if entry.mode.is_some() && self.get(&entry.name).is_none() {
-                entries.push(OutputEntry {
-                    name: entry.name.clone(),
-                    scale: None,
-                    mode: entry.mode,
-                });
+            if live.and_then(|entry| entry.position) != new.and_then(|entry| entry.position) {
+                diff.positions.push(name.to_owned());
             }
         }
-        entries.retain(|entry| entry.scale.is_some() || entry.mode.is_some());
-        Self(entries)
+        diff
     }
 }
 
 /// What [`OutputEntries::diff`] found: the output names whose entry scale
-/// changed, and those whose entry mode changed.
+/// changed, those whose entry mode changed, and those whose entry position
+/// changed.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct EntriesDiff {
     pub(super) scales: Vec<String>,
     pub(super) modes: Vec<String>,
+    pub(super) positions: Vec<String>,
 }
 
 /// What `--tty` asks each connector for: `--mode` as the default, and every
-/// `[[outputs]]` entry's `mode` for its own connector. Fixed for the session
-/// (a reload refuses a changed mode -- see the module doc), and consulted at
-/// startup and on every re-probe alike, so a hotplug, a VT switch back or an
-/// unrelated uevent re-runs exactly the choice startup made instead of
-/// quietly re-modesetting a connector back to `--mode` or its preferred mode.
+/// `[[outputs]]` entry's `mode` for its own connector. The default is fixed
+/// for the session (it comes from a flag, which no reload re-reads); the
+/// per-output half follows the live entries -- a reload swaps in the fresh
+/// list and re-probes, so a hotplug, a VT switch back or an unrelated uevent
+/// re-runs exactly the choice the last reload made instead of quietly
+/// re-modesetting a connector back to `--mode` or its preferred mode.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ModeRequests {
     default: Option<(u16, u16)>,
@@ -272,6 +290,16 @@ impl ModeRequests {
         }
     }
 
+    /// Swaps the per-output half for `entries`' (a reload's fresh list),
+    /// keeping the session default: what `--tty` re-probes with after a
+    /// reload changed a mode.
+    pub fn update(&mut self, entries: &OutputEntries) {
+        self.per_output = entries
+            .iter()
+            .filter_map(|entry| entry.mode.map(|mode| (entry.name.clone(), mode)))
+            .collect();
+    }
+
     /// The size connector `name` should be driven at, if one was asked for.
     pub fn for_output(&self, name: &str) -> Option<(u16, u16)> {
         self.per_output
@@ -280,6 +308,39 @@ impl ModeRequests {
             .map(|(_, mode)| *mode)
             .or(self.default)
     }
+}
+
+/// An entry's `position`, validated: exactly two integers, each fitting
+/// an `i32` (TOML integers are `i64`; anything wider cannot be a logical
+/// coordinate). Either axis may be negative, to place a monitor left of or
+/// above the origin. Anything else -- a string, a float, a lone number, a
+/// triple -- is dropped (`None`: the output packs after the placed ones)
+/// with a warning naming the entry, costing that value only.
+fn resolve_position(name: &str, value: &toml::Value) -> Option<(i32, i32)> {
+    let pair = match value {
+        toml::Value::Array(pair) if pair.len() == 2 => pair,
+        _ => {
+            tracing::warn!(
+                output = %name,
+                value = %value,
+                "an [[outputs]] position is not [x, y] (two integers, like [-1920, 0]); this output packs after the placed ones"
+            );
+            return None;
+        }
+    };
+    let mut axes = [0i32; 2];
+    for (index, value) in pair.iter().enumerate() {
+        let Some(axis) = value.as_integer().and_then(|axis| i32::try_from(axis).ok()) else {
+            tracing::warn!(
+                output = %name,
+                value = %value,
+                "an [[outputs]] position is not [x, y] (two integers, like [-1920, 0]); this output packs after the placed ones"
+            );
+            return None;
+        };
+        axes[index] = axis;
+    }
+    Some((axes[0], axes[1]))
 }
 
 /// An entry's `scale`, resolved the way `[output] scale` is -- clamped into

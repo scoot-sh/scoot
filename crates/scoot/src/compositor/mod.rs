@@ -196,8 +196,13 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // binds` lists beside the live rows (see `binds.rs`).
     state.skipped_binds = loaded.skipped_binds;
     // Before any output exists: `headless::create_output` decides each
-    // output's scale from these by name, the primary's included.
+    // output's scale from these by name, the primary's included -- and
+    // `headless_size` below sizes the outputs the file leaves unplaced.
     state.output_entries = output_entries;
+    // The headless session-default size, for a reload that removes an
+    // entry's mode (back to what a fresh output is created at). `--tty`
+    // never reads it: there the connector's probe decides.
+    state.default_size = (!options.tty).then_some((options.width, options.height));
 
     // `--tty` picks its own size from the connector's preferred mode (or
     // the `--mode` the user named) -- there's no host to negotiate a size

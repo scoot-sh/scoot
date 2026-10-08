@@ -15,6 +15,7 @@ use smithay::utils::{Logical, Point, Transform};
 
 use super::State;
 use super::output_clip::placed_on;
+use super::output_config::OutputEntries;
 use super::output_identity::OutputIdentity;
 use super::output_scale::smithay_scale;
 use super::reconnect::DisplacedOutput;
@@ -58,6 +59,10 @@ pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Er
 /// labels the screen the way it would under any other compositor, or
 /// [`OUTPUT_NAME`] where there is no connector.
 ///
+/// At its `[[outputs]]` position when the file places it, else at the
+/// origin -- so a session whose primary is placed starts placed, exactly
+/// where a reload would put it.
+///
 /// The output this creates is the one [`Outputs::primary`] hands back;
 /// [`add_output`] puts further outputs beside it -- each with its own
 /// [`Backend`] -- and refuses to run before it. Returns the id the output was
@@ -72,7 +77,8 @@ pub fn init_named(
     height: i32,
     scanout: ScanoutHandoff,
 ) -> Result<OutputId, Box<dyn Error>> {
-    let output = create_output(state, name, width, height, (0, 0));
+    let position = state.output_entries.position_for(name).unwrap_or((0, 0));
+    let output = create_output(state, name, width, height, position);
 
     // The renderer the session resolved at startup (`render::resolve`, then
     // `tty::init`'s own fallback), not a per-call choice:
@@ -125,6 +131,7 @@ pub fn init_named(
     let id = state.outputs.add(output);
     state.backends.insert(id, backend);
     state.note_output_scales();
+    state.note_primary_origin();
     // Name-only: the connector-less backends (and every test) identify by
     // name alone. `--tty` upgrades this to the full connector identity once
     // it knows it (`State::note_output_identity`); the primary is the first
@@ -160,8 +167,9 @@ pub fn init_named(
     Ok(id)
 }
 
-/// Adds another headless output immediately to the right of the last one, and
-/// hands back the core id it was filed under.
+/// Adds another headless output -- at its `[[outputs]]` position when the
+/// file places it, else immediately past the right edge of every output
+/// there is -- and hands back the core id it was filed under.
 ///
 /// This is what `--headless --outputs N` builds outputs 2..N with (see
 /// `cli.rs`). It creates a real `wl_output` global, maps the output into the
@@ -169,6 +177,11 @@ pub fn init_named(
 /// core gives it its own scrolling strip -- plus a render target of its own,
 /// built with the session's renderer at the same size, so the render loop
 /// composites every output's own strip.
+///
+/// A new output never moves an existing one: a placed replug lands exactly
+/// on its entry while its neighbours stay where they are (the next full
+/// layout -- a rescale, a removal, a mode change, or a reload that moves a
+/// position -- repacks the unplaced outputs behind it).
 ///
 /// Refuses before [`init_named`] has run rather than trusting `run`'s call
 /// order: a later output must never become the primary, and there must never
@@ -201,25 +214,8 @@ pub fn add_output_with(
     if state.outputs.is_empty() || state.backends.is_empty() {
         return Err("an additional output needs the primary one to exist first".into());
     }
-    // Measured off the previous output's *logical* geometry, not off `width`:
-    // at `[output] scale = 2` a 1600px mode is 800 logical pixels wide, and
-    // stepping by the physical width would leave a gap between the two
-    // outputs that no pointer coordinate belongs to. `Space` and the core
-    // both work in logical coordinates, so this is the one that makes them
-    // adjacent.
-    //
-    // Saturating because the sum is client-independent but not
-    // config-independent: `MAX_OUTPUTS` modes of `MAX_OUTPUT_DIMENSION` at the
-    // `[output] scale` floor come to ~1e6, four orders inside `i32`, and a
-    // saturated edge would merely stack two outputs rather than wrap into
-    // negative coordinates.
-    let x = state
-        .outputs
-        .last()
-        .and_then(|previous| state.space.output_geometry(previous))
-        .map(|geometry| geometry.loc.x.saturating_add(geometry.size.w))
-        .unwrap_or(0);
-    let output = create_output(state, name, width, height, (x, 0));
+    let position = state.origin_for_new_output(name);
+    let output = create_output(state, name, width, height, position);
     // The render target behind this output: same renderer, same size as the
     // primary's. Built before the output is registered with `State::outputs`
     // or the core, and a failure takes back the two things `create_output`
@@ -253,6 +249,7 @@ pub fn add_output_with(
     // scale refresh -- which the `apply()` below, and the restore after it,
     // then use to tell any window moved onto it (see `output_scale.rs`).
     state.note_output_scales();
+    state.note_primary_origin();
     // Name-only, like the primary above (`--tty` upgrades it after). Then
     // the restore: an output added under an identity a removed output filed
     // gets that output's still-open windows back (`State::restore_displaced`
@@ -319,6 +316,7 @@ pub(crate) fn add_output_without_backend(
     let scale = super::output_scale::scale_of(&output);
     let id = state.outputs.add(output);
     state.note_output_scales();
+    state.note_primary_origin();
     // Name-only, like the other add paths, then the added event and the
     // restore: a harness output added under a removed output's name gets
     // its windows back the same way a hotplugged monitor does, and tells
@@ -380,6 +378,38 @@ fn create_output(
     set_mode(&output, width, height, Some(position.into()), scale);
     state.space.map_output(&output, position);
     output
+}
+
+/// Lays one output into a running left-to-right layout: where an output
+/// `width` logical pixels wide goes, and where the cursor -- the origin
+/// the next unplaced output takes -- steps to afterwards.
+///
+/// A placed output (one with an `[[outputs]]` `position`) goes exactly to
+/// its entry, and the cursor steps past its right edge when that is further
+/// right than the cursor already is, so outputs created after a placed one
+/// land behind it. An output without one goes to the cursor at y `0`. The
+/// cursor only ever advances, so an earlier output -- the primary
+/// included -- never moves aside for a later placed one, and two passes
+/// over an unchanged session agree.
+///
+/// Pure (the entries are passed, not read off `State`) so the rule pins
+/// without a backend. Saturating: the cursor is config-derived, and at
+/// `MAX_OUTPUTS` modes of `MAX_OUTPUT_DIMENSION` at the `[output] scale`
+/// floor it comes to ~1e6, four orders inside `i32`; a saturated edge
+/// merely stacks two outputs rather than wrapping one into negative
+/// coordinates.
+fn place_in_layout(
+    cursor: i32,
+    name: &str,
+    width: i32,
+    entries: &OutputEntries,
+) -> ((i32, i32), i32) {
+    if let Some(position) = entries.position_for(name) {
+        let right = position.0.saturating_add(width);
+        (position, cursor.max(right))
+    } else {
+        ((cursor, 0), cursor.saturating_add(width))
+    }
 }
 
 /// The `wl_output` global [`create_output`] made for an output.
@@ -1293,12 +1323,12 @@ impl State {
     ///
     /// Each output keeps its physical mode -- only the advertised scale
     /// moves, through the same `set_mode` startup uses, so bound `wl_output`
-    /// clients hear the new integer -- and the outputs are recompacted
-    /// order-preservingly onto the new logical widths (each sits immediately
-    /// right of the previous one's new right edge, exactly the fold
-    /// `add_output` builds fresh sessions with), so a rescaled session ends
-    /// up laid out like a session started at the new scale rather than
-    /// preserving stale positions into a gap or an overlap. The new logical
+    /// clients hear the new integer -- and the outputs are re-laid-out with
+    /// placed outputs staying exactly on their entries and unplaced ones
+    /// repacking behind them (see [`place_in_layout`]), so a rescaled
+    /// session ends up laid out like a session started at the new scale
+    /// rather than preserving stale positions into a gap or an overlap
+    /// (beyond the ones the file places on purpose). The new logical
     /// geometry (see `output_scale.rs`'s `logical_size`) is filed with the
     /// core per output, position included (unlike `resize_output`'s
     /// origin-only rectangle, which is correct only for its single-output
@@ -1314,9 +1344,13 @@ impl State {
     /// and the core areas) reads, rewritten by re-mapping the already-mapped
     /// output, and the Output-side location the wire (`wl_output.geometry`,
     /// `xdg_output.logical_position`, the output-management heads)
-    /// advertises, re-sent through `set_mode`'s location. Passing a location
-    /// `set_mode` never touches the Space side, and mapping never announces
-    /// anything -- either half alone leaves the two disagreeing.
+    /// advertises, re-sent through a second `change_current_state` carrying
+    /// only the location. The scale goes first through `set_mode` without a
+    /// location (so the new logical width the layout needs is already what
+    /// `logical_size` reads), then the position follows for the outputs
+    /// that moved -- two announcements on a cold path rather than one, and
+    /// the two stores still agree at the end, which is the invariant (see
+    /// the paragraph above) rather than the call count.
     ///
     /// Deliberately *not* rebuilding any render target: the framebuffer is
     /// physical pixels, and a pure scale change leaves every output's
@@ -1338,9 +1372,14 @@ impl State {
         // beyond the one small `Vec` this cold path keeps.
         let count = self.outputs.len();
         let mut moved: Vec<(OutputId, Output, Rect)> = Vec::new();
-        // The running left edge, in the new logical pixels. Saturating like
-        // `add_output`, for the same config-scale overflow rationale.
-        let mut x = 0i32;
+        // The running origin, in the new logical pixels: placed outputs go
+        // to their entries, unplaced ones pack behind them (see
+        // `place_in_layout`). The new width each step needs is what
+        // `logical_size` reads once the scale below has moved -- the same
+        // `ceil` the `Space` re-derives on the re-map, so the cursor and the
+        // filed geometry agree by construction rather than by a second
+        // rounding.
+        let mut cursor = 0i32;
         for index in 0..count {
             let Some((id, output)) = self.outputs.at(index) else {
                 continue;
@@ -1354,7 +1393,18 @@ impl State {
                 continue;
             };
             let scale = self.configured_scale(&output.name());
-            let position = Point::<i32, Logical>::from((x, 0));
+            // The scale first, without a location: bound `wl_output`
+            // clients hear the new integer through the same `set_mode`
+            // startup uses, and `logical_size` below already reads the new
+            // logical width. The position follows after the re-map, for the
+            // outputs that moved, through a location-only
+            // `change_current_state` (see the method doc).
+            set_mode(&output, mode.size.w, mode.size.h, None, scale);
+            let (width, _) = super::output_scale::logical_size(&output);
+            let (origin, stepped) =
+                place_in_layout(cursor, &output.name(), width, &self.output_entries);
+            cursor = stepped;
+            let position = Point::<i32, Logical>::from(origin);
             // `None` where the output already sits there, so nothing
             // re-announces an identical geometry: a single-output session
             // recompacts onto its own origin, and its wire traffic stays
@@ -1366,7 +1416,9 @@ impl State {
                 .unwrap_or(true)
                 .then_some(position);
             self.space.map_output(&output, position);
-            set_mode(&output, mode.size.w, mode.size.h, location, scale);
+            if let Some(location) = location {
+                output.change_current_state(None, None, None, Some(location));
+            }
             let Some(geometry) = self.space.output_geometry(&output) else {
                 // Unreachable even beyond the mode arm above: the output was
                 // just (re-)mapped into this space. Same loud-skip rule.
@@ -1379,7 +1431,10 @@ impl State {
                     .is_none_or(|backend| backend.size() == (mode.size.w, mode.size.h)),
                 "a pure scale change must leave the physical render target alone"
             );
-            x = x.saturating_add(geometry.size.w);
+            debug_assert_eq!(
+                geometry.size.w, width,
+                "the Space must re-derive the logical width `logical_size` reads"
+            );
             moved.push((
                 id,
                 output,
@@ -1395,6 +1450,7 @@ impl State {
             // As on a resize: a drag measured against the old geometry ends.
             self.end_floating_grab();
         }
+        self.note_primary_origin();
         for (id, output, area) in &moved {
             // A lock surface's configured size is an *exact* requirement
             // (see `resize_output`); a rescaled output reconfigures its own
@@ -1660,12 +1716,57 @@ impl State {
         true
     }
 
-    /// Re-tiles the outputs side by side, left to right in creation order,
-    /// at the current scale -- the layout startup builds (`add_output` places
-    /// each one at the previous one's right edge) -- after something changed
-    /// an output's width or took one away. Returns whether any output moved.
+    /// Where a newly added output `name` goes: its `[[outputs]]` position
+    /// when the file places it, else immediately past the right edge of
+    /// every output there is (the union's right edge, `0` when there is
+    /// nothing to measure -- which `add_output_with` rules out before
+    /// calling) at y `0`.
     ///
-    /// Only outputs whose left edge actually changes are touched: re-mapped
+    /// Measured off the union, not off the previous output: at
+    /// `[output] scale = 2` a 1600px mode is 800 logical pixels wide, and
+    /// stepping by the physical width would leave a gap no pointer
+    /// coordinate belongs to. `Space` and the core both work in logical
+    /// coordinates, so the union's logical right edge is the one that makes
+    /// a new output adjacent. Saturating, for the same config-scale
+    /// overflow rationale as [`place_in_layout`].
+    fn origin_for_new_output(&self, name: &str) -> (i32, i32) {
+        if let Some(position) = self.output_entries.position_for(name) {
+            return position;
+        }
+        let mut right = 0i32;
+        for output in self.outputs.iter() {
+            if let Some(geometry) = self.space.output_geometry(output) {
+                right = right.max(geometry.loc.x.saturating_add(geometry.size.w));
+            }
+        }
+        (right, 0)
+    }
+
+    /// Remembers where the primary output sits for the single-output
+    /// pointer paths (`clamp_to_output_union`'s fast path and the cursor's
+    /// startup centre both assume they know it without a `Space` lookup).
+    /// The primary's origin with exactly one output, `(0, 0)` otherwise --
+    /// always recomputed, never carried, so no layout pass can leave it
+    /// stale. Called wherever outputs appear, move or go away.
+    fn note_primary_origin(&mut self) {
+        self.primary_origin = match self.outputs.len() {
+            1 => self
+                .outputs
+                .primary()
+                .and_then(|output| self.space.output_geometry(output))
+                .map(|geometry| (geometry.loc.x, geometry.loc.y))
+                .unwrap_or((0, 0)),
+            _ => (0, 0),
+        };
+    }
+
+    /// Re-tiles the outputs after something changed an output's width or
+    /// took one away: placed outputs stay exactly on their `[[outputs]]`
+    /// positions, unplaced ones pack left to right in creation order from
+    /// the origin, stepping over the placed ones (see [`place_in_layout`]).
+    /// Returns whether any output moved.
+    ///
+    /// Only outputs whose origin actually changes are touched: re-mapped
     /// in the `Space`, their new position announced on the wire
     /// (`wl_output.geometry`, `xdg_output.logical_position`) through
     /// `change_current_state` with nothing but the location, and an
@@ -1681,9 +1782,7 @@ impl State {
     pub(super) fn repack_outputs(&mut self) -> bool {
         let count = self.outputs.len();
         let mut moved: Vec<(OutputId, Output, Rect)> = Vec::new();
-        // Saturating like `add_output`, for the same config-scale overflow
-        // rationale.
-        let mut x = 0i32;
+        let mut cursor = 0i32;
         for index in 0..count {
             let Some((id, output)) = self.outputs.at(index) else {
                 continue;
@@ -1691,8 +1790,14 @@ impl State {
             let Some(geometry) = self.space.output_geometry(&output) else {
                 continue;
             };
-            let position = Point::<i32, Logical>::from((x, 0));
-            x = x.saturating_add(geometry.size.w);
+            let (origin, stepped) = place_in_layout(
+                cursor,
+                &output.name(),
+                geometry.size.w,
+                &self.output_entries,
+            );
+            cursor = stepped;
+            let position = Point::<i32, Logical>::from(origin);
             if geometry.loc == position {
                 continue;
             }
@@ -1704,6 +1809,7 @@ impl State {
                 Rect::new(position.x, position.y, geometry.size.w, geometry.size.h),
             ));
         }
+        self.note_primary_origin();
         if moved.is_empty() {
             return false;
         }

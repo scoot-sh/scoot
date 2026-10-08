@@ -54,7 +54,6 @@ fn an_empty_collection_has_no_primary_and_nothing_to_find() {
     assert!(outputs.primary().is_none());
     assert!(outputs.primary_id().is_none());
     assert!(outputs.primary_entry().is_none());
-    assert!(outputs.last().is_none());
     assert!(outputs.get(OutputId(1)).is_none());
     assert_eq!(outputs.iter().count(), 0);
 }
@@ -82,13 +81,10 @@ fn the_primary_output_is_the_first_one_added() {
     let first = output_named("headless");
     let second = output_named("headless-2");
     let first_id = outputs.add(first.clone());
-    outputs.add(second.clone());
+    outputs.add(second);
     assert_eq!(outputs.primary(), Some(&first));
     assert_eq!(outputs.primary_id(), Some(first_id));
     assert_eq!(outputs.primary_entry(), Some((first_id, &first)));
-    // ...and `last` is the other end, which is where `add_output` measures
-    // the next output's position from.
-    assert_eq!(outputs.last(), Some(&second));
 }
 
 #[test]

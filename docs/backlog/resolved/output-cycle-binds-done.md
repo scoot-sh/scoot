@@ -40,7 +40,7 @@ right as the outputs are packed", so left and right already have a meaning.
   `-index N` actions stay for anyone who wants a fixed screen.
 - **Order**: by geometry, x then y, which today equals creation order because the
   outputs are packed left to right. Say so, so it stays right when outputs become
-  placeable (see [output-position-and-live-mode](output-position-and-live-mode.md)).
+  placeable (see [output-position-and-live-mode](output-position-and-live-mode-done.md)).
 - **Naming** (settle it): `focus-output left|right` matches the workspace pair
   (`focus-workspace up|down` beside `focus-workspace-index N`) but overloads
   `focus-output ID`; a distinct verb avoids the overload. Whatever is chosen
