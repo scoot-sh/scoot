@@ -34,14 +34,29 @@
 //! The name, after one accepted trailing `.png` is stripped, is at most
 //! 128 bytes with no `/`, no NUL and no leading dot: no traversal, no
 //! absolute path, no hidden file. `.svg`/`.xpm` names stay
-//! hidden, as does any other unresolvable name. `IconThemePath` must
+//! hidden, as does any other unresolvable name. Only lowercase `.png`
+//! is stripped (an `IconName` is a name without extension; a trailing
+//! `.PNG` names no file the lookup probes, so it stays hidden like any
+//! other unresolvable name, unless a real app trips over it).
+//! `IconThemePath` must
 //! be an absolute path with no `..` component. Every candidate is
 //! resolved with `canonicalize` (a symlink loop is the kernel's `ELOOP`)
 //! and must stay under its base's canonical form, else it is skipped.
-//! The open itself is `O_NONBLOCK`/`O_NOFOLLOW` and the opened fd is
-//! checked for a regular file under the size cap, so a path swapped to
-//! a FIFO, device or symlink between the resolve and the open can never
-//! block the bus turn. The file is at most 8 MiB, the decoder's budget
+//! The open itself goes through `openat2` with `RESOLVE_BENEATH` against
+//! the base directory fd, so an intermediate component swapped after the
+//! `canonicalize` check (a same-user peer controlling its own
+//! `IconThemePath` directory) cannot escape the base: the kernel refuses
+//! the escape with `EXDEV` and the name stays hidden. `O_NONBLOCK`/
+//! `O_NOFOLLOW` and the opened fd's regular-file check still hold, so a
+//! path swapped to a FIFO, device or trailing symlink between the check
+//! and the open can never block the bus turn. The remaining swap the
+//! kernel cannot close is the base directory itself (a peer that owns
+//! its `IconThemePath` can always point it at bytes it could already
+//! read): same-user threat model, payoff no more than `kill`, impact
+//! capped at decoding a PNG the attacker could already read.
+//! Relative `$XDG_DATA_DIRS` entries are skipped outright (the variable
+//! is the bar's own environment; a relative entry would resolve against
+//! the bar's working directory and at best miss). The file is at most 8 MiB, the decoder's budget
 //! 16 MiB, the header's size checked before any pixel buffer exists (at
 //! most 512 a side, 1 M pixels: a decompression bomb declaring a huge
 //! image is refused after a few dozen bytes). The stored entry is at
@@ -89,7 +104,10 @@ pub const MAX_THEME_TOTAL_BYTES: usize =
 /// The size the lookup targets when no output size is known (the bus
 /// turn has none): 24 device pixels, the middle of the 14-48 tray range
 /// (the default font's 14 at scale 1 to a large font at scale 2), where
-/// the 22 and 24 dirs real themes ship bracket it.
+/// the 22 and 24 dirs real themes ship bracket it. A compromise at HiDPI
+/// by design: the shared cache scales the stored entry smoothly to the
+/// output's device pixels like a pixmap, so the lookup needs only the
+/// closest kept size, not the exact one.
 pub const LOOKUP_SIDE: u32 = 24;
 
 /// Fixed size directories probed under each base's `hicolor`, with the
@@ -169,12 +187,22 @@ fn data_home() -> Option<PathBuf> {
 fn data_dirs() -> Vec<PathBuf> {
     if let Some(dirs) = std::env::var_os("XDG_DATA_DIRS") {
         if !dirs.is_empty() {
-            return std::env::split_paths(&dirs).collect();
+            return data_dirs_from(&dirs);
         }
     }
     ["/usr/local/share", "/usr/share"]
         .iter()
         .map(PathBuf::from)
+        .collect()
+}
+
+/// Splits an `XDG_DATA_DIRS` value the way [`data_dirs`] does, keeping
+/// only absolute entries: the variable is the bar's own environment, and
+/// a relative entry would resolve against the bar's working directory
+/// (usually `/`), so at best it misses. Skipped explicitly, never fatal.
+fn data_dirs_from(dirs: &std::ffi::OsStr) -> Vec<PathBuf> {
+    std::env::split_paths(dirs)
+        .filter(|dir| dir.is_absolute())
         .collect()
 }
 
@@ -203,7 +231,9 @@ pub fn load_for_side(
     side: u32,
 ) -> Option<TrayIcon> {
     // An `IconName` is a name without extension, but many apps send one
-    // with: one trailing `.png` names the file it decodes to, while
+    // with: one trailing lowercase `.png` names the file it decodes to
+    // (uppercase `.PNG` is left alone and stays hidden, like any other
+    // unresolvable name), while
     // `.svg`/`.xpm` name formats the bar never decodes, so they stay
     // hidden like any other unresolvable name.
     if name.ends_with(".svg") || name.ends_with(".xpm") {
@@ -279,15 +309,112 @@ fn closest_order(side: u32) -> [&'static str; 8] {
 /// decodes it: symlink escapes, loops and oversized files are skipped,
 /// never fatal.
 fn read_if_inside(item_id: &str, base: &Path, candidate: &PathBuf) -> Option<TrayIcon> {
+    read_if_inside_impl(item_id, base, candidate, None)
+}
+
+/// [`read_if_inside`], with a seam for the race test: `between`, when
+/// set, runs after the `canonicalize` containment check and before the
+/// contained open, so a test can swap an intermediate directory component
+/// the way a same-user peer owning its `IconThemePath` could. Production
+/// passes `None` (one extra branch, no allocation).
+fn read_if_inside_impl(
+    item_id: &str,
+    base: &Path,
+    candidate: &PathBuf,
+    between: Option<&dyn Fn()>,
+) -> Option<TrayIcon> {
     let canonical = std::fs::canonicalize(candidate).ok()?;
     if !canonical.starts_with(base) {
         return None;
     }
-    read_file(item_id, &canonical)
+    if let Some(swap) = between {
+        swap();
+    }
+    // The contained open closes the intermediate-component swap the
+    // check above cannot: `RESOLVE_BENEATH` refuses any escape past the
+    // base with `EXDEV`, atomically in the kernel.
+    let file = open_contained(base, candidate).or_else(|| read_file_fallback(&canonical))?;
+    read_from_file(item_id, file)
+}
+
+/// Opens `candidate` (built as `base` plus a relative suffix) contained
+/// under `base` with `openat2` `RESOLVE_BENEATH`: an intermediate symlink
+/// swapped in after the `canonicalize` check cannot escape. `None` on any
+/// refusal, including an escape (`EXDEV`), a trailing symlink
+/// (`O_NOFOLLOW`), or a kernel without `openat2` (`ENOSYS`, left for the
+/// fallback below).
+fn open_contained(base: &Path, candidate: &Path) -> Option<std::fs::File> {
+    use rustix::fs::{Mode, OFlags, ResolveFlags};
+    let relative = candidate.strip_prefix(base).ok()?;
+    let base_fd = rustix::fs::open(
+        base,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .ok()?;
+    let fd = rustix::fs::openat2(
+        &base_fd,
+        relative,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+        ResolveFlags::BENEATH,
+    )
+    .ok()?;
+    Some(std::fs::File::from(fd))
+}
+
+/// The pre-`openat2` open, kept as the `ENOSYS` fallback only: kernels
+/// before 5.6 have no `openat2`, so a contained open is impossible there
+/// and the `canonicalize` check plus `O_NOFOLLOW`/`O_NONBLOCK` is still
+/// better than hiding every themed icon. It never runs on a kernel that
+/// refused an escape (`EXDEV` stays refused): [`open_contained`] maps
+/// every `openat2` error to `None`, and only this fallback's own `None`
+/// hides the icon.
+fn read_file_fallback(canonical: &Path) -> Option<std::fs::File> {
+    use rustix::fs::{Mode, OFlags};
+    // Probe once whether `openat2` exists at all: kernels before 5.6
+    // return `ENOSYS`. Newer kernels that refused this very path (an
+    // escape, a trailing symlink) must not fall through to an
+    // unconstrained open, so the fallback opens nothing unless the
+    // syscall itself is missing. The probe costs one failed `openat2`
+    // per fallback call, which runs only when the contained open already
+    // failed (a miss, never per frame).
+    if !openat2_missing() {
+        return None;
+    }
+    let fd = rustix::fs::open(
+        canonical,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .ok()?;
+    Some(std::fs::File::from(fd))
+}
+
+/// Whether this kernel has no `openat2` syscall (before 5.6): the one
+/// case the contained open cannot cover. Probed with `CWD` and an empty
+/// path so no filesystem path is touched; re-probed per fallback call (a
+/// miss path only, never per frame).
+fn openat2_missing() -> bool {
+    use rustix::fs::{Mode, OFlags, ResolveFlags};
+    matches!(
+        rustix::fs::openat2(
+            rustix::fs::CWD,
+            std::path::Path::new(""),
+            OFlags::RDONLY,
+            Mode::empty(),
+            ResolveFlags::empty(),
+        ),
+        Err(rustix::io::Errno::NOSYS)
+    )
 }
 
 /// Reads the resolved `path` and decodes it: symlink escapes, loops
 /// and oversized files are skipped, never fatal.
+///
+/// Test-only: the FIFO watchdog test's direct call (it opens without a
+/// base, exactly the old semantics; the lookup itself goes through
+/// [`read_if_inside`]'s contained open above).
 ///
 /// The open never blocks the bus turn: `O_NONBLOCK` means a FIFO or
 /// socket opened here (a path swapped between the `canonicalize` above
@@ -298,16 +425,24 @@ fn read_if_inside(item_id: &str, base: &Path, candidate: &PathBuf) -> Option<Tra
 /// miss stays tracked-but-hidden). The size cap is re-checked on the
 /// opened fd's own metadata, and the read is bounded by the cap, so a
 /// file growing during the read is refused rather than over-read.
+#[cfg(test)]
 fn read_file(item_id: &str, path: &Path) -> Option<TrayIcon> {
     use rustix::fs::{Mode, OFlags};
     use std::os::fd::OwnedFd;
     let fd: OwnedFd = rustix::fs::open(
         path,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
         Mode::empty(),
     )
     .ok()?;
-    let file = std::fs::File::from(fd);
+    read_from_file(item_id, std::fs::File::from(fd))
+}
+
+/// Reads an opened icon file and decodes it: the shared tail of the
+/// contained open and the fallback (and the direct `read_file` above).
+/// The `fstat` refuses anything but a regular file under the size cap
+/// before a byte is read, and the read stays `take`-bounded.
+fn read_from_file(item_id: &str, file: std::fs::File) -> Option<TrayIcon> {
     let meta = file.metadata().ok()?;
     if !meta.is_file() {
         return None;
@@ -354,6 +489,12 @@ fn decode(item_id: &str, bytes: &[u8]) -> Option<TrayIcon> {
     let mut buffer = vec![0u8; size];
     let frame = reader.next_frame(&mut buffer).ok()?;
     let data = buffer.get(..frame.buffer_size())?;
+    // `Indexed` never arrives here: with `EXPAND` the png 0.18 decoder
+    // expands palette images to `Rgb`/`Rgba` before the frame is returned
+    // (see `output_color_type`: `Indexed` maps to `Rgb`, or `Rgba` with
+    // transparency), so palette PNGs decode through the arms above. The
+    // arm below pins that: keep it, so a decoder upgrade that stops
+    // expanding surfaces here as a refused icon rather than a misread one.
     let channels = match frame.color_type {
         png::ColorType::Grayscale => 1,
         png::ColorType::GrayscaleAlpha => 2,

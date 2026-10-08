@@ -1133,7 +1133,8 @@ pub struct ItemProps<'a> {
     pub icon_name: Option<&'a str>,
     pub icon_theme_path: Option<&'a str>,
     /// The attention icon's name: drawn instead of the main one while the
-    /// status is `NeedsAttention`. The overlay icon's name is walked for
+    /// status is `NeedsAttention`, for items without a pixmap (an item
+    /// that sent a pixmap keeps it while alarmed). The overlay icon's name is walked for
     /// shape and dropped (compositing it would be a second scaled draw
     /// per frame for a badge real items rarely send).
     pub attention_icon_name: Option<&'a str>,

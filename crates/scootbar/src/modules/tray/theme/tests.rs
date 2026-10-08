@@ -328,5 +328,94 @@ fn a_name_with_an_extension_resolves_like_the_bare_name() {
     assert!(load("id", "vec.svg", None, &bases).is_none());
     std::fs::write(root.join("hicolor/22x22/apps/legacy.xpm"), "/* XPM */").unwrap();
     assert!(load("id", "legacy.xpm", None, &bases).is_none());
+    // Uppercase `.PNG` is left alone and stays hidden, like any other
+    // unresolvable name (only lowercase `.png` is stripped).
+    assert!(load("id", "app.PNG", None, &bases).is_none());
     cleanup(&root);
+}
+
+#[test]
+fn relative_xdg_data_dirs_entries_are_skipped() {
+    // The bar's own environment: a relative entry would resolve against
+    // the working directory and at best miss, so it is skipped outright.
+    let dirs = super::data_dirs_from(std::ffi::OsStr::new("relative/dir:/usr/share"));
+    assert_eq!(dirs, vec![std::path::PathBuf::from("/usr/share")]);
+    let dirs = super::data_dirs_from(std::ffi::OsStr::new("relative:also-relative"));
+    assert!(dirs.is_empty());
+    let dirs = super::data_dirs_from(std::ffi::OsStr::new("/usr/local/share:/usr/share"));
+    assert_eq!(
+        dirs,
+        vec![
+            std::path::PathBuf::from("/usr/local/share"),
+            std::path::PathBuf::from("/usr/share"),
+        ]
+    );
+}
+
+#[test]
+fn a_palette_png_decodes_through_expand() {
+    // png 0.18 with `EXPAND` maps `Indexed` to `Rgb`/`Rgba` before the
+    // frame is returned, so the `Indexed => return None` arm in `decode`
+    // is unreachable and palette icons draw. This pins that: a 4x4
+    // indexed PNG with a two-entry palette decodes.
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, 4, 4);
+        encoder.set_color(png::ColorType::Indexed);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_palette(vec![200, 30, 30, 30, 200, 30]);
+        let mut writer = encoder.write_header().unwrap();
+        writer
+            .write_image_data(&[0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0])
+            .unwrap();
+    }
+    let icon = super::decode("item-id", &bytes).expect("a palette PNG decodes");
+    assert_eq!(icon.side(), 4);
+}
+
+#[test]
+fn an_intermediate_swap_after_the_check_stays_contained() {
+    // A same-user peer owning its `IconThemePath` can swap an intermediate
+    // directory component after the `canonicalize` containment check: the
+    // contained `openat2` open with `RESOLVE_BENEATH` still refuses the
+    // escape. The seam runs the swap between the check and the open, so
+    // this fails on the old plain-open path (it decodes the outside file)
+    // and passes with the contained open (it stays hidden).
+    let root = scratch("race-base");
+    let outside = scratch("race-outside");
+    let dir = root.join("hicolor/22x22/apps");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("victim.png"), encode_png(4, 4, [200, 30, 30, 255])).unwrap();
+    let outside_apps = outside.join("apps");
+    std::fs::create_dir_all(&outside_apps).unwrap();
+    std::fs::write(
+        outside_apps.join("victim.png"),
+        encode_png(4, 4, [30, 200, 30, 255]),
+    )
+    .unwrap();
+    let base = std::fs::canonicalize(&root).unwrap();
+    let candidate = base.join("hicolor/22x22/apps/victim.png");
+    assert!(
+        std::fs::canonicalize(&candidate)
+            .unwrap()
+            .starts_with(&base)
+    );
+    let swapped = super::read_if_inside_impl(
+        "item-id",
+        &base,
+        &candidate,
+        Some(&|| {
+            // Swap `22x22` for a symlink to the outside tree: the absolute
+            // canonical path above now resolves outside.
+            let link = base.join("hicolor/22x22");
+            let real = base.join("hicolor/22x22-real");
+            std::fs::rename(&link, &real).unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&outside, &link).unwrap();
+        }),
+    );
+    #[cfg(unix)]
+    assert!(swapped.is_none(), "an intermediate swap escaped the base");
+    cleanup(&root);
+    cleanup(&outside);
 }

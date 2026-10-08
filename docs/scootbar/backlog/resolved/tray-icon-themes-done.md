@@ -42,7 +42,7 @@ Menus (landed with [tray](resolved/tray-done.md)); tooltip icons.
 ## Status (2026-10-07): themed names draw through the shared icon cache
 
 `IconName` (and `AttentionIconName` while `NeedsAttention`, preferring
-it over the main name) resolves through a `hicolor` lookup across
+it over the main name for items without a pixmap) resolves through a `hicolor` lookup across
 `IconThemePath` first, then `$XDG_DATA_DIRS`/`$XDG_DATA_HOME` and the
 legacy `/usr/share/pixmaps`, and decodes PNG only, with the `png`
 decoder the `icon-image` feature already carries (same 0.18.1 lock
@@ -62,20 +62,20 @@ work (the bar knows no theme setting yet). Theme changes arrive
 lazily, on the item's next update or restart: nothing polls the theme
 directories.
 
-Measurement note, stated plainly for the maintainer: the Linux
-resource numbers the ticket requires (release `.text`/file size, idle
-RSS, wakeups, per-icon lookup cost, base-vs-head over several runs)
-were NOT captured here — the dev VM is down and this lane had no
-Linux builder, so no `cargo test`/`nextest`/`clippy` ran on the change
-either. The size row will regress by roughly the `icon-image`
-decoder's known +115 KB (the `tray` feature now enables `dep:png`;
-the default build carries it), plus the lookup code itself: that row
-needs a ruling, or a smaller design (e.g. gating themed icons behind
-`icon-image`, which keeps the default lean but leaves IconName-only
-items invisible there). Live proof with pasystray/CopyQ/KeePassXC is
-likewise outstanding for whoever has the hardware: the pasystray case
-is covered by a fixture-theme test (`IconName`-only answers draw once
-resolved, attention prefers the alarm name, missing names stay
-hidden), and the traversal/bomb cases by unit tests. `cargo deny
-check` passes; `scripts/backlog check` shows only its 3 pre-existing
-problems.
+Measurement note (corrected 2026-10-08: the paragraph below first said
+no Linux numbers were captured; they were, in the PR body, the proof
+round and the reviews, and the maintainer waived the size row on
+2026-10-07): release builds (`lto = "fat"`, stripped, aarch64) against
+`main` at `ae10e90bc` measure the themed-icon decoder at release file
++131,072 B, `.text` +65,760 B, `.rodata` +24,568 B in the default build;
+idle wakeups, fds and threads do not move, and the idle RSS reading
+(+about 150 kB over base, inside the run-to-run noise) stays a
+measurement, not an accepted cost. The gated alternative (themed icons
+behind `icon-image`, default build +2,272 B `.text`) was measured and not
+chosen. See the [resource ratchet](lightest.md) for the table and the
+2026-10-07 waiver, which covers this row only. The pasystray case is
+covered by a fixture-theme test (`IconName`-only answers draw once
+resolved, attention prefers the alarm name for items without a pixmap,
+missing names stay hidden), and the traversal/bomb cases by unit tests.
+`cargo deny check` passes; `scripts/backlog check` shows only its 3
+pre-existing problems.

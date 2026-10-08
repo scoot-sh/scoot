@@ -527,10 +527,13 @@ socket is one more source in the `poll` loop), which is the
   `IconThemePath` first): PNG files, decoded once per icon version
   (downscaled to at most 64 a side, the pixmap bound) through the same
   cache, at the output's device pixels like a pixmap. The size dir
-  closest to the drawn size wins; a trailing `.png` on the name is
-  accepted, `.svg`/`.xpm` stay hidden.
+  closest to the drawn size wins (looked up for 24 device pixels where
+  the bus turn knows no output size; the cache scales smoothly to the
+  real size, including HiDPI); a trailing lowercase `.png` on the name is
+  accepted (`.PNG` stays hidden), `.svg`/`.xpm` stay hidden.
   While `NeedsAttention` the attention name is drawn instead of the
-  main one. An item whose `Status` is `Passive` (the spec's "hide
+  main one, for items without a pixmap (an item that sent a pixmap
+  keeps it while alarmed). An item whose `Status` is `Passive` (the spec's "hide
   me"), or whose name resolves to nothing (missing theme, SVG-only,
   hostile name), is tracked and reachable by index but takes no room.
   Overlay icons are read for shape and not drawn (compositing a badge
