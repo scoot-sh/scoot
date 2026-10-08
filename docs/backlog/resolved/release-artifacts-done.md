@@ -31,7 +31,7 @@ releases; installs are from source or Nix.
   aarch64 machine is a NixOS box, so this must not depend on it being on.
 - **One reference build**: decide whether release binaries come from `nix build`
   (bit-for-bit what Nix users get) or from `cargo` in a distro container, and
-  say which; the distro packages ([arch](arch-package-done.md), [deb](deb-package.md),
+  say which; the distro packages ([arch](arch-package-done.md), [deb](deb-package-done.md),
   [rpm](rpm-package.md)) build from the source tarball instead.
 - **Changelog per package**, in the repo, written at release time; user-facing
   changes and config or protocol breaks called out.

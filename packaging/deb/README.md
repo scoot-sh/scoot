@@ -99,11 +99,13 @@ asserted in CI, so one build runs on trixie, noble and newer.
   changelog, a `README.Debian`, and a starting `bar.toml.example`
   (proven valid: `scootbar daemon --check` prints `ok`).
 
-Lintian posture: no errors; the one standing warning is
-`no-manual-page` on each binary (explained, not overridden -- the
-binaries' `--help` plus the site reference are the documentation;
-manpages are a later addition, not this ticket). `Standards-Version`
-is deliberately absent from the binary control: it belongs in source
+Lintian posture: no errors; two standing warnings, explained rather
+than overridden -- `no-manual-page` on each binary (the binaries'
+`--help` plus the site reference are the documentation; manpages are a
+later addition, not this ticket) and `initial-upload-closes-no-bugs`
+on each changelog (expected: the first upload closes no Debian bugs;
+the history lives in the release notes). `Standards-Version` is
+deliberately absent from the binary control: it belongs in source
 packaging, and bookworm's lintian flags it as `unknown-field` there.
 
 `Maintainer` names the upstream copyright holder's public commit

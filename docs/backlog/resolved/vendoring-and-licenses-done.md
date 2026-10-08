@@ -10,7 +10,7 @@ resolved: "2026-10-07"
 # Vendoring, licenses and advisories
 
 Filed 2026-09-29. Serves **daily-drive**. Every distro package
-([arch](arch-package-done.md), [deb](deb-package.md), [rpm](rpm-package.md)) starts
+([arch](arch-package-done.md), [deb](deb-package-done.md), [rpm](rpm-package.md)) starts
 here: distro builders are usually offline and want sources vendored, a
 license inventory, and to know what is forked.
 
