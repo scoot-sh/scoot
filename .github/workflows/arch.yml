@@ -123,12 +123,20 @@ jobs:
           bar_ver=$(sed -n 's/^pkgver=//p' packaging/arch/scootbar/PKGBUILD)
           git archive HEAD --prefix "scoot-scoot-v$scoot_ver/" -o .test-tarballs/scoot-test.tar.gz
           git archive HEAD --prefix "scoot-scootbar-v$bar_ver/" -o .test-tarballs/scootbar-test.tar.gz
-          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scoot-v$scoot_ver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scoot-test.tar.gz|" \
+          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scoot-v\$pkgver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scoot-test.tar.gz|" \
             packaging/arch/scoot/PKGBUILD packaging/arch/scootbg/PKGBUILD
-          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scootbar-v$bar_ver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scootbar-test.tar.gz|" \
+          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scootbar-v\$pkgver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scootbar-test.tar.gz|" \
             packaging/arch/scootbar/PKGBUILD
           sed -i "s|git+https://github.com/scoot-sh/scoot\.git|git+file://$GITHUB_WORKSPACE#commit=$GITHUB_SHA|" \
             packaging/arch/scoot-git/PKGBUILD packaging/arch/scootbg-git/PKGBUILD packaging/arch/scootbar-git/PKGBUILD
+          # Loud if a substitution missed: an unrewritten URL would
+          # otherwise fail pages later as a 404 (release) or build the
+          # wrong tree (git).
+          if grep -r 'archive/refs/tags' packaging/arch/scoot*/PKGBUILD \
+            || grep -r 'git+https' packaging/arch/*-git/PKGBUILD; then
+            echo "::error title=Test-tarball substitution missed::a source URL above was not rewritten."
+            exit 1
+          fi
           ls -l .test-tarballs
 
       # The release pkgver must name its crate's version (the trio
