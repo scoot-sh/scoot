@@ -36,7 +36,7 @@ size, shared across outputs; past 64 mappings a set is refused. State
 file format v3 (`workspace` / `workspace-output` lines with an optional
 transition trailer; older readers refuse the file whole and never write
 it away). `[wallpaper]` section keys are the deferred half, split to
-`../config-workspace-wallpapers.md`: `apply-config` leaves mappings
+`config-workspace-wallpapers-done.md`: `apply-config` leaves mappings
 alone. E2E on headless scoot (switches by real pixels, restore across
 restart); unit tests for the tracker, choices arbitration, protocol and
 format, each proven by revert-run-restore.
