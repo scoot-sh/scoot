@@ -208,14 +208,21 @@ jobs:
 
       - uses: actions/checkout@v7
 
-      - name: Install the build and lint tools
+      # One shell for the whole SUSE proof: this image has twice refused
+      # to start a new `sh` after the package transaction below (OCI
+      # "sh not found in $PATH" on the following step, with different
+      # transactions both times), while the same sequence in one shell
+      # is proven green locally. Each phase below is its own ::group::,
+      # so the log reads the same.
+      - name: Build, lint, install and prove the trio
         run: |
+          echo '::group::Install the build and lint tools'
           # The image ships busybox-gawk, which conflicts with the gawk
           # that rpm-build itself requires; the solver cancels instead of
           # resolving, so busybox-gawk goes first. That takes git with it
           # (a git-core dependency), hence git is reinstalled in the same
           # transaction below — the checkout above is already done, and
-          # vendor-release.sh below needs git back. (No desktop-file-utils
+          # the staging below needs git back. (No desktop-file-utils
           # here either: same gawk conflict. The session entry it would
           # validate is the same file the Fedora job validates, so
           # nothing goes unproven.)
@@ -229,28 +236,31 @@ jobs:
           # install it with cargo so vendor-release.sh can stage the
           # tarball. It never runs at rpmbuild time.
           cargo install cargo-deny --locked
-          echo "$HOME/.cargo/bin" >>"$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          mkdir -p "$GITHUB_WORKSPACE/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS} \
+            "$GITHUB_WORKSPACE/dist"
+          echo '::endgroup::'
 
-      # Stage FIRST, before any step writes to the checkout:
-      # vendor-release.sh refuses a dirty tree, and even an untracked
-      # scratch dir counts. Nothing above touches the working tree.
-      - name: Stage the vendored tarball
-        run: |
+          # Stage before any workspace write: vendor-release.sh refuses
+          # a dirty tree, and even an untracked scratch dir counts.
+          echo '::group::Stage the vendored tarball'
           scripts/vendor-release.sh --out "$RUNNER_TEMP/rpm-vendor"
           ls -l "$RUNNER_TEMP/rpm-vendor"
+          echo '::endgroup::'
 
-      - name: rpmlint the spec files
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/dist"
+          echo '::group::rpmlint the spec files'
           rpmlint packaging/rpm/*.spec 2>&1 | tee "$GITHUB_WORKSPACE/dist/rpmlint-spec.log"
           if grep -q ' E: ' "$GITHUB_WORKSPACE/dist/rpmlint-spec.log"; then
             echo "::error title=rpmlint errors on a spec file::see rpmlint-spec.log"
             exit 1
           fi
           echo "ok: no rpmlint errors on the spec files (warnings, if any, are above)"
+          echo '::endgroup::'
 
-      - name: Spec versions track their crate manifests, place the tarball
-        run: |
+          # The spec `Version` must name its crate's version (the trio
+          # together, the bar on its own); the staged tarball is placed
+          # under the provisional Source0 basename naming that version.
+          echo '::group::Spec versions track their crate manifests, place the tarball'
           python3 - <<'EOF'
           import re
           pairs = [("scoot", "crates/scoot/Cargo.toml", "scoot"),
@@ -264,7 +274,6 @@ jobs:
               print(f"{spec}.spec: Version={spec_ver} crate={crate_ver} tag={tag}-v{crate_ver} {status}")
               assert spec_ver == crate_ver, f"{spec}.spec Version {spec_ver} != crate {crate_ver}"
           EOF
-          mkdir -p "$GITHUB_WORKSPACE/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
           scoot_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scoot.spec)
           bar_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scootbar.spec)
           cp "$RUNNER_TEMP"/rpm-vendor/scoot-*-vendored.tar.gz \
@@ -272,16 +281,16 @@ jobs:
           cp "$RUNNER_TEMP"/rpm-vendor/scoot-*-vendored.tar.gz \
             "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scootbar-$bar_ver-vendored.tar.gz"
           ls -l "$GITHUB_WORKSPACE/rpmbuild/SOURCES"
+          echo '::endgroup::'
 
-      - name: rpmbuild all three specs
-        run: |
+          echo '::group::rpmbuild all three specs'
           for s in scoot scootbg scootbar; do
             rpmbuild -ba --define "_topdir $GITHUB_WORKSPACE/rpmbuild" "packaging/rpm/$s.spec"
           done
           find "$GITHUB_WORKSPACE/rpmbuild/RPMS" "$GITHUB_WORKSPACE/rpmbuild/SRPMS" -name '*.rpm' | sort
+          echo '::endgroup::'
 
-      - name: rpmlint the built RPMs
-        run: |
+          echo '::group::rpmlint the built RPMs'
           # -r packaging/rpm/rpmlintrc holds the documented 'config'
           # override (see that file); it is used, so a stale filter
           # fails here instead of passing silently.
@@ -291,11 +300,11 @@ jobs:
             exit 1
           fi
           echo "ok: no rpmlint errors on the built RPMs (warnings, if any, are above)"
+          echo '::endgroup::'
 
-      # No desktop-file-validate here (see the install step): the file
-      # is identical in both jobs and the Fedora job gates it.
-      - name: Install the trio and prove it
-        run: |
+          # No desktop-file-validate here: the file is identical in both
+          # jobs and the Fedora job gates it.
+          echo '::group::Install the trio and prove it'
           # The opensuse container image excludes `%doc` files
           # (/usr/etc/zypp/zypp.conf.d/excludedocs.conf), which would
           # skip the example this step checks: override it. The `zz-`
@@ -311,6 +320,7 @@ jobs:
           # %doc lands under /usr/share/doc/packages/ on SUSE (not
           # /usr/share/doc/ as on Fedora).
           scootbar daemon --check --config /usr/share/doc/packages/scootbar/bar.toml.example
+          echo '::endgroup::'
 
       - name: Upload the built RPMs and lint logs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
