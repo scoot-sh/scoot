@@ -42,7 +42,7 @@ so note it in the benchmark, not here).
 wireplumber/pipewire (~40 MB together): a deliberate system choice,
 identical everywhere measured, not portal-pulled.
 
-## Resolution (2026-10-08, docs-only: no packaging change)
+## Resolution (2026-10-08, docs-only: no packaging change, PR #538)
 
 The ticket's portal-dependency premise does not hold: no portal backend
 pulls in `kunifiedpush-distributor`, and the scoot session never
