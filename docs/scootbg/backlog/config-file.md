@@ -9,7 +9,7 @@ blocked: null
 # A config file with per-output defaults (from config-and-rotation)
 
 Split 2026-10-08 from
-[config-and-rotation](config-and-rotation.md), whose slideshow half ships
+[config-and-rotation](resolved/config-and-rotation-done.md), whose slideshow half ships
 in the resolving PR and whose config-file half the ticket itself defers
 ("Only if people ask; the CLI plus an autostart line may be enough").
 Serves **daily-drive**: a static machine whose wallpaper never changes

@@ -370,7 +370,7 @@ after it adds this record, the numbers, and help-text wording).
   same as a `clear`. Review of PR #290 added `draw_failed` (below), which
   tells the two apart; `query` still does not say *why* (stderr does), and
   a failed draw on a live `set` has no end-to-end `draw_failed` check yet.
-- [config-and-rotation.md](../config-and-rotation.md): if a config file
+- [config-and-rotation.md](config-and-rotation-done.md): if a config file
   ever ships, TOML for it and the state file together may cost less than
   two formats (dependencies-done.md §5); the state format's versioning
   rule is above.

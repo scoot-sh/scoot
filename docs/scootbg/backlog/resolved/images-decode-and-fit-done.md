@@ -206,7 +206,7 @@ each, in docs-only commits.
 
 - **The pixel budget is a constant, not configurable.** The ticket said
   "configurable". scootbg has no config file yet
-  ([config-and-rotation.md](../config-and-rotation.md)), and an
+  ([config-and-rotation.md](config-and-rotation-done.md)), and an
   environment variable or flag with no home would be a knob added ahead
   of its surface. `MAX_PIXELS` is one constant in `image/decode.rs`;
   whichever ticket adds scootbg's own configuration can expose it.
