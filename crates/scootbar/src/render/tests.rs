@@ -219,6 +219,34 @@ fn a_view_is_asked_only_after_a_change() {
 }
 
 #[test]
+fn scenes_at_different_ems_measure_differently() {
+    let mut small = Bar::new(&[(Section::Left, "3:07")]);
+    small.style.font_size = 14;
+    small.update();
+    let mut big = Bar::new(&[(Section::Left, "3:07")]);
+    big.style.font_size = 28;
+    big.update();
+    let (a, b) = (small.scene.spans()[0], big.scene.spans()[0]);
+    assert!(b.width > a.width, "{a:?} against {b:?}");
+    // Asked once on each: two scenes, not two draws of one.
+    assert_eq!((small.asked[0].get(), big.asked[0].get()), (1, 1));
+}
+
+#[test]
+fn a_changed_em_measures_everything_again() {
+    let mut bar = Bar::new(&[(Section::Left, "1"), (Section::Right, "2")]);
+    bar.update();
+    bar.update();
+    assert_eq!((bar.asked[0].get(), bar.asked[1].get()), (1, 1));
+    // Same scale and width, new em: everything is measured again.
+    bar.style.font_size = EM + 10;
+    let before = bar.scene.spans().to_vec();
+    bar.update();
+    assert_eq!((bar.asked[0].get(), bar.asked[1].get()), (2, 2));
+    assert_ne!(bar.scene.spans(), before.as_slice());
+}
+
+#[test]
 fn the_first_paint_is_whole_and_reads_back() {
     let mut bar = Bar::new(&[(Section::Left, "12:59 am"), (Section::Right, "3:07 pm")]);
     let mut pixels = buffer();

@@ -193,8 +193,9 @@ pub struct Scene {
     hover: Option<usize>,
     sections: Vec<Section>,
     layout: u64,
-    /// The scale and bar width everything was measured at.
-    measured: Option<(Scale, u32)>,
+    /// The scale, bar width and em everything was measured at: a changed
+    /// `font-size` re-measures like a new scale or width does.
+    measured: Option<(Scale, u32, u32)>,
     /// The corners' coverage, rebuilt only when their radius changes.
     corners: Corners,
 }
@@ -311,8 +312,8 @@ impl Scene {
         if radius != self.corners.radius() {
             self.corners = Corners::new(radius);
         }
-        let all = self.measured != Some((scale, width));
-        self.measured = Some((scale, width));
+        let all = self.measured != Some((scale, width, style.font_size));
+        self.measured = Some((scale, width, style.font_size));
         let em = em(style.font_size, scale);
         let padding = device(style.padding, scale).saturating_mul(2);
         let entries = self

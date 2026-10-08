@@ -195,6 +195,7 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
     let (mut wayland, missing) = Wayland::connect(
         crate::policy::Placement {
             bar: config.bar,
+            font_size: config.font_size,
             layout: config.layout.clone(),
             policy: config.outputs.clone(),
         },
@@ -508,6 +509,12 @@ fn draw(state: &mut State, qh: &wayland_client::QueueHandle<State>) {
                 let output = OutputView {
                     name: entry.output.info().name.as_deref(),
                 };
+                // The output's own em over the shared style: everything
+                // else (colors, gaps, radii, opacity) is shared.
+                let style = crate::render::Style {
+                    font_size: objects.font_size,
+                    ..content.style
+                };
                 match objects.canvas.draw(
                     globals,
                     qh,
@@ -517,6 +524,7 @@ fn draw(state: &mut State, qh: &wayland_client::QueueHandle<State>) {
                     &mut objects.scene,
                     &output,
                     content,
+                    &style,
                 ) {
                     Ok(Drew::Committed) => entry.output.drew(frame),
                     // A release wakes the loop, and this plan is asked

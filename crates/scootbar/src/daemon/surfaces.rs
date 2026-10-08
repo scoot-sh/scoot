@@ -66,6 +66,10 @@ pub struct Objects {
     /// overrides applied. Set when the output settles (its name is known
     /// then) and on a reload.
     pub(super) bar: Bar,
+    /// This output's em, in logical pixels: its own `font-size`, or the
+    /// shared `[bar] font-size`. Set with the bar, and read wherever the
+    /// scene is measured, painted or hit-tested.
+    pub(super) font_size: u32,
     /// The buffers drawn on the surface; emptied with it.
     pub(super) canvas: Canvas,
     /// The modules as this output shows them.
@@ -213,7 +217,7 @@ pub enum RoundTrip {
 
 impl State {
     /// What one output gets under the current placement: its bar geometry,
-    /// the modules it shows, and whether it has a bar at all. Rebuilds its
+    /// its em, the modules it shows, and whether it has a bar at all. Rebuilds its
     /// scene and empties its buffers (they are sized to its module count),
     /// and draws once more whatever `stale` says, since the modules, style
     /// or font may have been swapped wholesale. Returns what selecting or
@@ -230,6 +234,7 @@ impl State {
         };
         let objects = &mut entry.objects;
         objects.bar = resolved.bar;
+        objects.font_size = resolved.font_size;
         objects.scene = Scene::with_members(&members);
         objects.canvas.resize(members.len());
         entry.output.invalidate();
@@ -268,6 +273,9 @@ impl State {
         for entry in self.outputs.iter_mut() {
             let before = entry.objects.bar;
             let effect = Self::place(&self.placement, &self.content.modules, entry);
+            // A changed `font-size` alone resizes nothing: the surface
+            // stays, and the next draw re-measures and repaints at the new
+            // em. Only a changed `Bar` is made again.
             if effect != Effect::None || entry.objects.bar == before {
                 Self::apply(
                     &self.globals,
@@ -346,10 +354,12 @@ impl State {
         // Its modules and geometry wait for the settle, when its name is
         // known (`State::place`).
         let bar = self.placement.bar;
+        let font_size = self.placement.font_size;
         let id = self.outputs.add(name, |id| Objects {
             output: registry.bind::<WlOutput, _, _>(name, version, qh, id),
             layer: None,
             bar,
+            font_size,
             canvas: Canvas::new(0),
             scene: Scene::default(),
         });

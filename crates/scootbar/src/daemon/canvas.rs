@@ -49,7 +49,7 @@ use crate::modules::OutputView;
 use crate::outputs::{Frame, OutputId, Size};
 use crate::paint::{self, Span};
 use crate::region;
-use crate::render::{self, Record, Scene};
+use crate::render::{self, Record, Scene, Style};
 
 #[cfg(test)]
 mod tests;
@@ -257,6 +257,7 @@ impl Canvas {
     }
 
     /// Draws `scene` at `frame` on `layer`'s surface and commits it.
+    /// `style` is the output's own: the shared style with its `font-size`.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
@@ -268,6 +269,7 @@ impl Canvas {
         scene: &mut Scene,
         output: &OutputView<'_>,
         content: &mut Content,
+        style: &Style,
     ) -> Result<Drew, DrawError> {
         // Without a viewport the buffer must be the logical size times an
         // integer (`set_buffer_scale`; anything else is a protocol error).
@@ -300,7 +302,7 @@ impl Canvas {
             None => {
                 // `ARGB8888` only when the style needs an alpha channel;
                 // a reload that changes that clears every buffer first.
-                let format = if content.style.translucent() {
+                let format = if style.translucent() {
                     wl_shm::Format::Argb8888
                 } else {
                     wl_shm::Format::Xrgb8888
@@ -310,12 +312,7 @@ impl Canvas {
                 entry.insert(fresh)
             }
         };
-        let Content {
-            modules,
-            text,
-            style,
-            ..
-        } = &mut *content;
+        let Content { modules, text, .. } = &mut *content;
         // The frame as drawn: at `scale`, which differs from the frame's
         // own only without a viewport. Measuring, painting and damage all
         // use it, so they cannot disagree about the scale.
