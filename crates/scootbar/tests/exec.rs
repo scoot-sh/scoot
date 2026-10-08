@@ -9,17 +9,25 @@
 //! Skipped without a `scoot` binary (see `common`);
 //! `SCOOTBAR_REQUIRE_SCOOT` makes that a failure.
 
+// The tests place button, push and exec modules (gated per test), so this
+// file exists where any of them does (docs/scootbar/testing.md: the
+// feature matrix); helpers used by only some kinds carry that gate too.
+#![cfg(any(feature = "button", feature = "push", feature = "exec"))]
+
 mod common;
 
+#[cfg(feature = "exec")]
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Output;
 use std::time::{Duration, Instant};
 
-use common::{
-    Reaper, Session, Shot, allowed_in_child, inheritable_fds, open_fds, rgb, settled_fds, testfont,
-};
+use common::{Reaper, Session, rgb};
+#[cfg(any(feature = "push", feature = "exec"))]
+use common::{Shot, testfont};
+#[cfg(feature = "exec")]
+use common::{allowed_in_child, inheritable_fds, open_fds, settled_fds};
 use serde_json::Value;
 
 const BAR: &str = "#102030";
@@ -27,6 +35,7 @@ const FG: &str = "#f0f0f0";
 const URGENT: &str = "#ff0000";
 const HEIGHT: u32 = 60;
 const EM: u32 = 50;
+#[cfg(any(feature = "push", feature = "exec"))]
 const BASELINE: i64 = 45;
 
 /// The bar's config: the look, `lists` (`right = ["x"]`), and `tables`.
@@ -127,6 +136,7 @@ impl Rig {
 }
 
 /// The bar's text read back from the top rows of `shot`, spaces left out.
+#[cfg(any(feature = "push", feature = "exec"))]
 fn read(shot: &Shot) -> String {
     let background = rgb(BAR);
     let ink = |x: i64, y: i64| {
@@ -145,11 +155,13 @@ fn read(shot: &Shot) -> String {
     testfont::decode(ink, left, right, BASELINE, f64::from(EM))
 }
 
+#[cfg(feature = "exec")]
 fn has_color(shot: &Shot, color: [u8; 3]) -> bool {
     (0..shot.width).any(|x| (0..HEIGHT).any(|y| shot.at(x, y) == color))
 }
 
 /// Whether a process runs with exactly this command line.
+#[cfg(feature = "exec")]
 fn running(cmdline: &str) -> bool {
     for entry in fs::read_dir("/proc").unwrap().flatten() {
         let Ok(raw) = fs::read(entry.path().join("cmdline")) else {
@@ -163,6 +175,7 @@ fn running(cmdline: &str) -> bool {
     false
 }
 
+#[cfg(any(feature = "push", feature = "exec"))]
 fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
@@ -404,6 +417,7 @@ fn a_command_holds_none_of_the_bars_descriptors() {
 }
 
 /// The `SigIgn` mask of `pid`.
+#[cfg(feature = "exec")]
 fn ignored_signals(pid: impl std::fmt::Display) -> u64 {
     fs::read_to_string(format!("/proc/{pid}/status"))
         .unwrap()
@@ -533,6 +547,7 @@ fn a_reload_replaces_the_command_and_kills_the_old_one_with_its_workers() {
 
 /// Kills the bar with `signal` and waits for its command, a shell loop
 /// that would otherwise run for ever, to be gone.
+#[cfg(feature = "exec")]
 fn a_command_ends_with_a_bar_that_dies_of(tag: &str, signal: rustix::process::Signal) {
     // A shell loop is the command that is not ended by the closing of its
     // pipe: the shell never writes, `date` and `echo` do, and the shell is

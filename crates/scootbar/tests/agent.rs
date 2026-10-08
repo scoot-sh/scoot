@@ -9,12 +9,20 @@
 //! alone. Skipped without a `scoot` binary (see `common`);
 //! `SCOOTBAR_REQUIRE_SCOOT` makes that a failure.
 
+// The tests place button, push and workspaces modules (gated per test),
+// so this file exists where any of them does (docs/scootbar/testing.md:
+// the feature matrix); helpers used by only one kind carry that gate too.
+#![cfg(any(feature = "button", feature = "push", feature = "workspaces"))]
+
 mod common;
 
 use std::fs;
+#[cfg(feature = "push")]
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
+#[cfg(feature = "push")]
 use std::process::{Child, Stdio};
+#[cfg(any(feature = "button", feature = "push"))]
 use std::time::{Duration, Instant};
 
 use common::{Reaper, Session, rgb};
@@ -24,6 +32,8 @@ const BAR: &str = "#102030";
 const HEIGHT: u32 = 40;
 
 /// Two outputs, the second at 1.5, each 1600x1000 logical before scale.
+/// Only the button-placed fidelity test uses it.
+#[cfg(feature = "button")]
 const SCOOT: &str = "[[outputs]]\nname = \"headless-2\"\nscale = 1.5\n";
 
 struct Rig {
@@ -126,11 +136,13 @@ impl Rig {
     }
 }
 
+#[cfg(feature = "button")]
 fn append(word: &str) -> String {
     format!("{{ exec = [\"sh\", \"-c\", \"echo {word} >> DIR/clicks\"] }}")
 }
 
 /// Two buttons a few characters wide, each appending its own name.
+#[cfg(feature = "button")]
 fn buttons() -> String {
     format!(
         "[button.alpha]\ntext = \"A\"\non-click = {}\n\
@@ -142,6 +154,7 @@ fn buttons() -> String {
 
 /// Whether the pixel at (`x`, `y`) of `shot` is anything but the bar's
 /// background: drawn ink.
+#[cfg(feature = "button")]
 fn inked(shot: &common::Shot, x: u32, y: u32) -> bool {
     shot.at(x, y) != rgb(BAR)
 }
@@ -150,6 +163,7 @@ fn inked(shot: &common::Shot, x: u32, y: u32) -> bool {
 /// screenshot: a module's rectangle with no ink in it, or a bar column
 /// outside every rectangle with ink in it. Logical to device is
 /// `(x - origin) * scale`, rounded outward.
+#[cfg(feature = "button")]
 fn ink_problem(shot: &common::Shot, output: &Value) -> Option<String> {
     let scale = output["scale"].as_f64().unwrap();
     let origin = output["origin"]["x"].as_i64().unwrap() as f64;
@@ -403,11 +417,13 @@ fn invoke_runs_a_module_action_with_its_number() {
 }
 
 /// A `subscribe` child whose lines are read as they come.
+#[cfg(feature = "push")]
 struct Subscriber {
     child: Child,
     lines: BufReader<std::process::ChildStdout>,
 }
 
+#[cfg(feature = "push")]
 impl Subscriber {
     fn start(rig: &Rig, kinds: &[&str]) -> Self {
         Self::try_start(rig, kinds).unwrap_or_else(|said| panic!("not subscribed: {said}"))
@@ -446,6 +462,7 @@ impl Subscriber {
     }
 }
 
+#[cfg(feature = "push")]
 impl Drop for Subscriber {
     fn drop(&mut self) {
         let _ = self.child.kill();

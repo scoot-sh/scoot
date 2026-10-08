@@ -222,7 +222,9 @@ fn side_margins_wider_than_the_output_still_give_a_bar() {
     assert_eq!(usable[0].1["y"].as_i64(), Some(28), "{usable:?}");
 }
 
-/// The clock's text on `output` as `scootbar msg query` reports it.
+/// The clock's text on `output` as `scootbar msg query` reports it. Only
+/// used by the clock-gated test below.
+#[cfg(feature = "clock")]
 fn clock_text(session: &Session, output: &str) -> Option<String> {
     let reply = session.scootbar().arg("msg").arg("query").output().unwrap();
     let reply: Value = serde_json::from_slice(&reply.stdout).ok()?;
@@ -234,7 +236,9 @@ fn clock_text(session: &Session, output: &str) -> Option<String> {
 }
 
 /// Waits until the clock on `output` reads two different times: it still
-/// ticks (`--clock-format %S`, once a second).
+/// ticks (`--clock-format %S`, once a second). Only used by the
+/// clock-gated test below.
+#[cfg(feature = "clock")]
 fn assert_ticking(session: &Session, bar: &mut Reaper, output: &str) {
     let first = session.wait_for(&mut bar.0, "the clock queried", |session| {
         clock_text(session, output)

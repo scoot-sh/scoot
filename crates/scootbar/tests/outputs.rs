@@ -7,6 +7,11 @@
 //! Skipped without a `scoot` binary (see `common`);
 //! `SCOOTBAR_REQUIRE_SCOOT` makes that a failure.
 
+// Every test here places the clock (two also place workspaces, gated per
+// test), so this file exists only where it does (docs/scootbar/testing.md:
+// the feature matrix).
+#![cfg(feature = "clock")]
+
 mod common;
 
 use std::process::{Child, Stdio};
@@ -120,7 +125,6 @@ fn two_outputs_show_different_module_sets_heights_and_edges_from_one_config() {
     assert!(bar.0.try_wait().unwrap().is_none());
 }
 
-#[cfg(feature = "clock")]
 #[test]
 fn the_list_leaves_an_output_without_a_bar_and_a_reload_moves_it() {
     let Some(session) = Session::scoot("list", 2, "") else {
@@ -171,7 +175,6 @@ fn the_list_leaves_an_output_without_a_bar_and_a_reload_moves_it() {
 /// Hide and show are per the list: a shown bar comes back only where the
 /// list wants one, and a reload that changes the list while hidden takes
 /// effect at the show.
-#[cfg(feature = "clock")]
 #[test]
 fn hide_and_show_keep_to_the_list() {
     let Some(session) = Session::scoot("vis", 2, "") else {
