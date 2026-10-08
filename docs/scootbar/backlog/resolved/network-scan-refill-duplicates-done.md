@@ -1,9 +1,10 @@
 ---
 title: "Wi-Fi picker can list a network twice after a scan handover"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-07"
 ---
 
 # Wi-Fi picker can list a network twice after a scan handover
@@ -43,3 +44,31 @@ Add a test for each ordering above, failing before the fix.
 
 R4 (an empty owning dump with nothing queued stays empty until the next
 wireless event): pre-existing, heals on the next event.
+
+## Resolution (2026-10-08, PR #507)
+
+Fixed as the ticket recommended: the queued refill owns its reset
+whenever the in-flight scan consumes or cancels one it was handed. New
+`Nets::scan_queued` helper; the scan page, `done_genl` terminator and
+`drop_genl` refusal hand the handed reset on to the queued refill
+instead of spending or cancelling it. The zero-page heal stands (D1
+ending with no pages still clears the stale list at its terminator, and
+the refill still fills it). No new struct fields, fds, timers, threads
+or hot-path allocations.
+
+Tests, each failing before the fix and passing after (Asahi M2):
+
+- `a_handover_between_pages_does_not_double_a_network` (R1): before,
+  the menu showed `Elsewhere / FarAway / Elsewhere`; after,
+  `FarAway / Elsewhere`.
+- `a_refused_handover_scan_keeps_the_queued_refill_s_reset` (R2):
+  before, the menu showed `FarAway / FarAway / Elsewhere`; after,
+  `FarAway / Elsewhere`.
+
+Also added the test-only `fake::error_seq` helper so a refusal can
+answer a specific in-flight dump. Full `scootbar` nextest suite green
+(1387 passed, 0 failed; the one sway-gated clock test needs sway, which
+the box has none of — CI covers it). Ratchet: release file unchanged at
+2,364,128 B, `.text` +416 B (+0.02%), all other sections identical;
+idle wakeups level with base (2–3 per 20 s both sides); the `.text`
+delta is reported in the PR for the maintainer, covered by no waiver.
