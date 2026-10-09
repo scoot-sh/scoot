@@ -1545,7 +1545,7 @@ fn is_master_loss(error: &DrmError) -> bool {
 /// Measured live on the M2: a same-client re-open through the session
 /// cannot recover the vacant shape (seatd hands back the same master-less
 /// file with a bumped refcount and never retries its single `SET_MASTER`
-/// -- see `docs/backlog/core/seatd-retry-seat-side.md`), so both shapes
+/// -- see `docs/backlog/core/seatd-reconnect-or-close-to-zero.md`), so both shapes
 /// keep the retry-on-the-next-switch-back path today; a future seat-side
 /// retry or seat reconnect will act on the vacant one.
 fn probe_held(error: &io::Error) -> bool {
