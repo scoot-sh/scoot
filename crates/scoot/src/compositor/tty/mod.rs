@@ -1509,7 +1509,7 @@ impl Tty {
                 }
             },
             Err(steal) => {
-                let held = steal.kind() == io::ErrorKind::ResourceBusy;
+                let held = probe_held(&steal);
                 if held {
                     tracing::warn!(
                         %steal,
@@ -1532,6 +1532,24 @@ impl Tty {
 /// the steal probe and takes the old loud-error path.
 fn is_master_loss(error: &DrmError) -> bool {
     matches!(error, DrmError::Access(access) if access.source.kind() == io::ErrorKind::PermissionDenied)
+}
+
+/// Whether the steal probe's refusal means master is genuinely held
+/// elsewhere: `EBUSY` is the kernel saying another open file holds master
+/// right now, while anything else (in practice `EACCES` -- an unprivileged
+/// process may not take even a vacant master) is the vacant-but-untakeable
+/// shape. A pure function so the held-vs-vacant discrimination every
+/// re-acquire path hinges on is pinned by headless tests -- the ioctl half
+/// needs real DRM hardware, this half must not rot silently.
+///
+/// Measured live on the M2: a same-client re-open through the session
+/// cannot recover the vacant shape (seatd hands back the same master-less
+/// file with a bumped refcount and never retries its single `SET_MASTER`
+/// -- see `docs/backlog/core/seatd-reconnect-or-close-to-zero.md`), so both shapes
+/// keep the retry-on-the-next-switch-back path today; a future seat-side
+/// retry or seat reconnect will act on the vacant one.
+fn probe_held(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::ResourceBusy
 }
 
 /// The actionable half of a failed reactivation: what holds master (or the
@@ -2330,6 +2348,20 @@ mod tests {
         // differs (wait for the holder vs seatd must hand it over), so a
         // refactor that merges the branches trips here.
         assert_ne!(master_loss_guidance(true), master_loss_guidance(false));
+    }
+
+    #[test]
+    fn only_a_busy_probe_means_held_everything_else_is_vacant() {
+        // The fail-first pin for the held-vs-vacant discrimination the
+        // re-acquire path hinges on: `EBUSY` is the kernel saying another
+        // open file holds master right now, while `EACCES` is the
+        // vacant-but-untakeable shape. Treat any non-busy refusal as
+        // vacant and this fails.
+        assert!(probe_held(&io::Error::from(io::ErrorKind::ResourceBusy)));
+        assert!(!probe_held(&io::Error::from(
+            io::ErrorKind::PermissionDenied
+        )));
+        assert!(!probe_held(&io::Error::from(io::ErrorKind::Interrupted)));
     }
 
     #[test]
