@@ -107,7 +107,7 @@ master (proven), it just never retries after losing the race.
 
 That maintainer finding is now tracked, not just prose: see
 [Unprivileged `--tty` display stays dead after the seat daemon loses
-the VT-switch-back master race](../core/seatd-reacquire-after-vt-switch.md)
+the VT-switch-back master race](./seatd-reacquire-after-vt-switch-done.md)
 (medium) -- reopen-through-libseat plus rebuild, a seat-side retry, or
 a privileged helper, with the measured evidence and the edges to pin.
 

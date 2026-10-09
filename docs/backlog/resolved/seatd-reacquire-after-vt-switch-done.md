@@ -1,9 +1,10 @@
 ---
 title: "Unprivileged --tty display stays dead after the seat daemon loses the VT-switch-back master race"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-09"
 ---
 
 # Unprivileged --tty display stays dead after the seat daemon loses the VT-switch-back master race
@@ -81,3 +82,47 @@ restart way back -- all shipped in #530 and staying regardless. Also
 out: Smithay's own pause/activate master handling (deliberately skipped
 on the libseat path), and devices that never had master (startup
 failures take the `gpu::unusable_device_error` path, a different ticket).
+
+## Resolution (2026-10-09, no behavior change)
+
+Worked as specified -- the reopen was implemented, measured live, and
+disproven -- so this resolves with evidence and a kept pin rather than a
+recovery.
+
+Tried first: the full scoot-side reopen (close the master-less device,
+re-open through the session, rebuild the `DrmDevice`, its heads and the
+event-loop wiring, re-bind outputs). Live on the Asahi M2 it triggers
+correctly on the vacant diagnosis and then fails deterministically: the
+fresh `session.open` succeeds and probes fine, but the rebuilt device
+has no master either. Mechanism, checked against seatd 0.9.3's source
+(`seat.c`: `seat_open_device` reuses the entry for an already-open
+(client, path) with a bumped refcount -- no fresh `open()`, no new
+`SET_MASTER`; `seat_activate_device` does the single `SET_MASTER`,
+logs `EBUSY` and continues master-less; only close-to-zero frees the
+entry): a same-client re-open hands back the *same* master-less file,
+so no client-side reopen can ever take master. The ticket's premise
+("a fresh seatd open is first-to-open while vacant") holds only for a
+new seat entry, not a re-open. Close-then-open is API-blocked (the fd
+belongs to an `Arc<OwnedFd>` past `DeviceFd::from`; `Session::close`
+needs the `OwnedFd`), a second client is refused while one is active
+(`EPERM`), and path aliases canonicalize to the same entry.
+
+Detour of lasting value, measured on the way (`strace`-counted):
+rebuilding with the old pools alive fails `DrmDevice::new`'s
+framebuffer snapshot (`MODE_OBJ_GETPROPERTIES` `EINVAL` on our own dumb
+framebuffer: 2 connectors + 2 CRTCs + 2 foreign framebuffers read fine
+first); after a full teardown the same build passes the snapshot. So a
+teardown-first rebuild is proven viable -- only the master never
+arrives. That path is reusable if a future route (seat reconnect, see
+the follow-up) produces a master-holding fd.
+
+Kept pin: `probe_held` in `crates/scoot/src/compositor/tty/mod.rs` with
+its headless test -- the `EBUSY`-vs-`EACCES` discrimination every
+re-acquire path hinges on. Everything else from the spike is reverted;
+`git log` on the branch shows the whole arc.
+
+What remains is tracked, not just prose: see
+[Seat daemon loses the VT-switch-back master race with no retry](../core/seatd-retry-seat-side.md)
+(medium, blocked on the maintainer fork decision) -- seat-side retry
+(fork or upstream) or seat reconnect, with the mechanism, the
+measurements and the edges to pin.
