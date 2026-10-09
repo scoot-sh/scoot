@@ -100,9 +100,11 @@ has no master either. Mechanism, checked against seatd 0.9.3's source
 `SET_MASTER`; `seat_activate_device` does the single `SET_MASTER`,
 logs `EBUSY` and continues master-less; only close-to-zero frees the
 entry): a same-client re-open hands back the *same* master-less file,
-so no client-side reopen can ever take master. The ticket's premise
-("a fresh seatd open is first-to-open while vacant") holds only for a
-new seat entry, not a re-open. Close-then-open is API-blocked (the fd
+so no same-client reopen can ever take master. That disproves only the
+same-client reopen: seat reconnect (a new libseat client, whose open is
+first-to-open on the freed entry) and close-to-zero-then-reopen remain
+unproven, not disproven. Close-then-open in the same client is
+API-blocked today (the fd
 belongs to an `Arc<OwnedFd>` past `DeviceFd::from`; `Session::close`
 needs the `OwnedFd`), a second client is refused while one is active
 (`EPERM`), and path aliases canonicalize to the same entry.
@@ -122,7 +124,12 @@ re-acquire path hinges on. Everything else from the spike is reverted;
 `git log` on the branch shows the whole arc.
 
 What remains is tracked, not just prose: see
-[Seat daemon loses the VT-switch-back master race with no retry](../core/seatd-retry-seat-side.md)
-(medium, blocked on the maintainer fork decision) -- seat-side retry
-(fork or upstream) or seat reconnect, with the mechanism, the
-measurements and the edges to pin.
+[Recover the display scoot-side after the seat daemon loses the VT-switch-back master race: seat reconnect or close-to-zero](../core/seatd-reconnect-or-close-to-zero.md)
+(medium, unblocked; per the 2026-10-09 user decision there is no seatd
+fork, so seat-side retry is off the table) -- seat reconnect as a fresh
+libseat client, or the close-to-zero refactor, each with the mechanism,
+the measurements and the edges to pin. That ticket also records the
+2026-10-09 cross-compositor research: no compositor retries client-side
+on the VT-back path (keep-fd plus survive + report + heal is the
+pattern), and logind avoids the race by claiming master before handing
+the fd back.
