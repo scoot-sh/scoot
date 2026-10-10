@@ -46,6 +46,16 @@ license.workspace = true
 [features]
 default = []
 gpu-scanout = ["smithay/backend_gbm"]
+# Spike (2026-10): runtime-loaded libgbm. Same Smithay `backend_gbm` code as
+# `gpu-scanout`, but linked against the in-tree static ABI stub
+# (`gbm-stub/gbm_stub.c`, compiled by `build.rs`) instead of the system
+# libgbm: the produced binary carries no libgbm DT_NEEDED entry (check with
+# `readelf -d`/`ldd`) and still starts where libgbm is absent, loading it by
+# dlopen only when the GPU tier is actually selected. Off by default and
+# orthogonal to `gpu-scanout` (enabling both is the future single build;
+# either alone keeps its old link behavior). Do not remove `gpu-scanout` in
+# the spike -- productionisation decides the collapse (see the backlog).
+runtime-gbm = ["smithay/backend_gbm"]
 xwayland = ["smithay/xwayland"]
 
 [dependencies]
@@ -74,6 +84,10 @@ serde_json.workspace = true
 # correctly handled by build.rs's own runtime `CARGO_CFG_TARGET_OS` check.
 [build-dependencies]
 pkg-config = "0.3"
+# Only for the `runtime-gbm` spike's static libgbm stub (see `build.rs`):
+# the same version Smithay itself already resolves, so this adds a direct
+# build-dependency, not a crate.
+cc = "1"
 
 # The compositor is Linux-only; `scoot msg` builds everywhere, so the CLI can
 # drive a VM from a Mac.

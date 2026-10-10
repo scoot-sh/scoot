@@ -860,6 +860,7 @@ name = "scoot"
 version = "0.1.0"
 dependencies = [
  "calloop-wayland-source",
+ "cc",
  "libc",
  "pixman",
  "pkg-config",
