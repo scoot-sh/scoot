@@ -46,6 +46,7 @@ pub(crate) mod hotplug;
 mod layout_exporter;
 mod present_retry;
 mod presenter;
+pub(super) mod reconnect;
 #[cfg(feature = "gpu-scanout")]
 pub(super) mod scanout;
 mod stale_vblanks;
@@ -59,7 +60,7 @@ pub(crate) use self::scanout::ForceComposite;
 
 use std::error::Error;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use scoot_ipc::PointerButton;
@@ -76,7 +77,7 @@ use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface}
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::UdevBackend;
-use smithay::reexports::calloop::LoopHandle;
+use smithay::reexports::calloop::{LoopHandle, RegistrationToken};
 use smithay::reexports::drm::control::{Mode, connector, crtc};
 // `DrmControl` (not `Device`): this module owns a `struct Device` of its
 // own, and the trait is only ever named once, below.
@@ -224,6 +225,28 @@ pub struct Tty {
     /// so reaching this initializer at all already proves the session is
     /// active.
     session_paused: bool,
+    /// The DRM node this session drives (`/dev/dri/card0`, ...), as chosen
+    /// in `init`. The seat reconnect re-opens exactly this path on a
+    /// fresh seat client after the old connection is dropped -- see
+    /// `reconnect.rs`. Never re-derived from udev: the device could have
+    /// been renamed underneath, and the reconnect must return to the node
+    /// whose connectors the outputs were built for, not to whatever the
+    /// seat's search would pick now.
+    path: PathBuf,
+    /// The event-loop registrations of the three sources `init` owns, so
+    /// the seat reconnect can remove them before dropping the pieces
+    /// they deliver to (see `reconnect.rs`). Removing the session notifier
+    /// is what closes the old seat connection: its `Rc` is the one strong
+    /// reference keeping libseat's client alive.
+    session_token: RegistrationToken,
+    drm_token: RegistrationToken,
+    libinput_token: RegistrationToken,
+    /// Whether a seat-reconnect idle is already armed. Coalesces one
+    /// `ActivateSession`'s arm with any earlier one whose idle has not run
+    /// yet -- the idle runs before any other source dispatches again, so in
+    /// practice this is always false here, but an `ActivateSession` storm
+    /// (a seat daemon flapping) must arm one reconnect, not one per event.
+    reconnect_armed: bool,
 }
 
 /// One connector `init` built a head for, on its way to `compositor::run`:
@@ -356,6 +379,16 @@ pub fn init(
         .map_err(|()| "could not assign the seat to libinput")?;
     let libinput_backend = LibinputInputBackend::new(libinput_context.clone());
 
+    let session_token = loop_handle
+        .insert_source(notifier, session_event)
+        .map_err(|error| format!("could not register the session notifier: {error}"))?;
+    let drm_token = loop_handle
+        .insert_source(drm_notifier, drm_event)
+        .map_err(|error| format!("could not register the drm device: {error}"))?;
+    let libinput_token = loop_handle
+        .insert_source(libinput_backend, libinput_event)
+        .map_err(|error| format!("could not register libinput: {error}"))?;
+
     state.tty = Some(Tty {
         session,
         drm,
@@ -367,6 +400,11 @@ pub fn init(
         libinput: libinput_context,
         active: true,
         session_paused: false,
+        path,
+        session_token,
+        drm_token,
+        libinput_token,
+        reconnect_armed: false,
     });
 
     // Explicit sync is offered only on the GPU scanout tier, and only where
@@ -392,15 +430,6 @@ pub fn init(
         state.drm_syncobj.enable(&state.display_handle, candidates);
     }
 
-    loop_handle
-        .insert_source(notifier, session_event)
-        .map_err(|error| format!("could not register the session notifier: {error}"))?;
-    loop_handle
-        .insert_source(drm_notifier, drm_event)
-        .map_err(|error| format!("could not register the drm device: {error}"))?;
-    loop_handle
-        .insert_source(libinput_backend, libinput_event)
-        .map_err(|error| format!("could not register libinput: {error}"))?;
     watch_for_hotplug(&loop_handle, &seat_name, device_id);
 
     // `--tty`-only: Ctrl+Alt+F1..F12. Kept out of `Keybindings::default()`
@@ -708,6 +737,57 @@ fn open_device(
         ))
     })?;
 
+    let (heads, tier, failures) = build_heads(&mut drm, &drm_fd, connected, None, wanted);
+    // Without the feature there is no second tier to choose, so the caller's
+    // answer is the only one there is. `render::resolve` has already turned
+    // `--renderer gles` under `--tty` into pixman with a warning naming the
+    // missing feature, so nothing is silently lost here.
+    #[cfg(not(feature = "gpu-scanout"))]
+    let _ = wanted;
+
+    let Some(renderer) = tier else {
+        // Not one connector built. The wording keeps the single-connector
+        // phrase this rejection has always had where there was only one.
+        let reason = match failures.as_slice() {
+            [] => "has no crtc usable with the chosen connector".to_owned(),
+            [one] if one.ends_with("no crtc usable with it") => {
+                "has no crtc usable with the chosen connector".to_owned()
+            }
+            many => format!("could not drive any connector ({})", many.join("; ")),
+        };
+        return Err(gpu::Rejection::Unusable(reason));
+    };
+    Ok(Device {
+        drm,
+        notifier,
+        heads,
+        renderer,
+    })
+}
+
+/// Builds one head per connected connector on an already-open DRM device:
+/// the CRTC assignment, the surface, and the presenter (see `build_head`
+/// for the tier rules). Shared by `open_device` (startup and the
+/// seat reconnect's fresh device) and the restore path,
+/// which rebuilds heads on the *old* device when the fresh one refuses.
+///
+/// `tier` is the session's tier as decided by an earlier head, `None`
+/// where no head has decided yet (startup's first device, or a restore
+/// that must re-derive it). Returns the heads with their renderer
+/// handoffs, the decided tier (`None` when nothing built), and one
+/// lowercase reason per connector left dark -- the same phrases
+/// `open_device` has always reported.
+fn build_heads(
+    drm: &mut DrmDevice,
+    drm_fd: &DrmDeviceFd,
+    connected: Vec<gpu::Connected>,
+    tier: Option<RendererKind>,
+    wanted: RendererKind,
+) -> (
+    Vec<(Head, ScanoutHandoff)>,
+    Option<RendererKind>,
+    Vec<String>,
+) {
     // Which CRTC each connector goes through, decided from the encoders'
     // `possible_crtcs` up front rather than by whichever CRTC first accepts
     // a surface (see `crtcs.rs` for why that only works by luck of order).
@@ -726,9 +806,9 @@ fn open_device(
     let assigned = crtcs::assign(&possible, &[]);
 
     let mut heads: Vec<(Head, ScanoutHandoff)> = Vec::new();
-    // The session's tier, decided by the first head that builds (see this
-    // function's doc). `None` until then.
-    let mut tier: Option<RendererKind> = None;
+    // The session's tier, decided by the first head that builds (see
+    // `open_device`'s doc). `None` until then.
+    let mut tier = tier;
     let mut failures: Vec<String> = Vec::new();
     for ((found, crtc), reachable) in connected.into_iter().zip(assigned).zip(possible.iter()) {
         if heads.len() >= crate::cli::MAX_OUTPUTS as usize {
@@ -760,7 +840,7 @@ fn open_device(
                 .copied()
                 .filter(|&other| other != crtc && !busy.contains(&other)),
         );
-        let Some(surface) = create_surface(&mut drm, order, found.connector, found.mode) else {
+        let Some(surface) = create_surface(drm, order, found.connector, found.mode) else {
             tracing::warn!(
                 connector = %found.name,
                 "drm: no crtc would take a surface for this connector; leaving it dark"
@@ -768,7 +848,7 @@ fn open_device(
             failures.push(format!("{}: no crtc usable with it", found.name));
             continue;
         };
-        match build_head(&mut drm, &drm_fd, surface, &found, tier, wanted) {
+        match build_head(drm, drm_fd, surface, &found, tier, wanted) {
             Ok((head, scanout, head_tier)) => {
                 tier.get_or_insert(head_tier);
                 heads.push((head, scanout));
@@ -779,31 +859,7 @@ fn open_device(
             }
         }
     }
-    // Without the feature there is no second tier to choose, so the caller's
-    // answer is the only one there is. `render::resolve` has already turned
-    // `--renderer gles` under `--tty` into pixman with a warning naming the
-    // missing feature, so nothing is silently lost here.
-    #[cfg(not(feature = "gpu-scanout"))]
-    let _ = wanted;
-
-    let Some(renderer) = tier else {
-        // Not one connector built. The wording keeps the single-connector
-        // phrase this rejection has always had where there was only one.
-        let reason = match failures.as_slice() {
-            [] => "has no crtc usable with the chosen connector".to_owned(),
-            [one] if one.ends_with("no crtc usable with it") => {
-                "has no crtc usable with the chosen connector".to_owned()
-            }
-            many => format!("could not drive any connector ({})", many.join("; ")),
-        };
-        return Err(gpu::Rejection::Unusable(reason));
-    };
-    Ok(Device {
-        drm,
-        notifier,
-        heads,
-        renderer,
-    })
+    (heads, tier, failures)
 }
 
 /// Builds one head's presenter on `surface`: the GPU scanout tier when this
@@ -1393,8 +1449,8 @@ impl Tty {
     /// have reconfigured it), and a bare page-flip onto stale state is
     /// exactly the "switch away, switch back, screen stays black forever"
     /// failure this project's standards call out as the worst kind (silent,
-    /// no error anywhere). Returns whether reactivation succeeded well
-    /// enough to ask for a fresh render.
+    /// no error anywhere). Answers what the reactivation managed (see
+    /// [`Reactivation`]): only `Recovered` asks for a fresh render.
     ///
     /// Every step below is attempted regardless of whether an earlier one
     /// failed -- this used to return early the moment `drm.activate` failed,
@@ -1406,9 +1462,13 @@ impl Tty {
     /// gates whether `present()` may safely flip -- but a dead DRM device
     /// with a working keyboard is recoverable (the user just retries the VT
     /// switch); a dead DRM device *and* a dead keyboard is not.
-    fn reactivate(&mut self) -> bool {
-        let drm_active = match self.drm.activate(true) {
-            Ok(()) => true,
+    ///
+    /// Answers which shape the failure took, not just whether it failed:
+    /// the seat reconnect (`reconnect.rs`) acts on the vacant one
+    /// (`LostVacant`) and leaves every other shape on today's path.
+    fn reactivate(&mut self) -> Reactivation {
+        let outcome = match self.drm.activate(true) {
+            Ok(()) => Reactivation::Recovered,
             Err(error) => self.reacquire_master(error),
         };
         if self.libinput.resume().is_err() {
@@ -1437,8 +1497,8 @@ impl Tty {
         // Every head's scanout state was just thrown away, and with it any
         // certainty about which completions are still owed.
         self.stale_vblanks.clear();
-        self.active = drm_active;
-        drm_active
+        self.active = outcome.recovered();
+        outcome
     }
 
     /// Tries once to take DRM master back after a failed `drm.activate`,
@@ -1476,8 +1536,10 @@ impl Tty {
     /// alive), the failure names the holder (or the vacancy) and the way
     /// back, every output reports `live: false` over IPC, and the next VT
     /// activation event retries the whole path again -- never a silent
-    /// black screen.
-    fn reacquire_master(&mut self, first: DrmError) -> bool {
+    /// black screen. The vacant shape additionally returns `LostVacant`,
+    /// which the seat reconnect acts on; every other failure returns
+    /// its own shape and stays on today's path.
+    fn reacquire_master(&mut self, first: DrmError) -> Reactivation {
         if !is_master_loss(&first) {
             // A privileged `acquire` failure still names its holder: a
             // privileged fd takes vacant master (measured live), so
@@ -1485,10 +1547,11 @@ impl Tty {
             // else keeps the old terse line.
             if matches!(first, DrmError::DrmMasterFailed) {
                 tracing::error!(%first, "{}", master_loss_guidance(true));
+                return Reactivation::LostHeld;
             } else {
                 tracing::error!(%first, "could not reactivate the drm device");
             }
-            return false;
+            return Reactivation::Failed;
         }
         // `Device` (not `DrmControl`): `acquire_master_lock` lives on
         // the base `drm::Device` trait, and this module's own
@@ -1497,7 +1560,7 @@ impl Tty {
             Ok(()) => match self.drm.activate(true) {
                 Ok(()) => {
                     tracing::info!("reacquired drm master after a VT switch; the display is back");
-                    true
+                    Reactivation::Recovered
                 }
                 Err(error) => {
                     // The probe just took master, so no holder to blame:
@@ -1505,7 +1568,7 @@ impl Tty {
                     // fd. Both errors are logged -- the master-loss failure
                     // that entered the probe, and the retry's own.
                     tracing::error!(%first, %error, "{}", reactivation_retry_guidance());
-                    false
+                    Reactivation::Failed
                 }
             },
             Err(steal) => {
@@ -1517,9 +1580,40 @@ impl Tty {
                     );
                 }
                 tracing::error!(%first, "{}", master_loss_guidance(held));
-                false
+                if held {
+                    Reactivation::LostHeld
+                } else {
+                    Reactivation::LostVacant
+                }
             }
         }
+    }
+}
+
+/// What one `Tty::reactivate` managed: whether DRM master came back, and
+/// -- when it did not -- which shape the failure took. `Recovered` is the
+/// only one that arms a render; `LostVacant` is the only one the
+/// seat reconnect acts on (see `reconnect::should_attempt`); the
+/// rest keep today's survive-and-report path unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Reactivation {
+    /// `drm.activate` (or the probe-plus-retry) recovered master.
+    Recovered,
+    /// Master is genuinely held by another session (probe said `EBUSY`).
+    LostHeld,
+    /// Master is vacant but only the seat daemon can take it (probe said
+    /// `EACCES`): seatd lost the re-acquire race on the switch back.
+    LostVacant,
+    /// Some other failure: not the master-loss shape at all, or the probe
+    /// retook master and the retry still failed on our own fd.
+    Failed,
+}
+
+impl Reactivation {
+    /// Whether this is the shape `Tty::active` (and so `present`, the
+    /// render gate and `live` over IPC) treats as holding DRM master.
+    fn recovered(self) -> bool {
+        matches!(self, Self::Recovered)
     }
 }
 
@@ -1545,9 +1639,10 @@ fn is_master_loss(error: &DrmError) -> bool {
 /// Measured live on the M2: a same-client re-open through the session
 /// cannot recover the vacant shape (seatd hands back the same master-less
 /// file with a bumped refcount and never retries its single `SET_MASTER`
-/// -- see `docs/backlog/core/seatd-reconnect-or-close-to-zero.md`), so both shapes
-/// keep the retry-on-the-next-switch-back path today; a future seat-side
-/// retry or seat reconnect will act on the vacant one.
+/// -- see `docs/backlog/core/seatd-reconnect-or-close-to-zero.md`), so the
+/// vacant shape keeps the retry-on-the-next-switch-back path underneath;
+/// the seat reconnect (`reconnect.rs`) acts on the vacant shape first,
+/// once per activation.
 fn probe_held(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::ResourceBusy
 }
@@ -1693,8 +1788,10 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
     let paused = matches!(event, SessionEvent::PauseSession);
     // Scoped so the mutable borrow of `state.tty` ends before the
     // `Reconfigured::finish` call below needs `state` whole again -- same
-    // shape as `nested_dispatch.rs`'s `Dispatch<HostBuffer>` handler.
-    let outcomes = {
+    // shape as `nested_dispatch.rs`'s `Dispatch<HostBuffer>` handler. The
+    // seat-reconnect arm needs `state` whole too (it inserts an idle), so
+    // it reports back through `arm_reconnect` rather than acting inline.
+    let (outcomes, arm_reconnect) = {
         let Some(tty) = &mut state.tty else {
             return;
         };
@@ -1714,7 +1811,7 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
                 for head in &mut tty.heads {
                     head.presenter.pause();
                 }
-                Vec::new()
+                (Vec::new(), false)
             }
             SessionEvent::ActivateSession => {
                 tracing::info!("session activated");
@@ -1727,28 +1824,32 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
                 // working keyboard, retry the VT switch" case `reactivate`'s
                 // doc calls out as the one meant to stay recoverable.
                 tty.session_paused = false;
-                if !tty.reactivate() {
-                    Vec::new()
-                } else {
-                    // A display plugged in (or the host window resized)
-                    // while this session was on another VT fired its udev
-                    // event then, with no DRM master to act on it, and
-                    // `Tty::reconfigure` correctly declined. Nothing else
-                    // will ever deliver that event again, so the switch back
-                    // has to ask the device what it says *now* rather than
-                    // assume the mode it left on is still the right one.
-                    //
-                    // `reactivate` has already armed a full modeset, so the
-                    // do-nothing answer this returns in the overwhelmingly
-                    // common case (nothing changed while away) must still
-                    // ask for the frame that modeset rides on -- which the
-                    // render request below does, whatever the hotplug path
-                    // found.
-                    tty.reconfigure()
+                match tty.reactivate() {
+                    Reactivation::Recovered => {
+                        // A display plugged in (or the host window resized)
+                        // while this session was on another VT fired its udev
+                        // event then, with no DRM master to act on it, and
+                        // `Tty::reconfigure` correctly declined. Nothing else
+                        // will ever deliver that event again, so the switch back
+                        // has to ask the device what it says *now* rather than
+                        // assume the mode it left on is still the right one.
+                        //
+                        // `reactivate` has already armed a full modeset, so the
+                        // do-nothing answer this returns in the overwhelmingly
+                        // common case (nothing changed while away) must still
+                        // ask for the frame that modeset rides on -- which the
+                        // render request below does, whatever the hotplug path
+                        // found.
+                        (tty.reconfigure(), false)
+                    }
+                    outcome => (Vec::new(), reconnect::should_attempt(outcome)),
                 }
             }
         }
     };
+    if arm_reconnect {
+        reconnect::arm(state);
+    }
     let activated = !paused;
     hotplug::apply(state, outcomes);
     if activated && state.tty.as_ref().is_some_and(Tty::is_active) {

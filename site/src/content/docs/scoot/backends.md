@@ -185,26 +185,33 @@ race with the previous VT's owner (a login greeter holding master
 through logind), scoot probes master itself with one explicit
 `SET_MASTER` -- which also recovers root-run sessions outright -- and
 names the outcome: master genuinely held elsewhere, or master vacant
-with only the seat daemon able to re-acquire it. When master genuinely
-cannot be had, the session stays alive (keyboard and `scoot msg` keep
-answering) and every output reports `live: false` in `scoot msg
-outputs` until a later switch back succeeds -- check that field before
-trusting a screenshot, which goes stale while the display is dead.
-Each switch back is a new race the seat daemon may win this time; if
-it never recovers, restart the session -- a fresh start re-acquires
-master through the seat daemon, which is how every session gets its
-display in the first place.
+with only the seat daemon able to re-acquire it. On the vacant
+diagnosis an unprivileged session tries once per switch back to
+reconnect the seat itself -- a fresh seat client whose open is
+first-to-open, so the seat daemon takes master while handing the fd
+over -- then rebuilds the display on the new fd, re-initialises input,
+and proves master with a synchronous modeset before the outputs report
+`live: true` again. When master genuinely cannot be had, the session
+stays alive (keyboard and `scoot msg` keep answering) and every output
+reports `live: false` in `scoot msg outputs` until a later switch back
+succeeds -- check that field before trusting a screenshot, which goes
+stale while the display is dead. Each switch back is a new race the
+seat daemon may win this time; if it never recovers, restart the
+session -- a fresh start re-acquires master through the seat daemon,
+which is how every session gets its display in the first place.
 
 > **Symptom:** `--tty` display stays dark after switching back to it.
 > The compositor is usually alive underneath -- `scoot msg outputs`
 > answers, with `live: false` on every output, and the log names the
-> holder it could not take master from. Switch VTs away and back
-> (`Ctrl+Alt+F1`…`F12`); each return retries the re-acquisition, and
-> any one of them may win the race. If it never recovers, restart the
-> session -- a fresh start re-acquires master through the seat daemon.
-> The seat daemon (not scoot) is losing the master race every time --
-> `sudo cat /sys/kernel/debug/dri/N/clients` shows who holds `master`
-> while your VT is displayed.
+> holder it could not take master from (or the vacancy, plus whether
+> the seat reconnect recovered it or fell back). Switch VTs away and
+> back (`Ctrl+Alt+F1`…`F12`); each return retries the re-acquisition --
+> first through the seat daemon's own race, then through one fresh seat
+> client of scoot's own -- and any one of them may win it. If it never
+> recovers, restart the session -- a fresh start re-acquires master
+> through the seat daemon. The seat daemon (not scoot) is losing the
+> master race every time -- `sudo cat /sys/kernel/debug/dri/N/clients`
+> shows who holds `master` while your VT is displayed.
 
 **Losing the seat.** If the seat daemon dies under a running session
 (seatd killed, logind restarted — both reach scoot through libseat), the

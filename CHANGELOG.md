@@ -40,6 +40,22 @@ scoot has not cut a numbered release yet; entries are dated.
   while the display is dead, so check `live` before trusting pixels). See [VT
   switching](site/src/content/docs/scoot/backends.md#hotplug-vt-switching-captures).
 
+### Unreleased — `--tty` reconnects the seat after a lost VT-switch master race (bug fix)
+
+- **An unprivileged `--tty` session whose switch back lost the
+  seat daemon's master race gets its display back on the spot.**
+  On the vacant diagnosis (master held by nobody, only the seat daemon
+  able to re-acquire it), each switch back now tries one fresh seat
+  client -- a new connection whose open is first-to-open, so the seat
+  daemon takes master while handing the fd over -- then rebuilds the
+  display on it, re-initialises input, and proves master with a
+  synchronous modeset before the outputs report `live: true` again.
+  Anything short of a working device falls back to the stayed-alive
+  session (`live: false`, keyboard and `scoot msg` answering) with the
+  next switch back retrying as before. Dumb-buffer sessions only; the
+  scanout tier and genuinely-held master keep today's path. See [VT
+  switching](site/src/content/docs/scoot/backends.md#hotplug-vt-switching-captures).
+
 ### Animated images read as stills, with memory caps (`scootbg`)
 
 - **GIF images now show, and an animated GIF, APNG or animated WebP
