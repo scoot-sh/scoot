@@ -1,9 +1,10 @@
 ---
 title: "Recover the display scoot-side after the seat daemon loses the VT-switch-back master race: seat reconnect or close-to-zero"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-10"
 ---
 
 # Recover the display scoot-side after the seat daemon loses the VT-switch-back master race: seat reconnect or close-to-zero
@@ -139,3 +140,58 @@ above); client-side `SET_MASTER` retry loops (futile unprivileged,
 a privileged helper claiming this session's fd from another process (pid
 gate); second-client / path-alias games (`EPERM` / `realpath`); or
 spinning/polling of any kind.
+
+## Resolution (2026-10-10): route (a) seat reconnect ships (PR #548)
+
+Route (a) proven live on the Asahi M2 and shipped; route (b)
+close-to-zero is unneeded (no `Arc<OwnedFd>` refactor required now that
+reconnect recovers) and stays untried.
+
+What landed (`fix(scoot)`, `crates/scoot/src/compositor/tty/reconnect.rs`
+plus a `Reactivation` shape on the reactivate path): on the
+vacant-but-untakeable diagnosis each `ActivateSession` arms one idle
+that drops the heads teardown-first, drops the seat connection (freeing
+seatd's entry), connects a fresh client whose open is first-to-open,
+rebuilds the device and heads, re-inits libinput on the new session,
+rewires the loop, re-binds the existing outputs, and proves master with
+a synchronous `pause` + `activate` before reporting `live: true`.
+Anything short of a built device restores the old backend (today's
+`live: false` with keyboard and future retries); only a dead seat
+itself stops the process. Dumb tier only; held master and privileged
+self-recovery keep today's path. Headless tests pin the arming truth
+table and the fallback wording; site docs (`backends.md`
+hotplug-vt-switching section) and CHANGELOG updated in the same commit.
+
+Live evidence (private seatd + `openvt`, greeter cage+regreet via logind
+on tty1 unless noted; raw logs `~/fx/reconnect-*.log` on the box):
+
+- Baseline (guard-less build of this branch): 3/3 bounces lose the race
+  with the vacant diagnosis, both outputs `live: false`; debugfs shows
+  no `master y` anywhere.
+- With the fix, greeter case: 6 bounces -- 1 won outright (no arm),
+  5 lost and armed, 5/5 `seat reconnect recovered the display`, new
+  session `came_up_active=true` 5/5, input gap 36--54 ms, total
+  ~565--591 ms. Outputs `live: true`, screenshots fresh across a spawn
+  (pixels change), debugfs `master y` on the new seatd entry.
+- Input: Super+Return injected via ydotool through the rebuilt libinput
+  grew windows 1 -> 2.
+- No-greeter case (greetd stopped, then restarted cleanly): 2 bounces,
+  0 arms, `live: true` throughout -- no spurious attempts, no
+  regression of the normal path.
+- Root control: 3 bounces, no errors, no arms -- privileged
+  self-recovery unregressed (its probe arm is untouched).
+- Restore fallback fired live twice (once fault-injected, once on a
+  real lost race): old device rebuilt, session alive, `live: false`,
+  keyboard working (window spawned), next bounce's pause/activate
+  flowing through the rewired notifier.
+- Not run: a scoot-on-logind-backend session (infeasible from SSH --
+  no logind VT session to join); logind participated throughout as the
+  competing master holder. The `keep-dark` (fresh fd, proof failed)
+  branch never fired live; it keeps the fresh fd dark with today's
+  message, strictly better than the poisoned fd it replaces.
+
+Edges held: held-vs-vacant discrimination unchanged (acts only on
+`LostVacant`); `live: false` until the synchronous proof passes
+(restore asserts it explicitly); one attempt per activation, never a
+spin (coalesced arm + idle); input gap measured and logged; no hot-path
+allocation (reconnect runs once per VT switch on the calloop thread).

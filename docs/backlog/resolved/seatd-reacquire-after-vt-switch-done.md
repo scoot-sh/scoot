@@ -124,7 +124,7 @@ re-acquire path hinges on. Everything else from the spike is reverted;
 `git log` on the branch shows the whole arc.
 
 What remains is tracked, not just prose: see
-[Recover the display scoot-side after the seat daemon loses the VT-switch-back master race: seat reconnect or close-to-zero](../core/seatd-reconnect-or-close-to-zero.md)
+[Recover the display scoot-side after the seat daemon loses the VT-switch-back master race: seat reconnect or close-to-zero](./seatd-reconnect-or-close-to-zero-done.md)
 (medium, unblocked; per the 2026-10-09 user decision there is no seatd
 fork, so seat-side retry is off the table) -- seat reconnect as a fresh
 libseat client, or the close-to-zero refactor, each with the mechanism,
