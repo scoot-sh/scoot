@@ -25,16 +25,20 @@
  * real libgbm, 0: fail-closed): it lets a test prove which implementation
  * answered without needing a DRM device.
  *
- * Threading: the per-symbol cached function pointer is written with the
- * same value by every writer (dlsym is deterministic for one handle), so a
- * first-use race is benign. None of these run on a per-frame hot path
- * (allocation/import/query at startup, resize and buffer import), so even
- * the dlsym-per-call fallback shape would be affordable; the cache just
- * avoids paying it.
+ * Threading: the `dlopen` handle is resolved once per process under
+ * `pthread_once`; every entry point looks its symbol up per call. A per-call
+ * `dlsym` is a hash lookup, and none of these runs on a per-frame hot path
+ * (allocation/import/query at startup, resize and buffer import), so caching
+ * function pointers would buy nothing and only add shared state. A
+ * *transient* `dlopen` failure pins the process to fail-closed for its life
+ * (documented, not retried: GBM availability does not change under a
+ * running compositor often enough to matter, and every caller already
+ * treats refusal as a decision, not a retryable event).
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -53,77 +57,87 @@ union gbm_bo_handle {
     uint64_t u64;
 };
 
+static void *gbm_real_handle = NULL;
+static pthread_once_t gbm_real_once = PTHREAD_ONCE_INIT;
+
+static void gbm_real_init(void) {
+    /* Bare soname: resolved through LD_LIBRARY_PATH / the binary's
+     * RUNPATH / the loader cache / default dirs. This archive is
+     * linked statically and exports no SONAME, so it can never
+     * resolve to itself here. */
+    gbm_real_handle = dlopen("libgbm.so.1", RTLD_NOW | RTLD_LOCAL);
+}
+
 static void *gbm_real(void) {
-    static void *handle = NULL;
-    static int tried = 0;
-    if (!tried) {
-        tried = 1;
-        /* Bare soname: resolved through LD_LIBRARY_PATH / the binary's
-         * RUNPATH / the loader cache / default dirs. This archive is
-         * linked statically and exports no SONAME, so it can never
-         * resolve to itself here. */
-        handle = dlopen("libgbm.so.1", RTLD_NOW | RTLD_LOCAL);
-    }
-    return handle;
+    pthread_once(&gbm_real_once, gbm_real_init);
+    return gbm_real_handle;
 }
 
 int scoot_gbm_real_loaded(void) {
     return gbm_real() != NULL;
 }
 
-/* One cached dlsym per entry point; NULL while the real library is absent
- * (or lacks the symbol), in which case the caller fails closed. */
-#define GBM_SYM(name)                                        \
-    static void *gbm_sym_##name(void) {                      \
-        static void *sym = NULL;                             \
-        static int tried = 0;                                \
-        if (!tried) {                                        \
-            tried = 1;                                       \
-            void *h = gbm_real();                            \
-            if (h)                                            \
-                sym = dlsym(h, "gbm_" #name);                \
-        }                                                    \
-        return sym;                                          \
+/* One entry point's address in the real library, or NULL when there is no
+ * library (or it lacks the symbol -- an older libgbm under a newer stub:
+ * just that entry fails closed while its siblings forward). */
+static void *gbm_sym(const char *name) {
+    void *handle = gbm_real();
+    if (!handle)
+        return NULL;
+    return dlsym(handle, name);
+}
+
+#define GBM_PTR(name, ret, params, args) \
+    ret gbm_##name params { \
+        ret (*f) params = (ret (*) params)gbm_sym("gbm_" #name); \
+        if (!f) { \
+            errno = ENOSYS; \
+            return NULL; \
+        } \
+        return f args; \
     }
 
-#define GBM_PTR(name, ret, params, args)                     \
-    GBM_SYM(name)                                            \
-    ret gbm_##name params {                                  \
-        ret (*f) params = (ret (*) params)gbm_sym_##name();  \
-        if (!f) {                                            \
-            errno = ENOSYS;                                  \
-            return NULL;                                     \
-        }                                                    \
-        return f args;                                       \
+#define GBM_INT(name, params, args) \
+    int gbm_##name params { \
+        int (*f) params = (int (*) params)gbm_sym("gbm_" #name); \
+        if (!f) { \
+            errno = ENOSYS; \
+            return -1; \
+        } \
+        return f args; \
     }
 
-#define GBM_INT(name, params, args)                          \
-    GBM_SYM(name)                                            \
-    int gbm_##name params {                                  \
-        int (*f) params = (int (*) params)gbm_sym_##name();  \
-        if (!f) {                                            \
-            errno = ENOSYS;                                  \
-            return -1;                                       \
-        }                                                    \
-        return f args;                                       \
+#define GBM_U32(name, params, args) \
+    uint32_t gbm_##name params { \
+        uint32_t (*f) params = (uint32_t (*) params)gbm_sym("gbm_" #name); \
+        if (!f) \
+            return 0; \
+        return f args; \
     }
 
-#define GBM_U32(name, params, args)                                    \
-    GBM_SYM(name)                                                      \
-    uint32_t gbm_##name params {                                       \
-        uint32_t (*f) params = (uint32_t (*) params)gbm_sym_##name();  \
-        if (!f)                                                        \
-            return 0;                                                  \
-        return f args;                                                 \
+#define GBM_U64(name, params, args) \
+    uint64_t gbm_##name params { \
+        uint64_t (*f) params = (uint64_t (*) params)gbm_sym("gbm_" #name); \
+        if (!f) \
+            return 0; \
+        return f args; \
     }
 
-#define GBM_U64(name, params, args)                                    \
-    GBM_SYM(name)                                                      \
-    uint64_t gbm_##name params {                                       \
-        uint64_t (*f) params = (uint64_t (*) params)gbm_sym_##name();  \
-        if (!f)                                                        \
-            return 0;                                                  \
-        return f args;                                                 \
+#define GBM_VOID(name, params, args, fret, fparams) \
+    void gbm_##name params { \
+        fret (*f) fparams = (fret (*) fparams)gbm_sym("gbm_" #name); \
+        if (f) \
+            f args; \
+    }
+
+#define GBM_HANDLE(name, params, args, fret, fparams) \
+    fret gbm_##name params { \
+        fret (*f) fparams = (fret (*) fparams)gbm_sym("gbm_" #name); \
+        if (!f) { \
+            union gbm_bo_handle zero = { .ptr = NULL }; \
+            return zero; \
+        } \
+        return f args; \
     }
 
 /* Device */
@@ -138,13 +152,8 @@ GBM_INT(device_is_format_supported,
 GBM_INT(device_get_format_modifier_plane_count,
         (struct gbm_device *gbm, uint32_t format, uint64_t modifier),
         (gbm, format, modifier))
-GBM_SYM(device_destroy)
-void gbm_device_destroy(struct gbm_device *gbm) {
-    void (*f)(struct gbm_device *) =
-        (void (*)(struct gbm_device *))gbm_sym_device_destroy();
-    if (f)
-        f(gbm);
-}
+GBM_VOID(device_destroy, (struct gbm_device *gbm), (gbm),
+         void, (struct gbm_device *))
 
 /* Buffer objects */
 GBM_PTR(bo_create,
@@ -175,13 +184,8 @@ GBM_PTR(bo_map,
          uint32_t height, uint32_t flags, uint32_t *stride,
          void **map_data),
         (bo, x, y, width, height, flags, stride, map_data))
-GBM_SYM(bo_unmap)
-void gbm_bo_unmap(struct gbm_bo *bo, void *map_data) {
-    void (*f)(struct gbm_bo *, void *) =
-        (void (*)(struct gbm_bo *, void *))gbm_sym_bo_unmap();
-    if (f)
-        f(bo, map_data);
-}
+GBM_VOID(bo_unmap, (struct gbm_bo *bo, void *map_data), (bo, map_data),
+         void, (struct gbm_bo *, void *))
 GBM_U32(bo_get_width, (struct gbm_bo *bo), (bo))
 GBM_U32(bo_get_height, (struct gbm_bo *bo), (bo))
 GBM_U32(bo_get_stride, (struct gbm_bo *bo), (bo))
@@ -195,46 +199,20 @@ GBM_INT(bo_get_fd, (struct gbm_bo *bo), (bo))
 GBM_INT(bo_get_fd_for_plane, (struct gbm_bo *bo, int plane), (bo, plane))
 GBM_INT(bo_write, (struct gbm_bo *bo, const void *buf, size_t count),
         (bo, buf, count))
-GBM_SYM(bo_get_handle)
-union gbm_bo_handle gbm_bo_get_handle(struct gbm_bo *bo) {
-    union gbm_bo_handle (*f)(struct gbm_bo *) =
-        (union gbm_bo_handle (*)(struct gbm_bo *))gbm_sym_bo_get_handle();
-    if (!f) {
-        union gbm_bo_handle zero = { .ptr = NULL };
-        return zero;
-    }
-    return f(bo);
-}
-GBM_SYM(bo_get_handle_for_plane)
-union gbm_bo_handle gbm_bo_get_handle_for_plane(struct gbm_bo *bo, int plane) {
-    union gbm_bo_handle (*f)(struct gbm_bo *, int) =
-        (union gbm_bo_handle (*)(struct gbm_bo *, int))
-            gbm_sym_bo_get_handle_for_plane();
-    if (!f) {
-        union gbm_bo_handle zero = { .ptr = NULL };
-        return zero;
-    }
-    return f(bo, plane);
-}
-GBM_SYM(bo_set_user_data)
-void gbm_bo_set_user_data(struct gbm_bo *bo, void *data,
-                          void (*destroy_user_data)(struct gbm_bo *, void *)) {
-    void (*f)(struct gbm_bo *, void *,
-              void (*)(struct gbm_bo *, void *)) =
-        (void (*)(struct gbm_bo *, void *,
-                  void (*)(struct gbm_bo *, void *)))
-            gbm_sym_bo_set_user_data();
-    if (f)
-        f(bo, data, destroy_user_data);
-}
+GBM_HANDLE(bo_get_handle, (struct gbm_bo *bo), (bo),
+           union gbm_bo_handle, (struct gbm_bo *))
+GBM_HANDLE(bo_get_handle_for_plane, (struct gbm_bo *bo, int plane),
+           (bo, plane),
+           union gbm_bo_handle, (struct gbm_bo *, int))
+GBM_VOID(bo_set_user_data,
+         (struct gbm_bo *bo, void *data,
+          void (*destroy_user_data)(struct gbm_bo *, void *)),
+         (bo, data, destroy_user_data),
+         void, (struct gbm_bo *, void *,
+                void (*)(struct gbm_bo *, void *)))
 GBM_PTR(bo_get_user_data, void *, (struct gbm_bo *bo), (bo))
-GBM_SYM(bo_destroy)
-void gbm_bo_destroy(struct gbm_bo *bo) {
-    void (*f)(struct gbm_bo *) =
-        (void (*)(struct gbm_bo *))gbm_sym_bo_destroy();
-    if (f)
-        f(bo);
-}
+GBM_VOID(bo_destroy, (struct gbm_bo *bo), (bo),
+         void, (struct gbm_bo *))
 
 /* Surfaces */
 GBM_PTR(surface_create,
@@ -256,20 +234,9 @@ GBM_PTR(surface_create_with_modifiers2,
         (gbm, width, height, format, modifiers, count, flags))
 GBM_PTR(surface_lock_front_buffer, struct gbm_bo *,
         (struct gbm_surface *surface), (surface))
-GBM_SYM(surface_release_buffer)
-void gbm_surface_release_buffer(struct gbm_surface *surface,
-                                struct gbm_bo *bo) {
-    void (*f)(struct gbm_surface *, struct gbm_bo *) =
-        (void (*)(struct gbm_surface *,
-                  struct gbm_bo *))gbm_sym_surface_release_buffer();
-    if (f)
-        f(surface, bo);
-}
+GBM_VOID(surface_release_buffer,
+         (struct gbm_surface *surface, struct gbm_bo *bo), (surface, bo),
+         void, (struct gbm_surface *, struct gbm_bo *))
 GBM_INT(surface_has_free_buffers, (struct gbm_surface *surface), (surface))
-GBM_SYM(surface_destroy)
-void gbm_surface_destroy(struct gbm_surface *surface) {
-    void (*f)(struct gbm_surface *) =
-        (void (*)(struct gbm_surface *))gbm_sym_surface_destroy();
-    if (f)
-        f(surface);
-}
+GBM_VOID(surface_destroy, (struct gbm_surface *surface), (surface),
+         void, (struct gbm_surface *))

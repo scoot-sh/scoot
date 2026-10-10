@@ -39,7 +39,13 @@ fn main() {
     // linker's default --as-needed the archive resolves the GBM symbols
     // and no DT_NEEDED is emitted -- verified both with and without a
     // system libgbm present).
-    if std::env::var("CARGO_FEATURE_RUNTIME_GBM").is_ok() {
+    //
+    // Linux-only like the libinput block above (the stub is meaningless
+    // where `backend_gbm` cannot link anyway): without the gate a macOS
+    // `--features runtime-gbm` build would demand a C compiler for nothing.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux")
+        && std::env::var("CARGO_FEATURE_RUNTIME_GBM").is_ok()
+    {
         cc::Build::new().file("gbm-stub/gbm_stub.c").compile("gbm");
     }
 }

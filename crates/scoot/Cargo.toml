@@ -51,9 +51,13 @@ gpu-scanout = ["smithay/backend_gbm"]
 # (`gbm-stub/gbm_stub.c`, compiled by `build.rs`) instead of the system
 # libgbm: the produced binary carries no libgbm DT_NEEDED entry (check with
 # `readelf -d`/`ldd`) and still starts where libgbm is absent, loading it by
-# dlopen only when the GPU tier is actually selected. Off by default and
-# orthogonal to `gpu-scanout` (enabling both is the future single build;
-# either alone keeps its old link behavior). Do not remove `gpu-scanout` in
+# dlopen only when a GBM entry point is actually called. (With this feature
+# alone the GPU tier stays compiled out -- every call site is behind
+# `gpu-scanout` -- so the tier rides along once that feature is enabled too;
+# see the both-features build in the spike report.) Without libgbm every
+# entry fails closed, which the existing fallbacks already handle. Off by
+# default and orthogonal to `gpu-scanout`: a `gpu-scanout`-only build keeps
+# its old link behavior byte-identical. Do not remove `gpu-scanout` in
 # the spike -- productionisation decides the collapse (see the backlog).
 runtime-gbm = ["smithay/backend_gbm"]
 xwayland = ["smithay/xwayland"]

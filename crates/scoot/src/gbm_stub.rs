@@ -11,8 +11,8 @@
 /// Stable after the first call: the dlopen is attempted once per process.
 ///
 /// Test-only for the spike: nothing in production asks yet (the
-/// auto-detect rule in `./core/runtime-gbm-productionise.md` will), and an
-/// unasked question must not ship as dead code. The `extern` block below
+/// auto-detect rule in `docs/backlog/core/runtime-gbm-productionise.md`
+/// will), and an unasked question must not ship as dead code. The `extern` block below
 /// stays unconditional -- an unreferenced declaration warns nothing, and it
 /// keeps the symbol's contract beside its stub.
 #[cfg(test)]
