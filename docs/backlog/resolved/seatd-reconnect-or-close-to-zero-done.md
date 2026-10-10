@@ -141,7 +141,7 @@ a privileged helper claiming this session's fd from another process (pid
 gate); second-client / path-alias games (`EPERM` / `realpath`); or
 spinning/polling of any kind.
 
-## Resolution (2026-10-10): route (a) seat reconnect ships
+## Resolution (2026-10-10): route (a) seat reconnect ships (PR #548)
 
 Route (a) proven live on the Asahi M2 and shipped; route (b)
 close-to-zero is unneeded (no `Arc<OwnedFd>` refactor required now that
