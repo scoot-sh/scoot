@@ -43,19 +43,28 @@ mod tests {
         assert_eq!(real_loaded(), first, "the probe must be stable");
     }
 
-    /// Fail-closed where no DRM device can exist: `/dev/null` is never a
-    /// DRM node, so `GbmDevice::new` must refuse it -- through the real
-    /// libgbm's own refusal where one is installed, and through the
-    /// stub's ENOSYS where none is. This is the runtime half of the
-    /// DT_NEEDED proof: the GPU tier's constructor degrades to its
-    /// existing `Err` rather than aborting the process.
+    /// The stub's contract on a fd that can never be a DRM device.
+    /// Without a system libgbm (fail-closed) this must be a loud `Err` --
+    /// the runtime half of the DT_NEEDED proof. With a real libgbm the call
+    /// forwards to mesa, whose answer is mesa's business: it refuses most
+    /// bad fds, but `/dev/null` gets a zombie device that fails later
+    /// (measured: `gbm_create_device` succeeds with "failed to get driver
+    /// name" on stderr). Either way the process must survive the call --
+    /// no abort, no hang -- and scoot's own `try_scanout` turns any later
+    /// refusal into its warned dumb-buffer fallback.
     #[test]
-    fn gbm_device_on_a_non_drm_fd_is_a_loud_refusal() {
+    fn gbm_device_on_a_non_drm_fd_is_survived() {
         use smithay::backend::allocator::gbm::GbmDevice;
 
         let null = std::fs::File::open("/dev/null").expect("/dev/null opens");
-        let error = GbmDevice::new(null).expect_err("/dev/null is never a GBM device");
-        // Loud, not silent: the refusal carries the reason either way.
-        assert!(!error.to_string().is_empty(), "{error:?}");
+        let answer = GbmDevice::new(null);
+        if real_loaded() {
+            // Forwarded: mesa answered (Ok or Err, both are its answer).
+            eprintln!("forwarded answer: {}", answer.is_ok());
+        } else {
+            // Fail-closed: the stub refused loudly.
+            let error = answer.expect_err("/dev/null must be refused fail-closed");
+            assert!(!error.to_string().is_empty(), "{error:?}");
+        }
     }
 }
