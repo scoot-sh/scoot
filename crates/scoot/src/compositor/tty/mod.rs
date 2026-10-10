@@ -241,12 +241,16 @@ pub struct Tty {
     session_token: RegistrationToken,
     drm_token: RegistrationToken,
     libinput_token: RegistrationToken,
-    /// Whether a seat-reconnect idle is already armed. Coalesces one
-    /// `ActivateSession`'s arm with any earlier one whose idle has not run
-    /// yet -- the idle runs before any other source dispatches again, so in
-    /// practice this is always false here, but an `ActivateSession` storm
-    /// (a seat daemon flapping) must arm one reconnect, not one per event.
-    reconnect_armed: bool,
+    /// A queued seat-reconnect attempt, carrying the `ActivateSession`
+    /// diagnosis that armed it. Coalesces one `ActivateSession`'s arm with
+    /// any earlier one whose idle has not run yet -- the idle runs before
+    /// any other source dispatches again, so in practice this is always
+    /// `None` here, but an `ActivateSession` storm (a seat daemon
+    /// flapping) must arm one reconnect, not one per event. A later
+    /// activation overwrites the diagnosis without arming a second idle
+    /// (see `reconnect::arm`), so a queued idle never acts on a
+    /// superseded diagnosis.
+    reconnect_armed: Option<Reactivation>,
 }
 
 /// One connector `init` built a head for, on its way to `compositor::run`:
@@ -404,7 +408,7 @@ pub fn init(
         session_token,
         drm_token,
         libinput_token,
-        reconnect_armed: false,
+        reconnect_armed: None,
     });
 
     // Explicit sync is offered only on the GPU scanout tier, and only where
@@ -1790,8 +1794,11 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
     // `Reconfigured::finish` call below needs `state` whole again -- same
     // shape as `nested_dispatch.rs`'s `Dispatch<HostBuffer>` handler. The
     // seat-reconnect arm needs `state` whole too (it inserts an idle), so
-    // it reports back through `arm_reconnect` rather than acting inline.
-    let (outcomes, arm_reconnect) = {
+    // it reports back through `arm_diagnosis` rather than acting inline.
+    // Every non-recovered activation reports its diagnosis, even when no
+    // new idle is needed: an already-armed idle records the latest one so
+    // a superseded diagnosis never proceeds (see `reconnect::arm`).
+    let (outcomes, arm_diagnosis) = {
         let Some(tty) = &mut state.tty else {
             return;
         };
@@ -1811,7 +1818,7 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
                 for head in &mut tty.heads {
                     head.presenter.pause();
                 }
-                (Vec::new(), false)
+                (Vec::new(), None)
             }
             SessionEvent::ActivateSession => {
                 tracing::info!("session activated");
@@ -1840,15 +1847,15 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
                         // ask for the frame that modeset rides on -- which the
                         // render request below does, whatever the hotplug path
                         // found.
-                        (tty.reconfigure(), false)
+                        (tty.reconfigure(), None)
                     }
-                    outcome => (Vec::new(), reconnect::should_attempt(outcome)),
+                    outcome => (Vec::new(), Some(outcome)),
                 }
             }
         }
     };
-    if arm_reconnect {
-        reconnect::arm(state);
+    if let Some(diagnosis) = arm_diagnosis {
+        reconnect::arm(state, diagnosis);
     }
     let activated = !paused;
     hotplug::apply(state, outcomes);

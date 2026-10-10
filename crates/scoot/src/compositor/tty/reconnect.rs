@@ -30,11 +30,14 @@
 //! (`pause` + `activate` runs `reset_state`'s atomic commit -- the same
 //! commit the normal path proves with) before reporting `live: true`.
 //! Anything that fails short of a built device falls back to rebuilding
-//! the heads on the *old* device: today's `live: false` with a working
-//! keyboard and future retries, never a stranded session. Only a dead seat
-//! itself (the fresh connect failing, which dooms the old connection too)
-//! exits, through the same supervisor-restarts-into-a-fresh-session
-//! contract as any other seat loss.
+//! the heads on the *old* device -- or, when the old device itself drives
+//! nothing any more (every display unplugged while switched away), to
+//! keeping the old wiring dark with no heads at all: today's `live: false`
+//! with a working keyboard and future retries, never a stranded session
+//! and never a process exit. Only a dead seat itself (the fresh connect
+//! failing, which dooms the old connection too) exits, through the same
+//! supervisor-restarts-into-a-fresh-session contract as any other seat
+//! loss.
 //!
 //! Deliberately dumb-tier-only: a scanout-tier rebuild would re-tie the
 //! renderer's swapchain state this module does not touch, and the live
@@ -76,17 +79,28 @@ pub(super) fn should_attempt(outcome: Reactivation) -> bool {
 }
 
 /// Arms this activation's one reconnect attempt: an event-loop idle that
-/// runs `run` once dispatch settles. Coalesced by `reconnect_armed`, so a
-/// flapping seat daemon arms one attempt, not one per event. Called with
-/// the vacant diagnosis already established; re-checks nothing.
-pub(super) fn arm(state: &mut State) {
+/// runs `run` once dispatch settles. Called with every non-recovered
+/// activation diagnosis, not just the vacant one: the first vacant
+/// activation arms the idle and snapshots its diagnosis, and a later
+/// activation before the idle runs overwrites the snapshot without
+/// arming a second idle -- so a queued idle never acts on a superseded
+/// diagnosis (see `run`'s re-check). Called with the vacant diagnosis
+/// already established; re-checks nothing itself.
+pub(super) fn arm(state: &mut State, outcome: Reactivation) {
     let Some(tty) = state.tty.as_mut() else {
         return;
     };
-    if tty.reconnect_armed {
+    if let Some(stored) = tty.reconnect_armed.as_mut() {
+        // Already armed: record the latest diagnosis so `run` can stand
+        // down on a superseded one. No second idle: exactly one attempt
+        // per arming window, event-driven, never a spin.
+        *stored = outcome;
         return;
     }
-    tty.reconnect_armed = true;
+    if !should_attempt(outcome) {
+        return;
+    }
+    tty.reconnect_armed = Some(outcome);
     tracing::info!(
         "seat reconnect armed: the seat daemon lost the master race on a vacant device; \
          trying one fresh seat client"
@@ -94,27 +108,68 @@ pub(super) fn arm(state: &mut State) {
     state.loop_handle.insert_idle(run);
 }
 
+/// Whether a queued attempt may still proceed: the diagnosis it armed on
+/// must still be the vacant one, the session must not have recovered
+/// under it, and the session must not have been switched away again
+/// meanwhile. A pure predicate so the N1/N2 skip rules are pinned by
+/// headless tests -- the fd half needs real seat hardware, this half
+/// must not rot silently.
+fn should_proceed(diagnosis: Reactivation, active: bool, session_paused: bool) -> bool {
+    diagnosis == Reactivation::LostVacant && !active && !session_paused
+}
+
 /// One armed attempt. See the module doc for the shape; each numbered step
 /// below names its fallback, so a reader can check that no failure leaves
 /// the session worse than today's `live: false`.
 fn run(state: &mut State) {
     let started = Instant::now();
-    // The attempt is spent whatever happens below: clearing first means an
+    // The attempt is spent whatever happens below: taking first means an
     // early return cannot leave a stale arm behind, and a second activation
     // arms its own attempt afterwards.
     let wanted = state.renderer;
     let Some(tty) = state.tty.as_mut() else {
         return;
     };
-    tty.reconnect_armed = false;
-    // The session may have recovered between the arm and this idle (a
-    // second activation that won its own race): an active session holds
-    // master, so there is nothing to reconnect. Tearing down a healthy
-    // backend here would trade a live display for a needless swap.
-    if tty.active {
-        tracing::info!(
-            "seat reconnect skipped: the session re-acquired drm master before the attempt ran"
-        );
+    let Some(diagnosis) = tty.reconnect_armed.take() else {
+        return;
+    };
+    // The single gate on every queued attempt (see `should_proceed`): a
+    // superseded diagnosis, a recovery under the arm, or a switch-away
+    // since the arm each stands the attempt down. The per-case lines below
+    // only name the reason -- the proceed/skip truth lives in that one
+    // predicate, pinned headlessly there.
+    if !should_proceed(diagnosis, tty.active, tty.session_paused) {
+        if diagnosis != Reactivation::LostVacant {
+            // A second activation landed between the arm and this idle
+            // with a different answer (held master, a recovery, any other
+            // failure). Acting on the stale vacant one anyway would tear
+            // down a backend whose race the follow-up already settled --
+            // at best wasteful, at worst swapping in a fresh fd against a
+            // held master.
+            tracing::info!(
+                ?diagnosis,
+                "seat reconnect skipped: a later activation superseded the vacant diagnosis"
+            );
+        } else if tty.active {
+            // The session recovered between the arm and this idle (a
+            // second activation that won its own race): an active session
+            // holds master, so there is nothing to reconnect. Tearing down
+            // a healthy backend here would trade a live display for a
+            // needless swap.
+            tracing::info!(
+                "seat reconnect skipped: the session re-acquired drm master before the attempt ran"
+            );
+        } else {
+            // The session was switched away again before this idle ran:
+            // rebuilding while paused would open on an inactive client
+            // (refused), tear down a backend another activation will
+            // settle, and wrongly clear `session_paused` on the swap path.
+            // Stand down instead -- the next switch back arms its own
+            // attempt.
+            tracing::info!(
+                "seat reconnect skipped: the session switched away again before the attempt ran"
+            );
+        }
         return;
     }
     // Dumb tier only (see the module doc): a scanout rebuild
@@ -297,11 +352,25 @@ fn swap(
     let device_id = drm.device_id();
 
     // Read the old registrations and the carried-over state first, while
-    // the old backend is still in place.
+    // the old backend is still in place. `None` here is unreachable
+    // single-threaded: `state.tty` is set once at init and taken only in
+    // this swap, with no dispatch interleaving -- so this is a
+    // `debug_assert` plus an early return, not a process exit. (A
+    // compositor exit takes every client's unsaved state with it; a loud
+    // return on an unreachable branch strictly dominates it.) The fresh
+    // pieces drop on return; the session source was already removed in
+    // `run`, so session events are dead from here in the impossible case
+    // -- still alive for IPC, still retryable by restart, never a kill.
     let (old_drm_token, old_libinput_token, path, modes) = {
         let Some(tty) = state.tty.as_ref() else {
-            tracing::error!("seat reconnect: lost the old backend mid-swap; stopping");
-            std::process::exit(1);
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-swap with no dispatch between"
+            );
+            tracing::error!(
+                "seat reconnect: lost the old backend mid-swap; keeping the old session"
+            );
+            return;
         };
         (
             tty.drm_token,
@@ -317,20 +386,30 @@ fn swap(
     let input_gap = Instant::now();
     state.loop_handle.remove(old_drm_token);
     state.loop_handle.remove(old_libinput_token);
-    if state.tty.take().is_none() {
-        tracing::error!("seat reconnect: lost the old backend mid-swap; stopping");
-        std::process::exit(1);
-    }
-    // Wire the new sources. Failure here means the loop is shutting down
-    // (nothing else refuses an insert); stopping matches that outcome.
+    // Cannot fail after the read above: no source dispatches between the
+    // two, single-threaded, so the backend observed `Some` a moment ago is
+    // still `Some`. Asserted, not exited -- see above for why no
+    // `process::exit` lives on this path any more.
+    debug_assert!(
+        state.tty.is_some(),
+        "tty vanished mid-swap with no dispatch between"
+    );
+    state.tty.take();
+    // Wire the new sources. An insert refuses only while the loop is
+    // shutting down (nothing else refuses one) -- and during a shutdown an
+    // explicit `process::exit(1)` would misreport a clean teardown as a
+    // crash to the supervisor, costing a restart-failure mark for nothing.
+    // So a refusal logs and returns with the old backend already dropped:
+    // the session runs backend-less until the shutdown completes, which is
+    // exactly where it was headed anyway.
     let session_token = match state
         .loop_handle
         .insert_source(notifier, super::session_event)
     {
         Ok(token) => token,
         Err(error) => {
-            tracing::error!(%error, "seat reconnect: cannot re-register the session; stopping");
-            std::process::exit(1);
+            tracing::error!(%error, "seat reconnect: cannot re-register the session during shutdown");
+            return;
         }
     };
     let drm_token = match state
@@ -339,8 +418,8 @@ fn swap(
     {
         Ok(token) => token,
         Err(error) => {
-            tracing::error!(%error, "seat reconnect: cannot re-register the drm device; stopping");
-            std::process::exit(1);
+            tracing::error!(%error, "seat reconnect: cannot re-register the drm device during shutdown");
+            return;
         }
     };
     let libinput_token = match state
@@ -349,8 +428,8 @@ fn swap(
     {
         Ok(token) => token,
         Err(error) => {
-            tracing::error!(%error, "seat reconnect: cannot re-register input; stopping");
-            std::process::exit(1);
+            tracing::error!(%error, "seat reconnect: cannot re-register input during shutdown");
+            return;
         }
     };
     let input_gap_ms = input_gap.elapsed().as_millis();
@@ -377,7 +456,7 @@ fn swap(
         session_token,
         drm_token,
         libinput_token,
-        reconnect_armed: false,
+        reconnect_armed: None,
     });
     rebind(state, bindings);
     match live {
@@ -385,10 +464,18 @@ fn swap(
             // What the normal reactivation arm does after a win: ask the
             // device what it says now (a display may have moved while the
             // session was away), apply it, and render the modeset's frame.
+            // `None` is unreachable single-threaded (just wired above, no
+            // dispatch between): assert plus a return that skips the render
+            // rather than a process exit -- the fresh backend is already in
+            // place and dark-safe, and the next frame or switch back heals
+            // it.
             let outcomes = {
                 let Some(tty) = state.tty.as_mut() else {
-                    tracing::error!("seat reconnect: lost the new backend mid-swap; stopping");
-                    std::process::exit(1);
+                    debug_assert!(state.tty.is_some(), "new backend vanished mid-swap");
+                    tracing::error!(
+                        "seat reconnect: lost the new backend mid-swap; skipping its re-probe"
+                    );
+                    return;
                 };
                 tty.reconfigure()
             };
@@ -431,9 +518,28 @@ fn rebuild_input(session: &LibSeatSession) -> Result<(Libinput, LibinputInputBac
 /// Rebuilds heads on the *old* device after the fresh build (or the fresh
 /// input) failed, and rewires the session and input on the new seat
 /// client: today's `live: false` with a working keyboard, working
-/// `change_vt`, and future retries -- never a stranded session. Exits only
-/// when the old device cannot drive a head either, which leaves nothing to
-/// present on and nothing to retry with; a fresh start is the way back.
+/// `change_vt`, and future retries -- never a stranded session and never a
+/// process exit (a compositor exit takes every client's unsaved state with
+/// it; see the N3 hardening).
+///
+/// When the old device itself drives nothing any more -- every display
+/// unplugged while switched away, with the switch back losing the race in
+/// the same cycle -- there are no heads to rebuild. That used to be a
+/// `process::exit(1)`; it is now the same survival shape with an empty
+/// head list: the old wiring stays dark, every output reports `live:
+/// false` (all but the last are removed the way a hotplug would), the new
+/// seat client still takes over session and input, and the next switch
+/// back retries. Today's no-reconnect path survives exactly this window
+/// (`live: false` + hotplug reconfiguration on the next win), so turning
+/// it into a kill would be strictly worse.
+///
+/// The `state.tty is None` guards below are unreachable single-threaded
+/// (`state.tty` is `Some` for the whole idle: set once at init, taken only
+/// inside `swap`, where no dispatch interleaves) -- each is a
+/// `debug_assert` plus a loud early return, never an exit. The loop-insert
+/// refusals can only fire while the loop is shutting down (nothing else
+/// refuses an insert): they log and return so a clean teardown is not
+/// misreported as a crash to the supervisor.
 fn restore(
     state: &mut State,
     session: LibSeatSession,
@@ -444,11 +550,17 @@ fn restore(
 ) {
     // Fresh probe, not the startup cache: the connectors may have moved
     // while the session was away, and the restore must see what is there
-    // now (same freshness the hotplug path probes with).
+    // now (same freshness the hotplug path probes with). An unreadable
+    // device probes as nothing-connected rather than exiting: the empty
+    // survival below keeps the session alive for the retry.
     let connected = {
         let Some(tty) = state.tty.as_ref() else {
-            tracing::error!("seat reconnect restore: lost the old backend; stopping");
-            std::process::exit(1);
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-restore with no dispatch between"
+            );
+            tracing::error!("seat reconnect restore: lost the old backend; keeping the session");
+            return;
         };
         match tty.drm.resource_handles() {
             Ok(resources) => {
@@ -457,10 +569,10 @@ fn restore(
             Err(error) => {
                 tracing::error!(
                     %error,
-                    "seat reconnect restore failed: cannot re-read the old device; stopping \
-                     (a fresh start re-acquires master through the seat daemon)"
+                    "seat reconnect restore: cannot re-read the old device; keeping the session dark \
+                     until a later switch back retries it"
                 );
-                std::process::exit(1);
+                Vec::new()
             }
         }
     };
@@ -469,37 +581,53 @@ fn restore(
     // tier is refused, exactly as at startup.
     let (heads, _decided, _failures) = {
         let Some(tty) = state.tty.as_mut() else {
-            tracing::error!("seat reconnect restore: lost the old backend; stopping");
-            std::process::exit(1);
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-restore with no dispatch between"
+            );
+            tracing::error!("seat reconnect restore: lost the old backend; keeping the session");
+            return;
         };
         let drm_fd = tty.drm.device_fd().clone();
         super::build_heads(&mut tty.drm, &drm_fd, connected, Some(wanted), wanted)
     };
-    if heads.is_empty() {
-        tracing::error!(
-            "seat reconnect restore failed: the old device drives nothing now; stopping \
-             (a fresh start re-acquires master through the seat daemon)"
-        );
-        std::process::exit(1);
-    }
+    let heads: Vec<super::head::Head> = heads.into_iter().map(|(head, _scanout)| head).collect();
     // Rewire input on the new session first: the old context's interface
     // holds the dropped (dead) session, so it cannot survive the swap.
     // The old input source is removed only once the replacement is built.
-    let (context, backend) = match rebuild_input(&session) {
-        Ok(input) => input,
-        Err(error) => {
-            tracing::error!(
-                %error,
-                "seat reconnect restore failed: no input on the new session; stopping \
-                 (a fresh start re-acquires master through the seat daemon)"
-            );
-            std::process::exit(1);
+    // A rebuild failure keeps the old input wiring rather than exiting:
+    // the old context may be dead with it, but the session stays alive
+    // for IPC and the next switch back retries -- strictly better than a
+    // kill.
+    match rebuild_input(&session) {
+        Ok((context, backend)) => {
+            restore_with_input(state, session, notifier, context, backend, heads, bindings)
         }
-    };
+        Err(error) => restore_without_input(state, session, notifier, heads, bindings, error),
+    }
+}
+
+/// The restore tail when the fresh input built: swaps session and input
+/// onto the new seat client and puts `heads` back -- possibly empty (see
+/// `restore`'s doc for the drives-nothing survival shape).
+fn restore_with_input(
+    state: &mut State,
+    session: LibSeatSession,
+    notifier: LibSeatSessionNotifier,
+    context: Libinput,
+    backend: LibinputInputBackend,
+    heads: Vec<super::head::Head>,
+    bindings: &[(connector::Handle, OutputId)],
+) {
+    let empty = heads.is_empty();
     let old_libinput_token = {
         let Some(tty) = state.tty.as_ref() else {
-            tracing::error!("seat reconnect restore: lost the old backend; stopping");
-            std::process::exit(1);
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-restore with no dispatch between"
+            );
+            tracing::error!("seat reconnect restore: lost the old backend; keeping the session");
+            return;
         };
         tty.libinput_token
     };
@@ -512,9 +640,9 @@ fn restore(
         Err(error) => {
             tracing::error!(
                 %error,
-                "seat reconnect restore failed: cannot re-register the session; stopping"
+                "seat reconnect restore: cannot re-register the session during shutdown"
             );
-            std::process::exit(1);
+            return;
         }
     };
     let libinput_token = match state
@@ -525,9 +653,9 @@ fn restore(
         Err(error) => {
             tracing::error!(
                 %error,
-                "seat reconnect restore failed: cannot re-register input; stopping"
+                "seat reconnect restore: cannot re-register input during shutdown"
             );
-            std::process::exit(1);
+            return;
         }
     };
     // Heads and wiring back in place. The display stays dark: `active`
@@ -537,22 +665,90 @@ fn restore(
     // proves master, never on the strength of the old fd.
     {
         let Some(tty) = state.tty.as_mut() else {
-            tracing::error!("seat reconnect restore: lost the old backend; stopping");
-            std::process::exit(1);
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-restore with no dispatch between"
+            );
+            tracing::error!("seat reconnect restore: lost the old backend; keeping the session");
+            return;
         };
         tty.session = session;
         tty.libinput = context;
         tty.session_token = session_token;
         tty.libinput_token = libinput_token;
-        tty.nothing_connected = false;
+        // An empty restore holds the primary the way a fully-unplugged
+        // hotplug does (see `hotplug.rs`'s `Hold`): the next connector
+        // change retries rather than planning `Keep` on nothing.
+        tty.nothing_connected = empty;
         tty.active = false;
-        tty.heads = heads.into_iter().map(|(head, _scanout)| head).collect();
+        tty.heads = heads;
     }
     rebind(state, bindings);
+    if empty {
+        tracing::error!(
+            "seat reconnect did not recover the display: {}; the session stays alive \
+             (keyboard and `scoot msg` answer, every output reports live:false) -- switch \
+             VTs away and back to retry once a display is connected, or restart the session",
+            empty_device_guidance()
+        );
+        return;
+    }
     tracing::error!(
         "seat reconnect did not recover the display: {}; the session stays alive \
          (keyboard and `scoot msg` answer, every output reports live:false) -- switch \
          VTs away and back to retry, or restart the session",
+        restore_guidance()
+    );
+}
+
+/// The restore tail when the fresh input refused to build: swaps the
+/// session onto the new seat client but keeps the old input wiring
+/// untouched, then puts `heads` back. The keyboard may be dead with the
+/// old context, but IPC answers and the next switch back retries -- never
+/// a stranded session, never an exit.
+fn restore_without_input(
+    state: &mut State,
+    session: LibSeatSession,
+    notifier: LibSeatSessionNotifier,
+    heads: Vec<super::head::Head>,
+    bindings: &[(connector::Handle, OutputId)],
+    input_error: String,
+) {
+    let empty = heads.is_empty();
+    let session_token = match state
+        .loop_handle
+        .insert_source(notifier, super::session_event)
+    {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "seat reconnect restore: cannot re-register the session during shutdown"
+            );
+            return;
+        }
+    };
+    {
+        let Some(tty) = state.tty.as_mut() else {
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-restore with no dispatch between"
+            );
+            tracing::error!("seat reconnect restore: lost the old backend; keeping the session");
+            return;
+        };
+        tty.session = session;
+        tty.session_token = session_token;
+        tty.nothing_connected = empty;
+        tty.active = false;
+        tty.heads = heads;
+    }
+    rebind(state, bindings);
+    tracing::error!(
+        %input_error,
+        "seat reconnect did not recover the display ({}); the session stays alive \
+         (`scoot msg` answers, every output reports live:false) -- switch VTs away and \
+         back to retry, or restart the session",
         restore_guidance()
     );
 }
@@ -614,6 +810,16 @@ fn keep_dark_guidance() -> String {
     "the fresh device refused its first modeset, so it holds no proven master".to_owned()
 }
 
+/// The actionable half of a restore that found the old device driving
+/// nothing: why the session stays headless-dark. A pure function so
+/// headless tests pin its wording apart from [`restore_guidance`]'s -- the
+/// fd half needs real seat hardware, this half must not rot silently.
+fn empty_device_guidance() -> String {
+    "the old device drives nothing now, so the session stays headless-dark (every output \
+     reports live:false) until a display is connected and a later switch back retries it"
+        .to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -647,5 +853,56 @@ mod tests {
     fn the_keep_dark_guidance_names_the_unproven_master() {
         let guidance = keep_dark_guidance();
         assert!(guidance.contains("no proven master"), "{guidance}");
+    }
+
+    #[test]
+    fn only_a_vacant_idle_unpaused_session_proceeds() {
+        // The fail-first pin for `run`'s gate: the vacant diagnosis on a
+        // master-less, unpaused session is the only shape that proceeds.
+        assert!(should_proceed(Reactivation::LostVacant, false, false));
+    }
+
+    #[test]
+    fn a_superseded_diagnosis_never_proceeds() {
+        // N2: a second activation before the idle runs overwrites the
+        // snapshot (see `arm`), and the queued idle must stand down on
+        // anything but the vacant shape -- acting on a stale vacant one
+        // would tear down a backend the follow-up already settled.
+        for diagnosis in [
+            Reactivation::Recovered,
+            Reactivation::LostHeld,
+            Reactivation::Failed,
+        ] {
+            assert!(!should_proceed(diagnosis, false, false), "{diagnosis:?}");
+        }
+    }
+
+    #[test]
+    fn a_recovered_session_never_proceeds() {
+        // The session won its own race between the arm and the idle: an
+        // active session holds master, so there is nothing to reconnect.
+        assert!(!should_proceed(Reactivation::LostVacant, true, false));
+    }
+
+    #[test]
+    fn a_paused_session_never_proceeds() {
+        // N1: switched away again before the idle ran -- rebuilding while
+        // paused would open on an inactive client and wrongly clear
+        // `session_paused` on the swap path. The next switch back arms its
+        // own attempt.
+        assert!(!should_proceed(Reactivation::LostVacant, false, true));
+        assert!(!should_proceed(Reactivation::LostVacant, true, true));
+    }
+
+    #[test]
+    fn the_empty_device_guidance_names_the_dark_session_and_the_retry() {
+        // N3: the drives-nothing survival keeps the wiring dark instead of
+        // exiting -- the message must say what stayed alive, what reads
+        // dead, and what retries it. Drop any of those phrases and this
+        // fails.
+        let guidance = empty_device_guidance();
+        assert!(guidance.contains("drives nothing"), "{guidance}");
+        assert!(guidance.contains("live:false"), "{guidance}");
+        assert!(guidance.contains("switch back"), "{guidance}");
     }
 }
