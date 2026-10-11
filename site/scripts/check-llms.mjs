@@ -104,10 +104,13 @@ for (const page of pages) {
   } else if (statSync(twinFile).size === 0) {
     fail(`empty per-page twin: dist/${page.slug}.md`);
   } else if (page.isMdx) {
-    // The M1 gate: an `.mdx` twin must be plain Markdown — any `<[A-Z]`
-    // left in its prose is an unhandled component leaking JSX to agents.
-    // Scoped to `.mdx` twins only: plain-`.md` prose legitimately holds
-    // generics like `(ipc protocol <N>)`, which the same pattern matches.
+    // The M1 gate (hardened): an `.mdx` twin must be plain Markdown —
+    // any `<[A-Z]` or `</[A-Z]` left in its prose is an unhandled
+    // component leaking JSX to agents. Fenced code and inline-code
+    // spans (`` `<N>` ``) are exempt; an unterminated fence and any
+    // unclosed wrapper are their own line-numbered findings. Scoped to
+    // `.mdx` twins only: plain-`.md` prose legitimately holds generics
+    // like `(ipc protocol <N>)`, which the same pattern matches.
     const leaks = jsxLeakLines(readFileSync(twinFile, 'utf8'));
     for (const leak of leaks) {
       fail(`twin dist/${page.slug}.md leaks JSX to agents: ${leak}`);
