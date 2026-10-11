@@ -950,6 +950,36 @@ fn swap_scanout(
         });
     }
     hotplug::apply(state, added);
+    // Outputs left with no presenting head -- kept through an empty
+    // restore whose retry re-added their connectors under fresh ids --
+    // would otherwise linger headless: still laid out, still reporting
+    // `live`, showing nothing. Remove them the way a hotplug would, so
+    // their windows are adopted elsewhere. A no-op on every other path,
+    // where every output presents (the last output is never removed:
+    // `remove_output` refuses it, exactly as in `rebind`).
+    let headless: Vec<OutputId> = state
+        .outputs
+        .iter_with_ids()
+        .filter_map(|(id, _)| {
+            let presents = state
+                .tty
+                .as_ref()
+                .is_some_and(|tty| tty.heads.iter().any(|head| head.presents(id)));
+            (!presents).then_some(id)
+        })
+        .collect();
+    for id in headless {
+        tracing::info!(
+            output = id.0,
+            "seat reconnect: removing an output no head presents after the rebuild"
+        );
+        if !state.remove_output(id) {
+            tracing::error!(
+                output = id.0,
+                "seat reconnect: could not remove an output no head presents"
+            );
+        }
+    }
     // A handoff failure is a dark fresh device, not a stranded one: mark
     // it the way the proof failure does and fall through to the `Dark`
     // message below. So is a fresh device with nothing presenting: the
