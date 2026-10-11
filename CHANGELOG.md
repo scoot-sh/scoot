@@ -67,8 +67,11 @@ scoot has not cut a numbered release yet; entries are dated.
   synchronous modeset before the outputs report `live: true` again.
   Anything short of a working device falls back to the stayed-alive
   session (`live: false`, keyboard and `scoot msg` answering) with the
-  next switch back retrying as before. Dumb-buffer sessions only; the
-  scanout tier and genuinely-held master keep today's path. See [VT
+  next switch back retrying as before. Both the CPU and the GPU tiers
+  rebuild this way -- on the GPU tier each fresh renderer joins its
+  output's existing render backend, and a fresh device that comes up on
+  the other tier restores the old one instead of mixing tiers.
+  Genuinely-held master keeps today's path. See [VT
   switching](site/src/content/docs/scoot/backends.md#hotplug-vt-switching-captures).
 
 ### Animated images read as stills, with memory caps (`scootbg`)

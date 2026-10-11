@@ -443,6 +443,36 @@ impl Backend {
         self.size = (width, height);
     }
 
+    /// Hands a rebuilt GPU-tier renderer to the backend an output already
+    /// has: the seat reconnect's fresh device builds its presenters and
+    /// renderers together (`try_scanout`), and this is where the renderer
+    /// half lands. Only the pipeline moves -- damage, size and the capture
+    /// pools stay, exactly as a scanout resize keeps them (the damage
+    /// tracker is the `DrmCompositor`'s own on this tier, not this
+    /// backend's; the incoming renderer carries a fresh capture recording,
+    /// so the first capture after the swap forces its composite frame the
+    /// way it does after any swapchain rebuild). Answers whether the
+    /// backend was on that tier: anything else is a caller bug (the session
+    /// runs one tier throughout), asserted in debug builds and refused
+    /// loudly otherwise. No allocation: one pointer swap on a path that
+    /// runs once per VT switch, never per frame.
+    #[cfg(feature = "gpu-scanout")]
+    pub(crate) fn replace_scanout(&mut self, backend: Box<scanout::ScanoutBackend>) -> bool {
+        match &mut self.pipeline {
+            Pipeline::Scanout(slot) => {
+                *slot = backend;
+                true
+            }
+            Pipeline::Pixman(_) | Pipeline::Gles(_) => {
+                debug_assert!(
+                    false,
+                    "replace_scanout on a backend that is not on the GPU scanout tier"
+                );
+                false
+            }
+        }
+    }
+
     /// Resizes the render target to `width` x `height` on the renderer this
     /// backend already has, where the pipeline does that (see [`InPlace`]).
     ///

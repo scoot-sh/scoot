@@ -1609,19 +1609,12 @@ impl Tty {
             .is_some_and(|head| head.presenter.take_retry_render())
     }
 
-    /// The renderer every head of this session composites with: GLES on the
-    /// GPU scanout tier, pixman on the dumb one -- the tier the first head
-    /// decided at startup (see `open_device`), which a head built for a
-    /// connector plugged in later must share.
-    fn renderer(&self) -> RendererKind {
-        self.heads
-            .first()
-            .map_or(RendererKind::Pixman, |head| head.presenter.renderer())
-    }
-
     /// Whether this session came up on the GPU scanout tier -- fixed for the
     /// session's life (the tier is chosen once, in `init`, and every head
-    /// shares it; see `open_device`).
+    /// shares it; see `open_device`). Read only where heads are known
+    /// present (startup); everywhere else the session's tier comes from
+    /// `State::renderer`, which -- unlike the first head -- survives an
+    /// empty restore with zero heads to read.
     #[cfg(feature = "gpu-scanout")]
     fn scanout_tier(&self) -> bool {
         self.heads
@@ -2062,6 +2055,9 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
         let Some(tty) = &mut state.tty else {
             return;
         };
+        // The session's tier, read before the reconfigure below needs it:
+        // after an empty restore there are no heads to read it from.
+        let tier = state.renderer;
         match event {
             SessionEvent::PauseSession => {
                 tracing::info!("session paused; drm master released");
@@ -2107,7 +2103,28 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
                         // ask for the frame that modeset rides on -- which the
                         // render request below does, whatever the hotplug path
                         // found.
-                        (tty.reconfigure(), None)
+                        let outcomes = tty.reconfigure(tier);
+                        // No head presenting after the rebuild is a dark
+                        // device, not a live one: an empty restore leaves
+                        // zero heads, and a winning race reactivates with no
+                        // surfaces to fail on -- so without this the session
+                        // would report `live: true` over IPC while showing
+                        // nothing, and a display plugged in later would wait
+                        // for a losing race before anything rebuilt it (the
+                        // reconfigure above now builds from nothing, so the
+                        // plug heals on its own uevent instead). A pending
+                        // `Added` still counts as presenting: its head is
+                        // built but its output is created by `apply` below,
+                        // after this borrow ends. Hold the same darkness the
+                        // restore already reports until a head really presents.
+                        let will_present = tty.heads.iter().any(|head| head.output.is_some())
+                            || outcomes
+                                .iter()
+                                .any(|change| matches!(change, hotplug::Change::Added { .. }));
+                        if !will_present {
+                            tty.active = false;
+                        }
+                        (outcomes, None)
                     }
                     outcome => (Vec::new(), Some(outcome)),
                 }

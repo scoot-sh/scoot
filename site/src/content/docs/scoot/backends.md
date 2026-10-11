@@ -226,7 +226,10 @@ reconnect the seat itself -- a fresh seat client whose open is
 first-to-open, so the seat daemon takes master while handing the fd
 over -- then rebuilds the display on the new fd, re-initialises input,
 and proves master with a synchronous modeset before the outputs report
-`live: true` again. When master genuinely cannot be had, the session
+`live: true` again. The rebuild covers both the CPU and the GPU tiers:
+on the GPU tier each fresh renderer joins its output's existing render
+backend, and a fresh device that lands on the other tier restores the
+old one instead of mixing tiers. When master genuinely cannot be had, the session
 stays alive (keyboard and `scoot msg` keep answering) and every output
 reports `live: false` in `scoot msg outputs` until a later switch back
 succeeds -- check that field before trusting a screenshot, which goes

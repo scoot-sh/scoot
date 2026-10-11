@@ -79,12 +79,18 @@ pub(super) fn replan<C: Copy + PartialEq>(
     holding: bool,
 ) -> Replan<C> {
     if heads.is_empty() {
-        // Unreachable -- `Tty` never has zero heads -- but an empty plan is
-        // the answer that cannot strand anyone: nothing is removed, and no
-        // head is built without the primary it would stand beside.
+        // Reachable since the empty restore: a seat-reconnect fallback can
+        // leave the session with zero heads (see `reconnect::restore`), and
+        // the next winning switch back reactivates with nothing to replan
+        // for. Every connected connector no head drives still needs a head
+        // -- built below through the same add-head path a physical replug
+        // runs -- or the session would report live with nothing presenting
+        // and never pick a display up again. With nothing connected there
+        // is nothing to build, and the empty plan is still the answer that
+        // cannot strand anyone.
         return Replan {
             heads: Vec::new(),
-            add: Vec::new(),
+            add: undriven.to_vec(),
         };
     }
     if heads.iter().all(|head| head.now.is_none()) {
@@ -297,9 +303,40 @@ mod tests {
     }
 
     #[test]
-    fn no_heads_is_a_plan_that_does_nothing() {
+    fn no_heads_builds_every_connected_connector() {
+        // The empty-restore retry shape: a session with zero heads whose
+        // device still has connected connectors must build them, through
+        // the same add path a replug runs -- returning nothing here is what
+        // stranded a winning switch back headless (live with dark screens).
         assert_eq!(
             replan::<u32>(&[], &[(DP, FHD)], false),
+            Replan {
+                heads: vec![],
+                add: vec![(DP, FHD)],
+            }
+        );
+        assert_eq!(
+            replan::<u32>(&[], &[(DP, FHD), (HDMI, FHD)], false),
+            Replan {
+                heads: vec![],
+                add: vec![(DP, FHD), (HDMI, FHD)],
+            }
+        );
+    }
+
+    #[test]
+    fn no_heads_with_nothing_connected_plans_nothing() {
+        // Genuinely nothing to drive: the empty plan is still the answer
+        // that cannot strand anyone.
+        assert_eq!(
+            replan::<u32>(&[], &[], false),
+            Replan {
+                heads: vec![],
+                add: vec![],
+            }
+        );
+        assert_eq!(
+            replan::<u32>(&[], &[], true),
             Replan {
                 heads: vec![],
                 add: vec![],
