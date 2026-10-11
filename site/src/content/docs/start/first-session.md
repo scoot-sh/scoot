@@ -67,4 +67,10 @@ scoot --tty -- foot
 your usual desktop at any time — they always win over scoot's own keys, so
 you can never strand yourself.
 
-Next: [Keybindings](../scoot/keybindings.md) — the full default map, and how to make it yours.
+## Learn 3 keys today
+
+You already know the three that run everything: <kbd>Super</kbd>+<kbd>Return</kbd> (terminal), <kbd>Super</kbd>+<kbd>h</kbd>/<kbd>Super</kbd>+<kbd>l</kbd> (move between columns), <kbd>Super</kbd>+<kbd>q</kbd> (close). Use only those today. Tomorrow, learn three more from [Keybindings](../scoot/keybindings.md).
+
+**Learn the keys with scoot** *(coming)*: a small app that teaches scoot's keys a few at a time, inside your session. Until it ships, learn three keys a day from [Keybindings](../scoot/keybindings.md).
+
+Next: [Keybindings](../scoot/keybindings.md) — the full default map, and how to make it yours. Or [build your desktop](./compose.md) — bar, wallpaper, launcher and notifications.

@@ -118,7 +118,8 @@ export default defineConfig({
             { label: 'What is scoot', slug: 'index' },
             { label: 'Install', slug: 'start/install' },
             { label: 'Use the binary cache', slug: 'start/binary-cache' },
-            { label: 'First session', slug: 'start/first-session' },
+            { label: 'First run', slug: 'start/first-session' },
+            { label: 'Build your desktop', slug: 'start/compose' },
           ],
         },
         {
@@ -194,6 +195,8 @@ export default defineConfig({
           label: 'Reference',
           items: [
             { label: 'Reference hub', slug: 'reference' },
+            { label: 'Builds and renderers', slug: 'reference/builds' },
+            { label: 'Nix flake reference', slug: 'reference/nix' },
             { label: 'Versions and compatibility', slug: 'reference/versions' },
             { label: 'Releases', slug: 'reference/releases' },
             { label: 'Cut a release', slug: 'reference/cut-a-release' },
@@ -214,6 +217,7 @@ export default defineConfig({
             'start/install',
             'start/binary-cache',
             'start/first-session',
+            'start/compose',
             'desktop',
             'scoot/keybindings',
           ],
