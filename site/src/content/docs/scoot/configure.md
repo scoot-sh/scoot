@@ -54,7 +54,7 @@ exceptions (both cases where guessing would be worse than refusing):
   wallpaper is skipped — the rest of the file applies.
 - A set-but-unusable `[tty] gpu`: a hard startup error naming the key,
   not a silent fallback to the automatic pick. The same for
-  `[renderer] backend = "gles"` with no working EGL.
+  `[renderer] backend = "gpu"` with no working EGL.
 
 The reason for the general rule: on `--tty` scoot *is* the session —
 there is no other compositor to fall back to, so it always starts with
@@ -209,11 +209,13 @@ scale = 1.0
 # mode = "1920x1080"
 
 # [renderer]
-# Unset means "pixman", the CPU renderer -- the right answer on a GPU-less
-# box and the default everywhere. "gles" is opt-in; under --tty it scans out
-# from the GPU in a gpu-scanout build. --renderer wins over this when both
-# name one.
-# backend = "gles"
+# Type string, default "cpu". One of "cpu" (pixman; the default, needs no
+# graphics device), "gpu" (GLES; scanout on --tty), or "auto" (the GPU
+# renderer on real hardware, the CPU renderer everywhere else; never fails
+# startup). Restart-only: a reload refuses a changed value. --renderer wins
+# over this when both name one, and SCOOT_RENDERER beats this when
+# --renderer is absent.
+# backend = "cpu"
 
 # [tty]
 # Uncomment only on hardware where the automatic DRM device search picks

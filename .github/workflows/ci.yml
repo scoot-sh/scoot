@@ -19,7 +19,7 @@
 #       - `render/tests.rs`'s GLES tests do run here, but against Mesa's
 #         software rasteriser (see "Resolve a software EGL" below), never a
 #         driver. No run here starts a live compositor with `--renderer
-#         gles`; that is `RENDERER=gles scripts/smoke-test.sh` on the dev VM.
+#         gpu`; that is `RENDERER=gpu scripts/smoke-test.sh` on the dev VM.
 #       - The dmabuf suite's hardware tests skip *themselves* where there is
 #         no usable `/dev/udmabuf` (they print "skipped -- no usable
 #         /dev/udmabuf" and still count as passed), so a green nextest

@@ -19,7 +19,7 @@
 # dimensions. The nested scoot's RSS is printed before and after the drag, so
 # a target that is not freed across resizes shows as growth.
 #
-#   SCOOT=/path/to/scoot RENDERER=gles STEPS=120 PACE=0.03 \
+#   SCOOT=/path/to/scoot RENDERER=gpu STEPS=120 PACE=0.03 \
 #       PREFIX=/tmp/drag-after scripts/nested-drag-bench.sh
 #
 # Needs cage, wlr-randr, foot and grim on PATH and a writable
@@ -32,7 +32,7 @@
 set -euo pipefail
 
 SCOOT=${SCOOT:-${CARGO_TARGET_DIR:-target}/debug/scoot}
-RENDERER=${RENDERER:-gles}
+RENDERER=${RENDERER:-gpu}
 STEPS=${STEPS:-120}
 PACE=${PACE:-0.03}
 PREFIX=${PREFIX:-/tmp/drag}

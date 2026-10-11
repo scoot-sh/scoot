@@ -11,8 +11,8 @@
 # fewer than another on the same commit. `rc=0` is the pass condition.
 #
 # MODE selects the backend (default --headless); RENDERER selects which
-# renderer draws the frames it checks (default pixman, or `gles` under
-# --headless/--nested), e.g. RENDERER=gles scripts/smoke-test.sh. For
+# renderer draws the frames it checks (default cpu, or `gpu` under
+# --headless/--nested), e.g. RENDERER=gpu scripts/smoke-test.sh. For
 # --nested, run this script itself inside a host compositor, e.g.:
 #   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
 #     cage -- env MODE=--nested scripts/smoke-test.sh
@@ -126,11 +126,11 @@ else
     SCOOTBG=""
 fi
 # RENDERER picks which renderer composites the frames this run checks
-# (`pixman` -- the default when unset -- or `gles`, which needs --headless or
-# --nested; see README). Unset means the flag is not passed at all, so the
-# default run is byte-for-byte the command this script has always used. Only
-# the main compositor below takes it: the config-fallback launches further
-# down check config parsing, not pixels.
+# (`cpu` -- the default when unset -- `gpu` (which needs --headless or
+# --nested) or `auto`; see README). Unset means the flag is not passed at
+# all, so the default run is byte-for-byte the command this script has
+# always used. Only the main compositor below takes it: the config-fallback
+# launches further down check config parsing, not pixels.
 RENDERER=${RENDERER:-}
 RENDERER_ARGS=()
 if [ -n "$RENDERER" ]; then

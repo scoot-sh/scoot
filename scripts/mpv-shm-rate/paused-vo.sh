@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One paused-mpv run with selectable vo: isolates client GL rendering from
-# compositor handling. usage: paused-vo.sh <pixman|gles> <vo> <outdir>
+# compositor handling. usage: paused-vo.sh <cpu|gpu> <vo> <outdir>
 set -u
 RENDERER=$1; VO=$2; D=$3
 SCOOT=/var/cargo-target/debug/scoot

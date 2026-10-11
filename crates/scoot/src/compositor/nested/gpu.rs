@@ -1,10 +1,10 @@
-//! `--nested --renderer gles`: handing each frame to the host as a dma-buf
+//! `--nested --renderer gpu`: handing each frame to the host as a dma-buf
 //! instead of reading it back into `wl_shm`.
 //!
 //! Without this, a nested GLES session composites on the GPU and then reads
 //! every frame back to main memory (`render::read_back`), copies it into a
 //! host `wl_shm` buffer (`buffers.rs`), and the host uploads it again to
-//! composite it -- so on a GPU box `--renderer gles` buys nothing nested.
+//! composite it -- so on a GPU box `--renderer gpu` buys nothing nested.
 //! With it, the frame is composited exactly as before, into the same
 //! persistent render target, and then **blitted on the GPU** into one of a
 //! few host buffers scoot allocated on the renderer's own device and shared

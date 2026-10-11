@@ -43,11 +43,15 @@ ls /dev/dri/renderD*
 - **A render node listed (e.g. `renderD128`)** → a GPU exists. On real
   hardware with Intel/AMD graphics or Apple Silicon under Asahi Linux,
   take `scoot-gpu`. On a VM the node is usually software (llvmpipe) —
-  there `gles` is several times *slower* than pixman, so stay on the
+  there `gpu` is several times *slower* than the CPU renderer, so stay on the
   default unless you measured otherwise.
 
+With `scoot-gpu`, `--renderer auto` picks the GPU renderer on real
+hardware and the CPU renderer in VMs — one build that does the right
+thing on either machine.
+
 Confirm what you actually got from scoot's own startup log: with
-`--renderer gles` a working GPU prints `the GLES renderer is up`
+`--renderer gpu` a working GPU prints `the GLES renderer is up`
 with `device=/dev/dri/renderD128 software=false`. Trust that line over
 the flag name — a device node backed by a software driver answers
 `software=true`, and then you are rendering in software anyway.
@@ -60,15 +64,15 @@ difference at idle. What it costs: the EGL drivers must come from your
 system (NixOS: `hardware.graphics` enabled), and `--tty` scanout needs
 the real seat.
 
-> **Symptom:** `--renderer gles` exits at startup naming EGL devices.
+> **Symptom:** `--renderer gpu` exits at startup naming EGL devices.
 > That is the intended behavior, not a bug to work around: when EGL
-> itself is missing or broken, a wrong `--renderer gles` is a
+> itself is missing or broken, a wrong `--renderer gpu` is a
 > **startup error, never a silent downgrade** — scoot names each
-> failure and points back at `--renderer pixman`, which needs no GPU
+> failure and points back at `--renderer cpu`, which needs no GPU
 > at all. There is **no automatic fallback** to the CPU tier on that
-> path. Either drop the flag (stay on pixman) or fix the cause: the
+> path. Either drop the flag (stay on the CPU renderer) or fix the cause: the
 > GPU build installed, drivers present, render node visible. (The one
-> deliberate fallback is the other direction: under `--tty`, a `gles`
+> deliberate fallback is the other direction: under `--tty`, a `gpu`
 > session whose device cannot drive GPU scanout warns and keeps the
 > CPU renderer with dumb buffers instead of refusing to start — see
 > [Backends and rendering](../scoot/backends.md#which-renderer-draws-the-frames).)

@@ -15,7 +15,7 @@
 //!
 //! Two scenes, both driving a real renderer into a real [`CANVAS`]-square
 //! framebuffer -- `PixmanRenderer` by default, or `GlesRenderer` with
-//! `SCOOT_TEST_RENDERER=gles` (see `test_support`), which is how the two are
+//! `SCOOT_TEST_RENDERER=gpu` (see `test_support`), which is how the two are
 //! compared on the same scenes rather than on two hand-written ones:
 //!
 //! - **empty desktop** -- no windows, no layer surfaces, no cursor: the
@@ -227,7 +227,7 @@ fn resize_cost() {
 #[test]
 #[ignore = "prints per-frame render timings for a human; asserts nothing"]
 fn render_frame_cost() {
-    // Named on every line, because `SCOOT_TEST_RENDERER=gles` runs these
+    // Named on every line, because `SCOOT_TEST_RENDERER=gpu` runs these
     // exact scenes through the other renderer and two sets of numbers that
     // don't say which is which are worse than none.
     let renderer = test_renderer();

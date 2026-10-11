@@ -79,9 +79,9 @@
 //! - One connection at every bound at once, on the tier with the most
 //!   (`--tty` GPU scanout with explicit sync): 512 client fds + 64
 //!   acquire-wait eventfds + 1 socket = **577**, over a baseline measured at
-//!   **43 fds** idle there (dev VM, `--tty --renderer gles`, 2026-09-24):
+//!   **43 fds** idle there (dev VM, `--tty --renderer gpu`, 2026-09-24):
 //!   **620**, 276 below the 896 line (measured live at the bound with a
-//!   three-plane dma-buf client: 557). On the default pixman tier it is 513
+//!   three-plane dma-buf client: 557). On the default CPU tier it is 513
 //!   over 14. The 512 includes the copy the dev VM's software GLES renderer
 //!   keeps of each imported plane (`dmabuf/renderer_copies.rs`); copies of
 //!   planes that closed since the last cache drain can add one round of the

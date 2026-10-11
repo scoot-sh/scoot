@@ -27,7 +27,7 @@ OPTIONS (backends in brackets: all means --headless, --nested and --tty):
     --outputs 1-8        headless outputs, left to right (default 1) [headless]
     --gpu PATH           DRM device, when the automatic choice is wrong [tty]
     --mode WxH           display mode, when the preferred one is wrong [tty]
-    --renderer pixman|gles  which renderer composites each frame [all]
+    --renderer cpu|gpu|auto  which renderer composites each frame [all]
     --xwayland           run an XWayland server inside the session [all]
     --socket PATH        where the IPC socket lives [all]
     --config PATH        which config file to read [all]
@@ -149,6 +149,10 @@ pub const ENVIRONMENT: &[(&str, &str)] = &[
         "the caller's display: --nested presents there as a window",
     ),
     (
+        "SCOOT_RENDERER",
+        "if --renderer is absent: cpu, gpu or auto; beats [renderer] backend",
+    ),
+    (
         "SCOOT_SOCKET",
         "the IPC socket's path; the default is $XDG_RUNTIME_DIR/scoot.sock",
     ),
@@ -198,8 +202,8 @@ pub const BACKENDS: &[BackendDoc] = &[
             },
             FlagDoc {
                 flag: "--renderer",
-                takes: "pixman|gles",
-                default: "pixman (or the config file)",
+                takes: "cpu|gpu|auto",
+                default: "cpu (or $SCOOT_RENDERER, or the config file)",
             },
             FlagDoc {
                 flag: "--xwayland",
@@ -233,8 +237,8 @@ pub const BACKENDS: &[BackendDoc] = &[
             },
             FlagDoc {
                 flag: "--renderer",
-                takes: "pixman|gles",
-                default: "pixman (or the config file)",
+                takes: "cpu|gpu|auto",
+                default: "cpu (or $SCOOT_RENDERER, or the config file)",
             },
             FlagDoc {
                 flag: "--xwayland",
@@ -268,8 +272,8 @@ pub const BACKENDS: &[BackendDoc] = &[
             },
             FlagDoc {
                 flag: "--renderer",
-                takes: "pixman|gles",
-                default: "pixman (or the config file)",
+                takes: "cpu|gpu|auto",
+                default: "cpu (or $SCOOT_RENDERER, or the config file)",
             },
             FlagDoc {
                 flag: "--xwayland",
@@ -403,49 +407,56 @@ pub const MAX_OUTPUT_DIMENSION: i32 = 65535;
 /// `headless::add_output` saturates in any case.
 pub const MAX_OUTPUTS: i32 = 8;
 
-/// Which renderer composites each frame.
+/// Which renderer composites each frame: the *resolved* tier.
 ///
 /// Lives here rather than beside the renderers themselves because
 /// [`CompositorOptions`] has to exist on every platform -- the client
 /// The client (`scoot msg`) builds anywhere, while `compositor::render`
-/// is Linux-only -- and because the config file parses the same two names
-/// (`[renderer] backend`). One name list, one parser, the way the client library's
+/// is Linux-only -- and because the config file parses the same names
+/// (`[renderer] backend`). The user-facing spellings are `cpu` (pixman)
+/// and `gpu` (GLES); the variant names stay as they were so internal
+/// matches read unchanged. One name list, one parser, the way the client library's
 /// [`scootctl::action`] is shared with `[binds]`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// The resolved tier is read only by the Linux compositor; the macOS client
+// parses requests but never resolves them.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub enum RendererKind {
     /// CPU compositing with pixman: the default, and the only renderer that
-    /// needs no graphics device at all.
+    /// needs no graphics device at all. Spelled `cpu` to the user.
     #[default]
     Pixman,
     /// GLES on an EGL device. Opt-in; `--headless`/`--nested` honour it in
     /// every build (the offscreen pipeline). Under `--tty` it needs the
     /// `gpu-scanout` Cargo feature, where the frame is composited straight
     /// into the buffer the CRTC scans out; without the feature `--tty`
-    /// warns and keeps pixman, since the offscreen pipeline would only copy
+    /// warns and keeps the CPU renderer, since the offscreen pipeline would only copy
     /// every frame back to the CPU (see `compositor::render::resolve`, and
     /// `tty::init`'s fallback when the device cannot drive the tier).
+    /// Spelled `gpu` to the user.
     Gles,
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 impl RendererKind {
-    /// The spelling a user writes, in both the flag and the config file --
-    /// and what every log line and warning names it by, so the two cannot
-    /// drift.
+    /// The spelling a user writes, in both the flag and the config file --    /// and what every log line and warning names it by, so the two cannot
+    /// drift. `gpu` means the GLES renderer (scanout on `--tty`).
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Pixman => "pixman",
-            Self::Gles => "gles",
+            Self::Pixman => "cpu",
+            Self::Gles => "gpu",
         }
     }
 
     /// Exactly the two names [`RendererKind::as_str`] produces, and nothing
-    /// else -- no aliases, no case folding. `None` is "not one of ours",
+    /// else -- no aliases, no case folding, and the old `pixman`/`gles`
+    /// spellings are not accepted. `None` is "not one of ours",
     /// which the flag refuses outright and the config file warns about and
     /// ignores (see `compositor::config`).
     pub fn parse(value: &str) -> Option<Self> {
         match value {
-            "pixman" => Some(Self::Pixman),
-            "gles" => Some(Self::Gles),
+            "cpu" => Some(Self::Pixman),
+            "gpu" => Some(Self::Gles),
             _ => None,
         }
     }
@@ -454,6 +465,110 @@ impl RendererKind {
 impl fmt::Display for RendererKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// What the user *asked* for, before the session resolves it to a
+/// [`RendererKind`]. Separate from the resolved tier on purpose: `auto`
+/// is not a tier, and every site that reads "what was built" must keep
+/// reading [`RendererKind`], never this.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RendererRequest {
+    /// Pick the best tier for this session: the GPU renderer on real
+    /// hardware, the CPU renderer in VMs and headless. Never fails startup.
+    Auto,
+    /// The CPU renderer (pixman), everywhere. The default request.
+    #[default]
+    Cpu,
+    /// The GPU renderer (GLES): the offscreen pipeline under
+    /// `--headless`/`--nested`, scanout under `--tty` in a `gpu-scanout`
+    /// build.
+    Gpu,
+}
+
+/// The default request: the CPU tier. Every caller that defaults uses this
+/// constant, so the stage that flips the default to `auto` moves one line
+/// (and its pin test).
+// Resolved only by the Linux compositor (see `RendererKind`).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const DEFAULT_REQUEST: RendererRequest = RendererRequest::Cpu;
+
+impl RendererRequest {
+    /// The spelling a user writes: `cpu`, `gpu` or `auto`. Shared by the
+    /// flag, `SCOOT_RENDERER` and the config file, so the three cannot
+    /// drift. No aliases: the old `pixman`/`gles` spellings are rejected
+    /// with a message naming the new value (see [`renamed_renderer`]).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Cpu => "cpu",
+            Self::Gpu => "gpu",
+        }
+    }
+
+    /// Exactly the three names [`RendererRequest::as_str`] produces, and
+    /// nothing else -- no aliases, no case folding.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "auto" => Some(Self::Auto),
+            "cpu" => Some(Self::Cpu),
+            "gpu" => Some(Self::Gpu),
+            _ => None,
+        }
+    }
+
+    /// The tier an explicit (non-`auto`) request names, if it names one.
+    // Resolved only by the Linux compositor (see `RendererKind`).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn kind(self) -> Option<RendererKind> {
+        match self {
+            Self::Auto => None,
+            Self::Cpu => Some(RendererKind::Pixman),
+            Self::Gpu => Some(RendererKind::Gles),
+        }
+    }
+}
+
+impl fmt::Display for RendererRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Where a [`RendererRequest`] came from, for the `renderer chosen` log
+/// line. Precedence is flag > `SCOOT_RENDERER` > config file > default.
+// Produced only by the Linux compositor (see `RendererKind`).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequestSource {
+    /// An explicit `--renderer`.
+    Flag,
+    /// The `SCOOT_RENDERER` environment variable.
+    Env,
+    /// The config file's `[renderer] backend`.
+    Config,
+    /// Neither flag, env nor file named one: [`DEFAULT_REQUEST`].
+    Default,
+}
+
+impl fmt::Display for RequestSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Flag => "flag",
+            Self::Env => "env",
+            Self::Config => "config",
+            Self::Default => "default",
+        })
+    }
+}
+
+/// The old spelling's new name, for the rejection message. `None` when the
+/// value was never ours under any spelling.
+pub fn renamed_renderer(value: &str) -> Option<&'static str> {
+    match value {
+        "pixman" => Some("cpu"),
+        "gles" => Some("gpu"),
+        _ => None,
     }
 }
 
@@ -554,12 +669,13 @@ pub struct CompositorOptions {
     pub gpu: Option<PathBuf>,
     /// Which renderer composites each frame, when the command line says.
     /// `None` (the normal case) means the config file's `[renderer] backend`
-    /// decides, and pixman when that is unset too -- so this is
-    /// `Option<RendererKind>` rather than a plain `RendererKind` precisely so
-    /// that an explicit `--renderer pixman` can *override* a config file
-    /// asking for `gles`, the way `--gpu` overrides `[tty] gpu`. Resolved
-    /// once, in `compositor::render::resolve`.
-    pub renderer: Option<RendererKind>,
+    /// decides, and the CPU renderer when that is unset too -- so this is
+    /// `Option<RendererRequest>` rather than a plain `RendererRequest` precisely so
+    /// that an explicit `--renderer cpu` can *override* a config file
+    /// asking for `gpu`, the way `--gpu` overrides `[tty] gpu`. Resolved
+    /// once, in `compositor::render::policy::resolve_request` and
+    /// `compositor::render::resolve`.
+    pub renderer: Option<RendererRequest>,
     /// `--tty`'s display mode, as `WxH`, when the connector's own preferred
     /// mode is the wrong size. `None` (the normal case) takes the preferred
     /// mode, else the first one listed. `Some` picks the connector mode of
@@ -585,7 +701,7 @@ pub struct CompositorOptions {
     /// the layout like any other, behind a focus gate (see
     /// `compositor::xwayland`). Needs an `xwayland` Cargo-feature build;
     /// without one this warns and the session runs Wayland-only, the way
-    /// `--renderer gles` degrades without `gpu-scanout`.
+    /// `--renderer gpu` degrades without `gpu-scanout`.
     pub xwayland: bool,
 }
 
@@ -813,14 +929,26 @@ fn compositor(
     Ok(options)
 }
 
-/// One of the two renderer names, refused rather than defaulted: a typo'd
-/// `--renderer glse` silently compositing on the CPU is exactly the kind of
+/// One of the three renderer requests, refused rather than defaulted: a typo'd
+/// `--renderer gpuu` silently compositing on the CPU is exactly the kind of
 /// "it ran, but not the way you asked" this project treats as a bug. The
 /// config file's copy of the same key is the graceful half (warn, keep the
 /// default) -- see `compositor::config` for why the two differ.
-fn renderer(what: &'static str, value: Option<String>) -> Result<RendererKind, Error> {
-    let value = value.ok_or(Error::Missing("pixman or gles after --renderer"))?;
-    RendererKind::parse(&value).ok_or(Error::Invalid { what, value })
+///
+/// The old `pixman`/`gles` spellings are rejected with a message naming the
+/// new value (`cpu`/`gpu`): breaking, no aliases.
+fn renderer(what: &'static str, value: Option<String>) -> Result<RendererRequest, Error> {
+    let value = value.ok_or(Error::Missing("cpu, gpu or auto after --renderer"))?;
+    if let Some(request) = RendererRequest::parse(&value) {
+        return Ok(request);
+    }
+    if let Some(new) = renamed_renderer(&value) {
+        return Err(Error::Invalid {
+            what,
+            value: format!("{value} was renamed to {new}; use cpu, gpu or auto"),
+        });
+    }
+    Err(Error::Invalid { what, value })
 }
 
 /// A display mode as `WxH` (`1920x1080`): two positive pixel counts around a
@@ -1282,8 +1410,8 @@ mod tests {
 
     #[test]
     fn renderer_is_unset_by_default_and_takes_either_name() {
-        // Unset, not `Pixman`: the config file only gets a say when the
-        // command line has not spoken, so "absent" and "explicitly pixman"
+        // Unset, not `Cpu`: the config file only gets a say when the
+        // command line has not spoken, so "absent" and "explicitly cpu"
         // cannot be the same value (see `CompositorOptions::renderer`).
         for mode in ["--headless", "--nested", "--tty"] {
             let Ok(Command::Compositor(options)) = parse_args(&[mode]) else {
@@ -1293,8 +1421,9 @@ mod tests {
         }
 
         for (name, expected) in [
-            ("pixman", RendererKind::Pixman),
-            ("gles", RendererKind::Gles),
+            ("cpu", RendererRequest::Cpu),
+            ("gpu", RendererRequest::Gpu),
+            ("auto", RendererRequest::Auto),
         ] {
             let Ok(Command::Compositor(options)) = parse_args(&["--headless", "--renderer", name])
             else {
@@ -1308,7 +1437,7 @@ mod tests {
     fn an_unknown_renderer_name_is_refused_not_defaulted() {
         // Including the near-misses a typo actually produces, and the empty
         // string: none of them may quietly composite with the other renderer.
-        for bad in ["glse", "GLES", "opengl", "gl", "vulkan", "", "pixman "] {
+        for bad in ["gpuu", "GPU", "opengl", "gl", "vulkan", "", "cpu "] {
             assert_eq!(
                 parse_args(&["--headless", "--renderer", bad]),
                 Err(Error::Invalid {
@@ -1318,19 +1447,61 @@ mod tests {
                 "{bad}"
             );
         }
+        // The old spellings are rejected with a message naming the new
+        // value: breaking, no aliases.
+        for (old, new) in [("pixman", "cpu"), ("gles", "gpu")] {
+            assert_eq!(
+                parse_args(&["--headless", "--renderer", old]),
+                Err(Error::Invalid {
+                    what: "--renderer",
+                    value: format!("{old} was renamed to {new}; use cpu, gpu or auto"),
+                }),
+                "{old}"
+            );
+        }
         assert_eq!(
             parse_args(&["--headless", "--renderer"]),
-            Err(Error::Missing("pixman or gles after --renderer"))
+            Err(Error::Missing("cpu, gpu or auto after --renderer"))
         );
     }
 
     #[test]
-    fn the_two_renderer_names_round_trip_through_their_own_spelling() {
+    fn the_renderer_names_round_trip_through_their_own_spelling() {
         for kind in [RendererKind::Pixman, RendererKind::Gles] {
             assert_eq!(RendererKind::parse(kind.as_str()), Some(kind));
             assert_eq!(kind.to_string(), kind.as_str());
         }
+        for request in [
+            RendererRequest::Auto,
+            RendererRequest::Cpu,
+            RendererRequest::Gpu,
+        ] {
+            assert_eq!(RendererRequest::parse(request.as_str()), Some(request));
+            assert_eq!(request.to_string(), request.as_str());
+        }
         assert_eq!(RendererKind::default(), RendererKind::Pixman);
+        // The default request is the CPU tier (pinned here; the stage that
+        // flips it to `auto` moves this test on purpose).
+        assert_eq!(DEFAULT_REQUEST, RendererRequest::Cpu);
+        assert_eq!(RendererRequest::default(), RendererRequest::Cpu);
+        // The request-to-tier map behind the policy: explicit requests name
+        // their tier, `auto` names none.
+        assert_eq!(RendererRequest::Cpu.kind(), Some(RendererKind::Pixman));
+        assert_eq!(RendererRequest::Gpu.kind(), Some(RendererKind::Gles));
+        assert_eq!(RendererRequest::Auto.kind(), None);
+    }
+
+    #[test]
+    fn request_sources_render_for_the_log_line() {
+        // The `source=` field of the `renderer chosen` line.
+        for (source, text) in [
+            (RequestSource::Flag, "flag"),
+            (RequestSource::Env, "env"),
+            (RequestSource::Config, "config"),
+            (RequestSource::Default, "default"),
+        ] {
+            assert_eq!(source.to_string(), text);
+        }
     }
 
     #[test]
@@ -1354,7 +1525,7 @@ mod tests {
         // text must both name it everywhere. Found 2026-09-20 with the
         // `--tty` line missing it while `README.md`,
         // `site/src/content/docs/scoot/configure.md` and `site/src/content/docs/scoot/backends.md` all showed
-        // `scoot --tty --renderer gles`.
+        // `scoot --tty --renderer gpu`.
         let text = usage();
         for backend in BACKENDS {
             assert!(
@@ -1363,10 +1534,10 @@ mod tests {
                 backend.name
             );
             assert!(
-                text.contains("--renderer pixman|gles"),
+                text.contains("--renderer cpu|gpu|auto"),
                 "help text hides --renderer"
             );
-            for name in ["pixman", "gles"] {
+            for name in ["cpu", "gpu", "auto"] {
                 let Ok(Command::Compositor(options)) =
                     parse_args(&[backend.name, "--renderer", name])
                 else {
@@ -1374,7 +1545,7 @@ mod tests {
                 };
                 assert_eq!(
                     options.renderer,
-                    RendererKind::parse(name),
+                    RendererRequest::parse(name),
                     "{} --renderer {name}",
                     backend.name
                 );
@@ -1394,7 +1565,7 @@ mod tests {
                 "--socket" => vec![flag, "/tmp/scoot-help-probe.sock"],
                 "--config" => vec![flag, "/dev/null"],
                 "--gpu" => vec![flag, "/dev/dri/card0"],
-                "--renderer" => vec![flag, "pixman"],
+                "--renderer" => vec![flag, "cpu"],
                 "--mode" => vec![flag, "1920x1080"],
                 "--xwayland" => vec![flag],
                 other => panic!("{other} has no sample value"),

@@ -340,6 +340,37 @@ impl ScanoutBackend {
             .copied()
             .collect()
     }
+
+    /// The `GL_RENDERER` string of the GLES renderer built above, for the
+    /// `auto` policy's software check (`policy::after_renderer`).
+    ///
+    /// Read here -- right after [`ScanoutBackend::new`] succeeds and before
+    /// the surface is consumed -- so a software verdict can still reuse the
+    /// same surface for the dumb tier. `None` when the string cannot be
+    /// read, which never refuses: an unreadable string is not proof of a
+    /// software stack. Once per session at startup, so the one context
+    /// round trip costs nothing.
+    pub(crate) fn gl_renderer(&mut self) -> Option<String> {
+        use smithay::backend::renderer::gles::ffi;
+        self.renderer
+            .with_context(|gl| {
+                // SAFETY: `GetString` with a valid enum writes nothing and
+                // returns either a pointer to a NUL-terminated string the
+                // context owns or NULL, on the context `with_context` has
+                // just made current.
+                let pointer = unsafe { gl.GetString(ffi::RENDERER) };
+                (!pointer.is_null()).then(|| unsafe {
+                    std::ffi::CStr::from_ptr(pointer.cast())
+                        .to_string_lossy()
+                        .into_owned()
+                })
+            })
+            .inspect_err(|error| {
+                tracing::debug!(%error, "could not read the GL renderer string");
+            })
+            .ok()
+            .flatten()
+    }
 }
 
 /// The DRM render node belonging to the same device as `gbm`, if it has one.

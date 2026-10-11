@@ -27,7 +27,7 @@ use wayland_protocols::ext::session_lock::v1::client::{
 };
 
 use super::{ScaleReload, autostart_delta, field, output_refusals, scale_reload};
-use crate::cli::RendererKind;
+use crate::cli::{RendererKind, RendererRequest};
 use crate::compositor::config;
 use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::headless;
@@ -271,6 +271,10 @@ fn reload_applies_the_inactive_ring_width_live() {
 #[test]
 fn reload_applies_column_widths_scale_and_refuses_restart_fields() {
     let mut fixture = Fixture::with_config("");
+    // As if the session had started with this `[renderer]` value: the
+    // reload diffs request against request, so an unchanged file stays
+    // silent here.
+    fixture.state.startup_renderer_request = Some(RendererRequest::Cpu);
     fixture.rewrite(
         r#"
         [layout]
@@ -282,7 +286,7 @@ fn reload_applies_column_widths_scale_and_refuses_restart_fields() {
         scale = 2.0
 
         [renderer]
-        backend = "pixman"
+        backend = "cpu"
 
         [tty]
         gpu = "/dev/dri/card9"
@@ -295,7 +299,7 @@ fn reload_applies_column_widths_scale_and_refuses_restart_fields() {
         "#,
     );
     let response = fixture.reload();
-    // `gap = 12` is the running default, `backend = "pixman"` is the running
+    // `gap = 12` is the running default, `backend = "cpu"` is the running
     // renderer: agreeing fields stay silent in both lists. `scale = 2.0`
     // applies live now (Phase 3), alongside the widths and the new bind.
     // `quit` is the non-spawn autostart refusal (Phase 4 runs only new
@@ -1566,12 +1570,12 @@ fn device_and_renderer_refusals_name_restart() {
     //
     // The renderer named is whichever one this session is *not* running
     // (see `test_renderer`): naming the running one is no change at all, so
-    // under `SCOOT_TEST_RENDERER=gles` a hardcoded `gles` would be refused
+    // under `SCOOT_TEST_RENDERER=gpu` a hardcoded `gpu` would be refused
     // by nothing.
     let mut fixture = Fixture::with_config("");
     let other = match test_renderer() {
-        RendererKind::Pixman => RendererKind::Gles,
-        RendererKind::Gles => RendererKind::Pixman,
+        RendererKind::Pixman => RendererRequest::Gpu,
+        RendererKind::Gles => RendererRequest::Cpu,
     };
     fixture.rewrite(&format!(
         "[renderer]\nbackend = \"{other}\"\n\n[tty]\ngpu = \"/dev/dri/card9\"\n"
@@ -1589,6 +1593,55 @@ fn device_and_renderer_refusals_name_restart() {
             "{name} should name restart as the remedy: {entry}"
         );
     }
+}
+
+/// The reload diff is request versus request, not versus the resolved tier.
+/// A file naming `auto` on a session that resolved to the GPU renderer is
+/// unchanged, so it must not refuse -- the pre-existing false refusal this
+/// ticket fixes (it used to compare against the resolved tier).
+#[test]
+fn an_unchanged_auto_file_is_not_refused_on_a_gpu_session() {
+    let mut fixture = Fixture::with_config("[renderer]\nbackend = \"auto\"\n");
+    fixture.state.renderer = RendererKind::Gles;
+    fixture.state.startup_renderer_request = Some(RendererRequest::Auto);
+    let response = fixture.reload();
+    assert!(
+        applied(&response).is_empty() && refused(&response).is_empty(),
+        "an unchanged auto file must not refuse: {response:?}"
+    );
+}
+
+/// The same false refusal through the fallback shape: a file naming `gpu`
+/// on a `--tty` session that fell back to the CPU renderer is unchanged,
+/// so it must not refuse either.
+#[test]
+fn an_unchanged_gpu_file_is_not_refused_after_a_tty_fallback() {
+    let mut fixture = Fixture::with_config("[renderer]\nbackend = \"gpu\"\n");
+    fixture.state.renderer = RendererKind::Pixman;
+    fixture.state.startup_renderer_request = Some(RendererRequest::Gpu);
+    let response = fixture.reload();
+    assert!(
+        applied(&response).is_empty() && refused(&response).is_empty(),
+        "an unchanged gpu file must not refuse after a fallback: {response:?}"
+    );
+}
+
+/// A real change still refuses: `cpu` at startup, `auto` on reload.
+#[test]
+fn a_cpu_to_auto_change_refuses_with_restart() {
+    let mut fixture = Fixture::with_config("[renderer]\nbackend = \"cpu\"\n");
+    fixture.state.startup_renderer_request = Some(RendererRequest::Cpu);
+    fixture.rewrite("[renderer]\nbackend = \"auto\"\n");
+    let response = fixture.reload();
+    let entry = refused(&response)
+        .iter()
+        .find(|entry| entry.starts_with(field::BACKEND))
+        .unwrap_or_else(|| panic!("{} was not refused: {response:?}", field::BACKEND))
+        .to_owned();
+    assert!(
+        entry.contains("takes effect on restart"),
+        "a changed backend should name restart as the remedy: {entry}"
+    );
 }
 
 #[test]

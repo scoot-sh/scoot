@@ -192,7 +192,7 @@ fn one_connection_at_every_bound_stays_below_the_reserve() {
     use crate::compositor::client_fds::{Check, ClientFds, Kind, LIMITS, MAX_FDS_PER_CLIENT};
     use crate::compositor::drm_syncobj::MAX_ACQUIRE_WAITS_PER_CLIENT;
     use smithay::reexports::wayland_server::Display;
-    /// Idle `--tty --renderer gles` on the dev VM, 2026-09-24.
+    /// Idle `--tty --renderer gpu` on the dev VM, 2026-09-24.
     const GPU_TIER_IDLE_BASELINE: u64 = 43;
     const SOCKET: u64 = 1;
 

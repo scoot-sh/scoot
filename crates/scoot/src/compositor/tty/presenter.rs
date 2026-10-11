@@ -33,7 +33,7 @@ pub(super) enum Presenter {
     /// and the only tier that needs no GPU stack at all. See `dumb.rs`.
     Dumb(Box<DumbPresenter>),
     /// GLES-composited frames scanned out of a GBM swapchain by
-    /// `DrmCompositor`, with no read-back at all. `--renderer gles` under
+    /// `DrmCompositor`, with no read-back at all. `--renderer gpu` under
     /// `--tty`, only in a build carrying the `gpu-scanout` feature. Boxed
     /// because `DrmCompositor` is a large value and `Tty` is moved into
     /// `State` at startup. See `scanout.rs`.

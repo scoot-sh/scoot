@@ -1,7 +1,7 @@
 //! The GPU renderer: GLES compositing into an offscreen renderbuffer.
 //!
-//! Opt-in and never the default -- `--renderer gles` or `[renderer] backend =
-//! "gles"`, on `--headless` and `--nested` only (see
+//! Opt-in and never the default -- `--renderer gpu` or `[renderer] backend =
+//! "gpu"`, on `--headless` and `--nested` only (see
 //! [`RendererKind`](crate::cli::RendererKind) and `render::resolve`). GPU-free
 //! operation is a hard requirement (webtop, no-GPU boxes), so
 //! [`pixman`](super::pixman) stays the default and the only pipeline that
@@ -180,12 +180,12 @@ impl GlesBackend {
     /// `height`, on the best EGL device that will have it (see the module
     /// doc).
     ///
-    /// Fails -- rather than quietly falling back to pixman -- when no device
+    /// Fails -- rather than quietly falling back to the CPU renderer -- when no device
     /// can: the caller asked for this renderer explicitly, and a session that
     /// silently drew with the other one would make every "verified under
     /// GLES" claim untrue. `compositor::run` turns that into a startup error
     /// naming the default that needs no GPU; `State::resize_output` treats it
-    /// the same way it treats pixman failing, i.e. as "the render target is
+    /// the same way it treats the CPU renderer failing, i.e. as "the render target is
     /// not there" (see that function's doc).
     ///
     /// `pin` is `None` for a session's first GLES build and the device that
@@ -327,10 +327,10 @@ impl GlesBackend {
 /// a session that has just refused to start. The one thing that is always
 /// true and always actionable there is that the default renderer needs
 /// nothing this one could not find.
-const FALL_BACK_HINT: &str = "; --renderer pixman, the default, needs no GPU at all";
+const FALL_BACK_HINT: &str = "; --renderer cpu, the default, needs no GPU at all";
 
 /// The `dlopen` soname Smithay loads libEGL under (see `lib_loadable`).
-pub(super) const LIB_EGL_SONAME: &str = "libEGL.so.1";
+pub(crate) const LIB_EGL_SONAME: &str = "libEGL.so.1";
 
 /// Whether `soname` can be `dlopen`ed right now.
 ///
@@ -340,7 +340,7 @@ pub(super) const LIB_EGL_SONAME: &str = "libEGL.so.1";
 /// or the GLES backend, checked in source. So on a box with no loadable
 /// libEGL, the first EGL touch panics instead of returning the per-candidate
 /// startup error this tier was designed to report (gh #177: the packaged
-/// `--renderer gles` died exactly there, before device enumeration ever
+/// `--renderer gpu` died exactly there, before device enumeration ever
 /// ran). Both GLES tiers probe here first and report the designed error when
 /// there is nothing to load. `catch_unwind` is not an alternative: the
 /// workspace's release profile sets `panic = "abort"`, which turns that

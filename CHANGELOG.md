@@ -9,6 +9,21 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### Unreleased — renderer names are `cpu` / `gpu` / `auto` (breaking)
+
+- **`--renderer` now takes `cpu`, `gpu` or `auto` — the old `pixman`
+  and `gles` spellings are rejected.** The same three names work in
+  `SCOOT_RENDERER` (new: beats the config file when `--renderer` is
+  absent) and `[renderer] backend`. `cpu` is the pixman renderer and the
+  default; `gpu` is the GLES renderer (scanout on `--tty`); `auto`
+  picks the GPU renderer on real hardware and the CPU renderer
+  everywhere else (headless, nested, VMs, GPU-less boxes) and never
+  fails startup. Every session logs one `renderer chosen` line saying
+  what was decided and why. Migration: replace `pixman` with `cpu`
+  and `gles` with `gpu` in flags, environment and config files; use
+  `auto` where you used to pick per machine. See [Backends and
+  rendering](site/src/content/docs/scoot/backends.md#which-renderer-draws-the-frames).
+
 ### Unreleased — per-output position and live mode changes (behavior change)
 
 - **Monitors can be arranged with `position = [x, y]` in `[[outputs]]`**,

@@ -3,7 +3,7 @@
 //!
 //! # What it guards
 //!
-//! Under `--renderer gles` the dma-buf feedback offers the driver's own tiled
+//! Under `--renderer gpu` the dma-buf feedback offers the driver's own tiled
 //! and compressed modifiers (`dmabuf.rs`), so a client buffer reaching the
 //! primary plane (`render::primary_direct`) may carry one. Smithay turns a
 //! client dma-buf into a framebuffer by importing it into GBM and `AddFB2`ing

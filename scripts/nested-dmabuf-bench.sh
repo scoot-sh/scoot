@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# `--nested --renderer gles`: what presenting to the host costs, read-back
+# `--nested --renderer gpu`: what presenting to the host costs, read-back
 # into wl_shm against dma-buf (nested/gpu.rs), under the same load.
 #
-# The host is an outer `scoot --headless --renderer gles` rather than cage:
+# The host is an outer `scoot --headless --renderer gpu` rather than cage:
 # on the dev VM cage's gles2 renderer has no output (its swapchain cannot
 # allocate on the render node) and its pixman renderer advertises no
 # linux-dmabuf, so neither can take a dma-buf frame; an outer scoot can, and
@@ -91,11 +91,11 @@ trap cleanup EXIT
 
 strip() { sed 's/\x1b\[[0-9;]*m//g' "$1"; }
 
-env -u WAYLAND_DISPLAY SCOOT_SOCKET= RUST_LOG=info "$HOST_SCOOT" --headless --renderer gles \
+env -u WAYLAND_DISPLAY SCOOT_SOCKET= RUST_LOG=info "$HOST_SCOOT" --headless --renderer gpu \
     --width "$W" --height "$H" --socket "$HOST_SOCK" --config "$PREFIX-host.toml" -- \
     sh -c 'echo $$ >"$0"; exec env SCOOT_SOCKET= \
         RUST_LOG="info,scoot::compositor::headless=debug,scoot::compositor::nested=debug" \
-        "$1" --nested --renderer gles --width 800 --height 600 --socket "$2" --config "$3" >"$4" 2>&1' \
+        "$1" --nested --renderer gpu --width 800 --height 600 --socket "$2" --config "$3" >"$4" 2>&1' \
     "$INNER_PID_FILE" "$SCOOT" "$INNER_SOCK" "$PREFIX-inner.toml" "$INNER_LOG" \
     >"$HOST_LOG" 2>&1 &
 host_pid=$!

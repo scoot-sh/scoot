@@ -42,8 +42,8 @@
 //! ## The table is the active renderer's, not a list
 //!
 //! Which renderer will do the importing is a per-session fact --
-//! `PixmanRenderer` by default, `GlesRenderer` under `--renderer gles`, and a
-//! third `GlesRenderer` on its own EGL display under `--tty --renderer gles`
+//! `PixmanRenderer` by default, `GlesRenderer` under `--renderer gpu`, and a
+//! third `GlesRenderer` on its own EGL display under `--tty --renderer gpu`
 //! (see [`render`](super::render)) -- and their importable sets are not the
 //! same. pixman's is a fixed list of fourccs at `LINEAR`; a GLES one is
 //! whatever its EGL display reports, which is a property of the driver and
@@ -111,7 +111,7 @@
 //!
 //! **What this deliberately does not fix**, because it never was this: the
 //! seven `dmabuf/tests.rs` import tests that fail under
-//! `SCOOT_TEST_RENDERER=gles` fail identically after it, and that is the
+//! `SCOOT_TEST_RENDERER=gpu` fail identically after it, and that is the
 //! expected result rather than a gap. They build their buffers through
 //! `/dev/udmabuf`, and Mesa's `kms_swrast` refuses a udmabuf-backed import
 //! (`eglCreateImageKHR: createImageFromDmaBufs failed`, `EGL_BAD_ALLOC`) for
@@ -494,14 +494,14 @@ pub(super) fn advertise(
         // creates a capture context at all, so its previews stay blank
         // forever with no error anywhere. Naming the remedy matters as much:
         // pixman imports a linear dma-buf by mapping it and refuses
-        // essentially nothing, so `--renderer pixman` is a working session
+        // essentially nothing, so `--renderer cpu` is a working session
         // rather than a downgrade to be argued about.
         tracing::warn!(
             "this session's renderer reported no dma-buf format it can be trusted \
              to import, so zwp_linux_dmabuf_v1 is not advertised at all: GL \
              clients will fall back to software rendering over wl_shm, and a \
              shell that waits for dmabuf feedback before capturing the screen \
-             will never capture anything. Run with --renderer pixman for a \
+             will never capture anything. Run with --renderer cpu for a \
              session that imports linear dma-bufs"
         );
         return None;

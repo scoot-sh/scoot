@@ -6,7 +6,7 @@
 # tear down. Scoring is scripts/mpv-shm-rate/score.sh (ImageMagick mean/std
 # over the window's content rect).
 #
-# usage: run.sh <pixman|gles> <nruns> <outdir> [scoot-bin]
+# usage: run.sh <cpu|gpu> <nruns> <outdir> [scoot-bin]
 set -u
 RENDERER=$1; N=$2; OUTBASE=$3
 SCOOT=${4:-/var/cargo-target/debug/scoot}

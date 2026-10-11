@@ -7,7 +7,7 @@
 //! the spec points toolkits at), and the test asserts on the RGBA the
 //! compositor stored and -- for the render test -- on the pixels a real
 //! renderer drew (`PixmanRenderer`, or `GlesRenderer` under
-//! `SCOOT_TEST_RENDERER=gles`). That last part is the point: "the compositor
+//! `SCOOT_TEST_RENDERER=gpu`). That last part is the point: "the compositor
 //! accepted the buffer" is a claim about the framebuffer, and a test that
 //! asserted on a compositor-side field would pass just as happily against a
 //! version that never drew it.

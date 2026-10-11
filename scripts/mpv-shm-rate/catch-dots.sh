@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Catches a "dots" paused run, then dumps mpv's pool bytes and renders them
 # as an image for direct comparison with the screenshot.
-# usage: catch-dots.sh <pixman|gles> <outdir> [max-tries]
+# usage: catch-dots.sh <cpu|gpu> <outdir> [max-tries]
 set -u
 RENDERER=$1; D=$2; MAXTRIES=${3:-8}
 SCOOT=/var/cargo-target/debug/scoot

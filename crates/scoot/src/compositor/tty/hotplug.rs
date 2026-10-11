@@ -649,8 +649,22 @@ impl Tty {
         };
         let fd = self.drm.device_fd().clone();
         let tier = self.renderer();
-        match super::build_head(&mut self.drm, &fd, surface, found, Some(tier), tier) {
-            Ok((head, scanout, _)) => {
+        // The session's tier is already decided here, so the plan follows
+        // it with no software rejection (see `policy::plan_for_resolved_tier`).
+        // The request is forced `gpu` for logging only: a refusal here is
+        // news (the session is already on the tier), never an expected
+        // `auto` possibility, so it stays `warn!`.
+        let plan = crate::compositor::render::policy::plan_for_resolved_tier(tier);
+        match super::build_head(
+            &mut self.drm,
+            &fd,
+            surface,
+            found,
+            Some(tier),
+            plan,
+            crate::cli::RendererRequest::Gpu,
+        ) {
+            Ok((head, scanout, _, _)) => {
                 let change = Change::Added {
                     connector: head.connector,
                     name: head.name.clone(),

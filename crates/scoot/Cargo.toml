@@ -282,13 +282,13 @@ default-features = false
 # Without that feature the `--tty` backend presents through DRM dumb buffers;
 # see `tty/dumb.rs`'s module doc.
 #
-# renderer_gl is the optional `--renderer gles` pipeline
+# renderer_gl is the optional `--renderer gpu` pipeline
 # (compositor/render/gles.rs). It is *not* behind a Cargo feature of our own
 # and does not need to be: it pulls backend_egl, which loads libEGL and
 # libGLESv2 through `libloading` at runtime, so enabling it adds no link-time
 # dependency and a build of this crate still runs on a machine with no GL
-# stack installed at all (`--renderer gles` is what fails there, at startup,
-# with a message -- not the build, and not the default pixman path).
+# stack installed at all (`--renderer gpu` is what fails there, at startup,
+# with a message -- not the build, and not the default cpu path).
 features = [
     "desktop",
     "wayland_frontend",

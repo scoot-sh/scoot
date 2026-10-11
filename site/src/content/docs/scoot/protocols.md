@@ -431,7 +431,7 @@ it covers:
 
 Other outputs are untouched: fullscreen is per output.
 
-**On the GPU scanout tier** (`--tty --renderer gles`, `gpu-scanout` build),
+**On the GPU scanout tier** (`--tty --renderer gpu`, `gpu-scanout` build),
 a covering fullscreen window whose buffer is a dma-buf the display can take
 is scanned out directly -- shown from the client's own buffer, with no
 compositing -- provided it is opaque (an opaque-format buffer, or an opaque
@@ -1618,10 +1618,10 @@ What to know before pointing a client at it:
 
 `zwp_linux_dmabuf_v1` is advertised (version 6), and dmabufs really are
 imported — a GPU-rendering client works here under either renderer. Under
-the default pixman renderer there is no GPU on the compositor side at all:
+the default CPU renderer there is no GPU on the compositor side at all:
 the client renders with the GPU and hands over a dma-buf, and scoot `mmap`s
 it and composites it on the CPU, next to `wl_shm` clients in the same
-session. No `LIBGL_ALWAYS_SOFTWARE=1` needed. Under `--renderer gles` the
+session. No `LIBGL_ALWAYS_SOFTWARE=1` needed. Under `--renderer gpu` the
 buffer goes to the GPU driver instead, as a texture.
 
 What is advertised is **what the renderer this session is actually running
@@ -1631,10 +1631,10 @@ would kill the client that believed it
 is derived from that renderer rather than fixed, and pinned over the wire by
 test:
 
-- **pixman:** `Xrgb8888` then `Argb8888`, `LINEAR` only, single-plane only —
-  the only layout a CPU mapping can read — minus either one pixman cannot
+- **CPU (`--renderer cpu`):** `Xrgb8888` then `Argb8888`, `LINEAR` only, single-plane only —
+  the only layout a CPU mapping can read — minus either one the CPU renderer cannot
   import.
-- **GLES (`--renderer gles`, on every backend, including the `--tty` GPU
+- **GPU (`--renderer gpu`, on every backend, including the `--tty` GPU
   scanout tier):** every format and modifier the GPU driver says it
   imports. On real hardware that means GPU clients get their **native
   tiled/compressed layouts** instead of being forced into slow linear
@@ -1642,11 +1642,11 @@ test:
   `P010`, three-plane `YUV420`, packed `YUYV`, …) straight from a decoder,
   composited through the driver's own YUV sampling. `Xrgb8888` and
   `Argb8888` are listed first, each at whatever layouts the driver names
-  for it, so wherever the driver offers both at `LINEAR` the pixman table is
-  the head of the GLES one — but not on a driver that lists them only as
+  for it, so wherever the driver offers both at `LINEAR` the CPU table is
+  the head of the GPU one — but not on a driver that lists them only as
   tiled, which then gets no `LINEAR` entry for them at all.
 
-  Two things are deliberately left out of the GLES table. An **implicit
+  Two things are deliberately left out of the GPU table. An **implicit
   modifier** (`DRM_FORMAT_MOD_INVALID`, "the driver's default layout") is
   never offered for a format the driver named explicit layouts for: a YUV
   buffer imported that way is sampled as if it were RGB and shows the wrong
@@ -1686,7 +1686,7 @@ vouch for — an EGL display with no dma-buf import capability at all —
 rather than killing them, but it is not free: they then render in
 software, and a shell that waits for dmabuf feedback before capturing
 (below) waits forever. scoot logs `reported no dma-buf format it can be
-trusted to import` when it happens, and `--renderer pixman` is the working
+trusted to import` when it happens, and `--renderer cpu` is the working
 session on such a machine. A compositor with no renderer at all advertises
 nothing here for the same reason.
 
@@ -1705,8 +1705,8 @@ every quickshell `ScreencopyView` stays blank despite the capture protocol
 working.
 
 **This follows `--renderer`**, and no longer asks you to avoid one: the
-table is the active renderer's, so `gles` advertises what the GPU driver
-can import and pixman advertises what pixman can. See
+table is the active renderer's, so `gpu` advertises what the GPU driver
+can import and `cpu` advertises what the CPU renderer can. See
 [tty.md](./backends.md#which-renderer-draws-the-frames).
 
 **Limits.** Every plane `add`ed is one fd, and counts against the client's
@@ -1745,7 +1745,7 @@ on the dev VM.
 The default feedback — the one every client gets, and what
 `get_surface_feedback` answers for almost every surface — is one tranche
 with no `scanout` flag. There is one exception, and it exists only on the
-GPU scanout tier (`--tty --renderer gles`, `gpu-scanout` build): the
+GPU scanout tier (`--tty --renderer gpu`, `gpu-scanout` build): the
 **fullscreen window covering an output** is sent per-surface feedback whose
 first tranche is flagged `scanout`, names the display device as
 `tranche_target_device`, and lists the layouts the output's primary plane
@@ -1835,8 +1835,8 @@ or `drm: no device here has syncobj timeline eventfd support; explicit
 sync … is not offered`. The dev VM's virtio-gpu passes on the display
 device.
 
-**Where it is not, and why.** Not under pixman (`--headless`, `--nested`,
-the default dumb-buffer `--tty`), and not under `--renderer gles` on
+**Where it is not, and why.** Not under `cpu` (`--headless`, `--nested`,
+the default dumb-buffer `--tty`), and not under `--renderer gpu` on
 `--headless`/`--nested`. Honouring the points needs a way to wait on an
 acquire point without blocking the compositor and a render fence to wait
 out before signalling a release point, and only the scanout tier has both
@@ -2512,7 +2512,7 @@ flags) or that the update was superseded before it ever got there
   one vblank before the photons — and the `vsync` flag is set there, because
   the flip is vblank-synchronized; the other backends report no flags.
 - **`zero_copy` means the buffer went to the display directly.** Only on the
-  GPU scanout tier (`--tty --renderer gles`, `gpu-scanout` build), and only
+  GPU scanout tier (`--tty --renderer gpu`, `gpu-scanout` build), and only
   for the surface whose buffer was scanned out on the primary plane that
   frame — the covering fullscreen window, on a frame that
   [went direct](#per-surface-feedback-the-scanout-tranche). Every composited

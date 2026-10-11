@@ -4,7 +4,7 @@
 //! The fd ledger (`client_fds.rs`) records every plane's fd as it arrives.
 //! That is every fd a *client* hands over, but not every fd its buffer makes
 //! this process hold: Mesa's software rasterizer (llvmpipe, which is what
-//! the dev VM's `--renderer gles` and `--tty` GPU tier run on, through
+//! the dev VM's `--renderer gpu` and `--tty` GPU tier run on, through
 //! `kms_swrast`) duplicates each imported plane's fd for its own mapping,
 //! and keeps the duplicate for as long as the renderer's texture cache holds
 //! the import. Measured on the dev VM: a three-plane `YU12` buffer imported

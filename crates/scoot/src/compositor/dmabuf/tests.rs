@@ -451,7 +451,7 @@ fn every_advertised_format_is_one_the_renderer_imports() {
     // - a GLES renderer hands the buffer to its driver, so every entry is one
     //   the driver itself listed, or -- only for a candidate the driver gave
     //   no explicit modifier for -- the documented `LINEAR` widening. Never
-    //   `Invalid` either way. Under `SCOOT_TEST_RENDERER=gles` this asserts
+    //   `Invalid` either way. Under `SCOOT_TEST_RENDERER=gpu` this asserts
     //   against the EGL display the session really built.
     let mut fixture = Fixture::start();
     let seen = fixture.run(Step::ReadFeedback { version: 5 }).feedback();

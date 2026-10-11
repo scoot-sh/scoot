@@ -35,7 +35,7 @@
 //! ## `zero_copy`
 //!
 //! Set on exactly one surface's feedback, and only on the GPU scanout tier
-//! (`--tty --renderer gles`, `gpu-scanout` build): the surface whose client
+//! (`--tty --renderer gpu`, `gpu-scanout` build): the surface whose client
 //! buffer the primary plane scanned out directly on that frame
 //! (`render::primary_direct` made it eligible; Smithay's plane assignment
 //! and the atomic test let it through). The frame reports that element

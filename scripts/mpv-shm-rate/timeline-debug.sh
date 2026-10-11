@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Timeline with WAYLAND_DEBUG: correlates compositor screenshots with actual
-# client commit traffic. usage: timeline-debug.sh <pixman|gles> <outdir>
+# client commit traffic. usage: timeline-debug.sh <cpu|gpu> <outdir>
 set -u
 RENDERER=$1; D=$2
 SCOOT=/var/cargo-target/debug/scoot

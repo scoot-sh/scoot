@@ -10,18 +10,14 @@
 /// Whether the stub has a real libgbm loaded (1) or is failing closed (0).
 /// Stable after the first call: the dlopen is attempted once per process.
 ///
-/// Test-only for the spike: nothing in production asks yet (the
-/// auto-detect rule in `docs/backlog/core/runtime-gbm-productionise.md`
-/// will), and an unasked question must not ship as dead code. The `extern` block below
-/// stays unconditional -- an unreferenced declaration warns nothing, and it
-/// keeps the symbol's contract beside its stub.
-#[cfg(test)]
+/// Asked by the `auto` renderer policy before choosing the GPU tier (see
+/// `compositor::render::policy::on_device`): without a loadable libgbm
+/// there is no GPU stack to win on, so `auto` stays on the CPU renderer.
 pub(crate) fn real_loaded() -> bool {
     // SAFETY: plain C call with no Rust-side invariants; returns 0 or 1.
     unsafe { scoot_gbm_real_loaded() != 0 }
 }
 
-#[cfg(test)]
 unsafe extern "C" {
     fn scoot_gbm_real_loaded() -> std::os::raw::c_int;
 }
