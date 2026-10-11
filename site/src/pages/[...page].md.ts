@@ -9,17 +9,30 @@ import type { APIRoute, GetStaticPaths } from 'astro';
 // Served from the Markdown sources (bundled raw at build time via
 // `import.meta.glob`, so this works prerendered with no filesystem), as
 // the page's own prose: title heading, description quote, body without
-// frontmatter.
-const sources = import.meta.glob<string>('../content/docs/**/*.md', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-});
+// frontmatter. `.mdx` pages convert through `scripts/mdx-twin.mjs` (M1):
+// imports stripped, TabItem/Aside/Steps/LinkCard flattened to plain
+// Markdown, fenced code untouched — so agents never see JSX.
+import { mdxToTwinMarkdown } from '../../scripts/mdx-twin.mjs';
+
+const sources = import.meta.glob<string>(
+  [
+    '../content/docs/**/*.{md,mdx}',
+    // Mirror Starlight's docsLoader (`**/[^_]*`, pinned source
+    // `dist/loaders.js`): underscore-led files are drafts, never pages —
+    // and never twins, so the twin set stays exactly the page set.
+    '!../content/docs/**/_*.{md,mdx}',
+  ],
+  {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  },
+);
 
 const slugOf = (path: string) =>
-  path.replace(/^.*\/content\/docs\//, '').replace(/\.md$/, '');
+  path.replace(/^.*\/content\/docs\//, '').replace(/\.mdx?$/, '');
 
-const twinBody = (raw: string, slug: string) => {
+const twinBody = (raw: string, slug: string, isMdx: boolean) => {
   const frontmatter = raw.match(/^---\n([\s\S]*?)\n---\n/);
   const title =
     frontmatter?.[1].match(/^title:\s*(.+)$/m)?.[1].trim() ?? slug;
@@ -28,10 +41,11 @@ const twinBody = (raw: string, slug: string) => {
   // Twins read as plain Markdown (the docs-bar agent-friendly rule), so
   // `<kbd>` keycaps become backtick-quoted keys rather than literal tags:
   // `<kbd>Super</kbd>+<kbd>Return</kbd>` reads as `` `Super`+`Return` ``.
-  const body = raw
-    .replace(/^---\n[\s\S]*?\n---\n/, '')
-    .trim()
-    .replaceAll(/<kbd>(.*?)<\/kbd>/g, '`$1`');
+  const plain = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+  const body = (isMdx ? mdxToTwinMarkdown(plain) : plain).replaceAll(
+    /<kbd>(.*?)<\/kbd>/g,
+    '`$1`',
+  );
   return `# ${title}\n\n${description}\n\n${body}\n`;
 };
 
@@ -46,7 +60,10 @@ export const GET: APIRoute = async ({ params }) => {
   if (!path) {
     return new Response('Not found', { status: 404 });
   }
-  return new Response(twinBody(sources[path], params.page ?? 'page'), {
-    headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
-  });
+  return new Response(
+    twinBody(sources[path], params.page ?? 'page', path.endsWith('.mdx')),
+    {
+      headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+    },
+  );
 };

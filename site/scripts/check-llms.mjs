@@ -9,12 +9,13 @@
 //      (catches a `site`/`base` mismatch: the plugin builds bundle URLs
 //      from Astro's `base`, so a subpath `site` with the default base
 //      emits domain-root links — see astro.config.mjs).
-//   2. Every content page (src/content/docs/**/*.md, nested sections
+//   2. Every content page (src/content/docs/**/*.{md,mdx}, nested sections
 //      included) appears in `llms-full.txt` AND `llms-small.txt`, by its
 //      frontmatter title.
 //   3. Every page's `.md` twin exists in `dist/` at its nested path
-//      (`scoot/keybindings` → `dist/scoot/keybindings.md`) and is
-//      non-empty.
+//      (`scoot/keybindings` → `dist/scoot/keybindings.md`, whether the
+//      source is `.md` or `.mdx`) and is non-empty; `.mdx` twins must
+//      additionally hold no `<[A-Z]` JSX in their prose (the M1 gate).
 //   4. Every `.md` / `.txt` link in every source page resolves: a
 //      page-relative link (`./x.md`, `../scoot/y.md`) to a source page in
 //      the tree (so the twin it points at exists), a root-absolute link
@@ -32,6 +33,7 @@ import {
   statSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { jsxLeakLines } from './mdx-twin.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const dist = join(root, 'dist');
@@ -61,13 +63,19 @@ for (const bundle of ['llms-full.txt', 'llms-small.txt']) {
 }
 
 // Every page under the docs tree, nested sections included. The slug is
-// the source path relative to the docs root, minus `.md`
+// the source path relative to the docs root, minus `.md` or `.mdx`
 // (`scoot/keybindings.md` → `scoot/keybindings`).
 const walk = (dir) =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return walk(path);
-    return entry.name.endsWith('.md') ? [path] : [];
+    // Mirror Starlight's docsLoader (`**/[^_]*`): underscore-led files
+    // are drafts, never pages — demanding bundles or twins for them
+    // would fail a file the site itself ignores.
+    if (entry.name.startsWith('_')) return [];
+    return entry.name.endsWith('.md') || entry.name.endsWith('.mdx')
+      ? [path]
+      : [];
   });
 
 const pages = walk(contentDir).map((file) => {
@@ -77,8 +85,8 @@ const pages = walk(contentDir).map((file) => {
     frontmatter?.[1].match(/^title:\s*(.+)$/m)?.[1].trim() ?? file;
   const slug = file
     .replace(`${contentDir}/`, '')
-    .replace(/\.md$/, '');
-  return { file, slug, title, text };
+    .replace(/\.mdx?$/, '');
+  return { file, slug, title, text, isMdx: file.endsWith('.mdx') };
 });
 
 for (const page of pages) {
@@ -95,6 +103,15 @@ for (const page of pages) {
     fail(`missing per-page twin: dist/${page.slug}.md`);
   } else if (statSync(twinFile).size === 0) {
     fail(`empty per-page twin: dist/${page.slug}.md`);
+  } else if (page.isMdx) {
+    // The M1 gate: an `.mdx` twin must be plain Markdown — any `<[A-Z]`
+    // left in its prose is an unhandled component leaking JSX to agents.
+    // Scoped to `.mdx` twins only: plain-`.md` prose legitimately holds
+    // generics like `(ipc protocol <N>)`, which the same pattern matches.
+    const leaks = jsxLeakLines(readFileSync(twinFile, 'utf8'));
+    for (const leak of leaks) {
+      fail(`twin dist/${page.slug}.md leaks JSX to agents: ${leak}`);
+    }
   }
 }
 
@@ -117,7 +134,13 @@ for (const page of pages) {
       }
     } else {
       const resolved = resolve(dir, base);
-      if (!existsSync(resolved)) {
+      // Sources link the `.md` twin spelling even when the target page is
+      // an `.mdx` source (the route serves every twin at `<slug>.md`), so
+      // a missing `.md` falls back to its `.mdx` sibling before failing.
+      const exists =
+        existsSync(resolved) ||
+        (base.endsWith('.md') && existsSync(`${resolved.slice(0, -3)}.mdx`));
+      if (!exists) {
         fail(`${page.slug}: links ${match[1]}, which is no page in the tree`);
       }
     }

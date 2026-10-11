@@ -131,7 +131,7 @@ jobs:
   #   the tree since the move)                   -> docs-site=true (docs-site job:
   #                                           `nix build .#docs-site`, which
   #                                           also runs the llms, page-link,
-  #                                           asset and snippet gates). `nix/docs-site.nix` and
+  #                                           asset, snippet and mdx-twin gates). `nix/docs-site.nix` and
   #                                           `flake.nix`/`flake.lock` fall to
   #                                           the catch-all below and run
   #                                           everything, site included.
@@ -412,7 +412,9 @@ jobs:
   # raw `.md` twin, every rewritten link resolves), `check-assets` (every
   # asset url/src/srcset resolves to a file in `dist/`, base-aware, with
   # its missing-font-plus-image fixture pinned by `test-check-assets`),
-  # `test-snippets` (fenced toml/sh blocks are sound) and `test-nix`
+  # `test-snippets` (fenced toml/sh blocks are sound in `.md` and `.mdx`),
+  # `test-mdx-twin` (the fixture `.mdx` converts to plain Markdown, broken
+  # variants trip the JSX gate) and `test-nix`
   # (fenced nix blocks parse) — so a red gate fails this job, not the
   # deploy. Runs when `site/**` changes
   # (checked before `*.md`, since the site's own pages are Markdown), on the
@@ -436,7 +438,7 @@ jobs:
         run: |
           git ls-files -z '*.nix' | xargs -0 nix fmt -- --check
 
-      - name: nix build .#docs-site (builds the site, runs the llms, page-link, asset and snippet gates)
+      - name: nix build .#docs-site (builds the site, runs the llms, page-link, asset, snippet and mdx-twin gates)
         run: nix build -L --no-link .#docs-site
 
   linux:

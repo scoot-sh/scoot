@@ -10,7 +10,7 @@
 //     CLAUDE.md). Quoted upstream text is the only exception, and there is
 //     none on the site.
 //
-// Covers the whole tree (src/content/docs/**/*.md, nested sections
+// Covers the whole tree (src/content/docs/**/*.{md,mdx}, nested sections
 // included): a page the snippet gate never scans is a page whose examples
 // can rot unnoticed.
 //
@@ -37,7 +37,9 @@ const walk = (dir) =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return walk(path);
-    return entry.name.endsWith('.md') ? [path] : [];
+    return entry.name.endsWith('.md') || entry.name.endsWith('.mdx')
+      ? [path]
+      : [];
   });
 
 for (const file of walk(contentDir)) {

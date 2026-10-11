@@ -39,7 +39,9 @@ const walk = (dir) =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return walk(path);
-    return entry.name.endsWith('.md') ? [path] : [];
+    return entry.name.endsWith('.md') || entry.name.endsWith('.mdx')
+      ? [path]
+      : [];
   });
 
 const fence = /```nix\n([\s\S]*?)```/g;

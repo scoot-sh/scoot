@@ -1,0 +1,12 @@
+---
+title: MDX twin fixture (broken)
+description: Gate fixture only — never published. Carries a component the converter does not handle, so the JSX gate must fail on its twin.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+This page looks innocent until the twin keeps its JSX:
+
+<Badge text="coming" variant="caution" />
+
+That line must trip the `<[A-Z]` gate.
