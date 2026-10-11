@@ -309,6 +309,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [scoot's `[stack]` mapping reports 17 MB PSS at idle](./resolved/compositor-stack-pss-done.md) — CLOSED 2026-10-05 as a classifier artifact: the benchmark's `smaps.sh` credits each block's PSS to the next block's class, so a client shm buffer read as `[stack]` (live `[stack]` is 128 kB); no compositor change
 
 ### --tty / backend
+- [Seat reconnect for the GPU scanout tier](./core/scanout-seat-reconnect.md) — high, filed 2026-10-10 (runtime-renderer plan): `tty/reconnect.rs` refuses scanout sessions, so a GPU `--tty` session that loses the VT-switch-back master race sits at `live: false` while pixman rebuilds and recovers. Extend the teardown-first rebuild (drop `ScanoutPresenter`s + `ScanoutBackend`s, new `GbmDevice` on the fresh fd, `try_scanout` per head, `Backend::replace_scanout` handoff, synchronous master proof) with its own Asahi live matrix. Gates the default flip to `auto`.
 - [Config-file key for the DRM device](./resolved/tty-gpu-config-key-done.md)
 - [Unprivileged `--tty` display stays dead after the seat daemon loses the VT-switch-back master race](./resolved/seatd-reacquire-after-vt-switch-done.md) — RESOLVED 2026-10-09 (live-spiked reopen disproves the same-client re-open, no behavior change): same-client re-open hands back the same master-less file (seatd reuses the entry, single `SET_MASTER`, close-to-zero frees); seat reconnect and close-to-zero remain -- see the follow-up below; kept `probe_held` pin for the `EBUSY`-vs-`EACCES` split
 - [Recover the display scoot-side after the seat daemon loses the VT-switch-back master race: seat reconnect or close-to-zero](./resolved/seatd-reconnect-or-close-to-zero-done.md) — RESOLVED 2026-10-10 (route (a) seat reconnect ships: one fresh seat client per vacant switch back, teardown-first rebuild, synchronous master proof; 5/5 lost races recovered live on the M2): same-client re-open was already disproven; close-to-zero unneeded and untried
@@ -414,6 +415,10 @@ falsify. Read `flexwm` there as `scoot`.
   serial); resize and VT-switch reactivation leave it where the user left
   it; the smoke test's park-the-pointer workaround stays as harmless
   protection.
+- [`auto` renderer request: GPU on real hardware, pixman in VMs and headless](./core/renderer-auto-policy.md) — medium, filed 2026-10-10 (runtime-renderer plan, NEXT implementer ticket): `--renderer auto` / `SCOOT_RENDERER` / `[renderer] backend = "auto"` through a pure `render/policy.rs` (flag > env > config precedence, KMS-driver + GBM/EGL + `GL_RENDERER` software checks, one INFO line, reload request-diff fix). Default stays pixman.
+- [Swap pixman <-> GPU at runtime over IPC](./core/runtime-renderer-swap.md) — research, filed 2026-10-10 (runtime-renderer plan): `scoot msg renderer` query + `set` without restarting clients, headless/nested first, `--tty` second. Design gate: no client kill (target must import every advertised and live dma-buf, else refuse); teardown-first; refuse while locked.
+- [Measure pixman vs GPU scanout on virgl/venus and vmwgfx](./core/renderer-auto-virtual-gpus.md) — research, filed 2026-10-10 (runtime-renderer plan): flip those `auto` rows to GPU-first only on >10% bench numbers over ≥4 rounds; no such host exists in this project today.
+- [Measure nested gles+dma-buf vs pixman on real hardware](./core/renderer-auto-nested.md) — research, filed 2026-10-10 (runtime-renderer plan): `INNER_RENDERER` bench variable on the M2, same >10% rule before nested `auto` prefers the GPU.
 
 ### Packaging and releases (filed 2026-09-29)
 
