@@ -13,8 +13,9 @@
     "check-assets": "node ./scripts/check-assets.mjs",
     "test-check-assets": "node ./scripts/test-check-assets.mjs",
     "test-snippets": "node ./scripts/test-snippets.mjs",
+    "test-mdx-twin": "node ./scripts/test-mdx-twin.mjs",
     "test-nix": "node ./scripts/check-nix.mjs",
-    "verify": "astro build && node ./scripts/check-llms.mjs && node ./scripts/check-md-links.mjs && node ./scripts/check-assets.mjs && node ./scripts/test-check-assets.mjs && node ./scripts/test-snippets.mjs && node ./scripts/check-nix.mjs"
+    "verify": "astro build && node ./scripts/check-llms.mjs && node ./scripts/check-md-links.mjs && node ./scripts/check-assets.mjs && node ./scripts/test-check-assets.mjs && node ./scripts/test-snippets.mjs && node ./scripts/test-mdx-twin.mjs && node ./scripts/check-nix.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "0.42.5",

@@ -1,0 +1,70 @@
+---
+title: MDX twin fixture (good)
+description: Gate fixture only — never published. Exercises every MDX construct the twin converter handles.
+---
+
+import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+<Tabs syncKey="distro">
+  <TabItem label="Debian/Ubuntu">
+    Build the package from the repo:
+
+    ```sh
+    sudo apt install ./scoot.deb
+    ```
+  </TabItem>
+  <TabItem label="Fedora">
+    Build the package from the repo:
+
+    ```sh
+    sudo dnf install ./scoot.rpm
+    ```
+  </TabItem>
+</Tabs>
+
+<Steps>
+
+1. Start scoot from a VT:
+
+   ```sh
+   scoot --tty
+   ```
+
+2. Open a terminal with `Super+Return`.
+
+3. Quit with `Super+q`.
+
+</Steps>
+
+<Aside type="caution" title="Login screen">
+  Picking scoot at the login screen needs the M0 packaging fix first.
+  Until then, start it with `scoot --tty` from a VT.
+</Aside>
+
+<Aside type="note">
+  The default renderer draws on the CPU and runs everywhere.
+</Aside>
+
+<CardGrid>
+  <LinkCard title="Install" href="/start/install/" description="Get scoot onto your machine" />
+  <LinkCard title="First run" href="/start/first-session/" />
+</CardGrid>
+
+One minimal desktop in eight lines of TOML:
+
+```toml
+[wallpaper]
+path = "~/pictures/quiet-dune.jpg"
+
+[bar]
+modules = ["workspaces", "clock"]
+```
+
+A quoted tag inside a fence is code, not a component, and must survive
+the twin byte-for-byte:
+
+```toml
+# This line mentions <TabItem label="X"> and <Aside> as plain text.
+[output."DP-1"]
+scale = 2
+```

@@ -40,6 +40,16 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const docsRoot = fileURLToPath(new URL('../src/content/docs/', import.meta.url));
 
+// A docs source exists as `.md` or (since M1) `.mdx`: resolve either.
+// Returns the absolute source path, or null when neither exists.
+const sourceFor = (root, target) => {
+  const md = join(root, `${target}.md`);
+  if (existsSync(md)) return md;
+  const mdx = join(root, `${target}.mdx`);
+  if (existsSync(mdx)) return mdx;
+  return null;
+};
+
 const pageOf = (slug) =>
   slug === 'index' || slug.endsWith('/index') ? slug.replace(/\/?index$/, '') : slug;
 
@@ -70,18 +80,20 @@ function contextForHtml(distFile, distRoot, root = docsRoot) {
   const relPath = relative(distRoot, distFile).replace(/\\/g, '/');
   let source;
   if (relPath === '404.html') {
-    source = join(root, '404.md');
+    source = sourceFor(root, '404') ?? join(root, '404.md');
   } else if (relPath === 'index.html') {
-    source = join(root, 'index.md');
+    source = sourceFor(root, 'index') ?? join(root, 'index.md');
   } else if (relPath.endsWith('/index.html')) {
     const page = relPath.slice(0, -'/index.html'.length);
-    const direct = join(root, `${page}.md`);
-    source = existsSync(direct) ? direct : join(root, page, 'index.md');
+    source =
+      sourceFor(root, page) ??
+      sourceFor(root, `${page}/index`) ??
+      join(root, `${page}.md`);
   } else {
     return null;
   }
   if (!existsSync(source)) return null;
-  const slug = relative(root, source).replace(/\\/g, '/').replace(/\.md$/, '');
+  const slug = relative(root, source).replace(/\\/g, '/').replace(/\.mdx?$/, '');
   return { sourceDir: posix.dirname(slug), currentPage: pageOf(slug), slug };
 }
 
@@ -97,10 +109,12 @@ function rewriteHref(raw, context, root = docsRoot) {
     .replace(/\.md$/, '');
   const candidate = existsSync(join(root, `${target}.md`))
     ? target
-    : target === 'index' || target.endsWith('/index')
-      ? null
-      : `${target}/index`;
-  if (candidate === null || !existsSync(join(root, `${candidate}.md`))) return raw;
+    : existsSync(join(root, `${target}.mdx`))
+      ? target
+      : target === 'index' || target.endsWith('/index')
+        ? null
+        : `${target}/index`;
+  if (candidate === null || sourceFor(root, candidate) === null) return raw;
   return next;
 }
 

@@ -11,7 +11,10 @@
 # `url()` and every HTML `src`/`href`/`srcset` naming an asset resolves to
 # a file in `dist/`, base-aware; `test-check-assets` pins its fixture: one
 # missing font plus one missing image must fail), `test-snippets` (fenced
-# toml/sh blocks are sound) and `check-nix` (`nix-instantiate --parse` over
+# toml/sh blocks are sound in `.md` and `.mdx`), `test-mdx-twin` (the
+# fixture `.mdx` page converts to plain Markdown with fences intact, and a
+# broken variant trips the `<[A-Z]` JSX gate — both directions) and
+# `check-nix` (`nix-instantiate --parse` over
 # every fenced nix block, so the flake/module snippets cannot rot at the
 # syntax level; evaluation is pinned in nix/tests.nix, which
 # `nix flake check` runs).
@@ -73,6 +76,7 @@ stdenv.mkDerivation (finalAttrs: {
     pnpm check-assets
     pnpm test-check-assets
     pnpm test-snippets
+    pnpm test-mdx-twin
     pnpm test-nix
 
     runHook postBuild

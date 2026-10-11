@@ -30,6 +30,7 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
    into it). Small raw-HTML accents are allowed where Markdown cannot do
    the job (the hero art, the home Looks grid, the 404 terminal chrome),
    but they must keep the twin readable: real links, real alt text.
+   Need tabs, steps, asides or cards? Write `<slug>.mdx` instead (`Tabs`/`TabItem`, `Steps`, `Aside`, `LinkCard`/`CardGrid` from `@astrojs/starlight/components`): the twin route converts it to plain Markdown (imports stripped, `TabItem` → `###`, `Aside` → `> **Note:**`, `LinkCard` → link list; fences untouched) and `pnpm test-mdx-twin` plus the llms gate fail on any leftover `<[A-Z]` JSX — so backtick-quote generics like `` `<N>` ``.
 2. Add it to its app's `sidebar` group in `astro.config.mjs` (new app, new
    group per `OUTLINE.md`), to `promote` if it should sort near the top
    of the bundles, and to that app's `customSets` entry (new app, new
@@ -46,7 +47,8 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
 - `pnpm check` (`scripts/check-llms.mjs`): fails the build if `llms.txt`
   misses a page, a `.md` twin is missing/empty, or a linked bundle 404s.
   Runs in the nix derivation after `astro build` and in CI. Covers the
-  whole tree (`src/content/docs/**/*.md`, nested sections included).
+  whole tree (`src/content/docs/**/*.{md,mdx}`, nested sections included);
+  `.mdx` twins additionally fail on any `<[A-Z]` JSX left in the prose.
 - `pnpm check-md-links` (`scripts/check-md-links.mjs`): fails the build
   if any built HTML page links a raw `.md` twin (a relative `href` ending
   in `.md` or `.md#…`), or if a rewritten page link resolves to no page
@@ -72,9 +74,14 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
   pins the fixture (`scripts/fixtures/check-assets/`): one missing font
   plus one missing image must fail, the all-present twin must pass.
 - `pnpm test-snippets`: toml/sh soundness + the "color"/"compositor"
-  wording rules, over the whole tree. Executing snippets against headless
-  scoot is the recorded next step (needs the Linux binary; both runners
-  already call this file).
+  wording rules, over the whole tree (`*.md` and `*.mdx`). Executing
+  snippets against headless scoot is the recorded next step (needs the
+  Linux binary; both runners already call this file).
+- `pnpm test-mdx-twin` (`scripts/test-mdx-twin.mjs` over the fixtures in
+  `scripts/fixtures/mdx-twin/`, never published): the good `.mdx` fixture
+  (Tabs with `syncKey`, Steps, Aside, LinkCard, TOML fence) must convert
+  to plain Markdown with fences intact, and the broken fixture's twin must
+  trip the `<[A-Z]` JSX gate — both directions, every run.
 - `pnpm test-nix` (`scripts/check-nix.mjs`): every fenced `nix` block
   must parse under `nix-instantiate --parse` — as a full file, a closed
   fragment, or a module body with `inputs`/`pkgs`/`lib`/`config` bound —
