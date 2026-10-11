@@ -3,7 +3,7 @@ title: "Swap cpu <-> gpu at runtime over IPC without restarting clients (no clie
 status: "research"
 area: "core"
 priority: "research"
-blocked: "scanout-seat-reconnect"
+blocked: null
 ---
 
 # Swap cpu <-> gpu at runtime over IPC without restarting clients (no client kills)

@@ -1,9 +1,10 @@
 ---
 title: "Seat reconnect for the GPU scanout tier (teardown-first rebuild of scanout heads)"
-status: "open"
-area: "core"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-11"
 ---
 
 # Seat reconnect for the GPU scanout tier (teardown-first rebuild of scanout heads)
@@ -67,3 +68,7 @@ The `auto` policy itself (`renderer-auto-policy`); the runtime IPC swap
 `--tty`); close-to-zero (unneeded and untried, stays that way unless this
 route fails live); any change to the cpu reconnect path (regression
 suite must stay green untouched).
+
+## Resolution (2026-10-11)
+
+Landed in #551: the teardown-first seat reconnect now covers the GPU scanout tier (`run_scanout`/`swap_scanout`/`restore_scanout`, `Backend::replace_scanout`), with tier-mismatch restore, empty-device survival and a hold-dark rule so a session never reports `live: true` over a dark screen. Review rounds found and fixed: the empty-restore tier misdispatch, the empty-bindings strand, headless duplicate outputs, the Dark-downgrade `active` lie, and a zero-head session that never rebuilt heads (shared hotplug funnel `apply` now removes outputs no head presents). Verified live on the Asahi M2 on the rebased head (forced recovery with `scanout="gpu"`, hotplug unplug/replug, true-empty then comeback, CPU-tier recovery, `--renderer auto`). Not verified live: a logind-backed session, the Dark downgrade and the winning-race-after-empty hold (headless tests only), the input-rebuild-failure restore. Open follow-up: the CPU-tier empty swap can still strand one headless output reporting `live: true` until the next win.
