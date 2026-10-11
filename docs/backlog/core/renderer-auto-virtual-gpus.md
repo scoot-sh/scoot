@@ -3,7 +3,7 @@ title: "Measure cpu vs gpu scanout on virgl/venus and vmwgfx before auto picks t
 status: "research"
 area: "core"
 priority: "research"
-blocked: "renderer-auto-policy"
+blocked: null
 ---
 
 # Measure cpu vs gpu scanout on virgl/venus and vmwgfx before auto picks the gpu there

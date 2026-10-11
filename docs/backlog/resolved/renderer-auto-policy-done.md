@@ -1,9 +1,10 @@
 ---
 title: "auto renderer request: gpu on real hardware, cpu in VMs and headless (pure policy, default unchanged)"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-10"
 ---
 
 # auto renderer request: gpu on real hardware, cpu in VMs and headless (pure policy, default unchanged)
@@ -261,3 +262,7 @@ No flipping the virtual-GPU or nested rows to the gpu tier (see the two
 startup; out of scope, say so in the docs). No render-node probing, no
 `EGLDevice::is_software()`, no Smithay fork changes, no new dependency.
 `scripts/asahi-test4.sh` needs no change.
+
+## Resolution (2026-10-10)
+
+Landed in #552 (`feat(scoot)!:`): `--renderer cpu|gpu|auto`, `SCOOT_RENDERER`, `[renderer] backend`, the pure policy in `render/policy.rs`, the reload request-vs-request fix, and the breaking rename with no aliases (old `pixman`/`gles` values are refused with a message naming the new one). Default stays `cpu`. Independent review found three missed rename leftovers, fixed in the same PR. Unverified: the dev VM `virtual-gpu` auto line, and `~/nixos-config` references to the old values.

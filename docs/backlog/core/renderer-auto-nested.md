@@ -3,7 +3,7 @@ title: "Measure nested gpu+dma-buf vs cpu on real hardware before auto picks the
 status: "research"
 area: "core"
 priority: "research"
-blocked: "renderer-auto-policy"
+blocked: null
 ---
 
 # Measure nested gpu+dma-buf vs cpu on real hardware before auto picks the gpu under --nested
