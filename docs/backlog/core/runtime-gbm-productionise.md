@@ -51,14 +51,13 @@ auto policy, swap UX -- is this ticket.
    tar over ssh, run `--tty --renderer gpu` on a free VT (check for other
    agents' `scoot`/`seatd`/`openvt` first), confirm the tier engages and
    scans out, record SHA + raw output in `Asahi.md`.
-2. Decide the auto-detect rule and implement it in `render::resolve` /
-   `tty::init`: `auto` picks the tier that fits the probed hardware (a
-   render-capable device plus loadable EGL/GBM -> GPU, otherwise CPU),
-   with a one-line log saying which tier was chosen and why; an explicit
-   `--renderer` / config always wins over `auto`; a forced-`gpu` request
-   without the stack fails loudly, never silently. See "Auto policy"
-   below for the hardware-aware table; do not fix the table before the
-   exploration measurement in item 6.
+2. Land the auto policy per `renderer-auto-policy` (pure
+   `render/policy.rs`: KMS-driver + GBM/EGL + `GL_RENDERER` checks, one
+   INFO line, `auto` never fails startup; an explicit request always wins
+   over `auto`; a forced-`gpu` request without the stack fails loudly,
+   never silently). This ticket owns the collapse and the default flip
+   around that policy, not the table itself; do not fix the table before
+   the exploration measurement in item 6.
 3. Collapse the feature: `runtime-gbm` becomes the default (or merges into
    `gpu-scanout`), `flake.nix` `scoot`/`scoot-gpu` collapse to one package
    (the four dependency artifacts collapse with them), CI's `ldd` gate
@@ -92,6 +91,27 @@ auto policy, swap UX -- is this ticket.
    may favor the CPU tier there -- that is the expected hardware-aware
    outcome, not a failure.
 
+## CPU-only minimal build (user, 2026-10-10; stage C gate)
+
+A minimal CPU-only build must stay possible via Cargo features
+(`cargo build --no-default-features`): no GBM code, no C stub, no C
+compiler need, no libgbm anywhere, and XWayland excludable too. In such
+a build `--renderer gpu` fails at startup with a clear message and
+`auto` resolves to cpu with reason `no-scanout-tier` (the
+`renderer-auto-policy` table already rows this; the build must keep that
+row reachable). The mechanism half already holds: `build.rs` compiles
+the stub only under `CARGO_FEATURE_RUNTIME_GBM` (so without the feature
+no C compiler runs), and `default = []` carries neither `gpu-scanout`
+nor `xwayland` — stage C (the default flip / feature collapse in item 3)
+must leave this path intact, not absorb it. Concretely: (a) the collapse
+keeps the scanout tier behind a feature the minimal build disables;
+(b) a CI job builds `--no-default-features`, asserts no libgbm in
+`readelf -d`, no stub symbols via `nm`, and that the binary starts;
+(c) a documented/packaged minimal build exists (e.g. a nix
+`scoot-minimal` or a documented command) so the path is a product, not a
+flag combination. See `xwayland-always.md` for the XWayland half (the
+feature stays disableable there too).
+
 ## Per-frame cost (measured for the spike, PR #547 fix round)
 
 Review Finding 1 (PR #547): the stub comment's "no per-frame hot path"
@@ -110,16 +130,17 @@ orchestrator scratchpad) and the PR discussion.
 
 ## Easy swapping: design for this ticket
 
-- **Flag/config/env.** `--renderer cpu|gpu|auto` and `[renderer] mode`
-  already exist in spirit (`--renderer pixman|gles` plus `[renderer]
-  backend` today; the user-facing names change to `cpu|gpu` in the
-  renderer-auto-policy PR, breaking, no aliases -- this ticket uses the
-  new names throughout). Precedence stays: flag wins over file, env
-  overrides both (e.g. `SCOOT_RENDERER`, following the existing
-  `SCOOT_SOCKET` / `SCOOT_TEST_RENDERER` precedent); unknown names are
-  refused, never defaulted -- keep that. `auto` means "run the auto
-  policy below" and becomes the default only when this ticket lands;
-  until then the default stays CPU.
+- **Flag/config/env.** `--renderer cpu|gpu|auto` and `[renderer]
+  backend` already exist in spirit (`--renderer pixman|gles` plus
+  `[renderer] backend` today; the user-facing names change to `cpu|gpu`
+  in the renderer-auto-policy PR, breaking, no aliases -- this ticket
+  uses the new names throughout). Precedence (per `renderer-auto-policy`,
+  flag > env > config > default): an explicit `--renderer` wins,
+  `SCOOT_RENDERER` (following the existing `SCOOT_SOCKET` /
+  `SCOOT_TEST_RENDERER` precedent) beats the file, the file beats the
+  built-in default; unknown names are refused, never defaulted -- keep
+  that. `auto` means "run the auto policy below" and becomes the default
+  only when this ticket lands; until then the default stays CPU.
 - **Runtime switch.** Research (not yet proven): switching tiers over
   IPC / `scoot msg` without restarting clients. Cost to scope: re-create
   swapchains and presenters per output while clients stay mapped -- the

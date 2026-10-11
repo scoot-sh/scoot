@@ -1,12 +1,12 @@
 ---
-title: "Swap pixman <-> GPU at runtime over IPC without restarting clients (no client kills)"
+title: "Swap cpu <-> gpu at runtime over IPC without restarting clients (no client kills)"
 status: "research"
 area: "core"
 priority: "research"
 blocked: "renderer-auto-policy, scanout-seat-reconnect"
 ---
 
-# Swap pixman <-> GPU at runtime over IPC without restarting clients (no client kills)
+# Swap cpu <-> gpu at runtime over IPC without restarting clients (no client kills)
 
 Filed 2026-10-10. Serves **daily-drive**: a user who docks a GPU (or
 whose auto choice proves wrong) should flip tiers without losing every
@@ -21,7 +21,7 @@ The renderer is fixed for the process's life (`State::renderer` doc,
 `state.rs:477-485`). Changing tiers today means restarting scoot, which
 disconnects every client. The dma-buf feedback that would make a swap
 safe is built once per session and never re-sent (`dmabuf.rs`), and
-`create_immed` can only refuse with a fatal error — so a GPU→CPU swap
+`create_immed` can only refuse with a fatal error — so a gpu→cpu swap
 with live tiled or compressed client buffers would kill clients. That is
 the shape this ticket must rule out, not discover mid-PR.
 
@@ -33,7 +33,7 @@ IPC first (`scoot-ipc` protocol 10 → 11, under the existing bump rule in
 could ship first as a tiny PR after `renderer-auto-policy`), then
 `Request::SetRenderer { request }` → the same response or an `Error`
 naming the refusal. CLI: `scoot msg renderer` and `scoot msg renderer
-set auto|pixman|gles`. Docs in `site/src/content/docs/msg/requests.md`.
+set auto|cpu|gpu`. Docs in `site/src/content/docs/msg/requests.md`.
 Order: headless/nested first (rebuild `Backend` per output via
 `Backend::new`), `--tty` second (reuses `scanout-seat-reconnect`'s
 rebuild machinery — hence the block).
@@ -42,8 +42,8 @@ rebuild machinery — hence the block).
 modifier pair currently *advertised* by `zwp_linux_dmabuf_v1` is
 importable by the target renderer (`Backend::imports_dmabuf_format` /
 `dmabuf_import_set`), *and* every live imported client dma-buf is too —
-otherwise refuse, naming the reason. Consequence: pixman→gles is usually
-allowed; gles→pixman is refused whenever the GLES advertisement carried
+otherwise refuse, naming the reason. Consequence: cpu→gpu is usually
+allowed; gpu→cpu is refused whenever the gpu advertisement carried
 tiled/compressed modifiers or any client holds one. Re-sending v4
 feedback and waiting for clients to reallocate is a research question,
 not a default.
@@ -61,8 +61,8 @@ two renderers).
 **Everything that assumes the renderer is fixed needs a decision:**
 `State::renderer`'s doc, `gles::FIRST_BUILD_LOGGED`, the `GlesDevice`
 pin, `dmabuf` advertise-once, the `drm_syncobj` global (enabled only on
-the scanout tier at startup, `tty/mod.rs:414-435` — a swap to dumb must
-keep honoring acquire points of already-bound clients; a swap to scanout
+the scanout tier at startup, `tty/mod.rs:414-435` — a swap to cpu must
+keep honoring acquire points of already-bound clients; a swap to gpu
 cannot add the global retroactively), cursor/overlay plane state,
 `Captures`/`ensure_scanout_capture_current`, screencopy sessions (size
 unchanged, buffers re-validated), presentation feedback, the
