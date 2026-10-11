@@ -39,10 +39,20 @@
 //! supervisor-restarts-into-a-fresh-session contract as any other seat
 //! loss.
 //!
-//! Deliberately dumb-tier-only: a scanout-tier rebuild would re-tie the
-//! renderer's swapchain state this module does not touch, and the live
-//! matrix runs the panel on dumb buffers. A scanout session logs once per
-//! activation and stays on today's path.
+//! Both tiers rebuild through the same shape. On the CPU tier the heads
+//! carry dumb pools and surfaces; on the GPU tier they carry a
+//! `DrmCompositor` each, and the fresh build carries a renderer per head
+//! that is handed to the output's existing render backend through
+//! `Backend::replace_scanout` -- never a new output, never a mixed tier.
+//! A fresh device that comes up on the other tier than the session runs is
+//! not a recovery but a tier switch, so it restores the old device instead.
+//! In-flight flips need no refuse-and-retry here: the pause path already
+//! discarded the CPU tier's numbers and drained the GPU tier's queue in
+//! `reactivate` before this idle runs, the old DRM registration is removed
+//! before the old backend drops (so no late completion can settle a new
+//! head early), and a `DrmCompositor` queues behind a pending flip rather
+//! than refusing it -- dropping one with frames queued releases its client
+//! buffers unwaited, exactly like the pause path does.
 //!
 //! Hard edges, as the ticket pins them: held-vs-vacant discrimination
 //! unchanged (this acts only on `LostVacant`); privileged self-recovery
@@ -172,16 +182,16 @@ fn run(state: &mut State) {
         }
         return;
     }
-    // Dumb tier only (see the module doc): a scanout rebuild
-    // would re-tie renderer state this module does not touch. Nothing has
-    // been torn down at this point, so returning keeps today's path whole.
-    if tty.renderer() != RendererKind::Pixman {
-        tracing::info!(
-            "seat reconnect not attempted: this session is on the gpu scanout tier, \
-             which the seat reconnect does not rebuild; keeping live:false until a \
-             later switch back wins the race"
-        );
-        return;
+    // The session's tier decides the rebuild shape below: the CPU tier
+    // swaps heads alone (its render backends hold no device state), while
+    // the GPU tier additionally hands each fresh renderer to its output's
+    // existing backend (see `run_scanout`). Resolved here, before anything
+    // is torn down, from what the session actually drives -- the same
+    // `RendererKind` the hotplug path maps per head, so no `auto` request
+    // state is needed here.
+    let gpu_tier = tty.renderer() != RendererKind::Pixman;
+    if gpu_tier {
+        return run_scanout(state, started, wanted);
     }
     // Snapshot everything the rebuild needs while the old backend is whole.
     // Connectors plus their outputs, so the new heads re-bind to the
@@ -323,6 +333,221 @@ fn run(state: &mut State) {
             );
         }
     }
+}
+
+/// The GPU-tier attempt: the same teardown-first shape as [`run`], plus
+/// the renderer handoff. Only compiled with the GPU tier present; without
+/// it the tier cannot exist (the resolver keeps such a session on the CPU
+/// tier), so reaching here is a loud decline rather than a rebuild.
+///
+/// The arm is already spent by [`run`] (it took the snapshot before
+/// dispatching here), so this never re-takes it. Every failure short of a
+/// dead seat restores the old device through [`restore_scanout`]; only a
+/// dead seat exits, through the same contract [`run`] documents.
+#[cfg(feature = "gpu-scanout")]
+fn run_scanout(state: &mut State, started: Instant, wanted: RendererKind) {
+    // Snapshot everything the rebuild needs while the old backend is whole.
+    // Connectors plus their outputs, so the new heads re-bind to the
+    // outputs the rest of the compositor already has.
+    let (bindings, path, modes, session_token) = {
+        let Some(tty) = state.tty.as_ref() else {
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished before a GPU-tier reconnect with no dispatch between"
+            );
+            tracing::error!(
+                "seat reconnect: lost the old backend before the attempt; keeping the session"
+            );
+            return;
+        };
+        // One tier per session: every head shares it, so the first head's
+        // answer is the session's. A head with no output never presents,
+        // but it still drives its connector and must be rebuilt -- so the
+        // bindings snapshot keeps the output-claimed shape the CPU path
+        // rebinds by, while the teardown below drops every head.
+        let bindings: Vec<(connector::Handle, OutputId)> = tty
+            .heads
+            .iter()
+            .filter_map(|head| Some((head.connector, head.output?)))
+            .collect();
+        (
+            bindings,
+            tty.path.clone(),
+            tty.modes.clone(),
+            tty.session_token,
+        )
+    };
+
+    // Teardown first, exactly like the CPU path: drop every head
+    // (compositors, swapchains, flip state) before the new `DrmDevice` is
+    // built, while the old device and session are still in place. The old
+    // swapchain's framebuffers would fail the new device's snapshot the
+    // way the old pools' would; the render backends stay -- their renderer
+    // holds no framebuffer, only an EGL context and exported dma-bufs --
+    // until the swap hands them their fresh renderers. Single-threaded
+    // dispatch means no event can observe the headless interval.
+    {
+        let Some(tty) = state.tty.as_mut() else {
+            return;
+        };
+        // No refuse-and-retry on queued frames: the pause path released the
+        // GPU tier's held buffers and `reactivate` drained its pending frame
+        // before this idle ran, and a compositor queues behind a pending
+        // flip rather than refusing it -- so there is nothing to wait for.
+        // The check below pins that reading: a head that ever reports one
+        // in flight here is a future presenter shape this path has not been
+        // taught, and standing down is safer than tearing down under it.
+        if tty.heads.iter().any(|head| head.presenter.flip_in_flight()) {
+            tracing::info!(
+                "seat reconnect skipped: a flip is still in flight on the GPU tier; \
+                 the next switch back retries"
+            );
+            return;
+        }
+        std::mem::take(&mut tty.heads);
+    }
+
+    // Drop the seat connection: removing the session notifier drops the
+    // one strong `Rc` keeping libseat's client alive, which closes the
+    // socket, which frees seatd's per-client device entry. Only then can
+    // a fresh client's open be first-to-open. The DRM and libinput sources
+    // stay registered across this: their fds are still open in the old
+    // backend, nothing dispatches mid-idle, and keeping them is what lets
+    // the restore path below reuse them untouched.
+    state.loop_handle.remove(session_token);
+
+    // A fresh seat client. Failure here means the seat itself is gone (the
+    // socket the old connection lived on is unreachable), which dooms the
+    // old connection too -- its next dispatch would fail the same way and
+    // exit through the seat-loss contract. Exiting now, loudly, is that
+    // contract arriving one event early, and the supervisor's fresh start
+    // is the documented way back (it re-acquires master through the seat
+    // daemon, which is exactly what this attempt wanted).
+    let (mut session, notifier) = match LibSeatSession::new() {
+        Ok(pair) => pair,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "seat reconnect failed: no new seat connection after dropping the old one; \
+                 the seat is gone, so stopping (a supervisor restarts into a fresh session, \
+                 which re-acquires master through the seat daemon)"
+            );
+            std::process::exit(1);
+        }
+    };
+    let session_came_up_active = session.is_active();
+    tracing::info!(
+        came_up_active = session_came_up_active,
+        "seat reconnect: fresh seat client connected"
+    );
+
+    // Rebuild input on the new session before touching the old backend's
+    // registration: failure below restores with the old input still wired.
+    let input = match rebuild_input(&session) {
+        Ok(input) => input,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "seat reconnect failed: {}; restoring the old device",
+                restore_guidance()
+            );
+            restore_scanout(state, session, notifier, &bindings, &modes, wanted);
+            return;
+        }
+    };
+
+    // The fresh open: first-to-open on the freed entry, so seatd-as-root
+    // takes vacant master while handing the fd over. Teardown-first is
+    // already done (step above), which is what lets `DrmDevice::new`
+    // inside pass its framebuffer snapshot.
+    let device = match super::open_device(&mut session, &path, &modes, wanted) {
+        Ok(device) => device,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "seat reconnect failed: {}; restoring the old device",
+                restore_guidance()
+            );
+            restore_scanout(state, session, notifier, &bindings, &modes, wanted);
+            return;
+        }
+    };
+    // One tier per session: a fresh device that fell back to the CPU tier
+    // is not a recovery but a tier switch, so it restores the old device
+    // instead of mixing tiers (a CPU head in a GPU session would be
+    // rebuilt as the offscreen pipeline the tier choice exists to avoid).
+    if !fresh_tier_matches(device.renderer, wanted) {
+        tracing::error!(
+            "seat reconnect failed: the fresh device came up on the CPU tier while this \
+             session runs on the GPU tier; {}; restoring the old device",
+            restore_guidance()
+        );
+        restore_scanout(state, session, notifier, &bindings, &modes, wanted);
+        return;
+    }
+
+    // Prove master synchronously, in the normal path's own shape: `pause`
+    // then `activate` runs `reset_state`'s atomic commit, which only a
+    // master-holding fd passes. `live` stays false until this succeeds.
+    let mut device = device;
+    device.drm.pause();
+    match device.drm.activate(true) {
+        Ok(()) => {
+            swap_scanout(
+                state,
+                session,
+                notifier,
+                input,
+                device,
+                &bindings,
+                SwapLive::Live,
+                started,
+                session_came_up_active,
+            );
+        }
+        Err(error) => {
+            // A fresh fd that still cannot modeset: the holder came back
+            // between the open and the proof, or the device refused for its
+            // own reasons. Keep the fresh device anyway -- unlike the old
+            // poisoned fd it joins future races normally, so the next
+            // switch back retries on a healthy fd.
+            swap_scanout(
+                state,
+                session,
+                notifier,
+                input,
+                device,
+                &bindings,
+                SwapLive::Dark {
+                    proof: error.to_string(),
+                },
+                started,
+                session_came_up_active,
+            );
+        }
+    }
+}
+
+/// Without the GPU tier the session cannot be on it (the resolver keeps
+/// such a session on the CPU tier), so a GPU-tier attempt there declines
+/// loudly before any teardown -- keeping today's path whole. This is the
+/// only `run_scanout` a build without the feature has.
+#[cfg(not(feature = "gpu-scanout"))]
+fn run_scanout(state: &mut State, started: Instant, wanted: RendererKind) {
+    let _ = (state, started, wanted);
+    tracing::info!(
+        "seat reconnect not attempted: this session is on the GPU tier, \
+         which this build does not carry; keeping live:false until a \
+         later switch back wins the race"
+    );
+}
+
+/// Whether the fresh device came up on the tier the session runs: the
+/// reconnect must never mix tiers. A pure predicate so headless tests pin
+/// it -- the fd half needs real seat hardware, this half must not rot
+/// silently.
+fn fresh_tier_matches(fresh: RendererKind, wanted: RendererKind) -> bool {
+    fresh == wanted
 }
 
 /// Whether the swapped-in device proved master and may report `live: true`.
@@ -498,6 +723,213 @@ fn swap(
                 came_up_active = session_came_up_active,
                 input_gap_ms,
                 total_ms = started.elapsed().as_millis(),
+                "seat reconnect recovered the display: fresh seat client holds drm master"
+            );
+        }
+        SwapLive::Dark { proof } => {
+            tracing::error!(
+                %proof,
+                "seat reconnect opened a fresh device but cannot modeset on it: {}; \
+                 keeping the fresh device dark (every output reports live:false) until a \
+                 later switch back -- switch VTs away and back to retry the reactivation; \
+                 if it never comes back, restart the session",
+                keep_dark_guidance()
+            );
+        }
+    }
+}
+
+/// Installs a built GPU-tier device: the same registration swap as
+/// [`swap`], plus handing each fresh renderer to its output's existing
+/// render backend. Only compiled with the GPU tier present.
+///
+/// The handoffs ride alongside the heads by connector: each fresh head's
+/// connector names the output it re-binds to (see `rebind`), and the same
+/// connector names the backend its renderer joins through
+/// `Backend::replace_scanout`. A backend that is missing or not on the
+/// GPU tier is a caller bug (one tier per session, outputs already bound)
+/// -- asserted in debug builds, and turned dark loudly otherwise rather
+/// than left mismatched: the fresh device stays, `live: false`, retryable
+/// on the next switch back, exactly like [`SwapLive::Dark`].
+#[cfg(feature = "gpu-scanout")]
+#[allow(clippy::too_many_arguments)]
+fn swap_scanout(
+    state: &mut State,
+    session: LibSeatSession,
+    notifier: LibSeatSessionNotifier,
+    input: (Libinput, LibinputInputBackend),
+    device: super::Device,
+    bindings: &[(connector::Handle, OutputId)],
+    live: SwapLive,
+    started: Instant,
+    session_came_up_active: bool,
+) {
+    let (context, backend) = input;
+    let super::Device {
+        drm,
+        notifier: drm_notifier,
+        heads: built,
+        renderer,
+    } = device;
+    debug_assert_eq!(
+        renderer,
+        RendererKind::Gles,
+        "a GPU-tier swap was handed a CPU-tier device"
+    );
+    let device_id = drm.device_id();
+
+    // The renderer halves, keyed by the connector their head drives, so
+    // the handoff below cannot attach one screen's renderer to another's
+    // backend. One small `Vec` on a path that runs once per VT switch,
+    // matching `bindings`' own shape -- never on a per-frame path.
+    let mut heads: Vec<super::head::Head> = Vec::with_capacity(built.len());
+    let mut handoffs: Vec<(connector::Handle, crate::compositor::render::ScanoutHandoff)> =
+        Vec::with_capacity(built.len());
+    for (head, handoff) in built {
+        handoffs.push((head.connector, handoff));
+        heads.push(head);
+    }
+
+    let (old_drm_token, old_libinput_token, path, modes) = {
+        let Some(tty) = state.tty.as_ref() else {
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-swap with no dispatch between"
+            );
+            tracing::error!(
+                "seat reconnect: lost the old backend mid-swap; keeping the old session"
+            );
+            return;
+        };
+        (
+            tty.drm_token,
+            tty.libinput_token,
+            tty.path.clone(),
+            tty.modes.clone(),
+        )
+    };
+    let input_gap = Instant::now();
+    state.loop_handle.remove(old_drm_token);
+    state.loop_handle.remove(old_libinput_token);
+    debug_assert!(
+        state.tty.is_some(),
+        "tty vanished mid-swap with no dispatch between"
+    );
+    state.tty.take();
+    let session_token = match state
+        .loop_handle
+        .insert_source(notifier, super::session_event)
+    {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::error!(%error, "seat reconnect: cannot re-register the session during shutdown");
+            return;
+        }
+    };
+    let drm_token = match state
+        .loop_handle
+        .insert_source(drm_notifier, super::drm_event)
+    {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::error!(%error, "seat reconnect: cannot re-register the drm device during shutdown");
+            return;
+        }
+    };
+    let libinput_token = match state
+        .loop_handle
+        .insert_source(backend, super::libinput_event)
+    {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::error!(%error, "seat reconnect: cannot re-register input during shutdown");
+            return;
+        }
+    };
+    let input_gap_ms = input_gap.elapsed().as_millis();
+    let live_flag = matches!(live, SwapLive::Live);
+    state.tty = Some(Tty {
+        session,
+        drm,
+        heads,
+        stale_vblanks: StaleVblanks::new(),
+        device_id,
+        modes,
+        nothing_connected: false,
+        libinput: context,
+        active: live_flag,
+        session_paused: false,
+        path,
+        session_token,
+        drm_token,
+        libinput_token,
+        reconnect_armed: None,
+    });
+    rebind(state, bindings);
+    // Hand each fresh renderer to its output's backend, by the connector
+    // snapshot taken before teardown. A head the rebind dropped (its
+    // connector vanished mid-switch) has no output to present, so its
+    // renderer drops with it -- the backend keeps its old renderer, which
+    // then has no presenter and draws nothing until the next switch back.
+    let mut handoff_failed = false;
+    for (connector, id) in bindings {
+        let position = handoffs
+            .iter()
+            .position(|(head_connector, _)| *head_connector == *connector);
+        let Some(position) = position else {
+            continue;
+        };
+        let (_, handoff) = handoffs.remove(position);
+        let Some(handoff) = handoff.backend else {
+            continue;
+        };
+        let replaced = state
+            .backends
+            .get_mut(id)
+            .is_some_and(|backend| backend.replace_scanout(handoff));
+        if !replaced {
+            tracing::error!(
+                output = id.0,
+                "seat reconnect: no GPU-tier backend to hand the fresh renderer to; \
+                 keeping the fresh device dark until a later switch back retries it"
+            );
+            handoff_failed = true;
+        }
+    }
+    // A handoff failure is a dark fresh device, not a stranded one: mark
+    // it the way the proof failure does and fall through to the `Dark`
+    // message below.
+    let live = if handoff_failed {
+        if let SwapLive::Live = live {
+            SwapLive::Dark {
+                proof: "the fresh renderers could not join their outputs".to_owned(),
+            }
+        } else {
+            live
+        }
+    } else {
+        live
+    };
+    match live {
+        SwapLive::Live => {
+            let outcomes = {
+                let Some(tty) = state.tty.as_mut() else {
+                    debug_assert!(state.tty.is_some(), "new backend vanished mid-swap");
+                    tracing::error!(
+                        "seat reconnect: lost the new backend mid-swap; skipping its re-probe"
+                    );
+                    return;
+                };
+                tty.reconfigure()
+            };
+            hotplug::apply(state, outcomes);
+            state.request_render();
+            state.update_cursor_hide(Instant::now());
+            tracing::info!(
+                came_up_active = session_came_up_active,
+                input_gap_ms,
+                total_ms = started.elapsed().as_millis(),
+                scanout = "gpu",
                 "seat reconnect recovered the display: fresh seat client holds drm master"
             );
         }
@@ -779,6 +1211,311 @@ fn restore_without_input(
     );
 }
 
+/// Rebuilds GPU-tier heads on the *old* device after the fresh build (or
+/// the fresh input) failed, and rewires the session and input on the new
+/// seat client: today's `live: false` with a working keyboard, working
+/// `change_vt`, and future retries -- never a stranded session and never a
+/// process exit. Only compiled with the GPU tier present.
+///
+/// Mirrors [`restore`] one step at a time, with the renderer handoff added:
+/// the old device is re-probed fresh (connectors may have moved while the
+/// session was away), heads are rebuilt on the session's own tier through
+/// `build_heads` (a head that cannot rejoin the GPU tier is refused rather
+/// than mixed in, exactly as at startup -- see `hotplug.rs`'s per-head
+/// plan), and each rebuilt renderer joins its output's backend through
+/// `Backend::replace_scanout`. An unreadable device probes as
+/// nothing-connected; an empty rebuild keeps the session headless-dark
+/// with the same survival shape [`restore`] documents.
+///
+/// The `state.tty is None` guards below are unreachable single-threaded
+/// (see [`restore`]'s doc) -- each is a `debug_assert` plus a loud early
+/// return, never an exit. Loop-insert refusals can only fire while the loop
+/// is shutting down: they log and return so a clean teardown is not
+/// misreported as a crash.
+#[cfg(feature = "gpu-scanout")]
+fn restore_scanout(
+    state: &mut State,
+    session: LibSeatSession,
+    notifier: LibSeatSessionNotifier,
+    bindings: &[(connector::Handle, OutputId)],
+    modes: &ModeRequests,
+    wanted: RendererKind,
+) {
+    // Fresh probe, not the startup cache: the connectors may have moved
+    // while the session was away, and the restore must see what is there
+    // now (same freshness the hotplug path probes with). An unreadable
+    // device probes as nothing-connected rather than exiting: the empty
+    // survival below keeps the session alive for the retry.
+    let connected = {
+        let Some(tty) = state.tty.as_ref() else {
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-restore with no dispatch between"
+            );
+            tracing::error!("seat reconnect restore: lost the old backend; keeping the session");
+            return;
+        };
+        match tty.drm.resource_handles() {
+            Ok(resources) => {
+                super::gpu::find_all(&tty.drm, &resources, modes, super::gpu::Freshness::Reprobe)
+            }
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    "seat reconnect restore: cannot re-read the old device; keeping the session dark \
+                     until a later switch back retries it"
+                );
+                Vec::new()
+            }
+        }
+    };
+    // The session's tier is settled (it drove these outputs minutes ago);
+    // keep it rather than re-deciding: a head that cannot rejoin its own
+    // tier is refused, exactly as at startup.
+    let (built, _decided, _failures) = {
+        let Some(tty) = state.tty.as_mut() else {
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-restore with no dispatch between"
+            );
+            tracing::error!("seat reconnect restore: lost the old backend; keeping the session");
+            return;
+        };
+        let drm_fd = tty.drm.device_fd().clone();
+        super::build_heads(&mut tty.drm, &drm_fd, connected, Some(wanted), wanted)
+    };
+    let mut heads: Vec<super::head::Head> = Vec::with_capacity(built.len());
+    let mut handoffs: Vec<(connector::Handle, crate::compositor::render::ScanoutHandoff)> =
+        Vec::with_capacity(built.len());
+    for (head, handoff) in built {
+        handoffs.push((head.connector, handoff));
+        heads.push(head);
+    }
+    // Rewire input on the new session first: the old context's interface
+    // holds the dropped (dead) session, so it cannot survive the swap.
+    // The old input source is removed only once the replacement is built.
+    // A rebuild failure keeps the old input wiring rather than exiting:
+    // the old context may be dead with it, but the session stays alive
+    // for IPC and the next switch back retries -- strictly better than a
+    // kill.
+    match rebuild_input(&session) {
+        Ok((context, backend)) => {
+            restore_scanout_with_input(
+                state, session, notifier, context, backend, heads, handoffs, bindings,
+            );
+        }
+        Err(error) => {
+            restore_scanout_without_input(
+                state, session, notifier, heads, handoffs, bindings, error,
+            );
+        }
+    }
+}
+
+/// The GPU-tier restore tail when the fresh input built: swaps session and
+/// input onto the new seat client, puts `heads` back -- possibly empty (see
+/// [`restore`]'s doc for the drives-nothing survival shape) -- and hands
+/// each rebuilt renderer to its output's backend. Only compiled with the
+/// GPU tier present.
+#[cfg(feature = "gpu-scanout")]
+#[allow(clippy::too_many_arguments)]
+fn restore_scanout_with_input(
+    state: &mut State,
+    session: LibSeatSession,
+    notifier: LibSeatSessionNotifier,
+    context: Libinput,
+    backend: LibinputInputBackend,
+    heads: Vec<super::head::Head>,
+    mut handoffs: Vec<(connector::Handle, crate::compositor::render::ScanoutHandoff)>,
+    bindings: &[(connector::Handle, OutputId)],
+) {
+    let empty = heads.is_empty();
+    let old_libinput_token = {
+        let Some(tty) = state.tty.as_ref() else {
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-restore with no dispatch between"
+            );
+            tracing::error!("seat reconnect restore: lost the old backend; keeping the session");
+            return;
+        };
+        tty.libinput_token
+    };
+    state.loop_handle.remove(old_libinput_token);
+    let session_token = match state
+        .loop_handle
+        .insert_source(notifier, super::session_event)
+    {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "seat reconnect restore: cannot re-register the session during shutdown"
+            );
+            return;
+        }
+    };
+    let libinput_token = match state
+        .loop_handle
+        .insert_source(backend, super::libinput_event)
+    {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "seat reconnect restore: cannot re-register input during shutdown"
+            );
+            return;
+        }
+    };
+    // Heads and wiring back in place. The display stays dark: `active`
+    // was already false from the failed reactivation that armed this
+    // attempt, and it is asserted again here rather than trusted -- a
+    // restored backend reports `live: false` until a later switch back
+    // proves master, never on the strength of the old fd.
+    {
+        let Some(tty) = state.tty.as_mut() else {
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-restore with no dispatch between"
+            );
+            tracing::error!("seat reconnect restore: lost the old backend; keeping the session");
+            return;
+        };
+        tty.session = session;
+        tty.libinput = context;
+        tty.session_token = session_token;
+        tty.libinput_token = libinput_token;
+        // An empty restore holds the primary the way a fully-unplugged
+        // hotplug does (see `hotplug.rs`'s `Hold`): the next connector
+        // change retries rather than planning `Keep` on nothing.
+        tty.nothing_connected = empty;
+        tty.active = false;
+        tty.heads = heads;
+    }
+    rebind(state, bindings);
+    // Each rebuilt renderer joins its output's backend, by connector. A
+    // head the rebind dropped leaves its renderer to drop with it; a
+    // backend without one keeps its old renderer, which then has no
+    // presenter and draws nothing until the next switch back -- dark, but
+    // never mismatched mid-frame, and never a kill.
+    for (connector, id) in bindings {
+        let position = handoffs
+            .iter()
+            .position(|(head_connector, _)| *head_connector == *connector);
+        let Some(position) = position else {
+            continue;
+        };
+        let (_, handoff) = handoffs.remove(position);
+        let Some(handoff) = handoff.backend else {
+            continue;
+        };
+        if !state
+            .backends
+            .get_mut(id)
+            .is_some_and(|backend| backend.replace_scanout(handoff))
+        {
+            tracing::error!(
+                output = id.0,
+                "seat reconnect restore: no GPU-tier backend to hand the rebuilt renderer to"
+            );
+        }
+    }
+    if empty {
+        tracing::error!(
+            "seat reconnect did not recover the display: {}; the session stays alive \
+             (keyboard and `scoot msg` answer, every output reports live:false) -- switch \
+             VTs away and back to retry once a display is connected, or restart the session",
+            empty_device_guidance()
+        );
+        return;
+    }
+    tracing::error!(
+        "seat reconnect did not recover the display: {}; the session stays alive \
+         (keyboard and `scoot msg` answer, every output reports live:false) -- switch \
+         VTs away and back to retry, or restart the session",
+        restore_guidance()
+    );
+}
+
+/// The GPU-tier restore tail when the fresh input refused to build: swaps
+/// the session onto the new seat client but keeps the old input wiring
+/// untouched, then puts `heads` back and hands each rebuilt renderer to
+/// its output's backend. The keyboard may be dead with the old context,
+/// but IPC answers and the next switch back retries -- never a stranded
+/// session, never an exit. Only compiled with the GPU tier present.
+#[cfg(feature = "gpu-scanout")]
+#[allow(clippy::too_many_arguments)]
+fn restore_scanout_without_input(
+    state: &mut State,
+    session: LibSeatSession,
+    notifier: LibSeatSessionNotifier,
+    heads: Vec<super::head::Head>,
+    mut handoffs: Vec<(connector::Handle, crate::compositor::render::ScanoutHandoff)>,
+    bindings: &[(connector::Handle, OutputId)],
+    input_error: String,
+) {
+    let empty = heads.is_empty();
+    let session_token = match state
+        .loop_handle
+        .insert_source(notifier, super::session_event)
+    {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "seat reconnect restore: cannot re-register the session during shutdown"
+            );
+            return;
+        }
+    };
+    {
+        let Some(tty) = state.tty.as_mut() else {
+            debug_assert!(
+                state.tty.is_some(),
+                "tty vanished mid-restore with no dispatch between"
+            );
+            tracing::error!("seat reconnect restore: lost the old backend; keeping the session");
+            return;
+        };
+        tty.session = session;
+        tty.session_token = session_token;
+        tty.nothing_connected = empty;
+        tty.active = false;
+        tty.heads = heads;
+    }
+    rebind(state, bindings);
+    for (connector, id) in bindings {
+        let position = handoffs
+            .iter()
+            .position(|(head_connector, _)| *head_connector == *connector);
+        let Some(position) = position else {
+            continue;
+        };
+        let (_, handoff) = handoffs.remove(position);
+        let Some(handoff) = handoff.backend else {
+            continue;
+        };
+        if !state
+            .backends
+            .get_mut(id)
+            .is_some_and(|backend| backend.replace_scanout(handoff))
+        {
+            tracing::error!(
+                output = id.0,
+                "seat reconnect restore: no GPU-tier backend to hand the rebuilt renderer to"
+            );
+        }
+    }
+    tracing::error!(
+        %input_error,
+        "seat reconnect did not recover the display ({}); the session stays alive \
+         (`scoot msg` answers, every output reports live:false) -- switch VTs away and \
+         back to retry, or restart the session",
+        restore_guidance()
+    );
+}
+
 /// Binds rebuilt heads to the outputs the compositor already has, by the
 /// connector snapshot taken before teardown; drops heads no output claims
 /// and removes outputs no head drives (mirroring the hotplug path's
@@ -930,5 +1667,27 @@ mod tests {
         assert!(guidance.contains("drives nothing"), "{guidance}");
         assert!(guidance.contains("live:false"), "{guidance}");
         assert!(guidance.contains("switch back"), "{guidance}");
+    }
+
+    #[test]
+    fn only_a_matching_tier_swaps() {
+        // One tier per session: a fresh device that fell back to the other
+        // tier restores the old device instead of mixing tiers (a CPU head
+        // in a GPU session would be rebuilt as the offscreen pipeline the
+        // tier choice exists to avoid). Same tier on both sides proceeds;
+        // anything else restores.
+        assert!(fresh_tier_matches(
+            RendererKind::Pixman,
+            RendererKind::Pixman
+        ));
+        assert!(fresh_tier_matches(RendererKind::Gles, RendererKind::Gles));
+        assert!(!fresh_tier_matches(
+            RendererKind::Pixman,
+            RendererKind::Gles
+        ));
+        assert!(!fresh_tier_matches(
+            RendererKind::Gles,
+            RendererKind::Pixman
+        ));
     }
 }
