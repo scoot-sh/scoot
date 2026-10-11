@@ -9,7 +9,7 @@ Two minutes from here to a scoot window. The cat is impatient too.
 
 ## Try it in your browser
 
-You need Docker. Nothing is installed.
+You need [Docker](https://docs.docker.com/get-started/get-docker/). Nothing else is installed.
 
 <Steps>
 
@@ -35,8 +35,9 @@ security](https://github.com/scoot-sh/try-scoot#ports-and-security).
 
 ## Or in a window on Linux (Nix)
 
-You need Linux and [Nix](https://nixos.org/download/). Nix keeps scoot
-in its own store. Nothing goes on your `PATH`.
+You need Linux and [Nix](https://nixos.org/download/). On macOS, Nix
+runs only the `scoot msg` client, so use the browser route above. Nix
+keeps scoot in its own store. Nothing goes on your `PATH`.
 
 <Steps>
 
@@ -203,7 +204,7 @@ see [First run](../first-session/).
 </TabItem>
 <TabItem label="From source">
 
-Rust 1.87 or newer. On Debian or Ubuntu:
+Rust 1.87 or newer. On Debian 13 or Ubuntu 24.04 and newer (older releases do not ship `libdisplay-info-dev`):
 
 ```sh
 sudo apt install pkg-config libwayland-dev libxkbcommon-dev libinput-dev \
