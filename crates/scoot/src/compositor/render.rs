@@ -343,7 +343,7 @@ enum Pipeline {
     /// only -- see [`gles`] and [`resolve`].
     Gles(Box<GlesBackend>),
     /// GLES compositing straight into the buffer the CRTC scans out, with no
-    /// read-back at all. `--tty --renderer gles`, in a build carrying the
+    /// read-back at all. `--tty --renderer gpu`, in a build carrying the
     /// `gpu-scanout` feature -- see [`scanout`] and `tty/scanout.rs`. Boxed
     /// for the same reason the offscreen variant is.
     #[cfg(feature = "gpu-scanout")]
@@ -494,7 +494,7 @@ impl Backend {
     ///
     /// Deliberately not the same question as `State::renderer`: that field
     /// is what was asked for, this is what was built. A test that runs the
-    /// pixel suites under `--renderer gles` has to be able to tell the
+    /// pixel suites under `--renderer gpu` has to be able to tell the
     /// difference, or a silent fallback to pixman would make it pass while
     /// proving nothing (see `test_support`); and `dmabuf/renderer_copies.rs`
     /// counts the backends a dma-buf import really went into as GLES, once

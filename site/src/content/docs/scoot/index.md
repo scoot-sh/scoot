@@ -65,7 +65,7 @@ default shown); `--write` places it directly, refusing to overwrite.
 |---|---|---|---|
 | `--width N`, `--height N` | int | `1600x1000` | the `--headless`/`--nested` output size, 1–65535 per axis. Out of range is a startup error naming the range. Under `--nested` it is only the size scoot *asks* for — the host's configure decides. An `[[outputs]]` entry's `mode` overrides it for the output it names. |
 | `--outputs N` | int | `1` | how many outputs `--headless` creates, 1–8, laid left to right. `--nested` and `--tty` warn and ignore it. |
-| `--renderer pixman\|gles` | enum | `pixman` | which renderer composites each frame (config: `[renderer] backend`). |
+| `--renderer cpu\|gpu\|auto` | enum | `cpu` | which renderer composites each frame (config: `[renderer] backend`). |
 | `--gpu PATH` | path | automatic search | which DRM device `--tty` drives (config: `[tty] gpu`). Ignored with a warning outside `--tty`. |
 | `--mode WxH` | mode | connector preferred | which connector mode `--tty` picks. Ignored with a warning outside `--tty`. An `[[outputs]]` entry's `mode` overrides it per connector. |
 | `--xwayland` | switch | off | run an XWayland server so X11 apps get a `DISPLAY` (config: `[xwayland] enabled`; either turns it on). Needs an `xwayland` build; without one it warns and runs Wayland-only. |

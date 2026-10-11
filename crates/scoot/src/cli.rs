@@ -701,7 +701,7 @@ pub struct CompositorOptions {
     /// the layout like any other, behind a focus gate (see
     /// `compositor::xwayland`). Needs an `xwayland` Cargo-feature build;
     /// without one this warns and the session runs Wayland-only, the way
-    /// `--renderer gles` degrades without `gpu-scanout`.
+    /// `--renderer gpu` degrades without `gpu-scanout`.
     pub xwayland: bool,
 }
 

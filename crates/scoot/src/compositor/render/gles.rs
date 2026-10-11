@@ -340,7 +340,7 @@ pub(crate) const LIB_EGL_SONAME: &str = "libEGL.so.1";
 /// or the GLES backend, checked in source. So on a box with no loadable
 /// libEGL, the first EGL touch panics instead of returning the per-candidate
 /// startup error this tier was designed to report (gh #177: the packaged
-/// `--renderer gles` died exactly there, before device enumeration ever
+/// `--renderer gpu` died exactly there, before device enumeration ever
 /// ran). Both GLES tiers probe here first and report the designed error when
 /// there is nothing to load. `catch_unwind` is not an alternative: the
 /// workspace's release profile sets `panic = "abort"`, which turns that

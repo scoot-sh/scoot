@@ -3,7 +3,7 @@
 //!
 //! # Why this exists
 //!
-//! Under `--renderer gles` the default feedback is the driver's whole import
+//! Under `--renderer gpu` the default feedback is the driver's whole import
 //! set, tiled and compressed layouts included ([`driver_tranche`](super::driver_tranche)).
 //! A client picks from it by *render* preference, which on a real GPU is
 //! commonly a layout the display cannot scan out -- so a fullscreen window
@@ -14,7 +14,7 @@
 //! the plane can show. Smithay's anvil does the same at the pinned rev
 //! (`anvil/src/udev.rs`, `get_surface_dmabuf_feedback`).
 //!
-//! Only the GPU scanout tier (`--tty --renderer gles`, `gpu-scanout` build)
+//! Only the GPU scanout tier (`--tty --renderer gpu`, `gpu-scanout` build)
 //! has a plane to describe, so only it builds one; every other backend and
 //! tier is untouched.
 //!

@@ -174,7 +174,8 @@ pub(crate) enum KmsClass {
 /// (`drivers/gpu/drm/tiny/cirrus.c` no longer exists -- only
 /// `cirrus-qemu.c` does) and `xlnx` (`drivers/gpu/drm/xlnx/` holds only
 /// the ZynqMP display driver, whose name is `zynqmp-dpsub`).
-/// The Asahi display driver's name (`apple-drm` per sysfs) is deliberately
+/// The Asahi display driver's name (`apple` per `apple_drv.c:44`
+/// `DRIVER_NAME "apple"` in the AsahiLinux fork) is deliberately
 /// absent: it must classify [`KmsClass::Other`].
 pub(crate) fn kms_class(driver: &str) -> KmsClass {
     // Display-only (no 3D engine):

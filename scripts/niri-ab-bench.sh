@@ -12,8 +12,8 @@
 # scoot's stays 1600x1000.
 #
 # Variants, alternated round by round (the order rotates each round):
-#   scoot-pixman  scoot --nested (default renderer)
-#   scoot-gles    scoot --nested --renderer gles (llvmpipe on the VM)
+#   scoot-cpu     scoot --nested (default renderer)
+#   scoot-gpu     scoot --nested --renderer gpu (llvmpipe on the VM)
 #   niri-off      niri, animations off (scripts/niri-ab/niri-anim-off.kdl)
 #   niri-on       niri, its default animations (same file minus that line)
 #
@@ -67,7 +67,7 @@ VPTR=${VPTR:-}
 NIRI_CONF=${NIRI_CONF:-$HERE/niri-ab/niri-anim-off.kdl}
 OUT=${OUT:-/tmp/niri-ab}
 ROUNDS=${ROUNDS:-3}
-VARIANTS=${VARIANTS:-"scoot-pixman scoot-gles niri-off niri-on"}
+VARIANTS=${VARIANTS:-"scoot-cpu scoot-gpu niri-off niri-on"}
 WIDTH=${WIDTH:-1600}
 HEIGHT=${HEIGHT:-1000}
 IDLE_SECS=${IDLE_SECS:-20}
@@ -226,8 +226,8 @@ run_session() { # round variant
     mkdir -p "$dir/cfg"
     HOST_LOG="$dir/host.log"; SURF=""
     case $v in
-        scoot-pixman) kind=scoot; cmd="$SCOOT --nested --width $WIDTH --height $HEIGHT --socket $dir/ipc.sock" ;;
-        scoot-gles) kind=scoot; cmd="$SCOOT --nested --renderer gles --width $WIDTH --height $HEIGHT --socket $dir/ipc.sock" ;;
+        scoot-cpu) kind=scoot; cmd="$SCOOT --nested --width $WIDTH --height $HEIGHT --socket $dir/ipc.sock" ;;
+        scoot-gpu) kind=scoot; cmd="$SCOOT --nested --renderer gpu --width $WIDTH --height $HEIGHT --socket $dir/ipc.sock" ;;
         # niri's default log filter hides Smithay's "GL Renderer" line, which
         # is the only record of which driver it actually rendered with.
         niri-off) kind=niri; cmd="env RUST_LOG=$NIRI_LOG $NIRI -c $NIRI_CONF_OFF" ;;

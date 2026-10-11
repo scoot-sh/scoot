@@ -6,7 +6,7 @@ D=$1
 SCOOT=/var/cargo-target/debug/scoot
 GEARS=/nix/store/8l6kj814gkkq8yw1qcjw9pr8hdy98wbz-mesa-demos-9.0.0/bin/es2gears_wayland
 mkdir -p "$D"
-for R in pixman gles; do
+for R in cpu gpu; do
   for i in $(seq 1 6); do
     T=$D/$R-$i; mkdir -p "$T"
     rm -f "$T/scoot.sock"

@@ -53,7 +53,7 @@ pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Er
 }
 
 /// Creates the primary output and the render target behind it -- pixman's
-/// image or, under `--renderer gles`, a GLES renderbuffer (see `render`).
+/// image or, under `--renderer gpu`, a GLES renderbuffer (see `render`).
 /// `name` is what clients see as `wl_output.name` (and `model`): a connector
 /// name such as `HDMI-A-1` or `Virtual-1` under `--tty`, so a bar or shell
 /// labels the screen the way it would under any other compositor, or
@@ -1028,10 +1028,10 @@ impl State {
     /// size to get there -- it was never torn down -- which is why the
     /// restore cannot itself fail.
     ///
-    /// Under `--renderer gles` the target is reallocated in place, on the
+    /// Under `--renderer gpu` the target is reallocated in place, on the
     /// renderer it already has ([`Backend::resize_in_place`]): the EGL
     /// context, its shaders, every imported client texture and the EGL
-    /// device all stay. pixman rebuilds its whole backend, which costs
+    /// device all stay. The CPU renderer rebuilds its whole backend, which costs
     /// microseconds. Either way the renderer is the one the session started
     /// with (`State::renderer`), never a different one: a resize that
     /// silently changed renderers would be a session quietly different from
