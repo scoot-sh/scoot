@@ -545,7 +545,9 @@ fn run_scanout(state: &mut State, started: Instant, wanted: RendererKind) {
 /// Whether the fresh device came up on the tier the session runs: the
 /// reconnect must never mix tiers. A pure predicate so headless tests pin
 /// it -- the fd half needs real seat hardware, this half must not rot
-/// silently.
+/// silently. Only the GPU-tier attempt calls it outside tests, so it is
+/// gated on either.
+#[cfg(any(test, feature = "gpu-scanout"))]
 fn fresh_tier_matches(fresh: RendererKind, wanted: RendererKind) -> bool {
     fresh == wanted
 }
