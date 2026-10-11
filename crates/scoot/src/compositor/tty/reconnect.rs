@@ -867,12 +867,25 @@ fn swap_scanout(
         libinput_token,
         reconnect_armed: None,
     });
-    rebind(state, bindings);
+    // Bind the fresh heads to the outputs the compositor already has, by
+    // the connector snapshot taken before teardown -- but unlike `rebind`,
+    // without dropping the heads no binding covers yet (see below): an
+    // empty-bindings retry after an empty restore, or a display that
+    // arrived mid-switch, still needs outputs, and dropping them here
+    // strands the session headless (a later re-probe with no heads plans
+    // nothing) until restart.
+    for (connector, id) in bindings {
+        let connector = *connector;
+        super::attach_where(
+            state,
+            move |head| head.connector == connector && head.output.is_none(),
+            *id,
+        );
+    }
+    remove_orphaned_outputs(state, bindings);
+    state.reapply_output_power();
     // Hand each fresh renderer to its output's backend, by the connector
-    // snapshot taken before teardown. A head the rebind dropped (its
-    // connector vanished mid-switch) has no output to present, so its
-    // renderer drops with it -- the backend keeps its old renderer, which
-    // then has no presenter and draws nothing until the next switch back.
+    // snapshot taken before teardown.
     let mut handoff_failed = false;
     for (connector, id) in bindings {
         let position = handoffs
@@ -898,6 +911,41 @@ fn swap_scanout(
             handoff_failed = true;
         }
     }
+    // Heads no binding covers take the hotplug Added shape instead: a new
+    // output each, attached by connector, with displaced windows restored
+    // -- the same path a physical replug runs, and the reason an empty
+    // restore stays retryable rather than terminal. A renderer whose head
+    // is gone already (its connector vanished mid-switch) has no output
+    // to present, so it drops here -- the backend keeps its old renderer,
+    // which then has no presenter and draws nothing until the next switch
+    // back.
+    let mut added: Vec<hotplug::Change> = Vec::new();
+    for (connector, handoff) in handoffs {
+        let Some(head) = state
+            .tty
+            .as_ref()
+            .and_then(|tty| tty.heads.iter().find(|head| head.connector == connector))
+        else {
+            continue;
+        };
+        if head.output.is_some() {
+            continue;
+        }
+        let Some(renderer) = handoff.backend else {
+            continue;
+        };
+        added.push(hotplug::Change::Added {
+            connector,
+            name: head.name.clone(),
+            identity: head.identity.clone(),
+            width: head.width,
+            height: head.height,
+            scanout: crate::compositor::render::ScanoutHandoff {
+                backend: Some(renderer),
+            },
+        });
+    }
+    hotplug::apply(state, added);
     // A handoff failure is a dark fresh device, not a stranded one: mark
     // it the way the proof failure does and fall through to the `Dark`
     // message below.
@@ -1138,7 +1186,10 @@ fn restore_with_input(
         tty.libinput_token = libinput_token;
         // An empty restore holds the primary the way a fully-unplugged
         // hotplug does (see `hotplug.rs`'s `Hold`): the next connector
-        // change retries rather than planning `Keep` on nothing.
+        // change retries rather than planning `Keep` on nothing. Only an
+        // actually empty probe holds: a master-less rebuild left
+        // connected displays behind, and claiming a hold would throw away
+        // the retry the next identical probe owes.
         tty.nothing_connected = empty;
         tty.active = false;
         tty.heads = heads;
@@ -1273,7 +1324,13 @@ fn restore_scanout(
     };
     // The session's tier is settled (it drove these outputs minutes ago);
     // keep it rather than re-deciding: a head that cannot rejoin its own
-    // tier is refused, exactly as at startup.
+    // tier is refused, exactly as at startup. Whether the probe saw
+    // anything connected rides along separately: an empty rebuild with
+    // displays still connected is the master-less shape (a GPU compositor
+    // needs master even to test its modeset, and the old fd has none --
+    // that is why this reconnect is running at all), not an unplug, and
+    // its message must say so.
+    let anything_connected = !connected.is_empty();
     let (built, _decided, _failures) = {
         let Some(tty) = state.tty.as_mut() else {
             debug_assert!(
@@ -1303,12 +1360,27 @@ fn restore_scanout(
     match rebuild_input(&session) {
         Ok((context, backend)) => {
             restore_scanout_with_input(
-                state, session, notifier, context, backend, heads, handoffs, bindings,
+                state,
+                session,
+                notifier,
+                context,
+                backend,
+                heads,
+                handoffs,
+                bindings,
+                anything_connected,
             );
         }
         Err(error) => {
             restore_scanout_without_input(
-                state, session, notifier, heads, handoffs, bindings, error,
+                state,
+                session,
+                notifier,
+                heads,
+                handoffs,
+                bindings,
+                anything_connected,
+                error,
             );
         }
     }
@@ -1330,8 +1402,14 @@ fn restore_scanout_with_input(
     heads: Vec<super::head::Head>,
     mut handoffs: Vec<(connector::Handle, crate::compositor::render::ScanoutHandoff)>,
     bindings: &[(connector::Handle, OutputId)],
+    anything_connected: bool,
 ) {
     let empty = heads.is_empty();
+    // An empty rebuild with displays still connected is the master-less
+    // shape, not an unplug (see `restore_scanout`): its message must name
+    // the missing master and the seat-level retry, not a missing display.
+    // A genuinely empty probe keeps the unplug wording and the hold.
+    let masterless_empty = empty && anything_connected;
     let old_libinput_token = {
         let Some(tty) = state.tty.as_ref() else {
             debug_assert!(
@@ -1390,8 +1468,11 @@ fn restore_scanout_with_input(
         tty.libinput_token = libinput_token;
         // An empty restore holds the primary the way a fully-unplugged
         // hotplug does (see `hotplug.rs`'s `Hold`): the next connector
-        // change retries rather than planning `Keep` on nothing.
-        tty.nothing_connected = empty;
+        // change retries rather than planning `Keep` on nothing. Only an
+        // actually empty probe holds: a master-less rebuild left
+        // connected displays behind, and claiming a hold would throw away
+        // the retry the next identical probe owes.
+        tty.nothing_connected = empty && !anything_connected;
         tty.active = false;
         tty.heads = heads;
     }
@@ -1424,11 +1505,19 @@ fn restore_scanout_with_input(
         }
     }
     if empty {
+        // An empty rebuild with displays still connected is the
+        // master-less shape, not an unplug: name the missing master and
+        // the seat-level retry rather than a missing display.
+        let guidance = if masterless_empty {
+            masterless_rebuild_guidance()
+        } else {
+            empty_device_guidance()
+        };
         tracing::error!(
             "seat reconnect did not recover the display: {}; the session stays alive \
              (keyboard and `scoot msg` answer, every output reports live:false) -- switch \
              VTs away and back to retry once a display is connected, or restart the session",
-            empty_device_guidance()
+            guidance
         );
         return;
     }
@@ -1455,6 +1544,7 @@ fn restore_scanout_without_input(
     heads: Vec<super::head::Head>,
     mut handoffs: Vec<(connector::Handle, crate::compositor::render::ScanoutHandoff)>,
     bindings: &[(connector::Handle, OutputId)],
+    anything_connected: bool,
     input_error: String,
 ) {
     let empty = heads.is_empty();
@@ -1482,7 +1572,10 @@ fn restore_scanout_without_input(
         };
         tty.session = session;
         tty.session_token = session_token;
-        tty.nothing_connected = empty;
+        // Only an actually empty probe holds the primary (see
+        // `restore_scanout_with_input`): a master-less rebuild left
+        // connected displays behind.
+        tty.nothing_connected = empty && !anything_connected;
         tty.active = false;
         tty.heads = heads;
     }
@@ -1532,6 +1625,15 @@ fn rebind(state: &mut State, bindings: &[(connector::Handle, OutputId)]) {
         );
     }
     super::retain_attached(state);
+    remove_orphaned_outputs(state, bindings);
+}
+
+/// Outputs whose head is gone (their connector vanished mid-switch):
+/// remove them the way a hotplug would, so no output points at a head
+/// that no longer exists. Shared by [`rebind`] and the GPU-tier swap,
+/// which binds the same way but must not drop the heads no binding
+/// covers (see `swap_scanout`).
+fn remove_orphaned_outputs(state: &mut State, bindings: &[(connector::Handle, OutputId)]) {
     // Outputs whose head is gone (their connector vanished mid-switch):
     // remove them the way a hotplug would, so no output points at a head
     // that no longer exists.
@@ -1582,6 +1684,22 @@ fn keep_dark_guidance() -> String {
 fn empty_device_guidance() -> String {
     "the old device drives nothing now, so the session stays headless-dark (every output \
      reports live:false) until a display is connected and a later switch back retries it"
+        .to_owned()
+}
+
+/// The actionable half of a GPU-tier restore whose rebuild came back
+/// empty while displays are still connected: the old fd holds no master
+/// (that is why the reconnect is running at all), and building a GPU
+/// compositor needs one even to test its modeset -- so the heads cannot
+/// be rebuilt on it, unlike CPU heads, which need no master to build.
+/// Why the session stays headless-dark, and what retries it. A pure
+/// function so headless tests pin its wording apart from
+/// [`empty_device_guidance`]'s -- the fd half needs real seat hardware,
+/// this half must not rot silently.
+fn masterless_rebuild_guidance() -> String {
+    "the old device is still master-less, so its GPU heads cannot be rebuilt on it \
+     (every output reports live:false) -- switch VTs away and back to retry, which \
+     reconnects the seat anew on a healthy fd, or restart the session"
         .to_owned()
 }
 
@@ -1657,6 +1775,18 @@ mod tests {
         // own attempt.
         assert!(!should_proceed(Reactivation::LostVacant, false, true));
         assert!(!should_proceed(Reactivation::LostVacant, true, true));
+    }
+
+    #[test]
+    fn the_masterless_rebuild_guidance_names_master_and_the_retry() {
+        // The GPU-tier empty-with-connected shape is not an unplug: the
+        // message must name the missing master (not a missing display)
+        // and the switch-back retry. Drop any of those phrases and this
+        // fails.
+        let guidance = masterless_rebuild_guidance();
+        assert!(guidance.contains("master-less"), "{guidance}");
+        assert!(guidance.contains("live:false"), "{guidance}");
+        assert!(guidance.contains("switch VTs away and back"), "{guidance}");
     }
 
     #[test]
