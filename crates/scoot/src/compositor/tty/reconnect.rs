@@ -277,9 +277,9 @@ fn run(state: &mut State) {
     // inside pass its framebuffer snapshot.
     //
     // The request the rebuild runs under follows the resolved tier (see
-    // `open_device`): the dumb-tier gate above makes this `Cpu` today;
-    // `scanout-seat-reconnect` extends the gate, and the `Gles` arm already
-    // maps faithfully so it keeps rebuilding the tier the session runs.
+    // `open_device`): the dispatch above makes this `Cpu` on the CPU path,
+    // and the `Gles` arm maps faithfully so the GPU-tier attempt below
+    // keeps rebuilding the tier the session runs.
     let request = match wanted {
         RendererKind::Pixman => crate::cli::RendererRequest::Cpu,
         RendererKind::Gles => crate::cli::RendererRequest::Gpu,
@@ -398,9 +398,15 @@ fn run_scanout(state: &mut State, started: Instant, wanted: RendererKind) {
         // GPU tier's held buffers and `reactivate` drained its pending frame
         // before this idle ran, and a compositor queues behind a pending
         // flip rather than refusing it -- so there is nothing to wait for.
-        // The check below pins that reading: a head that ever reports one
-        // in flight here is a future presenter shape this path has not been
-        // taught, and standing down is safer than tearing down under it.
+        // The check below is future-proofing, not today's guarantee (the
+        // GPU tier's `flip_in_flight` is hard-`false`: its queue lives
+        // inside `DrmCompositor`, which this cannot read with certainty --
+        // see `Presenter::flip_in_flight`): what actually owns safety here
+        // is the pause-path drain plus removing the old DRM registration
+        // before the old backend drops, so no late completion can settle a
+        // new head. A head that ever reports one in flight here is a future
+        // presenter shape this path has not been taught, and standing down
+        // is safer than tearing down under it.
         if tty.heads.iter().any(|head| head.presenter.flip_in_flight()) {
             tracing::info!(
                 "seat reconnect skipped: a flip is still in flight on the GPU tier; \
@@ -464,7 +470,16 @@ fn run_scanout(state: &mut State, started: Instant, wanted: RendererKind) {
     // takes vacant master while handing the fd over. Teardown-first is
     // already done (step above), which is what lets `DrmDevice::new`
     // inside pass its framebuffer snapshot.
-    let device = match super::open_device(&mut session, &path, &modes, wanted) {
+    //
+    // The request the rebuild runs under follows the resolved tier (see
+    // `open_device`): this attempt runs only for the GPU tier, so this is
+    // `Gpu` -- a refusal here logs the way the tier's own startup path
+    // would, never as an expected `auto` possibility.
+    let request = match wanted {
+        RendererKind::Pixman => crate::cli::RendererRequest::Cpu,
+        RendererKind::Gles => crate::cli::RendererRequest::Gpu,
+    };
+    let device = match super::open_device(&mut session, &path, &modes, request) {
         Ok(device) => device,
         Err(error) => {
             tracing::error!(
@@ -566,6 +581,44 @@ enum SwapLive {
     Dark { proof: String },
 }
 
+/// The post-swap darkness rule for a proven GPU-tier swap: a fresh device
+/// whose proof passed but that lost every renderer handoff, or that
+/// presents nothing (no rebuilt head reached an output), is dark -- the
+/// same `Dark` a failed proof produces, with the failure's own wording.
+/// Answers the `SwapLive` to report *and* the `Tty` shape that goes with
+/// it: `active` must be false on every dark answer (the fresh `Tty` is
+/// built `live_flag`, so the caller writes this back -- without it IPC
+/// reports `live: true` on a dark screen), and `nothing_connected` follows
+/// the restore shape (only a swap with no heads at all holds the primary;
+/// heads that merely missed their outputs retry through the normal
+/// re-probe, exactly like the master-less restore).
+/// A pure function so the downgrade is pinned by headless tests -- the fd
+/// half needs real seat hardware, this half must not rot silently. Only
+/// the GPU-tier swap calls it outside tests, so it is gated on either.
+#[cfg(any(test, feature = "gpu-scanout"))]
+fn swap_downgrade(
+    live: SwapLive,
+    handoff_failed: bool,
+    nothing_presenting: bool,
+    heads_empty: bool,
+) -> (SwapLive, bool, bool) {
+    if !(handoff_failed || nothing_presenting) {
+        let active = matches!(live, SwapLive::Live);
+        return (live, active, false);
+    }
+    match live {
+        SwapLive::Live => {
+            let proof = if handoff_failed {
+                "the fresh renderers could not join their outputs".to_owned()
+            } else {
+                "no rebuilt head reached an output".to_owned()
+            };
+            (SwapLive::Dark { proof }, false, heads_empty)
+        }
+        dark => (dark, false, false),
+    }
+}
+
 /// Installs a built device: removes the old DRM and input registrations,
 /// drops the old backend, wires the new sources, binds the existing
 /// outputs to the new heads, and -- only on [`SwapLive::Live`] -- re-runs
@@ -593,6 +646,9 @@ fn swap(
         gl_renderer: _,
     } = device;
     let device_id = drm.device_id();
+    // The session's tier, for the re-probe below: after an empty restore
+    // there are no heads to read it from.
+    let tier = state.renderer;
 
     // Read the old registrations and the carried-over state first, while
     // the old backend is still in place. `None` here is unreachable
@@ -720,7 +776,7 @@ fn swap(
                     );
                     return;
                 };
-                tty.reconfigure()
+                tty.reconfigure(tier)
             };
             hotplug::apply(state, outcomes);
             state.request_render();
@@ -776,6 +832,9 @@ fn swap_scanout(
         notifier: drm_notifier,
         heads: built,
         renderer,
+        reason: _,
+        driver: _,
+        gl_renderer: _,
     } = device;
     debug_assert_eq!(
         renderer,
@@ -783,6 +842,9 @@ fn swap_scanout(
         "a GPU-tier swap was handed a CPU-tier device"
     );
     let device_id = drm.device_id();
+    // The session's tier, for the re-probe below: after an empty restore
+    // there are no heads to read it from.
+    let tier = state.renderer;
 
     // The renderer halves, keyed by the connector their head drives, so
     // the handoff below cannot attach one screen's renderer to another's
@@ -887,7 +949,9 @@ fn swap_scanout(
         );
     }
     remove_orphaned_outputs(state, bindings);
-    state.reapply_output_power();
+    // No separate `reapply_output_power` here: `remove_orphaned_outputs`
+    // already re-applies it (one idempotent application, shared with the
+    // CPU tier's `rebind`).
     // Hand each fresh renderer to its output's backend, by the connector
     // snapshot taken before teardown.
     let mut handoff_failed = false;
@@ -950,60 +1014,36 @@ fn swap_scanout(
         });
     }
     hotplug::apply(state, added);
-    // Outputs left with no presenting head -- kept through an empty
-    // restore whose retry re-added their connectors under fresh ids --
-    // would otherwise linger headless: still laid out, still reporting
-    // `live`, showing nothing. Remove them the way a hotplug would, so
-    // their windows are adopted elsewhere. A no-op on every other path,
-    // where every output presents (the last output is never removed:
-    // `remove_output` refuses it, exactly as in `rebind`).
-    let headless: Vec<OutputId> = state
-        .outputs
-        .iter_with_ids()
-        .filter_map(|(id, _)| {
-            let presents = state
-                .tty
-                .as_ref()
-                .is_some_and(|tty| tty.heads.iter().any(|head| head.presents(id)));
-            (!presents).then_some(id)
-        })
-        .collect();
-    for id in headless {
-        tracing::info!(
-            output = id.0,
-            "seat reconnect: removing an output no head presents after the rebuild"
-        );
-        if !state.remove_output(id) {
-            tracing::error!(
-                output = id.0,
-                "seat reconnect: could not remove an output no head presents"
-            );
-        }
-    }
+    // Outputs left with no presenting head are removed by `apply` itself
+    // (see its headless cleanup): a no-op here on every path where every
+    // output presents, which is all but the retry that re-added connectors
+    // under fresh ids.
     // A handoff failure is a dark fresh device, not a stranded one: mark
     // it the way the proof failure does and fall through to the `Dark`
     // message below. So is a fresh device with nothing presenting: the
     // proof passed, but no head survived onto an output (every output
     // creation refused) -- reporting `live: true` for that would lie to
     // every capture consumer checking the flag before trusting pixels.
+    // `swap_downgrade` owns that rule (and the `active` it must clear --
+    // the fresh `Tty` above was built `live_flag`, so without the write
+    // back IPC would report `live: true` on a dark screen); the write
+    // below applies it.
     let nothing_presenting = state
         .tty
         .as_ref()
         .is_none_or(|tty| !tty.heads.iter().any(|head| head.output.is_some()));
-    let live = if handoff_failed || nothing_presenting {
-        if let SwapLive::Live = live {
-            let proof = if handoff_failed {
-                "the fresh renderers could not join their outputs".to_owned()
-            } else {
-                "no rebuilt head reached an output".to_owned()
-            };
-            SwapLive::Dark { proof }
-        } else {
-            live
-        }
-    } else {
-        live
-    };
+    let heads_empty = state.tty.as_ref().is_some_and(|tty| tty.heads.is_empty());
+    let (live, active, nothing_connected) =
+        swap_downgrade(live, handoff_failed, nothing_presenting, heads_empty);
+    {
+        let Some(tty) = state.tty.as_mut() else {
+            debug_assert!(state.tty.is_some(), "new backend vanished mid-swap");
+            tracing::error!("seat reconnect: lost the new backend mid-swap; skipping its re-probe");
+            return;
+        };
+        tty.active = active;
+        tty.nothing_connected = nothing_connected;
+    }
     match live {
         SwapLive::Live => {
             let outcomes = {
@@ -1014,7 +1054,7 @@ fn swap_scanout(
                     );
                     return;
                 };
-                tty.reconfigure()
+                tty.reconfigure(tier)
             };
             hotplug::apply(state, outcomes);
             state.request_render();
@@ -1368,14 +1408,17 @@ fn restore_scanout(
     };
     // The session's tier is settled (it drove these outputs minutes ago);
     // keep it rather than re-deciding: a head that cannot rejoin its own
-    // tier is refused, exactly as at startup. Whether the probe saw
+    // tier is refused, exactly as at startup. The plan follows the tier
+    // (no software rejection -- it is already decided), and the request
+    // follows it too, so a refusal here logs the way the tier's own
+    // startup path would. Whether the probe saw
     // anything connected rides along separately: an empty rebuild with
     // displays still connected is the master-less shape (a GPU compositor
     // needs master even to test its modeset, and the old fd has none --
     // that is why this reconnect is running at all), not an unplug, and
     // its message must say so.
     let anything_connected = !connected.is_empty();
-    let (built, _decided, _failures) = {
+    let (built, _decided, _failures, _trying) = {
         let Some(tty) = state.tty.as_mut() else {
             debug_assert!(
                 state.tty.is_some(),
@@ -1385,7 +1428,18 @@ fn restore_scanout(
             return;
         };
         let drm_fd = tty.drm.device_fd().clone();
-        super::build_heads(&mut tty.drm, &drm_fd, connected, Some(wanted), wanted)
+        let request = match wanted {
+            RendererKind::Pixman => crate::cli::RendererRequest::Cpu,
+            RendererKind::Gles => crate::cli::RendererRequest::Gpu,
+        };
+        super::build_heads(
+            &mut tty.drm,
+            &drm_fd,
+            connected,
+            Some(wanted),
+            crate::compositor::render::policy::device_plan_for_resolved_tier(wanted),
+            request,
+        )
     };
     let mut heads: Vec<super::head::Head> = Vec::with_capacity(built.len());
     let mut handoffs: Vec<(connector::Handle, crate::compositor::render::ScanoutHandoff)> =
@@ -1867,5 +1921,94 @@ mod tests {
             RendererKind::Gles,
             RendererKind::Pixman
         ));
+    }
+
+    #[test]
+    fn a_handoff_failure_downgrades_a_proven_swap_to_dark() {
+        // H1: the proof passed (`Live`) but no fresh renderer joined its
+        // output -- the swap must report `Dark` with `active = false`
+        // (written back onto the fresh `Tty` at the call site), never
+        // `live: true` on a dark screen. Drop the downgrade or the write
+        // and this fails.
+        let (live, active, _) = swap_downgrade(SwapLive::Live, true, false, false);
+        assert!(
+            matches!(live, SwapLive::Dark { .. }),
+            "a handoff failure must downgrade a proven swap"
+        );
+        assert!(!active, "a downgraded swap must not report active");
+    }
+
+    #[test]
+    fn nothing_presenting_downgrades_and_holds_only_when_headless() {
+        // H1, second trigger: nothing survived onto an output. `active`
+        // clears either way; `nothing_connected` follows the restore shape
+        // -- only a swap with no heads at all holds the primary, while
+        // heads that merely missed their outputs retry through the normal
+        // re-probe.
+        let (live, active, nothing_connected) = swap_downgrade(SwapLive::Live, false, true, true);
+        assert!(
+            matches!(live, SwapLive::Dark { .. }),
+            "nothing presenting must downgrade a proven swap"
+        );
+        assert!(!active, "a downgraded swap must not report active");
+        assert!(
+            nothing_connected,
+            "a headless downgrade holds the primary like the empty restore"
+        );
+        let (live, active, nothing_connected) = swap_downgrade(SwapLive::Live, false, true, false);
+        assert!(
+            matches!(live, SwapLive::Dark { .. }),
+            "nothing presenting must downgrade"
+        );
+        assert!(!active, "a downgraded swap must not report active");
+        assert!(
+            !nothing_connected,
+            "heads that missed their outputs must not claim the hold"
+        );
+    }
+
+    #[test]
+    fn both_triggers_pin_the_handoff_wording() {
+        // Both downgrade triggers at once: the handoff wording wins (it
+        // names the failure that owns the fix -- the renderers never
+        // joined -- while "no rebuilt head reached an output" would also
+        // be true but less precise). Drop the priority and this fails.
+        let (live, active, nothing_connected) = swap_downgrade(SwapLive::Live, true, true, false);
+        let SwapLive::Dark { proof } = live else {
+            panic!("both triggers must downgrade a proven swap");
+        };
+        assert_eq!(
+            proof, "the fresh renderers could not join their outputs",
+            "the handoff wording owns the both-triggers downgrade"
+        );
+        assert!(!active, "a downgraded swap must not report active");
+        assert!(
+            !nothing_connected,
+            "heads that missed their outputs must not claim the hold"
+        );
+    }
+
+    #[test]
+    fn a_clean_proven_swap_stays_live_and_a_failed_proof_stays_dark() {
+        // Neither trigger: the rule is the identity -- `Live` keeps
+        // `active`, and an already-dark proof failure is untouched (its
+        // `active` was already false at construction).
+        let (live, active, nothing_connected) = swap_downgrade(SwapLive::Live, false, false, false);
+        assert!(
+            matches!(live, SwapLive::Live),
+            "a clean swap must stay live"
+        );
+        assert!(active, "a clean proven swap reports active");
+        assert!(!nothing_connected, "a clean swap claims no hold");
+        let (live, active, _) = swap_downgrade(
+            SwapLive::Dark {
+                proof: "box-only".to_owned(),
+            },
+            true,
+            true,
+            true,
+        );
+        assert!(matches!(live, SwapLive::Dark { .. }), "dark must stay dark");
+        assert!(!active, "a failed proof never reports active");
     }
 }

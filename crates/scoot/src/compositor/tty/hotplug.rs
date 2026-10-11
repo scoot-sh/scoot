@@ -61,6 +61,7 @@ use self::heads::{HeadAction, Probed, replan};
 use super::buffers::BufferPool;
 use super::head::Head;
 use super::{State, Tty, crtc_gamma_size, crtcs, gpu};
+use crate::cli::RendererKind;
 use crate::compositor::headless;
 use crate::compositor::output_config::OutputEntries;
 use crate::compositor::render::ScanoutHandoff;
@@ -80,8 +81,13 @@ pub(super) fn udev_event(event: UdevEvent, _: &mut UdevDevices, state: &mut Stat
         let Some(tty) = &mut state.tty else {
             return;
         };
+        // The session's tier, not the heads': after an empty restore there
+        // are no heads to read, and the first head's presenter would misread
+        // as the CPU tier -- rebuilding GPU heads as dumb ones the tier
+        // choice exists to avoid.
+        let tier = state.renderer;
         match event {
-            UdevEvent::Changed { device_id } if device_id == tty.device_id => tty.reconfigure(),
+            UdevEvent::Changed { device_id } if device_id == tty.device_id => tty.reconfigure(tier),
             UdevEvent::Removed { device_id } if device_id == tty.device_id => {
                 // error!, not warn!: the device this session's display lives
                 // on is gone, every subsequent flip will fail, and there is
@@ -148,7 +154,8 @@ pub(crate) fn apply_reloaded_modes(state: &mut State, entries: &OutputEntries) {
             return;
         };
         tty.modes.update(entries);
-        tty.reconfigure()
+        let tier = state.renderer;
+        tty.reconfigure(tier)
     };
     apply(state, changes);
 }
@@ -228,6 +235,41 @@ pub(super) fn apply(state: &mut State, changes: Vec<Change>) {
     // A head whose output could not be created is dropped here rather than
     // left driving a CRTC with nothing to show.
     super::retain_attached(state);
+    // An output no head presents shows nothing: a rebuild that re-added
+    // its connector under a fresh id (the empty-restore retry, on either
+    // tier) would otherwise leave it lingering headless beside the new
+    // one -- still laid out, still reporting `live`, showing nothing.
+    // Remove it the way a hotplug would, so its windows are adopted
+    // elsewhere. A no-op wherever every output presents; the last output
+    // is never removed (`remove_output` refuses it -- a single dark output
+    // staying put is the survival shape, not a duplicate). Skipped with no
+    // backend: headless outputs are not this module's to judge.
+    if state.tty.is_some() {
+        let headless: Vec<OutputId> = state
+            .outputs
+            .iter_with_ids()
+            .filter_map(|(id, _)| {
+                let presents = state
+                    .tty
+                    .as_ref()
+                    .is_some_and(|tty| tty.heads.iter().any(|head| head.presents(id)));
+                (!presents).then_some(id)
+            })
+            .collect();
+        for id in headless {
+            if state.remove_output(id) {
+                tracing::info!(
+                    output = id.0,
+                    "drm: removing an output no head presents after the rebuild"
+                );
+            } else {
+                tracing::debug!(
+                    output = id.0,
+                    "drm: keeping an output no head presents: it is the last one"
+                );
+            }
+        }
+    }
     // A reconfigure re-modesets behind the power state: an output that is
     // logically off would come back lit. Re-applied here, where every path
     // that rebuilds heads (hotplug, VT-switch reactivation) funnels
@@ -395,7 +437,11 @@ impl Tty {
     /// VT-switched away produces its uevent then, when this backend has no
     /// DRM master and cannot act on it, so the switch back has to ask again
     /// rather than assume nothing moved.
-    pub(super) fn reconfigure(&mut self) -> Vec<Change> {
+    ///
+    /// `tier` is the session's tier (`State::renderer`, settled at startup):
+    /// a new head must join it, and after an empty restore there is no head
+    /// to read it from (the first head would misread empty as the CPU tier).
+    pub(super) fn reconfigure(&mut self, tier: RendererKind) -> Vec<Change> {
         // Gated on `active` (DRM master held), not `session_paused`: every
         // step below past the probe is a modeset, and a modeset needs
         // master. These two are not the same question -- see `active`'s own
@@ -586,7 +632,7 @@ impl Tty {
             let Some(found) = undriven.iter().find(|found| found.connector == *target) else {
                 continue;
             };
-            if let Some(change) = self.add_head(found) {
+            if let Some(change) = self.add_head(found, tier) {
                 changes.push(change);
             }
         }
@@ -599,7 +645,10 @@ impl Tty {
     /// `None` -- with a warning -- when it cannot be driven: already at
     /// `MAX_OUTPUTS`, no free CRTC, a surface or presenter that refuses. The
     /// screen stays dark and nothing else changes.
-    fn add_head(&mut self, found: &gpu::Connected) -> Option<Change> {
+    ///
+    /// `tier` is the session's tier (see [`reconfigure`](Self::reconfigure)):
+    /// the new head joins it, never a tier read from the heads.
+    fn add_head(&mut self, found: &gpu::Connected, tier: RendererKind) -> Option<Change> {
         if self.heads.len() >= crate::cli::MAX_OUTPUTS as usize {
             tracing::warn!(
                 connector = %found.name,
@@ -648,7 +697,6 @@ impl Tty {
             return None;
         };
         let fd = self.drm.device_fd().clone();
-        let tier = self.renderer();
         // The session's tier is already decided here, so the plan follows
         // it with no software rejection (see `policy::plan_for_resolved_tier`).
         // The request is forced `gpu` for logging only: a refusal here is
