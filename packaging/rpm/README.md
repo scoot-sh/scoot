@@ -21,7 +21,8 @@ compositor package at all (standard Wayland protocols only).
 
 Why a hand-written spec and not `cargo-generate-rpm`: the ticket allows
 either, and the generated file would need the same hand edits anyway
-(the session entry, the bar's user unit, the license set including the
+(the session entry, the session user units, the portal selection, the
+bar's user unit, the license set including the
 deny-generated inventory, the vendored offline build, the versioned
 `scootbg` requirement). The spec is the whole package definition; what
 `cargo-generate-rpm` would contribute (the file list, the soname
@@ -79,6 +80,11 @@ Notes:
   all of which trip the same `desktop-file-validate` notice, which CI
   accepts as the one known exception and which is why the spec does not
   run the validator at build time),
+  the session user units (`%{_userunitdir}/scoot.service` with
+  `ExecStart=/usr/bin/scoot --tty`, `scoot-session.target`,
+  `scoot-shutdown.target` — the same files `resources/systemd/user/`
+  carries and the NixOS module installs), the portal selection
+  (`/usr/share/xdg-desktop-portal/scoot-portals.conf`),
   licenses (`%license`: `LICENSE`, `NOTICE`, `THIRD-PARTY-LICENSES`), and
   the output of `scoot --print-default-config` as `%doc`
   (`config.toml.example`, which documents the `[wallpaper]` handoff, so

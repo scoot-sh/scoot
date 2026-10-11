@@ -16,7 +16,8 @@
 # ldd-derived allow-list in deb-meta.py -- a new or renamed system
 # library fails here), renders DEBIAN/control from the crate manifests
 # (no version is remembered anywhere), stages the installed files (the
-# same set as packaging/arch: the session entry, the bar's user unit,
+# same set as packaging/arch: the session entry, the session user
+# units, the portal selection, the bar's user unit,
 # licenses including the deny-generated inventory, no writes to a user
 # config), and runs `dpkg-deb --build`.
 #
@@ -104,6 +105,16 @@ for pkg in scoot scootbg scootbar; do
         scoot)
             install -m755 "$SOURCE/resources/scoot-session" "$STAGE/usr/bin/scoot-session"
             install -Dm644 "$HERE/scoot.desktop" "$STAGE/usr/share/wayland-sessions/scoot.desktop"
+            # The session units scoot-session starts (single-sourced from
+            # resources/systemd/user/, the same files the NixOS module
+            # installs): the service names the packaged binary, the two
+            # targets name no binary. Plus the portal selection for the
+            # vendor slot (see resources/scoot-portals.conf).
+            install -Dm644 "$SOURCE/resources/systemd/user/scoot-session.target" "$STAGE/usr/lib/systemd/user/scoot-session.target"
+            install -Dm644 "$SOURCE/resources/systemd/user/scoot-shutdown.target" "$STAGE/usr/lib/systemd/user/scoot-shutdown.target"
+            sed 's|@SCOOT_BIN@|/usr/bin/scoot|g' "$SOURCE/resources/systemd/user/scoot.service" >"$STAGE/usr/lib/systemd/user/scoot.service"
+            chmod 644 "$STAGE/usr/lib/systemd/user/scoot.service"
+            install -Dm644 "$SOURCE/resources/scoot-portals.conf" "$STAGE/usr/share/xdg-desktop-portal/scoot-portals.conf"
             "$BINDIR/scoot" --print-default-config >"$STAGE/usr/share/doc/scoot/config.toml.example"
             install -m644 "$HERE/README.Debian.scoot" "$STAGE/usr/share/doc/scoot/README.Debian"
             ;;

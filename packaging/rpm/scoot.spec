@@ -57,7 +57,9 @@ Requires:       scootbg = %{version}-%{release}
 %description
 scoot is a scrolling-tiling Wayland compositor that renders on the CPU
 by default, so it runs with no GPU stack installed. This package is the
-compositor binary plus the greeter launcher: pick "scoot" on the login
+compositor binary plus the greeter launcher and the systemd user units
+it starts (scoot.service, scoot-session.target, scoot-shutdown.target)
+with the portal selection: pick "scoot" on the login
 screen, or run `scoot --headless` for a headless session. Copy the
 shipped example into ~/.config/scoot/ to start from the built-in
 defaults (its `[wallpaper]` section drives the daemon, so that package
@@ -82,6 +84,16 @@ cd source
 install -Dm755 target/release/scoot %{buildroot}%{_bindir}/scoot
 install -Dm755 resources/scoot-session %{buildroot}%{_bindir}/scoot-session
 install -Dm644 packaging/rpm/scoot.desktop %{buildroot}%{_datadir}/wayland-sessions/scoot.desktop
+# The session units scoot-session starts (single-sourced from
+# resources/systemd/user/, the same files the NixOS module installs):
+# the service names the packaged binary, the two targets name no
+# binary. Plus the portal selection for the vendor slot (see
+# resources/scoot-portals.conf).
+install -Dm644 resources/systemd/user/scoot-session.target %{buildroot}%{_userunitdir}/scoot-session.target
+install -Dm644 resources/systemd/user/scoot-shutdown.target %{buildroot}%{_userunitdir}/scoot-shutdown.target
+sed 's|@SCOOT_BIN@|%{_bindir}/scoot|g' resources/systemd/user/scoot.service > %{buildroot}%{_userunitdir}/scoot.service
+chmod 644 %{buildroot}%{_userunitdir}/scoot.service
+install -Dm644 resources/scoot-portals.conf %{buildroot}%{_datadir}/xdg-desktop-portal/scoot-portals.conf
 
 # Stripped explicitly: with `debug_package %%{nil}` above there is no
 # find-debuginfo run, which is what normally strips the binaries, so an
@@ -101,6 +113,10 @@ cd source
 %{_bindir}/scoot
 %{_bindir}/scoot-session
 %{_datadir}/wayland-sessions/scoot.desktop
+%{_userunitdir}/scoot.service
+%{_userunitdir}/scoot-session.target
+%{_userunitdir}/scoot-shutdown.target
+%{_datadir}/xdg-desktop-portal/scoot-portals.conf
 %license source/LICENSE source/NOTICE source/THIRD-PARTY-LICENSES
 %doc source/config.toml.example
 

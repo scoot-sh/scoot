@@ -218,6 +218,31 @@ jobs:
               echo "ok: lintian reports no errors (warnings, if any, are above)"
             '
 
+      # The greeter login runs scoot-session, which starts scoot.service
+      # and then scoot-session.target past the display import: a scoot
+      # .deb without those units installs a login that falls straight
+      # back to the greeter. This gate lists the built .deb and fails on
+      # a missing unit, a missing portal selection, or an ExecStart that
+      # does not name the packaged binary.
+      - name: Session units ship in the scoot .deb
+        env:
+          DEBS: ${{ runner.temp }}/debs
+        run: |
+          deb=$(echo "$DEBS"/scoot_*.deb)
+          echo "--- $deb"
+          dpkg-deb --fsys-tarfile "$deb" | tar -t | sort | grep -E 'systemd/user|scoot-session|wayland-sessions|xdg-desktop-portal'
+          for f in ./usr/bin/scoot-session ./usr/share/wayland-sessions/scoot.desktop ./usr/lib/systemd/user/scoot.service ./usr/lib/systemd/user/scoot-session.target ./usr/lib/systemd/user/scoot-shutdown.target ./usr/share/xdg-desktop-portal/scoot-portals.conf; do
+            if ! dpkg-deb --fsys-tarfile "$deb" | tar -t | grep -qx "$f"; then
+              echo "::error title=scoot .deb is missing $f::scoot-session starts scoot.service past the display import; without these units the greeter login falls back to the login screen."
+              exit 1
+            fi
+          done
+          tmp=$(mktemp -d)
+          dpkg-deb --fsys-tarfile "$deb" | tar -x -C "$tmp" ./usr/lib/systemd/user/scoot.service
+          grep -q '^ExecStart=/usr/bin/scoot --tty$' "$tmp/usr/lib/systemd/user/scoot.service" \
+            || { echo "::error title=scoot.service ExecStart is wrong::expected 'ExecStart=/usr/bin/scoot --tty'."; cat "$tmp/usr/lib/systemd/user/scoot.service"; exit 1; }
+          echo "ok: the scoot .deb ships the session units with ExecStart=/usr/bin/scoot --tty"
+
       # DesktopNames is the session's XDG_CURRENT_DESKTOP name: sway
       # ships it in its own session entry and the Nix-built entry
       # carries it too, so the deb login behaves the same. The

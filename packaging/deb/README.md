@@ -81,7 +81,13 @@ asserted in CI, so one build runs on trixie, noble and newer.
   greeter launcher; degrades to `exec scoot --tty` with no systemd
   user manager), `/usr/share/wayland-sessions/scoot.desktop`
   (with `DesktopNames=scoot`, the same key the Arch, rpm and Nix
-  entries ship), a DEP-5 `copyright`, the deny-generated
+  entries ship), the session user units
+  (`/usr/lib/systemd/user/scoot.service` with `ExecStart=/usr/bin/scoot
+  --tty`, `scoot-session.target`, `scoot-shutdown.target` — the same
+  files `resources/systemd/user/` carries and the NixOS module
+  installs), the portal selection
+  (`/usr/share/xdg-desktop-portal/scoot-portals.conf`), a DEP-5
+  `copyright`, the deny-generated
   `THIRD-PARTY-LICENSES`, `NOTICE`, a
   `changelog.Debian.gz` (required: our versions carry a Debian
   revision, so the packages are non-native and lintian fails without

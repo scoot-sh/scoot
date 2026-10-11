@@ -2,7 +2,11 @@ scoot for Debian/Ubuntu
 ----------------------
 
 The greeter entry lives at /usr/share/wayland-sessions/scoot.desktop:
-pick "scoot" on your login screen (greetd, GDM, SDDM). Without a systemd
+pick "scoot" on your login screen (greetd, GDM, SDDM). The login runs
+/usr/bin/scoot-session, which starts the user units in
+/usr/lib/systemd/user/ (scoot.service, scoot-session.target,
+scoot-shutdown.target); portals read
+/usr/share/xdg-desktop-portal/scoot-portals.conf. Without a systemd
 user manager scoot-session runs the compositor directly with no session
 integration.
 

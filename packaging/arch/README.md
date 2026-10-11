@@ -60,6 +60,11 @@ pair), not a linked library, which a linkage linter cannot see.
 - `scoot`: `/usr/bin/scoot`, `/usr/bin/scoot-session` (the in-tree
   greeter launcher; degrades to `exec scoot --tty` with no systemd
   user manager), `/usr/share/wayland-sessions/scoot.desktop`,
+  the session user units (`/usr/lib/systemd/user/scoot.service` with
+  `ExecStart=/usr/bin/scoot --tty`, `scoot-session.target`,
+  `scoot-shutdown.target` — the same files `resources/systemd/user/`
+  carries and the NixOS module installs), the portal selection
+  (`/usr/share/xdg-desktop-portal/scoot-portals.conf`),
   licenses under `/usr/share/licenses/scoot/`, and the output of
   `scoot --print-default-config` as
   `/usr/share/doc/scoot/config.toml.example` (it documents the
