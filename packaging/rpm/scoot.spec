@@ -59,7 +59,7 @@ scoot is a scrolling-tiling Wayland compositor that renders on the CPU
 by default, so it runs with no GPU stack installed. This package is the
 compositor binary plus the greeter launcher and the systemd user units
 it starts (scoot.service, scoot-session.target, scoot-shutdown.target)
-with the portal backend selection: pick "scoot" on the login
+with the portal selection: pick "scoot" on the login
 screen, or run `scoot --headless` for a headless session. Copy the
 shipped example into ~/.config/scoot/ to start from the built-in
 defaults (its `[wallpaper]` section drives the daemon, so that package
