@@ -33,7 +33,11 @@ const slugOf = (path: string) =>
   path.replace(/^.*\/content\/docs\//, '').replace(/\.mdx?$/, '');
 
 const twinBody = (raw: string, slug: string, isMdx: boolean) => {
-  const frontmatter = raw.match(/^---\n([\s\S]*?)\n---\n/);
+  // CRLF sources normalize to LF on the `.mdx` path only (mdx-twin
+  // harden F7); the `.md` path stays byte-identical and is pinned so by
+  // test-mdx-twin's all-sources comparison.
+  const source = isMdx ? raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n') : raw;
+  const frontmatter = source.match(/^---\n([\s\S]*?)\n---\n/);
   const title =
     frontmatter?.[1].match(/^title:\s*(.+)$/m)?.[1].trim() ?? slug;
   const description =
@@ -41,7 +45,7 @@ const twinBody = (raw: string, slug: string, isMdx: boolean) => {
   // Twins read as plain Markdown (the docs-bar agent-friendly rule), so
   // `<kbd>` keycaps become backtick-quoted keys rather than literal tags:
   // `<kbd>Super</kbd>+<kbd>Return</kbd>` reads as `` `Super`+`Return` ``.
-  const plain = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+  const plain = source.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
   const body = (isMdx ? mdxToTwinMarkdown(plain) : plain).replaceAll(
     /<kbd>(.*?)<\/kbd>/g,
     '`$1`',

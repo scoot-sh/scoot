@@ -1,6 +1,8 @@
-// Gate test for the MDX twin conversion (M1): proves both directions —
-// the good fixture converts to plain Markdown with fences intact and no
-// JSX left, and the broken fixture's twin still trips the `<[A-Z]` gate.
+// Gate test for the MDX twin conversion (M1, hardened F1–F7): proves
+// both directions — the good fixture converts to plain Markdown with
+// fences intact and no JSX left, and the broken fixture's twin still
+// trips the gate — plus one regression pin per hardening finding. Each
+// hardening test FAILS on the pre-hardening converter and passes after.
 // The fixtures live outside the content tree on purpose: they must never
 // publish (no sidebar entry, no build output), only pin this conversion.
 import { execFileSync } from 'node:child_process';
@@ -10,8 +12,10 @@ import { parse as parseToml } from 'smol-toml';
 import { jsxLeakLines, mdxToTwinMarkdown, splitFences } from './mdx-twin.mjs';
 
 const root = new URL('.', import.meta.url).pathname;
-const good = readFileSync(join(root, 'fixtures/mdx-twin/good.mdx'), 'utf8');
-const broken = readFileSync(join(root, 'fixtures/mdx-twin/broken.mdx'), 'utf8');
+const fixture = (name) =>
+  readFileSync(join(root, 'fixtures/mdx-twin', name), 'utf8');
+const good = fixture('good.mdx');
+const broken = fixture('broken.mdx');
 
 const failures = [];
 const check = (name, ok) => {
@@ -19,7 +23,10 @@ const check = (name, ok) => {
   if (!ok) failures.push(name);
 };
 
-const stripFrontmatter = (text) => text.replace(/^---\n[\s\S]*?\n---\n/, '');
+// Frontmatter strip only (CRLF-aware); the body keeps its original line
+// endings so the CRLF fixture pins the converter's own normalization.
+const stripFrontmatter = (text) =>
+  text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
 
 // --- Good fixture: the twin must be plain Markdown. ---
 const twin = mdxToTwinMarkdown(stripFrontmatter(good));
@@ -79,6 +86,107 @@ const leaks = jsxLeakLines(brokenTwin);
 check(
   'broken twin trips the gate (Badge leaks)',
   leaks.length > 0 && leaks.some((line) => line.includes('<Badge')),
+);
+
+// --- F1+F3: inline-code spans are exempt from rewriting and the gate. ---
+const inlineTwin = mdxToTwinMarkdown(
+  stripFrontmatter(fixture('inline-code.mdx')),
+);
+check(
+  'backticked <N> survives verbatim',
+  inlineTwin.includes('`<N>`'),
+);
+check(
+  'backticked <TabItem> is not rewritten to a heading',
+  inlineTwin.includes('`<TabItem>`') && !inlineTwin.includes('`### Tab`'),
+);
+check(
+  'multi-backtick <Aside> survives verbatim',
+  inlineTwin.includes('``<Aside>``'),
+);
+check(
+  'inline-code twin trips no gate',
+  jsxLeakLines(inlineTwin).length === 0,
+);
+
+// --- F2: unclosed wrappers fail the gate. ---
+const unclosedAsideTwin = mdxToTwinMarkdown(
+  stripFrontmatter(fixture('unclosed-aside.mdx')),
+);
+const unclosedAsideLeaks = jsxLeakLines(unclosedAsideTwin);
+check(
+  'unclosed Aside fails the gate',
+  unclosedAsideLeaks.length > 0 &&
+    unclosedAsideLeaks.some((line) => line.includes('Aside-UNCLOSED')),
+);
+const unclosedTabsTwin = mdxToTwinMarkdown(
+  stripFrontmatter(fixture('unclosed-tabs.mdx')),
+);
+const unclosedTabsLeaks = jsxLeakLines(unclosedTabsTwin);
+check(
+  'unclosed Tabs/TabItem fails the gate',
+  unclosedTabsLeaks.length > 0 &&
+    unclosedTabsLeaks.some((line) => line.includes('UNCLOSED')),
+);
+
+// --- F4: `>` inside a quoted attribute value does not end the tag. ---
+const attrGtTwin = mdxToTwinMarkdown(
+  stripFrontmatter(fixture('attr-gt.mdx')),
+);
+check(
+  'Aside title keeps its inner >',
+  attrGtTwin.includes('> **Note:** a > b') &&
+    /^>\s+Body text\./m.test(attrGtTwin),
+);
+check(
+  'title-with-> twin trips no gate',
+  jsxLeakLines(attrGtTwin).length === 0,
+);
+
+// --- F5: escaped quotes inside a label parse. ---
+const attrEscapedTwin = mdxToTwinMarkdown(
+  stripFrontmatter(fixture('attr-escaped.mdx')),
+);
+check(
+  'TabItem label unescapes its quoted quotes',
+  attrEscapedTwin.includes('### A "quoted" label'),
+);
+check(
+  'escaped-quote twin trips no gate',
+  jsxLeakLines(attrEscapedTwin).length === 0,
+);
+
+// --- F6: an unterminated fence fails the gate loudly. ---
+const unfencedTwin = mdxToTwinMarkdown(
+  stripFrontmatter(fixture('unterminated-fence.mdx')),
+);
+const unfencedLeaks = jsxLeakLines(unfencedTwin);
+check(
+  'unterminated fence fails the gate',
+  unfencedLeaks.length > 0 &&
+    unfencedLeaks.some((line) => line.includes('UNTERMINATED-FENCE')),
+);
+
+// --- F7: CRLF normalizes to LF, and multi-line Aside opens convert. ---
+const crlfTwin = mdxToTwinMarkdown(
+  stripFrontmatter(fixture('crlf.mdx')),
+);
+check('CRLF twin holds no carriage returns', !crlfTwin.includes('\r'));
+check(
+  'CRLF prose survives (both lines)',
+  crlfTwin.includes('First line.') && crlfTwin.includes('Second line.'),
+);
+const asideMultiTwin = mdxToTwinMarkdown(
+  stripFrontmatter(fixture('aside-multiline.mdx')),
+);
+check(
+  'multi-line Aside open converts like a single-line one',
+  asideMultiTwin.includes('> **Note:** Hello') &&
+    /^>\s+Body text\./m.test(asideMultiTwin),
+);
+check(
+  'multi-line Aside twin trips no gate',
+  jsxLeakLines(asideMultiTwin).length === 0,
 );
 
 if (failures.length > 0) {

@@ -1,0 +1,17 @@
+---
+title: MDX twin fixture (inline code)
+description: Gate fixture only — never published. Inline-code spans must survive verbatim and never trip the JSX gate (F1/F3).
+---
+
+Use `<N>` here.
+
+See `<TabItem>` for tabs.
+
+See ``<Aside>`` with double backticks.
+
+See ```<N>``` with triple backticks.
+
+```sh
+# A fence quoting <TabItem label="X"> stays byte-identical.
+echo ok
+```
