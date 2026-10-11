@@ -1695,7 +1695,9 @@ fn empty_device_guidance() -> String {
 /// Why the session stays headless-dark, and what retries it. A pure
 /// function so headless tests pin its wording apart from
 /// [`empty_device_guidance`]'s -- the fd half needs real seat hardware,
-/// this half must not rot silently.
+/// this half must not rot silently. Only the GPU-tier restore calls it
+/// outside tests, so it is gated on either.
+#[cfg(any(test, feature = "gpu-scanout"))]
 fn masterless_rebuild_guidance() -> String {
     "the old device is still master-less, so its GPU heads cannot be rebuilt on it \
      (every output reports live:false) -- switch VTs away and back to retry, which \
