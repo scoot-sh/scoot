@@ -27,4 +27,25 @@ fn main() {
             println!("cargo:warning=could not locate libinput via pkg-config: {error}");
         }
     }
+
+    // The `runtime-gbm` spike (see `gbm-stub/gbm_stub.c` and the feature's
+    // comment in `Cargo.toml`): a static libgbm ABI stub that satisfies
+    // gbm-sys's `-lgbm` without emitting a DT_NEEDED entry, forwarding to
+    // the real libgbm by dlopen only when a GBM entry point is actually
+    // called. Gated on the spike feature alone, so the `gpu-scanout`
+    // feature's link behavior is byte-identical with and without this.
+    // `cc` compiles the stub into OUT_DIR and links it statically (its
+    // `static=gbm` arrives alongside gbm-sys's plain `-lgbm`; with the
+    // linker's default --as-needed the archive resolves the GBM symbols
+    // and no DT_NEEDED is emitted -- verified both with and without a
+    // system libgbm present).
+    //
+    // Linux-only like the libinput block above (the stub is meaningless
+    // where `backend_gbm` cannot link anyway): without the gate a macOS
+    // `--features runtime-gbm` build would demand a C compiler for nothing.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux")
+        && std::env::var("CARGO_FEATURE_RUNTIME_GBM").is_ok()
+    {
+        cc::Build::new().file("gbm-stub/gbm_stub.c").compile("gbm");
+    }
 }

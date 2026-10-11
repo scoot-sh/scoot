@@ -10,6 +10,11 @@ mod cli;
 #[cfg(target_os = "linux")]
 mod compositor;
 
+/// The `runtime-gbm` spike's static libgbm stub probe (see `gbm-stub/`).
+/// Linux-only like the compositor: the stub is only linked there.
+#[cfg(all(target_os = "linux", feature = "runtime-gbm"))]
+mod gbm_stub;
+
 use std::process::ExitCode;
 
 /// Exit status for a usage error, as for most Unix tools (and as `scootbar`
