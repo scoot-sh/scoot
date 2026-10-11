@@ -202,7 +202,7 @@ curl -s https://scoot-sh.cachix.org/nix-cache-info
    dispatch before that proves the build without pushing.
 2. **Signing key rotation:** rotate in the Cachix dashboard, then update
    the public key in `flake.nix` (`nixConfig`), this page, and
-   [Install](./install.md#skip-the-compile-the-binary-cache) in one PR.
+   [Install](./install.md) in one PR.
    Keep the old key in `extra-trusted-public-keys` alongside the new
    one until every still-used path is re-pushed, then remove it in a
    follow-up.

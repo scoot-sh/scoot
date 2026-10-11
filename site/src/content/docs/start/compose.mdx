@@ -1,0 +1,213 @@
+---
+title: Build your desktop
+description: "Turn a bare compositor into a desktop: bar, wallpaper, launcher, notifications, lock and a login screen — one switch on NixOS, one config file anywhere else."
+---
+
+import { Tabs, TabItem, Steps, Aside, LinkCard } from '@astrojs/starlight/components';
+
+scoot on its own is a compositor: windows, keys, nothing else. Bring
+the rest of the furniture. The cat will arrange it.
+
+There are two routes. **NixOS** takes one switch. **Any other Linux**
+takes one config file and a few packages.
+
+## What a desktop needs
+
+| Piece | What you use today | scoot's own |
+|---|---|---|
+| Compositor | `scoot` | ✓ live |
+| Status bar | `scootbar`, or any layer-shell bar (Waybar, …) | ✓ live |
+| Wallpaper | `scootbg`, started by scoot from `[wallpaper]` | ✓ live |
+| App launcher | fuzzel | `scootlaunch` *(coming)* |
+| Notifications | mako | `scootnotify` *(coming)* |
+| Idle and lock | swayidle and swaylock | `scootlock` *(planned)* |
+| Login screen | ReGreet on NixOS; your current login screen elsewhere | a scoot greeter *(planned)* |
+| Clipboard history | cliphist and wl-clipboard | — |
+| Screenshots and screen sharing | grim, slurp and xdg-desktop-portal-wlr | — |
+
+When a scoot-made piece ships, it replaces the tool in the same slot.
+Your keys and options keep their names.
+
+## NixOS: one switch
+
+<Steps>
+
+1. Do the NixOS steps on [Install](../install/#use-it-every-day) first.
+
+2. Pick a look. The look goes in your home-manager config, in `configuration.nix`.
+
+   ```nix
+   home-manager.users.alice.programs.scoot.desktop.look = "ginger-night";
+   ```
+
+3. Rebuild.
+
+   ```sh
+   sudo nixos-rebuild switch --flake .#myhost
+   ```
+
+4. Log out. Pick **scoot** on your login screen.
+
+</Steps>
+
+You get every row of the table above, themed to the look. The login
+screen is the one exception (see below). The looks are `ginger-night`
+(the default), `music-desk`, `radial-burst`, `moonrise` and
+`vinyl-sunset`. You can [see them here](../../scoot/theming/).
+
+To replace your login screen with ReGreet, add one more line. Do this
+only after the desktop works:
+
+```nix
+programs.scoot.greeter.enable = true;
+```
+
+Turn off a piece you do not want:
+
+```nix
+home-manager.users.alice.programs.scoot.desktop.notifications.enable = false;
+```
+
+Every piece and every option: [The scoot desktop](../../desktop/).
+
+## Any other Linux: the parts
+
+<Steps>
+
+1. Install the parts.
+
+   <Tabs syncKey="distro">
+   <TabItem label="Debian / Ubuntu">
+
+   ```sh
+   sudo apt install foot fuzzel mako-notifier swaylock swayidle fonts-dejavu-core
+   ```
+
+   </TabItem>
+   <TabItem label="Fedora / openSUSE">
+
+   ```sh
+   sudo dnf install foot fuzzel mako swaylock swayidle dejavu-sans-fonts
+   ```
+
+   </TabItem>
+   <TabItem label="Arch">
+
+   ```sh
+   sudo pacman -S --needed foot fuzzel mako swaylock swayidle ttf-dejavu
+   ```
+
+   </TabItem>
+   <TabItem label="Other Linux (Nix)">
+
+   ```sh
+   nix profile add nixpkgs#foot nixpkgs#fuzzel nixpkgs#mako nixpkgs#dejavu_fonts
+   ```
+
+   Install `swaylock` and `swayidle` from your distro, not from Nix. The distro package installs the PAM file that lets your password unlock the screen.
+
+   </TabItem>
+   </Tabs>
+
+2. Make the config directory.
+
+   ```sh
+   mkdir -p ~/.config/scoot
+   ```
+
+3. Write the bar config to `~/.config/scoot/bar.toml`.
+
+   ```toml
+   left = ["workspaces"]
+   center = ["clock"]
+   right = ["window-title"]
+   ```
+
+4. Check the bar config. The command prints `ok`.
+
+   ```sh
+   scootbar daemon --check
+   ```
+
+5. Write the scoot config to `~/.config/scoot/config.toml`. Change the image path to a picture you have.
+
+   ```toml
+   [autostart]
+   commands = [
+       "spawn scootbar daemon",
+       "spawn mako",
+   ]
+
+   [wallpaper]
+   image = "~/Pictures/wallpaper.jpg"
+   mode = "fill"
+
+   [binds]
+   "super+d" = "spawn fuzzel"
+   "super+escape" = "spawn swaylock -f"
+   ```
+
+6. Press `Ctrl+Alt+F3`. A text console opens.
+
+7. Log in.
+
+8. Start scoot.
+
+   ```sh
+   scoot --tty -- foot
+   ```
+
+</Steps>
+
+The bar is at the top, and the wallpaper is behind your windows.
+`Super+d` opens the launcher. `Super+Escape` locks the screen.
+
+Already running scoot? Do steps 1 to 5, then apply the change without
+a restart:
+
+```sh
+scoot msg reload
+```
+
+A reload starts the new `[autostart]` entries once.
+
+To log in through your display manager instead, pick **scoot** there:
+the distro packages ship the session entry and its service files.
+
+> **Symptom:** the bar does not show.
+> Run `scootbar daemon` in a scoot terminal and read the error. "no font" means step 1 did not install DejaVu. Install it, then run `scoot msg reload`.
+
+> **Symptom:** the wallpaper does not show.
+> scoot needs `scootbg` on your `PATH`. Run `command -v scootbg`. No output means `scootbg` is not installed. Install it, then run `scoot msg reload`.
+
+> **Symptom:** `Super+d` does nothing.
+> Run `fuzzel` in a scoot terminal. An error there names the cause. If fuzzel opens, read the scoot log for a warning about `[binds]`.
+
+### Lock the screen when you leave
+
+Locking on idle needs a small script, because `spawn` does not run a
+shell. The recipe is in [Idle: locking and screen
+power](../../scoot/configure/#idle-locking-and-screen-power).
+
+### Pick a look
+
+Each look is a set of files: `config.toml` colors, a `bar.toml`, a
+wallpaper and terminal colors. Copy the files you want from the look's
+folder. Each look's README lists them.
+
+<LinkCard title="The five looks" description="ginger-night, music-desk, radial-burst, moonrise, vinyl-sunset" href="../../scoot/theming/" />
+
+<Aside type="tip" title="Bring your own">
+
+Any bar, launcher or notification daemon that speaks the standard
+Wayland protocols works. Put it in `[autostart]` instead. Waybar, wofi
+and dunst all work. [What works](../../scoot/protocols/).
+
+</Aside>
+
+## Where next
+
+- [Keybindings](../../scoot/keybindings/): every key, and how to add your own.
+- [scootbar modules](../../scootbar/modules/): sound, network, battery, tray, your own buttons.
+- [scootbg](../../scootbg/): a wallpaper per output or per workspace, or from a link.
+- [Troubleshooting](../../troubleshooting/): find a fix by symptom.

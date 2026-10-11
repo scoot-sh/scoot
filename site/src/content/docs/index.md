@@ -40,26 +40,27 @@ Pick one:
   lightweight desktop: compositor, bar, wallpaper, greeter, idle and lock,
   notifications, hardware keys. Start here unless you know you want less.
 - **[Just the compositor](./start/install.md)** — first-class, bring the rest
-  yourself. Install any `scoot` build, wire your own bar, launcher and
-  shell, on NixOS or anywhere else. The desktop profile stays optional by
-  design.
+  yourself ([build your desktop](./start/compose.md): bar, wallpaper,
+  launcher, notifications). Install any `scoot` build on NixOS or
+  anywhere else. The desktop profile stays optional by design.
 - **[Agents, headless and webtop](./agents/index.md)** — drive scoot from
   code. The IPC socket, screenshots, `--help --json`, `llms.txt` sets for
   every section, and the webtop image for containers.
 
 ## Start here, in order
 
-1. [Install](./start/install.md) — including **which build you need:
-   GPU or CPU**.
-2. [First session](./start/first-session.md) — run scoot, open a terminal,
-   learn five keys.
-3. [Keybindings](./scoot/keybindings.md) — the full default map and how to
+1. [Install](./start/install.md) — in your browser with Docker, or in a window with Nix.
+2. [First run](./start/first-session.md) — run scoot, open a terminal,
+   learn three keys.
+3. [Build your desktop](./start/compose.md) — bar, wallpaper, launcher
+   and notifications.
+4. [Keybindings](./scoot/keybindings.md) — the full default map and how to
    make it yours.
 
 ## Why scoot
 
 - **Scrolling columns, not a grid.** Focus follows position; nothing ever hides.
-- **No GPU required.** The pixman renderer draws on the CPU, so scoot runs on a webtop container, a VM, and real hardware alike. A GPU build exists for real hardware — [picking takes one command](./start/install.md#which-build-do-i-need).
+- **No GPU required.** The CPU renderer draws without a GPU, so scoot runs on a webtop container, a VM, and real hardware alike. A GPU build exists for real hardware — [picking takes one look](./start/install.md#which-build-do-i-need).
 - **Scriptable to the core.** Every action in [Keybindings](./scoot/keybindings.md) is also an IPC action an agent can send — windows, screenshots, input, the lot.
 
 *Home-page art: the project logo (`docs/assets/logo.png`). Look previews: [vinyl-sunset](https://github.com/scoot-sh/scoot/tree/main/docs/examples/vinyl-sunset) (the wallpaper illustration stays under its [Pixabay license](https://pixabay.com/service/license/)), moonrise, music-desk and radial-burst.*

@@ -23,6 +23,8 @@ everything).
 | [scootbar modules](../scootbar/modules.md) | every module's keys |
 | [scootbar CLI](./../scootbar/cli.md) | flags, `msg`, agent interface, exit statuses |
 | [scootbg CLI](../scootbg/cli.md) | commands, `apply-config`, `query`, exit statuses |
+| [Builds and renderers](./builds.md) | which package: CPU or GPU, XWayland, the renderer rules |
+| [Nix flake reference](./nix.md) | outputs, overlay, apps, macOS split |
 | [Versions and compatibility](./versions.md) | what each `--version` prints, which versions work together |
 | [Releases](./releases.md) | get a release, which file is which, verify it |
 | [Cut a release](./cut-a-release.md) | maintainer: version, tag, dry-run, recover |
