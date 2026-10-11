@@ -2,7 +2,7 @@
 # Reads mpv's wl_shm pool backing files straight from /proc and compares
 # their bytes against what scoot screenshots show. If the pool bytes carry
 # the dots, the artifact is client-written, not compositor-rendered.
-# usage: pool-bytes.sh <pixman|gles> <outdir>
+# usage: pool-bytes.sh <cpu|gpu> <outdir>
 set -u
 RENDERER=$1; D=$2
 SCOOT=/var/cargo-target/debug/scoot

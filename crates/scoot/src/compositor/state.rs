@@ -116,6 +116,13 @@ pub struct State {
     /// entries to the first unlocked reload) -- see `reload.rs`.
     pub startup_gpu: Option<PathBuf>,
     pub startup_autostart: Vec<Action>,
+    /// The `[renderer] backend` the config file named at startup (`None`
+    /// when unset), seeded once in `run`, never written after. What a reload
+    /// diffs `[renderer] backend` against -- request versus request, not
+    /// versus the resolved tier: a `--tty` session that fell back to the CPU
+    /// renderer, or an explicit `--renderer` overriding the file, must not
+    /// refuse an unchanged file (see `reload.rs`).
+    pub startup_renderer_request: Option<crate::cli::RendererRequest>,
     /// Whether the session asked for XWayland (`--xwayland` or `[xwayland]
     /// enabled` -- see `xwayland::resolve`), seeded once in `run`, never
     /// written after. What a reload diffs `[xwayland] enabled` against: the
@@ -1303,6 +1310,7 @@ impl State {
             ipc_path: None,
             config_path: None,
             startup_gpu: None,
+            startup_renderer_request: None,
             startup_autostart: Vec::new(),
             startup_xwayland: false,
             startup_virtual_input: false,

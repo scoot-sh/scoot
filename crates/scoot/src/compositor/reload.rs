@@ -712,7 +712,10 @@ impl State {
                 "takes effect on restart: the session already drives its device",
             ));
         }
-        if fresh.renderer.is_some_and(|kind| kind != self.renderer) {
+        if fresh
+            .renderer
+            .is_some_and(|request| Some(request) != self.startup_renderer_request)
+        {
             report.refused.push(refused(
                 field::BACKEND,
                 "takes effect on restart: the live renderer holds client textures",

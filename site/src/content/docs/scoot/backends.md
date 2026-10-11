@@ -56,25 +56,60 @@ startup, and one bound every host meets beats a tunable nobody asked for.
 
 ## Which renderer draws the frames
 
-`--renderer pixman|gles` (config: `[renderer] backend`) picks what
-composites each frame. **The default is `pixman`, the CPU renderer,
-and that is not changing** — running with no GPU at all is a hard
-requirement, not a fallback tier. `gles` is opt-in:
+scoot composites every frame with either the CPU renderer or the GPU
+renderer, and you can always override the choice. `gpu` means the GLES
+renderer (scanout on `--tty`).
 
-- **What it buys.** Correctness parity with pixman on a second
+`--renderer cpu|gpu|auto` (config: `[renderer] backend`, env:
+`SCOOT_RENDERER`) picks what composites each frame. **The default is
+`cpu`, the CPU renderer** — running with no GPU at all is a hard
+requirement, not a fallback tier. `auto` picks the best tier for the
+session and never fails startup:
+
+| Session | `auto` picks | Why |
+|---|---|---|
+| `--headless` | CPU renderer | Offscreen GPU rendering reads every frame back; the CPU renderer is as fast or faster here. |
+| `--nested` | CPU renderer | The GPU hand-off to the host is not yet measured against the CPU renderer; `--renderer gpu` tries it. |
+| `--tty`, real hardware | GPU renderer | The frame scans out directly (see below); measured 4–5x less compositor CPU on Apple Silicon. |
+| `--tty`, VM / GPU-less box / display-only device / build without the scanout tier | CPU renderer | There is no hardware stack to win on; `--renderer gpu` overrides it. |
+
+The request comes from the flag first, then `SCOOT_RENDERER`, then the
+config file, then the default — an explicit `--renderer cpu` beats
+`SCOOT_RENDERER=gpu` and `backend = "gpu"`. The variable is inherited by
+child processes, including a nested `scoot` you start inside the session.
+Every session logs one line saying what was decided and why —
+`requested=… source=… tier=… reason=… driver=… gl_renderer=…` with
+`renderer chosen` on it. When the tier is not what you expected, read
+`reason=` there first. `[renderer] backend` takes effect on restart; a
+reload refuses a changed value and `SCOOT_RENDERER` is never re-read on
+reload.
+
+> **Symptom:** `auto` chose the CPU renderer on my GPU laptop. Read
+> `reason=` on the `renderer chosen` line. It is usually `no-gbm` or
+> `no-egl` (the GPU libraries are missing or unloadable), `no-scanout-tier`
+> (this build has no GPU scanout tier — you want the `scoot-gpu` build),
+> or `display-only` (the display device has no 3D engine). Fix the cause
+> or pass `--renderer gpu` to force the tier.
+>
+> **Symptom:** `auto` chose the CPU renderer in my VM. That is intended —
+> the CPU renderer is usually faster there. `--renderer gpu` overrides it.
+
+`gpu` is opt-in:
+
+- **What it buys.** Correctness parity with the CPU renderer on a second
   renderer, and the groundwork for scanning a GPU buffer out directly
   under `--tty`. Every pixel-readback test passes byte-identically
   under either renderer.
 - **What it does not buy (yet).** No speed, except on the scanout
   path below: the frame is composited into an offscreen buffer and
-  read back to main memory exactly as pixman's is, so `gles` adds a
+  read back to main memory exactly as the CPU renderer's is, so `gpu` adds a
   GPU round trip without removing any CPU copy — on a machine whose
   "GPU" is a software rasteriser it is several times *slower* than
-  pixman.
-- **Under `--tty`, `gles` scans out from the GPU** — in a
+  the CPU renderer.
+- **Under `--tty`, `gpu` scans out from the GPU** — in a
   `gpu-scanout` build. The frame is scanned out directly instead of
   being read back and memcpy'd into a dumb buffer. Without that
-  feature `--tty` warns and keeps pixman, because the read-back shape
+  feature `--tty` warns and keeps the CPU renderer, because the read-back shape
   would be strictly worse than the CPU. With the feature, a device
   that cannot drive the scanout tier warns and falls back the same
   way — CPU renderer and dumb buffers — instead of refusing to start:
@@ -91,11 +126,11 @@ requirement, not a fallback tier. `gles` is opt-in:
   working renderer. The chosen device is logged at startup (`the GLES
   renderer is up device=/dev/dri/renderD128 software=false`) — trust
   that line over the flag name.
-- **A wrong `--renderer gles` is a startup error, not a silent
+- **A wrong `--renderer gpu` is a startup error, not a silent
   downgrade — when EGL itself is missing or broken.** If no EGL device
   can drive it scoot says so and names each failure rather than quietly
   compositing with the other renderer. There is no automatic fallback
-  on that path: drop the flag (stay on pixman) or fix the cause. (The
+  on that path: drop the flag (stay on the CPU renderer) or fix the cause. (The
   deliberate exception is `--tty` GPU scanout above: there scoot warns
   and keeps the CPU renderer instead of refusing to start.)
 
@@ -127,7 +162,7 @@ where the panel does.
 
 | Field | Type | Default | Reload | Meaning |
 |---|---|---|---|---|
-| `[renderer] backend` | `"pixman"` / `"gles"` | `"pixman"` | restart only | Which renderer composites each frame. A name this build *knows* but cannot build (`gles` with no working EGL) is a startup error; `--renderer` wins over the file either way. |
+| `[renderer] backend` | `"cpu"` / `"gpu"` / `"auto"` | `"cpu"` | restart only | Which renderer composites each frame (`gpu` is the GLES renderer). A name this build *knows* but cannot build (`gpu` with no working EGL) is a startup error; `auto` never fails startup; `--renderer` wins over the file either way. |
 
 ## Which DRM device `--tty` drives
 

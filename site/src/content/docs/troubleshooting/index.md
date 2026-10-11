@@ -23,7 +23,7 @@ right one.
 
 ## Config and reload
 
-- *Scoot won't start after a config edit* → almost never the config: [failure semantics](../scoot/configure.md#failure-semantics) fall back to defaults and log, except `[tty] gpu` and `[renderer] backend = "gles"`, which are deliberate startup errors.
+- *Scoot won't start after a config edit* → almost never the config: [failure semantics](../scoot/configure.md#failure-semantics) fall back to defaults and log, except `[tty] gpu` and `[renderer] backend = "gpu"`, which are deliberate startup errors.
 - *Reload changed nothing* → [Reloading](../scoot/configure.md#reloading-the-config): both lists empty means file and session agree; `tty.gpu`, `renderer.backend`, `xwayland.enabled` and output `mode` need a restart.
 - *A bind doesn't fire / two binds collide* → [Keybindings](../scoot/keybindings.md#the-bind-grammar): unparseable binds skip quietly; colliding combos both drop.
 

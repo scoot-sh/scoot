@@ -39,7 +39,7 @@ description: "Compositor symptoms and their fixes — picture, keys, config, out
 ## Config
 
 - *Scoot won't start after an edit.* It still starts: everything but
-  `[tty] gpu` and `[renderer] backend = "gles"` falls back to defaults
+  `[tty] gpu` and `[renderer] backend = "gpu"` falls back to defaults
   and logs. Those two are deliberate startup errors naming the key.
   See [failure semantics](./configure.md#failure-semantics).
 - *Reload changed nothing.* Both lists empty means file and session
@@ -57,7 +57,7 @@ description: "Compositor symptoms and their fixes — picture, keys, config, out
 - *Wrong scale / blurry X apps.* Scale is per output, told to windows
   on move; X apps draw at `ceil(scale)` unless `fractional = "light"`.
   See [Outputs](./outputs.md) and [XWayland](./xwayland.md).
-- *`--renderer gles` exits naming EGL.* Intended: no silent downgrade,
+- *`--renderer gpu` exits naming EGL.* Intended: no silent downgrade,
   no automatic fallback. Drop the flag or fix the cause — see
   [Backends](./backends.md#which-renderer-draws-the-frames).
 - *VNC connects but input does nothing.* Remote control is opt-in

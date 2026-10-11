@@ -111,7 +111,7 @@
 //!
 //! **What this deliberately does not fix**, because it never was this: the
 //! seven `dmabuf/tests.rs` import tests that fail under
-//! `SCOOT_TEST_RENDERER=gles` fail identically after it, and that is the
+//! `SCOOT_TEST_RENDERER=gpu` fail identically after it, and that is the
 //! expected result rather than a gap. They build their buffers through
 //! `/dev/udmabuf`, and Mesa's `kms_swrast` refuses a udmabuf-backed import
 //! (`eglCreateImageKHR: createImageFromDmaBufs failed`, `EGL_BAD_ALLOC`) for

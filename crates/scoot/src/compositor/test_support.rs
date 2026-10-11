@@ -77,41 +77,41 @@ const PATIENCE: Duration = Duration::from_secs(10);
 const CLIENT_PATIENCE: Duration = Duration::from_secs(5);
 
 /// The renderer every test in the crate builds its `State` with, from
-/// `SCOOT_TEST_RENDERER` (`pixman` -- the default -- or `gles`).
+/// `SCOOT_TEST_RENDERER` (`cpu` -- the default -- or `gpu`).
 ///
 /// This is how the pixel-readback suites become the regression net for a
 /// *second* renderer instead of just the first: the same tests, the same
-/// assertions, run a second time with `SCOOT_TEST_RENDERER=gles`, and any
+/// assertions, run a second time with `SCOOT_TEST_RENDERER=gpu`, and any
 /// pixel the two renderers disagree about fails a real test rather than
 /// going unnoticed. One env var rather than a parameterised `Harness::new`
 /// per suite because the suites assert on pixels, not on renderers -- a
-/// GLES-run variant of each would be the same assertions copied twice.
+/// GPU-run variant of each would be the same assertions copied twice.
 ///
 /// Public to the crate because a dozen suites still build their `State` by
 /// hand rather than through [`Harness`] (they predate it), and a run that
 /// covered only the harness-based ones would be a partial claim.
 ///
 /// Both failure modes are loud on purpose. An unrecognised value panics
-/// rather than falling back, and a `gles` run on a machine where GLES cannot
+/// rather than falling back, and a `gpu` run on a machine where GLES cannot
 /// be built panics inside `headless::init` with the renderer's own error --
-/// because a run that quietly used pixman would report a clean pass for a
-/// renderer it never touched.
+/// because a run that quietly used the CPU renderer would report a clean
+/// pass for a renderer it never touched.
 ///
-/// # Known: seven `dmabuf` tests fail under `gles` on software EGL
+/// # Known: seven `dmabuf` tests fail under `gpu` on software EGL
 ///
 /// Every pixel-readback suite passes byte-identically under both renderers,
 /// and so does every other test in the crate (the reload suite's renderer
 /// refusal names whichever renderer is *not* running, so it refuses under
 /// either). The exception is `dmabuf::tests`' seven *import* tests, and it is a
 /// property of the machine, not of the renderer's format support: those tests
-/// synthesise a dma-buf from a memfd through `/dev/udmabuf`, which pixman
-/// imports by mmapping it, while GLES must hand it to the driver -- and Mesa's
+/// synthesise a dma-buf from a memfd through `/dev/udmabuf`, which the CPU
+/// renderer imports by mmapping it, while GLES must hand it to the driver -- and Mesa's
 /// `kms_swrast` answers `eglCreateImageKHR: createImageFromDmaBufs failed`
 /// (`EGL_BAD_ALLOC`) for a udmabuf-backed import.
 ///
 /// It is the buffer's **provenance** that is refused, not its format -- now
 /// shown directly rather than argued: `dmabuf/tests/layouts.rs` allocates
-/// from a dumb buffer on `/dev/dri/card0` instead, and under `gles` on the
+/// from a dumb buffer on `/dev/dri/card0` instead, and under `gpu` on the
 /// same machine every layout it builds (the two candidates through three-plane
 /// `YU12`) imports through `create_immed` and draws. The full-format GLES
 /// advertisement did not change these seven (same seven, same failure), and
@@ -121,9 +121,8 @@ const CLIENT_PATIENCE: Duration = Duration::from_secs(5);
 pub(crate) fn test_renderer() -> RendererKind {
     static RENDERER: OnceLock<RendererKind> = OnceLock::new();
     *RENDERER.get_or_init(|| match std::env::var("SCOOT_TEST_RENDERER") {
-        Ok(name) => RendererKind::parse(&name).unwrap_or_else(|| {
-            panic!("SCOOT_TEST_RENDERER must be `pixman` or `gles`, not `{name}`")
-        }),
+        Ok(name) => RendererKind::parse(&name)
+            .unwrap_or_else(|| panic!("SCOOT_TEST_RENDERER must be `cpu` or `gpu`, not `{name}`")),
         Err(_) => RendererKind::default(),
     })
 }
@@ -170,15 +169,15 @@ impl<S, A> Harness<S, A> {
     /// A compositor with a real headless backend rendering into a
     /// `canvas`-square framebuffer, which [`Harness::render`] draws and reads
     /// back with a real renderer -- `PixmanRenderer`, or `GlesRenderer`
-    /// under `SCOOT_TEST_RENDERER=gles` (see [`test_renderer`]).
+    /// under `SCOOT_TEST_RENDERER=gpu` (see [`test_renderer`]).
     pub(crate) fn headless(appearance: Appearance, canvas: i32) -> Self {
         Self::build(appearance, Some(canvas), 1.0, test_renderer())
     }
 
     /// The same on a named renderer, whatever `SCOOT_TEST_RENDERER` says:
-    /// for a suite whose subject *is* one renderer's behaviour (a GLES
+    /// for a suite whose subject *is* one renderer's behaviour (a GPU
     /// resize keeping its context), which has to be pinned in the default
-    /// run rather than only in a `gles` one. The renderer assertion in
+    /// run rather than only in a `gpu` one. The renderer assertion in
     /// `build` still guards it, so a fallback cannot pass for the one asked.
     pub(crate) fn headless_on(appearance: Appearance, canvas: i32, renderer: RendererKind) -> Self {
         Self::build(appearance, Some(canvas), 1.0, renderer)

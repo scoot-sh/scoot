@@ -50,8 +50,10 @@ request, the compositor going away), `2` for a usage error.
 
 `scoot` and `scoot msg` read `SCOOT_SOCKET` (else
 `$XDG_RUNTIME_DIR/scoot.sock`) and need `XDG_RUNTIME_DIR` to exist;
-`scoot` also reads `XDG_CONFIG_HOME` and the caller's
-`WAYLAND_DISPLAY` for `--nested`. `scootbar` reads `WAYLAND_DISPLAY`
+`scoot` also reads `XDG_CONFIG_HOME`, the caller's
+`WAYLAND_DISPLAY` for `--nested`, and `SCOOT_RENDERER` (`cpu`, `gpu` or
+`auto`: the renderer request when `--renderer` is absent, beating the
+config file's `[renderer] backend`). `scootbar` reads `WAYLAND_DISPLAY`
 and `XDG_RUNTIME_DIR` plus `XDG_CONFIG_HOME` for `bar.toml`; `scootbg`
 reads `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR` plus `XDG_STATE_HOME`
 for its profiles.

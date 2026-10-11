@@ -2107,7 +2107,7 @@ mod tests {
     /// that the dma-buf feedback is built once, from that device's driver, and
     /// never re-sent (see `render::gles::GlesDevice`). Under pixman there is
     /// no GLES device at all, and the test says so and stops; the
-    /// `SCOOT_TEST_RENDERER=gles` run is the one that pins it. Which device a
+    /// `SCOOT_TEST_RENDERER=gpu` run is the one that pins it. Which device a
     /// pinned build lands on when it is *not* the preferred one is pinned in
     /// `render/gles.rs`'s own tests, on real devices.
     #[test]

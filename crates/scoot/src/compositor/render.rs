@@ -30,7 +30,7 @@
 //! Damage tracking and the framebuffer's size are renderer-agnostic and live
 //! on [`Backend`] itself, so an implementation brings only a renderer and a
 //! target -- [`pixman::PixmanBackend`] (the default) and
-//! [`gles::GlesBackend`] (opt-in, `--renderer gles`) are each exactly that
+//! [`gles::GlesBackend`] (opt-in, `--renderer gpu`) are each exactly that
 //! pair -- and inherits the rest. The three things one has to satisfy are the
 //! bounds on [`draw_frame_with`]: import client buffers ([`ImportAll`] +
 //! [`ImportMem`]), bind its own target ([`Bind`]), and read that target back
@@ -67,7 +67,7 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Buffer, Physical, Rectangle};
 
-use crate::cli::RendererKind;
+use crate::cli::{RendererKind, RendererRequest};
 
 use super::State;
 #[cfg(feature = "gpu-scanout")]
@@ -84,6 +84,7 @@ mod gles;
 #[cfg(feature = "gpu-scanout")]
 mod overlay_candidate;
 mod pixman;
+pub(crate) mod policy;
 #[cfg(feature = "gpu-scanout")]
 mod primary_direct;
 #[cfg(feature = "gpu-scanout")]
@@ -117,66 +118,106 @@ pub(crate) struct ScanoutHandoff {
     pub(crate) backend: Option<Box<ScanoutBackend>>,
 }
 
-/// Which renderer this session composites with: the flag, else the config
-/// file, else the default.
+/// Which renderer this session composites with: the flag, else
+/// `SCOOT_RENDERER`, else the config file, else the default.
 ///
 /// `flag` is `--renderer`, `file` is `[renderer] backend`, and an explicit
 /// flag beats the file the way `--gpu` beats `[tty] gpu` -- including
-/// `--renderer pixman`, which is why both are `Option` rather than a resolved
-/// value (see [`CompositorOptions::renderer`](crate::cli::CompositorOptions)).
+/// `--renderer cpu`, which is why the request is `Option` rather than a
+/// resolved value (see [`CompositorOptions::renderer`](crate::cli::CompositorOptions)).
 ///
-/// `tty` is the one case that can override both, and only in a build without
-/// the `gpu-scanout` feature. With the feature, `--renderer gles` under
+/// Returns the request, where it came from, the pre-device decision (see
+/// [`policy::Early`]: resolved already, or deferred to the DRM device under
+/// `--tty` + `auto`), and the warnings to emit (a bad `SCOOT_RENDERER`
+/// value, a forced `gpu` in a build without the scanout tier).
+///
+/// `tty` is the one case that can override the request, and only in a build
+/// without the `gpu-scanout` feature. With the feature, `--renderer gpu` under
 /// `--tty` selects the GPU scanout tier (`tty/scanout.rs`): the frame is
 /// composited straight into the buffer the CRTC scans out, with no read-back
 /// and no memcpy. Without it, the only GLES pipeline that exists is the
 /// offscreen one, which under `--tty` would mean rendering on the GPU only to
 /// copy every frame back to the CPU and memcpy it into a dumb buffer --
 /// strictly worse than compositing there in the first place. So that build
-/// warns and keeps pixman rather than silently accepting a slower session.
+/// warns and keeps the CPU renderer rather than silently accepting a slower session.
 ///
 /// A warning, not a startup error, and that asymmetry with
 /// `--headless`/`--nested` is deliberate: on `--tty` scoot *is* the session,
 /// so a refusal to start is a lockout (see `config.rs`'s module doc). The
 /// second place the same rule applies is `tty::init`, which falls back the
 /// same way when the feature is present but the device cannot drive the tier.
-pub(super) fn resolve(
-    flag: Option<RendererKind>,
-    file: Option<RendererKind>,
-    tty: bool,
-) -> RendererKind {
-    let (chosen, warning) = resolve_with(flag, file, tty, cfg!(feature = "gpu-scanout"));
-    if let Some(warning) = warning {
+pub(crate) fn resolve(
+    flag: Option<RendererRequest>,
+    env: Option<&str>,
+    file: Option<RendererRequest>,
+    session: policy::Session,
+) -> (
+    RendererRequest,
+    crate::cli::RequestSource,
+    policy::Early,
+    Vec<String>,
+) {
+    let (request, source, early, warnings) =
+        resolve_with(flag, env, file, session, cfg!(feature = "gpu-scanout"));
+    for warning in &warnings {
         tracing::warn!("{warning}");
     }
-    chosen
+    (request, source, early, warnings)
 }
 
 /// [`resolve`]'s decision, with the build-time fact spelled out as an
-/// argument so both answers are unit-testable from either build.
+/// argument so every answer is unit-testable from either build.
 ///
-/// Returns the warning text rather than logging it, so a test can pin *which*
-/// refusal happened: "this build has no scanout tier" and "this device cannot
-/// drive it" are different problems with different fixes, and a user reading
-/// one must not be handed the other's wording.
+/// Returns the warnings as text rather than logging them, so a test can pin
+/// *which* refusal happened: "this build has no scanout tier" and "this
+/// device cannot drive it" are different problems with different fixes, and
+/// a user reading one must not be handed the other's wording.
 fn resolve_with(
-    flag: Option<RendererKind>,
-    file: Option<RendererKind>,
-    tty: bool,
+    flag: Option<RendererRequest>,
+    env: Option<&str>,
+    file: Option<RendererRequest>,
+    session: policy::Session,
     scanout_available: bool,
-) -> (RendererKind, Option<&'static str>) {
-    let chosen = flag.or(file).unwrap_or_default();
-    if tty && chosen == RendererKind::Gles && !scanout_available {
+) -> (
+    RendererRequest,
+    crate::cli::RequestSource,
+    policy::Early,
+    Vec<String>,
+) {
+    let (request, source, env_warning) = policy::resolve_request(flag, env, file);
+    let mut warnings = Vec::new();
+    if let Some(warning) = env_warning {
+        warnings.push(warning);
+    }
+    // A forced `gpu` on `--tty` in a build without the scanout tier warns
+    // and keeps the CPU renderer: the only GLES pipeline in such a build
+    // is the offscreen one, which would copy every frame back to the CPU
+    // (see above). `auto` needs no special case here: `before_device`
+    // already answers it with `NoScanoutTier`, silently -- there is nothing
+    // to warn about when the user asked for no tier in particular.
+    if session == policy::Session::Tty && request == RendererRequest::Gpu && !scanout_available {
+        warnings.push(
+            "this build has no gpu scanout tier (it was built without the \
+             `gpu-scanout` Cargo feature), and the offscreen gles pipeline \
+             would be slower than the cpu renderer under --tty; using cpu"
+                .to_owned(),
+        );
         return (
-            RendererKind::Pixman,
-            Some(
-                "this build has no gpu scanout tier (it was built without the \
-                 `gpu-scanout` Cargo feature), and the offscreen gles pipeline \
-                 would be slower than the cpu renderer under --tty; using pixman",
-            ),
+            request,
+            source,
+            policy::Early::Resolved(RendererKind::Pixman, policy::Reason::NoScanoutTier),
+            warnings,
         );
     }
-    (chosen, None)
+    let early = policy::before_device(request, session, scanout_available);
+    (request, source, early, warnings)
+}
+
+/// Whether libEGL can be `dlopen`ed right now (see
+/// [`gles::lib_loadable`]). One `dlopen`+`dlclose`, run once per candidate
+/// DRM device at startup -- never on a hot path.
+pub(crate) fn egl_loadable() -> bool {
+    gles::lib_loadable(gles::LIB_EGL_SONAME).is_ok()
 }
 
 /// What draws this session's frames, and what it draws into.

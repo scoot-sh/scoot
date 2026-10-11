@@ -155,13 +155,57 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
 
     // Resolved before `State::new` for the same reason the config is: the
     // renderer is fixed for the process's life, and `State` carries it so a
-    // later resize rebuilds the pipeline this session started with. `--tty`
-    // is handled inside `resolve` (without the `gpu-scanout` feature it
-    // warns and keeps pixman; with it, `--tty --renderer gles` selects the
-    // scanout tier, falling back in `tty::init` when the device cannot
-    // drive it), which is why it takes the flag rather than
-    // reading it back out afterwards.
-    let renderer = render::resolve(options.renderer, loaded.renderer, options.tty);
+    // later resize rebuilds the pipeline this session started with.
+    //
+    // The request is flag > `SCOOT_RENDERER` > file > the CPU default, read
+    // exactly once here and passed in as `Option<&str>` (tests never mutate
+    // the process environment, which is unsafe under `cargo test`'s shared
+    // process). A bad env value warns and falls through to the file -- never
+    // a refusal, because `--tty` must never be locked out -- while a bad
+    // flag value stays a refusal at the parser. The variable is inherited
+    // by children, including a nested `scoot`: that is the user's env, so
+    // it is documented, not stripped (see `backends.md`).
+    //
+    // `--tty` + `auto` in a build with the scanout tier defers to the DRM
+    // device (`tty::init` decides per device); every other combination
+    // resolves here. The provisional tier below is what `State::new` holds
+    // until `tty::init` overwrites it with the decided one.
+    let session = if options.tty {
+        render::policy::Session::Tty
+    } else if options.nested {
+        render::policy::Session::Nested
+    } else {
+        render::policy::Session::Headless
+    };
+    let env_renderer =
+        std::env::var_os("SCOOT_RENDERER").map(|value| value.to_string_lossy().into_owned());
+    let (request, source, early, _) = render::resolve(
+        options.renderer,
+        env_renderer.as_deref(),
+        loaded.renderer,
+        session,
+    );
+    let renderer = match early {
+        render::policy::Early::Resolved(kind, _) => kind,
+        // Provisional only: `tty::init` always overwrites `state.renderer`
+        // with the device-time decision before any output exists.
+        render::policy::Early::DecideOnDevice(_) => crate::cli::RendererKind::Pixman,
+    };
+    // Headless and nested resolve fully here, so the one INFO line per
+    // session (see `tty::init` for `--tty`'s) is emitted here for them.
+    if !options.tty {
+        if let render::policy::Early::Resolved(kind, reason) = early {
+            tracing::info!(
+                requested = %request,
+                source = %source,
+                tier = %kind,
+                reason = %reason,
+                driver = "-",
+                gl_renderer = "-",
+                "renderer chosen"
+            );
+        }
+    }
 
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new()?;
     let display: Display<State> = Display::new()?;
@@ -188,6 +232,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         std::env::var_os("HOME"),
     );
     state.startup_gpu = loaded.gpu.clone();
+    state.startup_renderer_request = loaded.renderer;
     state.startup_autostart = loaded.autostart.clone();
     // Which windows float when they map: what a reload diffs against too.
     state.floating_rules = loaded.floating.clone();
@@ -228,7 +273,14 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // built there, because it needs the renderer's formats) on its way to the
     // render target; or the one headless/nested output. See `ScanoutHandoff`.
     let heads: Vec<tty::StartupHead> = if options.tty {
-        tty::init(state.loop_handle.clone(), &mut state, gpu, options.mode)?
+        tty::init(
+            state.loop_handle.clone(),
+            &mut state,
+            gpu,
+            options.mode,
+            request,
+            source,
+        )?
     } else {
         // Not silently dropped the way `--width`/`--height` are under
         // `--tty`: those have a sensible reading on the backend that

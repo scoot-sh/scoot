@@ -8,7 +8,7 @@
 //! through a real `State` -- `session_lock`, `layer_shell`, `alpha_modifier`,
 //! `single_pixel_buffer`, `cursor`, `output_scale` -- all of which read the
 //! framebuffer back through [`Backend::capture`], and all of which run under
-//! either renderer (`SCOOT_TEST_RENDERER=gles`, see `test_support`). They are
+//! either renderer (`SCOOT_TEST_RENDERER=gpu`, see `test_support`). They are
 //! the regression net for this module; duplicating them here would only pin
 //! the seam against itself.
 //!
@@ -223,90 +223,209 @@ fn a_capture_covers_the_whole_target_at_the_backends_own_size() {
     }
 }
 
-/// Which renderer a session ends up with, across the four ways of asking.
-/// The flag beats the file -- including `--renderer pixman` against a file
-/// asking for `gles`, which is the case a plain `RendererKind` (rather than
-/// an `Option`) at either site would quietly get wrong.
+/// Which renderer a session ends up with, across the ways of asking.
+/// The flag beats the env beats the file -- including `--renderer cpu`
+/// against a file asking for `gpu`, which is the case a plain
+/// `RendererRequest` (rather than an `Option`) at either site would quietly
+/// get wrong.
 #[test]
-fn the_flag_beats_the_config_file_and_neither_means_pixman() {
-    use RendererKind::{Gles, Pixman};
-    assert_eq!(resolve(None, None, false), Pixman, "nothing named");
-    assert_eq!(resolve(None, Some(Gles), false), Gles, "the file alone");
-    assert_eq!(resolve(Some(Gles), None, false), Gles, "the flag alone");
-    assert_eq!(
-        resolve(Some(Pixman), Some(Gles), false),
-        Pixman,
-        "an explicit --renderer pixman must beat a file asking for gles"
-    );
-    assert_eq!(
-        resolve(Some(Gles), Some(Pixman), false),
-        Gles,
-        "an explicit --renderer gles must beat a file asking for pixman"
-    );
+fn the_flag_beats_the_env_beats_the_file_and_none_means_cpu() {
+    use crate::cli::{RendererRequest, RequestSource};
+    use policy::{Early, Reason, Session};
+    // (flag, env, file) -> (request, source, early); no warnings anywhere here.
+    for (flag, env, file, request, source, kind) in [
+        (
+            None,
+            None,
+            None,
+            RendererRequest::Cpu,
+            RequestSource::Default,
+            RendererKind::Pixman,
+        ),
+        (
+            None,
+            None,
+            Some(RendererRequest::Gpu),
+            RendererRequest::Gpu,
+            RequestSource::Config,
+            RendererKind::Gles,
+        ),
+        (
+            Some(RendererRequest::Gpu),
+            None,
+            None,
+            RendererRequest::Gpu,
+            RequestSource::Flag,
+            RendererKind::Gles,
+        ),
+        (
+            Some(RendererRequest::Cpu),
+            None,
+            Some(RendererRequest::Gpu),
+            RendererRequest::Cpu,
+            RequestSource::Flag,
+            RendererKind::Pixman,
+        ),
+        (
+            Some(RendererRequest::Gpu),
+            None,
+            Some(RendererRequest::Cpu),
+            RendererRequest::Gpu,
+            RequestSource::Flag,
+            RendererKind::Gles,
+        ),
+        (
+            None,
+            Some("gpu"),
+            Some(RendererRequest::Cpu),
+            RendererRequest::Gpu,
+            RequestSource::Env,
+            RendererKind::Gles,
+        ),
+    ] {
+        let (got_request, got_source, early, warnings) =
+            resolve_with(flag, env, file, Session::Headless, true);
+        assert_eq!(got_request, request, "{flag:?} / {env:?} / {file:?}");
+        assert_eq!(got_source, source, "{flag:?} / {env:?} / {file:?}");
+        assert_eq!(
+            early,
+            Early::Resolved(kind, Reason::Requested),
+            "{flag:?} / {env:?} / {file:?}"
+        );
+        assert!(warnings.is_empty(), "{flag:?} / {env:?} / {file:?}");
+    }
 }
 
-/// Without a scanout tier compiled in, `--tty` overrides both: the only GLES
-/// pipeline that exists there reads the GPU frame back only to memcpy it into
-/// a dumb buffer, which is slower than compositing on the CPU in the first
-/// place. A warning and pixman, never a refusal to start -- on `--tty`, scoot
-/// *is* the session.
+/// Without a scanout tier compiled in, `--tty` overrides a forced `gpu`:
+/// the only GLES pipeline that exists there reads the GPU frame back only
+/// to memcpy it into a dumb buffer, which is slower than compositing on
+/// the CPU in the first place. A warning and the CPU renderer, never a
+/// refusal to start -- on `--tty`, scoot *is* the session.
 ///
 /// `resolve_with` rather than `resolve` so both answers are pinned from
 /// either build: which Cargo features this test binary happens to carry must
 /// not decide which half of the behaviour is covered.
 #[test]
-fn tty_without_a_scanout_tier_keeps_pixman_however_gles_was_asked_for() {
-    use RendererKind::{Gles, Pixman};
+fn tty_without_a_scanout_tier_keeps_cpu_however_gpu_was_asked_for() {
+    use crate::cli::RendererRequest;
+    use policy::{Early, Reason, Session};
     for (flag, file) in [
-        (Some(Gles), None),
-        (None, Some(Gles)),
-        (Some(Gles), Some(Gles)),
-        (Some(Gles), Some(Pixman)),
+        (Some(RendererRequest::Gpu), None),
+        (None, Some(RendererRequest::Gpu)),
+        (Some(RendererRequest::Gpu), Some(RendererRequest::Gpu)),
+        (Some(RendererRequest::Gpu), Some(RendererRequest::Cpu)),
     ] {
-        let (chosen, warning) = resolve_with(flag, file, true, false);
-        assert_eq!(chosen, Pixman, "{flag:?} / {file:?}");
+        let (_, _, early, warnings) = resolve_with(flag, None, file, Session::Tty, false);
+        assert_eq!(
+            early,
+            Early::Resolved(RendererKind::Pixman, Reason::NoScanoutTier),
+            "{flag:?} / {file:?}"
+        );
         assert!(
-            warning.is_some_and(|text| text.contains("gpu-scanout")),
+            warnings.iter().any(|text| text.contains("gpu-scanout")),
             "the refusal must name the missing Cargo feature, not just say no"
         );
     }
+    // `auto` without the tier resolves the same way but warns about
+    // nothing: the user asked for no tier in particular.
+    let (_, _, early, warnings) =
+        resolve_with(Some(RendererRequest::Auto), None, None, Session::Tty, false);
+    assert_eq!(
+        early,
+        Early::Resolved(RendererKind::Pixman, Reason::NoScanoutTier),
+    );
+    assert!(warnings.is_empty());
     // ...and asking for nothing under --tty is still the same default, not a
     // second code path, and warns about nothing.
-    assert_eq!(resolve_with(None, None, true, false), (Pixman, None));
+    let (request, source, early, warnings) = resolve_with(None, None, None, Session::Tty, false);
+    assert_eq!(request, crate::cli::RendererRequest::Cpu);
+    assert_eq!(source, crate::cli::RequestSource::Default);
+    assert_eq!(
+        early,
+        Early::Resolved(RendererKind::Pixman, Reason::Requested),
+    );
+    assert!(warnings.is_empty());
 }
 
-/// With the scanout tier compiled in, `--tty --renderer gles` is a real
-/// choice and resolves to `gles` -- silently, because there is nothing to
+/// With the scanout tier compiled in, `--tty --renderer gpu` is a real
+/// choice and resolves to `gpu` -- silently, because there is nothing to
 /// warn about. Whether the *device* can actually drive it is `tty::init`'s
 /// question, not this one's, and it falls back there with its own distinct
-/// wording.
+/// wording. `--renderer auto` defers to the device.
 #[test]
-fn tty_with_a_scanout_tier_honours_gles() {
-    use RendererKind::{Gles, Pixman};
-    assert_eq!(resolve_with(Some(Gles), None, true, true), (Gles, None));
-    assert_eq!(resolve_with(None, Some(Gles), true, true), (Gles, None));
-    // An explicit `--renderer pixman` still beats a file asking for gles,
-    // under `--tty` exactly as anywhere else.
+fn tty_with_a_scanout_tier_honours_gpu_and_defers_auto() {
+    use crate::cli::RendererRequest;
+    use policy::{Early, Reason, Session};
+    let (_, _, early, warnings) =
+        resolve_with(Some(RendererRequest::Gpu), None, None, Session::Tty, true);
     assert_eq!(
-        resolve_with(Some(Pixman), Some(Gles), true, true),
-        (Pixman, None)
+        early,
+        Early::Resolved(RendererKind::Gles, Reason::Requested)
     );
-    // And the default is still pixman: having the tier available does not
-    // make it the default.
-    assert_eq!(resolve_with(None, None, true, true), (Pixman, None));
+    assert!(warnings.is_empty());
+    let (_, _, early, warnings) =
+        resolve_with(None, None, Some(RendererRequest::Gpu), Session::Tty, true);
+    assert_eq!(
+        early,
+        Early::Resolved(RendererKind::Gles, Reason::Requested)
+    );
+    assert!(warnings.is_empty());
+    // An explicit `--renderer cpu` still beats a file asking for gpu,
+    // under `--tty` exactly as anywhere else.
+    let (_, _, early, _) = resolve_with(
+        Some(RendererRequest::Cpu),
+        None,
+        Some(RendererRequest::Gpu),
+        Session::Tty,
+        true,
+    );
+    assert_eq!(
+        early,
+        Early::Resolved(RendererKind::Pixman, Reason::Requested)
+    );
+    // And the default is still the CPU renderer: having the tier available
+    // does not make it the default.
+    let (_, _, early, warnings) = resolve_with(None, None, None, Session::Tty, true);
+    assert_eq!(
+        early,
+        Early::Resolved(RendererKind::Pixman, Reason::Requested)
+    );
+    assert!(warnings.is_empty());
+    // `auto` defers to the device.
+    let (request, source, early, warnings) =
+        resolve_with(Some(RendererRequest::Auto), None, None, Session::Tty, true);
+    assert_eq!(request, RendererRequest::Auto);
+    assert_eq!(source, crate::cli::RequestSource::Flag);
+    assert_eq!(early, Early::DecideOnDevice(RendererRequest::Auto));
+    assert!(warnings.is_empty());
 }
 
 /// The scanout tier is a `--tty` thing only: `--headless`/`--nested` are
 /// unaffected by whether the feature is compiled in, in either direction.
 #[test]
 fn the_scanout_feature_changes_nothing_off_tty() {
-    use RendererKind::{Gles, Pixman};
-    for available in [false, true] {
-        assert_eq!(
-            resolve_with(Some(Gles), None, false, available),
-            (Gles, None)
-        );
-        assert_eq!(resolve_with(None, None, false, available), (Pixman, None));
+    use crate::cli::RendererRequest;
+    use policy::{Early, Reason, Session};
+    for session in [Session::Headless, Session::Nested] {
+        for available in [false, true] {
+            let (_, _, early, warnings) =
+                resolve_with(Some(RendererRequest::Gpu), None, None, session, available);
+            assert_eq!(
+                early,
+                Early::Resolved(RendererKind::Gles, Reason::Requested)
+            );
+            assert!(warnings.is_empty());
+            let (_, _, early, warnings) = resolve_with(None, None, None, session, available);
+            assert_eq!(
+                early,
+                Early::Resolved(RendererKind::Pixman, Reason::Requested)
+            );
+            assert!(warnings.is_empty());
+            // `auto` off `--tty` resolves without the tier either way.
+            let (_, _, early, _) =
+                resolve_with(Some(RendererRequest::Auto), None, None, session, available);
+            assert!(matches!(early, Early::Resolved(RendererKind::Pixman, _)));
+        }
     }
 }
 

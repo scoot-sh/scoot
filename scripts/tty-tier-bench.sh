@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Asahi.md Test 4: alternating A/B of the two --tty presentation tiers on real
-# hardware -- dumb buffers + pixman (the default) vs GPU scanout via
-# DrmCompositor (`--renderer gles`, gpu-scanout build).
+# hardware -- dumb buffers + CPU renderer (the default) vs GPU scanout via
+# DrmCompositor (`--renderer gpu`, gpu-scanout build).
 #
 # Unattended by design. The --tty seat can be held by only one process, and on
 # a laptop whose desktop session *is* scoot the only safe way to free it is a
@@ -24,9 +24,10 @@
 # afterwards, off this machine's critical path, so nothing here needs jq,
 # python or ImageMagick -- bash, coreutils, the two scoot builds and foot.
 #
-# Overrides: SCOOT_DUMB, SCOOT_GPU (binaries), OUT (output dir),
-# ROUNDS, IDLE_SECS, MOVE_SECS/MOVE_GAP, WIDTH_SECS/WIDTH_GAP, BACKEND,
-# OVERWRITE=1 (replace a run already in OUT -- destroys its numbers).
+# Overrides: SCOOT_DUMB, SCOOT_GPU (binaries), TIER_A_ARGS, TIER_B_ARGS
+# (extra args per side, defaulting to `--renderer cpu` / `--renderer gpu`),
+# OUT (output dir), ROUNDS, IDLE_SECS, MOVE_SECS/MOVE_GAP, WIDTH_SECS/WIDTH_GAP,
+# BACKEND, OVERWRITE=1 (replace a run already in OUT -- destroys its numbers).
 set -uo pipefail
 
 # Same lesson as nested-resize-repro.sh: default to the tree you invoked from
@@ -212,7 +213,7 @@ run_round() {
                 # An absent library is this box's setup, not this GPU's
                 # answer, and conflating the two would report a missing
                 # libEGL as "scanout does not work on Apple Silicon". The
-                # compositor's own message already names the pixman fallback.
+                # compositor's own message already names the cpu fallback.
                 why="startup failed on a MISSING LIBRARY, not the GPU: $last" ;;
             *gbm*|*GBM*|*egl*|*EGL*|*gles*|*scanout*|*drm*|*DRM*)
                 why="startup failed inside the GPU/DRM path: $last -- THIS IS THE TEST 4 ANSWER, keep $tag.log" ;;
@@ -391,9 +392,16 @@ run_round() {
 
 # Alternate the tiers. Never all of A then all of B: a single ordering on this
 # project once read as a 70% regression that was pure noise.
+#
+# The tier flags are overridable per side (stage A uses them to compare two
+# `gpu` builds against each other): TIER_A_ARGS for the dumb side, TIER_B_ARGS
+# for the scanout side. The dumb side names its renderer explicitly, so a
+# future default flip cannot silently turn this A/B into a same-tier run.
 for r in $(seq "$ROUNDS"); do
-    run_round "$r" dumb "$SCOOT_DUMB"
-    run_round "$r" gpu  "$SCOOT_GPU" --renderer gles
+    # shellcheck disable=SC2086
+    run_round "$r" dumb "$SCOOT_DUMB" ${TIER_A_ARGS:---renderer cpu}
+    # shellcheck disable=SC2086
+    run_round "$r" gpu "$SCOOT_GPU" ${TIER_B_ARGS:---renderer gpu}
 done
 
 echo

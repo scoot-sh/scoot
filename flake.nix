@@ -73,7 +73,7 @@
       # only client), built `-p scoot` so `$out/bin` carries only the `scoot`
       # binary;
       # `scoot-gpu` is the same binary with the `gpu-scanout` build feature
-      # (`--tty --renderer gles` scans out from the GPU instead of reading
+      # (`--tty --renderer gpu` scans out from the GPU instead of reading
       # back; needs OS EGL drivers -- see site/src/content/docs/start/install.md#which-build-do-i-need);
       # `scoot-xwayland` (and `scoot-gpu-xwayland`) add the `xwayland`
       # build feature and nixpkgs' Xwayland on `PATH` (Linux only; X11 apps
@@ -352,7 +352,7 @@
               # Smithay reaches libEGL through `dlopen`, not a link-time
               # `DT_NEEDED`, so the cc wrapper's RUNPATH logic (correct for
               # `-lfoo` above) puts nothing in the RUNPATH for it -- and
-              # `--renderer gles` dies in Smithay's ffi with `Failed to load
+              # `--renderer gpu` dies in Smithay's ffi with `Failed to load
               # LibEGL` before device enumeration ever runs (gh #177). Forced
               # the way nixpkgs' own niri package does it
               # (`pkgs/by-name/ni/niri/package.nix`: "Force linking with
@@ -379,7 +379,7 @@
               # host OS's OpenGL setup (on NixOS, `hardware.graphics`), the
               # standard nixpkgs pattern -- bundling Mesa would risk shadowing
               # the host's drivers (notably Asahi's) with wrong ones. So
-              # `--renderer gles` from this package needs an OS that provides
+              # `--renderer gpu` from this package needs an OS that provides
               # EGL drivers; see site/src/content/docs/start/install.md#which-build-do-i-need.
               #
               # Linux-only: these are GNU-ld flags and Apple's ld rejects
@@ -576,7 +576,7 @@
               if pkgs.stdenv.hostPlatform.isDarwin then
                 " (gpu-scanout build feature: Linux-only, same client binary here)"
               else
-                " (gpu-scanout build feature: --tty --renderer gles scans out from the GPU)";
+                " (gpu-scanout build feature: --tty --renderer gpu scans out from the GPU)";
           };
         in
         {

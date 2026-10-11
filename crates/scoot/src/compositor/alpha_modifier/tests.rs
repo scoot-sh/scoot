@@ -5,7 +5,7 @@
 //! global, maps an `xdg_toplevel` showing an opaque red shm buffer, names a
 //! multiplier on its modifier-surface object, and the test asserts on the
 //! pixels a real renderer drew (`PixmanRenderer`, or `GlesRenderer` under
-//! `SCOOT_TEST_RENDERER=gles`). That last part is the point: "the
+//! `SCOOT_TEST_RENDERER=gpu`). That last part is the point: "the
 //! compositor honoured the factor" is a claim about the framebuffer, and a
 //! test that asserted on a compositor-side field would pass just as happily
 //! against a version that never blended it.

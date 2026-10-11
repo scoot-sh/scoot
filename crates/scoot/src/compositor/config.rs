@@ -41,16 +41,18 @@
 //! `[renderer] backend` is a near-miss worth spelling out, because it splits
 //! the two halves across the rule. An *unknown* name (`backend = "vulkan"`)
 //! is an ordinary malformed value: warn, use the default, start. But a name
-//! this build knows and then cannot build -- `"gles"` on a box with no
+//! this build knows and then cannot build -- `"gpu"` on a box with no
 //! working EGL -- fails startup, from the config file exactly as from
-//! `--renderer gles`, because silently compositing with the other renderer
-//! would make every "verified under GLES" claim false while looking fine.
+//! `--renderer gpu`, because silently compositing with the other renderer
+//! would make every "verified under GPU" claim false while looking fine.
 //! That is not the lockout the rule above exists to prevent: `--tty` never
-//! reaches it (without the `gpu-scanout` feature it warns and keeps pixman
-//! in `render::resolve`; with it the fallback happens in `tty::init`
+//! reaches it (without the `gpu-scanout` feature it warns and keeps the CPU
+//! renderer in `render::resolve`; with it the fallback happens in `tty::init`
 //! instead), so the only
 //! sessions that can fail this way are `--headless` and `--nested`, both of
 //! which are started from a shell that is still there to read the error.
+//! `auto` never fails startup on any backend: every no-GPU outcome is the
+//! CPU renderer plus a reason.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -64,7 +66,7 @@ use scoot_core::{Action, Config};
 use serde::Deserialize;
 use smithay::input::keyboard::{Keysym, xkb};
 
-use crate::cli::RendererKind;
+use crate::cli::{RendererRequest, renamed_renderer};
 
 use super::decorations::{Appearance, Color};
 use super::input::keysym_named;
@@ -254,16 +256,18 @@ struct TtyConfig {
 }
 
 /// `[renderer]`. One field today: `backend`, which renderer composites each
-/// frame -- `"pixman"` (the default, and the only one that needs no graphics
-/// device) or `"gles"`. Named `backend` for the renderer *behind* the
+/// frame -- `"cpu"` (the default, and the only one that needs no graphics
+/// device), `"gpu"` (GLES; scanout on `--tty`), or `"auto"` (the GPU
+/// renderer on real hardware, the CPU renderer everywhere else; never fails
+/// startup). Named `backend` for the renderer *behind* the
 /// compositor, which is a different axis from `--headless`/`--nested`/`--tty`
 /// (how the compositor presents what it drew); `site/src/content/docs/scoot/backends.md` says so in as
 /// many words.
 ///
-/// A `String` rather than a `RendererKind` so that an unrecognised name
+/// A `String` rather than a `RendererRequest` so that an unrecognised name
 /// degrades the way every other malformed value in this file does -- a
 /// warning naming the key, and the default for that field only (see
-/// [`RendererConfig::into_kind`]) -- instead of `serde` rejecting the whole
+/// [`RendererConfig::into_request`]) -- instead of `serde` rejecting the whole
 /// file over one typo. `--renderer` refuses the same typo outright, because
 /// a flag is a thing the user just typed and can retype.
 #[derive(Debug, Default, Deserialize, PartialEq)]
@@ -276,17 +280,24 @@ impl RendererConfig {
     /// `None` when the file says nothing (or says something unusable), which
     /// is what lets `--renderer` and the built-in default share one
     /// resolution rule -- see `render::resolve`.
-    fn into_kind(self) -> Option<RendererKind> {
+    fn into_request(self) -> Option<RendererRequest> {
         let name = self.backend?;
-        let kind = RendererKind::parse(&name);
-        if kind.is_none() {
-            tracing::warn!(
-                value = %name,
-                "unknown [renderer] backend in config file; expected `pixman` or `gles`, \
-                 using the default"
-            );
+        if let Some(request) = RendererRequest::parse(&name) {
+            return Some(request);
         }
-        kind
+        match renamed_renderer(&name) {
+            Some(new) => tracing::warn!(
+                backend = %name,
+                "unknown [renderer] backend in config file: `{name}` was renamed to `{new}`; \
+                 expected `cpu`, `gpu` or `auto`, using the default"
+            ),
+            None => tracing::warn!(
+                backend = %name,
+                "unknown [renderer] backend in config file; expected `cpu`, `gpu` or `auto`, \
+                 using the default"
+            ),
+        }
+        None
     }
 }
 
@@ -511,13 +522,15 @@ pub struct LoadedConfig {
     /// `compositor::run` ignores it with a warning, for the same reason as
     /// `--gpu` itself.
     pub gpu: Option<PathBuf>,
-    /// The `[renderer] backend` the file asks for, when it names a renderer
-    /// this build knows. `None` -- no `[renderer]` table, no `backend` key,
-    /// or a name that is neither `pixman` nor `gles` (warned about at load) --
-    /// leaves the choice to `--renderer`, and to the pixman default when that
-    /// is unset too. `--renderer` wins over this when both name one; see
-    /// `render::resolve`, which is also where `--tty` overrides both.
-    pub renderer: Option<RendererKind>,
+    /// The `[renderer] backend` the file asks for, when it names a request
+    /// this build knows (`cpu`, `gpu` or `auto`). `None` -- no `[renderer]`
+    /// table, no `backend` key, or any other name (warned about at load,
+    /// with the old `pixman`/`gles` spellings naming their new value) --
+    /// leaves the choice to `--renderer`/`SCOOT_RENDERER`, and to the CPU
+    /// default when those are unset too. `--renderer` wins over this when
+    /// both name one; see `render::resolve`, which is also where `--tty`
+    /// overrides.
+    pub renderer: Option<RendererRequest>,
     /// Whether the file asks for an XWayland server in the session. `false`
     /// (the default) means Wayland-only; `true` means start one, OR-ed with
     /// `--xwayland` in `compositor::run` (see [`XwaylandConfig`]). Needs an
@@ -634,7 +647,7 @@ impl LoadedConfig {
         let scale = file.output.unwrap_or_default().into_scale();
         let outputs = OutputEntries::resolve(file.outputs);
         let gpu = file.tty.and_then(|tty| tty.gpu);
-        let renderer = file.renderer.unwrap_or_default().into_kind();
+        let renderer = file.renderer.unwrap_or_default().into_request();
         let xwayland = file
             .xwayland
             .as_ref()
@@ -970,11 +983,15 @@ pub fn default_config_toml() -> String {
 
     out.push_str("\n[renderer]\n");
     out.push_str(
-        "# Which renderer composites each frame. --renderer wins over this when both name one.\n",
+        "# Which renderer composites each frame: \"cpu\" (pixman; the default, needs no\n\
+         # graphics device), \"gpu\" (GLES; scanout on --tty), or \"auto\" (the GPU\n\
+         # renderer on real hardware, the CPU renderer everywhere else; never fails\n\
+         # startup). --renderer wins over this when both name one, and SCOOT_RENDERER\n\
+         # beats this when --renderer is absent.\n",
     );
     out.push_str(&format!(
         "# backend = \"{}\"\n",
-        RendererKind::default().as_str()
+        RendererRequest::Cpu.as_str()
     ));
 
     out.push_str("\n[tty]\n");
@@ -3807,10 +3824,11 @@ mod tests {
     // -- [renderer] -------------------------------------------------------
 
     #[test]
-    fn a_renderer_backend_key_round_trips_for_both_names() {
+    fn a_renderer_backend_key_round_trips_for_all_names() {
         for (name, expected) in [
-            ("pixman", RendererKind::Pixman),
-            ("gles", RendererKind::Gles),
+            ("cpu", RendererRequest::Cpu),
+            ("gpu", RendererRequest::Gpu),
+            ("auto", RendererRequest::Auto),
         ] {
             let toml = format!("[renderer]\nbackend = \"{name}\"\n");
             let file: FileConfig = toml::from_str(&toml).expect("valid toml");
@@ -3844,7 +3862,9 @@ mod tests {
     /// that the whole *file* survives, unlike a type mismatch.
     #[test]
     fn an_unknown_renderer_backend_falls_back_without_taking_the_file_down() {
-        for bad in ["vulkan", "GLES", "gles2", "", "opengl"] {
+        // The old spellings fall back the same way (with a warning naming
+        // the new value): breaking, no aliases.
+        for bad in ["vulkan", "GPU", "gpu2", "", "opengl", "pixman", "gles"] {
             let toml = format!("[layout]\ngap = 20\n\n[renderer]\nbackend = \"{bad}\"\n");
             let file: FileConfig = toml::from_str(&toml).expect("valid toml");
             let loaded = LoadedConfig::from_file(file);
@@ -4443,7 +4463,7 @@ mod tests {
             format!("# auto = {}", FloatingRules::default().auto),
             format!(
                 "# backend = \"{}\"",
-                crate::cli::RendererKind::default().as_str()
+                crate::cli::RendererRequest::Cpu.as_str()
             ),
         ] {
             assert!(

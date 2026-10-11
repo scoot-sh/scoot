@@ -261,7 +261,16 @@ fn run(state: &mut State) {
     // takes vacant master while handing the fd over. Teardown-first is
     // already done (step above), which is what lets `DrmDevice::new`
     // inside pass its framebuffer snapshot.
-    let device = match super::open_device(&mut session, &path, &modes, wanted) {
+    //
+    // The request the rebuild runs under follows the resolved tier (see
+    // `open_device`): the dumb-tier gate above makes this `Cpu` today;
+    // `scanout-seat-reconnect` extends the gate, and the `Gles` arm already
+    // maps faithfully so it keeps rebuilding the tier the session runs.
+    let request = match wanted {
+        RendererKind::Pixman => crate::cli::RendererRequest::Cpu,
+        RendererKind::Gles => crate::cli::RendererRequest::Gpu,
+    };
+    let device = match super::open_device(&mut session, &path, &modes, request) {
         Ok(device) => device,
         Err(error) => {
             tracing::error!(
@@ -348,6 +357,9 @@ fn swap(
         notifier: drm_notifier,
         heads,
         renderer: _,
+        reason: _,
+        driver: _,
+        gl_renderer: _,
     } = device;
     let device_id = drm.device_id();
 
@@ -578,8 +590,11 @@ fn restore(
     };
     // The session's tier is settled (it drove these outputs minutes ago);
     // keep it rather than re-deciding: a head that cannot rejoin its own
-    // tier is refused, exactly as at startup.
-    let (heads, _decided, _failures) = {
+    // tier is refused, exactly as at startup. The plan follows the tier
+    // (no software rejection -- it is already decided), and the request
+    // follows it too, so a refusal here logs the way the tier's own
+    // startup path would.
+    let (heads, _decided, _failures, _trying) = {
         let Some(tty) = state.tty.as_mut() else {
             debug_assert!(
                 state.tty.is_some(),
@@ -589,7 +604,18 @@ fn restore(
             return;
         };
         let drm_fd = tty.drm.device_fd().clone();
-        super::build_heads(&mut tty.drm, &drm_fd, connected, Some(wanted), wanted)
+        let request = match wanted {
+            RendererKind::Pixman => crate::cli::RendererRequest::Cpu,
+            RendererKind::Gles => crate::cli::RendererRequest::Gpu,
+        };
+        super::build_heads(
+            &mut tty.drm,
+            &drm_fd,
+            connected,
+            Some(wanted),
+            crate::compositor::render::policy::device_plan_for_resolved_tier(wanted),
+            request,
+        )
     };
     let heads: Vec<super::head::Head> = heads.into_iter().map(|(head, _scanout)| head).collect();
     // Rewire input on the new session first: the old context's interface

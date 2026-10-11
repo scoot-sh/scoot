@@ -4,7 +4,7 @@
 //! The parent suite's import tests build their buffers through
 //! `/dev/udmabuf`, and a GLES renderer on Mesa's `kms_swrast` refuses a
 //! udmabuf whatever its format (buffer *provenance*, not layout -- see
-//! `test_support::test_renderer`). So under `SCOOT_TEST_RENDERER=gles` those
+//! `test_support::test_renderer`). So under `SCOOT_TEST_RENDERER=gpu` those
 //! tests cannot say anything about which layouts import. This suite uses the
 //! one provenance that driver does take: a **DRM dumb buffer** on
 //! `/dev/dri/card0`, exported as a PRIME fd, i.e. a dma-buf the importing

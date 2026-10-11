@@ -100,7 +100,8 @@ use super::State;
 use super::input::{ScrollAxis, scroll_frame};
 use super::output_config::ModeRequests;
 use super::render::ScanoutHandoff;
-use crate::cli::RendererKind;
+use super::render::policy::{self, DevicePlan, HeadPlan};
+use crate::cli::{RendererKind, RendererRequest, RequestSource};
 
 /// The DRM/KMS presenter: session, device, surface, and the dumb-buffer
 /// pool frames get copied into. See the module doc for how this fits next
@@ -309,12 +310,21 @@ pub struct StartupHead {
 /// [`State::renderer`] when the scanout tier was asked for and could not be
 /// built -- a `--tty` session must never refuse to start over a renderer
 /// (that is a lockout; see `config.rs`'s module doc), so the refusal becomes
-/// a loud warning and a pixman session.
+/// a loud warning and a CPU-renderer session.
+///
+/// `request` is what the user asked for (`--renderer`, else
+/// `SCOOT_RENDERER`, else the config file, else the default) and `source`
+/// is where it came from: the `auto` policy decides per device in
+/// [`open_device`], and both ride into the one `renderer chosen` INFO line
+/// below. An explicit device (`gpu`) never implies a renderer: it only
+/// picks the device the policy then runs on.
 pub fn init(
     loop_handle: LoopHandle<'static, State>,
     state: &mut State,
     gpu: Option<ExplicitGpu<'_>>,
     mode: Option<(u16, u16)>,
+    request: RendererRequest,
+    source: RequestSource,
 ) -> Result<Vec<StartupHead>, Box<dyn Error>> {
     let (mut session, notifier) = LibSeatSession::new()?;
     let seat_name = session.seat();
@@ -325,12 +335,11 @@ pub fn init(
     // a user staring at a black screen needs to know which devices exist
     // and what each of them said, not just that something went wrong.
     let candidates = gpu::candidates(&seat_name, gpu)?;
-    let wanted = state.renderer;
     // `--mode` as the default, and each `[[outputs]]` entry's mode for its
     // own connector -- the entries `compositor::run` stored before this.
     let modes = ModeRequests::new(mode, &state.output_entries);
     let (path, device) = gpu::first_usable(candidates, |path| {
-        open_device(&mut session, path, &modes, wanted)
+        open_device(&mut session, path, &modes, request)
     })
     .map_err(|failures| gpu::unusable_device_error(&seat_name, gpu, &failures))?;
     let Device {
@@ -338,6 +347,9 @@ pub fn init(
         notifier: drm_notifier,
         heads: built,
         renderer,
+        reason,
+        driver,
+        gl_renderer,
     } = device;
     let device_id = drm.device_id();
     // The tier this device actually came up on, which is not always the one
@@ -347,6 +359,20 @@ pub fn init(
     // rebuilds from, so the correction has to land there and not merely in a
     // log line.
     state.renderer = renderer;
+    // Exactly one INFO line per session, saying what was decided and why.
+    // Absent fields read as `-`: the KMS driver name is empty when its
+    // ioctl failed, the GL string when the session never built a GLES
+    // renderer (or it could not be read). Candidate devices that fell
+    // through on the way here logged at `debug!` inside `open_device`.
+    tracing::info!(
+        requested = %request,
+        source = %source,
+        tier = %renderer,
+        reason = %reason,
+        driver = %driver,
+        gl_renderer = %gl_renderer,
+        "renderer chosen"
+    );
     let mut heads = Vec::with_capacity(built.len());
     let mut startup = Vec::with_capacity(built.len());
     for (head, scanout) in built {
@@ -626,6 +652,14 @@ struct Device {
     /// writes it back to [`State::renderer`]; see its doc for why a `--tty`
     /// session falls back rather than refusing to start.
     renderer: RendererKind,
+    /// Why the session composites with that tier, and the two detail
+    /// strings the `renderer chosen` line carries beside it: the KMS driver
+    /// name `DRM_IOCTL_VERSION` reported (`"-"` when the ioctl failed) and
+    /// the `GL_RENDERER` string (`"-"` when no GLES renderer was built, or
+    /// it could not be read).
+    reason: policy::Reason,
+    driver: String,
+    gl_renderer: String,
 }
 
 /// Opens one candidate and builds everything on it, or says why it can't.
@@ -653,15 +687,23 @@ struct Device {
 /// session's tier: if it came up on the GPU scanout tier every later head
 /// must too, and one that cannot is left dark with a warning rather than
 /// mixing tiers (`State::renderer` is one value for the session, and
-/// `resize_output` rebuilds every non-scanout target from it -- a pixman
-/// head in a GLES session would be rebuilt as the offscreen GLES pipeline
+/// `resize_output` rebuilds every non-scanout target from it -- a CPU
+/// head in a GPU session would be rebuilt as the offscreen GLES pipeline
 /// the `--tty` tier choice exists to avoid). If the first head fell back to
 /// dumb buffers, every head does.
+///
+/// `request` is the user's renderer request. The `auto` policy
+/// (`render::policy::on_device`) runs here, once per candidate device,
+/// after `DrmDevice::new`: the KMS driver name, GBM loadability and EGL
+/// loadability decide between the CPU renderer and trying the GPU tier,
+/// and the first head's outcome (including the `GL_RENDERER` check) fixes
+/// the session's reason. An explicit device (`--gpu PATH`) never implies a
+/// renderer: the policy runs on it as usual.
 fn open_device(
     session: &mut LibSeatSession,
     path: &Path,
     requested: &ModeRequests,
-    wanted: RendererKind,
+    request: RendererRequest,
 ) -> Result<Device, gpu::Rejection> {
     // `gpu::open` goes through `Session::open`, never a bare
     // `std::fs::File::open` -- that would compile and even run, right up
@@ -741,13 +783,58 @@ fn open_device(
         ))
     })?;
 
-    let (heads, tier, failures) = build_heads(&mut drm, &drm_fd, connected, None, wanted);
-    // Without the feature there is no second tier to choose, so the caller's
-    // answer is the only one there is. `render::resolve` has already turned
-    // `--renderer gles` under `--tty` into pixman with a warning naming the
-    // missing feature, so nothing is silently lost here.
-    #[cfg(not(feature = "gpu-scanout"))]
-    let _ = wanted;
+    // The `auto` policy's device-time inputs, read once per candidate
+    // device at startup -- never on a hot path. The KMS driver name comes
+    // from `DRM_IOCTL_VERSION`; an ioctl failure answers `""`, which the
+    // policy classifies `Other` (an unknown name must never refuse the GPU
+    // tier on its own -- the `GL_RENDERER` check is what proves the stack
+    // is real). GBM loadability is the `runtime-gbm` stub probe where the
+    // stub is linked, and linked-by-construction in a plain `gpu-scanout`
+    // build; EGL is `dlopen`ed, so it gets the loader probe.
+    let kms_driver = DrmControl::get_driver(&drm_fd)
+        .map(|version| version.name().to_string_lossy().into_owned())
+        .unwrap_or_default();
+    // Whether libgbm / libEGL can be loaded. Probed only when the request
+    // can try the GPU tier: a forced `cpu` request never consults the
+    // device, so it never touches EGL or GBM on the way to the dumb tier
+    // (by construction here, not by assertion -- `on_device` is not called
+    // for it at all).
+    let plan = match request {
+        RendererRequest::Cpu => DevicePlan::Pixman(policy::Reason::Requested),
+        RendererRequest::Auto | RendererRequest::Gpu => {
+            // The `runtime-gbm` stub probe where the stub is linked (a
+            // `dlopen`, once per candidate device), linked by construction
+            // in a plain `gpu-scanout` build (where libgbm is a real
+            // `DT_NEEDED` entry). EGL is `dlopen`ed, so it gets the loader
+            // probe.
+            #[cfg(feature = "runtime-gbm")]
+            let gbm_loadable = crate::gbm_stub::real_loaded();
+            #[cfg(not(feature = "runtime-gbm"))]
+            let gbm_loadable = true;
+            let egl_loadable = super::render::egl_loadable();
+            tracing::debug!(
+                requested = %request,
+                driver = %kms_driver,
+                gbm_loadable,
+                egl_loadable,
+                "drm: candidate device renderer loaders"
+            );
+            policy::on_device(request, &kms_driver, gbm_loadable, egl_loadable)
+        }
+    };
+    tracing::debug!(
+        requested = %request,
+        plan = ?HeadPlan::from(plan),
+        "drm: candidate device renderer plan"
+    );
+
+    let (heads, tier, failures, trying) =
+        build_heads(&mut drm, &drm_fd, connected, None, plan, request);
+    // Without the `gpu-scanout` feature there is no second tier to choose:
+    // `render::resolve` has already turned `--renderer gpu` under `--tty`
+    // into the CPU renderer with a warning naming the missing feature, and
+    // `auto` into the same silently, so the trying plan above always lands
+    // on the dumb tier here and nothing is silently lost.
 
     let Some(renderer) = tier else {
         // Not one connector built. The wording keeps the single-connector
@@ -761,11 +848,28 @@ fn open_device(
         };
         return Err(gpu::Rejection::Unusable(reason));
     };
+    // The session's reason and detail strings for the `renderer chosen`
+    // line. An unattempted GPU tier reports the plan's reason; a tried one
+    // reports the first head's outcome.
+    let (reason, gl_renderer) = match plan {
+        DevicePlan::Pixman(reason) => (reason, "-".to_owned()),
+        DevicePlan::TryGpu { .. } => {
+            trying.unwrap_or((policy::Reason::GpuBuildFailed, "-".to_owned()))
+        }
+    };
+    let driver = if kms_driver.is_empty() {
+        "-".to_owned()
+    } else {
+        kms_driver
+    };
     Ok(Device {
         drm,
         notifier,
         heads,
         renderer,
+        reason,
+        driver,
+        gl_renderer,
     })
 }
 
@@ -777,20 +881,32 @@ fn open_device(
 ///
 /// `tier` is the session's tier as decided by an earlier head, `None`
 /// where no head has decided yet (startup's first device, or a restore
-/// that must re-derive it). Returns the heads with their renderer
-/// handoffs, the decided tier (`None` when nothing built), and one
-/// lowercase reason per connector left dark -- the same phrases
-/// `open_device` has always reported.
+/// that must re-derive it). `first` is the trying plan for the first
+/// undecided head; `request` is the user's request, which decides whether
+/// a refused GPU tier logs at `warn!` (forced `gpu`) or `info!` (`auto`
+/// expected the possibility). Returns the heads with their renderer
+/// handoffs, the decided tier (`None` when nothing built), one lowercase
+/// reason per connector left dark -- the same phrases `open_device` has
+/// always reported -- and the first trying head's outcome (its reason and
+/// `GL_RENDERER` string, `"-"` when there was none), for the `renderer
+/// chosen` line. Later heads never move the reason: the tier is decided.
+///
+/// The 4-tuple is the whole answer (heads, tier, dark-reasons, first
+/// outcome), the shape `open_device` already destructured; a struct would
+/// name one call site.
+#[allow(clippy::type_complexity)]
 fn build_heads(
     drm: &mut DrmDevice,
     drm_fd: &DrmDeviceFd,
     connected: Vec<gpu::Connected>,
     tier: Option<RendererKind>,
-    wanted: RendererKind,
+    first: DevicePlan,
+    request: RendererRequest,
 ) -> (
     Vec<(Head, ScanoutHandoff)>,
     Option<RendererKind>,
     Vec<String>,
+    Option<(policy::Reason, String)>,
 ) {
     // Which CRTC each connector goes through, decided from the encoders'
     // `possible_crtcs` up front rather than by whichever CRTC first accepts
@@ -813,6 +929,8 @@ fn build_heads(
     // The session's tier, decided by the first head that builds (see
     // `open_device`'s doc). `None` until then.
     let mut tier = tier;
+    // The first trying head's outcome, for the `renderer chosen` line.
+    let mut trying: Option<(policy::Reason, String)> = None;
     let mut failures: Vec<String> = Vec::new();
     for ((found, crtc), reachable) in connected.into_iter().zip(assigned).zip(possible.iter()) {
         if heads.len() >= crate::cli::MAX_OUTPUTS as usize {
@@ -852,8 +970,19 @@ fn build_heads(
             failures.push(format!("{}: no crtc usable with it", found.name));
             continue;
         };
-        match build_head(drm, drm_fd, surface, &found, tier, wanted) {
-            Ok((head, scanout, head_tier)) => {
+        // The plan for this head: the trying plan while no head has
+        // decided the tier, the decided tier's plan afterwards (same
+        // device, same renderer string -- see `policy::after_renderer`'s
+        // callers and the one-tier-per-session rule).
+        let plan = match tier {
+            None => HeadPlan::from(first),
+            Some(decided) => policy::plan_for_resolved_tier(decided),
+        };
+        match build_head(drm, drm_fd, surface, &found, tier, plan, request) {
+            Ok((head, scanout, head_tier, note)) => {
+                if tier.is_none() {
+                    trying = note;
+                }
                 tier.get_or_insert(head_tier);
                 heads.push((head, scanout));
             }
@@ -863,27 +992,43 @@ fn build_heads(
             }
         }
     }
-    (heads, tier, failures)
+    (heads, tier, failures, trying)
 }
 
 /// Builds one head's presenter on `surface`: the GPU scanout tier when this
-/// session is on it (or is deciding, and asked for it), else dumb buffers.
-/// Returns the head, the renderer its render target takes over, and the tier
-/// it landed on -- or why the connector has to stay dark.
+/// session is on it (or is deciding, and its plan tries it), else dumb buffers.
+/// Returns the head, the renderer its render target takes over, the tier
+/// it landed on, and -- when this head tried the GPU tier while the tier
+/// was still undecided -- the trying outcome (its reason and `GL_RENDERER`
+/// string) for the `renderer chosen` line; or why the connector has to stay
+/// dark.
 ///
 /// `tier` is the session's tier as decided by an earlier head, `None` for
 /// the first. Only the first head may fall back from scanout to dumb
-/// buffers (and so decide a pixman session); a later head in a scanout
+/// buffers (and so decide a CPU-renderer session); a later head in a scanout
 /// session that cannot join it is refused rather than mixed in (see
 /// `open_device`'s doc).
+///
+/// The tuple is the whole answer (head, handoff, tier, first outcome),
+/// destructured at the one call site; a struct would name it alone.
+#[allow(clippy::type_complexity)]
 fn build_head(
     drm: &mut DrmDevice,
     drm_fd: &DrmDeviceFd,
     surface: smithay::backend::drm::DrmSurface,
     found: &gpu::Connected,
     tier: Option<RendererKind>,
-    wanted: RendererKind,
-) -> Result<(Head, ScanoutHandoff, RendererKind), String> {
+    plan: HeadPlan,
+    request: RendererRequest,
+) -> Result<
+    (
+        Head,
+        ScanoutHandoff,
+        RendererKind,
+        Option<(policy::Reason, String)>,
+    ),
+    String,
+> {
     let (mode_width, mode_height) = found.mode.size();
     let (width, height) = (i32::from(mode_width), i32::from(mode_height));
     let head = |presenter| Head {
@@ -899,77 +1044,111 @@ fn build_head(
         height,
     };
 
-    // The GPU scanout tier, if this build has it and this session asked for
+    // The GPU scanout tier, if this build has it and this head's plan tries
     // it. Tried before the dumb buffers are allocated, so a head that gets
     // it never pays for two full-screen dumb buffers it will never write to.
     #[cfg(feature = "gpu-scanout")]
-    let surface = {
-        let try_gpu = match tier {
-            None => wanted,
-            Some(decided) => decided,
-        };
+    let (surface, deciding_note): (
+        smithay::backend::drm::DrmSurface,
+        Option<(policy::Reason, String)>,
+    ) = if plan.try_gpu {
         let crtc = surface.crtc();
-        match try_scanout(drm, drm_fd, surface, (width, height), try_gpu) {
-            Ok((presenter, scanout)) => {
-                return Ok((head(presenter), scanout, RendererKind::Gles));
+        match try_scanout(drm, drm_fd, surface, (width, height), plan, request) {
+            Ok((presenter, scanout, reason, gl_renderer)) => {
+                let note = tier.is_none().then_some((reason, gl_renderer));
+                return Ok((head(presenter), scanout, RendererKind::Gles, note));
             }
-            Err(_) if tier == Some(RendererKind::Gles) => {
+            Err(_failure) if tier == Some(RendererKind::Gles) => {
                 return Err(
                     "this session is on the gpu scanout tier and this connector could not \
                      join it (one tier per session)"
                         .to_owned(),
                 );
             }
-            // Not taken up (not asked for), or refused before the surface was
-            // handed over: carry on with the same surface.
-            Err(Some(surface)) => *surface,
-            // `DrmCompositor::new` takes the surface by value and drops it on
-            // failure, so there is nothing left to fall back *on*. Building a
-            // fresh one is safe precisely because the old one is gone: Smithay's
-            // surface `Drop` clears that CRTC's state and releases its primary
-            // plane, so this claims exactly what the failed attempt released.
-            Err(None) => create_surface(drm, std::iter::once(crtc), found.connector, found.mode)
-                .ok_or_else(|| {
-                    "could not be re-opened for dumb-buffer scanout after the gpu scanout \
-                     tier refused it"
-                        .to_owned()
-                })?,
+            // Refused before the surface was handed over, or after it was
+            // consumed: carry on with the same surface, or a fresh one. A
+            // refused trying head that decides the tier records its outcome
+            // for the `renderer chosen` line.
+            Err(failure) => {
+                let note = tier.is_none().then(|| {
+                    (
+                        failure.reason,
+                        failure.gl_renderer.unwrap_or_else(|| "-".to_owned()),
+                    )
+                });
+                let surface = match failure.surface {
+                    Some(surface) => *surface,
+                    // `DrmCompositor::new` takes the surface by value and
+                    // drops it on failure, so there is nothing left to fall
+                    // back *on*. Building a fresh one is safe precisely
+                    // because the old one is gone: Smithay's surface `Drop`
+                    // clears that CRTC's state and releases its primary
+                    // plane, so this claims exactly what the failed attempt
+                    // released.
+                    None => create_surface(drm, std::iter::once(crtc), found.connector, found.mode)
+                        .ok_or_else(|| {
+                            "could not be re-opened for dumb-buffer scanout after the gpu scanout \
+                         tier refused it"
+                                .to_owned()
+                        })?,
+                };
+                (surface, note)
+            }
         }
+    } else {
+        (surface, None)
     };
     #[cfg(not(feature = "gpu-scanout"))]
-    let _ = (&drm, tier, wanted);
+    let (surface, deciding_note): (
+        smithay::backend::drm::DrmSurface,
+        Option<(policy::Reason, String)>,
+    ) = {
+        let _ = (&drm, tier, plan, request);
+        (surface, None)
+    };
 
     let buffers = BufferPool::new(drm_fd, width, height)
         .map_err(|error| format!("could not allocate scanout buffers ({error})"))?;
-    // Not `wanted`: reaching here means either the dumb tier was what was
+    // Not `plan`: reaching here means either the dumb tier was what was
     // asked for, or the scanout tier was asked for and refused. Both are a
-    // pixman session, and `init` writes this back to `State::renderer` so a
+    // CPU-renderer session, and `init` writes this back to `State::renderer` so a
     // later `resize_output` rebuilds the pipeline this session is actually
-    // running rather than the one it hoped for.
+    // running rather than the one it hoped for. A deciding head carries its
+    // trying outcome for the `renderer chosen` line.
     Ok((
         head(Presenter::Dumb(Box::new(DumbPresenter::new(
             surface, buffers,
         )))),
         ScanoutHandoff::default(),
         RendererKind::Pixman,
+        deciding_note,
     ))
 }
 
 /// Builds the GPU scanout tier on `surface`, or explains itself and hands the
 /// surface back.
 ///
-/// `Err(Some(surface))` means nothing was attempted or nothing was consumed
-/// -- the caller carries on with the same surface. `Err(None)` means
-/// `DrmCompositor::new` took the surface and dropped it with its failure, so
-/// the caller has to build a new one.
+/// `Ok` carries the presenter, the renderer handoff, the trying reason
+/// (`Requested` for a forced `gpu` request, `HardwareRenderer` for `auto`
+/// on real hardware) and the `GL_RENDERER` string (`"-"` when it could not
+/// be read). `Err` carries the surface back when nothing was consumed
+/// (`Some`) -- the caller carries on with it -- or nothing when
+/// `DrmCompositor::new` took the surface and dropped it with its failure
+/// (`None`), so the caller has to build a new one; either way it carries
+/// the trying reason and the `GL_RENDERER` string when one was read.
 ///
-/// Every failure here is a `warn!` and a fall back to the dumb tier, never a
-/// startup error. Under `--tty` scoot *is* the session: refusing to start
-/// over a renderer leaves a user with no desktop and no way back (see
-/// `config.rs`'s module doc), which is a far worse outcome than a session
-/// that runs on the CPU renderer and says so. That is the opposite of
-/// `--headless`/`--nested`, where `--renderer gles` failing is a startup
-/// error precisely because nothing is at stake.
+/// Every refusal here falls back to the dumb tier, never a startup error.
+/// Under `--tty` scoot *is* the session: refusing to start over a renderer
+/// leaves a user with no desktop and no way back (see `config.rs`'s module
+/// doc), which is a far worse outcome than a session that runs on the CPU
+/// renderer and says so. That is the opposite of `--headless`/`--nested`,
+/// where `--renderer gpu` failing is a startup error precisely because
+/// nothing is at stake.
+///
+/// Under an `auto` request the refusals log at `info!`: `auto` expected the
+/// possibility, and a warning would cry wolf on every VM boot. Under a
+/// forced `gpu` request they stay `warn!`: the user asked for this tier
+/// explicitly, so not getting it is news.
 #[cfg(feature = "gpu-scanout")]
 #[allow(clippy::type_complexity)]
 fn try_scanout(
@@ -977,74 +1156,155 @@ fn try_scanout(
     drm_fd: &DrmDeviceFd,
     surface: smithay::backend::drm::DrmSurface,
     size: (i32, i32),
-    wanted: RendererKind,
-) -> Result<(Presenter, ScanoutHandoff), Option<Box<smithay::backend::drm::DrmSurface>>> {
+    plan: HeadPlan,
+    request: RendererRequest,
+) -> Result<(Presenter, ScanoutHandoff, policy::Reason, String), TryScanoutFailure> {
     use smithay::backend::allocator::gbm::GbmDevice;
 
-    if wanted != RendererKind::Gles {
-        return Err(Some(Box::new(surface)));
-    }
+    debug_assert!(
+        plan.try_gpu,
+        "try_scanout runs only for heads whose plan tries the GPU tier"
+    );
+    // `info!` under `auto` (an expected possibility), `warn!` under a
+    // forced `gpu` request (explicitly asked for, so news when refused).
+    let loud = request != RendererRequest::Auto;
     let gbm = match GbmDevice::new(drm_fd.clone()) {
         Ok(gbm) => gbm,
         Err(error) => {
-            tracing::warn!(
-                %error,
-                "drm: this device has no usable gbm node, so --renderer gles cannot \
-                 scan out on it; falling back to the cpu renderer and dumb buffers"
-            );
-            return Err(Some(Box::new(surface)));
+            if loud {
+                tracing::warn!(
+                    %error,
+                    "drm: this device has no usable gbm node, so --renderer gpu cannot \
+                     scan out on it; falling back to the cpu renderer and dumb buffers"
+                );
+            } else {
+                tracing::info!(
+                    %error,
+                    "drm: this device has no usable gbm node; falling back to the cpu \
+                     renderer and dumb buffers"
+                );
+            }
+            return Err(TryScanoutFailure {
+                surface: Some(Box::new(surface)),
+                reason: policy::Reason::GpuBuildFailed,
+                gl_renderer: None,
+            });
         }
     };
-    let backend = match super::render::ScanoutBackend::new(&gbm) {
+    let mut backend = match super::render::ScanoutBackend::new(&gbm) {
         Ok(backend) => backend,
         Err(error) => {
-            tracing::warn!(
-                %error,
-                "drm: could not build a gles renderer on this device's gbm node; \
-                 falling back to the cpu renderer and dumb buffers"
-            );
-            return Err(Some(Box::new(surface)));
+            if loud {
+                tracing::warn!(
+                    %error,
+                    "drm: could not build a gpu renderer on this device's gbm node; \
+                     falling back to the cpu renderer and dumb buffers"
+                );
+            } else {
+                tracing::info!(
+                    %error,
+                    "drm: could not build a gpu renderer on this device's gbm node; \
+                     falling back to the cpu renderer and dumb buffers"
+                );
+            }
+            return Err(TryScanoutFailure {
+                surface: Some(Box::new(surface)),
+                reason: policy::Reason::GpuBuildFailed,
+                gl_renderer: None,
+            });
         }
     };
-    let formats = backend.renderer_formats();
-    // The device's own hardware cursor size, read here because this is the
-    // one place that holds the `DrmDevice`: the presenter keeps it for CRTC
-    // switches, which cannot change it (a property of the device, not the
-    // CRTC), and hands it to `DrmCompositor` as the cursor plane's buffer
-    // bound.
-    let cursor_size = drm.cursor_size();
-    match scanout::ScanoutPresenter::new(surface, gbm, formats, cursor_size, size) {
-        Ok(presenter) => {
-            // info!, not debug!: whether the cursor rides its own KMS plane
-            // or stays composited decides what the swapchain slot a capture
-            // reads holds of it (and so whether a capture that asks for the
-            // pointer pays for re-rendering its region -- see
-            // `render::capture_cursor`), so it belongs next to the tier line
-            // above, not buried where only a bug hunt looks. The overlay
-            // count rides on the same line for the same reason: a
-            // plane-assigned element of any kind is absent from that slot.
+    // The software check: a GPU stack that turns out to be llvmpipe (or any
+    // other software rasteriser) composites slower than the CPU renderer,
+    // so under `auto` the tier is refused here. A forced `gpu` request
+    // never rejects software -- the plan carries `reject_software: false`
+    // there -- and an unreadable string never refuses either, since that is
+    // not proof of software. The refusal reuses the same surface for the
+    // dumb tier, and dropping `backend` frees the EGL context (which is
+    // exactly what the other refusal arms do -- see `scanout.rs`'s
+    // `EGLDisplay::new` contract note -- so no new EGL lifetime is
+    // introduced).
+    let gl_name = backend.gl_renderer();
+    match policy::after_renderer(plan.reject_software, gl_name.as_deref()) {
+        Err(reason) => {
+            let gl = gl_name.as_deref().unwrap_or("-");
             tracing::info!(
-                cursor_planes = presenter.cursor_planes(),
-                overlay_planes = presenter.overlay_planes(),
-                cursor_width = cursor_size.w,
-                cursor_height = cursor_size.h,
-                "drm: scanout cursor planes"
+                gl_renderer = %gl,
+                "drm: the gpu stack is a software rasteriser; falling back to the cpu \
+                 renderer and dumb buffers"
             );
-            let handoff = ScanoutHandoff {
-                backend: Some(Box::new(backend)),
-            };
-            Ok((Presenter::Gpu(Box::new(presenter)), handoff))
+            Err(TryScanoutFailure {
+                surface: Some(Box::new(surface)),
+                reason,
+                gl_renderer: gl_name,
+            })
         }
-        Err(error) => {
-            tracing::warn!(
-                %error,
-                "drm: no scan-out format works for both this crtc's primary plane \
-                 and the gles renderer; falling back to the cpu renderer and dumb \
-                 buffers"
-            );
-            Err(None)
+        Ok(reason) => {
+            let gl = gl_name.clone().unwrap_or_else(|| "-".to_owned());
+            let formats = backend.renderer_formats();
+            // The device's own hardware cursor size, read here because this is the
+            // one place that holds the `DrmDevice`: the presenter keeps it for CRTC
+            // switches, which cannot change it (a property of the device, not the
+            // CRTC), and hands it to `DrmCompositor` as the cursor plane's buffer
+            // bound.
+            let cursor_size = drm.cursor_size();
+            match scanout::ScanoutPresenter::new(surface, gbm, formats, cursor_size, size) {
+                Ok(presenter) => {
+                    // info!, not debug!: whether the cursor rides its own KMS plane
+                    // or stays composited decides what the swapchain slot a capture
+                    // reads holds of it (and so whether a capture that asks for the
+                    // pointer pays for re-rendering its region -- see
+                    // `render::capture_cursor`), so it belongs next to the tier line
+                    // above, not buried where only a bug hunt looks. The overlay
+                    // count rides on the same line for the same reason: a
+                    // plane-assigned element of any kind is absent from that slot.
+                    tracing::info!(
+                        cursor_planes = presenter.cursor_planes(),
+                        overlay_planes = presenter.overlay_planes(),
+                        cursor_width = cursor_size.w,
+                        cursor_height = cursor_size.h,
+                        "drm: scanout cursor planes"
+                    );
+                    let handoff = ScanoutHandoff {
+                        backend: Some(Box::new(backend)),
+                    };
+                    Ok((Presenter::Gpu(Box::new(presenter)), handoff, reason, gl))
+                }
+                Err(error) => {
+                    if loud {
+                        tracing::warn!(
+                            %error,
+                            "drm: no scan-out format works for both this crtc's primary plane \
+                             and the gpu renderer; falling back to the cpu renderer and dumb \
+                             buffers"
+                        );
+                    } else {
+                        tracing::info!(
+                            %error,
+                            "drm: no scan-out format works for both this crtc's primary plane \
+                             and the gpu renderer; falling back to the cpu renderer and dumb \
+                             buffers"
+                        );
+                    }
+                    Err(TryScanoutFailure {
+                        surface: None,
+                        reason: policy::Reason::GpuBuildFailed,
+                        gl_renderer: gl_name,
+                    })
+                }
+            }
         }
     }
+}
+
+/// What a refused [`try_scanout`] hands back: the surface when it was not
+/// consumed, the trying reason, and the `GL_RENDERER` string when one had
+/// been read by then.
+#[cfg(feature = "gpu-scanout")]
+struct TryScanoutFailure {
+    surface: Option<Box<smithay::backend::drm::DrmSurface>>,
+    reason: policy::Reason,
+    gl_renderer: Option<String>,
 }
 
 /// Tries `crtcs` in order against `conn`/`mode` until one accepts a surface
