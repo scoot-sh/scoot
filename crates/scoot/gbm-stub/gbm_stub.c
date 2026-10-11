@@ -1,4 +1,5 @@
-/*
+/* SPDX-License-Identifier: MIT
+ *
  * Static libgbm ABI stub for the `runtime-gbm` Cargo feature (spike).
  *
  * The problem it solves: Smithay's `backend_gbm` (via the `gbm` crate's
@@ -9,7 +10,8 @@
  * and without a system libgbm present), and each symbol forwards to the
  * real libgbm, loaded by dlopen on first use, only when it is actually
  * called. With no libgbm on the box every entry point fails closed
- * (NULL/-1 plus ENOSYS, void ones a no-op), which is exactly what scoot's
+ * (NULL/0/-1/zero-handle plus `ENOSYS`; void ones do nothing but still set
+ * `ENOSYS`), which is exactly what scoot's
  * existing fallbacks already handle: `tty::try_scanout` warns and keeps
  * dumb buffers, `nested::gpu::open_allocator` keeps read-back.
  *
@@ -27,10 +29,21 @@
  *
  * Threading: the `dlopen` handle is resolved once per process under
  * `pthread_once`; every entry point looks its symbol up per call. A per-call
- * `dlsym` is a hash lookup, and none of these runs on a per-frame hot path
- * (allocation/import/query at startup, resize and buffer import), so caching
- * function pointers would buy nothing and only add shared state. A
- * *transient* `dlopen` failure pins the process to fail-closed for its life
+ * `dlsym` is a hash lookup plus loader lock, and the export path DOES run
+ * per presented frame on the scanout tier: at the pinned Smithay rev,
+ * `GbmBufferedSurface::next_buffer` calls `slot.export()` every frame, and
+ * `Exporter::export` calls `plane_count()` plus, per plane,
+ * `fd_for_plane()` (= `gbm_bo_get_fd_for_plane`), `offset()`
+ * (= `gbm_bo_get_offset`) and `stride_for_plane()`
+ * (= `gbm_bo_get_stride_for_plane`) -- i.e. ~1 + 3xplanes stub calls per
+ * frame, each paying a `dlsym` here. Measured 2026-10-11 (PR #547 discussion:
+ * microbenchmark dlopening the real libgbm.so.1 and `dlsym`ing a real symbol
+ * per call, 2M iterations, best of 3, linux/aarch64 container: ~20 ns per
+ * `dlsym`-then-call vs ~1 ns cached-pointer call, so ~0.08 us per frame at
+ * 1 plane / ~0.14 us at 2 planes) -- ~0.001% of a 16.7 ms (60 Hz) / 6.9 ms
+ * (144 Hz) frame budget -- so the per-call lookup stays: caching function
+ * pointers would add shared state for no measurable gain. Re-measure if
+ * the export path or the loader ever changes. A *transient* `dlopen` failure pins the process to fail-closed for its life
  * (documented, not retried: GBM availability does not change under a
  * running compositor often enough to matter, and every caller already
  * treats refusal as a decision, not a retryable event).
@@ -110,23 +123,29 @@ static void *gbm_sym(const char *name) {
 #define GBM_U32(name, params, args) \
     uint32_t gbm_##name params { \
         uint32_t (*f) params = (uint32_t (*) params)gbm_sym("gbm_" #name); \
-        if (!f) \
+        if (!f) { \
+            errno = ENOSYS; \
             return 0; \
+        } \
         return f args; \
     }
 
 #define GBM_U64(name, params, args) \
     uint64_t gbm_##name params { \
         uint64_t (*f) params = (uint64_t (*) params)gbm_sym("gbm_" #name); \
-        if (!f) \
+        if (!f) { \
+            errno = ENOSYS; \
             return 0; \
+        } \
         return f args; \
     }
 
 #define GBM_VOID(name, params, args, fret, fparams) \
     void gbm_##name params { \
         fret (*f) fparams = (fret (*) fparams)gbm_sym("gbm_" #name); \
-        if (f) \
+        if (!f) \
+            errno = ENOSYS; \
+        else \
             f args; \
     }
 
@@ -134,6 +153,7 @@ static void *gbm_sym(const char *name) {
     fret gbm_##name params { \
         fret (*f) fparams = (fret (*) fparams)gbm_sym("gbm_" #name); \
         if (!f) { \
+            errno = ENOSYS; \
             union gbm_bo_handle zero = { .ptr = NULL }; \
             return zero; \
         } \
@@ -144,6 +164,12 @@ static void *gbm_sym(const char *name) {
 GBM_PTR(create_device, struct gbm_device *,
         (int fd), (fd))
 GBM_INT(device_get_fd, (struct gbm_device *gbm), (gbm))
+/* NB: the pinned `gbm` crate (0.18.0, `src/device.rs`) wraps this one call
+ * with `CStr::from_ptr` and no NULL check -- the only FFI call in the crate
+ * that skips one. A NULL here would be instant UB, so this symbol must never
+ * fail closed while a live `Device` exists; in practice that needs a working
+ * real libgbm that lacks this ancient-API symbol, which no shipped libgbm
+ * omits. No code change: recorded so a future reader knows the constraint. */
 GBM_PTR(device_get_backend_name, const char *,
         (struct gbm_device *gbm), (gbm))
 GBM_INT(device_is_format_supported,
