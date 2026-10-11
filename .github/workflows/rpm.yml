@@ -138,6 +138,30 @@ jobs:
           done
           find "$GITHUB_WORKSPACE/rpmbuild/RPMS" "$GITHUB_WORKSPACE/rpmbuild/SRPMS" -name '*.rpm' | sort
 
+      # The greeter login runs scoot-session, which starts scoot.service
+      # and then scoot-session.target past the display import: a scoot
+      # RPM without those units installs a login that falls straight
+      # back to the greeter. This gate lists the built RPM and fails on
+      # a missing unit, a missing portal selection, or an ExecStart that
+      # does not name the packaged binary.
+      - name: Session units ship in the scoot RPM
+        run: |
+          dnf install -y -q cpio
+          rpm=$(echo "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/scoot-0*.rpm)
+          echo "--- $rpm"
+          rpm -qlp "$rpm"
+          for f in /usr/bin/scoot-session /usr/share/wayland-sessions/scoot.desktop /usr/lib/systemd/user/scoot.service /usr/lib/systemd/user/scoot-session.target /usr/lib/systemd/user/scoot-shutdown.target /usr/share/xdg-desktop-portal/scoot-portals.conf; do
+            if ! rpm -qlp "$rpm" | grep -qx "$f"; then
+              echo "::error title=scoot RPM is missing $f::scoot-session starts scoot.service past the display import; without these units the greeter login falls back to the login screen."
+              exit 1
+            fi
+          done
+          tmp=$(mktemp -d)
+          (cd "$tmp" && rpm2cpio "$rpm" | cpio -id ./usr/lib/systemd/user/scoot.service 2>/dev/null)
+          grep -q '^ExecStart=/usr/bin/scoot --tty$' "$tmp/usr/lib/systemd/user/scoot.service" \
+            || { echo "::error title=scoot.service ExecStart is wrong::expected 'ExecStart=/usr/bin/scoot --tty'."; cat "$tmp/usr/lib/systemd/user/scoot.service"; exit 1; }
+          echo "ok: the scoot RPM ships the session units with ExecStart=/usr/bin/scoot --tty"
+
       - name: rpmlint the built RPMs
         run: |
           rpmlint "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/*.rpm 2>&1 | tee "$GITHUB_WORKSPACE/dist/rpmlint-packages.log"
@@ -288,6 +312,24 @@ jobs:
             rpmbuild -ba --define "_topdir $GITHUB_WORKSPACE/rpmbuild" "packaging/rpm/$s.spec"
           done
           find "$GITHUB_WORKSPACE/rpmbuild/RPMS" "$GITHUB_WORKSPACE/rpmbuild/SRPMS" -name '*.rpm' | sort
+          echo '::endgroup::'
+
+          echo '::group::Session units ship in the scoot RPM'
+          zypper --non-interactive install --no-recommends cpio
+          rpm=$(echo "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/scoot-0*.rpm)
+          echo "--- $rpm"
+          rpm -qlp "$rpm"
+          for f in /usr/bin/scoot-session /usr/share/wayland-sessions/scoot.desktop /usr/lib/systemd/user/scoot.service /usr/lib/systemd/user/scoot-session.target /usr/lib/systemd/user/scoot-shutdown.target /usr/share/xdg-desktop-portal/scoot-portals.conf; do
+            if ! rpm -qlp "$rpm" | grep -qx "$f"; then
+              echo "::error title=scoot RPM is missing $f::scoot-session starts scoot.service past the display import; without these units the greeter login falls back to the login screen."
+              exit 1
+            fi
+          done
+          tmp=$(mktemp -d)
+          (cd "$tmp" && rpm2cpio "$rpm" | cpio -id ./usr/lib/systemd/user/scoot.service 2>/dev/null)
+          grep -q '^ExecStart=/usr/bin/scoot --tty$' "$tmp/usr/lib/systemd/user/scoot.service" \
+            || { echo "::error title=scoot.service ExecStart is wrong::expected 'ExecStart=/usr/bin/scoot --tty'."; cat "$tmp/usr/lib/systemd/user/scoot.service"; exit 1; }
+          echo "ok: the scoot RPM ships the session units with ExecStart=/usr/bin/scoot --tty"
           echo '::endgroup::'
 
           echo '::group::rpmlint the built RPMs'

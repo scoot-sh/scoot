@@ -63,7 +63,10 @@ LONG = {
         " CPU rendering by default and full IPC for agents and scripts.\n"
         " .\n"
         " This package ships the compositor, the greeter session launcher\n"
-        " (scoot-session) and its wayland-sessions entry, the default\n"
+        " (scoot-session) and its wayland-sessions entry, the systemd user\n"
+        " units the launcher starts (scoot.service, scoot-session.target,\n"
+        " scoot-shutdown.target), the portal backend selection\n"
+        " (scoot-portals.conf), the default\n"
         " configuration text (with the [wallpaper] handoff), and the\n"
         " license inventory. It writes nothing to a user's home."
     ),

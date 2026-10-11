@@ -188,6 +188,30 @@ jobs:
           done
           ls -l "$GITHUB_WORKSPACE/dist"/*.pkg.tar.zst
 
+      # The greeter login runs scoot-session, which starts scoot.service
+      # and then scoot-session.target past the display import: a scoot
+      # package without those units installs a login that falls straight
+      # back to the greeter. This gate lists both scoot packages (release
+      # and -git) and fails on a missing unit, a missing portal
+      # selection, or an ExecStart that does not name the packaged binary.
+      - name: Session units ship in the scoot packages
+        run: |
+          for p in "$GITHUB_WORKSPACE"/dist/scoot-0*.pkg.tar.zst "$GITHUB_WORKSPACE"/dist/scoot-git-*.pkg.tar.zst; do
+            echo "--- $p"
+            tar -tf "$p" | sort | grep -E 'systemd/user|scoot-session|wayland-sessions|xdg-desktop-portal'
+            for f in usr/bin/scoot-session usr/share/wayland-sessions/scoot.desktop usr/lib/systemd/user/scoot.service usr/lib/systemd/user/scoot-session.target usr/lib/systemd/user/scoot-shutdown.target usr/share/xdg-desktop-portal/scoot-portals.conf; do
+              if ! tar -tf "$p" | grep -qx "$f"; then
+                echo "::error title=$p is missing $f::scoot-session starts scoot.service past the display import; without these units the greeter login falls back to the login screen."
+                exit 1
+              fi
+            done
+            tmp=$(mktemp -d)
+            tar -xf "$p" -C "$tmp" usr/lib/systemd/user/scoot.service
+            grep -q '^ExecStart=/usr/bin/scoot --tty$' "$tmp/usr/lib/systemd/user/scoot.service" \
+              || { echo "::error title=scoot.service ExecStart is wrong in $p::expected 'ExecStart=/usr/bin/scoot --tty'."; cat "$tmp/usr/lib/systemd/user/scoot.service"; exit 1; }
+          done
+          echo "ok: both scoot packages ship the session units with ExecStart=/usr/bin/scoot --tty"
+
       - name: namcap the built packages
         run: |
           namcap dist/*.pkg.tar.zst 2>&1 | tee "$GITHUB_WORKSPACE/dist/namcap-packages.log"
