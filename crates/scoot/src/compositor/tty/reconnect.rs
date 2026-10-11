@@ -185,11 +185,15 @@ fn run(state: &mut State) {
     // The session's tier decides the rebuild shape below: the CPU tier
     // swaps heads alone (its render backends hold no device state), while
     // the GPU tier additionally hands each fresh renderer to its output's
-    // existing backend (see `run_scanout`). Resolved here, before anything
-    // is torn down, from what the session actually drives -- the same
+    // existing backend (see `run_scanout`). Resolved from the session's
+    // own tier (`state.renderer`, settled at startup and never rewritten
+    // afterwards), not from the heads: after an empty restore there are
+    // no heads to read, and an empty session misreads as the CPU tier --
+    // which would rebuild GPU heads and then drop them for want of a
+    // binding, reporting `live: true` with nothing presenting. The same
     // `RendererKind` the hotplug path maps per head, so no `auto` request
     // state is needed here.
-    let gpu_tier = tty.renderer() != RendererKind::Pixman;
+    let gpu_tier = wanted != RendererKind::Pixman;
     if gpu_tier {
         return run_scanout(state, started, wanted);
     }
@@ -948,12 +952,22 @@ fn swap_scanout(
     hotplug::apply(state, added);
     // A handoff failure is a dark fresh device, not a stranded one: mark
     // it the way the proof failure does and fall through to the `Dark`
-    // message below.
-    let live = if handoff_failed {
+    // message below. So is a fresh device with nothing presenting: the
+    // proof passed, but no head survived onto an output (every output
+    // creation refused) -- reporting `live: true` for that would lie to
+    // every capture consumer checking the flag before trusting pixels.
+    let nothing_presenting = state
+        .tty
+        .as_ref()
+        .is_none_or(|tty| !tty.heads.iter().any(|head| head.output.is_some()));
+    let live = if handoff_failed || nothing_presenting {
         if let SwapLive::Live = live {
-            SwapLive::Dark {
-                proof: "the fresh renderers could not join their outputs".to_owned(),
-            }
+            let proof = if handoff_failed {
+                "the fresh renderers could not join their outputs".to_owned()
+            } else {
+                "no rebuilt head reached an output".to_owned()
+            };
+            SwapLive::Dark { proof }
         } else {
             live
         }
