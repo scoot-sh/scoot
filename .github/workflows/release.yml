@@ -382,7 +382,7 @@ jobs:
               export PATH="$HOME/.cargo/bin:$PATH"
               echo "--- toolchain and glibc floor ---"
               rustc --version
-              ldd --version | head -1
+              ldd --version | sed -n 1p
               cd /src
               # Unquoted on purpose: the resolve output is allowlist-safe
               # (scoot/scootbg/scootbar from scripts/release-resolve).
