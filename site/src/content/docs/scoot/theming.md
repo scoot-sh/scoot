@@ -105,6 +105,25 @@ palette is sixteen hand-placed hues, not six bar roles projected
 wider — generating it would invent colors no one chose, so the flake
 applies the file instead of synthesizing one.
 
+Card rules in `regreet.css` stay scoped to `frame.background`, never
+bare `frame`: ReGreet's login card and its clock card carry the
+`background` class, while the empty notification bar above Reboot/Power
+Off carries none (read against ReGreet 0.5.0's
+`src/gui/templates.rs`). A bare `frame` rule also inks that empty bar,
+leaving a blank card when there is nothing to report (GTK CSS has no
+`:empty`). The five shipped sheets scope theirs, and the card-scope
+gate (`scripts/check-regreet-css-scope.sh`, run by the docs-site CI
+job) refuses a bare `frame` selector in any of them or in a docs CSS
+snippet. Writing your own sheet? Copy the header comment's rule:
+`frame.background` (and `frame.background > border` for the inner
+border) for the cards, nothing bare.
+
+> **Symptom:** an empty rounded card above Reboot/Power Off on the login screen.
+>
+> The greeter CSS styles bare `frame`, which also matches ReGreet's
+> empty notification bar. Scope the card rules to `frame.background`
+> (see above); the shipped looks already do.
+
 The app accent is the bar's own accent, and the app surfaces are the
 bar's background and foreground — no new hues, so app text contrast
 equals bar text contrast (measured at AA in the module checks).
