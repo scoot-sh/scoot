@@ -108,7 +108,7 @@ jobs:
                 | sh -s -- -y --default-toolchain "$0" --profile minimal
               export PATH="$HOME/.cargo/bin:$PATH"
               rustc --version
-              ldd --version | head -1
+              ldd --version | sed -n 1p
               cd /src
               for bin in scoot scootbg scootbar; do
                 cargo build --release --locked -p "$bin"
