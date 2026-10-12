@@ -29,7 +29,10 @@
 # release" never points at it.
 #
 # Keep DISTRO_IMAGE, RUST_TOOLCHAIN and the dependency lists in step with
-# release.yml's build job.
+# release.yml's build job. One deliberate exception: nightly installs
+# `git` beside the libraries, because it builds the checkout (which pulls
+# the pinned Smithay fork) while release.yml builds the vendored tree
+# offline, which needs no git.
 
 name: nightly (main, portable binaries)
 
@@ -114,12 +117,23 @@ jobs:
               ls -l /out/
             ' "$RUST_TOOLCHAIN"
 
+      # The floor the release promises, checked the way release.yml
+      # checks it: the compositor runs with only its five runtime
+      # libraries installed, while the bar and the wallpaper daemon must
+      # start bare (`scoot-nightly-*` names only the compositor, as
+      # release.yml's `scoot-[0-9]*` does: shell globs need the literal
+      # `-nightly-`, so scootbg-* and scootbar-* also start with scoot
+      # but must run with nothing installed).
       - name: The binaries start on the bare base
         run: |
           docker run --rm -v "$RUNNER_TEMP/dist:/dist:ro" "$DISTRO_IMAGE" bash -euo pipefail -c '
             apt-get update -qq
-            apt-get install -y -qq libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0 >/dev/null
-            for bin in /dist/*; do "$bin" --version; done
+            for bin in /dist/*; do
+              case "$(basename "$bin")" in
+                scoot-nightly-*) apt-get install -y -qq libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0 >/dev/null ;;
+              esac
+              "$bin" --version
+            done
           '
 
       - name: Checksums
