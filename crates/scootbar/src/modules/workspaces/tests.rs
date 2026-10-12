@@ -152,7 +152,7 @@ fn each_output_shows_its_own_numbers_sorted_by_coordinates() {
     // Arrival order is not sorted order; coordinates rule.
     commit(&link, "DP-1", &[(10, 10, false), (2, 2, true)]);
     commit(&link, "HDMI-1", &[(1, 1, true)]);
-    assert_eq!(harness.view_on(Some("DP-1")).text(), "2   10");
+    assert_eq!(harness.view_on(Some("DP-1")).text(), "2  10");
     assert_eq!(harness.view_on(Some("HDMI-1")).text(), "1");
     // No group here, and no name at all: nothing to show, taking no space.
     assert!(harness.view_on(Some("DP-2")).is_empty());
@@ -185,7 +185,7 @@ fn a_workspace_never_named_shows_its_position() {
     // Sorted by coordinates first: `(3, 3)` stays first, `(0, 5)` shows
     // its 1-based position, 2.
     commit(&link, "DP-1", &[(0, 5, false), (3, 3, true)]);
-    assert_eq!(harness.view_on(Some("DP-1")).text(), "3   2");
+    assert_eq!(harness.view_on(Some("DP-1")).text(), "3  2");
 }
 
 #[test]
@@ -230,7 +230,7 @@ fn a_removed_workspace_is_not_redrawn_nor_clicked_before_its_done() {
     let (mut harness, link) = started();
     commit(&link, "DP-1", &[(1, 1, false), (2, 2, true)]);
     assert_eq!(harness.dispatch(), Update::Changed);
-    assert_eq!(harness.view_on(Some("DP-1")).text(), "1   2");
+    assert_eq!(harness.view_on(Some("DP-1")).text(), "1  2");
     // `Removed` for workspace 1, with no `done` after it: the staged
     // half of what `on_workspace_removed` does, hand-rolled (the event
     // method takes a proxy, which no compositor-free test can fabricate;
@@ -255,13 +255,13 @@ fn a_removed_workspace_is_not_redrawn_nor_clicked_before_its_done() {
     // No redraw: the batch is not whole, and the drawn view still shows
     // both workspaces.
     assert_eq!(harness.dispatch(), Update::Unchanged);
-    assert_eq!(harness.view_on(Some("DP-1")).text(), "1   2");
+    assert_eq!(harness.view_on(Some("DP-1")).text(), "1  2");
     // A press on the removed pill sends nothing. (Without a manager no
     // request could go out in any case; what this pins alongside the
     // above is that the press path stays quiet while the batch is open.)
     let font = text();
     let view = harness.view_on(Some("DP-1"));
-    let (start, end) = item_span(&font, "1   2", EM, i64::from(PAD), 0).unwrap();
+    let (start, end) = item_span(&font, "1  2", EM, i64::from(PAD), 0).unwrap();
     let ctx = ClickCtx {
         output: DP1,
         x: (start + end) / 2,
@@ -386,12 +386,12 @@ fn a_click_without_a_manager_sends_nothing() {
     commit(&link, "DP-1", &[(1, 1, false), (2, 2, true)]);
     let font = text();
     let view = harness.view_on(Some("DP-1"));
-    assert_eq!(view.text(), "1   2");
+    assert_eq!(view.text(), "1  2");
     // No manager is bound in a unit test, so no request can go out
     // whatever is clicked: the inactive pill, the active one (already
     // there), a gap, or nowhere near the text.
-    let (first, first_end) = item_span(&font, "1   2", EM, i64::from(PAD), 0).unwrap();
-    let (second, second_end) = item_span(&font, "1   2", EM, i64::from(PAD), 1).unwrap();
+    let (first, first_end) = item_span(&font, "1  2", EM, i64::from(PAD), 0).unwrap();
+    let (second, second_end) = item_span(&font, "1  2", EM, i64::from(PAD), 1).unwrap();
     for (x, means) in [
         (0, None),
         // The inactive pill means `activate 1`.
@@ -433,7 +433,7 @@ fn only_a_click_means_anything_by_default() {
     commit(&link, "DP-1", &[(1, 1, false), (2, 2, true)]);
     let font = text();
     let view = harness.view_on(Some("DP-1"));
-    let (first, first_end) = item_span(&font, "1   2", EM, i64::from(PAD), 0).unwrap();
+    let (first, first_end) = item_span(&font, "1  2", EM, i64::from(PAD), 0).unwrap();
     let ctx = ClickCtx {
         output: DP1,
         x: (first + first_end) / 2,
@@ -510,7 +510,7 @@ fn custom_draw_marks_only_the_active_item() {
     let bg = [theme.background.r, theme.background.g, theme.background.b];
     // The active item's span, from the same walk the module uses.
     let font = text();
-    let (start, end) = item_span(&font, "1   2", EM, i64::from(PAD), 1).unwrap();
+    let (start, end) = item_span(&font, "1  2", EM, i64::from(PAD), 1).unwrap();
     // The fill is behind the number, full height: accent just outside the
     // digits on both sides.
     assert_eq!(at(start - 2, 30), accent);
@@ -522,7 +522,7 @@ fn custom_draw_marks_only_the_active_item() {
         "no background-colored digit on the pill"
     );
     // ...and the inactive digit sits on plain background.
-    let (first, _) = item_span(&font, "1   2", EM, i64::from(PAD), 0).unwrap();
+    let (first, _) = item_span(&font, "1  2", EM, i64::from(PAD), 0).unwrap();
     assert_eq!(at(first.saturating_sub(2), 30), bg);
 }
 
@@ -596,7 +596,7 @@ fn pill_drawn_look(
         hovered,
     };
     assert!(module.custom_draw(&mut custom));
-    let (start, end) = item_span(&text(), "1   2", EM, i64::from(PAD), 1).unwrap();
+    let (start, end) = item_span(&text(), "1  2", EM, i64::from(PAD), 1).unwrap();
     (pixels, start, end)
 }
 
@@ -611,7 +611,11 @@ fn a_rounded_pill_cuts_its_corners_and_a_square_one_does_not() {
     let accent = [theme.accent.r, theme.accent.g, theme.accent.b];
     let bg = [theme.background.r, theme.background.g, theme.background.b];
     // The pill spans start - 4 .. end + 4 (half the padding), full height.
-    let (square, start, end) = pill_drawn(super::Pill::default());
+    let (square, start, end) = pill_drawn(super::Pill {
+        shape: super::Shape::Rect,
+        radius: 0,
+        inset: 0,
+    });
     let (left, right) = (start - PAD / 2, end + PAD / 2 - 1);
     for (x, y) in [(left, 0), (right, 0), (left, 59), (right, 59)] {
         assert_eq!(at(&square, x, y), accent, "square corner ({x},{y})");
@@ -695,7 +699,7 @@ fn a_hovered_pill_is_the_hover_token_and_the_configured_color_otherwise() {
     let accent = [theme.accent.r, theme.accent.g, theme.accent.b];
     // The pill's padding, left of the digit: fill, never ink.
     let fill_at = |pixels: &Vec<u8>| {
-        let (start, _) = item_span(&text(), "1   2", EM, i64::from(PAD), 1).unwrap();
+        let (start, _) = item_span(&text(), "1  2", EM, i64::from(PAD), 1).unwrap();
         at(pixels, start.saturating_sub(2), 30)
     };
     let (pixels, ..) = pill_drawn_look(super::Pill::default(), theme, true, None, None);
@@ -723,7 +727,7 @@ fn a_hovered_pill_is_the_hover_token_and_the_configured_color_otherwise() {
 fn inactive_numbers_take_the_configured_color() {
     let theme = Theme::default();
     let fg = [theme.foreground.r, theme.foreground.g, theme.foreground.b];
-    let (first, first_end) = item_span(&text(), "1   2", EM, i64::from(PAD), 0).unwrap();
+    let (first, first_end) = item_span(&text(), "1  2", EM, i64::from(PAD), 0).unwrap();
     let shows = |pixels: &Vec<u8>, color: [u8; 3]| {
         (first..first_end).any(|x| (0..60).any(|y| at(pixels, x, y) == color))
     };
@@ -754,12 +758,12 @@ fn dots_show_a_cell_each_and_clicks_land_by_them() {
     commit(&link, "DP-1", &[(1, 1, false), (2, 2, true), (3, 3, false)]);
     assert_eq!(harness.dispatch(), Update::Changed);
     let view = harness.view_on(Some("DP-1"));
-    assert_eq!(view.text(), "o   o   o");
+    assert_eq!(view.text(), "o  o  o");
     let font = text();
     // Each dot's middle switches to it, by position: the middle one is
     // active, so it asks for nothing.
     for (item, position) in [(0, 1), (2, 3)] {
-        let (start, end) = item_span(&font, "o   o   o", EM, i64::from(PAD), item).unwrap();
+        let (start, end) = item_span(&font, "o  o  o", EM, i64::from(PAD), item).unwrap();
         let ctx = ClickCtx {
             output: DP1,
             x: (start + end) / 2,
@@ -777,7 +781,7 @@ fn dots_show_a_cell_each_and_clicks_land_by_them() {
             "dot {item}"
         );
     }
-    let (start, end) = item_span(&font, "o   o   o", EM, i64::from(PAD), 1).unwrap();
+    let (start, end) = item_span(&font, "o  o  o", EM, i64::from(PAD), 1).unwrap();
     let ctx = ClickCtx {
         output: DP1,
         x: (start + end) / 2,
@@ -795,8 +799,8 @@ fn dots_show_a_cell_each_and_clicks_land_by_them() {
         "the active dot is already shown"
     );
     // A click in the middle of a gap hits nothing.
-    let (_, first_end) = item_span(&font, "o   o   o", EM, i64::from(PAD), 0).unwrap();
-    let (second_start, _) = item_span(&font, "o   o   o", EM, i64::from(PAD), 1).unwrap();
+    let (_, first_end) = item_span(&font, "o  o  o", EM, i64::from(PAD), 0).unwrap();
+    let (second_start, _) = item_span(&font, "o  o  o", EM, i64::from(PAD), 1).unwrap();
     let ctx = ClickCtx {
         output: DP1,
         x: (first_end + second_start) / 2,
@@ -899,7 +903,7 @@ fn dots_are_discs_in_state_colors_with_no_digits() {
     // others dim. No digit is drawn over the active dot, and no text ink
     // anywhere: dots are fills, not glyphs.
     for (item, color) in [(0, dim), (1, accent), (2, dim)] {
-        let (start, end) = item_span(&font, "o   o   o", EM, i64::from(PAD), item).unwrap();
+        let (start, end) = item_span(&font, "o  o  o", EM, i64::from(PAD), item).unwrap();
         assert_eq!(at(&pixels, (start + end) / 2, 30), color, "dot {item}");
     }
     assert!(
@@ -931,7 +935,8 @@ fn geometry(pill: &Pill, full: &str, active: usize, height: u32) -> Geometry {
 fn a_circle_around_one_digit_is_as_wide_as_it_is_tall() {
     let circle = Pill {
         shape: Shape::Circle,
-        ..Pill::default()
+        radius: 0,
+        inset: 0,
     };
     let g = geometry(&circle, "1 2 3", 1, 60);
     // Rows the whole bar less nothing here: the line is 50 of 60, so the
@@ -967,7 +972,8 @@ fn a_two_digit_number_widens_a_circle_into_a_pill_rather_than_clipping() {
 fn a_press_on_a_grown_pill_is_the_active_item_not_a_neighbours() {
     let circle = Pill {
         shape: Shape::Circle,
-        ..Pill::default()
+        radius: 0,
+        inset: 0,
     };
     let full = "1 2 3";
     let font = text();
@@ -1145,6 +1151,24 @@ fn snapshot_a_pill_at_1x() {
 }
 
 #[test]
+fn snapshot_the_default_tile_at_1x() {
+    // The no-config look this change ships: whatever the defaults are, so a
+    // deliberate defaults change re-blesses this scene with the rest.
+    crate::snapshots::check(
+        "workspaces-default-tile-1x",
+        "the active workspace (2 of 1 2 3) with no workspaces config: the default tile on a 120x24 bar at scale 1",
+        &shapes_scene(
+            super::Pill::default(),
+            &[1, 2, 3],
+            1,
+            Scale::Integer(1),
+            BAR_SIZE,
+            Look::plain(),
+        ),
+    );
+}
+
+#[test]
 fn snapshot_a_circle_at_1x() {
     crate::snapshots::check(
         "workspaces-circle-1x",
@@ -1303,7 +1327,7 @@ fn snapshot_state_colors_at_1_5x() {
 }
 
 /// `item-gap`: the view separates the numbers by that many spaces, and the
-/// default is the published looks' three.
+/// default is two.
 #[test]
 fn the_view_separates_the_numbers_by_the_item_gap() {
     for (gap, want) in [(1, "1 2 3"), (3, "1   2   3"), (8, "1        2        3")] {
@@ -1317,8 +1341,8 @@ fn the_view_separates_the_numbers_by_the_item_gap() {
     assert_eq!(harness.dispatch(), Update::Changed);
     assert_eq!(
         harness.view_on(Some("DP-1")).text(),
-        "1   2",
-        "the default is three spaces"
+        "1  2",
+        "the default is two spaces"
     );
 }
 
@@ -1439,8 +1463,8 @@ fn a_click_on_the_second_of_two_equal_numbers_means_the_second() {
     commit(&link, "DP-1", &[(1, 1, false), (2, 2, true), (2, 3, false)]);
     let font = text();
     let view = harness.view_on(Some("DP-1"));
-    assert_eq!(view.text(), "1   2   2");
-    let (start, end) = item_span(&font, "1   2   2", EM, i64::from(PAD), 2).unwrap();
+    assert_eq!(view.text(), "1  2  2");
+    let (start, end) = item_span(&font, "1  2  2", EM, i64::from(PAD), 2).unwrap();
     let ctx = ClickCtx {
         output: DP1,
         x: (start + end) / 2,
@@ -1454,7 +1478,7 @@ fn a_click_on_the_second_of_two_equal_numbers_means_the_second() {
     };
     assert_eq!(click(&harness, &ctx), Some(activate(3)));
     // Clicking the first of the pair is the active one: nothing.
-    let (start, end) = item_span(&font, "1   2   2", EM, i64::from(PAD), 1).unwrap();
+    let (start, end) = item_span(&font, "1  2  2", EM, i64::from(PAD), 1).unwrap();
     let ctx = ClickCtx {
         x: (start + end) / 2,
         ..ctx

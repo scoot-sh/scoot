@@ -135,8 +135,9 @@ const MAX_WORKSPACES: usize = 32;
 /// single-digit workspaces (about 26 numbered up to 99).
 pub const MAX_ITEM_GAP: u32 = 8;
 /// The spaces `item-gap` takes between two numbers when the config names
-/// none: the published looks' roomy row, not the old tight one.
-pub const DEFAULT_ITEM_GAP: u32 = 3;
+/// none: two spaces, an even row with the default tile ([`pill`]), between
+/// the old tight one and the published looks' roomy three.
+pub const DEFAULT_ITEM_GAP: u32 = 2;
 /// Output names kept at most, in bytes: `wl_output` names are short
 /// (`DP-1`, `HEADLESS-1`); longer ones are cut.
 const MAX_NAME: usize = 64;

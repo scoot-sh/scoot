@@ -47,9 +47,12 @@ impl Shape {
     }
 }
 
-/// The active workspace's pill: logical pixels, all off by default (square,
-/// the bar's full height, as the pill always was).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// The active workspace's pill: logical pixels. The default is a rounded
+/// square tile: a `rect` with radius 3, lifted 6 off the bar's top and
+/// bottom, with two spaces between the numbers ([`super::DEFAULT_ITEM_GAP`]).
+/// At the default bar (28 tall, DejaVu Sans 14, padding 8) the tile is 17
+/// wide and 18 tall, about as wide as the bar's inner height.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pill {
     pub shape: Shape,
     /// The corner radius of a `rect`, cut back to half the pill's shorter
@@ -57,6 +60,16 @@ pub struct Pill {
     pub radius: u32,
     /// The gap from the bar's top and bottom edges.
     pub inset: u32,
+}
+
+impl Default for Pill {
+    fn default() -> Self {
+        Self {
+            shape: Shape::Rect,
+            radius: 3,
+            inset: 6,
+        }
+    }
 }
 
 impl Pill {

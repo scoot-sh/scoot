@@ -12,12 +12,17 @@ fn pill(shape: Shape) -> Pill {
 }
 
 #[test]
-fn the_default_is_the_square_full_height_pill_it_always_was() {
+fn the_default_is_a_rounded_square_tile() {
     let pill = Pill::default();
     assert_eq!(pill.shape, Shape::Rect);
-    assert_eq!(pill.rows(28, 16, ONE), (0, 28));
-    assert_eq!(pill.radius(ONE), 0);
-    assert_eq!(pill.extent((10, 30), (0, 100), (0, 28)), (10, 30));
+    assert_eq!(pill.radius, 3);
+    assert_eq!(pill.inset, 6);
+    // Lifted 6 off a 28-high bar with room to spare; cut back to the room
+    // the text line leaves when there is none.
+    assert_eq!(pill.rows(28, 16, ONE), (6, 22));
+    assert_eq!(pill.rows(28, 20, ONE), (4, 24));
+    assert_eq!(pill.radius(ONE), 3);
+    assert_eq!(pill.extent((10, 30), (0, 100), (6, 22)), (10, 30));
 }
 
 #[test]
