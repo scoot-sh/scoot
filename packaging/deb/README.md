@@ -66,7 +66,7 @@ probes, `crates/scootbar/src/font.rs`).
 
 ## Toolchain: the distro's rustc is too old, so the container pins one
 
-The workspace floor is `rust-version = "1.87"`. Bookworm ships 1.63,
+The workspace floor is `rust-version = "1.88"`. Bookworm ships 1.63,
 noble 1.75, trixie 1.85.1 -- none builds the tree (the site packaging
 page's table, checked 2026-10-07). Per the ticket this picks the
 first option: the build container installs a newer toolchain, which

@@ -94,7 +94,7 @@ This tree builds with no network. Every dependency is in vendor/
 (including the two scoot-sh git forks: Smithay and wayland-backend),
 and .cargo/config.toml replaces crates-io and both git sources with it.
 
-Prerequisites (not vendored): a Rust toolchain >= 1.87
+Prerequisites (not vendored): a Rust toolchain >= 1.88
 (workspace rust-version; rustup or a distro toolchain that new),
 plus the system libraries in the docs site's packaging page
 ("package scoot offline": libinput, libseat, libudev, libpixman-1,

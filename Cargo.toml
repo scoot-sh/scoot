@@ -6,7 +6,7 @@ members = ["crates/*"]
 version = "0.1.0"
 edition = "2024"
 # Smithay's minimum; the compositor sets the floor for everything.
-rust-version = "1.87"
+rust-version = "1.88"
 license = "MIT"
 
 [workspace.dependencies]

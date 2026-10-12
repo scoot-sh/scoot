@@ -57,7 +57,7 @@ Notes:
   gpu-scanout` is a local `rpmbuild` edit (the feature on the `cargo
   build` line, the two `-devel` packages beside it), not a separate spec.
 - Toolchain floor: both distros clear the workspace floor
-  (`rust-version = "1.87"`), so no rustup is needed in the build
+  (`rust-version = "1.88"`), so no rustup is needed in the build
   containers — Fedora 43 resolves rust 1.98.1, Tumbleweed ships rust
   1.98.1 (both re-measured 2026-10-08 with the same queries;
   toolchains move, so re-check at build time).
