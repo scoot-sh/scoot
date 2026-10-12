@@ -247,10 +247,10 @@ impl Canvas {
                 continue;
             }
             slot.state.held = false;
-            if current != Some(slot.state.dims) {
-                if let Some(slot) = entry.take() {
-                    slot.destroy();
-                }
+            if current != Some(slot.state.dims)
+                && let Some(slot) = entry.take()
+            {
+                slot.destroy();
             }
             return;
         }
@@ -292,10 +292,10 @@ impl Canvas {
             return Ok(Drew::Stalled);
         };
         // A free slot of the wrong size is replaced.
-        if entry.as_ref().is_some_and(|slot| slot.state.dims != dims) {
-            if let Some(stale) = entry.take() {
-                stale.destroy();
-            }
+        if entry.as_ref().is_some_and(|slot| slot.state.dims != dims)
+            && let Some(stale) = entry.take()
+        {
+            stale.destroy();
         }
         let slot = match entry {
             Some(slot) => slot,
@@ -386,10 +386,9 @@ impl Canvas {
             if entry
                 .as_ref()
                 .is_some_and(|s| !s.state.held && s.state.dims != dims)
+                && let Some(stale) = entry.take()
             {
-                if let Some(stale) = entry.take() {
-                    stale.destroy();
-                }
+                stale.destroy();
             }
         }
         Ok(Drew::Committed)

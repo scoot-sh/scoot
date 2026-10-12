@@ -326,10 +326,8 @@ impl Live {
             0,
             Op::Props(id.to_owned()),
         );
-        if !queued {
-            if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
-                item.fetching = false;
-            }
+        if !queued && let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
+            item.fetching = false;
         }
     }
 
@@ -493,10 +491,8 @@ impl Live {
                 parent,
             },
         );
-        if !queued {
-            if let Some(menu) = self.menu.as_mut().filter(|menu| menu.item == id) {
-                menu.fetching = false;
-            }
+        if !queued && let Some(menu) = self.menu.as_mut().filter(|menu| menu.item == id) {
+            menu.fetching = false;
         }
     }
 

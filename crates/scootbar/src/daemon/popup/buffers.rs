@@ -119,10 +119,9 @@ impl Pool {
         if entry
             .as_ref()
             .is_some_and(|s| s.dims != dims || s.rounded != rounded)
+            && let Some(stale) = entry.take()
         {
-            if let Some(stale) = entry.take() {
-                stale.destroy();
-            }
+            stale.destroy();
         }
         if entry.is_none() {
             *entry = Some(Slot::new(globals, qh, id, dims, rounded)?);

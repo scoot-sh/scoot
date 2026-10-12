@@ -444,11 +444,12 @@ impl Module for Bluetooth {
                 timer -= 1;
             }
             let holding = self.held.is_some();
-            if holding && timer == 0 {
-                if let Some(held) = self.held.take() {
-                    held.drain();
-                    return self.draw_now();
-                }
+            if holding
+                && timer == 0
+                && let Some(held) = self.held.take()
+            {
+                held.drain();
+                return self.draw_now();
             }
             if holding {
                 timer -= 1;

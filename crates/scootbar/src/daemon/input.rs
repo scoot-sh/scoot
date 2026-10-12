@@ -56,11 +56,11 @@ impl Throttle {
     /// Whether a failure at `now` may be said; a failure that may not is
     /// counted and reported with the next line that may.
     pub(crate) fn allow(&mut self, now: Instant) -> Option<u32> {
-        if let Some(last) = self.last {
-            if now.saturating_duration_since(last) < WARN_EVERY {
-                self.held = self.held.saturating_add(1);
-                return None;
-            }
+        if let Some(last) = self.last
+            && now.saturating_duration_since(last) < WARN_EVERY
+        {
+            self.held = self.held.saturating_add(1);
+            return None;
         }
         self.last = Some(now);
         Some(std::mem::take(&mut self.held))
@@ -330,17 +330,16 @@ impl State {
             // release's serial for the grab. A press with a binding
             // already opened or closed above; a scroll never asks.
             #[cfg(feature = "popup")]
-            if wants {
-                if let Err(why) = self.open_popup(qh, output, member, Some(serial)) {
-                    if let Some(held) = self.warned.allow(Instant::now()) {
-                        let more = if held > 0 {
-                            format!(" ({held} more since)")
-                        } else {
-                            String::new()
-                        };
-                        warn(format_args!("scootbar: popup: {why}{more}"));
-                    }
-                }
+            if wants
+                && let Err(why) = self.open_popup(qh, output, member, Some(serial))
+                && let Some(held) = self.warned.allow(Instant::now())
+            {
+                let more = if held > 0 {
+                    format!(" ({held} more since)")
+                } else {
+                    String::new()
+                };
+                warn(format_args!("scootbar: popup: {why}{more}"));
             }
             #[cfg(not(feature = "popup"))]
             let _ = wants;
@@ -385,18 +384,18 @@ impl State {
             return;
         }
         self.input.disarm();
-        if let Err(why) = self.open_popup(qh, target.output, target.member, Some(serial)) {
-            if let Some(held) = self.warned.allow(Instant::now()) {
-                let more = if held > 0 {
-                    format!(" ({held} more since)")
-                } else {
-                    String::new()
-                };
-                warn(format_args!(
-                    "scootbar: {} opening a popup: {why}{more}",
-                    trigger.key()
-                ));
-            }
+        if let Err(why) = self.open_popup(qh, target.output, target.member, Some(serial))
+            && let Some(held) = self.warned.allow(Instant::now())
+        {
+            let more = if held > 0 {
+                format!(" ({held} more since)")
+            } else {
+                String::new()
+            };
+            warn(format_args!(
+                "scootbar: {} opening a popup: {why}{more}",
+                trigger.key()
+            ));
         }
     }
 

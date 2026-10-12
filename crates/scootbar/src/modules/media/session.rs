@@ -261,11 +261,11 @@ impl Live {
             let Some(flight) = self.flights.get_mut(token as usize).and_then(Option::take) else {
                 continue;
             };
-            if let Op::Props(id) = flight.op {
-                if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
-                    player.asked = None;
-                    player.stale = false;
-                }
+            if let Op::Props(id) = flight.op
+                && let Some(player) = self.players.iter_mut().find(|p| p.id == id)
+            {
+                player.asked = None;
+                player.stale = false;
             }
         }
     }
@@ -337,10 +337,8 @@ impl Live {
             &body,
             Op::Props(id),
         );
-        if !queued {
-            if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
-                player.asked = None;
-            }
+        if !queued && let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
+            player.asked = None;
         }
     }
 
@@ -625,10 +623,10 @@ impl Live {
         if !room_to_make || self.players.len() < MAX_PLAYERS {
             return;
         }
-        if let Some(at) = self.waiting.iter().position(|(_, _, evicted)| !evicted) {
-            if let Some((name, owner, _)) = self.waiting.remove(at) {
-                self.add(name, owner);
-            }
+        if let Some(at) = self.waiting.iter().position(|(_, _, evicted)| !evicted)
+            && let Some((name, owner, _)) = self.waiting.remove(at)
+        {
+            self.add(name, owner);
         }
     }
 

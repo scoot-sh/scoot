@@ -269,11 +269,11 @@ impl Format {
         self.text.push(c);
         // At most `MAX_FORMAT` bytes of text: fits a `u16`.
         let end = self.text.len() as u16;
-        if let Some(Item::Literal { end: last, .. }) = self.items.last_mut() {
-            if usize::from(*last) == start {
-                *last = end;
-                return;
-            }
+        if let Some(Item::Literal { end: last, .. }) = self.items.last_mut()
+            && usize::from(*last) == start
+        {
+            *last = end;
+            return;
         }
         self.items.push(Item::Literal {
             start: start as u16,

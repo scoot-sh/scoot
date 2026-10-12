@@ -174,10 +174,10 @@ impl Open {
     /// Everything, children first: the keyboard, the popup, its role
     /// object, the viewport, the surface, then the buffers.
     fn destroy(mut self) {
-        if let Some(keyboard) = self.keyboard.take() {
-            if keyboard.version() >= 3 {
-                keyboard.release();
-            }
+        if let Some(keyboard) = self.keyboard.take()
+            && keyboard.version() >= 3
+        {
+            keyboard.release();
         }
         self.popup.destroy();
         self.xdg.destroy();
@@ -580,18 +580,17 @@ impl State {
             &action,
             None,
             &mut effects,
-        ) {
-            if let Some(held) = self.warned.allow(std::time::Instant::now()) {
-                let more = if held > 0 {
-                    format!(" ({held} more since)")
-                } else {
-                    String::new()
-                };
-                warn(format_args!(
-                    "scootbar: {} on the {id} module's popup: {failure}{more}",
-                    activate.action
-                ));
-            }
+        ) && let Some(held) = self.warned.allow(std::time::Instant::now())
+        {
+            let more = if held > 0 {
+                format!(" ({held} more since)")
+            } else {
+                String::new()
+            };
+            warn(format_args!(
+                "scootbar: {} on the {id} module's popup: {failure}{more}",
+                activate.action
+            ));
         }
         if activate.closes {
             self.popup.close();

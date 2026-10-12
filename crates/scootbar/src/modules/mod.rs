@@ -630,16 +630,15 @@ pub fn start(
         // A kept `exec`: the same id for the same table, wherever the
         // lists place it now (a move between sections or outputs keeps it
         // running, by the id rather than the position).
-        if let Some(custom) = settings.custom_named(id) {
-            if let Some(at) = old
+        if let Some(custom) = settings.custom_named(id)
+            && let Some(at) = old
                 .iter()
                 .position(|kept| kept.id == id && kept.module.keeps(custom))
-            {
-                let mut kept = old.remove(at);
-                kept.bindings = settings.bindings_of(id);
-                placed.push(kept);
-                continue;
-            }
+        {
+            let mut kept = old.remove(at);
+            kept.bindings = settings.bindings_of(id);
+            placed.push(kept);
+            continue;
         }
         // A built-in module, or one the config defines by name; the config
         // and the flags refuse any other id, skipped all the same.

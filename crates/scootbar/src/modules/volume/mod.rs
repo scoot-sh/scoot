@@ -255,12 +255,11 @@ fn cookie() -> [u8; 256] {
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".config")));
-    if let Some(path) = base.map(|base| base.join("pulse").join("cookie")) {
-        if let Ok(bytes) = std::fs::read(&path) {
-            if bytes.len() == 256 {
-                cookie.copy_from_slice(&bytes);
-            }
-        }
+    if let Some(path) = base.map(|base| base.join("pulse").join("cookie"))
+        && let Ok(bytes) = std::fs::read(&path)
+        && bytes.len() == 256
+    {
+        cookie.copy_from_slice(&bytes);
     }
     cookie
 }

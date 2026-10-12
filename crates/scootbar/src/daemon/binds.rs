@@ -203,17 +203,17 @@ impl State {
                 if shared.has_manager() {
                     shared.release();
                 }
-            } else if !shared.has_manager() {
-                if let Some(offer) = self.binds.manager {
-                    // Version 1 is the only one.
-                    let manager = self.binds.registry.bind::<ExtWorkspaceManagerV1, _, _>(
-                        offer.name,
-                        offer.version.min(1),
-                        qh,
-                        (),
-                    );
-                    shared.set_manager(manager);
-                }
+            } else if !shared.has_manager()
+                && let Some(offer) = self.binds.manager
+            {
+                // Version 1 is the only one.
+                let manager = self.binds.registry.bind::<ExtWorkspaceManagerV1, _, _>(
+                    offer.name,
+                    offer.version.min(1),
+                    qh,
+                    (),
+                );
+                shared.set_manager(manager);
             }
         }
         #[cfg(feature = "window-title")]
@@ -223,21 +223,21 @@ impl State {
                 if shared.has_manager() {
                     shared.release();
                 }
-            } else if !shared.has_manager() {
-                if let Some(offer) = self.binds.toplevel {
-                    // Version 3 is the newest: `fullscreen` state from 2,
-                    // `parent` from 3.
-                    let manager = self
-                        .binds
-                        .registry
-                        .bind::<ZwlrForeignToplevelManagerV1, _, _>(
-                            offer.name,
-                            offer.version.min(3),
-                            qh,
-                            (),
-                        );
-                    shared.set_manager(manager);
-                }
+            } else if !shared.has_manager()
+                && let Some(offer) = self.binds.toplevel
+            {
+                // Version 3 is the newest: `fullscreen` state from 2,
+                // `parent` from 3.
+                let manager = self
+                    .binds
+                    .registry
+                    .bind::<ZwlrForeignToplevelManagerV1, _, _>(
+                        offer.name,
+                        offer.version.min(3),
+                        qh,
+                        (),
+                    );
+                shared.set_manager(manager);
             }
         }
         #[cfg(feature = "popup")]
@@ -254,15 +254,15 @@ impl State {
             }
         }
         if self.wants_seat() {
-            if self.globals.seat.is_none() {
-                if let Some(offer) = self.binds.seat {
-                    self.globals.seat = Some(self.binds.registry.bind::<WlSeat, _, _>(
-                        offer.name,
-                        offer.version.min(9),
-                        qh,
-                        (),
-                    ));
-                }
+            if self.globals.seat.is_none()
+                && let Some(offer) = self.binds.seat
+            {
+                self.globals.seat = Some(self.binds.registry.bind::<WlSeat, _, _>(
+                    offer.name,
+                    offer.version.min(9),
+                    qh,
+                    (),
+                ));
             }
             // Whatever `activate` rides on: the title module keeps it while
             // one is bound.
@@ -273,10 +273,10 @@ impl State {
         } else if self.globals.seat.as_ref().is_some_and(|s| s.version() >= 5) {
             // Below version 5 a seat cannot be released: it stays, with its
             // pointer, rather than leave a live seat nothing holds.
-            if let Some(pointer) = self.pointer.take() {
-                if pointer.version() >= 3 {
-                    pointer.release();
-                }
+            if let Some(pointer) = self.pointer.take()
+                && pointer.version() >= 3
+            {
+                pointer.release();
             }
             self.input.leave();
             self.seat_pointer = false;

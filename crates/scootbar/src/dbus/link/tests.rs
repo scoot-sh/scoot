@@ -74,13 +74,12 @@ fn matched(link: &mut Link<Probe>) {
             start.elapsed() < Duration::from_secs(10),
             "the match never settled"
         );
-        if let Some((_, events)) = turn(link, Duration::from_millis(50)) {
-            if events
+        if let Some((_, events)) = turn(link, Duration::from_millis(50))
+            && events
                 .iter()
                 .any(|event| matches!(event, Event::Reply { token: MATCHED, .. }))
-            {
-                return;
-            }
+        {
+            return;
         }
     }
 }
@@ -289,14 +288,13 @@ fn a_signal_is_worked_through_the_closure_and_reports_a_change() {
     let start = Instant::now();
     loop {
         assert!(start.elapsed() < Duration::from_secs(10), "no signal");
-        if let Some((changed, events)) = turn(&mut link, Duration::from_millis(50)) {
-            if events
+        if let Some((changed, events)) = turn(&mut link, Duration::from_millis(50))
+            && events
                 .iter()
                 .any(|e| matches!(e, Event::Signal { member, .. } if member == "Ping"))
-            {
-                assert!(changed);
-                break;
-            }
+        {
+            assert!(changed);
+            break;
         }
         let _ = sender.pump();
     }

@@ -524,10 +524,10 @@ impl Fake {
                 );
             };
             let _ = interface;
-            if let Some(props) = self.state.props.get(destination) {
-                if let Some(variant) = find_prop(props, property) {
-                    return self.reply(message.serial, serial, "v", &variant);
-                }
+            if let Some(props) = self.state.props.get(destination)
+                && let Some(variant) = find_prop(props, property)
+            {
+                return self.reply(message.serial, serial, "v", &variant);
             }
             return self.error(
                 message.serial,

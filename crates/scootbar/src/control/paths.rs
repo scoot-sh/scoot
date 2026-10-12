@@ -87,10 +87,10 @@ impl std::error::Error for PathError {}
     allow(dead_code)
 )]
 pub fn runtime_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
+    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR")
+        && !dir.is_empty()
+    {
+        return PathBuf::from(dir);
     }
     PathBuf::from(format!("/run/user/{}", rustix::process::getuid().as_raw()))
 }

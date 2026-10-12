@@ -385,13 +385,13 @@ impl Module for Tray {
                 timer -= 1;
             }
             let holding = self.link.live().is_some_and(|live| live.held.is_some());
-            if holding && timer == 0 {
-                if let Some(live) = self.link.live_mut() {
-                    if let Some(held) = live.held.take() {
-                        held.drain();
-                        return live.draw_now();
-                    }
-                }
+            if holding
+                && timer == 0
+                && let Some(live) = self.link.live_mut()
+                && let Some(held) = live.held.take()
+            {
+                held.drain();
+                return live.draw_now();
             }
             return Update::Unchanged;
         }

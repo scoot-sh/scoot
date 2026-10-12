@@ -179,10 +179,10 @@ pub fn load(spec: &Spec) -> Loaded {
         },
         Err(error) => error,
     };
-    if let Some(text) = fallback {
-        if let Ok(tz) = Tz::posix(text) {
-            return Loaded { tz, problem: None };
-        }
+    if let Some(text) = fallback
+        && let Ok(tz) = Tz::posix(text)
+    {
+        return Loaded { tz, problem: None };
     }
     Loaded {
         tz: Tz::utc(),

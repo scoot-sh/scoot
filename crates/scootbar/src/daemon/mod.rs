@@ -263,13 +263,11 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         // what the last poll reported. A failed accept rests the listener
         // rather than spins or exits (`listen`).
         let (listen, timeout) = listening.poll_plan(Instant::now);
-        if listen {
-            if let Err(error) = server.accept(claim.listener()) {
-                warn(format_args!(
-                    "scootbar: cannot accept control clients: {error}"
-                ));
-                listening.rest(Instant::now());
-            }
+        if listen && let Err(error) = server.accept(claim.listener()) {
+            warn(format_args!(
+                "scootbar: cannot accept control clients: {error}"
+            ));
+            listening.rest(Instant::now());
         }
         // The popup first: a module whose popup is gone closes it before
         // anything else is drawn, and a changed module redraws it.
@@ -306,11 +304,9 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         // The modules' poll slots end here; the ready flags below must
         // not read past them (the control slots reuse no owners).
         let sources = len;
-        if listen {
-            if let Some(slot) = fds.get_mut(len) {
-                *slot = PollFd::new(claim.listener(), PollFlags::IN);
-                len += 1;
-            }
+        if listen && let Some(slot) = fds.get_mut(len) {
+            *slot = PollFd::new(claim.listener(), PollFlags::IN);
+            len += 1;
         }
         let conns_at = len;
         for conn in server.conns() {
@@ -457,17 +453,16 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
                     &hook,
                     None,
                     &mut effects,
-                ) {
-                    if let Some(held) = warned.allow(Instant::now()) {
-                        let more = if held > 0 {
-                            format!(" ({held} more since)")
-                        } else {
-                            String::new()
-                        };
-                        warn(format_args!(
-                            "scootbar: on-low on the {id} module: {failure}{more}"
-                        ));
-                    }
+                ) && let Some(held) = warned.allow(Instant::now())
+                {
+                    let more = if held > 0 {
+                        format!(" ({held} more since)")
+                    } else {
+                        String::new()
+                    };
+                    warn(format_args!(
+                        "scootbar: on-low on the {id} module: {failure}{more}"
+                    ));
                 }
             }
         }
