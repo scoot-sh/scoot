@@ -242,7 +242,7 @@ if command -v curl >/dev/null 2>&1; then
 elif command -v wget >/dev/null 2>&1; then
     fetch() { wget -q -O "$2" "$1"; }
 else
-    die "needs curl or wget"
+    die "needs curl or wget (e.g. sudo apt install curl)"
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then
@@ -271,13 +271,13 @@ if [ "$nightly" = 0 ]; then
     fetch "$RELEASES_URL" "$tmp/releases.json" || die "could not list releases at $RELEASES_URL"
     if [ -n "$scoot_version" ]; then
         scoot_tag=scoot-v$scoot_version
-        grep -q "\"$scoot_tag\"" "$tmp/releases.json" || die "no release $scoot_tag"
+        grep -q "\"tag_name\": *\"$scoot_tag\"" "$tmp/releases.json" || die "no release $scoot_tag"
     else
         scoot_tag=$(latest_tag scoot)
     fi
     if [ -n "$bar_version" ]; then
         bar_tag=scootbar-v$bar_version
-        grep -q "\"$bar_tag\"" "$tmp/releases.json" || die "no release $bar_tag"
+        grep -q "\"tag_name\": *\"$bar_tag\"" "$tmp/releases.json" || die "no release $bar_tag"
     else
         bar_tag=$(latest_tag scootbar)
     fi
@@ -359,14 +359,24 @@ sed "s|^Exec=.*|Exec=$bin_dir/scoot-session|" "$tmp/scoot.desktop" >"$tmp/scoot.
 : >"$tmp/manifest.new"
 
 # Refuse before writing anything if a destination holds a file this
-# script did not install (a distro package, a source build).
-dests="$bin_dir/scoot $bin_dir/scootbg $bin_dir/scoot-session $unit_dir/scoot.service
-$unit_dir/scoot-session.target $unit_dir/scoot-shutdown.target $portal_dir/scoot-portals.conf"
-if [ "$with_bar" = 1 ]; then dests="$dests $bin_dir/scootbar $unit_dir/scootbar.service"; fi
-if [ -n "$session_file" ]; then dests="$dests $session_file"; fi
-for d in $dests; do
-    ours "$d" || die "$d exists and was not installed by this script (a distro package or a source build?). Remove it first, or install elsewhere with --prefix."
-done
+# script did not install (a distro package, a source build). One call
+# per destination: the paths may contain spaces (a $HOME with one), so
+# they are never joined into a word-split string.
+check_ours() {
+    ours "$1" || die "$1 exists and was not installed by this script (a distro package or a source build?). Remove it first, or install elsewhere with --prefix."
+}
+check_ours "$bin_dir/scoot"
+check_ours "$bin_dir/scootbg"
+check_ours "$bin_dir/scoot-session"
+check_ours "$unit_dir/scoot.service"
+check_ours "$unit_dir/scoot-session.target"
+check_ours "$unit_dir/scoot-shutdown.target"
+check_ours "$portal_dir/scoot-portals.conf"
+if [ "$with_bar" = 1 ]; then
+    check_ours "$bin_dir/scootbar"
+    check_ours "$unit_dir/scootbar.service"
+fi
+if [ -n "$session_file" ]; then check_ours "$session_file"; fi
 
 place "$tmp/$scoot_asset" "$bin_dir/scoot" 755
 place "$tmp/$bg_asset" "$bin_dir/scootbg" 755
@@ -476,6 +486,16 @@ pkg_for() {
         case "$1" in
         libseat*) echo libseat ;; libinput*) echo libinput ;; libxkbcommon*) echo libxkbcommon ;;
         libudev*) echo systemd-libs ;; libpixman*) echo pixman ;; foot) echo foot ;;
+        esac
+        ;;
+    # openSUSE names its libraries the Debian way (libseat1, libinput10,
+    # ...: verified against Tumbleweed's own metadata), so it shares the
+    # default below; this branch only documents that the fallthrough is
+    # deliberate, not a gap.
+    *suse*)
+        case "$1" in
+        libseat*) echo libseat1 ;; libinput*) echo libinput10 ;; libxkbcommon*) echo libxkbcommon0 ;;
+        libudev*) echo libudev1 ;; libpixman*) echo libpixman-1-0 ;; foot) echo foot ;;
         esac
         ;;
     *)

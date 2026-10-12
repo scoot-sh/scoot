@@ -59,15 +59,44 @@ for ref in scoot-v0.1.0 "$commit"; do
     printf 'left = []\n' >"$r/docs/examples/moonrise/bar.toml"
     printf 'moon\n' >"$r/docs/assets/wallpapers/moonrise.png"
 done
-printf '[{"tag_name": "nightly"}, {"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0"}]' >"$f/tags.json"
+printf '[{"tag_name": "nightly"}, {"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0", "body": "compare scoot-v9.9.9 and scootbar-v9.9.9"}]' >"$f/tags.json"
 printf '[]' >"$f/none.json"
 
 export SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl" SCOOT_INSTALL_RAW_URL="file://$f/raw"
 unset XDG_CONFIG_HOME XDG_DATA_HOME
+
+# Portable uname/getconf: on macOS the installer would refuse Darwin and
+# miss glibc, so shadow both (anything else passes through to the real
+# tools). uname answers the real machine with a Linux kernel name; getconf
+# answers the glibc floor the script requires. On a Linux box at or past
+# that floor the stubs change nothing, so the suite proves the same
+# behavior there.
+real_uname=$(command -v uname)
+real_getconf=$(command -v getconf || true)
+mkdir -p "$work/bin"
+# shellcheck disable=SC2016 # the $1 must stay literal: it runs in the stub, not here.
+printf '#!/bin/sh\nif [ "${1:-}" = -s ]; then echo Linux; else exec "%s" "$@"; fi\n' "$real_uname" >"$work/bin/uname"
+chmod +x "$work/bin/uname"
+if [ -n "$real_getconf" ]; then
+    # shellcheck disable=SC2016 # same: literal $1 for the stub.
+    printf '#!/bin/sh\nif [ "${1:-}" = GNU_LIBC_VERSION ]; then echo "glibc 2.36"; else exec "%s" "$@"; fi\n' "$real_getconf" >"$work/bin/getconf"
+    chmod +x "$work/bin/getconf"
+fi
+PATH="$work/bin:$PATH"
+# Fake user manager: a CI runner has a real `systemctl --user`, which would
+# enable units outside the test HOME (and fail when the unit is not in the
+# real search path). Shadow it with a stub that records calls and tracks
+# enabled units in a file, so the suite asserts the enable/disable contract
+# without touching the host.
+mkdir -p "$work/fake-systemd"
+# shellcheck disable=SC2016 # every $ here runs in the stub, not in this file.
+printf '#!/bin/sh\n# fake systemctl for the installer gate: log, never touch the host.\nlog="%s/systemctl.log"\nstatedir="%s/fake-systemd"\necho "systemctl $*" >>"$log"\nif [ "${1:-}" = --user ]; then shift; fi\ncase "${1:-}" in\nshow-environment) exit 0 ;;\nis-enabled) [ -f "$statedir/$2.enabled" ] ;;\nenable) touch "$statedir/$2.enabled" ;;\ndisable) rm -f "$statedir/$2.enabled" ;;\ndaemon-reload) exit 0 ;;\n*) exit 0 ;;\nesac\n' "$work" "$work" >"$work/bin/systemctl"
+chmod +x "$work/bin/systemctl"
+: >"$work/systemctl.log"
 run_in() {
     h=$1
     shift
-    HOME=$h SCOOT_INSTALL_RELEASES_URL=${releases:-file://$f/tags.json} sh "$installer" "$@" >"$work/out" 2>&1
+    HOME="$h" SCOOT_INSTALL_RELEASES_URL=${releases:-file://$f/tags.json} sh "$installer" "$@" >"$work/out" 2>&1
 }
 
 # 1. Tagged release, a look, user install.
@@ -84,6 +113,8 @@ grep -q "WantedBy=scoot-session.target" "$h/.config/systemd/user/scootbar.servic
 grep -q "command = \[\"$h/.config/scoot/cpu.sh\"\]" "$h/.config/scoot/bar.toml" || fail "bar script not by full path"
 [ ! -e "$h/.local/bin/cpu.sh" ] || fail "look script dropped into the bin directory"
 grep -q 'image = "wallpaper.png"' "$h/.config/scoot/config.toml" || fail "look config"
+grep -q "systemctl --user enable scootbar.service" "$work/systemctl.log" || fail "bar unit not enabled"
+grep -q "systemctl --user daemon-reload" "$work/systemctl.log" || fail "no daemon-reload after install"
 ok "tagged install with a look"
 
 # 2. A second look never overwrites the first, and a re-run updates
@@ -101,12 +132,26 @@ if run_in "$h"; then fail "a foreign scoot was replaced"; fi
 grep -q "was not installed by this script" "$work/out" || fail "foreign-file message"
 [ "$(cat "$h/.local/bin/scoot")" = foreign ] && [ ! -e "$h/.local/bin/scootbg" ] || fail "refusal wrote files"
 ok "foreign files refused before anything is written"
+
+# 2c. The refusal also fires when the paths contain spaces, and a clean
+#     install works there too (the check never word-splits destinations).
+h="$work/h space"
+mkdir -p "$h/.local/bin"
+echo foreign >"$h/.local/bin/scoot"
+if run_in "$h"; then fail "a foreign scoot under a spaced HOME was replaced"; fi
+grep -q "was not installed by this script" "$work/out" || fail "spaced-HOME refusal message"
+[ "$(cat "$h/.local/bin/scoot")" = foreign ] || fail "spaced-HOME refusal wrote files"
+rm "$h/.local/bin/scoot"
+run_in "$h" || { cat "$work/out"; fail "install under a spaced HOME"; }
+[ "$("$h/.local/bin/scoot")" = "scoot 0.1.0" ] || fail "spaced-HOME install is not the tagged build"
+ok "spaced HOME: refusal fires, install works"
 h=$work/h1
 
 # 3. Uninstall removes what was installed and keeps the config.
 run_in "$h" --uninstall || fail "uninstall"
 [ ! -e "$h/.local/bin/scoot" ] && [ ! -e "$h/.config/systemd/user/scoot.service" ] || fail "uninstall left files"
 [ -f "$h/.config/scoot/config.toml" ] || fail "uninstall removed the config"
+grep -q "systemctl --user disable scootbar.service" "$work/systemctl.log" || fail "bar unit not disabled on uninstall"
 ok "uninstall"
 
 # 3b. A run that fails halfway still records what it placed.
@@ -123,6 +168,7 @@ ok "partial run recorded and removable"
 # 4. No tag yet: nightly, and a relative wallpaper outside the look dir.
 h=$work/h2
 releases=file://$f/none.json run_in "$h" --look moonrise || { cat "$work/out"; fail "nightly fallback"; }
+unset releases
 grep -q "installing the nightly build" "$work/out" || fail "nightly fallback not announced"
 grep -q "Installing scoot nightly 0.1.42+rev-0123456" "$work/out" || fail "nightly not labeled with its rolling version"
 [ "$("$h/.local/bin/scoot")" = "scoot nightly" ] || fail "fallback is not nightly"
@@ -140,9 +186,14 @@ ok "checksum refusal"
 # 6. Dry run changes nothing; bad options are refused.
 h=$work/h4
 releases=file://$f/none.json run_in "$h" --dry-run || fail "dry run"
+unset releases
 [ ! -e "$h/.local" ] || fail "dry run wrote files"
 if run_in "$h" --look nope; then fail "unknown look accepted"; fi
 if run_in "$h" --nightly --version 1.0.0; then fail "--nightly --version accepted"; fi
+# The release body mentions scoot-v9.9.9, but no such tag exists: an
+# explicit --version must match a tag_name, not any mention.
+if run_in "$h" --version 9.9.9; then fail "a body-text version was accepted"; fi
+grep -q "no release scoot-v9.9.9" "$work/out" || fail "body-text version message"
 ok "dry run and refusals"
 
 printf 'test-install: all passed\n'
