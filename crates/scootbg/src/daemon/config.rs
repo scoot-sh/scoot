@@ -353,15 +353,15 @@ fn adopt(state: &mut State, profile: Profile) -> Record {
     // save): wait for that write, bounded, so the file read below is the
     // newest. This stalls the loop only then, and only as long as the disk
     // takes to finish a write of a few hundred bytes.
-    if let Some(old) = state.retired.iter().find(|old| *old.profile() == profile) {
-        if !old.flush(super::SAVE_GRACE) {
-            warn(format_args!(
-                "scootbg: the state file of profile {:?} was still being written after {} s; \
+    if let Some(old) = state.retired.iter().find(|old| *old.profile() == profile)
+        && !old.flush(super::SAVE_GRACE)
+    {
+        warn(format_args!(
+            "scootbg: the state file of profile {:?} was still being written after {} s; \
                  reading it as it is",
-                profile.as_str(),
-                super::SAVE_GRACE.as_secs()
-            ));
-        }
+            profile.as_str(),
+            super::SAVE_GRACE.as_secs()
+        ));
     }
     let (mut saved, record) = restore::load(profile);
     let generation = state.waiters.next_generation();

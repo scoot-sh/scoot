@@ -211,16 +211,16 @@ fn deliver(profile: &Profile, section: &Section, may_start: MayStart) -> Result<
         }
         // Nothing answers yet.
         if let Some(child) = started.as_mut() {
-            if let Ok(Some(status)) = child.try_wait() {
-                if !status.success() {
-                    return Err(said(format!(
-                        "the daemon it started exited ({status}) before answering; \
+            if let Ok(Some(status)) = child.try_wait()
+                && !status.success()
+            {
+                return Err(said(format!(
+                    "the daemon it started exited ({status}) before answering; \
                          why is above"
-                    )));
-                }
-                // It lost the race and forwarded the section: a daemon
-                // runs, and answers soon.
+                )));
             }
+            // It lost the race and forwarded the section: a daemon
+            // runs, and answers soon.
         } else {
             match lock_if_free(&paths.lock).map_err(|error| said(error.to_string()))? {
                 Some(_) if may_start == MayStart::Never => return Err(Undelivered::NoDaemon),
