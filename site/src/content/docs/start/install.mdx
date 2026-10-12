@@ -1,9 +1,9 @@
 ---
 title: Install
-description: "Run scoot in your browser with Docker, or in a window with Nix — then keep it on NixOS or any Linux."
+description: "Try scoot in your browser, install it on any Linux with one command, or get the whole desktop on NixOS with a flake and home-manager."
 ---
 
-import { Tabs, TabItem, Steps, Aside, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { Tabs, TabItem, Steps, Aside } from '@astrojs/starlight/components';
 
 Two minutes from here to a scoot window. The cat is impatient too.
 
@@ -23,7 +23,9 @@ You need [Docker](https://docs.docker.com/get-started/get-docker/). Nothing else
 
 3. Click the desktop. One terminal is already open.
 
-4. Press `Alt+Return`. A second terminal opens. This route uses `Alt`, because your browser keeps `Super`.
+4. Press `Alt+Return`. A second terminal opens. This route uses `Alt`
+   wherever the rest of the docs say `Super`, because your browser
+   keeps `Super`.
 
 5. To stop, press `Ctrl+C` in the terminal where you started the container. `--rm` deletes the container.
 
@@ -35,176 +37,239 @@ security](https://github.com/scoot-sh/try-scoot#ports-and-security).
 
 ## Or in a window on Linux (Nix)
 
-You need Linux and [Nix](https://nixos.org/download/). On macOS, Nix
-runs only the `scoot msg` client, so use the browser route above. Nix
-keeps scoot in its own store. Nothing goes on your `PATH`.
-
-<Steps>
-
-1. Start scoot in a window, with a terminal in it.
-
-   ```sh
-   nix shell --accept-flake-config github:scoot-sh/scoot nixpkgs#foot --command scoot --nested -- foot
-   ```
-
-2. Press `Super+Return`. A second terminal opens. Some desktops keep `Super` for themselves. If nothing happens, use the browser route above.
-
-3. Close the window to quit.
-
-</Steps>
-
-That is scoot. It ran inside your desktop and touched nothing.
-
-> **Symptom:** step 1 compiles for many minutes.
-> Your Nix does not trust the scoot cache. A multi-user Nix install starts that way.
-> 1. Stop the build with `Ctrl+C`.
-> 2. Add the cache to the system Nix config. Use the command below.
-> 3. Do step 1 again.
+Already have [Nix](https://nixos.org/download/)? This runs scoot inside
+your current desktop and installs nothing:
 
 ```sh
-conf=/etc/nix/nix.conf
-if [ -e /etc/nix/nix.custom.conf ]; then conf=/etc/nix/nix.custom.conf; fi
-printf '%s\n' \
-  'extra-substituters = https://scoot-sh.cachix.org' \
-  'extra-trusted-public-keys = scoot-sh.cachix.org-1:QMj7CMw8uqZxrvqqm6SggdxTHz6Q4prt30ydDcXJXCo=' \
-  | sudo tee -a "$conf"
-if systemctl is-active --quiet nix-daemon; then sudo systemctl restart nix-daemon; fi
+nix shell --accept-flake-config github:scoot-sh/scoot nixpkgs#foot --command scoot --nested -- foot
 ```
 
-On NixOS, use the NixOS tab below instead. What the cache is, and what
-it trusts: [Use the binary cache](../binary-cache/).
-
-## Which way fits you?
-
-<CardGrid>
-  <LinkCard title="Try it in a browser" description="Docker, no install, macOS and Windows too." href="#try-it-in-your-browser" />
-  <LinkCard title="Use it every day" description="NixOS, any Linux with Nix, or from source." href="#use-it-every-day" />
-  <LinkCard title="Build your desktop" description="Add a bar, a wallpaper, a launcher and notifications." href="../compose/" />
-  <LinkCard title="Drive it from an agent" description="Run it headless, then control it over a socket." href="../../agents/" />
-</CardGrid>
+Press `Super+Return` for a second terminal; close the window to quit.
+If it compiles for minutes, your Nix does not trust the scoot cache
+yet: see [Use the binary cache](../binary-cache/).
 
 ## Use it every day
 
 Pick your system. The site remembers your choice.
 
 <Tabs syncKey="distro">
+<TabItem label="Any Linux">
+
+One command installs scoot, the wallpaper daemon and the bar from
+GitHub, checks every file against the release's checksums, and tells
+you which system libraries are missing. Any glibc distro from 2022 on
+(Debian 12, Ubuntu 24.04, Fedora, Arch, openSUSE), x86_64 or aarch64.
+
+```sh
+curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --system --look ginger-night
+```
+
+Then log out and pick **scoot** on your login screen.
+
+- `--system` installs under `/usr/local` and adds scoot to the login
+  screen; it asks for `sudo`. Leave it off to install into `~/.local`
+  with no root, and start a session from a text console with
+  `scoot-session`.
+- `--look` writes one of the five [looks](../../scoot/theming/) to
+  `~/.config/scoot`. A file you already have is never overwritten.
+- `--nightly` takes `main`'s latest build instead of the newest
+  release. It is rebuilt on every merge, the same build Nix users get.
+- `--uninstall` (with `--system` if you used it) removes exactly what
+  the script installed. Your config stays.
+
+Read the script before you run it:
+[install.sh](https://www.scoot.sh/install.sh). Every option:
+`sh install.sh --help`.
+
+This gets you the compositor, the bar and the wallpaper. The lock,
+notifications, launcher and screenshots come from your distro: [Build
+your desktop](../compose/#any-other-linux-the-parts) has the one
+command per distro.
+
+</TabItem>
 <TabItem label="NixOS">
 
-The full desktop: bar, wallpaper, lock, notifications, launcher,
-screenshots and a look. The NixOS module registers the session with
-your login screen; home-manager below configures your user.
+**This is the easy mode.** A flake with home-manager gets you the whole
+scoot desktop from one switch: the bar, wallpaper, lock, notifications,
+launcher, clipboard history, screenshots and screen sharing, all themed
+by one look, and rolled back together if you change your mind.
+
+Three files. Change `myhost` to your host name and `alice` to your user
+name everywhere below.
 
 <Steps>
 
-1. Add scoot and home-manager to the `inputs` of your `flake.nix`.
+1. `flake.nix` adds scoot and home-manager, and loads both sides of
+   scoot for your user.
 
-   ```nix
-   scoot.url = "github:scoot-sh/scoot";
-   home-manager.url = "github:nix-community/home-manager";
-   home-manager.inputs.nixpkgs.follows = "nixpkgs";
+   ```nix title="flake.nix"
+   {
+     inputs = {
+       nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+       home-manager.url = "github:nix-community/home-manager";
+       home-manager.inputs.nixpkgs.follows = "nixpkgs";
+       scoot.url = "github:scoot-sh/scoot";
+     };
+
+     outputs = { nixpkgs, home-manager, scoot, ... }@inputs: {
+       nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+         system = "x86_64-linux";
+         specialArgs = { inherit inputs; };
+         modules = [
+           ./configuration.nix
+           scoot.nixosModules.scoot
+           home-manager.nixosModules.home-manager
+           {
+             home-manager.useGlobalPkgs = true;
+             home-manager.useUserPackages = true;
+             home-manager.extraSpecialArgs = { inherit inputs; };
+             home-manager.sharedModules = [
+               scoot.homeModules.scoot
+               scoot.homeModules.scootbar
+             ];
+             home-manager.users.alice = import ./home.nix;
+           }
+         ];
+       };
+     };
+   }
    ```
 
-2. Add the modules to `flake.nix`. Pass `inputs` in `specialArgs`.
+2. `configuration.nix` is the system side: the login-screen entry and
+   the system services. Add these lines to the one you have. The cache
+   lines save compiling Smithay on the first rebuild.
 
-   ```nix
-   outputs = { nixpkgs, scoot, home-manager, ... }@inputs: {
-     nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
-       system = "x86_64-linux";
-       specialArgs = { inherit inputs; };
-       modules = [
-         ./configuration.nix
-         scoot.nixosModules.scoot
-         home-manager.nixosModules.home-manager
+   ```nix title="configuration.nix"
+   {
+     programs.scoot = {
+       enable = true;
+       desktop.enable = true;
+     };
+
+     nix.settings = {
+       extra-substituters = [ "https://scoot-sh.cachix.org" ];
+       extra-trusted-public-keys = [
+         "scoot-sh.cachix.org-1:QMj7CMw8uqZxrvqqm6SggdxTHz6Q4prt30ydDcXJXCo="
        ];
      };
-   };
+   }
    ```
 
-3. Turn scoot on in `configuration.nix`. Change `myhost` below to your host name.
+3. `home.nix` is your side: the look, the config file and the
+   per-user services. Create it next to `flake.nix`. Set
+   `home.stateVersion` to your NixOS release (do not copy the value
+   blindly: it must match your release).
 
-   ```nix
-   programs.scoot = {
-     enable = true;
-     desktop.enable = true;
-   };
+   ```nix title="home.nix"
+   {
+     programs.scoot = {
+       enable = true;
+       desktop.enable = true;
+       desktop.look = "ginger-night";
+     };
+
+     home.stateVersion = "26.05";
+   }
    ```
 
-4. Before you rebuild, add the cache to `configuration.nix`. Without it, the first rebuild compiles Smithay.
-
-   ```nix
-   nix.settings = {
-     extra-substituters = [ "https://scoot-sh.cachix.org" ];
-     extra-trusted-public-keys = [
-       "scoot-sh.cachix.org-1:QMj7CMw8uqZxrvqqm6SggdxTHz6Q4prt30ydDcXJXCo="
-     ];
-   };
-   ```
-
-5. Rebuild.
+4. Rebuild.
 
    ```sh
    sudo nixos-rebuild switch --flake .#myhost
    ```
 
-6. Log out. Pick **scoot** on your login screen.
+5. Log out. Pick **scoot** on your login screen.
 
 </Steps>
 
-Your other sessions stay. Nothing replaces your login screen unless
-you also set `programs.scoot.greeter.enable = true;` (see [Build your
-desktop](../compose/)).
+Your other sessions stay. To undo, set `desktop.enable = false;` in
+both files and rebuild, or boot the previous generation.
 
-On real hardware with a GPU, take the GPU build and enable graphics:
-`package = inputs.scoot.packages.${pkgs.system}.scoot-gpu;` beside the
-lines above, plus `hardware.graphics.enable = true;`. VMs and
-containers stay on the default.
+Every snippet on this site is titled with the file it goes in. Most
+desktop options are titled **configuration.nix and home.nix**: each
+side does its half (the system installs the service, your user runs
+it), so set them in both.
 
-<details>
-<summary>Add your user config (home-manager)</summary>
+On real hardware with a GPU, take the GPU build: add
+`package = inputs.scoot.packages.${pkgs.system}.scoot-gpu;` to
+`programs.scoot` in `configuration.nix` (which then starts
+`{ inputs, pkgs, ... }:`), plus `hardware.graphics.enable = true;`. VMs
+and containers stay on the default.
 
-Without this, you get the session entry and the packages but no bar,
-lock or notifications: those live on the home-manager side. Change
-`alice` to your user name. Set `home.stateVersion` to your NixOS
-release (do not copy the value blindly: it must match your release).
-
-```nix
-home-manager.users.alice = {
-  imports = [
-    inputs.scoot.homeModules.scoot
-    inputs.scoot.homeModules.scootbar
-  ];
-  programs.scoot = {
-    enable = true;
-    desktop.enable = true;
-  };
-  home.stateVersion = "26.05";
-};
-```
-
-</details>
-
-No flake yet, standalone home-manager, and every option: [The scoot
+The login screen, every piece and every option: [The scoot
 desktop](../../desktop/).
 
 </TabItem>
-<TabItem label="Other Linux (Nix)">
+<TabItem label="Other Linux with Nix">
 
-Keep scoot on any Linux that has Nix. Do step 1 of [Or in a window on
-Linux](#or-in-a-window-on-linux-nix) first, so Nix downloads instead
-of compiling.
+Nix on another distro gets the themed desktop from home-manager on its
+own: the config, the bar, the user services and the look. Your distro
+keeps the login screen.
 
-```sh
-nix profile add github:scoot-sh/scoot#scoot github:scoot-sh/scoot#scootbar github:scoot-sh/scoot#scootbg
-```
+<Steps>
 
-Older Nix spells it `nix profile install`. This gives you the
-binaries, but no login-screen entry. Start scoot from a text console:
-see [First run](../first-session/).
+1. Turn on the [binary cache](../binary-cache/) first, so Nix
+   downloads instead of compiling.
+
+2. A standalone home-manager flake:
+
+   ```nix title="flake.nix"
+   {
+     inputs = {
+       nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+       home-manager.url = "github:nix-community/home-manager";
+       home-manager.inputs.nixpkgs.follows = "nixpkgs";
+       scoot.url = "github:scoot-sh/scoot";
+     };
+
+     outputs = { nixpkgs, home-manager, scoot, ... }@inputs: {
+       homeConfigurations.alice = home-manager.lib.homeManagerConfiguration {
+         pkgs = nixpkgs.legacyPackages.x86_64-linux;
+         extraSpecialArgs = { inherit inputs; };
+         modules = [
+           scoot.homeModules.scoot
+           scoot.homeModules.scootbar
+           ./home.nix
+         ];
+       };
+     };
+   }
+   ```
+
+3. The same `home.nix` as on NixOS, plus who you are:
+
+   ```nix title="home.nix"
+   {
+     programs.scoot = {
+       enable = true;
+       desktop.enable = true;
+       desktop.look = "ginger-night";
+     };
+
+     home.username = "alice";
+     home.homeDirectory = "/home/alice";
+     home.stateVersion = "26.05";
+   }
+   ```
+
+4. Apply it.
+
+   ```sh
+   nix run home-manager -- switch --flake .#alice
+   ```
+
+</Steps>
+
+To get scoot on your login screen too, also run the [Any
+Linux](#use-it-every-day) script with `--system --no-bar`: it adds the
+session entry, and home-manager keeps the bar and the config. Two
+pieces need your distro rather than home-manager: the lock screen's PAM
+service and backlight access ([details](../../desktop/#home-manager)).
 
 </TabItem>
 <TabItem label="From source">
 
-Rust 1.87 or newer. On Debian 13 or Ubuntu 24.04 and newer (older releases do not ship `libdisplay-info-dev`):
+Rust 1.88 or newer. On Debian 13 or Ubuntu 24.04 and newer (older releases do not ship `libdisplay-info-dev`):
 
 ```sh
 sudo apt install pkg-config libwayland-dev libxkbcommon-dev libinput-dev \
@@ -216,199 +281,8 @@ cargo build --release -p scoot -p scootbar -p scootbg
 ```
 
 The binaries are in `target/release/`. Copy them to a directory on
-your `PATH`.
-
-</TabItem>
-<TabItem label="Packages and ISO (coming)">
-
-<Aside type="caution" title="Coming">
-
-Signed distro repositories and an ISO download do not exist yet. Until
-they do, build the packages yourself (below).
-
-</Aside>
-
-When each channel is live, this tab holds its one-line install. The
-ISO will be a first-class option once tested: download it, write it to
-a USB stick, boot it, and get a live scoot session with an installer.
-Until then, build it yourself with one Nix command (below).
-
-<details>
-<summary>Today: build the Debian packages</summary>
-
-This works on Debian 12 and 13, and on Ubuntu 24.04 and newer.
-
-<Steps>
-
-1. Install the build tools.
-
-   ```sh
-   sudo apt install git curl build-essential pkg-config dpkg-dev python3 \
-     libseat-dev libinput-dev libxkbcommon-dev libudev-dev \
-     libpixman-1-dev libwayland-dev wayland-protocols
-   ```
-
-2. Install Rust 1.87 or newer. Your distro's Rust is too old.
-
-   ```sh
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-   . "$HOME/.cargo/env"
-   cargo install cargo-deny --locked
-   ```
-
-3. Get the source.
-
-   ```sh
-   git clone https://github.com/scoot-sh/scoot
-   cd scoot
-   ```
-
-4. Build the packages.
-
-   ```sh
-   scripts/vendor-release.sh --out "$HOME/scoot-build"
-   packaging/deb/build-deb.sh --source "$HOME/scoot-build/source" --out "$HOME/scoot-debs"
-   ```
-
-5. Install the packages.
-
-   ```sh
-   sudo apt install "$HOME"/scoot-debs/*.deb
-   ```
-
-</Steps>
-
-</details>
-
-<details>
-<summary>Today: build the Fedora packages</summary>
-
-<Steps>
-
-1. Install the build tools.
-
-   ```sh
-   sudo dnf install git cargo cargo-deny gcc rpm-build \
-     libinput-devel libseat-devel libxkbcommon-devel pixman-devel \
-     systemd-devel systemd-rpm-macros wayland-devel wayland-protocols-devel
-   ```
-
-2. Get the source.
-
-   ```sh
-   git clone https://github.com/scoot-sh/scoot
-   cd scoot
-   ```
-
-3. Make the source tarball.
-
-   ```sh
-   scripts/vendor-release.sh --out "$HOME/scoot-build"
-   ```
-
-4. Copy the tarball to the two names that the spec files expect.
-
-   ```sh
-   mkdir -p "$HOME/rpmbuild/SOURCES"
-   scoot_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scoot.spec)
-   bar_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scootbar.spec)
-   cp "$HOME"/scoot-build/scoot-*-vendored.tar.gz "$HOME/rpmbuild/SOURCES/scoot-$scoot_ver-vendored.tar.gz"
-   cp "$HOME"/scoot-build/scoot-*-vendored.tar.gz "$HOME/rpmbuild/SOURCES/scootbar-$bar_ver-vendored.tar.gz"
-   ```
-
-5. Build the packages.
-
-   ```sh
-   for spec in scootbg scoot scootbar; do rpmbuild -ba "packaging/rpm/$spec.spec"; done
-   ```
-
-6. Install the packages.
-
-   ```sh
-   sudo dnf install "$HOME"/rpmbuild/RPMS/*/*.rpm
-   ```
-
-</Steps>
-
-On openSUSE Tumbleweed, use `zypper` and the package names in [the rpm
-README](https://github.com/scoot-sh/scoot/blob/main/packaging/rpm/README.md).
-
-</details>
-
-<details>
-<summary>Today: build the Arch packages</summary>
-
-<Steps>
-
-1. Install the build tools.
-
-   ```sh
-   sudo pacman -S --needed base-devel git
-   ```
-
-2. Get the source.
-
-   ```sh
-   git clone https://github.com/scoot-sh/scoot
-   ```
-
-3. Install the wallpaper daemon first. `makepkg -si` builds the package and installs it.
-
-   ```sh
-   cd scoot/packaging/arch/scootbg-git && makepkg -si
-   ```
-
-4. Install the compositor.
-
-   ```sh
-   cd ../scoot-git && makepkg -si
-   ```
-
-5. Install the bar.
-
-   ```sh
-   cd ../scootbar-git && makepkg -si
-   ```
-
-</Steps>
-
-These packages track `main`.
-
-</details>
-
-<details>
-<summary>Today: build the ISO yourself</summary>
-
-<Steps>
-
-1. Build the ISO.
-
-   ```sh
-   nix build github:scoot-sh/scoot-iso#iso -o result-iso
-   ```
-
-2. Find the stick's device name. Make sure that it is the stick.
-
-   ```sh
-   lsblk
-   ```
-
-3. Write the ISO to the stick. This erases the stick. Change `/dev/sdX` to the stick's name.
-
-   ```sh
-   sudo dd if="$(echo result-iso/iso/*.iso)" of=/dev/sdX bs=4M status=progress oflag=sync
-   ```
-
-4. Boot the stick in UEFI mode.
-
-</Steps>
-
-Apple Silicon Macs cannot boot this ISO. Use [Asahi
-Linux](https://asahilinux.org/) and the NixOS tab.
-
-</details>
-
-Then start scoot: see [First run](../first-session/).
+your `PATH`. To build `.deb`, `.rpm` or Arch packages yourself, see
+[Package scoot offline](../../reference/packaging/).
 
 </TabItem>
 </Tabs>
@@ -449,60 +323,17 @@ Then start scoot: see [First run](../first-session/).
 
 All four work? You are done.
 
-## More choices
-
-Most people never need these. The defaults draw with the CPU renderer
-and run everywhere.
-
-<details>
-<summary>Which build do I need?</summary>
-
-### Which build do I need?
+## Which build do I need?
 
 One build is enough for most people: `scoot`. It draws with the CPU
-renderer, so it needs no GPU. Every build, flag and renderer rule is
-in [Builds and renderers](../../reference/builds/).
-
-</details>
-
-<details>
-<summary>The smallest build: CPU only</summary>
-
-The default Cargo features build the CPU renderer and link no GPU
-library.
-
-```sh
-cargo build --release -p scoot
-```
-
-Add a tier only when you need it: `--features gpu-scanout` or
-`--features xwayland`.
-
-</details>
-
-<details>
-<summary>What the binary cache trusts</summary>
-
-The cache holds binaries that CI builds from reviewed merges to
-`main`. Details, the key, and how to check it: [Use the binary
-cache](../binary-cache/).
-
-</details>
-
-<details>
-<summary>Build from source</summary>
-
-### Build from source
-
-See the **From source** tab in [Use it every day](#use-it-every-day).
-Offline and distro builds: [Package scoot
-offline](../../reference/packaging/).
-
-</details>
+renderer, so it needs no GPU, and it is what the script and the default
+Nix package install. On real hardware with a GPU, the `scoot-gpu` Nix
+package scans out through the GPU. Every build, flag and renderer rule
+is in [Builds and renderers](../../reference/builds/); what the binary
+cache trusts is in [Use the binary cache](../binary-cache/).
 
 ## Where next
 
-- **[First run](../first-session/)**: learn 3 keys today, then go full-screen.
-- **[Build your desktop](../compose/)**: add a bar, a wallpaper, a launcher and notifications.
+- **[First run](../first-session/)**: learn three keys today, then go full-screen.
+- **[Build your desktop](../compose/)**: the lock, notifications, launcher and login screen.
 - **[Keybindings](../../scoot/keybindings/)**: every key, and how to change it.
-- **Learn the keys with scoot** *(coming)*: a small app that teaches scoot's keys a few at a time, inside your session. Until it ships, learn three keys a day from [Keybindings](../../scoot/keybindings/).

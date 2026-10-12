@@ -33,8 +33,8 @@ Sans — a demo, not what a system installs.)
 With Nix, the modules are separate from the compositor's (importing
 one changes nothing about the other):
 
-```nix
-imports = [ inputs.scoot.homeModules.scootbar ];   # or nixosModules.scootbar
+```nix title="home.nix"
+imports = [ inputs.scoot.homeModules.scootbar ];   # skip if the Install flake already loads it
 programs.scootbar = {
   enable = true;
   features = [ "clock" "workspaces" ];   # optional: build with exactly these modules
@@ -73,12 +73,12 @@ Modules are Cargo features, reachable through `.override` — a bar
 with no modules needs no font, and `icon-image` (the PNG decoder,
 +115 KB) builds the same way (each line is one alternative):
 
-```nix
-scootbar.override { buildNoDefaultFeatures = true; }
+```nix title="home.nix"
+programs.scootbar.package = inputs.scoot.packages.${pkgs.system}.scootbar.override { buildNoDefaultFeatures = true; };
 ```
 
-```nix
-scootbar.override { buildFeatures = [ "icon-image" ]; }
+```nix title="home.nix"
+programs.scootbar.package = inputs.scoot.packages.${pkgs.system}.scootbar.override { buildFeatures = [ "icon-image" ]; };
 ```
 
 A bar built without a module refuses its table in the config (an

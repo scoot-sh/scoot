@@ -41,7 +41,7 @@ bar.
 `overlays.default` adds `pkgs.scoot` and, on Linux, `pkgs.scootbg`
 and `pkgs.scootbar`:
 
-```nix
+```nix title="configuration.nix"
 nixpkgs.overlays = [ inputs.scoot.overlays.default ];
 ```
 
@@ -56,7 +56,7 @@ the client-only `scoot` and no `scootbg` or `scootbar`. It never adds
 Keep the flake's inputs following your nixpkgs, or the modules build
 against a second nixpkgs:
 
-```nix
+```nix title="flake.nix"
 home-manager.inputs.nixpkgs.follows = "nixpkgs";
 ```
 

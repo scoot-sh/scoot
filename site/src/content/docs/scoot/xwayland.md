@@ -14,7 +14,7 @@ Xwayland's own):
 | `scoot-xwayland` | `scoot` with the `xwayland` feature |
 | `scoot-gpu-xwayland` | `scoot-gpu` with it |
 
-```nix
+```nix title="configuration.nix"
 programs.scoot = {
   enable = true;
   package = inputs.scoot.packages.${pkgs.system}.scoot-xwayland;

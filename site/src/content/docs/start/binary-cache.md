@@ -12,7 +12,7 @@ you download. Opt in once with the two lines below.
 
 NixOS (`configuration.nix`):
 
-```nix
+```nix title="configuration.nix"
 nix.settings = {
   extra-substituters = [ "https://scoot-sh.cachix.org" ];
   extra-trusted-public-keys = [
@@ -23,7 +23,7 @@ nix.settings = {
 
 Home Manager (your home config — writes the same `nix.conf` for your user):
 
-```nix
+```nix title="home.nix"
 nix.settings = {
   extra-substituters = [ "https://scoot-sh.cachix.org" ];
   extra-trusted-public-keys = [

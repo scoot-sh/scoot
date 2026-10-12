@@ -28,13 +28,32 @@ The binaries are the default feature build: the GPU-free compositor
 that runs on a box with no GPU stack installed, and a bar that links
 nothing beyond the C library. They are built with cargo from the
 vendored tree on Debian 12 (glibc 2.36) with Rust 1.97.0 (the rustup
-pin in `release.yml`; the workspace `rust-version` floor predates the
-let-chains the tree uses), so they run on any glibc
-distro at or past that floor. What they are not: the `gpu-scanout`
+pin in `release.yml`), so they run on any glibc distro at or past that
+floor. What they are not: the `gpu-scanout`
 build (needs libgbm at run time) and the `xwayland` build (needs the
 `Xwayland` binary on `PATH`). For those, build from the vendored
 tarball ([package scoot offline](./packaging.md)) or take the Nix
 packages, which cover all four combinations.
+
+The easy way to get them: the [install
+script](../../start/install/#use-it-every-day) picks the right files
+for your machine, checks them against `SHA256SUMS`, and installs the
+session files beside them.
+
+## Nightly builds
+
+`main` is rebuilt on every merge into one moving prerelease,
+[`nightly`](https://github.com/scoot-sh/scoot/releases/tag/nightly),
+by `nightly.yml`: the same portable build as a release, so the same
+glibc floor and runtime libraries. Its files are named
+`scoot-nightly-<arch>`, `scootbg-nightly-<arch>` and
+`scootbar-nightly-<arch>`, so their URLs never change, plus
+`nightly.txt` (the commit and its version) and `SHA256SUMS`. The
+version is the one FlakeHub gives the same commit, `0.1.<commits on
+main>+rev-<short>`, so a nightly binary and a Nix user's flake name the
+same build. Install it with `install.sh --nightly`, and verify a file
+with `--signer-workflow scoot-sh/scoot/.github/workflows/nightly.yml`
+in the command below.
 
 ## Run them on your distro
 

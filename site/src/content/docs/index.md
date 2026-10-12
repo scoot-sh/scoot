@@ -14,8 +14,8 @@ hero:
     - text: Get the scoot desktop
       link: desktop/
       icon: download
-    - text: Take it for a spin
-      link: start/first-session/
+    - text: Install on any Linux
+      link: start/install/
       icon: right-arrow
       variant: minimal
 ---
@@ -48,21 +48,23 @@ default is ginger-night):
 
 Pick one:
 
-- **[The scoot desktop](./desktop/index.md)** — the primary path. One switch
-  plus a look (`programs.scoot.desktop.enable` + `look`) gets the full
-  lightweight desktop: compositor, bar, wallpaper, greeter, idle and lock,
-  notifications, hardware keys. Start here unless you know you want less.
-- **[Just the compositor](./start/install.md)** — first-class, bring the rest
-  yourself ([build your desktop](./start/compose.md): bar, wallpaper,
-  launcher, notifications). Install any `scoot` build on NixOS or
-  anywhere else. The desktop profile stays optional by design.
+- **[The scoot desktop](./desktop/index.md)** — the easy mode, on NixOS
+  with a flake and home-manager. One switch plus a look gets the full
+  lightweight desktop: compositor, bar, wallpaper, idle and lock,
+  notifications, launcher, screenshots, hardware keys, all themed
+  together. Start here if you run NixOS.
+- **[Any Linux](./start/install.md#use-it-every-day)** — one command
+  installs the compositor, the bar and the wallpaper on any glibc
+  distro, puts scoot on your login screen, and can write a look.
+  [Build your desktop](./start/compose.md) adds the lock, launcher and
+  notifications from your distro.
 - **[Agents, headless and webtop](./agents/index.md)** — drive scoot from
   code. The IPC socket, screenshots, `--help --json`, `llms.txt` sets for
   every section, and the webtop image for containers.
 
 ## Start here, in order
 
-1. [Install](./start/install.md) — in your browser with Docker, or in a window with Nix.
+1. [Install](./start/install.md) — try it in your browser, then keep it on any Linux or NixOS.
 2. [First run](./start/first-session.md) — run scoot, open a terminal,
    learn three keys.
 3. [Build your desktop](./start/compose.md) — bar, wallpaper, launcher

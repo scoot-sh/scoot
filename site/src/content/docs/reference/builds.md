@@ -53,7 +53,7 @@ ls /dev/dri/renderD*
 The package knob is `programs.scoot.package` (home-manager and NixOS
 alike; the desktop profile never sets it — the choice stays yours):
 
-```nix
+```nix title="configuration.nix"
 programs.scoot = {
   enable = true;
   # Real hardware with a GPU: take the scanout build.

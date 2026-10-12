@@ -255,8 +255,9 @@
 #   autologin, and a display-manager autologin (class `user`, whose
 #   manager starts) stay quiet -- the warning itself also pinned
 #   against a real NixOS evaluation.
-# - the documented install configs (site/src/content/docs/desktop/index.md,
-#   "Set up the flake" / NixOS / Home Manager): the minimal NixOS desktop,
+# - the documented install configs (site/src/content/docs/start/install.mdx,
+#   the NixOS and "Other Linux with Nix" tabs, and the top of
+#   desktop/index.md): the minimal NixOS desktop,
 #   the GPU-package plus opt-in-greeter variant, and standalone
 #   home-manager evaluate through the flake wrappers with the profile on
 #   and the moonrise look rendered into the config file -- so the page's
@@ -1172,9 +1173,8 @@ let
     enable = true;
     settings.wallpaper.image = "~/Pictures/hills.jpg";
   };
-  # --- the documented install configs (site/src/content/docs/desktop/index.md:
-  # "Set up the flake" / NixOS / Home Manager — keep in step with that
-  # page). The minimal NixOS desktop, exactly the page's snippet, through
+  # --- the documented install configs (site/src/content/docs/start/install.mdx
+  # and the top of desktop/index.md — keep in step with those pages). The minimal NixOS desktop, exactly the page's snippet, through
   # the flake wrapper a consumer imports.
   osDocsDesktop = evalNixosWith [ flake.nixosModule ] pkgs {
     enable = true;
