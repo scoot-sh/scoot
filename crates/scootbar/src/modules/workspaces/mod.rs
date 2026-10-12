@@ -134,6 +134,9 @@ const MAX_WORKSPACES: usize = 32;
 /// cut at [`super::MAX_TEXT`] bytes, and at 8 spaces that still holds 28
 /// single-digit workspaces (about 26 numbered up to 99).
 pub const MAX_ITEM_GAP: u32 = 8;
+/// The spaces `item-gap` takes between two numbers when the config names
+/// none: the published looks' roomy row, not the old tight one.
+pub const DEFAULT_ITEM_GAP: u32 = 3;
 /// Output names kept at most, in bytes: `wl_output` names are short
 /// (`DP-1`, `HEADLESS-1`); longer ones are cut.
 const MAX_NAME: usize = 64;
@@ -166,7 +169,7 @@ impl Default for Settings {
         Self {
             link: Link::default(),
             pill: Pill::default(),
-            item_gap: 1,
+            item_gap: DEFAULT_ITEM_GAP,
             active_color: None,
             inactive_color: None,
             display: Display::default(),

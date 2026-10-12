@@ -195,8 +195,8 @@ fn the_pill_shapes_are_read_by_name() {
 fn the_workspaces_item_gap_is_a_count_of_spaces() {
     assert_eq!(
         read("").unwrap().modules.workspaces.item_gap,
-        1,
-        "the default is one space"
+        3,
+        "the default is three spaces, as in the published looks"
     );
     for spaces in [1, 4, 8] {
         let config = read(&format!("[workspaces]\nitem-gap = {spaces}\n")).unwrap();
