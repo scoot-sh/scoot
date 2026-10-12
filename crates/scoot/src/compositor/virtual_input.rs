@@ -629,12 +629,11 @@ fn pointer_absolute(
 /// it names one this compositor still has, else the output union. `None`
 /// only before any output exists.
 fn pointer_target(state: &State, output: Option<&WlOutput>) -> Option<Rectangle<i32, Logical>> {
-    if let Some(named) = output {
-        if let Some(known) = state.outputs.iter().find(|known| known.owns(named)) {
-            if let Some(geometry) = state.space.output_geometry(known) {
-                return Some(geometry);
-            }
-        }
+    if let Some(named) = output
+        && let Some(known) = state.outputs.iter().find(|known| known.owns(named))
+        && let Some(geometry) = state.space.output_geometry(known)
+    {
+        return Some(geometry);
     }
     state.output_union()
 }
@@ -1039,15 +1038,15 @@ fn virtual_key(state: &mut State, resource: &ZwpVirtualKeyboardV1, key: u32, key
     // with binds on -- with it off the teardown is `release_source`,
     // which needs no mirror, so the off path touches no state past the
     // filter's one bool (see the module doc's inertness note).
-    if state.virtual_input_binds {
-        if let Some(device) = state.virtual_input.keyboards.get_mut(resource) {
-            if pressed {
-                if !device.held.iter().any(|(held_key, _)| *held_key == key) {
-                    device.held.push((key, seat_code));
-                }
-            } else {
-                device.held.retain(|(held_key, _)| *held_key != key);
+    if state.virtual_input_binds
+        && let Some(device) = state.virtual_input.keyboards.get_mut(resource)
+    {
+        if pressed {
+            if !device.held.iter().any(|(held_key, _)| *held_key == key) {
+                device.held.push((key, seat_code));
             }
+        } else {
+            device.held.retain(|(held_key, _)| *held_key != key);
         }
     }
     state.check_keyboard_layout();

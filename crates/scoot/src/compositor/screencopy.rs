@@ -933,10 +933,11 @@ impl State {
         // specifically not a copy of some other output, which is what
         // answering it from any framebuffer would be.
         for capture in &mut self.screencopy.sessions {
-            if capture.due(serials) && capture.output.is_none() {
-                if let Some(frame) = capture.pending.take() {
-                    frame.fail(CaptureFailureReason::Stopped);
-                }
+            if capture.due(serials)
+                && capture.output.is_none()
+                && let Some(frame) = capture.pending.take()
+            {
+                frame.fail(CaptureFailureReason::Stopped);
             }
         }
         // A powered-off output has no current pixels: its framebuffer keeps
@@ -972,10 +973,11 @@ impl State {
         // parked capture -- the normal case returned above.
         let mut ids: Vec<OutputId> = Vec::new();
         for capture in &self.screencopy.sessions {
-            if let Some(id) = capture.output {
-                if capture.due(serials) && !ids.contains(&id) {
-                    ids.push(id);
-                }
+            if let Some(id) = capture.output
+                && capture.due(serials)
+                && !ids.contains(&id)
+            {
+                ids.push(id);
             }
         }
         // Scanout-tier only: force one composite frame per output whose

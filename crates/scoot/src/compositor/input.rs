@@ -125,11 +125,11 @@ pub(super) fn scroll_frame(
     let mut dirty = false;
     for (axis, report) in [(Axis::Horizontal, horizontal), (Axis::Vertical, vertical)] {
         frame = frame.relative_direction(axis, report.direction);
-        if let Some(steps) = report.v120 {
-            if steps != 0 {
-                frame = frame.v120(axis, steps);
-                dirty = true;
-            }
+        if let Some(steps) = report.v120
+            && steps != 0
+        {
+            frame = frame.v120(axis, steps);
+            dirty = true;
         }
         if report.stop {
             frame = frame.stop(axis);
