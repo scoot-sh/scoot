@@ -8,7 +8,7 @@ blocked: null
 
 # Docs migration remainder: split the desktop page (M7), STE pass (M8), coming-flips (M9)
 
-Filed 2026-10-11. Serves **daily-drive**: the site is how people learn the keys and install..
+Filed 2026-10-11. Serves **daily-drive**: the site is how people learn the keys and install.
 
 ## The gap
 

@@ -8,7 +8,7 @@ blocked: null
 
 # Test the seat/VT-switch recovery path on a logind-backed session
 
-Filed 2026-10-11. Serves **daily-drive**: most desktops start through logind..
+Filed 2026-10-11. Serves **daily-drive**: most desktops start through logind.
 
 ## The gap
 
