@@ -8,7 +8,7 @@ blocked: null
 
 # CPU-tier output swap with empty bindings can strand a headless output reporting live:true
 
-Filed 2026-10-11. Serves **daily-drive**: a display that reports live while showing nothing..
+Filed 2026-10-11. Serves **daily-drive**: a display that reports live while showing nothing.
 
 ## The gap
 

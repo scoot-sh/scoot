@@ -366,11 +366,9 @@ falsify. Read `flexwm` there as `scoot`.
 
 ### Core / config / rendering
 - [CPU-tier output swap with empty bindings can strand a headless output reporting live:true](./core/cpu-swap-empty-bindings-strand.md) — found in the #551 seat-reconnect review; the next win heals it
-- [Test the seat/VT-switch recovery path on a logind-backed session](./testing/logind-session-reconnect-test.md) — #546/#551 were proven on seatd only
-- [Slim the scoot ISO under GitHub's 2 GB release-asset cap](./core/iso-slim-under-2gb.md) — 2.83 GiB today; start with mbrola-voices
-- [Docs migration remainder: M7 split, M8 STE pass, M9 coming-flips](./core/docs-migration-m7-m9.md)
 - [`scoot --version`](./resolved/cli-version-flag-done.md) — RESOLVED 2026-09-21: `scoot --version` and `scootctl --version` print `scoot <version> (ipc protocol <N>)` from one shared helper (no drift, no session needed); the bare `version` word stays the remote IPC request by deliberate spelling decision.
-- [[nested] top-layer content missing from frames with no toplevels](./resolved/layer-content-without-toplevels-done.md) — CLOSED 2026-09-21 as could-not-reproduce (gh #183): a real Top-layer bar with a committed buffer draws with zero toplevels on current `main` and on the reported rev alike (live `--nested` matrix + harness pixel pins); the field symptom is the designed bufferless-bar shape (zone reserved, nothing painted), so the client had almost certainly committed no buffer — no compositor change.- [`--width`/`--height` are unbounded `i32`s](./resolved/width-height-bounded-done.md)
+- [[nested] top-layer content missing from frames with no toplevels](./resolved/layer-content-without-toplevels-done.md) — CLOSED 2026-09-21 as could-not-reproduce (gh #183): a real Top-layer bar with a committed buffer draws with zero toplevels on current `main` and on the reported rev alike (live `--nested` matrix + harness pixel pins); the field symptom is the designed bufferless-bar shape (zone reserved, nothing painted), so the client had almost certainly committed no buffer — no compositor change.
+- [`--width`/`--height` are unbounded `i32`s](./resolved/width-height-bounded-done.md)
   — RESOLVED 2026-09-17: refused past 65535 per axis at parse (the most DRM
   itself can report for a mode axis); `Rect::inset`/`right()`/`bottom()`,
   `scroll_into_view` and the arrange on-screen test saturate.
@@ -472,6 +470,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [Pin the fd-pressure grace conjunction's boundaries](./resolved/fd-pressure-grace-boundary-pins-done.md) — RESOLVED 2026-09-18 (pin, no behavior change): `pressure_refusal`'s pure conjunction split out as `pressure_refusal_for` and pinned at both operators and both graces (129 refused, 128 passes; either half alone passes); the ceiling record's 400 stands as "two at grace", the permitted maximum is 404
 
 ### Packaging / tooling
+- [Slim the scoot ISO under GitHub's 2 GB release-asset cap](./core/iso-slim-under-2gb.md) — 2.83 GiB today; start with mbrola-voices
 - [Nix package can reach neither GPU tier](./resolved/nix-gpu-tiers-done.md)
   — RESOLVED 2026-09-21 (gh #177): `packages.scoot` force-links libEGL
   (niri's `--no-as-needed` trick, Linux-only) so packaged `--renderer gles`
@@ -856,9 +855,11 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [`--nested` confirms a lock before the host shows it](./resolved/nested-lock-confirm-on-present-done.md) — RESOLVED 2026-09-28 (PR #304): the nested tail confirms on the host's commit (`note_nested_frame` over `FrameOutcome::host_committed`), not the draw; dropped read-back and owed dma-buf frames wait for the owed hand-over (`note_nested_handed_over`, gated on a draw recorded for this lock), a re-render, or the shared one-second fallback. Eight unit tests, three behind `gpu-scanout`.
 
 ### Found by the niri A/B (2026-09-24)
+- [Test the seat/VT-switch recovery path on a logind-backed session](./testing/logind-session-reconnect-test.md) — #546/#551 were proven on seatd only
 - [Nested scoot presents fewer frames than niri for a ~60 Hz client](./resolved/nested-frame-rate-vs-client-done.md) — RESOLVED 2026-09-28 (PR #308, verdict-only, no code change): own 16 ms timer rather than host callbacks; the done-gated client draws fewer frames on the longer loop — loop-paced, nothing cheap and safe to fix.
 
 ### Meta
+- [Docs migration remainder: M7 split, M8 STE pass, M9 coming-flips](./core/docs-migration-m7-m9.md)
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.
 
 ### Not-yet removal plan (2026-09-21, macOS excluded)
