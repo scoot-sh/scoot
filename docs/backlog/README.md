@@ -58,6 +58,7 @@ falsify. Read `flexwm` there as `scoot`.
 ## Open
 
 ### Protocols
+- [Research: HDR and color management](./protocols/hdr-color-management.md) — none today; target `wp-color-management-v1`, GPU tier first, pinned Smithay has neither the protocol nor DRM HDR helpers
 - [Foreign-toplevel management](./resolved/foreign-toplevel-list-done.md)
   — RESOLVED 2026-09-16 (PR #47): `ext-foreign-toplevel-list-v1`, the `ext-`
   successor the entry told its reader to check for, so a taskbar or switcher

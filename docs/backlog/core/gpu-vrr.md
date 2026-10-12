@@ -28,7 +28,8 @@ frame scheduling needs anything else.
 `wp_tearing_control_v1`: the pinned Smithay rev does not carry it (checked
 2026-09-22: no `tearing_control` in `src/`), so it would be hand-written;
 file separately if a client need shows up. HDR / color management is a
-different order of work and is not filed.
+different order of work; the research entry is
+[hdr-color-management](../protocols/hdr-color-management.md).
 
 ## Blocked
 
