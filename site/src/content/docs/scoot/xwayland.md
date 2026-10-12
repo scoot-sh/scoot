@@ -22,6 +22,10 @@ programs.scoot = {
 };
 ```
 
+`inputs` and `pkgs` need `{ inputs, pkgs, ... }:` at the top of
+`configuration.nix` (the Install page's `flake.nix` passes `inputs`
+down through `specialArgs`).
+
 The package is only half: XWayland still starts only when asked, by
 `--xwayland` or `[xwayland] enabled`. Either half alone is loud rather
 than silent: the knob with the default package logs that the build has

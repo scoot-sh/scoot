@@ -55,6 +55,11 @@ programs.scootbar = {
 | `settings` | attrset | `{ }` | restart (unit) / `scootbar msg reload` by hand | Free-form: rendered as TOML to the bar's config, so a new option never needs a module change first. |
 | `systemd.enable` | bool | `true` | — | The user service. Off: start `scootbar daemon` from your compositor's autostart instead (one route per program — both starts two daemons, and the second refuses). |
 
+The snippets below name `inputs` and `pkgs`: they need
+`{ inputs, pkgs, ... }:` at the top of `home.nix`. Both
+[Install](../start/install/) flakes pass those down, but a bare
+`{ ... }` file has neither in scope.
+
 Without Nix: `scootbar daemon` runs in the foreground until the
 compositor goes away (start it with `&`, or from `[autostart]`).
 home-manager writes `~/.config/scoot/bar.toml` (the bar's default

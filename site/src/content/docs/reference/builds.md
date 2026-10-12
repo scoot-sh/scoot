@@ -62,6 +62,10 @@ programs.scoot = {
 };
 ```
 
+`inputs` and `pkgs` need `{ inputs, pkgs, ... }:` at the top of
+`configuration.nix` (the Install page's `flake.nix` passes `inputs`
+down through `specialArgs`).
+
 Leave the default (omit `package`) for the CPU build. The same names
 work with `nix profile add` and `nix run` — swap `scoot` for
 `scoot-gpu` (or an `-xwayland` variant) wherever it appears.

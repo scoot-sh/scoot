@@ -66,6 +66,10 @@ installed.
 curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --system --look ginger-night
 ```
 
+You need `curl` (or `wget`) and `sh`: `sudo apt install curl` on
+Debian and Ubuntu. Silence with a zero exit means the download itself
+failed and the script never ran — check the network and run it again.
+
 Then log out and pick **scoot** on your login screen.
 
 - `--system` installs under `/usr/local` and adds scoot to the login
@@ -228,7 +232,7 @@ keeps the login screen.
 
      outputs = { nixpkgs, home-manager, scoot, ... }@inputs: {
        homeConfigurations.alice = home-manager.lib.homeManagerConfiguration {
-         pkgs = nixpkgs.legacyPackages.x86_64-linux;
+         pkgs = nixpkgs.legacyPackages.x86_64-linux;  # aarch64-linux on ARM
          extraSpecialArgs = { inherit inputs; };
          modules = [
            scoot.homeModules.scoot

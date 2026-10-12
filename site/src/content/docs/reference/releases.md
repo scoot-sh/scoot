@@ -44,7 +44,9 @@ session files beside them.
 
 `main` is rebuilt on every merge into one moving prerelease,
 [`nightly`](https://github.com/scoot-sh/scoot/releases/tag/nightly),
-by `nightly.yml`: the same portable build as a release, so the same
+by `nightly.yml`: the same portable build as a release (the same base
+image, toolchain and runtime libraries, built from the merged commit
+rather than the vendored tarball), so the same
 glibc floor and runtime libraries. Its files are named
 `scoot-nightly-<arch>`, `scootbg-nightly-<arch>` and
 `scootbar-nightly-<arch>`, so their URLs never change, plus

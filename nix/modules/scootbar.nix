@@ -202,7 +202,7 @@ in
       type = lib.types.nullOr lib.types.package;
       default = pkgs.scootbar or null;
       defaultText = lib.literalExpression "pkgs.scootbar or null";
-      example = lib.literalExpression "inputs.scoot.packages.\${pkgs.system}.scootbar";
+      example = lib.literalExpression "inputs.scoot.packages.\${pkgs.stdenv.hostPlatform.system}.scootbar";
       description = ''
         The scootbar package. Its Cargo features are `features`, below;
         a `package` you build yourself is used as given when `features`
