@@ -70,6 +70,17 @@ You need `curl` (or `wget`) and `sh`: `sudo apt install curl` on
 Debian and Ubuntu. Silence with a zero exit means the download itself
 failed and the script never ran — check the network and run it again.
 
+Minimal Fedora and Arch images ship no usable font, and the bar refuses
+to start without one (`no font: none of the usual font files is usable`).
+The script says so when that is you, naming the package for your distro
+(`fonts-dejavu-core` on Debian and Ubuntu, `dejavu-sans-fonts` on
+Fedora, `dejavu-fonts` on openSUSE, `ttf-dejavu` on Arch) — or point the
+bar at any file with `--font PATH` instead.
+
+The command it prints waits for confirmation; for a non-interactive run,
+add `-y` (`apt`, `dnf`) or `--noconfirm` (`pacman`). `--dry-run` lists
+the missing libraries and fonts without changing anything.
+
 Then log out and pick **scoot** on your login screen.
 
 - `--system` installs under `/usr/local` and adds scoot to the login
