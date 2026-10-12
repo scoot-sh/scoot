@@ -32,12 +32,14 @@ Your keys and options keep their names.
 
 <Steps>
 
-1. Do the NixOS steps on [Install](../install/#use-it-every-day) first.
+1. Do the NixOS steps on [Install](../install/#use-it-every-day) first:
+   a `flake.nix`, your `configuration.nix` and a `home.nix`.
 
-2. Pick a look. The look goes in your home-manager config, in `configuration.nix`.
+2. Pick a look, the same one on both sides (the system side themes the
+   login screen).
 
-   ```nix
-   home-manager.users.alice.programs.scoot.desktop.look = "ginger-night";
+   ```nix title="configuration.nix and home.nix"
+   programs.scoot.desktop.look = "ginger-night";
    ```
 
 3. Rebuild.
@@ -58,14 +60,15 @@ screen is the one exception (see below). The looks are `ginger-night`
 To replace your login screen with ReGreet, add one more line. Do this
 only after the desktop works:
 
-```nix
+```nix title="configuration.nix"
 programs.scoot.greeter.enable = true;
 ```
 
-Turn off a piece you do not want:
+Turn off a piece you do not want, on both sides (the system stops
+installing it, your user stops running it):
 
-```nix
-home-manager.users.alice.programs.scoot.desktop.notifications.enable = false;
+```nix title="configuration.nix and home.nix"
+programs.scoot.desktop.notifications.enable = false;
 ```
 
 Every piece and every option: [The scoot desktop](../../desktop/).
@@ -74,7 +77,11 @@ Every piece and every option: [The scoot desktop](../../desktop/).
 
 <Steps>
 
-1. Install the parts.
+1. Install scoot with the [Any Linux script](../install/#use-it-every-day)
+   (add `--system` to get it on your login screen). It runs the bar as a
+   service for you.
+
+2. Install the parts.
 
    <Tabs syncKey="distro">
    <TabItem label="Debian / Ubuntu">
@@ -112,13 +119,13 @@ Every piece and every option: [The scoot desktop](../../desktop/).
    </TabItem>
    </Tabs>
 
-2. Make the config directory.
+3. Make the config directory.
 
    ```sh
    mkdir -p ~/.config/scoot
    ```
 
-3. Write the bar config to `~/.config/scoot/bar.toml`.
+4. Write the bar config to `~/.config/scoot/bar.toml`.
 
    ```toml
    left = ["workspaces"]
@@ -126,18 +133,17 @@ Every piece and every option: [The scoot desktop](../../desktop/).
    right = ["window-title"]
    ```
 
-4. Check the bar config. The command prints `ok`.
+5. Check the bar config. The command prints `ok`.
 
    ```sh
    scootbar daemon --check
    ```
 
-5. Write the scoot config to `~/.config/scoot/config.toml`. Change the image path to a picture you have.
+6. Write the scoot config to `~/.config/scoot/config.toml`. Change the image path to a picture you have.
 
    ```toml
    [autostart]
    commands = [
-       "spawn scootbar daemon",
        "spawn mako",
    ]
 
@@ -150,14 +156,11 @@ Every piece and every option: [The scoot desktop](../../desktop/).
    "super+escape" = "spawn swaylock -f"
    ```
 
-6. Press `Ctrl+Alt+F3`. A text console opens.
-
-7. Log in.
-
-8. Start scoot.
+7. Log out and pick **scoot** on your login screen. Installed without
+   `--system`? Press `Ctrl+Alt+F3`, log in, and run:
 
    ```sh
-   scoot --tty -- foot
+   scoot-session
    ```
 
 </Steps>
@@ -165,7 +168,7 @@ Every piece and every option: [The scoot desktop](../../desktop/).
 The bar is at the top, and the wallpaper is behind your windows.
 `Super+d` opens the launcher. `Super+Escape` locks the screen.
 
-Already running scoot? Do steps 1 to 5, then apply the change without
+Already running scoot? Do steps 2 to 6, then apply the change without
 a restart:
 
 ```sh
@@ -174,11 +177,8 @@ scoot msg reload
 
 A reload starts the new `[autostart]` entries once.
 
-To log in through your display manager instead, pick **scoot** there:
-the distro packages ship the session entry and its service files.
-
 > **Symptom:** the bar does not show.
-> Run `scootbar daemon` in a scoot terminal and read the error. "no font" means step 1 did not install DejaVu. Install it, then run `scoot msg reload`.
+> Run `journalctl --user -u scootbar` and read the error. "no font" means step 2 did not install DejaVu. Install it, then run `systemctl --user restart scootbar`.
 
 > **Symptom:** the wallpaper does not show.
 > scoot needs `scootbg` on your `PATH`. Run `command -v scootbg`. No output means `scootbg` is not installed. Install it, then run `scoot msg reload`.
@@ -195,8 +195,10 @@ power](../../scoot/configure/#idle-locking-and-screen-power).
 ### Pick a look
 
 Each look is a set of files: `config.toml` colors, a `bar.toml`, a
-wallpaper and terminal colors. Copy the files you want from the look's
-folder. Each look's README lists them.
+wallpaper and terminal colors. The install script writes the first
+three with `--look ginger-night` (or any look's name), never over a
+file you already have. The terminal and app colors are in the look's
+folder; each look's README lists them.
 
 <LinkCard title="The five looks" description="ginger-night, music-desk, radial-burst, moonrise, vinyl-sunset" href="../../scoot/theming/" />
 

@@ -569,10 +569,10 @@ fn apng<R: BufRead + Seek>(reader: &mut R, fill: Color) -> Result<Option<Animate
             }
             png::DisposeOp::None => {}
         }
-        if index + 1 < num_frames {
-            if let Err(error) = reader.next_frame_info() {
-                return Err(corrupt(error));
-            }
+        if index + 1 < num_frames
+            && let Err(error) = reader.next_frame_info()
+        {
+            return Err(corrupt(error));
         }
     }
     if frames.len() < 2 {

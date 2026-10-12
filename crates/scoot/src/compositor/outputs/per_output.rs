@@ -285,10 +285,10 @@ impl Dispatch<wl_callback::WlCallback, FrameTag> for TestClient {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_callback::Event::Done { .. } = event {
-            if let Some(slot) = client.frame_dones.get_mut(tag.0) {
-                *slot += 1;
-            }
+        if let wl_callback::Event::Done { .. } = event
+            && let Some(slot) = client.frame_dones.get_mut(tag.0)
+        {
+            *slot += 1;
         }
     }
 }

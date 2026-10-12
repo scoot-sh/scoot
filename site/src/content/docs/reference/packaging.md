@@ -91,9 +91,9 @@ above resolve to `libinput10`, `libseat1`, `libudev1`,
 `gpu-scanout`) — checked against trixie's own `Contents-amd64.gz`;
 other distros map the same sonames through their own file search.
 
-### Toolchain floor: Rust 1.87
+### Toolchain floor: Rust 1.88
 
-The workspace sets `rust-version = "1.87"`. Which distro releases ship
+The workspace sets `rust-version = "1.88"`. Which distro releases ship
 at least that (checked 2026-10-07 against each distro's own package
 metadata — verify again at packaging time, toolchains move):
 
@@ -158,7 +158,7 @@ local fonts), and anything new is a visible red.
   `--locked`, or the tree was modified after staging. Re-stage from a
   clean checkout and keep `--locked`.
 - *`rustc 1.XX is not supported`.* The toolchain predates the floor
-  (see the table above): rustup to 1.87 or newer, or a distro release
+  (see the table above): rustup to 1.88 or newer, or a distro release
   whose toolchain qualifies.
 - *`Xwayland must be on PATH` at run time.* An `--features xwayland`
   build on a box without XWayland installed: the feature builds fine

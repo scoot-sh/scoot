@@ -247,10 +247,10 @@ impl Dispatch<WlOutput, ()> for Copy {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_output::Event::Name { name } = event {
-            if let Some(entry) = state.outputs.iter_mut().find(|(o, _)| o == output) {
-                entry.1 = Some(name);
-            }
+        if let wl_output::Event::Name { name } = event
+            && let Some(entry) = state.outputs.iter_mut().find(|(o, _)| o == output)
+        {
+            entry.1 = Some(name);
         }
     }
 }

@@ -1093,10 +1093,8 @@ fn set_pending(
     // `set_connectors`/`use_mode` that failed left `pending` untouched, so
     // re-asserting it would be a test commit for nothing -- and one that can
     // fail and log a warning about a state that was never wrong.
-    if mode_moved {
-        if let Err(error) = surface.use_mode(previous_mode) {
-            tracing::warn!(%error, "drm: could not put the previous mode back either");
-        }
+    if mode_moved && let Err(error) = surface.use_mode(previous_mode) {
+        tracing::warn!(%error, "drm: could not put the previous mode back either");
     }
     // Through `move_connector`, not a raw `set_connectors`, for the same
     // reason the two attempts above are: on Smithay's legacy (non-atomic)

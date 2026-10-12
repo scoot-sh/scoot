@@ -288,13 +288,13 @@ impl Exec {
                 lines::MAX_LINE
             ));
         }
-        if let Some(why) = invalid {
-            if self.may_say(now) {
-                warn(format_args!(
-                    "scootbar: exec module `{}`: ignored a line: {why}",
-                    self.id
-                ));
-            }
+        if let Some(why) = invalid
+            && self.may_say(now)
+        {
+            warn(format_args!(
+                "scootbar: exec module `{}`: ignored a line: {why}",
+                self.id
+            ));
         }
         if shown_any && self.scratch != self.shown {
             std::mem::swap(&mut self.scratch, &mut self.shown);
@@ -381,10 +381,10 @@ impl Exec {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     drained += n;
-                    if let Some(data) = chunk.get(..n) {
-                        if self.apply(data, now) == Update::Changed {
-                            changed = Update::Changed;
-                        }
+                    if let Some(data) = chunk.get(..n)
+                        && self.apply(data, now) == Update::Changed
+                    {
+                        changed = Update::Changed;
                     }
                 }
             }
@@ -401,11 +401,12 @@ impl Exec {
         // The leader is gone: so is anything it left behind (dropped with
         // `running` below, by the group kill in its `Drop`).
         let wait = self.backoff.after(lasted);
-        if let Some(line) = last {
-            if parse_line(format, &line, &mut self.scratch).is_ok() && self.scratch != self.shown {
-                std::mem::swap(&mut self.scratch, &mut self.shown);
-                changed = Update::Changed;
-            }
+        if let Some(line) = last
+            && parse_line(format, &line, &mut self.scratch).is_ok()
+            && self.scratch != self.shown
+        {
+            std::mem::swap(&mut self.scratch, &mut self.shown);
+            changed = Update::Changed;
         }
         if self.may_say(now) {
             let why = status.code().and_then(guard::meaning).unwrap_or("");

@@ -1599,10 +1599,10 @@ fn draw_frame_scanout(
     // then the first suitable window. Skipped where the CRTC has no overlay
     // plane: there is nothing to ride, so there is nothing to pick -- the
     // one comparison above, never the scans below.
-    if overlay_planes > 0 {
-        if let Some(id) = output_id {
-            overlay_pick.refresh(locked, covered, &elements, arrangement, &state.windows, id);
-        }
+    if overlay_planes > 0
+        && let Some(id) = output_id
+    {
+        overlay_pick.refresh(locked, covered, &elements, arrangement, &state.windows, id);
     }
 
     outcome.drew_a_frame = drawn.drew;

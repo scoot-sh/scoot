@@ -808,10 +808,10 @@ impl State {
             self.output_under(pointer.current_location())
                 .map(|(output, _)| output)
         });
-        if let Some(ref output) = preferred {
-            if let Some(found) = exclusive_on(output, self.covered_by_fullscreen(output)) {
-                return Some(found);
-            }
+        if let Some(ref output) = preferred
+            && let Some(found) = exclusive_on(output, self.covered_by_fullscreen(output))
+        {
+            return Some(found);
         }
         for output in self.outputs.iter() {
             if preferred.as_ref() == Some(output) {

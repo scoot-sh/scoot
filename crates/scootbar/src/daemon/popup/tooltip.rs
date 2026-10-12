@@ -233,10 +233,10 @@ impl State {
             }
             return;
         }
-        if let Some(tip) = self.popup.tip.as_mut() {
-            if !draw_open(tip, &self.globals, qh, text, &self.content.style.theme) {
-                self.popup.close_tip();
-            }
+        if let Some(tip) = self.popup.tip.as_mut()
+            && !draw_open(tip, &self.globals, qh, text, &self.content.style.theme)
+        {
+            self.popup.close_tip();
         }
     }
 }

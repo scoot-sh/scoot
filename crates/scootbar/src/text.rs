@@ -412,10 +412,10 @@ impl Text {
         self.arena.resize(offset + len, 0);
         let target = self.arena.get_mut(offset..offset + len)?;
         outline.draw(|gx, gy, c| {
-            if gx < width {
-                if let Some(slot) = target.get_mut(gy as usize * width as usize + gx as usize) {
-                    *slot = coverage(c);
-                }
+            if gx < width
+                && let Some(slot) = target.get_mut(gy as usize * width as usize + gx as usize)
+            {
+                *slot = coverage(c);
             }
         });
         let glyph = Cached {

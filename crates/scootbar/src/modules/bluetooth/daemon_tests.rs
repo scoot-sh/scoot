@@ -112,18 +112,18 @@ impl Peer {
                 let _ = signature;
             } else if interface == PROPERTIES && member == "Set" {
                 let mut reader = crate::dbus::proto::Reader::le(&body);
-                if let (Ok(iface), Ok(prop)) = (reader.str(), reader.str()) {
-                    if iface == ADAPTER && prop == "Powered" {
-                        if let Ok(powered) = reader.variant(|sig, reader| {
-                            if sig == "b" {
-                                reader.boolean()
-                            } else {
-                                Err(())
-                            }
-                        }) {
-                            self.sets.push((path, powered));
+                if let (Ok(iface), Ok(prop)) = (reader.str(), reader.str())
+                    && iface == ADAPTER
+                    && prop == "Powered"
+                    && let Ok(powered) = reader.variant(|sig, reader| {
+                        if sig == "b" {
+                            reader.boolean()
+                        } else {
+                            Err(())
                         }
-                    }
+                    })
+                {
+                    self.sets.push((path, powered));
                 }
             }
         }

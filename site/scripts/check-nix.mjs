@@ -11,6 +11,12 @@
 // `nix-instantiate` resolves names while parsing, so a fragment naming
 // `inputs` or `pkgs` needs them in scope); and the block as a bare
 // expression under that lambda (e.g. `scootbar.override { ... }`).
+//
+// Every block also names the file it goes in, as an Expressive Code
+// title (```nix title="home.nix"): `flake.nix`, `configuration.nix`,
+// `home.nix`, or "configuration.nix and home.nix" for the desktop
+// options each side wires half of. A reader should never have to know
+// which side an option lives on.
 // Placeholders are comments, never literal `...` outside real Nix
 // syntax (which `...` only is in attr patterns); alternatives go in
 // separate fences (two assignments to one path in one fence is a
@@ -44,15 +50,22 @@ const walk = (dir) =>
       : [];
   });
 
-const fence = /```nix\n([\s\S]*?)```/g;
+const fence = /```nix([^\n]*)\n([\s\S]*?)```/g;
+const titled = /title="[^"]*\.nix[^"]*"/;
 const scratch = mkdtempSync(join(tmpdir(), 'scoot-nix-snippets-'));
 
 let count = 0;
 for (const file of walk(contentDir)) {
   const text = readFileSync(file, 'utf8');
   for (const match of text.matchAll(fence)) {
-    const body = match[1];
+    const meta = match[1];
+    const body = match[2];
     count += 1;
+    if (!titled.test(meta))
+      fail(
+        file,
+        `nix block #${count} has no file title: write \`\`\`nix title="home.nix"\` (or flake.nix, configuration.nix, "configuration.nix and home.nix")`,
+      );
     const direct = join(scratch, `block-${count}.nix`);
     const wrapped = join(scratch, `block-${count}-wrapped.nix`);
     const modWrap = join(scratch, `block-${count}-module.nix`);

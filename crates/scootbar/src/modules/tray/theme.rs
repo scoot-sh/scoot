@@ -176,19 +176,19 @@ pub fn default_bases() -> Vec<PathBuf> {
 }
 
 fn data_home() -> Option<PathBuf> {
-    if let Some(home) = std::env::var_os("XDG_DATA_HOME") {
-        if !home.is_empty() {
-            return Some(PathBuf::from(home));
-        }
+    if let Some(home) = std::env::var_os("XDG_DATA_HOME")
+        && !home.is_empty()
+    {
+        return Some(PathBuf::from(home));
     }
     std::env::var_os("HOME").map(|home| Path::new(&home).join(".local/share"))
 }
 
 fn data_dirs() -> Vec<PathBuf> {
-    if let Some(dirs) = std::env::var_os("XDG_DATA_DIRS") {
-        if !dirs.is_empty() {
-            return data_dirs_from(&dirs);
-        }
+    if let Some(dirs) = std::env::var_os("XDG_DATA_DIRS")
+        && !dirs.is_empty()
+    {
+        return data_dirs_from(&dirs);
     }
     ["/usr/local/share", "/usr/share"]
         .iter()
@@ -245,10 +245,10 @@ pub fn load_for_side(
     }
     let file = format!("{stem}.png");
     let mut roots: Vec<PathBuf> = Vec::new();
-    if let Some(path) = theme_path {
-        if is_valid_theme_path(path) {
-            roots.push(PathBuf::from(path));
-        }
+    if let Some(path) = theme_path
+        && is_valid_theme_path(path)
+    {
+        roots.push(PathBuf::from(path));
     }
     roots.extend(bases.iter().cloned());
     for root in &roots {

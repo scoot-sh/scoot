@@ -515,11 +515,11 @@ impl Live {
         match flight.op {
             Op::Match => {}
             Op::Owner => {
-                if signature == "s" {
-                    if let Ok(owner) = proto::read_owner(signature, body) {
-                        self.set_owner(Some(owner));
-                        return;
-                    }
+                if signature == "s"
+                    && let Ok(owner) = proto::read_owner(signature, body)
+                {
+                    self.set_owner(Some(owner));
+                    return;
                 }
                 // An unparsable owner is no owner.
                 self.set_owner(None);
@@ -729,11 +729,11 @@ impl Live {
         if let Some(props) = &object.adapter {
             match self.adapters.iter_mut().find(|a| a.path == object.path) {
                 Some(adapter) => {
-                    if let Some(powered) = props.powered {
-                        if adapter.powered != powered {
-                            adapter.powered = powered;
-                            changed = true;
-                        }
+                    if let Some(powered) = props.powered
+                        && adapter.powered != powered
+                    {
+                        adapter.powered = powered;
+                        changed = true;
                     }
                 }
                 None => {
@@ -836,20 +836,20 @@ impl Live {
             && path == ROOT
             && signature == "oa{sa{sv}}"
         {
-            if let Ok(object) = bluez::read_interfaces_added(body) {
-                if is_object(object.path) {
-                    self.upsert(&object);
-                }
+            if let Ok(object) = bluez::read_interfaces_added(body)
+                && is_object(object.path)
+            {
+                self.upsert(&object);
             }
         } else if interface == MANAGER
             && member == "InterfacesRemoved"
             && path == ROOT
             && signature == "oas"
         {
-            if let Ok((removed, names)) = bluez::read_interfaces_removed(body) {
-                if is_object(removed) {
-                    self.remove(removed, &names);
-                }
+            if let Ok((removed, names)) = bluez::read_interfaces_removed(body)
+                && is_object(removed)
+            {
+                self.remove(removed, &names);
             }
         } else if interface == PROPERTIES
             && member == "PropertiesChanged"
@@ -888,14 +888,13 @@ impl Live {
             let before = self.devices.len();
             self.devices.retain(|d| d.path != path);
             changed |= self.devices.len() != before;
-        } else if names.contains(&BATTERY) {
-            if let Some(device) = self.devices.iter_mut().find(|d| d.path == path) {
-                if device.has_battery || device.battery.is_some() {
-                    device.has_battery = false;
-                    device.battery = None;
-                    changed = true;
-                }
-            }
+        } else if names.contains(&BATTERY)
+            && let Some(device) = self.devices.iter_mut().find(|d| d.path == path)
+            && (device.has_battery || device.battery.is_some())
+        {
+            device.has_battery = false;
+            device.battery = None;
+            changed = true;
         }
         if changed {
             self.rev = self.rev.wrapping_add(1);
@@ -916,11 +915,11 @@ impl Live {
                     self.restale();
                     return;
                 };
-                if let Some(powered) = changed.adapter.powered {
-                    if self.adapters[index].powered != powered {
-                        self.adapters[index].powered = powered;
-                        self.rev = self.rev.wrapping_add(1);
-                    }
+                if let Some(powered) = changed.adapter.powered
+                    && self.adapters[index].powered != powered
+                {
+                    self.adapters[index].powered = powered;
+                    self.rev = self.rev.wrapping_add(1);
                 }
                 if changed.invalidated {
                     let id = self.adapters[index].id;
@@ -934,11 +933,11 @@ impl Live {
                 };
                 let id = self.devices[index].id;
                 let mut moved = false;
-                if let Some(connected) = changed.device.connected {
-                    if self.devices[index].connected != connected {
-                        self.devices[index].connected = connected;
-                        moved = true;
-                    }
+                if let Some(connected) = changed.device.connected
+                    && self.devices[index].connected != connected
+                {
+                    self.devices[index].connected = connected;
+                    moved = true;
                 }
                 if changed.device.name.is_some() || changed.device.alias.is_some() {
                     let path = self.devices[index].path.clone();
@@ -968,11 +967,11 @@ impl Live {
                     device.has_battery = true;
                     moved = true;
                 }
-                if let Some(percentage) = changed.battery.percentage {
-                    if device.battery != Some(percentage) {
-                        device.battery = Some(percentage);
-                        moved = true;
-                    }
+                if let Some(percentage) = changed.battery.percentage
+                    && device.battery != Some(percentage)
+                {
+                    device.battery = Some(percentage);
+                    moved = true;
                 }
                 if changed.invalidated {
                     self.refresh(id, RefreshIface::Battery);
@@ -1008,13 +1007,12 @@ impl Live {
                 let Ok(props) = bluez::read_adapter_all(body) else {
                     return;
                 };
-                if let Some(adapter) = self.adapters.iter_mut().find(|a| a.id == refresh.id) {
-                    if let Some(powered) = props.powered {
-                        if adapter.powered != powered {
-                            adapter.powered = powered;
-                            self.rev = self.rev.wrapping_add(1);
-                        }
-                    }
+                if let Some(adapter) = self.adapters.iter_mut().find(|a| a.id == refresh.id)
+                    && let Some(powered) = props.powered
+                    && adapter.powered != powered
+                {
+                    adapter.powered = powered;
+                    self.rev = self.rev.wrapping_add(1);
                 }
             }
             RefreshIface::Device => {
@@ -1025,11 +1023,11 @@ impl Live {
                     return;
                 };
                 let mut moved = false;
-                if let Some(connected) = props.connected {
-                    if self.devices[index].connected != connected {
-                        self.devices[index].connected = connected;
-                        moved = true;
-                    }
+                if let Some(connected) = props.connected
+                    && self.devices[index].connected != connected
+                {
+                    self.devices[index].connected = connected;
+                    moved = true;
                 }
                 if props.name.is_some() || props.alias.is_some() {
                     let path = self.devices[index].path.clone();
@@ -1183,11 +1181,11 @@ fn rename(
 fn apply_device(device: &mut Device, scratch: &mut String, object: &bluez::Object<'_>) -> bool {
     let mut moved = false;
     if let Some(props) = &object.device {
-        if let Some(connected) = props.connected {
-            if device.connected != connected {
-                device.connected = connected;
-                moved = true;
-            }
+        if let Some(connected) = props.connected
+            && device.connected != connected
+        {
+            device.connected = connected;
+            moved = true;
         }
         // A `Name` that BlueZ stops sending falls back to the `Alias`,
         // and one with neither to the path: recompute whenever either is

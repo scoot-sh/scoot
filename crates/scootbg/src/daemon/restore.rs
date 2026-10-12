@@ -92,15 +92,15 @@ pub fn load(profile: Profile) -> (Saved, Record) {
         ));
     }
     let record = parsed.record;
-    if let Some(named) = record.profile.as_deref() {
-        if named != profile.as_str() {
-            warn(format_args!(
-                "scootbg: state file {} says it is profile {named:?}; it is read as \
+    if let Some(named) = record.profile.as_deref()
+        && named != profile.as_str()
+    {
+        warn(format_args!(
+            "scootbg: state file {} says it is profile {named:?}; it is read as \
                  profile {:?}, its file name",
-                file.display(),
-                profile.as_str()
-            ));
-        }
+            file.display(),
+            profile.as_str()
+        ));
     }
     if parsed.newer {
         warn(format_args!(
@@ -161,22 +161,22 @@ pub fn put(state: &mut State, record: Record, show: bool, origin: Origin) -> Vec
         if let Some(Wallpaper::Image(image)) = &choice {
             // Remote: recorded live whatever the cache holds (see the
             // function docs); local: a missing file shows the background.
-            if image.fetch.is_none() {
-                if let Err(why) = present(&image.path) {
-                    let problem = format!("{:?} for {}: {why}", image.path, Target(output));
-                    let what = match origin {
-                        Origin::StateFile => "cannot restore",
-                        Origin::Config => "cannot show, from the [wallpaper] section,",
-                    };
-                    warn(format_args!(
-                        "scootbg: {what} {problem}; showing the compositor's own background \
+            if image.fetch.is_none()
+                && let Err(why) = present(&image.path)
+            {
+                let problem = format!("{:?} for {}: {why}", image.path, Target(output));
+                let what = match origin {
+                    Origin::StateFile => "cannot restore",
+                    Origin::Config => "cannot show, from the [wallpaper] section,",
+                };
+                warn(format_args!(
+                    "scootbg: {what} {problem}; showing the compositor's own background \
                          there (it stays saved until the next `scootbg set` or `clear` for it)"
-                    ));
-                    problems.push(problem);
-                    // Nothing older shows there instead.
-                    state.choices.set(output, None, generation);
-                    return;
-                }
+                ));
+                problems.push(problem);
+                // Nothing older shows there instead.
+                state.choices.set(output, None, generation);
+                return;
             }
         }
         state.choices.set(output, choice, generation);
@@ -226,21 +226,20 @@ fn put_workspace(
     if !show {
         return;
     }
-    if let Some(Wallpaper::Image(image)) = &choice {
-        if image.fetch.is_none() {
-            if let Err(why) = present(&image.path) {
-                warn(format_args!(
-                    "scootbg: cannot restore {:?} for workspace {:?}: {why}; showing the \
+    if let Some(Wallpaper::Image(image)) = &choice
+        && image.fetch.is_none()
+        && let Err(why) = present(&image.path)
+    {
+        warn(format_args!(
+            "scootbg: cannot restore {:?} for workspace {:?}: {why}; showing the \
                      output's own wallpaper there (it stays saved until the next `scootbg \
                      set --workspace` or `clear --workspace` for it)",
-                    image.path, workspace,
-                ));
-                state
-                    .choices
-                    .set_workspace(output, workspace, None, spec, generation);
-                return;
-            }
-        }
+            image.path, workspace,
+        ));
+        state
+            .choices
+            .set_workspace(output, workspace, None, spec, generation);
+        return;
     }
     let rendered = match &choice {
         Some(Wallpaper::Image(image)) => Some(Arc::clone(image)),
@@ -260,16 +259,16 @@ fn put_workspace(
             if !targeted {
                 continue;
             }
-            if let Some(dims) = super::change::image_dims(&entry.output) {
-                if entry.objects.canvas.image(image.serial, dims).is_none() {
-                    state.images.jobs.render(
-                        &image,
-                        crate::jobs::Target {
-                            output: entry.output.id(),
-                            dims,
-                        },
-                    );
-                }
+            if let Some(dims) = super::change::image_dims(&entry.output)
+                && entry.objects.canvas.image(image.serial, dims).is_none()
+            {
+                state.images.jobs.render(
+                    &image,
+                    crate::jobs::Target {
+                        output: entry.output.id(),
+                        dims,
+                    },
+                );
             }
         }
     }

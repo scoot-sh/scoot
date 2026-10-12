@@ -21,8 +21,8 @@
 # `--locked --offline` from the vendored tree inside
 # `debian:bookworm-slim` (glibc floor 2.36, stated and asserted below),
 # with the stock toolchain of that base plus a pinned rustup toolchain
-# (the workspace `rust-version` floor predates the let-chains the tree
-# uses; the builder pins a toolchain new enough to compile it). Nix
+# (bookworm's rustc is far below the workspace `rust-version` floor of
+# 1.88, which the tree's let-chains need). Nix
 # stays the reproducible path for Nix users: every tag is on main, and
 # main's binaries are already on Cachix with the flake on FlakeHub
 # (`.github/workflows/nix-build.yml`).
@@ -354,8 +354,8 @@ jobs:
     timeout-minutes: 60
     env:
       # Pinned together: the base sets the glibc floor, the toolchain
-      # must be new enough for the tree (let-chains need >= 1.88; the
-      # workspace floor predates them, so this pin is load-bearing).
+      # must clear the workspace floor (1.88, for the tree's let-chains);
+      # bookworm's own rustc does not, so this pin is load-bearing.
       DISTRO_IMAGE: debian:bookworm-slim
       RUST_TOOLCHAIN: 1.97.0
     steps:

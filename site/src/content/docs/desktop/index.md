@@ -3,55 +3,59 @@ title: The scoot desktop
 description: "One switch plus a look for the full lightweight desktop — bar, wallpaper, lock, notifications, hardware keys."
 ---
 
-The primary path. Instead of hand-wiring the compositor, the bar, the
-wallpaper daemon, the lock policy and the keymap from separate pages,
-enable the desktop profile and pick a look:
+Turn on the profile, pick a look, rebuild, log out, and choose
+**scoot** on your login screen. On NixOS that is two short additions,
+one per side:
 
-```nix
-# Home configuration:
-programs.scoot.desktop = {
+```nix title="configuration.nix"
+programs.scoot = {
   enable = true;
-  look = "music-desk";   # "ginger-night" (default) | "vinyl-sunset" | "radial-burst" | "moonrise" | null (no theming)
+  desktop.enable = true;
+  desktop.look = "ginger-night";  # the login screen and system fonts follow it
 };
 ```
 
-```nix
-# System configuration:
-programs.scoot.desktop = {
+```nix title="home.nix"
+programs.scoot = {
   enable = true;
-  # Greeter passthrough (opt-in login screen, default off):
-  # greeter.enable = true;
+  desktop.enable = true;
+  desktop.look = "ginger-night";  # or music-desk, radial-burst, moonrise, vinyl-sunset
 };
 ```
 
-`enable` turns on the session wiring and the bar plus wallpaper defaults:
-on the NixOS side the login-screen session entry (`session.enable`) and
-the system-wide scootbg (`wallpaper.enable`, so a `[wallpaper]` section
-finds it on `PATH`); on the home-manager side the portal config
-(`portals.enable`); on either side the bar (`programs.scootbar.enable`,
-but only when that module is imported — the profile never requires it).
-Either side alone degrades to what it can do: NixOS without
-home-manager gets the entry and the packages but no themed config file
-(the compositor config is per-user), and home-manager without NixOS gets
-the themed files and the user units but no login-screen entry.
+Set the same look on both sides: your side themes the desktop, the
+system side themes the login screen and picks the system fonts.
+
+**You get** the bar, the wallpaper, idle and lock, notifications, a
+launcher (`Super+d`), clipboard history, screenshots and screen
+sharing, volume and brightness keys with an on-screen display, night
+light, a polkit agent and keyring, and GTK and Qt themed to the look.
+Power policy, the input method and the ReGreet login screen stay
+opt-in.
+
+**Your other sessions and your login screen stay.** To undo, set
+`desktop.enable = false;` on both sides and rebuild, or boot the
+previous generation.
+
+**Starting from nothing?** The three files (`flake.nix`,
+`configuration.nix`, `home.nix`) are on [Install](../start/install.md#use-it-every-day),
+ready to copy. That flake plus home-manager is the easy mode: one
+switch, one look, the whole desktop, rolled back together.
+
+**Which file does a snippet go in?** Each one on this page is titled
+with its file. The system side (`configuration.nix`) installs services
+and system packages; your side (`home.nix`) writes the config and runs
+your user services. Most pieces below need both halves, so their
+snippets say **configuration.nix and home.nix**: set them in both.
 
 ## Set up the flake
 
-Copy-paste complete, starting from nothing. Add the input:
+The [Install](../start/install.md#use-it-every-day) page has the whole
+`flake.nix`. Prefer FlakeHub? The flake is published as `scoot-sh/scoot`
+(once per merge to `main`, after both architectures' binaries reach
+Cachix):
 
-```nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    scoot.url = "github:scoot-sh/scoot";
-  };
-}
-```
-
-Prefer FlakeHub? The flake is published as `scoot-sh/scoot` (once per
-merge to `main`, after both architectures' binaries reach Cachix):
-
-```nix
+```nix title="flake.nix"
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -65,61 +69,14 @@ merge to `main`); pin a full version from the flake's page to hold
 still. Either way, set up the [binary cache](../start/binary-cache.md)
 or Nix compiles Smithay and the crates locally.
 
-About `scoot.inputs.nixpkgs.follows = "nixpkgs"`: leave it **off**
-unless you have a reason. The flake pins its own nixpkgs revision, and
-Cachix holds binaries built from exactly that revision — with `follows`
-pointing scoot's inputs at *your* nixpkgs instead, every store path
-differs, the cache misses, and you compile locally the first time
-(minutes). Turn `follows` on only to unify the tree with your system
-at that cost. Which package name to take, the overlay, `nix run` and
-the macOS split are in the [Nix flake
+Leave `scoot.inputs.nixpkgs.follows = "nixpkgs"` **off** unless you
+have a reason: Cachix holds binaries built from scoot's own pinned
+nixpkgs, so pointing it at yours makes the cache miss and the first
+build compile locally. Which package name to take, the overlay,
+`nix run` and the macOS split are in the [Nix flake
 reference](../reference/nix.md).
 
 ## NixOS
-
-A complete minimal setup — flake plus system config:
-
-```nix
-# flake.nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    scoot.url = "github:scoot-sh/scoot";
-  };
-
-  outputs = { nixpkgs, scoot, ... }@inputs: {
-    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      specialArgs = { inherit inputs; };
-      modules = [
-        ./configuration.nix
-        scoot.nixosModules.scoot
-      ];
-    };
-  };
-}
-```
-
-```nix
-# configuration.nix
-{ inputs, pkgs, ... }:
-{
-  programs.scoot = {
-    enable = true;
-    desktop.enable = true;
-    desktop.look = "moonrise";
-    # Real hardware with a GPU? Take the scanout build instead of the default:
-    # (see "Which build do I need" on the install page)
-    # package = inputs.scoot.packages.${pkgs.system}.scoot-gpu;
-    # Log in through ReGreet (opt-in; default off):
-    # greeter.enable = true;
-  };
-}
-```
-
-```sh
-nixos-rebuild switch --flake .#myhost
-```
 
 The session entry comes on with the profile (without it, `session.enable`
 stays an explicit opt-in — a login-screen change is a change to your way
@@ -157,64 +114,15 @@ Which options live on which side:
 | Side | Owns |
 |---|---|
 | NixOS (`programs.scoot` in `configuration.nix`) | the package system-wide; the login-screen session entry; system-wide scootbg (so `[wallpaper]` finds it on `PATH`); the idle/lock tools system-wide, the docked-lid rule, and the locker's PAM service; the portal backends system-wide plus PipeWire running; the OSD installed system-wide; the night-light tool system-wide; the polkit authority, the agent and the keyring system-wide plus the greetd keyring-unlock PAM pair; system dconf (for the theme's dark-mode signal); the profiles daemon, the lid/power-key/low-battery policy and the charge service (all opt-in through `power.enable`); the greeter |
-| Home Manager (`programs.scoot` in the home config) | the themed config file; the portal config; the per-desktop chooser config xdpw asks through; the screenshot tools; the secrets client; the user units (idle policy, notification daemon, clipboard watchers, night light, bar feed, OSD, polkit agent) plus the `scoot-session.target` scope they start in; the volume/brightness/sink scripts beside the keymap's binds; the profile switch, the charge button's fill unit, and the tools for the user |
+| Home Manager (`programs.scoot` in `home.nix`) | the themed config file; the portal config; the per-desktop chooser config xdpw asks through; the screenshot tools; the secrets client; the user units (idle policy, notification daemon, clipboard watchers, night light, bar feed, OSD, polkit agent) plus the `scoot-session.target` scope they start in; the volume/brightness/sink scripts beside the keymap's binds; the profile switch, the charge button's fill unit, and the tools for the user |
 
 ## Home Manager
 
-Standalone (a `home.nix` kept next to the machine that edits it — this
-form also manages the config on macOS, for the Linux box it deploys
-to):
-
-```nix
-# flake.nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    home-manager.url = "github:nix-community/home-manager";
-    home-manager.inputs.nixpkgs.follows = "nixpkgs";
-    scoot.url = "github:scoot-sh/scoot";
-  };
-
-  outputs = { nixpkgs, home-manager, scoot, ... }: {
-    homeConfigurations."alice" = home-manager.lib.homeManagerConfiguration {
-      pkgs = nixpkgs.legacyPackages."x86_64-linux";
-      modules = [
-        ./home.nix
-        scoot.homeModules.scoot
-      ];
-    };
-  };
-}
-```
-
-```nix
-# home.nix
-{
-  programs.scoot = {
-    enable = true;
-    desktop.enable = true;
-    desktop.look = "moonrise";
-  };
-}
-```
-
-As a NixOS module instead — home-manager inline in the
-system flake above:
-
-```nix
-# inside outputs, beside ./configuration.nix:
-# modules = [
-#   ./configuration.nix
-#   scoot.nixosModules.scoot
-#   home-manager.nixosModules.home-manager
-# ];
-# home-manager.users.alice.imports = [ scoot.homeModules.scoot ];
-# home-manager.users.alice.programs.scoot = {
-#   enable = true;
-#   desktop.enable = true;
-#   desktop.look = "moonrise";
-# };
-```
+Standalone home-manager (Nix on another distro, or a `home.nix` kept
+next to the machine that edits it — this form also manages the config
+on macOS, for the Linux box it deploys to) takes the same `home.nix`.
+The flake for it is on [Install](../start/install.md#use-it-every-day),
+under **Other Linux with Nix**.
 
 A home-manager-only setup still needs two things from wherever PAM
 and the seat are configured: the locker's PAM service (else no
@@ -310,7 +218,7 @@ or drop to `look = null`.
 For `vinyl-sunset`, the illustration is yours to download: point the
 wallpaper at your copy and the flat color steps aside:
 
-```nix
+```nix title="home.nix"
 programs.scoot.settings.wallpaper = {
   image = "~/Pictures/wallpapers/vinyl-sunset.png";
   mode = "fill";
@@ -360,7 +268,7 @@ Set any target to `false` to keep that piece's own style while the
 rest follows the look — for example, to leave alone an app you
 already themed:
 
-```nix
+```nix title="home.nix"
 programs.scoot.desktop.theme.targets.gtk.enable = false;  # my GTK is hand-tuned
 ```
 
@@ -484,7 +392,7 @@ into the new config; no re-login):
 | `desktop.idle.lock.settings` | attrset of string | `{ }` | extra swaylock lines over the themed ones (a value here wins per key) |
 | `desktop.theme.targets.lock.enable` | bool | `true` | theme the locker from the look; `false` keeps swaylock's own style while the rest follows the look |
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   # Later to bed: lock at 10 min, screens off at 15.
@@ -537,7 +445,7 @@ on the floor. The daemon is mako, owning
 `org.freedesktop.Notifications` on the session bus as a user unit, with
 its popups on the **`overlay`** layer:
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   # A popup at the bottom-right, at most three visible:
@@ -600,7 +508,7 @@ them per update (two 2-byte glyphs such as `éé` slip past the check and
 leave that state's last value shown, so do not use them). A Nerd Font glyph works wherever `bar.fallback-fonts`
 provides one:
 
-```nix
+```nix title="home.nix"
 programs.scoot.desktop.notifications.bar.icons = {
   idle = "○"; # the push module's static icon; "" shows nothing while idle
   unread = "●"; # sent beside the count, overriding idle while set
@@ -654,7 +562,7 @@ Without this slot, a copy dies with the app that offered it — from
 your side of the screen that reads as data loss, and agents move text
 through the clipboard constantly, so the profile turns it on.
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   # A longer tail in a moved db:
@@ -743,7 +651,7 @@ Press `Super+d`, type a few letters, Enter — the app opens. Without
 this slot a fresh desktop's launcher key does nothing; with it (on
 with the profile) two binds open one menu:
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   # The menu on Super+d lists XDG apps, most-launched first;
@@ -863,7 +771,7 @@ Share your screen in a Meet call, or screenshot a region into
 `~/Pictures` — on with the profile, through the standard portals, so
 Chrome, Meet, OBS and Telegram all work with nothing extra to start.
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   # Share without being asked which screen (kiosk: one fixed output):
@@ -1009,7 +917,7 @@ and mic-mute binds routed through small scripts that step the control
 *and* poke the on-screen display, and a sink helper the Bluetooth
 picker calls later.
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   # No sound or OSD on this box (the binds run silent, as before):
@@ -1129,7 +1037,7 @@ Troubleshooting, by symptom:
 Warm the screen after dark, on with the profile: the day's blue
 fades to amber across the evening instead of snapping at sunset.
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   # Warmer nights, or a fixed schedule of your own:
@@ -1209,7 +1117,7 @@ restarts into the new flags; no re-login):
 | `desktop.nightlight.package` | package or null | the daemon's tool (Linux-only: null off Linux) | point at your own build of either daemon (its flags must agree with `daemon`); null with the switch on fails evaluation naming it |
 | `desktop.theme.targets.nightlight.enable` | bool | `true` | warm to the look's own night temperature; `false` keeps the plain default (or your value) |
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   # Sunset where the box is, not fixed times:
@@ -1274,7 +1182,7 @@ for want of someone to ask the password, and without the keyring every
 app asks for its secrets again after each login. Both come on with
 the profile: a polkit agent to ask, a keyring to remember.
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   # No privilege prompts on this box (privileged actions refuse
@@ -1470,7 +1378,7 @@ The file manager is optional and off: nothing in the desktop needs
 one, and a graphical one carries a toolkit. Turn it on for
 mouse-driven browsing:
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop.apps.fileManager.enable = true;   # pcmanfm
 ```
 
@@ -1819,7 +1727,7 @@ reload (`scoot msg reload`) or re-login:
 Each bind renders as a default a value you set in `settings.binds` wins
 over — override or remove one bind like this:
 
-```nix
+```nix title="home.nix"
 programs.scoot.desktop.keys.binds.volumeUp.enable = false;
 programs.scoot.settings.binds."XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 3%+";
 ```
@@ -1828,7 +1736,7 @@ Overriding with a plain string like that drops the bind's repeat and
 lock-screen behavior (a string carries no flags). To keep both,
 override with the table form:
 
-```nix
+```nix title="home.nix"
 programs.scoot.settings.binds."XF86AudioRaiseVolume" = {
   action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 3%+";
   repeat = true;
@@ -1881,7 +1789,7 @@ suspend and an 80% charge cap change what the machine does — with real
 consequences on a box you drive remotely — so enabling the profile
 must not smuggle them in:
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop.power.enable = true;
 ```
 
@@ -1930,7 +1838,7 @@ silently from the keymap; `set` to an unlisted profile stays loud
 for terminal use. Where no driver honors the daemon at all, drop
 it and its bind entirely:
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop.power = {
   enable = true;
   profiles.enable = false;
@@ -1945,7 +1853,7 @@ Holding a profile across plug events is opt-in — the daemon itself
 holds whatever is set, treating a profile as your intent rather
 than power state:
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop.power = {
   enable = true;
   profileOnAC = "performance";
@@ -1970,7 +1878,7 @@ The exact rule, with the profile's docked twin beside it:
 | power key | `suspend` | short press (long press is the firmware's) |
 | battery at 2% | `suspend` | through UPower, which already sees the battery |
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop.power = {
   enable = true;
   # Stay awake on lid close (needs the idle policy's locker to mean
@@ -2025,7 +1933,7 @@ automatic refill to 100% after thirty minutes on battery (a trip
 needs the range), dropping back after a day straight on the
 charger:
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop.power = {
   enable = true;
   # A lower cap on a named battery, an hourly trip, a half-day trip end:
@@ -2050,7 +1958,7 @@ cell and give it the toggle, and the fill unit (which runs when the
 bar starts, so a fresh login does not wait for the next sync) does
 the rest:
 
-```nix
+```nix title="home.nix"
 programs.scootbar.settings = {
   right = [ "charge" "battery" "clock" ];
   push.charge.on-click.exec = [ "scoot-charge" "toggle" ];
@@ -2127,7 +2035,7 @@ goes dark); undock, and the laptop panel takes over again, lit even
 if the docked profile turned it off. No hand-editing the config on
 every move:
 
-```nix
+```nix title="home.nix"
 programs.scoot.desktop.displays.profiles = [
   {
     name = "docked";
@@ -2299,7 +2207,7 @@ the daemon downloads it once, caches it under `~/.cache/scootbg/`, and
 shows it like any other image. Pin it with `sha256` so a changed byte
 fails loudly instead of landing on screen:
 
-```nix
+```nix title="home.nix"
 programs.scoot.settings.wallpaper = {
   image = "https://example.com/hills.jpg";
   sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
@@ -2347,13 +2255,13 @@ No login screen: the console logs itself in and the shell profile
 starts the session. Enable the profile as usual, then name who logs
 in and let their user manager start at boot:
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
 };
 ```
 
-```nix
+```nix title="configuration.nix"
 services.getty.autologinUser = "alice";
 users.users."alice".linger = true;
 ```
@@ -2404,7 +2312,7 @@ Japanese, Korean or rely on compose, enable the engine — otherwise
 leave it off (most sessions type no CJK, and an engine awake in
 every session would spend closure and wakeups on nothing).
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   # An engine for CJK and compose (nothing runs until you set this):
@@ -2502,7 +2410,7 @@ restarts into a new theme; a new engine or addon rewrites
 | `desktop.inputMethod.package` | package or null | fcitx5 (Linux-only: null off Linux) | point at your own engine build (it must speak `input-method-v2`); null with the switch on fails evaluation naming it |
 | `desktop.theme.targets.inputMethod.enable` | bool | `true` | theme the candidate window from the look; `false` keeps fcitx5's own style |
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   inputMethod.enable = true;

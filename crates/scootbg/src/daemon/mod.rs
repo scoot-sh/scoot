@@ -379,10 +379,9 @@ impl Daemon {
                 .revents
                 .get(WORKER)
                 .is_some_and(|r| r.intersects(PollFlags::IN))
+                && let Some(done) = self.wayland.state.images.worker.take()
             {
-                if let Some(done) = self.wayland.state.images.worker.take() {
-                    images::land(&mut self.wayland.state, done, &self.wayland.qh);
-                }
+                images::land(&mut self.wayland.state, done, &self.wayland.qh);
             }
 
             // The transition timer fired: clear its expirations (else it

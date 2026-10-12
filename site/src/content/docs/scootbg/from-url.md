@@ -67,7 +67,7 @@ file cached in the store), and scootbg sees an ordinary file. A plain
 string URL works too, and then scootbg itself downloads and caches it
 at runtime (above).
 
-```nix
+```nix title="home.nix"
 # Fetched at build time (verified, in the store, no network at runtime):
 programs.scoot.settings.wallpaper = {
   image = {
@@ -78,7 +78,7 @@ programs.scoot.settings.wallpaper = {
 };
 ```
 
-```nix
+```nix title="home.nix"
 # Or fetched by scootbg at runtime (cached under ~/.cache/scootbg/):
 programs.scoot.settings.wallpaper = {
   image = "https://example.com/hills.jpg";

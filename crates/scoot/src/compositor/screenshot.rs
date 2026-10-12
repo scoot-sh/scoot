@@ -857,10 +857,10 @@ fn recycle_returned(
     output: Option<OutputId>,
     bgra: Vec<u8>,
 ) {
-    if let Some(id) = output {
-        if let Some(backend) = backends.get_mut(&id) {
-            backend.recycle_capture_buf(bgra);
-        }
+    if let Some(id) = output
+        && let Some(backend) = backends.get_mut(&id)
+    {
+        backend.recycle_capture_buf(bgra);
     }
 }
 

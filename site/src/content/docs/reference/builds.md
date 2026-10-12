@@ -53,14 +53,18 @@ ls /dev/dri/renderD*
 The package knob is `programs.scoot.package` (home-manager and NixOS
 alike; the desktop profile never sets it — the choice stays yours):
 
-```nix
+```nix title="configuration.nix"
 programs.scoot = {
   enable = true;
   # Real hardware with a GPU: take the scanout build.
-  package = inputs.scoot.packages.${pkgs.system}.scoot-gpu;
+  package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scoot-gpu;
   # ...plus X11 apps? Use scoot-gpu-xwayland instead.
 };
 ```
+
+`inputs` and `pkgs` need `{ inputs, pkgs, ... }:` at the top of
+`configuration.nix` (the Install page's `flake.nix` passes `inputs`
+down through `specialArgs`).
 
 Leave the default (omit `package`) for the CPU build. The same names
 work with `nix profile add` and `nix run` — swap `scoot` for

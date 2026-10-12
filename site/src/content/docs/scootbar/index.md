@@ -33,8 +33,8 @@ Sans — a demo, not what a system installs.)
 With Nix, the modules are separate from the compositor's (importing
 one changes nothing about the other):
 
-```nix
-imports = [ inputs.scoot.homeModules.scootbar ];   # or nixosModules.scootbar
+```nix title="home.nix"
+imports = [ inputs.scoot.homeModules.scootbar ];   # skip if the Install flake already loads it
 programs.scootbar = {
   enable = true;
   features = [ "clock" "workspaces" ];   # optional: build with exactly these modules
@@ -55,6 +55,11 @@ programs.scootbar = {
 | `settings` | attrset | `{ }` | restart (unit) / `scootbar msg reload` by hand | Free-form: rendered as TOML to the bar's config, so a new option never needs a module change first. |
 | `systemd.enable` | bool | `true` | — | The user service. Off: start `scootbar daemon` from your compositor's autostart instead (one route per program — both starts two daemons, and the second refuses). |
 
+The snippets below name `inputs` and `pkgs`: they need
+`{ inputs, pkgs, ... }:` at the top of `home.nix`. Both
+[Install](../start/install/) flakes pass those down, but a bare
+`{ ... }` file has neither in scope.
+
 Without Nix: `scootbar daemon` runs in the foreground until the
 compositor goes away (start it with `&`, or from `[autostart]`).
 home-manager writes `~/.config/scoot/bar.toml` (the bar's default
@@ -73,12 +78,12 @@ Modules are Cargo features, reachable through `.override` — a bar
 with no modules needs no font, and `icon-image` (the PNG decoder,
 +115 KB) builds the same way (each line is one alternative):
 
-```nix
-scootbar.override { buildNoDefaultFeatures = true; }
+```nix title="home.nix"
+programs.scootbar.package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scootbar.override { buildNoDefaultFeatures = true; };
 ```
 
-```nix
-scootbar.override { buildFeatures = [ "icon-image" ]; }
+```nix title="home.nix"
+programs.scootbar.package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scootbar.override { buildFeatures = [ "icon-image" ]; };
 ```
 
 A bar built without a module refuses its table in the config (an

@@ -520,19 +520,21 @@ impl Nets {
     /// refusing while it holds a full scan. AP-mode interfaces never
     /// qualify: their caches stay empty. Zero names none.
     fn scan_target(&self) -> u32 {
-        if let Some(iface) = self.selected(self.pinned.as_deref()) {
-            if iface.wireless && !iface.ap {
-                return iface.link.index;
-            }
+        if let Some(iface) = self.selected(self.pinned.as_deref())
+            && iface.wireless
+            && !iface.ap
+        {
+            return iface.link.index;
         }
         if let Some(iface) = self
             .ifaces
             .iter()
             .find(|iface| iface.link.index == self.station_of)
+            && iface.wireless
+            && !iface.ap
+            && !iface.ssid.is_empty()
         {
-            if iface.wireless && !iface.ap && !iface.ssid.is_empty() {
-                return iface.link.index;
-            }
+            return iface.link.index;
         }
         if let Some(iface) = self
             .ifaces
@@ -938,15 +940,15 @@ impl Nets {
     /// that has failed too often, which is dropped (see
     /// [`MAX_DUMP_FAILURES`]).
     fn redump_rt(&mut self, seq: u32) {
-        if let Some((busy, dump)) = self.rt_busy {
-            if busy == seq {
-                self.rt_busy = None;
-                self.rt_failures += 1;
-                if self.rt_failures >= MAX_DUMP_FAILURES {
-                    self.rt_failures = 0;
-                } else {
-                    self.rt_dumps.push_back(dump);
-                }
+        if let Some((busy, dump)) = self.rt_busy
+            && busy == seq
+        {
+            self.rt_busy = None;
+            self.rt_failures += 1;
+            if self.rt_failures >= MAX_DUMP_FAILURES {
+                self.rt_failures = 0;
+            } else {
+                self.rt_dumps.push_back(dump);
             }
         }
     }
@@ -984,20 +986,20 @@ impl Nets {
     /// owed reset but rebinds at resend, so pages of whatever goes out
     /// between never clear the list.
     fn redump_genl(&mut self, seq: u32) {
-        if let Some((busy, dump)) = self.genl_busy {
-            if busy == seq {
-                let was_scan = matches!(dump, GenlDump::Scan(_));
-                self.genl_busy = None;
-                self.scan_reset_spent = false;
-                self.genl_failures += 1;
-                if self.genl_failures >= MAX_DUMP_FAILURES {
-                    self.genl_failures = 0;
-                } else {
-                    self.genl_dumps.push_back(dump);
-                }
-                if was_scan {
-                    self.scan_reset_live = false;
-                }
+        if let Some((busy, dump)) = self.genl_busy
+            && busy == seq
+        {
+            let was_scan = matches!(dump, GenlDump::Scan(_));
+            self.genl_busy = None;
+            self.scan_reset_spent = false;
+            self.genl_failures += 1;
+            if self.genl_failures >= MAX_DUMP_FAILURES {
+                self.genl_failures = 0;
+            } else {
+                self.genl_dumps.push_back(dump);
+            }
+            if was_scan {
+                self.scan_reset_live = false;
             }
         }
     }
@@ -1310,17 +1312,17 @@ impl Network {
     /// per socket while none is in flight. A failed send resyncs; the
     /// dumps it carried are re-queued there.
     fn flush(&mut self) {
-        if let Some(sock) = self.rt.as_ref() {
-            if !flush_out(&sock.fd, &mut self.nets.out_rt) {
-                self.resync();
-                return;
-            }
+        if let Some(sock) = self.rt.as_ref()
+            && !flush_out(&sock.fd, &mut self.nets.out_rt)
+        {
+            self.resync();
+            return;
         }
-        if let Some(sock) = self.genl.as_ref() {
-            if !flush_out(&sock.fd, &mut self.nets.out_genl) {
-                self.resync();
-                return;
-            }
+        if let Some(sock) = self.genl.as_ref()
+            && !flush_out(&sock.fd, &mut self.nets.out_genl)
+        {
+            self.resync();
+            return;
         }
         self.pump_rt();
         self.pump_genl();
@@ -2175,15 +2177,15 @@ impl Module for Network {
         if let Some(timer) = self.timer.as_ref() {
             sources.add(timer.as_fd(), PollFlags::IN);
         }
-        if let Some(menu) = self.menu.as_ref() {
-            if let Some(pidfd) = menu.pidfd.as_ref() {
-                sources.add(pidfd.as_fd(), PollFlags::IN);
-            }
+        if let Some(menu) = self.menu.as_ref()
+            && let Some(pidfd) = menu.pidfd.as_ref()
+        {
+            sources.add(pidfd.as_fd(), PollFlags::IN);
         }
-        if let Some(connect) = self.connect.as_ref() {
-            if let Some(pidfd) = connect.pidfd.as_ref() {
-                sources.add(pidfd.as_fd(), PollFlags::IN);
-            }
+        if let Some(connect) = self.connect.as_ref()
+            && let Some(pidfd) = connect.pidfd.as_ref()
+        {
+            sources.add(pidfd.as_fd(), PollFlags::IN);
         }
         if let Some(retry) = self.retry.as_ref() {
             sources.add(retry.as_fd(), PollFlags::IN);

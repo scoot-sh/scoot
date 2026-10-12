@@ -95,7 +95,17 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
   `PATH`. Deeper — that the documented NixOS and home-manager desktop
   configs actually evaluate — is pinned in `nix/tests.nix` ("the
   documented install configs", run by `nix flake check` in CI); keep
-  that test in step with `desktop/index.md` when the page changes.
+  that test in step with `start/install.mdx` and `desktop/index.md`
+  when they change. Every block must also be titled with the file it
+  goes in (```` ```nix title="home.nix" ````: `flake.nix`,
+  `configuration.nix`, `home.nix`, or `"configuration.nix and home.nix"`
+  for desktop options each side wires half of); an untitled block fails.
+- `pnpm test-install` (`scripts/test-install.sh`): runs
+  `public/install.sh` (served at `/install.sh`) against a fake release
+  tree over `file://`: a tagged install with a look, a kept config, the
+  nightly fallback, a checksum refusal, uninstall, dry run and option
+  refusals, after shellcheck when it is on `PATH`. CI runs it with
+  shellcheck in the docs-site job.
 
 ## Nix build
 

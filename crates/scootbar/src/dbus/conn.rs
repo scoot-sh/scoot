@@ -123,12 +123,12 @@ pub fn bus_addr_for(address: Option<&std::ffi::OsStr>) -> Result<BusAddr, ()> {
                         &path,
                     ))));
                 }
-            } else if abstract_name.is_none() {
-                if let Some(name) = param.strip_prefix(b"abstract=") {
-                    let name = unescape(name);
-                    if !name.is_empty() && !name.contains(&0) {
-                        abstract_name = Some(name);
-                    }
+            } else if abstract_name.is_none()
+                && let Some(name) = param.strip_prefix(b"abstract=")
+            {
+                let name = unescape(name);
+                if !name.is_empty() && !name.contains(&0) {
+                    abstract_name = Some(name);
                 }
             }
         }
@@ -159,12 +159,13 @@ fn unescape(value: &[u8]) -> Vec<u8> {
     let mut at = 0;
     while at < value.len() {
         let hex = |byte: u8| char::from(byte).to_digit(16);
-        if value[at] == b'%' && at + 2 < value.len() {
-            if let (Some(high), Some(low)) = (hex(value[at + 1]), hex(value[at + 2])) {
-                out.push((high * 16 + low) as u8);
-                at += 3;
-                continue;
-            }
+        if value[at] == b'%'
+            && at + 2 < value.len()
+            && let (Some(high), Some(low)) = (hex(value[at + 1]), hex(value[at + 2]))
+        {
+            out.push((high * 16 + low) as u8);
+            at += 3;
+            continue;
         }
         out.push(value[at]);
         at += 1;

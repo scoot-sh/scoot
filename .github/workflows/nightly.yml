@@ -1,0 +1,232 @@
+# Nightly: portable glibc binaries of main, republished on every merge.
+#
+# The same build as release.yml's "Portable binaries" job (bookworm base,
+# so a glibc 2.36 floor; the pinned toolchain; the bare-base start check),
+# published to ONE moving prerelease tagged `nightly`, so a script can
+# fetch main's binaries at a stable, login-free URL:
+#
+#   https://github.com/scoot-sh/scoot/releases/download/nightly/<asset>
+#
+# Version: the same number FlakeHub's rolling release gives this commit
+# (nix-build.yml, `rolling: true`): `0.1.<commits on main>+rev-<commit>`,
+# so a nightly binary and the flake version a Nix user resolves name the
+# same commit. (The two workflows filter paths differently, so a merge
+# can publish one and not the other; the version still names the commit.) The asset names stay `-nightly-` so their URLs never move.
+#
+# Assets: `scoot-nightly-<arch>`, `scootbg-nightly-<arch>`,
+# `scootbar-nightly-<arch>` for x86_64-linux and aarch64-linux, plus
+# `nightly.txt` (commit, date, crate versions) and `SHA256SUMS`, uploaded
+# last so a download racing a republish fails its checksum instead of
+# installing a mixed set (`install.sh` says to retry). Every file carries
+# keyless build provenance:
+#
+#   gh attestation verify <file> --owner scoot-sh \
+#     --signer-workflow scoot-sh/scoot/.github/workflows/nightly.yml
+#
+# This is the non-Nix counterpart of Cachix (nix-build.yml pushes main's
+# Nix closures there): never more than one merge behind. Tagged releases
+# stay release.yml's job; `nightly` is a prerelease, so GitHub's "latest
+# release" never points at it.
+#
+# Keep DISTRO_IMAGE, RUST_TOOLCHAIN and the dependency lists in step with
+# release.yml's build job. One deliberate exception: nightly installs
+# `git` beside the libraries, because it builds the checkout (which pulls
+# the pinned Smithay fork) while release.yml builds the vendored tree
+# offline, which needs no git.
+
+name: nightly (main, portable binaries)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'resources/**'
+      - 'packaging/deb/scootbar.service'
+      - 'packaging/deb/scoot.desktop'
+      - 'docs/examples/**'
+      - '.github/workflows/nightly.yml'
+  pull_request:
+    paths:
+      - '.github/workflows/nightly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One publish at a time, never cancelled halfway: a merge during a
+# publish queues behind it, and a third replaces the queued second.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
+  cancel-in-progress: false
+
+jobs:
+  lint:
+    name: actionlint
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - name: actionlint (pinned through this repo's flake.lock)
+        run: nix shell --inputs-from . nixpkgs#actionlint --command actionlint .github/workflows/nightly.yml
+
+  build:
+    name: Portable binaries (${{ matrix.arch }})
+    # main only: a dispatch from another branch must not move `nightly`.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64-linux
+          - runner: ubuntu-24.04-arm
+            arch: aarch64-linux
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      DISTRO_IMAGE: debian:bookworm-slim
+      RUST_TOOLCHAIN: 1.97.0
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build --release --locked in the distro container
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/src:ro" -v "$RUNNER_TEMP/dist:/out" \
+            -e CARGO_TARGET_DIR=/tmp/target -e ARCH \
+            "$DISTRO_IMAGE" bash -euo pipefail -c '
+              apt-get update -qq
+              apt-get install -y -qq curl ca-certificates git build-essential pkg-config \
+                libseat-dev libinput-dev libxkbcommon-dev libudev-dev \
+                libpixman-1-dev libwayland-dev wayland-protocols
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs \
+                | sh -s -- -y --default-toolchain "$0" --profile minimal
+              export PATH="$HOME/.cargo/bin:$PATH"
+              rustc --version
+              ldd --version | head -1
+              cd /src
+              for bin in scoot scootbg scootbar; do
+                cargo build --release --locked -p "$bin"
+                cp "/tmp/target/release/$bin" "/out/${bin}-nightly-${ARCH}"
+              done
+              ls -l /out/
+            ' "$RUST_TOOLCHAIN"
+
+      # The floor the release promises, checked the way release.yml
+      # checks it: the compositor runs with only its five runtime
+      # libraries installed, while the bar and the wallpaper daemon must
+      # start bare (`scoot-nightly-*` names only the compositor, as
+      # release.yml's `scoot-[0-9]*` does: shell globs need the literal
+      # `-nightly-`, so scootbg-* and scootbar-* also start with scoot
+      # but must run with nothing installed).
+      - name: The binaries start on the bare base
+        run: |
+          docker run --rm -v "$RUNNER_TEMP/dist:/dist:ro" "$DISTRO_IMAGE" bash -euo pipefail -c '
+            apt-get update -qq
+            for bin in /dist/*; do
+              case "$(basename "$bin")" in
+                scoot-nightly-*) apt-get install -y -qq libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0 >/dev/null ;;
+              esac
+              "$bin" --version
+            done
+          '
+
+      - name: Checksums
+        run: (cd "$RUNNER_TEMP/dist" && sha256sum -- * > "SHA256SUMS-$ARCH" && cat "SHA256SUMS-$ARCH")
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-${{ matrix.arch }}
+          path: ${{ runner.temp }}/dist
+          include-hidden-files: true
+          retention-days: 3
+
+  publish:
+    name: Publish the nightly prerelease
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit count is the rolling version: a shallow clone miscounts.
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: nightly-*
+          path: ${{ runner.temp }}/rel
+
+      - name: Assemble and verify
+        run: |
+          mkdir -p dist
+          for arch in x86_64-linux aarch64-linux; do
+            src="$RUNNER_TEMP/rel/nightly-$arch"
+            (cd "$src" && sha256sum -c "SHA256SUMS-$arch")
+            cp "$src"/scoot*-nightly-"$arch" dist/
+          done
+          for bin in scoot scootbg scootbar; do
+            for arch in x86_64-linux aarch64-linux; do
+              test -f "dist/$bin-nightly-$arch" || { echo "::error title=Missing nightly asset::$bin-nightly-$arch"; exit 1; }
+            done
+          done
+          version() { sed -n 's/^version *= *"\(.*\)"/\1/p' "crates/$1/Cargo.toml" | head -1; }
+          # flakehub-push's rolling format: "0.1" + the commit count +
+          # "+rev-" + the full commit SHA.
+          rolling="0.1.$(git rev-list --count HEAD)+rev-$(git rev-parse HEAD)"
+          echo "ROLLING=$rolling" >>"$GITHUB_ENV"
+          {
+            echo "version=$rolling"
+            echo "commit=$GITHUB_SHA"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "scoot=$(version scoot)"
+            echo "scootbg=$(version scootbg)"
+            echo "scootbar=$(version scootbar)"
+          } > dist/nightly.txt
+          (cd dist && sha256sum -- * | LC_ALL=C sort -k2 > SHA256SUMS && sha256sum -c SHA256SUMS)
+          cat dist/nightly.txt
+          ls -l dist/
+
+      - name: Attest the file set
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'dist/*'
+
+      - name: Move the nightly tag and republish
+        run: |
+          short="$(git rev-parse --short HEAD)"
+          {
+            echo "Portable glibc binaries of \`main\` at \`$short\` ($ROLLING, the same version FlakeHub publishes), rebuilt on every merge."
+            echo
+            echo "Install with \`curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --nightly\`,"
+            echo "or verify a download on the site's [releases page](https://www.scoot.sh/reference/releases/)."
+          } > "$RUNNER_TEMP/NOTES.md"
+          git tag -f nightly HEAD
+          git push -f origin refs/tags/nightly
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly --prerelease --title "Nightly $ROLLING" --notes-file "$RUNNER_TEMP/NOTES.md"
+          else
+            gh release create nightly --prerelease --title "Nightly $ROLLING" --notes-file "$RUNNER_TEMP/NOTES.md" --verify-tag
+          fi
+          # Binaries first, the checksum list last (see the header).
+          for f in dist/*; do
+            [ "$(basename "$f")" = SHA256SUMS ] && continue
+            gh release upload nightly "$f" --clobber
+          done
+          gh release upload nightly dist/SHA256SUMS --clobber
+          # Drop any asset this run did not publish (a renamed binary).
+          gh release view nightly --json assets --jq '.assets[].name' | while read -r name; do
+            [ -f "dist/$name" ] || gh release delete-asset nightly "$name" --yes
+          done

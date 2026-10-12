@@ -9,7 +9,7 @@ fonts, dark mode, the login screen, and the terminal, prompt, editor
 and monitor configs — from one `look` choice. Set it in [the desktop
 profile](../desktop/index.md#pick-a-look):
 
-```nix
+```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
   enable = true;
   look = "music-desk";   # "ginger-night" (default) | "vinyl-sunset" | "radial-burst" | "moonrise" | null (no theming)
@@ -86,7 +86,7 @@ Per-target opt-out is Stylix-style, under one namespace, one flag per
 themed piece (every target defaults on) — see the [option
 table](../desktop/index.md#app-theme) for the full list:
 
-```nix
+```nix title="home.nix"
 programs.scoot.desktop.theme.targets.lock.enable = false;  # keep swaylock's own style
 ```
 

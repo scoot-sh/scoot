@@ -14,13 +14,17 @@ Xwayland's own):
 | `scoot-xwayland` | `scoot` with the `xwayland` feature |
 | `scoot-gpu-xwayland` | `scoot-gpu` with it |
 
-```nix
+```nix title="configuration.nix"
 programs.scoot = {
   enable = true;
-  package = inputs.scoot.packages.${pkgs.system}.scoot-xwayland;
+  package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scoot-xwayland;
   session.enable = true;
 };
 ```
+
+`inputs` and `pkgs` need `{ inputs, pkgs, ... }:` at the top of
+`configuration.nix` (the Install page's `flake.nix` passes `inputs`
+down through `specialArgs`).
 
 The package is only half: XWayland still starts only when asked, by
 `--xwayland` or `[xwayland] enabled`. Either half alone is loud rather

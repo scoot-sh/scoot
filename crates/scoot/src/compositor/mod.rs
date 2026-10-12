@@ -193,18 +193,18 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     };
     // Headless and nested resolve fully here, so the one INFO line per
     // session (see `tty::init` for `--tty`'s) is emitted here for them.
-    if !options.tty {
-        if let render::policy::Early::Resolved(kind, reason) = early {
-            tracing::info!(
-                requested = %request,
-                source = %source,
-                tier = %kind,
-                reason = %reason,
-                driver = "-",
-                gl_renderer = "-",
-                "renderer chosen"
-            );
-        }
+    if !options.tty
+        && let render::policy::Early::Resolved(kind, reason) = early
+    {
+        tracing::info!(
+            requested = %request,
+            source = %source,
+            tier = %kind,
+            reason = %reason,
+            driver = "-",
+            gl_renderer = "-",
+            "renderer chosen"
+        );
     }
 
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new()?;

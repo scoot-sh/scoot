@@ -316,13 +316,13 @@ impl World {
         // and a dialog already above it keeps its higher level. When the
         // covering window is a tiled column there is nothing to lift past:
         // the whole layer draws above it already.
-        if let Some(covering) = covering {
-            if let Some(c) = stack.iter().position(|&id| id == covering) {
-                let above = scratch.level[c].saturating_add(1);
-                for index in 0..n {
-                    if index != c && scratch.dialog_of_covering[index] {
-                        scratch.level[index] = scratch.level[index].max(above);
-                    }
+        if let Some(covering) = covering
+            && let Some(c) = stack.iter().position(|&id| id == covering)
+        {
+            let above = scratch.level[c].saturating_add(1);
+            for index in 0..n {
+                if index != c && scratch.dialog_of_covering[index] {
+                    scratch.level[index] = scratch.level[index].max(above);
                 }
             }
         }

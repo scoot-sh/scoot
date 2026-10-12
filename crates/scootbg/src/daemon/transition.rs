@@ -447,11 +447,10 @@ fn restart(
             .as_mut()
             .and_then(Rc::get_mut)
             .and_then(|shared| shared.memory_mut())
+            && memory.bytes_mut().len() == frame_bytes.len()
         {
-            if memory.bytes_mut().len() == frame_bytes.len() {
-                memory.bytes_mut().copy_from_slice(frame_bytes);
-                reused = true;
-            }
+            memory.bytes_mut().copy_from_slice(frame_bytes);
+            reused = true;
         }
         if !reused {
             match snap_from(frame_bytes, globals, qh, dims) {

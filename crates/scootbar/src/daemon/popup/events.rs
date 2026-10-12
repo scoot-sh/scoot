@@ -68,16 +68,15 @@ impl State {
         // enter it; a compositor that lets it anyway has the tooltip closed
         // (and held off until the pointer leaves its module), not made the
         // pointer's focus, which would end the hover that shows it.
-        if let wl_pointer::Event::Enter { surface, .. } = event {
-            if self
+        if let wl_pointer::Event::Enter { surface, .. } = event
+            && self
                 .popup
                 .tip
                 .as_ref()
                 .is_some_and(|tip| tip.surface == *surface)
-            {
-                self.popup.close_tip();
-                return true;
-            }
+        {
+            self.popup.close_tip();
+            return true;
         }
         let Some(open) = self.popup.open.as_mut() else {
             return false;
@@ -300,16 +299,15 @@ impl Dispatch<XdgSurface, PopupId> for State {
                 && *size != open.requested
                 && size.width <= super::MAX_SIDE
                 && size.height <= super::MAX_SIDE
-        }) {
-            if let Some(dims) = open.scale.buffer(size) {
-                open.requested = size;
-                open.dims = dims;
-                open.layout.width = dims.0;
-                open.layout.height = dims.1;
-                // The frame's shape follows the size: the radius cut back
-                // to what the configured size holds.
-                open.round = open.round.resize(dims.0, dims.1);
-            }
+        }) && let Some(dims) = open.scale.buffer(size)
+        {
+            open.requested = size;
+            open.dims = dims;
+            open.layout.width = dims.0;
+            open.layout.height = dims.1;
+            // The frame's shape follows the size: the radius cut back
+            // to what the configured size holds.
+            open.round = open.round.resize(dims.0, dims.1);
         }
         open.dirty = true;
     }
@@ -326,13 +324,13 @@ impl Dispatch<XdgPopup, PopupId> for State {
     ) {
         match event {
             xdg_popup::Event::Configure { width, height, .. } => {
-                if let Some(open) = state.popup.find_mut(*id) {
-                    if &open.popup == popup {
-                        open.configured = Some(Size {
-                            width: u32::try_from(width).unwrap_or(0),
-                            height: u32::try_from(height).unwrap_or(0),
-                        });
-                    }
+                if let Some(open) = state.popup.find_mut(*id)
+                    && &open.popup == popup
+                {
+                    open.configured = Some(Size {
+                        width: u32::try_from(width).unwrap_or(0),
+                        height: u32::try_from(height).unwrap_or(0),
+                    });
                 }
             }
             // A click outside, the session locking, or the compositor's own
@@ -352,10 +350,10 @@ impl Dispatch<WlBuffer, PopupId> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_buffer::Event::Release = event {
-            if let Some(open) = state.popup.find_mut(*id) {
-                open.pool.released(buffer);
-            }
+        if let wl_buffer::Event::Release = event
+            && let Some(open) = state.popup.find_mut(*id)
+        {
+            open.pool.released(buffer);
         }
     }
 }

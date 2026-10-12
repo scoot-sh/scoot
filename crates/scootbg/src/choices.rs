@@ -298,10 +298,10 @@ impl Choices {
             if !for_this_output {
                 continue;
             }
-            if let Some(Wallpaper::Image(image)) = &entry.choice {
-                if !images.iter().any(|(serial, _)| *serial == image.serial) {
-                    images.push((image.serial, Arc::clone(image)));
-                }
+            if let Some(Wallpaper::Image(image)) = &entry.choice
+                && !images.iter().any(|(serial, _)| *serial == image.serial)
+            {
+                images.push((image.serial, Arc::clone(image)));
             }
         }
         images.sort_by_key(|(serial, _)| std::cmp::Reverse(*serial));

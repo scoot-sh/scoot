@@ -451,10 +451,10 @@ fn assert_counts_agree_with_window_workspace(world: &World, id: OutputId) {
     assert_eq!(counts.len(), workspaces.count);
     let mut histogram = vec![0; workspaces.count];
     for (window, _) in world.windows() {
-        if let Some((output, workspace, _)) = world.window_workspace(window) {
-            if output == id {
-                histogram[workspace] += 1;
-            }
+        if let Some((output, workspace, _)) = world.window_workspace(window)
+            && output == id
+        {
+            histogram[workspace] += 1;
         }
     }
     assert_eq!(counts, histogram);

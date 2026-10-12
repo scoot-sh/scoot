@@ -446,22 +446,20 @@ impl Interaction {
             redraw: held.is_some(),
             activate: None,
         };
-        if let Some(Held::Button(row)) = held {
-            if Self::button_at(content, layout, x, self.content_y(y)) == Some(row) {
-                if let Some(Kind::Button {
-                    action,
-                    arg,
-                    closes,
-                    ..
-                }) = content.widgets().get(row).map(|w| w.kind)
-                {
-                    out.activate = Some(Activate {
-                        action,
-                        arg,
-                        closes,
-                    });
-                }
-            }
+        if let Some(Held::Button(row)) = held
+            && Self::button_at(content, layout, x, self.content_y(y)) == Some(row)
+            && let Some(Kind::Button {
+                action,
+                arg,
+                closes,
+                ..
+            }) = content.widgets().get(row).map(|w| w.kind)
+        {
+            out.activate = Some(Activate {
+                action,
+                arg,
+                closes,
+            });
         }
         out
     }

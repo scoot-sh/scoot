@@ -629,10 +629,10 @@ fn read_one(root: &Path, name: &str) -> Option<Level> {
     }
     // An empty slot (`present` 0) is not a battery. Missing the file, some
     // drivers do not have it, counts as present.
-    if let Some(present) = read_small(&present_path) {
-        if present.text() != "1" {
-            return None;
-        }
+    if let Some(present) = read_small(&present_path)
+        && present.text() != "1"
+    {
+        return None;
     }
     let capacity = read_small(&capacity_path)?;
     let percent = parse_capacity(capacity.text())?;

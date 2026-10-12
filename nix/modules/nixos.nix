@@ -856,7 +856,7 @@ in
       type = lib.types.nullOr lib.types.package;
       default = pkgs.scoot or null;
       defaultText = lib.literalExpression "pkgs.scoot or null";
-      example = lib.literalExpression "inputs.scoot.packages.\${pkgs.system}.scoot";
+      example = lib.literalExpression "inputs.scoot.packages.\${pkgs.stdenv.hostPlatform.system}.scoot";
       description = ''
         The scoot package to install system-wide and to launch from
         the login-screen session entry.
@@ -899,7 +899,7 @@ in
         type = lib.types.nullOr lib.types.package;
         default = pkgs.scootbg or null;
         defaultText = lib.literalExpression "pkgs.scootbg or null";
-        example = lib.literalExpression "inputs.scoot.packages.\${pkgs.system}.scootbg";
+        example = lib.literalExpression "inputs.scoot.packages.\${pkgs.stdenv.hostPlatform.system}.scootbg";
         description = ''
           The scootbg package to install when `wallpaper.enable` is set.
         '';

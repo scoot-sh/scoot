@@ -239,13 +239,13 @@ fn drift(fuzz_lock: &str) -> Vec<String> {
         // `jobserver`); what may not differ is the version a dependency
         // both have resolves to.
         for (name, version) in dependencies {
-            if let Some((_, wanted)) = expected.iter().find(|(n, _)| n == name) {
-                if wanted != version {
-                    differ.push(format!(
-                        "{} {}: fuzz takes {name} {version}, scootbg {wanted}",
-                        node.0, node.1
-                    ));
-                }
+            if let Some((_, wanted)) = expected.iter().find(|(n, _)| n == name)
+                && wanted != version
+            {
+                differ.push(format!(
+                    "{} {}: fuzz takes {name} {version}, scootbg {wanted}",
+                    node.0, node.1
+                ));
             }
         }
     }

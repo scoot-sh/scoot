@@ -364,10 +364,10 @@ impl State {
             scene: Scene::default(),
         });
         // Hidden now: the output settles into no surface.
-        if self.hidden {
-            if let Some(entry) = self.outputs.get_mut(id) {
-                let _ = entry.output.set_hidden(true);
-            }
+        if self.hidden
+            && let Some(entry) = self.outputs.get_mut(id)
+        {
+            let _ = entry.output.set_hidden(true);
         }
         // After the bind, so its callback comes after every event it caused.
         conn.display().sync(qh, RoundTrip::Settle(id));

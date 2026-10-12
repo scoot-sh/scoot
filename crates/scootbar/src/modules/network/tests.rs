@@ -1651,16 +1651,14 @@ fn multicast_membership_matches_the_mask() {
         tv_nsec: 0,
     };
     let mut buf = [0u8; super::netlink::READ_LEN];
-    if let Ok(ready) = rustix::event::poll(&mut poll, Some(&wait)) {
-        if ready > 0 {
-            if let Ok((_, n)) = rustix::net::recv(&genl, &mut buf, rustix::net::RecvFlags::empty())
-            {
-                for msg in super::netlink::messages(&buf[..n]) {
-                    if msg.kind == family.id {
-                        let command = super::netlink::genl_of(msg.body).map(|(command, _)| command);
-                        eprintln!("live: ambient multicast command {command:?}");
-                    }
-                }
+    if let Ok(ready) = rustix::event::poll(&mut poll, Some(&wait))
+        && ready > 0
+        && let Ok((_, n)) = rustix::net::recv(&genl, &mut buf, rustix::net::RecvFlags::empty())
+    {
+        for msg in super::netlink::messages(&buf[..n]) {
+            if msg.kind == family.id {
+                let command = super::netlink::genl_of(msg.body).map(|(command, _)| command);
+                eprintln!("live: ambient multicast command {command:?}");
             }
         }
     }
@@ -1708,14 +1706,14 @@ fn the_cqm_probe_records_the_driver_s_answer() {
             if msg.kind != family.id {
                 continue;
             }
-            if let Some((command, _)) = super::netlink::genl_of(msg.body) {
-                if command == super::netlink::NL80211_CMD_NEW_INTERFACE {
-                    // The full body: `parse_interface` strips the generic
-                    // header itself.
-                    let wifi = super::netlink::parse_interface(msg.body);
-                    if index == 0 {
-                        index = wifi.index;
-                    }
+            if let Some((command, _)) = super::netlink::genl_of(msg.body)
+                && command == super::netlink::NL80211_CMD_NEW_INTERFACE
+            {
+                // The full body: `parse_interface` strips the generic
+                // header itself.
+                let wifi = super::netlink::parse_interface(msg.body);
+                if index == 0 {
+                    index = wifi.index;
                 }
             }
         }

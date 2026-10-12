@@ -442,11 +442,11 @@ impl<S: Session> Link<S> {
     /// the way a directory watch's arrival does — an absent bus is not a
     /// bus that drops us.
     fn on_retry(&mut self) -> bool {
-        if let Bus::Waiting { retry, .. } = &mut self.bus {
-            if let Some(timer) = retry.take() {
-                let mut expirations = [0u8; 8];
-                let _ = rustix::io::read(&timer, &mut expirations);
-            }
+        if let Bus::Waiting { retry, .. } = &mut self.bus
+            && let Some(timer) = retry.take()
+        {
+            let mut expirations = [0u8; 8];
+            let _ = rustix::io::read(&timer, &mut expirations);
         }
         if self.quick_deaths >= MAX_QUICK_DEATHS {
             self.quick_deaths = MAX_QUICK_DEATHS - 1;

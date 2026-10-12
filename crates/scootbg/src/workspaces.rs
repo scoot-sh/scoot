@@ -95,19 +95,19 @@ impl Tracker {
 
     /// The group at `key` carries the output named `connector`.
     pub fn output_enter(&mut self, key: usize, connector: &str) {
-        if let Some(group) = self.groups.get_mut(&key) {
-            if !group.outputs.iter().any(|name| name == connector) {
-                group.outputs.push(connector.to_owned());
-            }
+        if let Some(group) = self.groups.get_mut(&key)
+            && !group.outputs.iter().any(|name| name == connector)
+        {
+            group.outputs.push(connector.to_owned());
         }
     }
 
     /// The group at `key` no longer carries `connector`.
     pub fn output_leave(&mut self, key: usize, connector: &str) {
-        if let Some(group) = self.groups.get_mut(&key) {
-            if let Some(index) = group.outputs.iter().position(|name| name == connector) {
-                group.outputs.swap_remove(index);
-            }
+        if let Some(group) = self.groups.get_mut(&key)
+            && let Some(index) = group.outputs.iter().position(|name| name == connector)
+        {
+            group.outputs.swap_remove(index);
         }
     }
 

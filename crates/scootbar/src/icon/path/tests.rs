@@ -341,11 +341,11 @@ fn fuzzed_path_strings_never_panic() {
     let alphabet = b"MmLlHhVvCcSsQqTtAaZz0123456789.,+-eE \n\t";
     let mut accepted = 0;
     let mut try_one = |bytes: &[u8], raster: &mut Rasterizer| {
-        if let Ok(text) = std::str::from_utf8(bytes) {
-            if let Ok(segs) = parse(text) {
-                accepted += 1;
-                check_ok(&segs, raster);
-            }
+        if let Ok(text) = std::str::from_utf8(bytes)
+            && let Ok(segs) = parse(text)
+        {
+            accepted += 1;
+            check_ok(&segs, raster);
         }
     };
     // Random strings over the grammar's alphabet.

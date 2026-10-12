@@ -632,10 +632,10 @@ impl Canvas {
     /// Drops every buffer the compositor is not holding.
     fn drop_free_slots(&mut self) {
         for place in &mut self.slots {
-            if place.as_ref().is_some_and(Slot::is_free) {
-                if let Some(slot) = place.take() {
-                    destroy(slot);
-                }
+            if place.as_ref().is_some_and(Slot::is_free)
+                && let Some(slot) = place.take()
+            {
+                destroy(slot);
             }
         }
     }

@@ -376,10 +376,10 @@ impl Shared {
     /// names stay: they come from `wl_output`, not from this protocol.
     /// Bumps the generation, so a module placed again draws from nothing.
     pub(crate) fn release(&mut self) {
-        if let Some(manager) = self.manager.take() {
-            if manager.is_alive() {
-                manager.stop();
-            }
+        if let Some(manager) = self.manager.take()
+            && manager.is_alive()
+        {
+            manager.stop();
         }
         self.live = false;
         for ws in self.pending[..self.pending_len].iter() {
@@ -963,10 +963,10 @@ fn hit_target(
     x: u32,
     active: Option<(usize, Geometry)>,
 ) -> Option<usize> {
-    if let Some((item, geometry)) = active {
-        if (geometry.lo..geometry.hi).contains(&x) {
-            return Some(item);
-        }
+    if let Some((item, geometry)) = active
+        && (geometry.lo..geometry.hi).contains(&x)
+    {
+        return Some(item);
     }
     hit_index(text, full, em, pad, count, x)
 }

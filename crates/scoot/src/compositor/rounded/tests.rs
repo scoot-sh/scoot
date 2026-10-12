@@ -256,12 +256,12 @@ impl Dispatch<xdg_toplevel::XdgToplevel, SurfaceKind> for TestClient {
                     .into_iter()
                     .any(|tiled| state == tiled as u32)
                 });
-            if width > 0 && height > 0 {
-                if let SurfaceKind::Window(index) = kind {
-                    if let Some(slot) = client.window_sizes.get_mut(*index) {
-                        *slot = Some((width, height));
-                    }
-                }
+            if width > 0
+                && height > 0
+                && let SurfaceKind::Window(index) = kind
+                && let Some(slot) = client.window_sizes.get_mut(*index)
+            {
+                *slot = Some((width, height));
             }
         }
     }

@@ -1,6 +1,6 @@
 ---
-title: First session
-description: "Run scoot in a window, open a terminal, and learn the five keys that run everything."
+title: First run
+description: "Run scoot in a window, open a terminal, and learn the three keys that run everything."
 ---
 
 Run scoot for the first time — nested in a window, then full-screen on a
@@ -19,11 +19,13 @@ A window opens with a terminal in it. Close the window to quit — nothing on
 your real desktop is touched.
 
 > **Symptom:** the nested window opens and instantly closes.
-> You quit: closing scoot's window *is* quitting. Re-run the command and use `Super+Shift+e` (below) only when you mean to leave.
+> scoot printed why in the terminal you started it from. Usually it is a missing `$XDG_RUNTIME_DIR` or a host that never answered: see [Backends](../scoot/backends.md).
 
-## Five keys
+## Three keys, and a way out
 
 `Super` is the Windows/Command key. Directions are vim's <kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd>.
+In the browser demo, use `Alt` wherever this page says `Super`: your
+browser keeps `Super` for itself.
 
 | Press | You get |
 |---|---|
@@ -56,12 +58,18 @@ A new window never covers an old one — the strip grows and the view follows:
 
 ## Go full-screen (your whole session)
 
-When the window-in-a-window feels right, switch to a text console
+When the window-in-a-window feels right, log out and pick **scoot** on
+your login screen (the NixOS setup and `install.sh --system` both put
+it there). No entry there? Switch to a text console
 (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F3</kbd>), log in, and run:
 
 ```sh
-scoot --tty -- foot
+scoot-session
 ```
+
+That starts the whole session: the bar and every service you
+installed. Only have the bare binary? `scoot --tty -- foot` runs the
+compositor alone.
 
 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F1</kbd>…<kbd>F12</kbd> switch back to
 your usual desktop at any time — they always win over scoot's own keys, so
@@ -70,7 +78,5 @@ you can never strand yourself.
 ## Learn 3 keys today
 
 You already know the three that run everything: <kbd>Super</kbd>+<kbd>Return</kbd> (terminal), <kbd>Super</kbd>+<kbd>h</kbd>/<kbd>Super</kbd>+<kbd>l</kbd> (move between columns), <kbd>Super</kbd>+<kbd>q</kbd> (close). Use only those today. Tomorrow, learn three more from [Keybindings](../scoot/keybindings.md).
-
-**Learn the keys with scoot** *(coming)*: a small app that teaches scoot's keys a few at a time, inside your session. Until it ships, learn three keys a day from [Keybindings](../scoot/keybindings.md).
 
 Next: [Keybindings](../scoot/keybindings.md) — the full default map, and how to make it yours. Or [build your desktop](./compose.md) — bar, wallpaper, launcher and notifications.

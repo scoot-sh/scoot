@@ -493,17 +493,17 @@ impl Dispatch<ZwlrLayerSurfaceV1, OutputId> for State {
         // A fresh size pre-renders the workspace wallpapers mapped here,
         // so the next switch to one attaches at once rather than
         // decoding; stashes at any other size are stale and go.
-        if matches!(effect, Effect::Ack(_)) {
-            if let Some(dims) = super::change::image_dims(&entry.output) {
-                entry.objects.canvas.drop_stale_stash(dims);
-                let name = entry.output.info().name.clone();
-                for image in state.choices.workspace_images_for(name.as_deref()) {
-                    if entry.objects.canvas.image(image.serial, dims).is_none() {
-                        state
-                            .images
-                            .jobs
-                            .render(&image, crate::jobs::Target { output: *id, dims });
-                    }
+        if matches!(effect, Effect::Ack(_))
+            && let Some(dims) = super::change::image_dims(&entry.output)
+        {
+            entry.objects.canvas.drop_stale_stash(dims);
+            let name = entry.output.info().name.clone();
+            for image in state.choices.workspace_images_for(name.as_deref()) {
+                if entry.objects.canvas.image(image.serial, dims).is_none() {
+                    state
+                        .images
+                        .jobs
+                        .render(&image, crate::jobs::Target { output: *id, dims });
                 }
             }
         }
@@ -623,23 +623,24 @@ impl Dispatch<WlCallback, RoundTrip> for State {
                     qh,
                     Instant::now(),
                 );
-                if !committed && entry.output.shows().is_some() {
-                    if let Some(layer) = &entry.objects.layer {
-                        layer.surface.commit();
-                    }
+                if !committed
+                    && entry.output.shows().is_some()
+                    && let Some(layer) = &entry.objects.layer
+                {
+                    layer.surface.commit();
                 }
                 return;
             }
             RoundTrip::Created(id, creation) => {
                 // Late or not, the loop's next `progress` sees it.
-                if let Some(entry) = state.outputs.get_mut(id) {
-                    if entry.output.unanswered(creation) {
-                        warn(format_args!(
-                            "scootbg: the compositor has not configured the wallpaper \
+                if let Some(entry) = state.outputs.get_mut(id)
+                    && entry.output.unanswered(creation)
+                {
+                    warn(format_args!(
+                        "scootbg: the compositor has not configured the wallpaper \
                              surface on {} yet; replies no longer wait for it",
-                            entry.output.label()
-                        ));
-                    }
+                        entry.output.label()
+                    ));
                 }
                 return;
             }
@@ -766,10 +767,10 @@ impl Dispatch<WlSurface, OutputId> for State {
         // (wlroots sends the output's transform only with dmabuf feedback
         // for scanout, which an shm buffer never gets; scoot always sends
         // `normal`), and an untransformed buffer is correct everywhere.
-        if let Event::PreferredBufferScale { factor } = event {
-            if entry.output.prefer_buffer_scale(factor) {
-                redraw_later(entry, conn, qh);
-            }
+        if let Event::PreferredBufferScale { factor } = event
+            && entry.output.prefer_buffer_scale(factor)
+        {
+            redraw_later(entry, conn, qh);
         }
     }
 }

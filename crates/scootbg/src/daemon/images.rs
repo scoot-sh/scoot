@@ -261,10 +261,10 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
                 if let JobError::Fetch(fetch) = &error {
                     let mut names: Vec<String> = Vec::new();
                     for target in &job.targets {
-                        if let Some(entry) = outputs.get_mut(target.output) {
-                            if wants(choices, entry, &image) {
-                                names.push(entry.output.label().to_string());
-                            }
+                        if let Some(entry) = outputs.get_mut(target.output)
+                            && wants(choices, entry, &image)
+                        {
+                            names.push(entry.output.label().to_string());
                         }
                     }
                     if !names.is_empty() {
@@ -277,13 +277,13 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
                     }
                 }
                 for target in &job.targets {
-                    if let Some(entry) = outputs.get_mut(target.output) {
-                        if wants(choices, entry, &image) {
-                            if error.is_fetch() {
-                                entry.output.draw_failed(error.to_string());
-                            } else {
-                                failed(entry, &image, &error);
-                            }
+                    if let Some(entry) = outputs.get_mut(target.output)
+                        && wants(choices, entry, &image)
+                    {
+                        if error.is_fetch() {
+                            entry.output.draw_failed(error.to_string());
+                        } else {
+                            failed(entry, &image, &error);
                         }
                     }
                 }

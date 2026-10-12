@@ -394,11 +394,11 @@ impl Module for Media {
             if refreshing {
                 timer -= 1;
             }
-            if timer == 0 {
-                if let Some(held) = self.held.take() {
-                    held.drain();
-                    return self.draw_now();
-                }
+            if timer == 0
+                && let Some(held) = self.held.take()
+            {
+                held.drain();
+                return self.draw_now();
             }
             return Update::Unchanged;
         }
@@ -523,10 +523,10 @@ impl Module for Media {
             self.last_skip = Some(now);
         }
         let preferred = self.preferred.as_deref();
-        if let Some(live) = self.link.live_mut() {
-            if let Some(index) = live.selected(preferred) {
-                live.control(index, member);
-            }
+        if let Some(live) = self.link.live_mut()
+            && let Some(index) = live.selected(preferred)
+        {
+            live.control(index, member);
         }
         Ok(Update::Unchanged)
     }

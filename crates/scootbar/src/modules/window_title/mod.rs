@@ -379,10 +379,10 @@ impl Shared {
     /// and forgets what they said, so a later bind starts clean. Bumps
     /// both generations, so a module placed again draws from nothing.
     pub(crate) fn release(&mut self) {
-        if let Some(manager) = self.manager.take() {
-            if manager.is_alive() {
-                manager.stop();
-            }
+        if let Some(manager) = self.manager.take()
+            && manager.is_alive()
+        {
+            manager.stop();
         }
         self.live = false;
         for toplevel in &self.toplevels[..self.toplevels_len] {
@@ -800,10 +800,10 @@ impl Module for WindowTitle {
     /// The flush timer, while a title change is held for it; nothing
     /// otherwise (this source is event-driven, no polling).
     fn sources<'fd>(&'fd self, sources: &mut Sources<'_, 'fd>) {
-        if self.armed {
-            if let Some(flush) = &self.flush {
-                sources.add(flush.as_fd(), PollFlags::IN);
-            }
+        if self.armed
+            && let Some(flush) = &self.flush
+        {
+            sources.add(flush.as_fd(), PollFlags::IN);
         }
     }
 
