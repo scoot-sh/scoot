@@ -369,6 +369,9 @@ jobs:
         run: |
           src="$RUNNER_TEMP/vendor/source"
           test -f "$src/.cargo/config.toml" || { echo "::error title=Staged source has no .cargo/config.toml::the vendor artifact did not download intact."; exit 1; }
+          # Create it as the runner: docker would create the bind mount as root,
+          # and the Checksums step could not write SHA256SUMS into it.
+          mkdir -p "$RUNNER_TEMP/dist"
           docker run --rm \
             -v "$src:/src:ro" -v "$RUNNER_TEMP/dist:/out" \
             -e CARGO_NET_OFFLINE=true -e CARGO_TARGET_DIR=/tmp/target \

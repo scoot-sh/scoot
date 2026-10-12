@@ -96,6 +96,9 @@ jobs:
 
       - name: Build --release --locked in the distro container
         run: |
+          # Create it as the runner: docker would create the bind mount as root,
+          # and the Checksums step could not write SHA256SUMS into it.
+          mkdir -p "$RUNNER_TEMP/dist"
           docker run --rm \
             -v "$GITHUB_WORKSPACE:/src:ro" -v "$RUNNER_TEMP/dist:/out" \
             -e CARGO_TARGET_DIR=/tmp/target -e ARCH \
