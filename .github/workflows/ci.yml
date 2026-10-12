@@ -144,6 +144,12 @@ jobs:
   #                                           Pages deploy workflow tracks
   #                                           `docs/**` separately, and `dev/`
   #                                           never deploys.
+  #   docs/examples/*/regreet.css              -> docs-site=true as well (the
+  #                                           card-scope gate in that job
+  #                                           reads the published looks, so
+  #                                           a look-only change runs it;
+  #                                           every other `docs/*` path
+  #                                           still runs nothing here).
   #   packaging/rpm/*                        -> nothing here: the Fedora and
   #                                           openSUSE container workflow
   #                                           (rpm.yml) owns those files,
@@ -228,6 +234,13 @@ jobs:
                 # Before `*.md`: the site's own pages are Markdown, and a
                 # content-only site change must still build the site.
                 site/*)
+                  docs_site=true ;;
+                # The published ReGreet looks: the card-scope gate in the
+                # docs-site job reads them, so a look-only change runs it
+                # (a `docs/*` change otherwise runs nothing, and the
+                # `*.md | docs/* | dev/*` arm below must stay first-match
+                # for everything else there).
+                docs/examples/*/regreet.css)
                   docs_site=true ;;
                 *.md | docs/* | dev/*) ;;
                 # The version tool and its tests: only the version jobs.
@@ -417,7 +430,9 @@ jobs:
   # variants trip the JSX gate) and `test-nix`
   # (fenced nix blocks parse) — so a red gate fails this job, not the
   # deploy. Runs when `site/**` changes
-  # (checked before `*.md`, since the site's own pages are Markdown), on the
+  # (checked before `*.md`, since the site's own pages are Markdown), when
+  # a published ReGreet look changes (`docs/examples/*/regreet.css`, for
+  # the card-scope gate below), on the
   # catch-all, and on every push to main; fail open like the other jobs
   # (only an explicit `false` skips). No store cache: the pnpm dependencies
   # arrive through the derivation's own hash.
@@ -429,6 +444,14 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+
+      # The ReGreet card-scope gate: no bare `frame` selectors in the
+      # published looks or the docs' CSS snippets (see the script: it
+      # names the fix). Plain `sh` plus `awk`, before nix is even
+      # installed, so a look-only change fails fast without the site
+      # build.
+      - name: regreet.css card-scope gate (no bare `frame` rules)
+        run: sh scripts/check-regreet-css-scope.sh
 
       - uses: DeterminateSystems/nix-installer-action@v23
 

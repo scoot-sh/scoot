@@ -2231,6 +2231,10 @@ the greeter stays an explicit opt-in on top of the profile. Logging in
 through it starts the same session [First session](../start/first-session.md)
 describes.
 
+Writing your own ReGreet CSS instead of using a look's? Scope card
+rules to `frame.background`, never bare `frame` — see
+[Theming](../scoot/theming.md#what-stays-a-static-file-and-why).
+
 **No buildup across logins.**
 While the greeter is on, each greeter session's leftover processes
 (the session bus, ReGreet's accessibility bus) are stopped with the
