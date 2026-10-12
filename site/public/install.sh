@@ -430,7 +430,8 @@ if [ -n "$look" ]; then
             if fetch "$base/$s" "$tmp/$s"; then
                 chmod 755 "$tmp/$s"
                 place_config "$tmp/$s" "$config_home/scoot/$s"
-                sed "s|\"$s\"|\"$config_home/scoot/$s\"|" "$tmp/look-bar.toml" >"$tmp/look-bar.toml.out"
+                esc=$(printf '%s' "$config_home/scoot/$s" | sed 's/[|&\\]/\\&/g')
+                sed "s|\"$s\"|\"$esc\"|" "$tmp/look-bar.toml" >"$tmp/look-bar.toml.out"
                 mv "$tmp/look-bar.toml.out" "$tmp/look-bar.toml"
             fi
         done
