@@ -50,8 +50,8 @@ glibc floor and runtime libraries. Its files are named
 `scootbar-nightly-<arch>`, so their URLs never change, plus
 `nightly.txt` (the commit and its version) and `SHA256SUMS`. The
 version is the one FlakeHub gives the same commit, `0.1.<commits on
-main>+rev-<short>`, so a nightly binary and a Nix user's flake name the
-same build. Install it with `install.sh --nightly`, and verify a file
+main>+rev-<commit>`, so a nightly binary and a Nix user's flake name
+the same commit. Install it with `install.sh --nightly`, and verify a file
 with `--signer-workflow scoot-sh/scoot/.github/workflows/nightly.yml`
 in the command below.
 

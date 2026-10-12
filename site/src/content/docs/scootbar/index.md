@@ -74,11 +74,11 @@ with no modules needs no font, and `icon-image` (the PNG decoder,
 +115 KB) builds the same way (each line is one alternative):
 
 ```nix title="home.nix"
-programs.scootbar.package = inputs.scoot.packages.${pkgs.system}.scootbar.override { buildNoDefaultFeatures = true; };
+programs.scootbar.package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scootbar.override { buildNoDefaultFeatures = true; };
 ```
 
 ```nix title="home.nix"
-programs.scootbar.package = inputs.scoot.packages.${pkgs.system}.scootbar.override { buildFeatures = [ "icon-image" ]; };
+programs.scootbar.package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scootbar.override { buildFeatures = [ "icon-image" ]; };
 ```
 
 A bar built without a module refuses its table in the config (an

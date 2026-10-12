@@ -8,7 +8,8 @@
 #   1. picks a release: the newest tagged one, or `nightly` (main, rebuilt
 #      on every merge) when asked or when no tag exists yet;
 #   2. downloads scoot, scootbg and scootbar for this machine and checks
-#      every file against the release's SHA256SUMS before installing it;
+#      each binary against the release's SHA256SUMS before installing it
+#      (the session files come from the same tagged or pinned commit);
 #   3. installs them and the `scoot-session` launcher into a bin directory,
 #      the session's systemd user units, and the portal config;
 #   4. with --system, also adds "scoot" to your login screen;
@@ -17,7 +18,8 @@
 #   6. lists any system library scoot still needs, with the one command to
 #      install them;
 #   7. records every file it installed, so --uninstall removes exactly
-#      those (your config stays).
+#      those (your config stays). It never replaces a file it did not
+#      install itself, such as one from a distro package.
 #
 # On Nix or NixOS, do not use this: the flake and home-manager give you
 # the whole desktop (https://www.scoot.sh/start/install/).
@@ -130,7 +132,7 @@ data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 if [ "$system" = 1 ]; then
     bin_dir=${prefix:-/usr/local}/bin
     unit_dir=/usr/local/lib/systemd/user
-    portal_dir=/usr/local/share/xdg-desktop-portal
+    portal_dir=/etc/xdg-desktop-portal
     session_file=/usr/share/wayland-sessions/scoot.desktop
     manifest=/usr/local/share/scoot/install-manifest
     if [ "$(id -u)" = 0 ]; then
@@ -145,7 +147,7 @@ if [ "$system" = 1 ]; then
 else
     bin_dir=${prefix:-$HOME/.local}/bin
     unit_dir=$config_home/systemd/user
-    portal_dir=$data_home/xdg-desktop-portal
+    portal_dir=$config_home/xdg-desktop-portal
     session_file=""
     manifest=$data_home/scoot/install-manifest
     sudo=""
@@ -171,6 +173,24 @@ place() {
     $sudo mkdir -p "$(dirname "$dest")"
     $sudo install -m "$mode" "$src" "$dest"
     printf '%s\n' "$dest" >>"$tmp/manifest.new"
+}
+
+# True when DEST is ours to write: absent, or recorded by an earlier run.
+ours() {
+    [ ! -e "$1" ] && [ ! -L "$1" ] && return 0
+    [ -f "$manifest" ] && grep -Fxq -- "$1" "$manifest"
+}
+
+# Merge what this run installed into the manifest. Runs on every exit,
+# so a run that fails halfway still records what it placed.
+write_manifest() {
+    [ "$dry_run" = 0 ] || return 0
+    [ -n "${tmp:-}" ] && [ -s "$tmp/manifest.new" ] || return 0
+    if [ -f "$manifest" ]; then cat "$manifest" >>"$tmp/manifest.new"; fi
+    sort -u "$tmp/manifest.new" >"$tmp/manifest.sorted"
+    $sudo mkdir -p "$(dirname "$manifest")"
+    $sudo install -m 644 "$tmp/manifest.sorted" "$manifest"
+    : >"$tmp/manifest.new"
 }
 
 have_systemd_user() {
@@ -234,7 +254,8 @@ else
 fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/scoot-install.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT INT TERM
+trap 'write_manifest; rm -rf "$tmp"' EXIT
+trap 'exit 130' INT TERM
 
 # --- which release ----------------------------------------------------------
 
@@ -325,12 +346,28 @@ for f in resources/scoot-session resources/scoot-portals.conf \
 done
 
 sed "s|@SCOOT_BIN@|$bin_dir/scoot|g" "$tmp/scoot.service" >"$tmp/scoot.service.out"
-sed "s|^ExecStart=.*|ExecStart=$bin_dir/scootbar daemon|" "$tmp/scootbar.service" >"$tmp/scootbar.service.out"
+# The packaged unit is generic (graphical-session.target, for any
+# compositor). Installed here it runs only inside a scoot session, the
+# way the home-manager profile's bar does, never in GNOME or KDE.
+sed -e "s|^ExecStart=.*|ExecStart=$bin_dir/scootbar daemon|" \
+    -e 's|graphical-session\.target|scoot-session.target|g' \
+    "$tmp/scootbar.service" >"$tmp/scootbar.service.out"
 sed "s|^Exec=.*|Exec=$bin_dir/scoot-session|" "$tmp/scoot.desktop" >"$tmp/scoot.desktop.out"
 
 # --- install ----------------------------------------------------------------
 
 : >"$tmp/manifest.new"
+
+# Refuse before writing anything if a destination holds a file this
+# script did not install (a distro package, a source build).
+dests="$bin_dir/scoot $bin_dir/scootbg $bin_dir/scoot-session $unit_dir/scoot.service
+$unit_dir/scoot-session.target $unit_dir/scoot-shutdown.target $portal_dir/scoot-portals.conf"
+if [ "$with_bar" = 1 ]; then dests="$dests $bin_dir/scootbar $unit_dir/scootbar.service"; fi
+if [ -n "$session_file" ]; then dests="$dests $session_file"; fi
+for d in $dests; do
+    ours "$d" || die "$d exists and was not installed by this script (a distro package or a source build?). Remove it first, or install elsewhere with --prefix."
+done
+
 place "$tmp/$scoot_asset" "$bin_dir/scoot" 755
 place "$tmp/$bg_asset" "$bin_dir/scootbg" 755
 place "$tmp/scoot-session" "$bin_dir/scoot-session" 755
@@ -359,7 +396,7 @@ place_config() {
         return 0
     fi
     mkdir -p "$(dirname "$2")"
-    cp "$1" "$2"
+    cp -p "$1" "$2"
 }
 
 if [ -n "$look" ]; then
@@ -386,23 +423,24 @@ if [ -n "$look" ]; then
     esac
     place_config "$tmp/look-scoot.toml" "$config_home/scoot/config.toml"
     if [ "$with_bar" = 1 ]; then
+        # The bar's helper scripts live beside its config (your files, like
+        # the config), and the bar runs them by full path.
+        for s in cpu.sh load.sh; do
+            grep -q "\"$s\"" "$tmp/look-bar.toml" || continue
+            if fetch "$base/$s" "$tmp/$s"; then
+                chmod 755 "$tmp/$s"
+                place_config "$tmp/$s" "$config_home/scoot/$s"
+                sed "s|\"$s\"|\"$config_home/scoot/$s\"|" "$tmp/look-bar.toml" >"$tmp/look-bar.toml.out"
+                mv "$tmp/look-bar.toml.out" "$tmp/look-bar.toml"
+            fi
+        done
         place_config "$tmp/look-bar.toml" "$config_home/scoot/bar.toml"
-        if grep -q '"cpu.sh"\|"load.sh"' "$tmp/look-bar.toml"; then
-            for s in cpu.sh load.sh; do
-                fetch "$base/$s" "$tmp/$s" && place "$tmp/$s" "$bin_dir/$s" 755
-            done
-        fi
     fi
 fi
 
 # --- record, enable --------------------------------------------------------------
 
-if [ "$dry_run" = 0 ]; then
-    if [ -f "$manifest" ]; then cat "$manifest" >>"$tmp/manifest.new"; fi
-    sort -u "$tmp/manifest.new" >"$tmp/manifest.sorted"
-    $sudo mkdir -p "$(dirname "$manifest")"
-    $sudo install -m 644 "$tmp/manifest.sorted" "$manifest"
-fi
+write_manifest
 
 if have_systemd_user; then
     run systemctl --user daemon-reload

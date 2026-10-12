@@ -49,7 +49,7 @@ for ref in scoot-v0.1.0 "$commit"; do
     printf '[Unit]\n' >"$r/resources/systemd/user/scoot-session.target"
     printf '[Unit]\n' >"$r/resources/systemd/user/scoot-shutdown.target"
     printf '[Desktop Entry]\nExec=/usr/bin/scoot-session\n' >"$r/packaging/deb/scoot.desktop"
-    printf '[Service]\nExecStart=/usr/bin/scootbar daemon\n' >"$r/packaging/deb/scootbar.service"
+    printf '[Unit]\nPartOf=graphical-session.target\nAfter=graphical-session.target\n[Service]\nExecStart=/usr/bin/scootbar daemon\n[Install]\nWantedBy=graphical-session.target\n' >"$r/packaging/deb/scootbar.service"
     printf '[wallpaper]\nimage = "wallpaper.png"\n' >"$r/docs/examples/ginger-night/scoot.toml"
     printf 'command = ["cpu.sh"]\n' >"$r/docs/examples/ginger-night/bar.toml"
     printf 'png\n' >"$r/docs/examples/ginger-night/wallpaper.png"
@@ -77,22 +77,48 @@ run_in "$h" --look ginger-night || { cat "$work/out"; fail "tagged install"; }
 [ "$("$h/.local/bin/scootbar")" = "scootbar 0.2.0" ] || fail "scootbar is not its own tagged build"
 grep -q "ExecStart=$h/.local/bin/scoot --tty" "$h/.config/systemd/user/scoot.service" || fail "scoot.service binary path"
 grep -q "ExecStart=$h/.local/bin/scootbar daemon" "$h/.config/systemd/user/scootbar.service" || fail "scootbar.service binary path"
-[ -f "$h/.local/share/xdg-desktop-portal/scoot-portals.conf" ] || fail "portal config"
-[ -f "$h/.config/scoot/wallpaper.png" ] && [ -x "$h/.local/bin/cpu.sh" ] || fail "look files"
+grep -q "WantedBy=scoot-session.target" "$h/.config/systemd/user/scootbar.service" || fail "bar not bound to scoot's own session"
+! grep -q "graphical-session" "$h/.config/systemd/user/scootbar.service" || fail "bar would start in other desktops"
+[ -f "$h/.config/xdg-desktop-portal/scoot-portals.conf" ] || fail "portal config"
+[ -f "$h/.config/scoot/wallpaper.png" ] && [ -x "$h/.config/scoot/cpu.sh" ] || fail "look files"
+grep -q "command = \[\"$h/.config/scoot/cpu.sh\"\]" "$h/.config/scoot/bar.toml" || fail "bar script not by full path"
+[ ! -e "$h/.local/bin/cpu.sh" ] || fail "look script dropped into the bin directory"
 grep -q 'image = "wallpaper.png"' "$h/.config/scoot/config.toml" || fail "look config"
 ok "tagged install with a look"
 
-# 2. A second look never overwrites the first.
+# 2. A second look never overwrites the first, and a re-run updates
+#    its own files.
 echo mine >"$h/.config/scoot/config.toml"
 run_in "$h" --look moonrise || fail "second look run"
 [ "$(cat "$h/.config/scoot/config.toml")" = mine ] || fail "user config was overwritten"
 ok "existing config kept"
+
+# 2b. A file the script did not install is never replaced.
+h=$work/h5
+mkdir -p "$h/.local/bin"
+echo foreign >"$h/.local/bin/scoot"
+if run_in "$h"; then fail "a foreign scoot was replaced"; fi
+grep -q "was not installed by this script" "$work/out" || fail "foreign-file message"
+[ "$(cat "$h/.local/bin/scoot")" = foreign ] && [ ! -e "$h/.local/bin/scootbg" ] || fail "refusal wrote files"
+ok "foreign files refused before anything is written"
+h=$work/h1
 
 # 3. Uninstall removes what was installed and keeps the config.
 run_in "$h" --uninstall || fail "uninstall"
 [ ! -e "$h/.local/bin/scoot" ] && [ ! -e "$h/.config/systemd/user/scoot.service" ] || fail "uninstall left files"
 [ -f "$h/.config/scoot/config.toml" ] || fail "uninstall removed the config"
 ok "uninstall"
+
+# 3b. A run that fails halfway still records what it placed.
+h=$work/h6
+mkdir -p "$h/.config/systemd"
+echo blocker >"$h/.config/systemd/user"
+if run_in "$h"; then fail "install into a blocked unit dir succeeded"; fi
+grep -Fxq "$h/.local/bin/scoot" "$h/.local/share/scoot/install-manifest" || fail "partial run left no record"
+rm "$h/.config/systemd/user"
+run_in "$h" --uninstall || fail "uninstall after a partial run"
+[ ! -e "$h/.local/bin/scoot" ] || fail "partial run's files not removed"
+ok "partial run recorded and removable"
 
 # 4. No tag yet: nightly, and a relative wallpaper outside the look dir.
 h=$work/h2

@@ -56,9 +56,11 @@ Pick your system. The site remembers your choice.
 <TabItem label="Any Linux">
 
 One command installs scoot, the wallpaper daemon and the bar from
-GitHub, checks every file against the release's checksums, and tells
-you which system libraries are missing. Any glibc distro from 2022 on
-(Debian 12, Ubuntu 24.04, Fedora, Arch, openSUSE), x86_64 or aarch64.
+GitHub, checks each binary against the release's checksums, and tells
+you which system libraries are missing. Any distro with glibc 2.36 or
+newer (Debian 12, Ubuntu 24.04, current Fedora, Arch, openSUSE),
+x86_64 or aarch64. It never replaces a scoot that a distro package
+installed.
 
 ```sh
 curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --system --look ginger-night
@@ -73,7 +75,8 @@ Then log out and pick **scoot** on your login screen.
 - `--look` writes one of the five [looks](../../scoot/theming/) to
   `~/.config/scoot`. A file you already have is never overwritten.
 - `--nightly` takes `main`'s latest build instead of the newest
-  release. It is rebuilt on every merge, the same build Nix users get.
+  release. It is rebuilt on every merge, from the same commit Nix users
+  get.
 - `--uninstall` (with `--system` if you used it) removes exactly what
   the script installed. Your config stays.
 
@@ -144,6 +147,7 @@ name everywhere below.
      programs.scoot = {
        enable = true;
        desktop.enable = true;
+       desktop.look = "ginger-night";  # the login screen and system fonts follow it
      };
 
      nix.settings = {
@@ -155,8 +159,8 @@ name everywhere below.
    }
    ```
 
-3. `home.nix` is your side: the look, the config file and the
-   per-user services. Create it next to `flake.nix`. Set
+3. `home.nix` is your side: the config file, the per-user services,
+   and the same look. Create it next to `flake.nix`. Set
    `home.stateVersion` to your NixOS release (do not copy the value
    blindly: it must match your release).
 
@@ -191,7 +195,7 @@ side does its half (the system installs the service, your user runs
 it), so set them in both.
 
 On real hardware with a GPU, take the GPU build: add
-`package = inputs.scoot.packages.${pkgs.system}.scoot-gpu;` to
+`package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scoot-gpu;` to
 `programs.scoot` in `configuration.nix` (which then starts
 `{ inputs, pkgs, ... }:`), plus `hardware.graphics.enable = true;`. VMs
 and containers stay on the default.
@@ -262,7 +266,9 @@ keeps the login screen.
 
 To get scoot on your login screen too, also run the [Any
 Linux](#use-it-every-day) script with `--system --no-bar`: it adds the
-session entry, and home-manager keeps the bar and the config. Two
+session entry, and home-manager keeps the bar and the config. The
+login entry then runs the script's scoot, not the flake's, so keep the
+two on one version (`--nightly` follows `main`, as the flake does). Two
 pieces need your distro rather than home-manager: the lock screen's PAM
 service and backlight access ([details](../../desktop/#home-manager)).
 

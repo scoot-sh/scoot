@@ -17,7 +17,7 @@ Xwayland's own):
 ```nix title="configuration.nix"
 programs.scoot = {
   enable = true;
-  package = inputs.scoot.packages.${pkgs.system}.scoot-xwayland;
+  package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scoot-xwayland;
   session.enable = true;
 };
 ```

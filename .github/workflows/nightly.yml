@@ -8,9 +8,10 @@
 #   https://github.com/scoot-sh/scoot/releases/download/nightly/<asset>
 #
 # Version: the same number FlakeHub's rolling release gives this commit
-# (nix-build.yml, `rolling: true`): `0.1.<commits on main>+rev-<short>`,
+# (nix-build.yml, `rolling: true`): `0.1.<commits on main>+rev-<commit>`,
 # so a nightly binary and the flake version a Nix user resolves name the
-# same build. The asset names stay `-nightly-` so their URLs never move.
+# same commit. (The two workflows filter paths differently, so a merge
+# can publish one and not the other; the version still names the commit.) The asset names stay `-nightly-` so their URLs never move.
 #
 # Assets: `scoot-nightly-<arch>`, `scootbg-nightly-<arch>`,
 # `scootbar-nightly-<arch>` for x86_64-linux and aarch64-linux, plus
@@ -55,7 +56,7 @@ permissions:
 # One publish at a time, never cancelled halfway: a merge during a
 # publish queues behind it, and a third replaces the queued second.
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
   cancel-in-progress: false
 
 jobs:
@@ -72,7 +73,8 @@ jobs:
 
   build:
     name: Portable binaries (${{ matrix.arch }})
-    if: github.event_name != 'pull_request'
+    # main only: a dispatch from another branch must not move `nightly`.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     strategy:
       matrix:
         include:
@@ -133,7 +135,7 @@ jobs:
   publish:
     name: Publish the nightly prerelease
     needs: build
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -167,7 +169,9 @@ jobs:
             done
           done
           version() { sed -n 's/^version *= *"\(.*\)"/\1/p' "crates/$1/Cargo.toml" | head -1; }
-          rolling="0.1.$(git rev-list --count HEAD)+rev-$(git rev-parse --short HEAD)"
+          # flakehub-push's rolling format: "0.1" + the commit count +
+          # "+rev-" + the full commit SHA.
+          rolling="0.1.$(git rev-list --count HEAD)+rev-$(git rev-parse HEAD)"
           echo "ROLLING=$rolling" >>"$GITHUB_ENV"
           {
             echo "version=$rolling"

@@ -57,7 +57,7 @@ alike; the desktop profile never sets it — the choice stays yours):
 programs.scoot = {
   enable = true;
   # Real hardware with a GPU: take the scanout build.
-  package = inputs.scoot.packages.${pkgs.system}.scoot-gpu;
+  package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scoot-gpu;
   # ...plus X11 apps? Use scoot-gpu-xwayland instead.
 };
 ```

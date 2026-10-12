@@ -11,6 +11,7 @@ one per side:
 programs.scoot = {
   enable = true;
   desktop.enable = true;
+  desktop.look = "ginger-night";  # the login screen and system fonts follow it
 };
 ```
 
@@ -21,6 +22,9 @@ programs.scoot = {
   desktop.look = "ginger-night";  # or music-desk, radial-burst, moonrise, vinyl-sunset
 };
 ```
+
+Set the same look on both sides: your side themes the desktop, the
+system side themes the login screen and picks the system fonts.
 
 **You get** the bar, the wallpaper, idle and lock, notifications, a
 launcher (`Super+d`), clipboard history, screenshots and screen
