@@ -798,6 +798,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display (the Asahi M2 eDP panel is confirmed not to be: no `vrr_capable` property, 2026-09-25).
 - [HDR readiness probe](./core/hdr-probe.md) — low (HDR plan stage 1): read-only per-connector HDR-capability probe, HDR refused with the reason named; no fork change.
 - [install.sh follow-ups from the #565 re-review](./core/install-sh-review-nits.md) — low: shellcheck 0.9 gate, empty `foot` fallback, unescaped `--version` grep, concurrent-install message; all fail safe.
+- [Headless VNC shows no mouse](./protocols/vnc-cursor-session.md) — medium: `create_pointer_cursor_session` is refused and wayvnc gets no cursor shape, so noVNC hides the pointer (try-scoot ships a dot as a workaround).
 - [Opt-in 10-bit scanout](./core/hdr-10bit-scanout.md) — low (HDR plan stage 2), blocked on a 10-bit-capable display for the positive path.
 - [HDR connector signaling](./core/hdr-output-signaling.md) — low (HDR plan stage 4), blocked on HDR hardware plus a Smithay fork change (see the research ticket).
 - [Productionise runtime-loaded libgbm](./core/runtime-gbm-productionise.md) — medium (spike 2026-10-10): one default build for GPU and GPU-free boxes via a static libgbm ABI stub (no DT_NEEDED, dlopen on use, fail-closed without); needs the M2 scanout proof, the auto-detect rule, and the `scoot`/`scoot-gpu` package collapse.
