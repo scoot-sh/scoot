@@ -58,7 +58,8 @@ falsify. Read `flexwm` there as `scoot`.
 ## Open
 
 ### Protocols
-- [Research: HDR and color management](./protocols/hdr-color-management.md) — none today; target `wp-color-management-v1`, GPU tier first, pinned Smithay has neither the protocol nor DRM HDR helpers
+- [Research: HDR and color management](./resolved/hdr-color-management-done.md) — RESOLVED 2026-10-11 (research only, no code): findings + 4-stage GPU-tier plan with per-stage fork separation; stages filed as `hdr-probe`, `hdr-10bit-scanout`, `hdr-color-protocol`, `hdr-output-signaling`
+- [Server-side `wp-color-management-v1`](./protocols/hdr-color-protocol.md) — low (HDR plan stage 3): hand-written scoot-side dispatch on the vendored staging types, GPU tier only; re-check Smithay #1143 first
 - [Foreign-toplevel management](./resolved/foreign-toplevel-list-done.md)
   — RESOLVED 2026-09-16 (PR #47): `ext-foreign-toplevel-list-v1`, the `ext-`
   successor the entry told its reader to check for, so a taskbar or switcher
@@ -795,6 +796,9 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [`--nested` gles presents by dmabuf](./resolved/nested-dmabuf-present-done.md) — RESOLVED 2026-09-24 (PR #235): in a `gpu-scanout` build, a nested GLES session whose host composites on the renderer's own DRM device blits each frame into a host dma-buf (GBM on that device, render node then primary; `zwp_linux_buffer_params_v1.create`; at most three per size, grown on demand; a frame with no free buffer handed over as drawn) instead of reading it back; read-back otherwise, chosen at startup from the host's v4 feedback and logged; a host refusal falls back for good with one WARN. Dev VM (llvmpipe, outer scoot as host): host screenshot byte-identical, CPU-neutral per frame, ~6-8% dearer per resize (software drawing dominates). Real GPU: `Asahi.md` Test 8.
 - [GLES captures keep a whole frame each while nothing redraws](./resolved/gles-capture-leaks-a-frame-per-shot-done.md) — RESOLVED 2026-09-24 (PR #238): Smithay queues a dropped read-back buffer (and the bind's framebuffer object) until the next frame's drain, and a capture of a static screen reached no drain. Both GLES arms of `Backend::capture` and the GLES capture-cursor region render now drain once the capture returns. Dev VM: 120 `scootctl screenshot --no-cursor` or `grim` captures went from +750–763 MB to flat after one frame, on `--nested`, `--headless`, the `--tty` GPU tier and the `--nested` dma-buf tier. p50 8.8 → 7.9 ms.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display (the Asahi M2 eDP panel is confirmed not to be: no `vrr_capable` property, 2026-09-25).
+- [HDR readiness probe](./core/hdr-probe.md) — low (HDR plan stage 1): read-only per-connector HDR-capability probe, HDR refused with the reason named; no fork change.
+- [Opt-in 10-bit scanout](./core/hdr-10bit-scanout.md) — low (HDR plan stage 2), blocked on a 10-bit-capable display for the positive path.
+- [HDR connector signaling](./core/hdr-output-signaling.md) — low (HDR plan stage 4), blocked on HDR hardware plus a Smithay fork change (see the research ticket).
 - [Productionise runtime-loaded libgbm](./core/runtime-gbm-productionise.md) — medium (spike 2026-10-10): one default build for GPU and GPU-free boxes via a static libgbm ABI stub (no DT_NEEDED, dlopen on use, fail-closed without); needs the M2 scanout proof, the auto-detect rule, and the `scoot`/`scoot-gpu` package collapse.
 
 ### Requested 2026-09-24
