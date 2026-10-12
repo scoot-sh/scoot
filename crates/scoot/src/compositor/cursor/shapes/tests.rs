@@ -167,7 +167,7 @@ fn every_shape_actually_draws_something_at_every_allowed_size() {
     // keeps small exact-pixel assertions elsewhere meaningful) and every
     // shape carries a halo -- flat outline or blends -- around its fill, so
     // it stays legible against content of a similar color. Thin strokes have
-    // no *flat* outline pixel by construction (a 1px band around a 1.6px
+    // no *flat* outline pixel by construction (a 1px band around a 2px
     // stroke is all partial coverage), which is why the halo counts blends.
     for size in [
         Appearance::default().cursor_size,

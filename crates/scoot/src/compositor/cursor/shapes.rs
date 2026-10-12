@@ -27,7 +27,7 @@
 //! pixel, once per shape at startup or on config reload. The outline sits
 //! *outside* the fill everywhere (a band `outline_width` pixels wide), and
 //! the arrow alone carries a soft offset shadow; the line-art shapes do not
-//! (a blur on a 1.6px stroke reads as blur, not depth, and would break
+//! (a blur on a 2px stroke reads as blur, not depth, and would break
 //! their symmetry about the bitmap middle).
 //!
 //! Every dimension is a fraction of `size`, clamped into insets that leave
@@ -196,12 +196,13 @@ fn outline_width(size: i32) -> f64 {
     (f64::from(size) / 16.0).clamp(1.0, 2.5)
 }
 
-/// How wide every line-art stroke is drawn, in pixels: 1.6px at the default
-/// size so a stroke survives its own outline on both sides, growing from
-/// there so a large cursor is a larger drawing rather than the same hairline
-/// on a bigger grid.
+/// How wide every line-art stroke is drawn, in pixels: 2px at the default
+/// size so a stroke carries a solid core inside its own outline on both
+/// sides (a 1.6px stem's core dissolves into edge blends at 16px), growing
+/// from there so a large cursor is a larger drawing rather than the same
+/// hairline on a bigger grid.
 fn stroke_width(size: i32) -> f64 {
-    (f64::from(size) / 10.0).max(1.6)
+    (f64::from(size) / 9.0).max(2.0)
 }
 
 /// The arrow tip's position in the bitmap: `ceil(outline + 1)` in both axes,
@@ -465,12 +466,16 @@ fn field(shape: Shape, size: i32, alpha: f64) -> (Vec<Prim>, Option<Shadow>) {
             let serif = (f64::from(size) / 8.0).max(1.5);
             // Arrowhead reach and half-width, clamped to the span so the
             // heads cannot outgrow their own shaft at any size. The barbs
-            // are deliberately wide (a fifth of the bitmap) and short: wide
-            // keeps a visible pinch between the two heads instead of
-            // merging with the shaft's own outline into a blob, short keeps
-            // the heads apart enough that the waist between them survives.
+            // are short so the heads stay apart enough that the waist between
+            // them survives, and narrower than round 1's fifth-of-bitmap:
+            // wide heads merge with the shaft's own outline into a blob at
+            // 16px, while narrow ones keep a visible pinch. The diagonal
+            // resizes use longer legs instead: their 45-degree shafts have no
+            // solid core to read by, so the heads must flare past the shaft's
+            // silhouette to say which way they point.
             let head = (f64::from(size) / 5.0).max(3.0).min((far - near) / 2.0);
-            let half_base = (f64::from(size) / 5.0).max(2.0).min(c - near).min(far - c);
+            let half_base = (f64::from(size) / 6.0).max(2.0).min(c - near).min(far - c);
+            let diag_head = (f64::from(size) / 4.0).max(4.0).min((far - near) / 2.0);
             let prims = match shape {
                 Shape::Arrow => unreachable!("handled above"),
                 Shape::Text => vec![
@@ -600,12 +605,16 @@ fn field(shape: Shape, size: i32, alpha: f64) -> (Vec<Prim>, Option<Shadow>) {
                         w,
                     }];
                     v.push(Prim::Poly(chamfer(
-                        &[(near, near), (near + head, near), (near, near + head)],
+                        &[
+                            (near, near),
+                            (near + diag_head, near),
+                            (near, near + diag_head),
+                        ],
                         round * 0.5,
                         Some(0),
                     )));
                     v.push(Prim::Poly(chamfer(
-                        &[(far, far), (far, far - head), (far - head, far)],
+                        &[(far, far), (far, far - diag_head), (far - diag_head, far)],
                         round * 0.5,
                         Some(0),
                     )));
@@ -620,70 +629,83 @@ fn field(shape: Shape, size: i32, alpha: f64) -> (Vec<Prim>, Option<Shadow>) {
                         w,
                     }];
                     v.push(Prim::Poly(chamfer(
-                        &[(far, near), (far, near + head), (far - head, near)],
+                        &[
+                            (far, near),
+                            (far, near + diag_head),
+                            (far - diag_head, near),
+                        ],
                         round * 0.5,
                         Some(0),
                     )));
                     v.push(Prim::Poly(chamfer(
-                        &[(near, far), (near, far - head), (near + head, far)],
+                        &[
+                            (near, far),
+                            (near, far - diag_head),
+                            (near + diag_head, far),
+                        ],
                         round * 0.5,
                         Some(0),
                     )));
                     v
                 }
                 Shape::Move => {
+                    // A connected cross with four plain triangular heads --
+                    // the same structure as a four-arrow sign: the shafts
+                    // meet at the middle, the heads flare past them, and the
+                    // diagonal notches between neighbouring head bases stay
+                    // open background so four arrows read. (Two earlier
+                    // variants failed here: a cross with wide heads merges
+                    // into a diamond, and four separate arrows knot their
+                    // outlines at the middle.) The span uses a tighter inset
+                    // than the strokes (tips need only outline plus bleed)
+                    // so the heads fit in 16px at all.
+                    let inset = ow + 0.5;
+                    let (near, far) = span(size, inset);
+                    let span_len = far - near;
+                    let mhead = (f64::from(size) / 5.5).max(3.0).min(span_len / 2.0);
+                    let mhalf = (f64::from(size) / 8.0).max(1.8).min(c - near).min(far - c);
+                    // The shafts stop half a stroke short of the head tips:
+                    // round caps overhang their endpoints by `w / 2`, which at
+                    // large sizes dwarfs the tip inset and would spill fill
+                    // off the bitmap edge. Ending flush with the tip plane
+                    // keeps every cap inside (the heads cover the difference).
+                    let (snear, sfar) = ((near + w / 2.0).min(c), (far - w / 2.0).max(c));
                     let mut v = vec![
                         Prim::Capsule {
                             ax: c,
-                            ay: near,
+                            ay: snear,
                             bx: c,
-                            by: far,
+                            by: sfar,
                             w,
                         },
                         Prim::Capsule {
-                            ax: near,
+                            ax: snear,
                             ay: c,
-                            bx: far,
+                            bx: sfar,
                             by: c,
                             w,
                         },
                     ];
-                    v.push(Prim::Poly(chamfer(
-                        &[
-                            (c, near),
-                            (c - half_base, near + head),
-                            (c + half_base, near + head),
-                        ],
-                        round * 0.5,
-                        Some(0),
-                    )));
-                    v.push(Prim::Poly(chamfer(
-                        &[
-                            (c, far),
-                            (c + half_base, far - head),
-                            (c - half_base, far - head),
-                        ],
-                        round * 0.5,
-                        Some(0),
-                    )));
-                    v.push(Prim::Poly(chamfer(
-                        &[
-                            (near, c),
-                            (near + head, c - half_base),
-                            (near + head, c + half_base),
-                        ],
-                        round * 0.5,
-                        Some(0),
-                    )));
-                    v.push(Prim::Poly(chamfer(
-                        &[
-                            (far, c),
-                            (far - head, c + half_base),
-                            (far - head, c - half_base),
-                        ],
-                        round * 0.5,
-                        Some(0),
-                    )));
+                    for (tx, ty, dx, dy) in [
+                        (c, near, 0.0, 1.0),
+                        (c, far, 0.0, -1.0),
+                        (near, c, 1.0, 0.0),
+                        (far, c, -1.0, 0.0),
+                    ] {
+                        // Head: plain triangle, tip capped at 1px -- the
+                        // click-point rule from `chamfer`.
+                        let bx = tx + dx * mhead;
+                        let by = ty + dy * mhead;
+                        v.push(Prim::Poly(chamfer(
+                            &[
+                                (tx, ty),
+                                (bx - dy * mhalf, by + dx * mhalf),
+                                (bx + dy * mhalf, by - dx * mhalf),
+                            ],
+                            round * 0.5,
+                            Some(0),
+                        )));
+                    }
                     v
                 }
                 Shape::NotAllowed => {
@@ -695,20 +717,29 @@ fn field(shape: Shape, size: i32, alpha: f64) -> (Vec<Prim>, Option<Shadow>) {
                             r: w / 2.0,
                         }]
                     } else {
-                        let reach = radius * 7.0 / 10.0;
+                        // A bolder ring and slash than the hairline strokes
+                        // elsewhere: at 16px a thin ring reads as wire, not
+                        // as "no". The extra width costs no inset: the span
+                        // already clears `w / 2` past the centerline with
+                        // room for the wider band plus its outline.
+                        let bold = w + 0.4;
+                        // Long enough to land on the ring's own stroke, so
+                        // the two merge into one mark rather than floating
+                        // apart.
+                        let reach = radius * 0.85;
                         vec![
                             Prim::Ring {
                                 cx: c,
                                 cy: c,
                                 r: radius,
-                                w,
+                                w: bold,
                             },
                             Prim::Capsule {
                                 ax: c - reach,
                                 ay: c + reach,
                                 bx: c + reach,
                                 by: c - reach,
-                                w,
+                                w: bold,
                             },
                         ]
                     }
@@ -722,6 +753,15 @@ fn field(shape: Shape, size: i32, alpha: f64) -> (Vec<Prim>, Option<Shadow>) {
 /// The arrow body: an original six-vertex silhouette pointing north-west --
 /// a vertical left edge, a concave notch, and a tail running down-right --
 /// chamfered at its convex corners and inset for outline, shadow and bleed.
+///
+/// Every edge is axis-aligned or exactly 45 degrees, and the fractions are
+/// chosen so that at the default 16px size (tip inset 2, bottom-right pad 4,
+/// hence a 10px drawable box) the left edge sits exactly on a pixel column,
+/// the long diagonal runs through pixel corners, and the tail's long edges
+/// are vertical pixel columns with an end slanting one pixel down to the
+/// right. No long edge straddles a pixel crack, so the 1px outline stays a
+/// crisp rim instead of a grey fringe -- which is what keeps white fill
+/// visible on light backgrounds rather than drowning it in outline.
 ///
 /// Fractions are of the drawable box (`size` minus the insets), so the
 /// shape at 4px and at 256px is the same drawing, not the same pixel count.
@@ -749,16 +789,19 @@ fn arrow(size: i32, round: f64, alpha: f64) -> (Vec<Prim>, Option<Shadow>) {
     // left, tail right, barb, and back to the tip along the long diagonal.
     // The tail's two long edges (notch->tail-left and barb->tail-right) are
     // parallel by construction: barb = tail-right - (tail-left - notch).
-    let notch = (0.20 * bw, 0.54 * bh);
-    let tail_left = (0.30 * bw, 0.84 * bh);
-    let tail_right = (0.50 * bw, 0.78 * bh);
+    // The long diagonal is exactly 45 degrees (barb - tip is (t, t)), the
+    // tail edges are vertical, and the tail end slants one pixel down to
+    // the right -- every edge snapped, none straddling a pixel crack.
+    let notch = (0.20 * bw, 0.50 * bh);
+    let tail_left = (0.20 * bw, 0.86 * bh);
+    let tail_right = (0.60 * bw, 0.96 * bh);
     let barb = (
         tail_right.0 - (tail_left.0 - notch.0),
         tail_right.1 - (tail_left.1 - notch.1),
     );
     let poly = vec![
         (0.0, 0.0),
-        (0.0, 0.68 * bh),
+        (0.0, 0.70 * bh),
         notch,
         tail_left,
         tail_right,

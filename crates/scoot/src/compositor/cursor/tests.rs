@@ -954,7 +954,11 @@ fn a_configured_cursor_size_and_color_reach_the_rendered_pixels() {
     assert_ne!(hot, fill_bgra, "the hotspot is fill, not rim");
     assert!(hot[2] < fill_bgra[2], "the hotspot should be rim-dark");
     assert_eq!(canvas.at(px - 2, py + 10), BLACK, "the left edge");
-    assert_eq!(canvas.at(px + 10, py + 10), BLACK, "the diagonal");
+    // Just above the long diagonal: the diagonal runs at exactly 45 degrees
+    // from the tip, so one pixel up and one right of it sits mid-outline-band
+    // (about 1.4px off the fill edge, inside the 3px rim at this size) and
+    // draws flat black.
+    assert_eq!(canvas.at(px + 11, py + 9), BLACK, "the diagonal");
     assert_eq!(canvas.at(px + 2, py + 20), fill_bgra, "the configured fill");
     assert_eq!(
         canvas.at(px + 40, py + 2),
