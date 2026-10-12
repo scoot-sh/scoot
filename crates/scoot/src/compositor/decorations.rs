@@ -156,8 +156,8 @@ impl Color {
     ///
     /// - **Byte order.** `Argb8888` names the channels from the *most*
     ///   significant bit of a 32-bit little-endian word down, so the lowest
-    ///   address holds B -- the same layout `cursor.rs::generate_bitmap`
-    ///   writes, `render/pixman.rs` renders into and `tty/buffers.rs` scans out
+    ///   address holds B -- the same layout `cursor/shapes.rs` writes,
+    ///   `render/pixman.rs` renders into and `tty/buffers.rs` scans out
     ///   (see their module docs on the same fact), which is why nothing
     ///   downstream converts.
     /// - **Premultiplied.** The pinned Smithay rev hands an `Argb8888` memory
@@ -252,8 +252,10 @@ pub struct Appearance {
     /// `cursor.rs` draws procedurally; a client that supplies its own cursor
     /// surface sizes that itself.
     pub cursor_size: i32,
-    /// The fallback cursor shape's fill color. Its 1px outline is always
-    /// black (at this color's own alpha) -- see `cursor::generate_bitmap`.
+    /// The fallback cursor shape's fill color. The outline is always black
+    /// (at this color's own alpha) and the arrow alone carries a soft drop
+    /// shadow at 28% of that alpha -- neither is separately configurable,
+    /// see `cursor/shapes.rs`.
     pub cursor_color: Color,
     /// Which installed xcursor theme to draw named cursor shapes from, or
     /// `None` to take `$XCURSOR_THEME` (and `"default"` if that is unset too)
@@ -297,10 +299,9 @@ impl Default for Appearance {
             // into the rounded window + ring path (see `rounded.rs`); the
             // default session never takes it.
             corner_radius: 0,
-            // The shape `cursor.rs` has drawn since it existed: a 16x16
-            // triangle with a white fill. Unchanged defaults, so an existing
-            // config file (or none) looks exactly as it did before this was
-            // configurable.
+            // The fallback cursor: a 16x16 arrow with a white fill, drawn by
+            // `cursor/shapes.rs`. Unchanged defaults, so an existing config
+            // file (or none) keeps its size and fill color.
             cursor_size: 16,
             cursor_color: Color::new(1.0, 1.0, 1.0, 1.0),
             // Unset, i.e. follow `$XCURSOR_THEME` like every other client on
@@ -328,15 +329,13 @@ impl Appearance {
 
     /// The smallest [`cursor_size`](Self::cursor_size) a config may ask for.
     ///
-    /// `cursor.rs`'s shape is a triangle whose 1px outline takes the left
-    /// column and the diagonal, so the fill only appears where `0 < x < y`:
-    /// at size 3 that is the single pixel `(1, 2)`, at size 2 and 1 there is
-    /// no fill pixel at all. 4 is therefore the smallest size that draws the
-    /// shape this module actually describes rather than a couple of stray
-    /// dark pixels -- and a pointer that small is indistinguishable from a
-    /// dead pixel on any real display, which on `--tty` (where scoot *is*
-    /// the session) leaves a user with no visible pointer and no other window
-    /// manager to fix it from.
+    /// 4 is the smallest size that draws a shape rather than a dot: below
+    /// it the fallback bitmaps' insets (outline plus anti-aliasing bleed,
+    /// and the arrow's shadow) leave no drawable box, so every shape
+    /// degrades to a soft dot (see `cursor/shapes.rs`). A pointer that small
+    /// is indistinguishable from a dead pixel on any real display, which on
+    /// `--tty` (where scoot *is* the session) leaves a user with no visible
+    /// pointer and no other window manager to fix it from.
     pub const MIN_CURSOR_SIZE: i32 = 4;
 
     /// The largest [`cursor_size`](Self::cursor_size) a config may ask for.
@@ -356,7 +355,7 @@ impl Appearance {
     ///   at `size = 23171` (`23171 * 23171 * 4` is past `i32::MAX`), long
     ///   before anything a config could plausibly spell -- which is a debug
     ///   panic and a wrapped, therefore wrong, length in release, both inside
-    ///   `generate_bitmap` and inside Smithay's own `stride * size.h` length
+    ///   `shapes::generate` and inside Smithay's own `stride * size.h` length
     ///   assertion.
     pub const MAX_CURSOR_SIZE: i32 = 256;
 
@@ -1709,7 +1708,7 @@ mod tests {
 
     /// The reason the bound exists at all: `size * size * 4` is the bitmap's
     /// length in bytes, and at `i32::MAX` that product overflows `i32` (a
-    /// debug panic inside `cursor::generate_bitmap`, a wrapped length in
+    /// debug panic inside `cursor::shapes::generate`, a wrapped length in
     /// release). Clamping first keeps it at 256 KiB.
     #[test]
     fn the_clamped_cursor_size_cannot_overflow_the_bitmap_length() {

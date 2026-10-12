@@ -82,6 +82,7 @@ use theme::{Theme, Themed};
 
 #[cfg(feature = "gpu-scanout")]
 pub mod plane;
+pub mod raster;
 pub mod shapes;
 pub mod theme;
 
@@ -100,43 +101,6 @@ render_elements! {
     // swaps it in for `Fallback` on the outputs that can use it.
     #[cfg(feature = "gpu-scanout")]
     Plane = plane::PlaneCursorElement<R>,
-}
-
-/// A filled right triangle `size` x `size`, point at the top-left corner
-/// (which is also the hotspot -- see [`Cursor::new`]): a 1px `outline` on the
-/// left edge and the diagonal, `fill` between them, transparent everywhere
-/// else.
-///
-/// Both colors are single `Argb8888` pixels in little-endian memory order
-/// (`[B, G, R, A]`, premultiplied) -- the same layout `render/pixman.rs`
-/// renders into and `tty/buffers.rs` scans out (see their module docs on the same
-/// fact), so this needs no conversion anywhere downstream.
-/// [`Color::to_argb8888`] is what produces one from a config color; this
-/// function stays pure and takes whatever it is given, so it is testable
-/// without a renderer and its tests can assert exact bytes.
-///
-/// `size` is expected in
-/// [`Appearance::MIN_CURSOR_SIZE`]`..=`[`Appearance::MAX_CURSOR_SIZE`] --
-/// [`Cursor::new`], the only non-test caller, clamps it there, which is what
-/// keeps `size * size * 4` both a small allocation and nowhere near
-/// overflowing `i32` (see [`Appearance::MAX_CURSOR_SIZE`]).
-fn generate_bitmap(size: i32, fill: [u8; 4], outline: [u8; 4]) -> Vec<u8> {
-    let transparent = [0u8; 4];
-    let mut pixels = vec![0u8; (size * size * 4) as usize];
-    for y in 0..size {
-        for x in 0..size {
-            let idx = ((y * size + x) * 4) as usize;
-            let pixel: [u8; 4] = if x == 0 || x == y {
-                outline
-            } else if x < y {
-                fill
-            } else {
-                transparent
-            };
-            pixels[idx..idx + 4].copy_from_slice(&pixel);
-        }
-    }
-    pixels
 }
 
 /// The fill/outline byte pair one configured cursor color draws as: the
@@ -225,11 +189,10 @@ impl Cursor {
     /// The outline is always black, at the fill's own alpha, rather than a
     /// second config field: its whole job is to keep the shape's edges legible
     /// against content of a similar color, which a configurable outline could
-    /// only undo, and at the default opaque fill this is byte-identical to the
-    /// fixed black outline this shape has always had. Matching the fill's
-    /// alpha is what makes a translucent `cursor_color` actually look
-    /// translucent instead of an opaque black triangle outline around a
-    /// see-through middle.
+    /// only undo. Matching the fill's alpha is what makes a translucent
+    /// `cursor_color` actually look translucent instead of an opaque black
+    /// rim around a see-through middle. The arrow's soft shadow is likewise
+    /// derived (28% of the fill's alpha), never configured.
     pub fn new(size: i32, color: Color, theme_name: Option<&str>) -> Self {
         let size = Appearance::clamp_cursor_size(size);
         let (fill, outline) = outline_pair(color);
@@ -276,9 +239,9 @@ impl Cursor {
     }
 
     /// The `Shape::COUNT` fallback bitmaps for one size/color pair, in
-    /// [`Shape::index`] order. `Shape::Arrow` is `generate_bitmap` above,
-    /// kept exactly as it has always been (see `shapes`'s module doc on the
-    /// two outline styles); every other shape is `shapes::generate`.
+    /// [`Shape::index`] order. Every shape -- the arrow included -- is
+    /// `shapes::generate`, one family with the same outline width, the same
+    /// 4x4 supersampling and the same premultiplication.
     ///
     /// Shared by [`Cursor::new`] and [`Cursor::rebuild`] so the two cannot
     /// disagree about what a size/color pair draws.
@@ -291,10 +254,7 @@ impl Cursor {
         // -- see that constant's doc for why the order lives there and
         // not here.
         Shape::ALL.map(|shape| {
-            let pixels = match shape {
-                Shape::Arrow => generate_bitmap(size, fill, outline),
-                other => shapes::generate(other, size, fill, outline),
-            };
+            let pixels = shapes::generate(shape, size, fill, outline);
             MemoryRenderBuffer::from_slice(
                 &pixels,
                 Fourcc::Argb8888,

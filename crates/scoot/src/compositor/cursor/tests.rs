@@ -1,6 +1,6 @@
 //! Tests for the cursor module.
 //!
-//! The pure arithmetic ([`generate_bitmap`], [`element_location`]) is unit
+//! The pure arithmetic ([`shapes::generate`], [`element_location`]) is unit
 //! tested directly. Everything about a *client-supplied* cursor surface
 //! needs a real `wl_surface` with a real committed buffer, so those tests
 //! drive an actual `wayland-client` connection through an actual [`State`]
@@ -9,7 +9,7 @@
 //! ones follow `SCOOT_TEST_RENDERER`; the few that build their own renderer
 //! below are pixman by construction). That
 //! is what distinguishes "drew the client's image" from "drew the fallback
-//! triangle"; asserting on the element enum's variant alone would pass even
+//! arrow"; asserting on the element enum's variant alone would pass even
 //! if the element were positioned or imported wrongly.
 //!
 //! Deliberately *not* covered here, and verified on real `--tty` hardware
@@ -52,7 +52,7 @@ use crate::compositor::test_support::{Harness, pixel};
 // -------------------------------------------------------------------------
 
 /// The default size and colors `Appearance::default()` resolves to, spelled
-/// out as `generate_bitmap`'s own parameters -- they are config values now,
+/// out as `shapes::generate`'s own parameters -- they are config values now,
 /// not compile-time constants, so the pure tests pass them explicitly and
 /// `the_default_appearance_still_describes_the_original_shape` below is what
 /// ties these literals back to the real defaults.
@@ -73,15 +73,26 @@ const TRANSPARENT: [u8; 4] = [0, 0, 0, 0];
 const NO_THEME: Option<&str> = Some("scoot-test-no-such-theme");
 
 #[test]
-fn bitmap_hotspot_pixel_is_the_outline_color() {
-    let pixels = generate_bitmap(DEFAULT_SIZE, WHITE, BLACK);
-    assert_eq!(pixel(&pixels, DEFAULT_SIZE, 0, 0), BLACK);
+fn bitmap_hotspot_pixel_is_drawn_and_opaque() {
+    // The arrow's tip: covered (it is what the user points with) and nearly
+    // opaque for opaque colors -- the tip pixel blends fill and outline
+    // under the supersampler, so it is neither flat color exactly, and its
+    // corner taps fall just outside the silhouette.
+    let pixels = shapes::generate(Shape::Arrow, DEFAULT_SIZE, WHITE, BLACK);
+    let hotspot = Shape::Arrow.hotspot(DEFAULT_SIZE);
+    let at_tip = pixel(&pixels, DEFAULT_SIZE, hotspot.x, hotspot.y);
+    assert_ne!(at_tip, TRANSPARENT, "the tip pixel is transparent");
+    assert!(
+        at_tip[3] > 128,
+        "the tip pixel is mostly transparent: {:?}",
+        at_tip
+    );
 }
 
 #[test]
 fn bitmap_is_fully_transparent_above_the_diagonal() {
-    let pixels = generate_bitmap(DEFAULT_SIZE, WHITE, BLACK);
-    // (size - 1, 0): far right of the top row, well outside the triangle.
+    let pixels = shapes::generate(Shape::Arrow, DEFAULT_SIZE, WHITE, BLACK);
+    // (size - 1, 0): far right of the top row, well outside the arrow.
     assert_eq!(
         pixel(&pixels, DEFAULT_SIZE, DEFAULT_SIZE - 1, 0),
         TRANSPARENT
@@ -90,14 +101,13 @@ fn bitmap_is_fully_transparent_above_the_diagonal() {
 
 #[test]
 fn bitmap_interior_is_the_fill_color() {
-    let pixels = generate_bitmap(DEFAULT_SIZE, WHITE, BLACK);
-    // (1, 3): strictly inside the triangle (0 < x < y).
-    assert_eq!(pixel(&pixels, DEFAULT_SIZE, 1, 3), WHITE);
+    let pixels = shapes::generate(Shape::Arrow, DEFAULT_SIZE, WHITE, BLACK);
+    // (2, 4): inside the arrow body, between the left edge and the diagonal.
+    assert_eq!(pixel(&pixels, DEFAULT_SIZE, 2, 4), WHITE);
 }
 
-/// The built-in defaults are what an unconfigured scoot draws, and they must
-/// stay the 16x16 white-on-black triangle this module shipped with -- the
-/// literals the three tests above use.
+/// The built-in defaults are what an unconfigured scoot draws: a 16x16
+/// white-filled arrow. The literals the three tests above use.
 #[test]
 fn the_default_appearance_still_describes_the_original_shape() {
     let defaults = Appearance::default();
@@ -121,44 +131,56 @@ fn bitmap_honors_the_requested_size() {
         48,
         Appearance::MAX_CURSOR_SIZE,
     ] {
-        let pixels = generate_bitmap(size, WHITE, BLACK);
+        let pixels = shapes::generate(Shape::Arrow, size, WHITE, BLACK);
         assert_eq!(
             pixels.len(),
             (size * size * 4) as usize,
             "wrong buffer length for size {size}"
         );
-        // The bottom-left corner is inside the triangle at every size >= 3,
-        // which is what proves the shape grew with the buffer.
-        assert_eq!(
-            pixel(&pixels, size, 1, size - 1),
-            WHITE,
-            "size {size}'s bottom row should be filled"
+        // The tip (the hotspot) is drawn at every size ...
+        let hotspot = Shape::Arrow.hotspot(size);
+        assert_ne!(
+            pixel(&pixels, size, hotspot.x, hotspot.y),
+            TRANSPARENT,
+            "size {size}'s tip should be drawn"
         );
-        // ...and the bottom-right corner is on the diagonal, i.e. outline.
-        assert_eq!(
-            pixel(&pixels, size, size - 1, size - 1),
-            BLACK,
-            "size {size}'s diagonal should reach the far corner"
-        );
+        // ... while the bitmap's own corners stay transparent padding wherever
+        // the insets fit: the tip's outline inset at the top-left, the
+        // shadow's at the bottom-right. That padding is what keeps the
+        // outline unclipped. (At the 4px minimum the whole bitmap is a dot
+        // with a halo -- there is no room for padding, and the shapes tests
+        // pin down what that dot guarantees instead.)
+        if size > Appearance::MIN_CURSOR_SIZE {
+            for (x, y) in [(0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1)] {
+                assert_eq!(
+                    pixel(&pixels, size, x, y),
+                    TRANSPARENT,
+                    "size {size}'s corner ({x}, {y}) should be transparent padding"
+                );
+            }
+        }
     }
 }
 
 /// Both colors are written through verbatim, with no channel reordering and
 /// no fallback to the old hardcoded white/black. Uses colors whose four bytes
-/// are all distinct, so a swap anywhere would change the assertion.
+/// are all distinct, so a swap anywhere would change the assertion; the
+/// sampled pixels are fully covered at this size (see the shapes tests for
+/// how the edges blend).
 #[test]
 fn bitmap_honors_the_requested_colors() {
     let fill = [0x11, 0x22, 0x33, 0xff];
     let outline = [0x44, 0x55, 0x66, 0x80];
-    let pixels = generate_bitmap(8, fill, outline);
-    assert_eq!(pixel(&pixels, 8, 1, 3), fill, "the interior");
-    assert_eq!(pixel(&pixels, 8, 0, 0), outline, "the hotspot corner");
-    assert_eq!(pixel(&pixels, 8, 0, 5), outline, "the left edge");
-    assert_eq!(pixel(&pixels, 8, 5, 5), outline, "the diagonal");
+    let pixels = shapes::generate(Shape::Arrow, 24, fill, outline);
+    // Outline is written with its own alpha, not forced opaque ...
+    let edge = pixel(&pixels, 24, 2, 8);
+    assert_eq!(edge, outline, "the outline edge");
+    // ... and the fill likewise.
+    assert_eq!(pixel(&pixels, 24, 4, 6), fill, "the interior");
     assert_eq!(
-        pixel(&pixels, 8, 7, 0),
+        pixel(&pixels, 24, 20, 4),
         TRANSPARENT,
-        "outside the triangle stays transparent whatever the colors are"
+        "outside the arrow stays transparent whatever the colors are"
     );
 }
 
@@ -290,9 +312,9 @@ const POINTER: (f64, f64) = (50.0, 50.0);
 /// Side of the square framebuffer the live tests render into.
 const CANVAS: i32 = 100;
 /// The clear color those renders start from, and the BGRA bytes it lands as.
-/// Deliberately not black: the fallback triangle's own hotspot pixel is
-/// opaque black, so a black canvas could not tell "drew the fallback" from
-/// "drew nothing".
+/// Deliberately not black: the fallback arrow's own hotspot pixel is
+/// near-opaque black, so a black canvas could not tell "drew the fallback"
+/// from "drew nothing".
 const CLEAR: [f32; 4] = [0.0, 0.5019608, 1.0, 1.0];
 const CLEAR_BGRA: [u8; 4] = [255, 128, 0, 255];
 /// The opaque BGRA color a test client commits to its cursor surface.
@@ -839,7 +861,7 @@ fn a_cursor_surface_with_no_buffer_draws_nothing() {
     let mut fixture = Fixture::new();
     fixture.run(Step::CreateBareCursorSurface);
     fixture.run(Step::SetCursor { hotspot: (0, 0) });
-    // Not the fallback triangle: the client did supply a cursor, it just has
+    // Not the fallback arrow: the client did supply a cursor, it just has
     // no content yet, and inventing a shape for it would flash the wrong
     // image between `set_cursor` and the client's first commit.
     fixture.frame().assert_blank();
@@ -870,10 +892,15 @@ fn destroying_the_cursor_surface_falls_back_to_the_builtin_shape() {
 
     let canvas = fixture.frame();
     assert_eq!(canvas.count, 1, "the fallback element");
-    assert_eq!(
+    assert_ne!(
         canvas.at(50, 50),
-        [0, 0, 0, 255],
-        "the triangle's own point"
+        CLEAR_BGRA,
+        "the arrow's own tip, at the pointer, drew nothing"
+    );
+    assert_eq!(
+        canvas.at(50, 50)[3],
+        255,
+        "the tip pixel should be opaque for opaque colors"
     );
     assert_eq!(
         canvas.at(51, 53),
@@ -918,22 +945,31 @@ fn a_configured_cursor_size_and_color_reach_the_rendered_pixels() {
     assert_eq!(canvas.count, 1, "the fallback element");
 
     let (px, py) = (POINTER.0 as i32, POINTER.1 as i32);
-    assert_eq!(canvas.at(px, py), BLACK, "the hotspot is still the outline");
-    assert_eq!(canvas.at(px, py + 10), BLACK, "the left edge");
+    // The hotspot pixel blends fill and outline under the supersampler, so
+    // it is neither flat color exactly -- but it is fully covered (opaque)
+    // and dark: the tip's rim, not fill and not background.
+    let hot = canvas.at(px, py);
+    assert_eq!(hot[3], 255, "the hotspot pixel should be opaque");
+    assert_ne!(hot, CLEAR_BGRA, "the hotspot drew nothing");
+    assert_ne!(hot, fill_bgra, "the hotspot is fill, not rim");
+    assert!(hot[2] < fill_bgra[2], "the hotspot should be rim-dark");
+    assert_eq!(canvas.at(px - 2, py + 10), BLACK, "the left edge");
     assert_eq!(canvas.at(px + 10, py + 10), BLACK, "the diagonal");
     assert_eq!(canvas.at(px + 2, py + 20), fill_bgra, "the configured fill");
     assert_eq!(
         canvas.at(px + 40, py + 2),
         CLEAR_BGRA,
-        "outside the triangle, still the clear color"
+        "outside the arrow, still the clear color"
     );
-    // The size took: the last row of a 48px shape is filled, the row after it
-    // is off the bitmap entirely. This is what a still-16x16 buffer (or a
-    // 48px buffer with a 16px shape in it) would fail.
+    // The size took: the element is 48x48 (asserted through its geometry in
+    // `rebuild_redraws_the_same_cursor_at_the_new_size_theme_and_color`, and
+    // the interior fill above only exists in a 48px drawing), while the last
+    // row stays clear -- the arrow's bottom-right inset (outline plus
+    // shadow), which is what keeps those pixels unclipped.
     assert_eq!(
         canvas.at(px + 1, py + SIZE - 1),
-        fill_bgra,
-        "the bottom row of the configured size"
+        CLEAR_BGRA,
+        "the bottom row is the shadow's padding, not fill"
     );
     assert_eq!(
         canvas.at(px + 1, py + SIZE),
@@ -1057,10 +1093,9 @@ fn a_cursor_surface_with_a_subsurface_draws_both() {
 // `wp-cursor-shape-v1`
 // -------------------------------------------------------------------------
 
-/// The BGRA bytes the default `[appearance]` draws a shape's fill and outline
-/// in, as they land on the canvas.
+/// The BGRA bytes the default `[appearance]` draws a shape's fill in, as
+/// they land on the canvas.
 const FILL_BGRA: [u8; 4] = [255, 255, 255, 255];
-const OUTLINE_BGRA: [u8; 4] = [0, 0, 0, 255];
 
 #[test]
 fn the_cursor_shape_manager_is_advertised() {
@@ -1167,10 +1202,10 @@ fn an_unmapped_shape_name_still_draws_the_arrow() {
     });
     let canvas = fixture.frame();
     assert_eq!(canvas.count, 1, "the arrow element");
-    assert_eq!(
+    assert_ne!(
         canvas.at(50, 50),
-        OUTLINE_BGRA,
-        "the arrow's own point, at the pointer"
+        CLEAR_BGRA,
+        "the arrow's own tip, at the pointer, drew nothing"
     );
     assert_eq!(canvas.at(51, 53), FILL_BGRA, "its white interior");
 }

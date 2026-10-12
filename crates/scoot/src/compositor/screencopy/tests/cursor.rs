@@ -495,9 +495,14 @@ fn the_frame_records_what_it_composited_of_the_cursor() {
         .expect("a backend")
         .cursor_in_frame();
     let footprint = record.composited.expect("the frame drew the cursor");
+    // The arrow's hotspot is its tip, inset from the bitmap corner for the
+    // outline and shadow -- so the footprint sits up-left of the pointer by
+    // exactly that inset.
+    let hotspot = crate::compositor::cursor::shapes::Shape::Arrow
+        .hotspot(fixture.state.appearance.cursor_size);
     assert_eq!(
         (footprint.loc.x, footprint.loc.y),
-        (20, 20),
+        (20 - hotspot.x, 20 - hotspot.y),
         "the arrow's hotspot is its tip"
     );
     assert!(!record.off_frame);
