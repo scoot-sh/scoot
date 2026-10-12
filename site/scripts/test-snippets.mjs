@@ -29,7 +29,7 @@ const contentDir = join(root, 'src', 'content', 'docs');
 const failures = [];
 const fail = (file, message) => failures.push(`${file}: ${message}`);
 
-const fence = /```(\w+)\n([\s\S]*?)```/g;
+const fence = /```(\w+)[^\n]*\n([\s\S]*?)```/g;
 
 // The whole tree, nested sections included (a moved page the gate never
 // scans is a page whose examples can rot unnoticed).

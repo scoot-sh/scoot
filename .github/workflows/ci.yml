@@ -441,6 +441,11 @@ jobs:
       - name: nix build .#docs-site (builds the site, runs the llms, page-link, asset, snippet and mdx-twin gates)
         run: nix build -L --no-link .#docs-site
 
+      # The installer served at scoot.sh/install.sh, against a fake release
+      # tree (no network), with shellcheck from the pinned nixpkgs.
+      - name: install.sh gate (shellcheck + fake-release install, uninstall, refusals)
+        run: nix shell --inputs-from . nixpkgs#shellcheck --command sh site/scripts/test-install.sh
+
   linux:
     name: Linux (compositor)
     needs: changes
