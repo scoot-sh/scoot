@@ -9,7 +9,7 @@ trailing motion lines](docs/assets/logo.png)
 that puts windows in columns on a strip that scrolls left and right. A
 new window never squeezes the others. The strip just gets longer.
 
-![scoot with the ginger-night look: a floating bar over two terminal columns, the cat-peeking wallpaper behind](docs/assets/ginger-night-preview.png)
+![scoot with the ginger-night look: a bar across the top, two terminal columns, the cat-peeking wallpaper behind](docs/assets/ginger-night-preview.png)
 
 ## See it now
 
@@ -107,8 +107,6 @@ X11 apps (with the XWayland build). [Full list](https://www.scoot.sh/scoot/proto
 
 ## Not yet
 
-- **Monitor placement.** Monitors line up left to right. There is no
-  position setting yet.
 - **Changing display modes from `wlr-randr` or Settings.** Read-only for
   now. Set modes in the config file.
 - **Some X11 extras.** X input methods (XIM) and X window icons.
