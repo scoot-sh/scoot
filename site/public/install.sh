@@ -15,8 +15,9 @@
 #   4. with --system, also adds "scoot" to your login screen;
 #   5. with --look, writes that look's config to ~/.config/scoot, never
 #      over a file you already have;
-#   6. lists any system library scoot still needs, with the one command to
-#      install them;
+#   6. lists any system library or font scoot still needs, with the one
+#      command to install them (it stays confirmation-based: add -y or
+#      --noconfirm yourself for a non-interactive run);
 #   7. records every file it installed, so --uninstall removes exactly
 #      those (your config stays). It never replaces a file it did not
 #      install itself, such as one from a distro package.
@@ -213,7 +214,18 @@ if [ "$uninstall" = 1 ]; then
     done <"$manifest"
     run $sudo rm -f -- "$manifest"
     if have_systemd_user; then run systemctl --user daemon-reload; fi
-    say "scoot is uninstalled. Your config in $config_home/scoot is untouched."
+    # Under sudo $HOME is root's, but the config the user cares about is
+    # the invoking user's: name theirs when SUDO_USER says who that is.
+    keep_config=$config_home
+    if [ -n "${SUDO_USER:-}" ]; then
+        keep_home=/home/$SUDO_USER
+        if command -v getent >/dev/null 2>&1; then
+            sudo_home=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
+            if [ -n "$sudo_home" ]; then keep_home=$sudo_home; fi
+        fi
+        keep_config=$keep_home/.config
+    fi
+    say "scoot is uninstalled. Your config in $keep_config/scoot is untouched."
     exit 0
 fi
 
@@ -462,30 +474,57 @@ fi
 
 # --- what is still missing ----------------------------------------------------------
 
+# The downloaded scoot binary is already in $tmp, so even a dry run can
+# say which system libraries it still needs: ldd only reads.
+ldd_target=$bin_dir/scoot
+if [ "$dry_run" = 1 ]; then ldd_target=$tmp/$scoot_asset; fi
 missing=""
-if [ "$dry_run" = 0 ] && command -v ldd >/dev/null 2>&1; then
-    missing=$(ldd "$bin_dir/scoot" 2>/dev/null | awk '/not found/ {print $1}' | tr '\n' ' ')
+if command -v ldd >/dev/null 2>&1; then
+    missing=$(ldd "$ldd_target" 2>/dev/null | awk '/not found/ {print $1}' | tr '\n' ' ')
 fi
 need_foot=0
 command -v foot >/dev/null 2>&1 || need_foot=1
+# The font files scootbar tries without --font (crates/scootbar/src/font.rs
+# WELL_KNOWN), overridable for tests the way the release URLs are.
+font_candidates=${SCOOT_INSTALL_FONTS:-"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf
+/usr/share/fonts/TTF/DejaVuSans.ttf
+/usr/share/fonts/truetype/DejaVuSans.ttf
+/usr/share/fonts/dejavu/DejaVuSans.ttf
+/run/current-system/sw/share/X11/fonts/DejaVuSans.ttf
+/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf
+/usr/share/fonts/noto/NotoSans-Regular.ttf"}
+# Whether scootbar would find a font: any one of its well-known files
+# present means it starts, so only none at all adds a font package below.
+need_font=0
+if [ "$with_bar" = 1 ]; then
+    need_font=1
+    for f in $font_candidates; do
+        if [ -s "$f" ]; then
+            need_font=0
+            break
+        fi
+    done
+fi
 
+os_release=${SCOOT_INSTALL_OS_RELEASE:-/etc/os-release}
 distro=""
-if [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    distro=$(. /etc/os-release && printf '%s %s' "${ID:-}" "${ID_LIKE:-}")
+if [ -r "$os_release" ]; then
+    # shellcheck disable=SC1090,SC1091
+    distro=$(. "$os_release" && printf '%s %s' "${ID:-}" "${ID_LIKE:-}")
 fi
 pkg_for() {
     case "$distro" in
     *arch*)
         case "$1" in
         libseat*) echo seatd ;; libinput*) echo libinput ;; libxkbcommon*) echo libxkbcommon ;;
-        libudev*) echo systemd-libs ;; libpixman*) echo pixman ;; foot) echo foot ;;
+        libudev*) echo systemd-libs ;; libpixman*) echo pixman ;; font) echo ttf-dejavu ;; foot) echo foot ;;
         esac
         ;;
     *fedora* | *rhel*)
         case "$1" in
         libseat*) echo libseat ;; libinput*) echo libinput ;; libxkbcommon*) echo libxkbcommon ;;
-        libudev*) echo systemd-libs ;; libpixman*) echo pixman ;; foot) echo foot ;;
+        libudev*) echo systemd-libs ;; libpixman*) echo pixman ;; font) echo dejavu-sans-fonts ;; foot) echo foot ;;
         esac
         ;;
     # openSUSE names its libraries the Debian way (libseat1, libinput10,
@@ -495,13 +534,13 @@ pkg_for() {
     *suse*)
         case "$1" in
         libseat*) echo libseat1 ;; libinput*) echo libinput10 ;; libxkbcommon*) echo libxkbcommon0 ;;
-        libudev*) echo libudev1 ;; libpixman*) echo libpixman-1-0 ;; foot) echo foot ;;
+        libudev*) echo libudev1 ;; libpixman*) echo libpixman-1-0 ;; font) echo dejavu-fonts ;; foot) echo foot ;;
         esac
         ;;
     *)
         case "$1" in
         libseat*) echo libseat1 ;; libinput*) echo libinput10 ;; libxkbcommon*) echo libxkbcommon0 ;;
-        libudev*) echo libudev1 ;; libpixman*) echo libpixman-1-0 ;; foot) echo foot ;;
+        libudev*) echo libudev1 ;; libpixman*) echo libpixman-1-0 ;; font) echo fonts-dejavu-core ;; foot) echo foot ;;
         esac
         ;;
     esac
@@ -509,6 +548,7 @@ pkg_for() {
 pkgs=""
 for lib in $missing; do pkgs="$pkgs $(pkg_for "$lib")"; done
 if [ "$need_foot" = 1 ]; then pkgs="$pkgs $(pkg_for foot)"; fi
+if [ "$need_font" = 1 ]; then pkgs="$pkgs $(pkg_for font)"; fi
 if [ -n "$pkgs" ]; then
     case "$distro" in
     *arch*) cmd="sudo pacman -S --needed$pkgs" ;;
@@ -520,9 +560,13 @@ if [ -n "$pkgs" ]; then
     say ""
     if [ -n "$missing" ]; then
         say "scoot needs a few system libraries (and foot, its default terminal):"
-    else
+    elif [ "$need_foot" = 1 ]; then
         say "Install foot, scoot's default terminal:"
     fi
+    if [ "$need_font" = 1 ]; then
+        say "scootbar needs a font to draw text (none of the usual font files is usable)."
+    fi
+    say "Non-interactive: use apt -y, dnf -y, or pacman --noconfirm."
     say "  $cmd"
 fi
 

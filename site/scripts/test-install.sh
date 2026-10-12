@@ -1,9 +1,10 @@
 #!/bin/sh
 # Installer gate: runs public/install.sh against a fake release tree
 # (file:// URLs, stub binaries, stub session files), so the script's
-# paths, checksum refusal, nightly fallback, look handling and uninstall
-# are proved without the network. shellcheck runs first when it is on
-# PATH (CI provides it). `pnpm test-install`; CI's docs-site job.
+# paths, checksum refusal, nightly fallback, look handling, uninstall and
+# missing-library/font report are proved without the network. shellcheck
+# runs first when it is on PATH (CI provides it). `pnpm test-install`;
+# CI's docs-site job.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -195,5 +196,110 @@ if run_in "$h" --nightly --version 1.0.0; then fail "--nightly --version accepte
 if run_in "$h" --version 9.9.9; then fail "a body-text version was accepted"; fi
 grep -q "no release scoot-v9.9.9" "$work/out" || fail "body-text version message"
 ok "dry run and refusals"
+
+# 7. A missing font adds the distro's font package (F1), with the reason
+#    line and the non-interactive note (F2); the printed command itself
+#    stays confirmation-based. SCOOT_INSTALL_OS_RELEASE and
+#    SCOOT_INSTALL_FONTS pin the distro and the bar's candidate list so
+#    these run the same on any host; ldd and foot are shadowed so the
+#    library half of the report is deterministic too. The nightly tree is
+#    used because test 5 tampered with the tagged scootbg above.
+printf 'ID=arch\n' >"$f/os-arch"
+printf 'ID=fedora\n' >"$f/os-fedora"
+printf 'ID=ubuntu\nID_LIKE=debian\n' >"$f/os-ubuntu"
+printf 'ID=opensuse-tumbleweed\nID_LIKE="opensuse suse"\n' >"$f/os-suse"
+printf '#!/bin/sh\necho "libinput.so.10 => not found"\n' >"$work/bin/ldd"
+chmod +x "$work/bin/ldd"
+printf '#!/bin/sh\nexit 0\n' >"$work/bin/foot"
+chmod +x "$work/bin/foot"
+for os in arch fedora ubuntu suse; do
+    case "$os" in
+    arch) want_cmd="sudo pacman -S --needed libinput ttf-dejavu" ;;
+    fedora) want_cmd="sudo dnf install libinput dejavu-sans-fonts" ;;
+    ubuntu) want_cmd="sudo apt install libinput10 fonts-dejavu-core" ;;
+    suse) want_cmd="sudo zypper install libinput10 dejavu-fonts" ;;
+    esac
+    export SCOOT_INSTALL_OS_RELEASE="$f/os-$os" SCOOT_INSTALL_FONTS=/nonexistent/scoot-test-font.ttf
+    if ! releases=file://$f/none.json run_in "$work/h-font-$os" --dry-run; then
+        cat "$work/out"
+        fail "dry run on $os"
+    fi
+    unset SCOOT_INSTALL_OS_RELEASE SCOOT_INSTALL_FONTS releases
+    if ! grep -Fq "  $want_cmd" "$work/out"; then
+        cat "$work/out"
+        fail "no '$want_cmd' on $os"
+    fi
+    if ! grep -q "none of the usual font files is usable" "$work/out"; then fail "no font reason on $os"; fi
+    if ! grep -q "Non-interactive: use apt -y, dnf -y, or pacman --noconfirm" "$work/out"; then fail "no non-interactive note on $os"; fi
+    cmdline=$(grep -F "  $want_cmd" "$work/out")
+    if printf '%s\n' "$cmdline" | grep -q -- ' -y\|--noconfirm'; then fail "printed command takes -y on $os"; fi
+    if [ -e "$work/h-font-$os/.local" ]; then fail "dry run wrote files on $os"; fi
+done
+ok "missing font names the distro package, with reason and note"
+
+# 8. A usable font adds no package (and --no-bar needs none either),
+#    while a dry run still lists the missing libraries (N1).
+# (-s: an empty file is unusable, as the bar's own loader refuses it.)
+printf 'fake-font\n' >"$work/have-font.ttf"
+export SCOOT_INSTALL_OS_RELEASE="$f/os-ubuntu" SCOOT_INSTALL_FONTS="$work/have-font.ttf"
+if ! releases=file://$f/none.json run_in "$work/h-font-ok" --dry-run; then
+    cat "$work/out"
+    fail "dry run with a font"
+fi
+unset SCOOT_INSTALL_OS_RELEASE SCOOT_INSTALL_FONTS releases
+if grep -q "fonts-dejavu-core" "$work/out"; then
+    cat "$work/out"
+    fail "font package listed despite a usable font"
+fi
+if grep -q "none of the usual font files" "$work/out"; then fail "font reason despite a usable font"; fi
+if ! grep -Fq "  sudo apt install libinput10" "$work/out"; then
+    cat "$work/out"
+    fail "dry run lists no libraries"
+fi
+ok "a usable font adds no package; dry run still lists libraries"
+
+export SCOOT_INSTALL_OS_RELEASE="$f/os-fedora" SCOOT_INSTALL_FONTS=/nonexistent/scoot-test-font.ttf
+if ! releases=file://$f/none.json run_in "$work/h-no-bar" --dry-run --no-bar; then
+    cat "$work/out"
+    fail "dry run with --no-bar"
+fi
+unset SCOOT_INSTALL_OS_RELEASE SCOOT_INSTALL_FONTS releases
+if grep -q "dejavu-sans-fonts" "$work/out"; then
+    cat "$work/out"
+    fail "font package listed with --no-bar"
+fi
+if grep -q "none of the usual font files" "$work/out"; then fail "font reason with --no-bar"; fi
+ok "--no-bar needs no font"
+
+# 9. A system uninstall under sudo names the invoking user's config (N3),
+#    not root's; without sudo the message is unchanged. Needs a writable
+#    /usr/local/share/scoot for the manifest the uninstall reads.
+sys_manifest=/usr/local/share/scoot/install-manifest
+if mkdir -p /usr/local/share/scoot 2>/dev/null && printf '%s\n' "$work/nowhere" >"$sys_manifest" 2>/dev/null; then
+    h=$work/h-sudo-user
+    export SUDO_USER=scoot-probe-user
+    if ! run_in "$h" --system --uninstall --dry-run; then
+        cat "$work/out"
+        fail "system uninstall dry run"
+    fi
+    unset SUDO_USER
+    if ! grep -Fq "Your config in /home/scoot-probe-user/.config/scoot is untouched" "$work/out"; then
+        cat "$work/out"
+        fail "uninstall names no invoking-user config"
+    fi
+    if grep -Fq "/root/.config/scoot is untouched" "$work/out"; then fail "uninstall names root's config under sudo"; fi
+    if ! run_in "$h" --system --uninstall --dry-run; then
+        cat "$work/out"
+        fail "system uninstall dry run without sudo"
+    fi
+    if ! grep -Fq "Your config in $h/.config/scoot is untouched" "$work/out"; then
+        cat "$work/out"
+        fail "plain uninstall message changed"
+    fi
+    rm -f "$sys_manifest"
+    ok "system uninstall names the invoking user's config"
+else
+    ok "system uninstall message skipped (no /usr/local/share/scoot write)"
+fi
 
 printf 'test-install: all passed\n'
