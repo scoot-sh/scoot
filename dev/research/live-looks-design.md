@@ -201,7 +201,7 @@ the `Tty::active` class of bug `CLAUDE.md` warns about):
 - A **rendered look** is the output of `scoot-look build`: one directory of
   per-app fragments (`scoot.toml`, `bar.toml`, `gtk/gtk.css`,
   `qt/scoot-look.conf`, `mako`, `swaylock`, `fuzzel.ini`, `wob.ini`,
-  `foot.ini`, ...) plus a `look.json` naming the source, its hash and the
+  `foot.ini`, ...) plus a `render.json` naming the source, its hash and the
   resolved inputs (font files, wallpaper path). It is never edited and never
   a source for anything; the state link only ever points at one.
 
@@ -534,8 +534,10 @@ startup then runs without a look layer.
 writes `look.json` (temp file, `rename`), then the link (`symlink` temp,
 `rename`). Startup, `sync` and every `apply` compare the two and repair the
 link from `look.json`, so a crash between the two renames heals the next
-time anything looks. Readers never read `look.json`: they read the link,
-which is always a complete rendered directory or absent.
+time anything looks. Apps never read `<state>/look.json`: they read the
+link, which is always a complete rendered directory or absent, and the
+`render.json` inside it (§3.1) is what tells scoot the layer's identity
+changed (§4.5). Two different files, two different names.
 
 Consumers point at the link, never at a specific look:
 
@@ -630,9 +632,14 @@ replies.** Two of the three apps already do:
 the user has half-edited: new `[autostart]` entries would spawn
 (`reload.rs:101-112`), binds would swap, and a half-written file would
 refuse the reload and roll the swap back over an unrelated file. So both
-apps gain `reload` with `scope = "look"`: the app keeps the **user file as
-it parsed it at its last successful load** (the raw table, already in
-memory for the diff) and merges the new look layer under it. Pending edits
+apps gain `reload` with `scope = "look"`: the app merges the new look layer
+under **a snapshot of the user file's raw table from its last successful
+load**. That snapshot is new state in both apps: today scoot's reload diffs
+a freshly loaded `LoadedConfig` against live `State` fields
+(`reload.rs:291-301,343-480`) and keeps no raw table, and scootbar's reload
+re-reads and re-parses the file (`daemon/respond.rs:177-191`); both start
+keeping the raw table at every successful load (startup and plain reload),
+which the raw-key merge of §4.3 needs anyway. Pending edits
 to the user's file wait for the user's own `reload`; autostart never runs
 from a swap. A plain `reload` keeps its meaning (re-read both).
 
@@ -890,8 +897,11 @@ what keeps profile users closest to what they see today (§5.5).
 
 What they see after (the `stylix` look extending ginger-night):
 
-- compositor, bar, wallpaper, night temperature, terminal and editor
-  files: **unchanged**;
+- compositor and bar *colors and fonts*, wallpaper, night temperature,
+  terminal and editor files: **unchanged**;
+- compositor and bar *shape and opacity* change the way they change for
+  every profile user (below, D15), since the `stylix` look inherits them
+  from ginger-night;
 - **GTK/Qt colors, mako, fuzzel and pickers, swaylock, wob and fcitx5
   change from ginger-night's palette to Stylix's.** This is a visible
   change and it is deliberate: today those apps disagree with the
@@ -902,6 +912,24 @@ What they see after (the `stylix` look extending ginger-night):
   ginger-night` with the per-app overrides set to ginger-night's values, or
   setting `look = "ginger-night"` for ginger-night everywhere (then the
   compositor and bar flip to ginger-night too). The changelog says so.
+
+**Every desktop-profile user, Stylix or not: shape and opacity (D15).**
+Today the Nix path applies only a look's 3 compositor colors, 6 bar colors,
+fonts and wallpaper (`home.nix:532-539` maps `look.appearance`, which holds
+only the three colors, `desktop.nix:1933-1937`; `scootbar.nix:374-378` maps
+`barColors`). The examples' style values never reach a Nix user:
+`corner_radius` 12 to 16 (`docs/examples/*/scoot.toml:18-25`), ring widths,
+bar `opacity` 0.7 to 0.88, `padding`, `spacing` and `separator`
+(`docs/examples/*/bar.toml:22-32`). Non-Nix users who ran `install.sh
+--look` have had them all along (it copied the whole files). A look must
+behave one way on both paths, so under the recommendation of D15 the
+shipped looks carry them, and every profile user sees rounded windows and a
+translucent, padded bar on migration. That costs a little per frame (the
+example's own comment: "costs a little per frame: 0 is free",
+`docs/examples/moonrise/scoot.toml:19`) and an ARGB bar buffer
+(`bar.toml:27`). It is a visible change, stated in `look-nix-catalog`'s
+changelog, and any user keeps the old result with `corner_radius = 0` and
+`opacity = 1.0` in their own files (user > look).
 
 **Users with Stylix, no profile** (scoot and the bar only): nothing visible
 changes. The `stylix` look has no base; its colors, fonts, cursor and
@@ -1410,6 +1438,16 @@ rest want the maintainer's call.
   session start, with the render cache keyed by the resolved file's path and
   mtime, so a font package update re-renders instead of leaving the bar
   pointing at a vanished file.
+- **D15. Do the shipped looks carry the examples' shape and opacity?**
+  Recommend yes: the looks are what the previews show and what non-Nix
+  users already run, and a look must behave the same on both paths. The
+  cost (rounded corners per frame, an ARGB bar) is the look author's choice
+  and measured by `look-layer-scoot` and `look-layer-scootbar`; every Nix
+  profile user sees the change once (§5.5), with a two-key opt-out. The
+  alternative keeps every costly part opt-in (`docs/examples/*/scoot.toml`'s
+  "nothing here is a default" rule) by leaving `[shape]` and `[opacity]`
+  out of the shipped looks, so Nix users see no change and non-Nix users
+  lose them on migration instead.
 - **D14. Stylix targets vs an explicit look.** Ownership by path (§5.5):
   paths an upstream module (and so a Stylix target) owns stay Stylix's; the
   reply names those apps.

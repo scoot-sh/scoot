@@ -23,15 +23,19 @@ and fails on a missing role"; no such check exists. And a change under
 ## What to do
 
 - Lift each look into `looks/<name>/look.toml` (D1), with no invented color:
-  the registry's values, the examples' style values (radius, ring widths,
-  bar opacity), foot's 16 hues into `[terminal]`. Gap stays in the example
-  layout configs (D7). The examples keep their layout and lose their colors
-  (they point at the look).
+  the registry's values, foot's 16 hues into `[terminal]`, and (if the
+  maintainer confirms D15) the examples' style values: radius, ring widths,
+  bar opacity, padding, spacing, separator. Gap stays in the example layout
+  configs (D7). The examples keep their layout and lose their colors (they
+  point at the look).
 - A CI path filter for `looks/` in the classify job (the way scootbg's is),
   and a test in `scoot-look` that validates and renders every directory
   there: this is the gate that makes `theming.md:208-209` true.
-- A Nix check that each `look.toml` equals its registry entry until
-  `look-nix-retire-registry`.
+- A Nix check that each `look.toml` agrees with its registry entry until
+  `look-nix-retire-registry`, over the fields both have (the 3 appearance
+  and 6 bar colors, `isDark`/`polarity`, `fonts`, `nightTemp`, the
+  wallpaper); `[shape]`, `[opacity]` and `[terminal]` have no registry
+  counterpart and are compared with the example files instead.
 - Put the `dim` and `urgent` contrast numbers (music-desk dim 1.57 and
   urgent 2.88, vinyl-sunset dim 2.18) in front of the maintainer: retune or
   accept.

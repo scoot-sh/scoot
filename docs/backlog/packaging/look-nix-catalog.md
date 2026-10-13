@@ -28,7 +28,10 @@ Per the design doc's sections 3.1, 5.2 and 6:
   `mkOverride 1200 "ginger-night"` (`home.nix:503-505`,
   `nixos.nix:2235-2237`), leaving priority 1000 for the Stylix source and
   1500 to the option's `default = null`. Breaking (`feat(nix)!`), the
-  maintainer's config updated in step.
+  maintainer's config updated in step. The changelog states the visible
+  change for every profile user under D15: the shipped looks' shape and
+  opacity (rounded windows, a translucent padded bar), which the Nix path
+  never applied before, and the two-key opt-out.
 - Each look rendered by a derivation running the `scoot-look` binary with
   its `[fonts.nix]` packages as inputs (D13); the catalog linked as
   `~/.local/share/scoot/looks/<name>` (sources) and

@@ -37,8 +37,10 @@ so the control socket is the trigger.
   `Bar` keys (`bar.rs:185-197`) and never recreates the layer surface.
 - A key whose feature is not compiled in is dropped from the *layer* with a
   note (the user's own file keeps `deny_unknown_fields`).
-- `{"type":"reload","scope":"look"}`: the user file as parsed at the last
-  successful load, the new layer under it.
+- `{"type":"reload","scope":"look"}`: the new layer under a snapshot of the
+  user file's raw table from the last successful load. The snapshot is new
+  state: today a reload re-reads and re-parses the file
+  (`daemon/respond.rs:181-191`).
 - A fixed layer for the bar-only path: a `[look] layer = PATH` key in
   `bar.toml`, read like the state link, for users who run the bar without
   scoot (the design doc's section 5.5).

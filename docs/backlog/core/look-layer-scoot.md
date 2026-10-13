@@ -38,13 +38,17 @@ Per the design doc's sections 4.1 to 4.5:
   an error log; reload: refused, everything kept).
 - A bad *user* value for a key the layer provides falls back to the layer's
   value, and the reply reports it as invalid and shadowing.
-- `Request::Reload` gains a scope: `look` keeps the user file as parsed at
-  the last successful load and swaps only the layer (no autostart, no binds,
-  no pending edits).
+- Keep a snapshot of the user file's raw table at every successful load
+  (new state: today the reload diffs a fresh `LoadedConfig` against live
+  `State` fields, `reload.rs:291-301`, and keeps no raw table).
+  `Request::Reload` gains a scope: `look` merges the new layer under that
+  snapshot and swaps only the layer (no autostart, no binds, no pending
+  edits).
 - The reply lists shadowed keys and gains an option to wait for the
   wallpaper run.
 - Emit `EventKind::Look` when a reload sees the layer's identity change (the
-  rendered look's hash in its `look.json`).
+  rendered look's hash in its `render.json`; not `<state>/look.json`, which
+  is the tool's record of the live choice).
 - Export `SCOOT_LOOK_STATE` to children: the user state on `--tty`, a
   private per-display state under `$XDG_RUNTIME_DIR` on `--headless` and
   `--nested`, seeded from the user's choice (D10).

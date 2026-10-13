@@ -89,8 +89,9 @@ In the design doc's "Decisions needed": D2 (`programs.scoot.look`), D3 (no
 module lists), D4 (default catalog), D5 (Stylix as a source), D7 (no gap in
 v1), D9 (the shell-apps plan follows section 9), D10 (per display vs per
 user), D11 (dconf ownership), D12 (no git install in v1), D13 (font
-carriers), D14 (Stylix targets keep their paths). D1, D6 and D8 are defaults
-that need no call.
+carriers), D14 (Stylix targets keep their paths), D15 (the shipped looks
+carry the examples' shape and opacity, a visible change for every Nix
+profile user). D1, D6 and D8 are defaults that need no call.
 
 ## Not in this epic
 
