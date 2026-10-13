@@ -94,8 +94,17 @@ fn badge_centre(ctx: &Ctx) -> (f64, f64) {
 
 /// Arrow plus a small paw badge at the lower right.
 pub(crate) fn pointer_badge(ctx: &Ctx, alpha: f64) -> (Vec<Prim>, Vec<Prim>, Option<Shadow>) {
-    let (bx, by) = badge_centre(ctx);
-    let r = (f64::from(ctx.size) / 8.0).clamp(1.5, 7.0);
+    let s = f64::from(ctx.size);
+    // Below 16px tuck the badge one pixel further inside and shrink it:
+    // at 8px its halo touched the bitmap edge, at 12px with blends.
+    let (bx, by, r) = if ctx.size < 12 {
+        (s * 0.64, s * 0.64, (s / 8.0).clamp(1.2, 7.0))
+    } else if ctx.size < 16 {
+        (s * 0.66, s * 0.67, (s / 8.0).clamp(1.4, 7.0))
+    } else {
+        let (bx, by) = badge_centre(ctx);
+        (bx, by, (s / 8.0).clamp(1.5, 7.0))
+    };
     (
         vec![body_poly(ctx)],
         paw::prims(bx, by, r),
@@ -109,13 +118,21 @@ pub(crate) fn wait_badge(ctx: &Ctx, alpha: f64) -> (Vec<Prim>, Vec<Prim>, Option
     let s = f64::from(ctx.size) / 16.0;
     // Tucked past the tail but clear of the bitmap edge: the badge must end
     // well before the bottom-right inset (outline plus shadow) or its lower
-    // bar clips.
-    let bx = f64::from(ctx.size) * 0.655;
-    let by = f64::from(ctx.size) * 0.63;
+    // bar clips. Below 16px pull one pixel further inside (F3: blends
+    // touched at 12px).
+    let (bx, by) = if ctx.size < 12 {
+        (f64::from(ctx.size) * 0.62, f64::from(ctx.size) * 0.60)
+    } else if ctx.size < 16 {
+        (f64::from(ctx.size) * 0.63, f64::from(ctx.size) * 0.59)
+    } else {
+        (f64::from(ctx.size) * 0.655, f64::from(ctx.size) * 0.63)
+    };
     // A ~3.8x5px bowtie at 16px: top and bottom bulbs in the body color
-    // with capping bars, the sand as accent.
-    let w = 1.9 * s;
-    let h = 2.5 * s;
+    // with capping bars, the sand as accent. Below 16px shrink the whole
+    // badge slightly so its lower bar keeps its rim inset (F3).
+    let badge_scale = if ctx.size < 16 { 0.8 } else { 1.0 };
+    let w = 1.9 * s * badge_scale;
+    let h = 2.5 * s * badge_scale;
     let waist = 0.45;
     let hourglass = vec![
         Prim::Poly(chamfer(
@@ -168,19 +185,28 @@ pub(crate) fn wait_badge(ctx: &Ctx, alpha: f64) -> (Vec<Prim>, Vec<Prim>, Option
 /// ~3 units below the badge centre so the mark fits at 24px and past.
 pub(crate) fn help(ctx: &Ctx, alpha: f64) -> (Vec<Prim>, Vec<Prim>, Option<Shadow>) {
     let s = f64::from(ctx.size) / 16.0;
-    let bx = f64::from(ctx.size) * 0.675;
-    let by = f64::from(ctx.size) * 0.66;
+    // At 12px and below the badge halo touched the edge: pull the centre in
+    // one pixel worth and let the mark shrink with it.
+    let (bx, by) = if ctx.size < 12 {
+        (f64::from(ctx.size) * 0.64, f64::from(ctx.size) * 0.60)
+    } else if ctx.size < 16 {
+        (f64::from(ctx.size) * 0.66, f64::from(ctx.size) * 0.63)
+    } else {
+        (f64::from(ctx.size) * 0.675, f64::from(ctx.size) * 0.66)
+    };
     // "?" ~3.5px wide, ~5px tall at 16px, centred on the badge point.
+    // Bolder than round 4 (F4): a wider stem and a bigger dot so the curve
+    // reads at 16px instead of dissolving into blends.
     let pts = [
-        (-1.3, 0.1),
-        (-0.9, -1.0),
-        (0.2, -1.5),
-        (1.2, -1.0),
-        (1.3, 0.0),
-        (0.5, 0.7),
-        (0.1, 1.2),
+        (-1.4, 0.15),
+        (-1.0, -1.1),
+        (0.2, -1.65),
+        (1.35, -1.1),
+        (1.45, 0.0),
+        (0.55, 0.75),
+        (0.1, 1.25),
     ];
-    let w = (1.3 * s).max(1.0);
+    let w = (1.6 * s).max(1.0);
     let mut mark = Vec::with_capacity(pts.len() + 1);
     for pair in pts.windows(2) {
         mark.push(Prim::Capsule {
@@ -201,7 +227,7 @@ pub(crate) fn help(ctx: &Ctx, alpha: f64) -> (Vec<Prim>, Vec<Prim>, Option<Shado
     mark.push(Prim::Disk {
         cx: bx + 0.1 * s,
         cy: by + 3.0 * s,
-        r: (0.85 * s).max(0.65),
+        r: (1.0 * s).max(0.7),
     });
     (vec![body_poly(ctx)], mark, arrow_shadow(ctx.size, alpha))
 }

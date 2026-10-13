@@ -9,6 +9,17 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### Unreleased — drawn fallback cursor family (behavior change)
+
+- **The built-in pointer is now a near-black/white-rim/ginger family
+  instead of a plain white arrow.** Where no cursor theme is installed,
+  all 22 fallback shapes draw in that look. New option
+  `appearance.cursor_accent` (`"#rrggbb"` / `"#rrggbbaa"` / `"none"`,
+  default `#e57f29`): `"none"` (any case) draws no mark, an unset or
+  empty value keeps the default. Setting `appearance.cursor_color =
+  "#ffffff"` restores the old white-pointer look (with a black rim).
+  See [Appearance](site/src/content/docs/scoot/appearance.md#the-fallback-cursor-family).
+
 ### Unreleased — renderer names are `cpu` / `gpu` / `auto` (breaking)
 
 - **`--renderer` now takes `cpu`, `gpu` or `auto` — the old `pixman`

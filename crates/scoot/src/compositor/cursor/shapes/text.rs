@@ -10,9 +10,20 @@ use super::{Ctx, Prim, span};
 /// Shared I-beam builder along one axis: `vertical` draws the `text` beam,
 /// horizontal the `vertical-text` one.
 fn beam(ctx: &Ctx, vertical: bool) -> (Vec<Prim>, Vec<Prim>, Option<super::super::raster::Shadow>) {
-    let inset = (ctx.ow + ctx.w / 2.0 + 1.0).ceil();
+    let mut inset = (ctx.ow + ctx.w / 2.0 + 1.0).ceil();
+    // Below 12px the serif end caps plus the rim land on the last column
+    // (Text at 8px put flat rim on column 7): reserve one more pixel and
+    // shorten the serifs so the whole beam keeps its rim inside.
+    let mut serif_scale = 1.0;
+    if ctx.size < 12 {
+        inset += 1.0;
+        serif_scale = 0.7;
+    } else if ctx.size < 16 {
+        inset += 0.5;
+        serif_scale = 0.85;
+    }
     let (near, far) = span(ctx.size, inset);
-    let serif = (f64::from(ctx.size) / 8.0).max(1.5);
+    let serif = (f64::from(ctx.size) / 8.0).max(1.5) * serif_scale;
     let c = ctx.c;
     let (stem, bars, mark) = if vertical {
         (

@@ -41,8 +41,8 @@ fn sizes() -> [i32; 3] {
 
 /// The sizes the brief pins the bitmap-edge guarantees to: every shape at
 /// each of these must keep its fill off the edge and wrapped in rim.
-fn edge_sizes() -> [i32; 6] {
-    [16, 24, 32, 48, 64, 256]
+fn edge_sizes() -> [i32; 8] {
+    [8, 12, 16, 24, 32, 48, 64, 256]
 }
 
 fn pixel(pixels: &[u8], size: i32, x: i32, y: i32) -> [u8; 4] {
@@ -256,6 +256,9 @@ fn no_shape_draws_fill_on_the_edge_of_its_own_bitmap() {
     // the brief's pinned sizes (badge dots are what would escape here: the
     // "?" dot at 24px is the closest any mark comes) and at the allowed
     // extremes, where the fractions collapse (4px) or stretch (256px).
+    // Round 5 extends the pinned sizes down to 8 and 12 (F3): Text at 8px
+    // put flat rim on the last column, badges at 8/12px touched with
+    // blends -- both fixed by growing the tiny-size insets.
     for size in edge_sizes().into_iter().chain(sizes()).collect::<Vec<_>>() {
         for shape in Shape::ALL {
             for accent in [None, Some(ACCENT)] {
@@ -267,6 +270,11 @@ fn no_shape_draws_fill_on_the_edge_of_its_own_bitmap() {
                             FILL,
                             "{shape:?} at {size}px puts fill on the bitmap edge at ({x}, {y})"
                         );
+                        assert_ne!(
+                            pixel(&pixels, size, x, y),
+                            RIM,
+                            "{shape:?} at {size}px puts flat rim on the bitmap edge at ({x}, {y})"
+                        );
                         if let Some(mark) = accent {
                             assert_ne!(
                                 pixel(&pixels, size, x, y),
@@ -274,6 +282,36 @@ fn no_shape_draws_fill_on_the_edge_of_its_own_bitmap() {
                                 "{shape:?} at {size}px puts accent on the bitmap edge at ({x}, {y})"
                             );
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn no_shape_touches_the_bitmap_edge_at_12px_and_up() {
+    // Strict transparency (F3): at 12px and above no pixel of any kind --
+    // flat or blend -- may sit on the outer edge row/column. The rim's job
+    // is to sit between the fill and the edge, so an edge pixel with any
+    // coverage means the insets are too tight there. At 8px the tiny-size
+    // insets keep flat fill/rim/accent off the edge (pinned above) but
+    // blends may still touch; that is the documented small-size limit.
+    for size in edge_sizes()
+        .into_iter()
+        .filter(|s| *s >= 12)
+        .collect::<Vec<_>>()
+    {
+        for shape in Shape::ALL {
+            for accent in [None, Some(ACCENT)] {
+                let pixels = generate(shape, size, FILL, RIM, accent);
+                for i in 0..size {
+                    for (x, y) in [(i, 0), (i, size - 1), (0, i), (size - 1, i)] {
+                        assert_eq!(
+                            alpha(&pixels, size, x, y),
+                            0,
+                            "{shape:?} at {size}px touches the bitmap edge at ({x}, {y})"
+                        );
                     }
                 }
             }

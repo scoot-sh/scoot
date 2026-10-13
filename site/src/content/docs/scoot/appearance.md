@@ -54,7 +54,9 @@ Where no cursor theme is installed (a webtop or minimal container, the
 everyday case), scoot draws its own 22-shape pointer family: a near-black
 body, a contrasting rim, and one ginger mark per shape. Every shape is
 original vector geometry drawn by the compositor itself — no theme's
-pixels, embedded or copied.
+pixels, embedded or copied. The concept art the family was designed
+against was generated with ChatGPT by the project owner; the shipped
+shapes are original geometry, never traced or pixel-copied.
 
 ![The fallback cursor family](../../../assets/cursor-family.png)
 

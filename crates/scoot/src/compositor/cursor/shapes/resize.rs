@@ -260,13 +260,15 @@ pub(crate) fn move_shape(
     (body, mark, None)
 }
 
-/// Two triangles around a vertical orange divider.
+/// Two triangles around a vertical orange divider. Slimmer than round 4
+/// (F4): narrower triangles and a thinner divider so the pair reads as a
+/// splitter, not an eye.
 pub(crate) fn split_v(ctx: &Ctx) -> (Vec<Prim>, Vec<Prim>, Option<super::super::raster::Shadow>) {
     let m = metrics(ctx);
-    let h = (f64::from(ctx.size) / 5.0)
-        .max(3.2)
+    let h = (f64::from(ctx.size) / 6.0)
+        .max(2.8)
         .min((m.far - m.near) / 2.0 - 0.5);
-    let gap = (ctx.w * 0.45).max(0.9) / 2.0 + ctx.aow + 0.75;
+    let gap = (ctx.w * 0.35).max(0.8) / 2.0 + ctx.aow + 0.9;
     let left = Prim::Poly(chamfer(
         &[(m.near, m.c), (m.c - gap, m.c - h), (m.c - gap, m.c + h)],
         ctx.round * 0.5,
@@ -282,18 +284,19 @@ pub(crate) fn split_v(ctx: &Ctx) -> (Vec<Prim>, Vec<Prim>, Option<super::super::
         ay: m.c - h,
         bx: m.c,
         by: m.c + h,
-        w: (ctx.w * 0.45).max(0.9),
+        w: (ctx.w * 0.35).max(0.8),
     }];
     (vec![left, right], mark, None)
 }
 
-/// Two triangles around a horizontal orange divider.
+/// Two triangles around a horizontal orange divider. Slimmer than round 4
+/// (F4): see `split_v`.
 pub(crate) fn split_h(ctx: &Ctx) -> (Vec<Prim>, Vec<Prim>, Option<super::super::raster::Shadow>) {
     let m = metrics(ctx);
-    let h = (f64::from(ctx.size) / 5.0)
-        .max(3.2)
+    let h = (f64::from(ctx.size) / 6.0)
+        .max(2.8)
         .min((m.far - m.near) / 2.0 - 0.5);
-    let gap = (ctx.w * 0.45).max(0.9) / 2.0 + ctx.aow + 0.75;
+    let gap = (ctx.w * 0.35).max(0.8) / 2.0 + ctx.aow + 0.9;
     let top = Prim::Poly(chamfer(
         &[(m.c, m.near), (m.c - h, m.c - gap), (m.c + h, m.c - gap)],
         ctx.round * 0.5,
@@ -309,7 +312,7 @@ pub(crate) fn split_h(ctx: &Ctx) -> (Vec<Prim>, Vec<Prim>, Option<super::super::
         ay: m.c,
         bx: m.c + h,
         by: m.c,
-        w: (ctx.w * 0.45).max(0.9),
+        w: (ctx.w * 0.35).max(0.8),
     }];
     (vec![top, bottom], mark, None)
 }
