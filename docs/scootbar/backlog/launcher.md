@@ -1,9 +1,9 @@
 ---
-title: "`scootlaunch`: the launcher, and a dmenu mode the bar's pickers can use"
+title: "`scootlaunch`: the launcher, and a dmenu mode the bar's pickers can use (epic)"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "not started: the maintainer starts it, and its own design pass and backlog come first"
+blocked: "launch-prototype, launch-desktop-index, launch-match-rank, launch-ui, launch-spawn, launch-icons, launch-dmenu, launch-agent-json, launch-windows-mode, launch-nix, launch-packaging, launch-default-flip"
 milestone: "M7"
 ---
 
@@ -11,6 +11,25 @@ milestone: "M7"
 
 Filed 2026-09-29 as a pointer, not a spec: it gets its own backlog and design
 pass when it starts. Serves **daily-drive**.
+
+## The plan (2026-10-12)
+
+The design is [dev/design/scootlaunch.md](../../../dev/design/scootlaunch.md); shared parts are in
+[shell-apps.md](../../../dev/design/shell-apps.md). The name stays `scootlaunch`, though the request said
+"scootlauncher" ([why](../../../dev/design/shell-apps.md#names)).
+
+Children, in order:
+
+1. [launch-prototype](launch-prototype.md): the go/no-go gate against fuzzel, out of the
+   workspace.
+2. [launch-desktop-index](launch-desktop-index.md), then [launch-match-rank](launch-match-rank.md).
+3. [launch-ui](launch-ui.md), then [launch-spawn](launch-spawn.md) and [launch-icons](launch-icons.md).
+4. [launch-dmenu](launch-dmenu.md) and [launch-agent-json](launch-agent-json.md).
+5. [launch-nix](launch-nix.md), [launch-packaging](launch-packaging.md),
+   [launch-default-flip](launch-default-flip.md); later, [launch-windows-mode](launch-windows-mode.md).
+
+Compositor side: [layer-shell-default-output](../../backlog/core/layer-shell-default-output.md).
+Resource tables are published here per milestone, against fuzzel, tofi, bemenu and wofi.
 
 **Name: `scootlaunch`** (settled 2026-09-29, over `scootmenu`); the picker is
 its `--dmenu` mode.

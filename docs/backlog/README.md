@@ -270,8 +270,8 @@ falsify. Read `flexwm` there as `scoot`.
   zero new state
 - [`ext-workspace-v1` `urgent` state bit](./protocols/ext-workspace-urgent-state.md) — low, filed 2026-09-29 (scootbar planning); needs a policy decision first, since an xdg-activation request always focuses today
 - [Turn screens off when idle (`wlr-output-power-management`)](./resolved/output-power-management-done.md) — RESOLVED 2026-10-04 (daily-drive: idle Asahi laptop keeps both panels lit; agent IPC half included)
-- [Smaller/general protocol gaps (bundled)](./protocols/protocol-gaps-general.md)
-- [Niche protocol gaps (bundled)](./protocols/protocol-gaps-niche.md)
+- [Smaller/general protocol gaps (bundled)](./resolved/protocol-gaps-general-bundle-done.md) — every item resolved; archived 2026-10-12
+- [Niche protocol gaps (bundled)](./resolved/protocol-gaps-niche-bundle-done.md) — every item resolved or a recorded non-entry; archived 2026-10-12
 - [Virtual pointer and keyboard protocols, so wayvnc gives full remote control](./resolved/virtual-input-remote-control-done.md) — RESOLVED 2026-10-05 (PR #448): both managers behind `[virtual_input] enabled`, refused under lock, keys translated by keysym; capture already worked
 - [Per-client allow-list for the virtual-input globals via `security-context-v1`](./resolved/virtual-input-allow-list-done.md) — CLOSED 2026-10-08 as an accepted tradeoff (no code): `security-context-v1` marks sandboxed clients only, so it cannot tell wayvnc from any other same-uid client; the on/off switch stays the whole gate
 - [Opt-in keybindings for virtual keyboards](./resolved/virtual-input-binds-done.md) — RESOLVED 2026-10-07 (PR #494): `[virtual_input] binds` (default off, restart-only) lets virtual keys run binds by seat keysym for webtop/try-scoot sessions
@@ -835,6 +835,11 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [Opt-in 10-bit scanout](./core/hdr-10bit-scanout.md) — low (HDR plan stage 2), blocked on a 10-bit-capable display for the positive path.
 - [HDR connector signaling](./core/hdr-output-signaling.md) — low (HDR plan stage 4), blocked on HDR hardware plus a Smithay fork change (see the research ticket).
 - [Productionise runtime-loaded libgbm](./core/runtime-gbm-productionise.md) — medium (spike 2026-10-10): one default build for GPU and GPU-free boxes via a static libgbm ABI stub (no DT_NEEDED, dlopen on use, fail-closed without); needs the M2 scanout proof, the auto-detect rule, and the `scoot`/`scoot-gpu` package collapse.
+
+### Shell apps, the compositor side (filed 2026-10-12)
+The scootnotify, scootlaunch and scootgreet plans ([dev/design/shell-apps.md](../../dev/design/shell-apps.md)) live in [scootbar's backlog](../scootbar/backlog/README.md#m7--the-rest-of-the-shell-separate-products-own-backlogs-when-they-start); these two are scoot changes they want.
+- [An output-less layer surface goes to the pointer's output](./core/layer-shell-default-output.md) — medium, unblocked: today it lands on the primary output while a new window opens under the pointer, which puts launchers and notifications on the wrong monitor (fuzzel and mako today included).
+- [A locked-down greeter-host mode](./core/scoot-greeter-mode.md) — low, only if cage fails the GPU-free check (blocked on its spike): no IPC socket, no binds but VT switch, exit with the child; opt-in.
 
 ### Requested 2026-09-24
 - [Floating windows (dialogs auto-float, window rules, toggle, move/resize)](./resolved/floating-windows-done.md) — RESOLVED 2026-09-25 in two PRs. PR 1 (#242): the floating layer, auto-float by `xdg-dialog-v1`/parent/fixed size, `[[window_rule]]`, the toggle and focus switch, IPC. PR 2 (#243): `[floating] modifier` (Super) + left/right drag moves/resizes, the client's own `xdg_toplevel.move`/`resize` honoured on its held press (tiled windows' ignored), IPC `move-floating`/`resize-floating`, cross-output moves, a window's dialogs always drawn above it (the re-review's fullscreen-game case), resize configures paced to client acks; no allocation per pointer motion (a resize allocates only for its configures, ~11 each, about one per client ack).

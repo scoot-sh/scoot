@@ -1,7 +1,7 @@
 ---
 title: "Niche protocol gaps, lowest priority for this project's current scope, bundled for the same reason as the entry above."
 status: "resolved"
-area: "protocols"
+area: "resolved"
 priority: "low"
 blocked: null
 ---

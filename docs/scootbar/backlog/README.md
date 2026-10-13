@@ -140,9 +140,44 @@ The [umbrella](resolved/data-source-modules-done.md) holds the rules they share 
 - [The bar wakes about 40 times a minute at idle](resolved/second-wakeups-done.md) (low) — RESOLVED 2026-10-05 in #458: the clock was already minute-aligned (2 wakes); the network module redrew on raw-dBm jitter and now redraws on level change
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)
-- [Extract `scootui`](extract-scootui.md) (low): when a second consumer appears
-- [`scootlaunch`: the launcher](launcher.md) (low, pointer)
-- [`scootnotify`: the notification daemon](scootnotify.md) (low, pointer)
+Planned 2026-10-12. The designs are [dev/design/](../../../dev/design/shell-apps.md) (shared
+foundation, start order, decisions needed), [scootnotify](../../../dev/design/scootnotify.md),
+[scootlaunch](../../../dev/design/scootlaunch.md) and [scootgreet](../../../dev/design/scootgreet.md).
+The tickets live here until each app gets its own backlog.
+
+What starts when:
+
+- **Now:** the two spikes and `greet-baseline` (with the core
+  [`layer-shell-default-output`](../../backlog/core/layer-shell-default-output.md)).
+- **On the maintainer's go-ahead:** the three go/no-go prototypes, which run out of the
+  workspace (Decisions needed 1).
+- **Only after a gate's GO:** the extraction and the app work, held by prose blockers that
+  `resolve` cannot strip ([how](../../../dev/design/shell-apps.md#how-the-gates-stay-closed)).
+
+Shared foundation ([epic](extract-scootui.md)):
+- [Spike: the keyboard stack](scootui-keyboard-spike.md) (medium) and [Spike: shaping and bidi](scootui-text-shaping-spike.md) (medium): the two choices that are expensive to reverse
+- [Extract the drawing half and `scoot-rt`](scootui-extract-draw.md), then the mechanical moves: [`scoot-dbus`](scoot-dbus-extract.md), [the Wayland half](scootui-extract-wayland.md), [the control socket](scootui-extract-control.md)
+- New code: [on-demand surfaces](scootui-surfaces-on-demand.md), [keyboard](scootui-keyboard.md), then [entry, list and focus](scootui-entry-and-list.md)
+
+[`scootnotify`: the notification daemon](scootnotify.md) (epic):
+- [Prototype: the go/no-go gate against mako](notify-prototype.md) (medium)
+- [The D-Bus server and model](notify-server.md), [popups](notify-popups.md), [the control interface](notify-control.md), [DND, history, rules](notify-dnd-history-rules.md), [the bar feed](notify-bar-feed.md)
+- [Nix, the look layer and the opt-in switch](notify-nix.md), [packaging and the site](notify-packaging.md), [flip the default](notify-default-flip.md)
+- Experiment: [a fullscreen hold through a `top` surface](notify-fullscreen-hold-spike.md)
+
+[`scootlaunch`: the launcher](launcher.md) (epic):
+- [Prototype: the go/no-go gate against fuzzel](launch-prototype.md) (medium)
+- [The desktop entry index](launch-desktop-index.md), [matching and ranking](launch-match-rank.md)
+- [The panel](launch-ui.md), [launching](launch-spawn.md), [icons](launch-icons.md)
+- [dmenu and run](launch-dmenu.md), [the agent interface](launch-agent-json.md)
+- [Nix, the look layer and the opt-in switch](launch-nix.md), [packaging and the site](launch-packaging.md), [flip the default](launch-default-flip.md); later, [windows mode](launch-windows-mode.md)
+
+[`scootgreet`: the login greeter](scootgreet.md) (epic):
+- [Baseline: measure ReGreet + cage](greet-baseline.md) (medium), then [the prototype: the go/no-go gate against a real greetd](greet-prototype.md) (medium)
+- [A headless greetd login for agents](greet-headless-login.md) (candidate early ticket), [the supervisor and the agreety fallback](greet-greetd-client.md)
+- [The screen](greet-ui.md), [users and sessions](greet-users-sessions.md), [power](greet-power.md)
+- [NixOS](greet-nixos.md), [packaging, docs and the ISO](greet-packaging-iso.md), [flip the default](greet-default-flip.md)
+- Only if cage fails the GPU-free check: [spike: scoot as the host](greet-scoot-kiosk-spike.md), then the [core ticket](../../backlog/core/scoot-greeter-mode.md)
 
 ### Live looks (filed 2026-10-12)
 The bar's half of the [live-looks epic](../../backlog/core/live-looks.md) ([design](../../../dev/research/live-looks-design.md)):

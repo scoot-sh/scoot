@@ -3,6 +3,7 @@ title: "Multi-output foundation: make `State.output` a collection, and give `--h
 status: "resolved"
 area: "core"
 priority: "high"
+blocked: null
 ---
 
 # Multi-output foundation: make `State.output` a collection, and give `--headless` an `--outputs N`

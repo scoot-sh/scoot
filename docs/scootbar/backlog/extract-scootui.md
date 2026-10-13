@@ -1,9 +1,9 @@
 ---
-title: "Extract `scootui`: the shared drawing and Wayland scaffolding"
+title: "Extract `scootui`: the shared drawing and Wayland scaffolding (epic)"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "waits for a second consumer (the launcher or the notification daemon) to start; unblock by hand when one does"
+blocked: "scootui-keyboard-spike, scootui-text-shaping-spike, scootui-extract-draw, scoot-dbus-extract, scootui-extract-wayland, scootui-extract-control, scootui-surfaces-on-demand, scootui-keyboard, scootui-entry-and-list"
 milestone: "M7"
 ---
 
@@ -11,6 +11,31 @@ milestone: "M7"
 
 Filed 2026-09-29. Serves **daily-drive** (one look across the shell) and the
 lightness bar (no duplicated code in three binaries).
+
+## The plan (2026-10-12)
+
+The second consumers arrived: scootnotify, scootlaunch and scootgreet. The seam is cut in
+[dev/design/shell-apps.md](../../../dev/design/shell-apps.md#the-shared-crates-scootui-and-scoot-dbus) into three
+crates:
+
+- `scootui`: drawing, widgets, icons, Wayland scaffolding, keyboard and the control socket,
+  each behind a feature;
+- `scoot-dbus`: the D-Bus client;
+- `scoot-rt`: the leaf both depend on (`print`, `runtime_dir`).
+
+scootbg stays on its own copy for now. **Nothing is extracted until one of the three gates says
+go.**
+
+Children, in order:
+
+1. [scootui-keyboard-spike](scootui-keyboard-spike.md) and
+   [scootui-text-shaping-spike](scootui-text-shaping-spike.md), now.
+2. [scootui-extract-draw](scootui-extract-draw.md), then the moves in parallel:
+   [scoot-dbus-extract](scoot-dbus-extract.md), [scootui-extract-wayland](scootui-extract-wayland.md)
+   and [scootui-extract-control](scootui-extract-control.md). These are mechanical, with nothing
+   new.
+3. New code: [scootui-surfaces-on-demand](scootui-surfaces-on-demand.md),
+   [scootui-keyboard](scootui-keyboard.md), then [scootui-entry-and-list](scootui-entry-and-list.md).
 
 Write the drawing and scaffolding as modules inside `scootbar` first. Extract
 when a second consumer needs them, so the seam comes from real use rather
