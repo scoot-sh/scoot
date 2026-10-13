@@ -2,6 +2,7 @@ import starlight from '@astrojs/starlight';
 import starlightLlmsTxt from 'starlight-llms-txt';
 import { defineConfig } from 'astro/config';
 import { mdLinksToPages } from './scripts/md-links.mjs';
+import { wbrDottedCode } from './scripts/wbr-code.mjs';
 
 // Post-build `.md` → page rewrite and its gate: see scripts/md-links.mjs
 // and scripts/check-md-links.mjs. This must stay a post-build HTML pass,
@@ -34,6 +35,9 @@ export default defineConfig({
   base,
   integrations: [
     mdLinksToPages(),
+    // Post-build `<wbr>` after intra-token dots in inline code (see
+    // scripts/wbr-code.mjs): HTML-only, twins and llms bundles untouched.
+    wbrDottedCode(),
     starlight({
       title: 'scoot',
       description:

@@ -143,8 +143,10 @@ kbd {
   border-inline-start-color: var(--sl-color-accent);
 }
 
-/* Option tables: first column (the option name) stays on one line so
- * type/default/example columns scan vertically. */
+/* Option tables: the first column (the option name) keeps its mono
+ * styling. On desktop it stays on one line so type/default/example columns
+ * scan vertically; the wrapping rules for narrow screens live in the
+ * `max-width` block below, so desktop rendering is untouched. */
 .sl-markdown-content table td:first-child {
   white-space: nowrap;
   font-family: var(--sl-font-system-mono);
@@ -277,11 +279,77 @@ kbd {
 
 /* Keybinding action strings are copy-paste tokens (`scoot msg action`
  * takes the same grammar `[binds]` uses): never break one mid-token at a
- * hyphen or pipe. Starlight already gives tables a horizontal scroll
- * container (`display: block; overflow: auto`), so a wide table scrolls
- * instead of wrapping. */
+ * hyphen or pipe on desktop. (Below the breakpoint the tokens must wrap
+ * rather than force the table wider than a phone; see the narrow-screen
+ * block.) Starlight already gives tables a horizontal scroll container
+ * (`display: block; overflow: auto`), so a truly wide table still scrolls
+ * instead of breaking the page. */
 .sl-markdown-content table td code {
   white-space: nowrap;
+}
+
+/* `<wbr>` markers from the `wbrDottedCode` build pass (see
+ * scripts/wbr-code.mjs) are inert on desktop: without this, the extra
+ * break opportunities would shrink the columns' preferred widths and
+ * reflow the desktop tables. Below the breakpoint they switch on. */
+.sl-markdown-content wbr {
+  display: none;
+}
+
+/* Narrow screens (phone/tablet portrait): long dotted names
+ * (`desktop.notifications.bar.icons.unread` and longer) must wrap instead
+ * of shoving the type/default/meaning columns off the screen.
+ * `overflow-wrap: anywhere` only breaks a token when the column is actually
+ * constrained, and the `<wbr>` markers switch back on so the breaks land
+ * on the dots. The desktop 1rem cell gutters cost 6rem of padding overhead
+ * across four columns, so tighten them, and give the option-name column a
+ * floor so its longest segment (`notifications`) fits whole. The other
+ * columns keep a small floor so short tokens (`"mako"`, `true`) never
+ * shatter. Wide matrices keep Starlight's contained scroll (`display:
+ * block; overflow: auto`); nothing here lets a table push the page
+ * sideways, and the 16px side gutter is untouched. */
+@media (max-width: 50rem) {
+  .sl-markdown-content wbr {
+    display: inline;
+  }
+  .sl-markdown-content table td:first-child {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-width: 15ch;
+  }
+  .sl-markdown-content table td code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .sl-markdown-content table kbd {
+    white-space: normal;
+  }
+  .sl-markdown-content th,
+  .sl-markdown-content td {
+    padding: 0.5rem;
+  }
+  /* Keep the edge columns flush with the 16px gutter, like desktop. */
+  .sl-markdown-content :is(th, td):first-child {
+    padding-inline-start: 0;
+  }
+  .sl-markdown-content :is(th, td):last-child {
+    padding-inline-end: 0;
+  }
+  .sl-markdown-content table :is(td, th):not(:first-child) {
+    min-width: 3.25rem;
+  }
+  /* Wide matrices still scroll inside Starlight's contained scroll box
+   * (never the page). Pin the first column so each scrolled row keeps its
+   * label; the opaque ground masks the cells sliding underneath, and the
+   * hairline — the same seam as the row dividers — marks the pinned edge.
+   * On tables that fit, this is a no-op: black on black, no scroll. */
+  .sl-markdown-content table :is(td, th):first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--sl-color-bg);
+    border-inline-end: 1px solid var(--sl-color-gray-5);
+  }
 }
 
 /* Starlight draws a divider after the social icons to separate them from
