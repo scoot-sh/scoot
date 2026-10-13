@@ -12,6 +12,31 @@ milestone: "M7"
 Filed 2026-09-29 as a pointer, not a spec: it gets its own backlog and
 design pass when it starts. Serves **daily-drive**.
 
+## The plan (2026-10-12)
+
+The design is [dev/design/scootnotify.md](../../../dev/design/scootnotify.md); what it shares with the
+other apps is in [shell-apps.md](../../../dev/design/shell-apps.md). That answers this entry's open question on
+the lock. No standard protocol tells a non-locker client the session is locked, and scootnotify
+needs none: scoot draws no layer surface while locked, and a card's expiry clock starts at the
+compositor's first presentation of it, so a notification that arrives while locked waits
+unexpired.
+
+Children, in order (each `blocked` names its predecessors):
+
+1. [notify-prototype](notify-prototype.md): the go/no-go gate against mako, out of the workspace,
+   before any extraction.
+2. [notify-server](notify-server.md): the D-Bus server and model.
+3. [notify-popups](notify-popups.md): cards, stack, lock and idle rules, the look layer.
+4. [notify-control](notify-control.md), then [notify-dnd-history-rules](notify-dnd-history-rules.md).
+5. [notify-bar-feed](notify-bar-feed.md), then [notify-nix](notify-nix.md),
+   [notify-packaging](notify-packaging.md) and [notify-default-flip](notify-default-flip.md).
+
+Experiment: [notify-fullscreen-hold-spike](notify-fullscreen-hold-spike.md).
+
+Each milestone's resource table is published here, and kept rather than overwritten, until the
+app gets its own backlog. The first targets are the [design's budgets](../../../dev/design/scootnotify.md#budgets),
+measured against mako, dunst and swaync.
+
 Its own binary, not a bar module. Outline, from the planning:
 
 - Owns `org.freedesktop.Notifications` on the session bus via the shared
@@ -34,35 +59,8 @@ Same standards apply: lowest resource use of its class, a resource ratchet
 against `mako`, `dunst` and `swaync`, docs in the same PR, and its own Nix
 module.
 
-## The plan (2026-10-12)
-
-The design pass happened: [dev/design/scootnotify.md](../../../dev/design/scootnotify.md), with the parts it
-shares in [shell-apps.md](../../../dev/design/shell-apps.md). It answers this entry's open question. No
-standard protocol tells a non-locker client the session is locked (scoot's IPC `lock_changed`
-exists for that, `site/src/content/docs/msg/events.md:178-181`), and scootnotify needs
-neither: scoot draws no layer surface while locked, and a card's expiry clock starts at the
-compositor's first presentation of it (the spec's "since the display"). A notification
-that arrives while locked therefore waits, unexpired, with no IPC.
-
-Children, in order (each `blocked` names its predecessors):
-
-1. [notify-prototype](notify-prototype.md): the go/no-go gate against mako.
-2. [notify-server](notify-server.md): the D-Bus server and model, headless.
-3. [notify-popups](notify-popups.md): cards, stack, lock and idle rules, outputs.
-4. [notify-control](notify-control.md): `msg`, JSON, `subscribe`/`wait`, DND, history, rules.
-5. [notify-bar-feed](notify-bar-feed.md): the bar's `notifications` push module, natively.
-6. [notify-nix](notify-nix.md): modules, Stylix, look; the opt-in profile switch.
-7. [notify-packaging](notify-packaging.md), then [notify-default-flip](notify-default-flip.md).
-
-Shared prerequisites: [scootui-extract-draw](scootui-extract-draw.md),
-[scoot-dbus-extract](scoot-dbus-extract.md), [scootui-extract-wayland](scootui-extract-wayland.md).
-
-## Resource ratchet
-
-Each milestone's table is published here, and kept rather than overwritten, until the app gets
-its own backlog. The [design's budgets](../../../dev/design/scootnotify.md#budgets) are the first targets, and
-lean mako, dunst and swaync are the competitors.
-
-## Theming
-
-Through the live-looks contract only (PR #578; [how this plan maps onto it](../../../dev/design/shell-apps.md#theme-the-live-looks-contract-stylix-and-looks)): the app reads the look layer under its own config, never Stylix.
+Theming contract (added 2026-10-12): read the look layer and implement a
+`reload` request on the control socket (whole-file validation, keep last
+good, an applied/refused reply); see the [live looks design](../../../dev/research/live-looks-design.md),
+section 9. A "look changed" toast from scoot's `look` event is an optional
+hook.

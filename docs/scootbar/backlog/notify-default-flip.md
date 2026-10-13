@@ -10,6 +10,12 @@ milestone: "M7"
 # scootnotify: flip the default
 
 Filed 2026-10-12. Serves **daily-drive**. The criteria are the
-[shared ones](../../../dev/design/shell-apps.md#nix-modules-and-the-desktop-profile-switch): gate passed,
-ratchet at or under mako, two weeks of daily use on the M2 with no open high-priority bug,
-real-login proof per look, mako one option away for a release. Needs the maintainer's ruling.
+[shared ones](../../../dev/design/shell-apps.md#nix-modules-and-the-desktop-profile-switch):
+
+- the gate passed;
+- the ratchet is at or under mako's;
+- two weeks of daily use on the M2 with no open high-priority bug;
+- a real-login proof per look;
+- mako stays one option away for a release.
+
+Needs the maintainer's ruling.

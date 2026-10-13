@@ -10,30 +10,34 @@ milestone: "M7"
 # `scootgreet`: the login greeter
 
 Filed 2026-10-12 at the user's request ("And scootgreeter or scootgreet"). Serves
-**daily-drive** (the login screen draws the session's look, at a fraction of ReGreet's
-stack) and **computer use** (a login a VM test or agent drives with one command).
+**daily-drive** and **computer use**. The login screen would draw the session's look without
+ReGreet's 1,018.5 MiB of ReGreet and cage, and a VM test or agent could drive the login with one
+command.
 
-The design is [dev/design/scootgreet.md](../../../dev/design/scootgreet.md); what it shares with the other shell apps is
-in [shell-apps.md](../../../dev/design/shell-apps.md). The name is a recommendation (Decisions needed 2).
+The design is [dev/design/scootgreet.md](../../../dev/design/scootgreet.md), and the parts it shares with the
+other shell apps are in [shell-apps.md](../../../dev/design/shell-apps.md). The name is a recommendation
+(Decisions needed 2).
 
 ## Children, in order
 
-1. [greet-baseline](greet-baseline.md): measure ReGreet + cage; verify the three facts the
-   no-stranding design rests on.
-2. [greet-greetd-client](greet-greetd-client.md): the protocol, the conversation, the secret's
-   path, `scootgreet login`.
-3. [greet-ui](greet-ui.md): the screen; the go/no-go gate.
-4. [greet-nixos](greet-nixos.md): the module and the agreety fallback; opt-in.
-5. [greet-packaging-iso](greet-packaging-iso.md), then [greet-default-flip](greet-default-flip.md).
+1. [greet-baseline](greet-baseline.md): measure ReGreet and cage. This can start now.
+2. [greet-prototype](greet-prototype.md): the go/no-go gate against a real greetd, out of the
+   workspace.
+3. [greet-greetd-client](greet-greetd-client.md): the cancel discipline, the supervisor and the
+   agreety fallback, the locked secret path, and `scootgreet login`.
+4. [greet-ui](greet-ui.md), then [greet-users-sessions](greet-users-sessions.md) and
+   [greet-power](greet-power.md).
+5. [greet-nixos](greet-nixos.md), [greet-packaging-iso](greet-packaging-iso.md),
+   [greet-default-flip](greet-default-flip.md).
 
-Later and opt-in: [greet-scoot-kiosk-spike](greet-scoot-kiosk-spike.md) then
-[scoot-greeter-mode](../../backlog/core/scoot-greeter-mode.md) (scoot as the host instead of
-cage).
-
-## Done when
-
-The children are resolved, or the gate in `greet-ui` says no and ReGreet stays, recorded here.
+Only if cage fails the GPU-free check: [greet-scoot-kiosk-spike](greet-scoot-kiosk-spike.md),
+then [scoot-greeter-mode](../../backlog/core/scoot-greeter-mode.md).
 
 ## Theming
 
-Through the live-looks contract only (PR #578; [how this plan maps onto it](../../../dev/design/shell-apps.md#theme-the-live-looks-contract-stylix-and-looks)): the app reads the look layer under its own config, never Stylix, and the greeter's look is static, set by the system build.
+Theming is static, through the live-looks contract (PR #578 §6.4): the greeter's look is set by
+the system build, never by a user's swap.
+
+## Done when
+
+The children are resolved, or `greet-prototype` says no and ReGreet stays, recorded here.

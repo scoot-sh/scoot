@@ -13,14 +13,19 @@ Filed 2026-10-12 from the [scootgreet design](../../../dev/design/scootgreet.md#
 
 ## What to do
 
-deb, rpm and Arch with the wrapper and a greetd config example (never wired by `install.sh`);
-the site greeter section (choice, recovery, the screen-reader note); in `scoot-sh/scoot-iso`,
-the target's switch to scootgreet measured for ISO and target closure delta, and
-`scripts/qemu-test.sh` typing into the focused field instead of clicking coordinates.
+- **Packages**: deb, rpm and Arch, with the supervisor, `scootgreet-fallback` and a greetd
+  config example. `install.sh` never wires them.
+- **The site's greeter section**: the choice of greeter, the recovery path, and the
+  screen-reader note.
+- **In `scoot-sh/scoot-iso`**:
+  - switch the target to scootgreet, measuring the ISO and target closure delta;
+  - make `scripts/qemu-test.sh` type into the focused field instead of clicking coordinates;
+  - offer ReGreet as the installer's screen-reader choice.
 
 ## Acceptance
 
-Packages build; site builds; the scoot-iso QEMU test passes with scootgreet on the target.
+The packages build, the site builds, and the scoot-iso QEMU test passes with scootgreet on the
+target.
 
 ## Evidence the review needs
 

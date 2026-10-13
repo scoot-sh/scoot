@@ -56,7 +56,9 @@ natively. Give agents a stable JSON view of notifications and a way to act on th
 **What we gain over the incumbent** (lean mako plus `scoot-notify-sync`;
 `docs/backlog/resolved/desktop-notifications-done.md`):
 
-- *Memory and processes.* mako is 9.3 MB RSS empty, and the feed is an 11.4 MB
+- *Memory and processes.* mako is 9.3 MB RSS empty (lean build, PR #441). The #579 review
+  measured stock mako 1.11.0 idle and empty on the M2 at 9,424 kB RSS, 7,332 kB PSS, 1 thread,
+  8 fds and 0 wakeups in 60 s. The feed is an 11.4 MB
   tree (`busctl --user monitor` piped through a shell loop calling `makoctl` and `jq`,
   `nix/modules/notifications-home.nix:58-198`). scootnotify targets about 3 MB in one process,
   with the feed built in ([budgets](#budgets)).
@@ -79,9 +81,14 @@ that comes back; [shell-apps.md, Text](shell-apps.md#text-shaping-wrapping-emoji
 mako's mature criteria syntax and its documentation, and years of real-world
 testing against odd clients.
 
-**Go/no-go gate (`notify-prototype`).** Build if the prototype shows all of:
+**Go/no-go gate (`notify-prototype`), before any extraction.** The prototype is built out of
+the workspace and `#[path]`-includes scootbar's sources (the pattern
+`crates/scootbar/fuzz/Cargo.toml:28-65` already uses), so a no costs no extraction. The memory
+row is close to certain to pass, since scootbar idles at 3.6 to 4.3 MB
+(`docs/scootbar/backlog/lightest.md`). The rows that can actually fail are text quality and
+the hang row. Build if the prototype shows all of:
 
-1. idle RSS at most half of lean mako's in the same harness, and 0 wakeups in 60 s;
+1. idle RSS at most half of mako's in the same harness, and 0 wakeups in 60 s;
 2. a real-client corpus renders legibly, judged by the maintainer from screenshots side by side with mako. The corpus is `notify-send` (plain, markup, `-i` name, `-i` path, `-h int:value:`), libnotify `image-data`, Firefox, Thunderbird, an Electron app, and a GTK4 app through the portal, with at least one CJK and one Cyrillic body;
 3. no client hangs: every call is answered, including oversized ones.
 
@@ -176,17 +183,25 @@ bar's `exec` discipline: argv not shell, process group, pidfd reaping, at most 4
 **Lock.** scoot never draws a layer surface while locked: the frame is built from
 the lock surfaces alone (`crates/scoot/src/compositor/session_lock.rs:51-58`,
 `render/elements.rs:359-376`), and ordinary clients "get no frame callbacks while
-locked". So content is never shown over the lock by construction. The daemon needs to know
-the lock state only for expiry, and it does not need IPC for that. **A card's
-expiry clock starts when the compositor first presents it**: on the
-`wl_surface.frame` callback for the commit that first contains it. This is the
-spec's own wording ("since the display of the notification"). A notification that arrives
-while locked is held with its clock stopped and expires normally after unlock.
-mako's measured behavior was the same ("queued popup held, shown on unlock",
-`desktop-notifications-done.md`), but there it was accidental and here it is the rule.
-It is also compositor-neutral: no scoot IPC (`lock_changed` exists, `msg/events.md`, but is
-not needed). Frame callbacks cost one wakeup per presented frame, and only while a
-card is newly shown, never at idle.
+locked". So content is never shown over the lock, by construction. **A card's expiry clock
+starts when the compositor first presents it**: on the `wl_surface.frame` callback for the
+commit that first contains it, the spec's own wording ("since the display of the
+notification"). A notification that arrives while locked is therefore held with its clock
+stopped, and it expires normally after unlock. mako's measured behavior was the same ("queued
+popup held, shown on unlock", `desktop-notifications-done.md`), but there it was accidental;
+here it is the rule.
+
+- **This rests on scoot's behavior, not on the protocol.** `wl_surface.frame` is a pacing hint,
+  and a compositor may serve it for a surface it is not showing. On scoot it holds by
+  construction. On another compositor, a card can start its clock while hidden.
+- **What it does not cover:** a card already on screen when the user locks keeps expiring
+  through the lock. "Nothing expires unseen" holds for cards that *arrive* while locked. The
+  docs state the difference, and `pause-when-idle` (below) covers the walked-away case,
+  because a manual lock usually follows input idling.
+
+No scoot IPC is needed for any of this (`lock_changed` exists, `msg/events.md`, and stays
+unused). Frame callbacks cost one wakeup per presented frame, and only while a card is newly
+shown, never at idle.
 
 **Idle.** With `pause-when-idle = 60` (seconds; 0 disables), the daemon binds
 `ext_idle_notifier_v1` v2 `get_input_idle_notification`. That one ignores inhibitors
@@ -197,27 +212,28 @@ IPC-injected input counts as activity in scoot (`crates/scoot/src/compositor/idl
 so an agent driving the VM keeps notifications flowing normally.
 
 **Fullscreen.** `overlay` stays above fullscreen windows in scoot
-(`crates/scoot/src/compositor/layer_shell.rs:100-133`, `ABOVE_FULLSCREEN`), so
-cards show over a fullscreen video or game by default, as mako on `layer=overlay`
-does today. `fullscreen = "hold"` queues non-critical notifications while a fullscreen
-window covers the target output and releases them when it leaves.
-Detection binds `zwlr_foreign_toplevel_manager_v1` (v2+ for the fullscreen state)
-**only at the moment a card would be placed**, reads the burst of handles, and
-`stop`s. It never holds the manager at idle: a held manager would wake the daemon
-on every terminal's title change. scoot counts these binds live and releases one on `stop`
-(`crates/scoot/src/compositor/bind_budget.rs:141,194-201`, at most 8 held per client), so a
-bind-and-stop per placement never exhausts the budget. Caveat: fullscreen coverage is per
-output (`crates/scoot-core/src/world/fullscreen.rs:41-49`), while `activated` is the single
-global focus, so a fullscreen window on an unfocused output is detected by `fullscreen` plus
-`output_enter`, not by `activated`.
+(`crates/scoot/src/compositor/layer_shell.rs:100-133`, `ABOVE_FULLSCREEN`), so cards show over
+a fullscreen video or game, as mako on `layer=overlay` does today. That is v1's only behavior.
 
-**Outputs.** `output = "focused"` (default), `"compositor"`, or an output name.
-`focused` uses the same on-demand foreign-toplevel snapshot: the
-output of the `activated` toplevel, else the compositor's choice (a null
-`wl_output`, which scoot resolves to its primary output,
-`crates/scoot/src/compositor/layer_shell.rs:228-239`). On hotplug the stack moves to the new
-target if its output left, and nothing is lost. With zero outputs, cards wait and their clocks
-stay stopped (they were never presented).
+A "hold while fullscreen" mode is an **experiment, not v1**: [`notify-fullscreen-hold-spike`](../../docs/scootbar/backlog/notify-fullscreen-hold-spike.md).
+The cheap idea it tests needs no foreign-toplevel machinery. Put non-critical cards on a
+`top` surface. scoot withholds frame callbacks from a `top` surface that has committed a
+buffer, while an opaque fullscreen window covers the output
+(`crates/scoot/src/compositor/layer_shell/occlusion.rs:15-26,96-113`). The
+presentation-started expiry clock then holds those cards for free. Critical cards stay on
+a second, `overlay` surface. Its caveats, measured there:
+
+- under a translucent fullscreen window the callback is served, so a hidden card's clock starts;
+- it is scoot-specific;
+- it costs a second surface.
+
+**Outputs.** v1 places the stack on the compositor's choice: a null `wl_output`, which scoot
+resolves to its primary output today (`crates/scoot/src/compositor/layer_shell.rs:228-239`).
+The core ticket [`layer-shell-default-output`](../../docs/backlog/core/layer-shell-default-output.md)
+moves that to the output the user is on, which fixes mako and fuzzel too. scootnotify therefore
+carries no "focused output" logic of its own. `output = "NAME"` pins an output. On hotplug the
+stack moves if its output left, and nothing is lost. With zero outputs, cards wait and their
+clocks stay stopped (they were never presented).
 
 ## The control interface, and what an agent gets
 
@@ -309,7 +325,7 @@ src/feed.rs                    the bar push client
 **Dependencies.** `scootui` (`widgets`, `icons` + `png`, `wayland`, `control`),
 `scoot-dbus`, `scootbg-mem`, `wayland-client` 0.31, `wayland-protocols`
 0.32 (`staging` for `xdg-activation` and `ext-idle-notify`),
-`wayland-protocols-wlr` 0.3 (layer shell, foreign toplevel), `rustix`, `serde`,
+`wayland-protocols-wlr` 0.3 (layer shell), `rustix`, `serde`,
 `serde_json` and `toml`. These are the bar's own set. Shaping (`rustybuzz`) is optional,
 pending the spike. **No new external crate is needed for v1.**
 
@@ -412,7 +428,7 @@ misleads**:
 | Compositor gone (Wayland hang-up) | Exit 1. The unit is `PartOf` the session target and goes with the session. A compositor restart restarts it |
 | No outputs | Cards wait with their clocks stopped; nothing is lost |
 | A crash | `panic = "abort"` (the workspace profile). `Restart=on-failure`, `RestartSec=1`. During the gap, `Notify` calls D-Bus-activate the unit, and the bus holds them until the name is owned. **What was on screen and in history is lost**, said plainly in the docs: the cost of not writing notifications to disk. The id counter is reserved in blocks of 1024 in `$XDG_RUNTIME_DIR/scootnotify-<display>.ids`, so a restart continues past every id it might have issued and a client's stale `replaces_id` cannot hit a stranger's notification |
-| Bad config at start | Exit 2 with the error (`--check` shows the same). Under the unit it restarts and fails again. The Nix module runs `--check` at build time, as scootbar's tests do, so that path needs a hand-edited file |
+| Bad config at start | Start on built-in defaults, log the error, and show one card saying the config was refused and why (the greeter's rule). An exit would restart-loop with no notification daemon at all. `--check` and `msg reload` still refuse loudly. The Nix module runs `--check` at build time, so this path needs a hand-edited file |
 | Bad config on reload | Keep the running config, and answer the error to `msg reload` |
 | A font that will not load | At start, fall back down the chain to the well-known list (the bar's `font::text`, `crates/scootbar/src/font.rs:166`). On reload, keep the running font |
 | Bar socket absent | Retry on the next change ([The bar](#the-bar)) |
@@ -438,30 +454,37 @@ misleads**:
 
 ## Stylix and look integration
 
-scootnotify takes its theme only through the live-looks contract ([shell-apps.md](shell-apps.md#theme-the-live-looks-contract-stylix-and-looks); PR #578).
-It reads `$XDG_STATE_HOME/scoot/look/notify.toml` merged **under** its own
-`notify.toml` per key: the user's file, then the look, then the default. It re-themes on
-`msg reload`, and it never reads Stylix. Stylix arrives as the synthesized `stylix` look.
-The look-layer loader takes only allowlisted keys: colors, radius, border width,
-font family and size, and opacity. Every string goes through the contract's grammar.
-`[[rule]]`, `exec`, placement and timeouts are user config only.
+scootnotify takes its theme only through the live-looks contract
+([shell-apps.md](shell-apps.md#theme-the-live-looks-contract-stylix-and-looks); PR #578 §9). It reads
+the `notify.toml` fragment at `<state>/look/notify.toml` (#578 §4.1), merged per key as
+flags > its own `notify.toml` > the look > its defaults (#578 §4.3). It answers
+`msg reload` (and `scope = "look"`, #578 §4.4) with applied or refused. It never reads
+Stylix: Stylix arrives as the synthesized `stylix` look.
 
-Per element, with the contract's roles. The last column shows that the shipped looks
-draw what mako draws for them today:
+The look-layer loader takes only the keys #578's allowlist names for scootnotify (held in
+`scoot-look`). Every string is checked against the contract's value grammar (#578 §3.4,
+§3.5). `[[rule]]`, `exec`, placement and timeouts are user config only and are never allowlisted.
+
+Per element, with #578 §3.2's roles. The last column shows that the shipped looks draw what
+mako draws for them today:
 
 | Element | Role | Through the `stylix` look | Shipped looks, today in mako (`notifications-home.nix:216-232`) |
 |---|---|---|---|
-| Card fill | `surface`, alpha from `shape.popup-opacity` ([request 2](shell-apps.md#requests-to-the-contract)) | `base01` × `opacity.popups` | `background-color` = `barColors.background` (`surface` defaults to `background`) |
+| Card fill | `surface` (default `background`), alpha `opacity.popups` | `base00` × Stylix `opacity.popups` | `background-color` = `barColors.background` |
 | Summary, body | `foreground` | `base05` | `text-color` = `barColors.foreground` |
 | App name, age, "+N more" | `dim` | `base03` | (none in mako) |
-| Border, normal | `focus` ([request 1](shell-apps.md#requests-to-the-contract)) | `base0D` | `border-color` = `appearance.focus_ring_active_color` |
-| Border, low | `dim` | `base03` | (one border in mako) |
+| Border, normal | `focus` (default `accent`) | `base0D` | `border-color` = `appearance.focus_ring_active_color` |
+| Border, low | `border` (default `dim`) | `base03` | (one border in mako) |
 | Border, critical | `urgent` | `base08` | `[urgency=critical] border-color` = `barColors.urgent` |
-| Progress bar | `accent` | `base0D` | `progress-color = over barColors.accent` |
+| Progress bar | `selection` (default `accent`) | `base02` (Stylix's mako `progress-color`) | `progress-color = over barColors.accent` |
 | Action button outline / hovered fill | `focus` / `hover` | `base0D` / `base0D` | — |
 | Link text (underlined) | `accent` | `base0D` | — |
 | Corners | `shape.radius` | the contract's default | — |
-| Font | `fonts.ui`, `fonts.popup-size` (request 2) | `sansSerif`, `sizes.popups` | mako's default `monospace 10` (no `font=` is generated) |
+| Font | `fonts.ui` at `fonts.popup-size` | `sansSerif` at `sizes.popups` | mako's default `monospace 10` (no `font=` is generated) |
+
+Through the `stylix` look this is what Stylix's own mako target draws: a `base00` card, a
+`base0D` border, `base03` for low urgency, `base08` for critical, and a `base02` progress bar
+(#578 §9).
 
 **Nix.** `programs.scootnotify` has `enable`, `package`, `features`, `settings` (the
 user's TOML only: contract §5.2) and `systemd.enable`. There is no `stylix.enable`. On Home
@@ -477,10 +500,7 @@ Manager it writes `xdg.configFile."scoot/notify.toml"` and a user unit:
   (`scoot-session.target` under the profile).
 
 The package's D-Bus service file goes on the user's data path. NixOS gets
-`/etc/scoot/notify.toml`, `services.dbus.packages` and the same user unit. If the
-contract's D5 is decided the other way, the fallback is scootbar's per-leaf ladder
-(`nix/modules/scootbar.nix:7-28`) in this module
-([Decisions needed 10](shell-apps.md#decisions-needed)).
+`/etc/scoot/notify.toml`, `services.dbus.packages` and the same user unit.
 
 **The profile switch.** `programs.scoot.desktop.notifications.daemon` widens to
 `[ "mako" "scootnotify" ]`. With `"scootnotify"`:
@@ -506,7 +526,7 @@ contract's D5 is decided the other way, the fallback is scootbar's per-leaf ladd
   that swaps the look with cards on screen and keeps them; a reload refused on a bad
   fragment, keeping the last good.
 - *Goldens* per shipped look and for a `stylix` look built from a fixed base16 scheme.
-  Stylix itself is the contract's test surface (its §5.6), not this app's.
+  Stylix itself is the contract's test surface (#578 §5.6), not this app's.
 
 ## Testing and verification
 
@@ -556,11 +576,13 @@ entries.
 | Slug | Serves | Blocked by |
 |---|---|---|
 | [`scootnotify`](../../docs/scootbar/backlog/scootnotify.md) (epic) | daily-drive, computer use | its children |
-| [`notify-prototype`](../../docs/scootbar/backlog/notify-prototype.md): the go/no-go gate | daily-drive | `scootui-extract-draw` |
-| [`notify-server`](../../docs/scootbar/backlog/notify-server.md): the D-Bus server and model, headless | both | `notify-prototype`, `scoot-dbus-extract` |
-| [`notify-popups`](../../docs/scootbar/backlog/notify-popups.md): cards, stack, lock and idle rules, outputs | daily-drive | `notify-server`, `scootui-extract-wayland` |
-| [`notify-control`](../../docs/scootbar/backlog/notify-control.md): `msg`, JSON, subscribe, wait, DND, history, rules, fullscreen hold | computer use, daily-drive | `notify-popups` |
-| [`notify-bar-feed`](../../docs/scootbar/backlog/notify-bar-feed.md): native push to the bar | daily-drive | `notify-control` |
-| [`notify-nix`](../../docs/scootbar/backlog/notify-nix.md): modules, the look layer, profile switch (opt-in) | daily-drive | `notify-bar-feed` |
+| [`notify-prototype`](../../docs/scootbar/backlog/notify-prototype.md): the go/no-go gate, out of the workspace | daily-drive | the go-ahead |
+| [`notify-server`](../../docs/scootbar/backlog/notify-server.md): the D-Bus server and model, headless | both | the GO verdict in `notify-prototype`, `scoot-dbus-extract` |
+| [`notify-popups`](../../docs/scootbar/backlog/notify-popups.md): cards, stack, lock and idle rules, outputs, the look layer | daily-drive | `notify-server`, `scootui-surfaces-on-demand`, `look-format` |
+| [`notify-control`](../../docs/scootbar/backlog/notify-control.md): the control socket, `msg`, JSON, `subscribe`, `wait`, scoped `reload` | computer use | `notify-popups`, `scootui-extract-control` |
+| [`notify-dnd-history-rules`](../../docs/scootbar/backlog/notify-dnd-history-rules.md): DND, the history ring and `restore`, `[[rule]]` with `exec` | daily-drive | `notify-control` |
+| [`notify-fullscreen-hold-spike`](../../docs/scootbar/backlog/notify-fullscreen-hold-spike.md) (research): the `top`-surface hold | daily-drive | `notify-popups` |
+| [`notify-bar-feed`](../../docs/scootbar/backlog/notify-bar-feed.md): native push to the bar | daily-drive | `notify-dnd-history-rules` |
+| [`notify-nix`](../../docs/scootbar/backlog/notify-nix.md): modules, the look layer, profile switch (opt-in) | daily-drive | `notify-bar-feed`, `look-format` |
 | [`notify-packaging`](../../docs/scootbar/backlog/notify-packaging.md): deb, rpm, Arch, install.sh | daily-drive | `notify-nix` |
 | [`notify-default-flip`](../../docs/scootbar/backlog/notify-default-flip.md): make it the profile default | daily-drive | `notify-packaging` |

@@ -36,7 +36,8 @@ as of `main` at `13173a7`. Where something could not be checked, it says so.
 13. [Start order across the three apps](#start-order-across-the-three-apps)
 14. [The tickets](#the-tickets)
 15. [Decisions needed](#decisions-needed)
-16. [Rejected alternatives](#rejected-alternatives)
+16. [Deferred](#deferred)
+17. [Rejected alternatives](#rejected-alternatives)
 
 ## Names
 
@@ -77,9 +78,13 @@ Measured baselines (all aarch64, Asahi M2 or dev VM):
 
 | Slot | Today | Closure | Marginal over the profile | RSS | Other |
 |---|---|---|---|---|---|
-| Notifications | lean mako + `scoot-notify-sync` (busctl + jq feed) | 183.4 MiB | 53.3 MiB | 9.3 MB empty, plus an 11.4 MB feed tree | 0 wakeups/60 s idle (`desktop-notifications-done.md`, Decisions) |
-| Launcher | fuzzel via `scoot-launcher` | 152.4 MiB | 41.7 MiB | ~22 MB open, 0 closed | first frame 57/50/52 ms (`desktop-launcher-done.md`, Resolution) |
-| Greeter | ReGreet 0.5.0 (GTK4, GStreamer, AccountsService) in `dbus-run-session cage` | **not measured** | **not measured** | **not measured** | nixpkgs `regreet` build inputs: `accountsservice dbus glib gtk4 gst_all_1.{gstreamer,gst-plugins-good,gst-plugins-base} pango librsvg libseccomp` |
+| Notifications | lean mako + `scoot-notify-sync` (busctl + jq feed) | 183.4 MiB (stock mako: 357.4 MiB) | 53.3 MiB | 9.3 MB empty, plus an 11.4 MB feed tree. Stock mako 1.11.0, idle: 9,424 kB RSS, 7,332 kB PSS, 1 thread, 8 fds | 0 wakeups/60 s idle (`desktop-notifications-done.md`, Decisions; stock re-measured by the #579 review) |
+| Launcher | fuzzel via `scoot-launcher` | 152.4 MiB | 41.7 MiB | ~22 MB open with icons, 0 closed. fuzzel 1.14.1 open, empty `$HOME`: 18,944 kB RSS, 15,951 kB PSS, 17 threads | first frame 57/50/52 ms (`desktop-launcher-done.md`, Resolution) |
+| Greeter | ReGreet 0.5.0 (GTK4, GStreamer, AccountsService) in `dbus-run-session cage` | **ReGreet 956.7 MiB; ReGreet ∪ cage 1,018.5 MiB** (307 paths; package union only: no greetd, dbus or accounts-daemon) | not measured (`greet-baseline`) | not measured (`greet-baseline`) | nixpkgs `regreet` build inputs: `accountsservice dbus glib gtk4 gst_all_1.{gstreamer,gst-plugins-good,gst-plugins-base} pango librsvg libseccomp` |
+
+The figures added in the #579 review were measured on the M2 at the pinned nixpkgs
+(`8ce4ef6c`): under `scoot --headless` with a fresh `XDG_RUNTIME_DIR` and `HOME`, sampled after
+14 s and again 60 s later; closures from `nix path-info -S` against cache.nixos.org.
 
 For comparison, scootbar's own idle RSS is 3.6 to 4.3 MB depending on the modules
 placed (`docs/scootbar/backlog/lightest.md`, M6 tables). The D-Bus spike's
@@ -107,9 +112,12 @@ What all three gain, beyond the per-app cases in their own docs:
 What all three lose, said plainly: mature, widely tested code; text rendering
 through pango and HarfBuzz, which our stack does not match (see
 [Text](#text-shaping-wrapping-emoji)); and the existing user docs and config
-knowledge for mako, fuzzel and ReGreet. Each app's doc has a **go/no-go gate**
-measured by a first spike or prototype. Keep wrapping if the gate fails. Because of the
-paved-path contract, keeping the wrapper costs nothing.
+knowledge for mako, fuzzel and ReGreet. Each app's doc has a **go/no-go gate**: an
+out-of-workspace prototype that runs **before any extraction**, so a no costs no sunk
+refactor. Each gate's memory and closure rows are close to certain to pass. What can really
+fail is text quality, typing correctness and, for the greeter, greetd's session lifecycle, so
+the gates test those. Keep wrapping if a gate fails. Because of the paved-path contract,
+keeping the wrapper costs nothing.
 
 ## What each app needs from the shared stack
 
@@ -149,21 +157,46 @@ extract-scootui: "Feature-gate the parts a consumer does not use".
 
 | Feature | Moves from scootbar | New |
 |---|---|---|
-| (always) | `paint.rs`, `color.rs`, `theme.rs` (tokens grow: below), `text.rs`, `font.rs`, `modules/ellipsis.rs`, `testfont.rs` (test-support), `snapshots.rs` (test-support), `print.rs` | `#aarrggbb` parsing; a token map that is not hard-wired to the bar's six |
+| (always) | `paint.rs`, `color.rs`, `theme.rs` (tokens grow: below), `text.rs`, `font.rs`, `modules/ellipsis.rs`, `testfont.rs` (test-support), `snapshots.rs` (test-support) | `#aarrggbb` parsing; a token map that is not hard-wired to the bar's six |
 | `widgets` | `popup/{mod,layout,interact,paint,hover,wrap}.rs` (the pure half; `extract-scootui.md`, "Popups") | `Activate` carries an owned id instead of `&'static str`; a virtualized list (row count unbounded, drawing bounded by the visible rows); a text-entry widget; wrapped paragraphs past 6 lines with a line cap the caller sets |
 | `icons` | `icon/{mod,path,raster,cache,sample}.rs`; `icon/image.rs` behind `png` | icon-theme lookup with `index.theme` inheritance (today hicolor-only, `modules/tray/theme.rs:13-19`); optional `svg` (below) |
-| `wayland` | `outputs.rs`, `density.rs`, `region.rs`, `daemon/surfaces.rs`, `daemon/canvas.rs`, the Wayland half of the `poll` loop (`daemon/mod.rs`) | a layer-surface lifecycle that is *on demand* (created when there is something to show, destroyed when empty, with no surface held at idle) beside the bar's one-per-output |
+| `wayland` | `outputs.rs`, `density.rs`, `region.rs`, `daemon/surfaces.rs`, `daemon/canvas.rs`, the Wayland half of the `poll` loop (`daemon/mod.rs`): moved by `scootui-extract-wayland`, with nothing new in that PR | in a **separate** PR (`scootui-surfaces-on-demand`): a layer-surface lifecycle that is *on demand* (created when there is something to show, destroyed when empty, no surface held at idle) beside the bar's one-per-output; a full-screen `xdg_toplevel` surface kind (scootgreet); the memfd name parameter in `scootbg-mem` |
 | `keyboard` | none | keymap, modifiers, repeat, keysym to text ([below](#keyboard-and-text-entry)) |
-| `control` | `control/{framing,paths,claim,conn}.rs` and the bounds (`MAX_CONNECTIONS`, `MAX_SUBSCRIBERS`, the write-stall deadline; `control/mod.rs:57-65`) | a socket name that is a parameter instead of fixed to `scootbar-…` |
+| `control` | `control/{framing,paths,claim,conn}.rs` and the bounds (`MAX_CONNECTIONS`, `MAX_SUBSCRIBERS`, the write-stall deadline; `control/mod.rs:57-65`): moved by its own ticket, `scootui-extract-control` | a socket name that is a parameter instead of fixed to `scootbar-…` |
 
 What stays in scootbar: modules, `bar.rs`, `layout.rs` (the three sections),
 `render.rs` (the bar's per-module repaint, which is bar-shaped), config,
 CLI, the popup's Wayland half (`daemon/popup/`, which is the bar's `xdg_popup` on its
 own layer surface), the pointer bindings and actions.
 
-`scootbg-mem` stays the one crate with `unsafe` code. The extraction adds the
-memfd name parameter that extract-scootui asks for (today every buffer is named
-`scootbg-wallpaper`, `crates/scootbg-mem/src/shm.rs:173`).
+`scootbg-mem` stays the one crate with `unsafe` code. `scootui-surfaces-on-demand` adds
+the memfd name parameter that extract-scootui asks for (today every buffer is named
+`scootbg-wallpaper`, `crates/scootbg-mem/src/shm.rs:173`), and scootgreet adds a locked,
+zeroized page type there ([scootgreet.md](scootgreet.md#security-model)).
+
+### `scoot-rt` (library, `crates/scoot-rt`): the leaf both depend on
+
+The D-Bus client is not free of the bar's other modules. `dbus/conn.rs` and `dbus/link.rs`
+call `crate::print::warn` (eight sites: `conn.rs:640,658,766,778,789,797,828,840`;
+`link.rs:353,388`) and `crate::control::paths::runtime_dir` (`conn.rs:111,207`,
+`link.rs:302`). If `print.rs` and `control/` moved into `scootui`, `scoot-dbus` would depend on
+the drawing crate. **Decided: a tiny leaf crate, `scoot-rt`**, with std and `rustix` only,
+holding:
+
+- `print`/`warn` (scootbar's 30-line `print.rs`; scootbg carries a copy of the same three
+  functions and can adopt it later);
+- `runtime_dir` (`control/paths.rs:89-96`).
+
+Both `scootui` and `scoot-dbus` depend on it, and neither depends on the other. The warnings'
+hard-coded `scootbar: dbus:` prefix becomes the running binary's name, read once at startup.
+The two alternatives were rejected:
+
+- copying the ~45 lines into `scoot-dbus` is a third copy of `print.rs` to keep in step;
+- passing a logger and the runtime dir into every `Conn` changes 11 call sites and the
+  public API in a PR meant to be mechanical.
+
+`scoot-rt` is created by `scootui-extract-draw`, and it gets its CI classify arm (fanning out
+to every consumer) and CLAUDE.md scope entry in that PR.
 
 **scootbg is not moved onto `scootui`** in this plan. It has a release gate
 (`docs/scootbg/backlog/lightest.md`), and extract-scootui says to rerun its
@@ -198,8 +231,8 @@ drawing: scootnotify serves `org.freedesktop.Notifications`, scootlaunch calls
 name follows `scoot-ipc`: a wire-protocol library, hyphenated. The
 MPRIS and BlueZ readers (`mpris.rs`, `bluez.rs`) stay in scootbar.
 
-What it needs that it lacks, each added by the first consumer that needs it
-(not in the move PR):
+It depends on `scoot-rt` (above) and on nothing that draws. What it needs that it lacks,
+each added by the first consumer that needs it (not in the move PR):
 
 - An error reply with a message body. `reply_error` sends a name only
   (`conn.rs:522`), and `org.freedesktop.Notifications.CloseNotification`
@@ -209,9 +242,10 @@ What it needs that it lacks, each added by the first consumer that needs it
 - **A reply for an over-cap method call.** Today a message past `MAX_MESSAGE = 1 MiB`
   (`proto.rs:51`) is skipped. If it was a method call, the caller waits for its
   own timeout: libnotify's default is 25 s, during which `notify-send` hangs. The
-  header is read before the body is discarded, so the client can answer
-  `org.freedesktop.DBus.Error.LimitsExceeded` to the serial. (scootnotify; verify against
-  `conn.rs`'s discard path before building on this.)
+  header fields (at most 64 KiB) are read before the body is discarded, but today they are
+  matched only against pending replies. A small addition answers
+  `org.freedesktop.DBus.Error.LimitsExceeded` to a method call's serial. (scootnotify;
+  confirmed in the #579 review's read of the discard path.)
 - A per-connection message cap, so scootnotify can raise its own to 4 MiB
   ([why](scootnotify.md#security-untrusted-content)) without raising scootbar's.
 - No fd passing, no big-endian, no non-unix transports. None of the three needs them.
@@ -251,7 +285,12 @@ for the spike to confirm or overturn:** `kbvm` if it passes the layout set
 including dead keys and costs under 300 KB; otherwise `xkbcommon`, wrapped in
 a small `scootui-xkb` crate that holds the `unsafe` code. Compose (the
 `XCompose` file) is required for scootgreet only if a password can contain a
-composed character. The spike reports whether either option handles it.
+composed character. The spike reports whether either option handles it, and whether Compose
+depends on the greeter's locale. It also records **how each option turns a keysym into
+UTF-8**. The widget needs a call that writes into a caller-supplied buffer (libxkbcommon's
+C `xkb_state_key_get_utf8(state, key, buf, size)`, or a `char` from `kbvm`). The `xkbcommon`
+crate's `key_get_utf8` returns a `String`, which would leave copies of typed password
+characters in freed heap.
 
 **IME.** scoot implements `text-input-v3` and `input-method-v2`
 (`site/src/content/docs/scoot/protocols.md`, "text-input"), and focus follows the
@@ -272,9 +311,10 @@ scootgreet:
   launcher only. It is never offered on a password field, which also refuses copy.
 - **Password mode**: draws a fixed glyph per character (or a fixed-width
   dot row that does not leak length, as an option), and keeps the buffer in a
-  `zeroize`-on-drop fixed allocation (`zeroize` 1.9, Apache-2.0 OR MIT). The
-  allocation is never resized, so no copy of the secret is left in freed heap.
-  scootgreet's doc covers the rest of the secret's path.
+  fixed allocation that is never resized, so no copy of the secret is left in freed heap.
+  The caller supplies that buffer: scootgreet's lives in a locked, zeroized page from
+  `scootbg-mem` ([scootgreet.md](scootgreet.md#security-model)), and scootlaunch's `--password`
+  prompt uses a `zeroize`-on-drop buffer (`zeroize` 1.9, Apache-2.0 OR MIT).
 - Key repeat: a `timerfd` armed on press of a repeatable key and disarmed on release
   or focus loss. Rate and delay come from `repeat_info`; a rate of 0 means no repeat.
   At idle it costs zero wakeups (no timer exists).
@@ -320,155 +360,153 @@ unchanged.
 ## Theme: the live-looks contract, Stylix and looks
 
 **The theming contract for all three apps is the live-looks design**, PR #578
-(`docs/live-look-swap-design`, `dev/research/live-looks-design.md` on that branch;
-unmerged as of 2026-10-12, with its token list being finalized in a review round). This
-plan adopts that contract and does not define its own theming. That contract's section 9 states what each
-app must do, and this section maps those requirements onto the apps. Section numbers
-below (§N) are that document's.
+(`docs/live-look-swap-design`, `dev/research/live-looks-design.md` on that branch). This
+plan was checked against its head `cd619d67`, which is still unmerged as of 2026-10-12. The
+apps adopt it; they do not define their own theming. Its §9 states what each app must do,
+and this section restates that for the apps. Section numbers (§N) and decisions (DN) are
+that document's.
 
 ### What the apps implement
 
-1. **Read the look layer.** Each app reads its fragment at
-   `$XDG_STATE_HOME/scoot/look/<file>` (§4.1). The fragment is a symlinked, atomically
-   swapped directory rendered by the `scoot-look` crate (§3.3). It is merged **under**
-   the app's own config file, per key.
-   - **Runtime precedence: the user's file per key > the active look's fragment > the
-     app's built-in default** (§5.2).
-   - An app never reads Stylix, a base16 file or the Nix look registry directly.
-   - Fragment names follow the app's own config file, as `bar.toml` does for the bar:
-     `notify.toml`, `launch.toml`, `greet.toml`. This is a naming request to the contract
-     (below).
-2. **Take the tokens from `scoot-look`'s schema**, not a local palette (§9.2). The
-   apps' element-to-role tables below use the contract's palette roles (§3.2):
-   - `background`, `surface`, `foreground`, `dim`, `accent`, `accent-fg`, `hover`, `urgent`;
-   - `border` (unfocused frames), `focus` (the active ring), `selection`;
-   - `[shape] radius`, `[fonts]`.
+1. **Read the look layer.** Each app reads its fragment at `<state>/look/<fragment>` (§4.1).
+   `<state>` is `--state`, then `$SCOOT_LOOK_STATE` (which scoot exports to its children, D10,
+   §4.2), then `$XDG_STATE_HOME/scoot`, then `~/.local/state/scoot`.
+   - The fragments are `notify.toml` and `launch.toml`, plus `greet.toml` for the greeter
+     (§3.3, §9 item 6).
+   - **Precedence at runtime is flags > the user's own file > the active look's fragment >
+     the app's default**, merged on raw keys with the contract's units (§4.3).
+   - An app never reads Stylix, a base16 file or the Nix look registry directly (§9 item 4).
+2. **Take the tokens from §3.2's single list**, never a local palette.
+   - Required: `background`, `foreground`, `dim`, `accent`, `urgent`.
+   - Optional, with their defaults:
 
-   When the token list is finalized, the tables are re-checked against it.
-   Anything more an app needs is **requested through the contract**, never invented
-   app-locally.
-3. **Reload.** The long-running app (scootnotify) implements `reload` on its control
-   socket: it re-reads its config and the look layer, validates both whole, keeps the last
-   good, and answers applied or refused (§4.2). `scoot look apply` drives that request in
-   its swap order, scoot, then the bars, then scootnotify (§4.3). The per-launch app
-   (scootlaunch) reads the link at every open and needs nothing else. The greeter is
-   static (§6.4; [below](#the-greeter-is-static)).
-4. **Treat a look as untrusted data.** A look carries presentation only. The allowlist is
-   a security boundary (§3.4): no commands, binds, `exec`, `on-*` or rules. Each app's
-   look-layer loader refuses non-allowlisted keys again, as defense in depth, and
-   applies the contract's string grammar (no control characters, no `=`, `[`, `]`, `"`
-   or `\`, a length cap, per the #578 review) before any look string reaches a draw path.
-   scootnotify's `[[rule]]` tables, including `exec`, and scootlaunch's `terminal` are
-   user config only and never allowlisted.
+     | Token | Default |
+     |---|---|
+     | `surface` | `background` |
+     | `hover` | `accent` |
+     | `focus` | `accent` |
+     | `border` | `dim` |
+     | `accent-fg` | `background` |
+     | `selection` | `accent` |
+     | `selection-text` | `accent-fg` |
+     | `match` | `hover` |
+
+   - Fonts: `[fonts]` `ui`, `sans`, `mono`, `size`, `popup-size` (default `size`), `app-size`
+     (default 12) and `terminal-size`. Pixels are `clamp(1, 256, (pt*4+1)/3)`.
+   - Opacity: `[opacity]` `bar`, `popups`, `terminal` (default 1.0 each).
+   - Shape: `[shape] radius` and the ring widths.
+   - Per-app overrides: `[apps.<app>]`, keyed by the app's own dotted config key and
+     allowlisted.
+   - Anything more an app needs is requested in #578, never invented app-locally.
+3. **Reload.**
+   - The long-running app (scootnotify) implements `reload` on its control socket. It
+     validates whole, keeps the last good, and answers applied or refused. It also takes
+     `scope = "look"`: the new look is merged under a snapshot of the user file's last
+     good raw table, so a swap never applies a half-edited user file (§4.4). `scoot look apply`
+     drives it in its swap order (§4.5).
+   - The per-launch app (scootlaunch) reads the link at every open.
+   - The greeter is static ([below](#the-greeter-is-static)).
+4. **Treat a look as untrusted data.** A look carries presentation only. Keys are
+   allowlisted in one place, `scoot-look` (§3.4). Every value passes the contract's value
+   grammar per field class: charset and length caps, no control characters or NUL (§3.5).
+   Each app's loader enforces both again. scootnotify's `[[rule]]` and `exec`, and
+   scootlaunch's `terminal`, are user config only and never allowlisted.
 5. **Never wedge.** A dangling or missing link means "no look layer" plus a warning at
-   startup, and a refused reload at runtime (§4.4). That is the same rule these designs
-   already set for a bad config.
+   startup, and a refused reload at runtime (§4.8).
 
 ### Stylix
 
-Stylix reaches the apps **only as the synthesized `stylix` look** (§5.2, §5.3). One
-mapping function in `scoot-look` (`import-base16`, fed by `nix/lib/look-from-stylix.nix`)
-turns the palette, fonts, sizes, opacity, cursor and image into a look. There are
-**no per-app `stylix.enable` options and no per-app slot reads**, so the earlier
-draft of this plan's user > Stylix > look ladder is withdrawn. Through that look, the
-contract's mapping gives `background = base00`, `surface = base01`,
-`foreground = base05`, `dim = border = base03`, `accent = focus = hover = base0D`,
-`urgent = base08` and `selection = base02` (§5.3). Stylix's own mako and fuzzel targets
-(checked at `fb28acd59e2ac1984ec84fa496599d6b4bf3e690`) use `base00` card backgrounds,
-`base0D` normal borders, `base03` low-urgency borders, `base08` critical borders,
-`base0A` for fuzzel's match and `base02` for fuzzel's selection. Where the contract's
-mapping differs (cards on `surface` = `base01`, the selected row on `accent`), that
-is the contract's call, so that every app on one look agrees.
+Stylix reaches the apps **only as the synthesized `stylix` look**, through one importer
+(`import-base16`, §5.3). There are no per-app `stylix.enable` options and no per-app slot reads.
+The mapping (§5.3; the fix report's table):
 
-### Requests to the contract
+| Token | Slot |
+|---|---|
+| `background`, `surface` | `base00` |
+| `foreground` | `base05` |
+| `dim`, `border` | `base03` |
+| `accent`, `hover`, `focus` | `base0D` |
+| `urgent` | `base08` |
+| `accent-fg` | `base00` |
+| `selection` | `base02` |
+| `selection-text` | `base05` |
+| `match` | `base0A` |
 
-These are raised on PR #578, not implemented app-locally:
+`sizes.popups`, `sizes.applications` and `opacity.popups` map to `popup-size`, `app-size` and
+`opacity.popups`. Through it, scootnotify and scootlaunch draw what Stylix's own mako and
+fuzzel targets draw. Those targets were checked at `fb28acd59e2ac1984ec84fa496599d6b4bf3e690`:
+mako uses `base00` cards, `base0D` and `base03` borders, a `base08` critical border and a
+`base02` progress bar; fuzzel uses `base02` selection with `base05` text, `base0A` match and a
+`base0D` border. With a non-Stylix look, they draw what that look's mako and fuzzel draw today
+(§9).
 
-1. **`focus` in the scootnotify and scootlaunch fragments.** §9.2 lists the bar's tokens
-   plus `surface`. The card and panel border today is the look's
-   `appearance.focus_ring_active_color` (mako's `border-color`,
-   `nix/modules/notifications-home.nix:216-232`; fuzzel's `--border-color`,
-   `nix/modules/fuzzel-theme.nix:17`). That is the contract's `focus`, which differs from
-   `accent` on two of five shipped looks (#578 review). Without `focus`, both apps' borders
-   change color on those looks the day they replace mako and fuzzel.
-2. **A popup font size and a popup opacity.** Stylix has `fonts.sizes.popups` ("notifications,
-   popups, and other overlay elements of the desktop", default `desktop`) and
-   `opacity.popups` (`stylix/fonts.nix:103-105`, `stylix/opacity.nix:18-21` at the pinned
-   rev), which its own mako and fuzzel targets use. The contract has one `fonts.size`
-   and a `shape.bar-opacity`. Proposed: `fonts.popup-size` (default `size`) and
-   `shape.popup-opacity` (default 1.0), filled from those two Stylix values by the one
-   mapping function.
-3. **The fragment names** `notify.toml`, `launch.toml` and `greet.toml`, and the
-   `[apps.scootnotify]`, `[apps.scootlaunch]` and `[apps.scootgreet]` override tables (§3.2)
-   for anything a look must set per app.
-4. **A greeter fragment** for scootgreet (§6.4 renders the greeter's CSS for ReGreet).
-   The same `render(look, "scootgreet")` produces `greet.toml`.
-5. **Text on `selection`.** The launcher's selected row uses `accent` with `accent-fg`
-   (the contract's "highlights, selection fill"). Text on `selection`, which is text
-   selection in the entry, needs a defined foreground. #578's review notes that `accent-fg`
-   defaults to `background`, which is dark on dark over `base02`.
+### The five requests, decided
+
+All five requests this plan raised were accepted in #578 §9: `focus` in both fragments,
+`fonts.popup-size` and `opacity.popups`, the fragment names and `[apps.<app>]`, a `greet.toml`
+for the greeter, and `selection-text`.
 
 ### Per-app element tables
 
-The per-app docs map each UI element to a contract role:
 [scootnotify](scootnotify.md#stylix-and-look-integration),
-[scootlaunch](scootlaunch.md#stylix-and-look-integration),
-[scootgreet](scootgreet.md#stylix-and-look-integration). Every mapping is chosen so that
-**the shipped looks draw what mako, fuzzel and ReGreet draw for them today**: background,
-foreground and dim from the bar colors, borders from `focus`, the launcher's
-selection on `accent`/`accent-fg`, and its match highlight on `hover`. The column "today" in
-each table is the evidence.
+[scootlaunch](scootlaunch.md#stylix-and-look-integration) and
+[scootgreet](scootgreet.md#stylix-and-look-integration) map each UI element to a role. Each
+mapping is chosen so the shipped looks draw what mako, fuzzel and ReGreet draw for them today:
+
+- borders on `focus`, because `focus` differs from `accent` on moonrise and ginger-night (#578 B1);
+- launcher selection on `selection`/`selection-text`;
+- match on `match`;
+- cards on `surface`.
+
+Each table's "today" column is the evidence.
 
 ### Fonts and sizes
 
-- **Family**: the look's `fonts.ui`, resolved to a file (as the contract resolves the
-  bar face, §3.5) for scootnotify and scootlaunch, and `fonts.sans` for scootgreet (the
-  face ReGreet gets today, `nix/modules/nixos.nix:2456-2460`).
-- **Size**: `fonts.popup-size` once request 2 is in, else `fonts.size`, converted to
-  logical pixels by the bar's rule `px = clamp(1, 256, (pt * 4 + 1) / 3)`
-  (`nix/modules/scootbar.nix:97-100`): 10 pt = 13 px. scootgreet's own default is 12 pt
-  (16 px), today's measured greeter size. A look sets it through `[apps.scootgreet]`.
+- **Family**: `fonts.ui` for scootnotify and scootlaunch. Fonts come from the look's carrier
+  (D13), and the scootbar module's `fontFile` helper (`nix/modules/scootbar.nix:62-95`) becomes
+  that carrier's Nix side (§9 item 3). scootgreet uses `fonts.sans`, the face ReGreet gets
+  today (`nix/modules/nixos.nix:2456-2460`).
+- **Size**: `fonts.popup-size` for scootnotify and scootlaunch (10 pt = 13 px by default);
+  `fonts.app-size` for scootgreet (12 pt = 16 px, today's measured greeter size).
 
 ### The greeter is static
 
-The login screen runs before any user session, as the `greeter` user, from `/etc`
-(§6.4). It takes `programs.scoot.greeter.look`, which defaults to the declared look,
-rendered at system build time into `/etc/scoot/look/greet.toml` beside
-`/etc/scoot/greet.toml`. A live swap never touches it. On a non-Nix box,
-"apply a look to the greeter" is the explicit root-level step
-`sudo scoot look apply --greeter NAME` (#578's `look-greeter` ticket). greetd's
-`restartIfChanged = false` means a running greeter shows a new look only from its
-next start ([scootgreet.md](scootgreet.md#stylix-and-look-integration)).
+The login screen runs before any user session, as the `greeter` user, from `/etc` (§6.4). It
+takes `programs.scoot.greeter.look`, which defaults to the declared look, rendered at system
+build time. A live swap never touches it. A non-Nix `sudo scoot look apply --greeter` is
+"later, not v1" in #578. greetd's `restartIfChanged = false` means a running greeter shows a
+new look only from its next start ([scootgreet.md](scootgreet.md#stylix-and-look-integration)).
 
 ### Example configs
 
-`docs/examples/<look>/` keeps layout only (#578 §3.4, Decision D1 moves looks to
-`looks/<name>/`). The apps' example `notify.toml` and `launch.toml` carry geometry and
-behavior with no colors. Per-app look values live in a look's `[apps.<app>]` table.
-The registry needs no new roles for these apps beyond the requests above.
+`docs/examples/<look>/` carries no colors for these apps (§9 item 5). Layout-only example
+`notify.toml` and `launch.toml` (anchor, width, timeouts) may ship beside the bar's. A look's
+colors reach the apps as rendered fragments, and per-app look values live in its
+`[apps.<app>]` table.
 
 ## Live look swap
 
-Covered by the contract ([above](#theme-the-live-looks-contract-stylix-and-looks)).
-What each app adds to it:
+Covered by the contract ([above](#theme-the-live-looks-contract-stylix-and-looks)). What each
+app adds:
 
-- **scootnotify** re-themes in place on `msg reload`. Cards on screen, history, DND and
-  ids survive, and the cost target is under 5 ms plus a font load. Under Nix its unit
-  never restarts for a config or look change: a restart throws away what is on screen.
-  Home Manager has `X-Reload-Triggers` (`modules/systemd.nix:140` at
-  `efa3ccb4c3cc90d832eab232976379058fa75aa3`, the rev
-  `scripts/scootbar-stylix-test.sh:35` pins), with `ExecReload = scootnotify msg reload`.
-  On NixOS the unit is a *user* unit, and what `switch-to-configuration` does to it is
-  **not verified here**. `notify-nix` checks it at the pinned nixpkgs (mind
-  `nix/modules/nixos.nix:2398-2402`: nixpkgs warns when a unit sets both
-  `reloadIfChanged` and `reloadTriggers`). The contract's `scoot look sync` activation
-  step drives reloads for a look change anyway (§6.2).
-- **No SIGHUP and no file watch**: the contract's §4.2 reasons, and scootbar's
+- **scootnotify re-themes in place** on `msg reload` (and `scope = "look"`). Cards on screen,
+  history, DND and ids survive, and the cost target is under 5 ms plus a font load.
+  - Under Nix its unit never restarts for a config change, because a restart throws away what
+    is on screen. Home Manager has `X-Reload-Triggers` (`modules/systemd.nix:140` at
+    `efa3ccb4c3cc90d832eab232976379058fa75aa3`, the rev `scripts/scootbar-stylix-test.sh:35`
+    pins), used with `ExecReload = scootnotify msg reload`.
+  - On NixOS the unit is a *user* unit, and what `switch-to-configuration` does to it is **not
+    verified here**. `notify-nix` checks it at the pinned nixpkgs (mind
+    `nix/modules/nixos.nix:2398-2402`: nixpkgs warns when a unit sets both `reloadIfChanged`
+    and `reloadTriggers`).
+  - A look change is driven by the contract's own `scoot look sync` and `apply` (§4.5, §6.2).
+- **No SIGHUP and no file watch**, for the contract's §4.4 reasons and scootbar's
   (`crates/scootbar/src/daemon/mod.rs:32-34`).
 - **scootlaunch**: the next open reads the new link.
-- **Optional hooks** from the contract (§7.3): scootnotify may show a "Look: NAME" card on
-  scoot's `look` event, and scootlaunch's dmenu mode serves a `Look:` picker
-  (`scoot look list | scootlaunch --dmenu | xargs scoot look apply`).
+- **Optional hooks** (§7.3, §9 item 8):
+  - scootnotify may show a "Look: NAME" card on scoot's `look` event;
+  - scootlaunch's dmenu mode serves a `Look:` picker
+    (`scoot look list | scootlaunch --dmenu | xargs scoot look apply`).
 
 ## Nix modules and the desktop profile switch
 
@@ -592,125 +630,189 @@ the ratchet's waivers do):
 
 ## Start order across the three apps
 
-Ordered by what unblocks what, and by risk:
+Ordered by what unblocks what, and by risk. **Nothing is extracted until a gate says go.**
 
-1. **Two spikes, in parallel** (both research, neither ships code):
-   [`scootui-keyboard-spike`](../../docs/scootbar/backlog/scootui-keyboard-spike.md)
-   and [`scootui-text-shaping-spike`](../../docs/scootbar/backlog/scootui-text-shaping-spike.md).
-   They decide the two choices that are expensive to reverse.
-2. **The extraction**, in three mechanical PRs, each held to scootbar's
-   ratchet: `scootui-extract-draw`, then `scoot-dbus-extract`, then
-   `scootui-extract-wayland`. Nothing new is added in them.
-3. **scootnotify first.** It needs only what exists: the D-Bus server
-   role, pointer input, multi-line text, on-demand overlay surfaces. It is the app
-   with the clearest gain (two processes and a shell feed replaced by
-   one) and its own go/no-go prototype (`notify-prototype`) can start right
-   after the draw extraction, before the Wayland extraction lands.
-4. **The keyboard and the entry widget** (`scootui-keyboard`,
-   `scootui-entry-and-list`), built to the spike's decision while scootnotify is
-   in progress, since no scootnotify ticket needs them.
-5. **scootlaunch second.** It is the first consumer of keyboard, entry and the
-   virtualized list, and a typo in a launcher costs nothing.
-6. **scootgreet last.** It has the same widgets plus a security boundary, a login
-   that must never be stranded, and a compositor-host question. By then the
-   entry widget has been in daily use in the launcher. Its baseline measurement
-   (`greet-baseline`) can run at any time and should run early, because nothing
-   in this repo has measured ReGreet.
+1. **Start now, all independent:**
+   - the two spikes, [`scootui-keyboard-spike`](../../docs/scootbar/backlog/scootui-keyboard-spike.md)
+     and [`scootui-text-shaping-spike`](../../docs/scootbar/backlog/scootui-text-shaping-spike.md),
+     which decide the two choices that are expensive to reverse;
+   - [`greet-baseline`](../../docs/scootbar/backlog/greet-baseline.md), measurement only;
+   - the core ticket [`layer-shell-default-output`](../../docs/backlog/core/layer-shell-default-output.md),
+     which fixes mako and fuzzel today.
+2. **The gates, out of the workspace.** Each is a prototype that `#[path]`-includes scootbar's
+   sources (`crates/scootbar/fuzz/Cargo.toml:28-65` already does this), so a no costs no
+   refactor:
+   - [`notify-prototype`](../../docs/scootbar/backlog/notify-prototype.md) can start at once;
+   - [`launch-prototype`](../../docs/scootbar/backlog/launch-prototype.md) and
+     [`greet-prototype`](../../docs/scootbar/backlog/greet-prototype.md) follow the keyboard
+     spike.
+3. **The extraction, once any gate says go**, in mechanical PRs held to scootbar's ratchet:
+   1. `scootui-extract-draw`, which also creates `scoot-rt`;
+   2. then, in parallel: `scoot-dbus-extract`, `scootui-extract-wayland` and
+      `scootui-extract-control`.
 
-The **riskiest decisions**, and what is prototyped first to retire them: the keyboard
-stack (spike 1), shaping (spike 2), whether scootnotify beats mako on the gate
-(`notify-prototype`), and for scootgreet whether scoot itself can safely host
-the greeter (`greet-scoot-kiosk-spike`, which is not on the critical path:
-cage hosts it until that spike says otherwise).
+   Nothing new is added in these PRs. New code waits for
+   `scootui-surfaces-on-demand`, `scootui-keyboard` and `scootui-entry-and-list`.
+4. **scootnotify first.** It needs the D-Bus server role, pointer input, multi-line text and
+   on-demand overlay surfaces, and no keymap. It has the clearest gain: two processes and a
+   shell feed become one.
+5. **scootlaunch second.** It is the first consumer of keyboard, entry and the virtualized
+   list, and a typo in a launcher costs nothing.
+6. **scootgreet last.** It has the same widgets, plus a security boundary and a login that
+   must never be stranded. By then the entry widget has been in daily use in the launcher.
+
+**The riskiest decisions**, and what retires each first:
+
+- the keyboard stack (spike 1);
+- shaping (spike 2);
+- greetd's retained-session behavior (`greet-prototype`, against a real greetd);
+- whether each app beats its incumbent on what can really fail (the three gates).
+
+The scoot-hosted greeter is not on any path unless cage fails the GPU-free check.
 
 ## The tickets
 
-All live in `docs/scootbar/backlog/` (area `scootbar`, milestone `M7`), the
-backlog that already holds the three pointer entries this plan turns into
-epics. The one compositor-side ticket, scoot's greeter host mode, lives in
-`docs/backlog/core/`. `scripts/backlog` knows a fixed set of areas
-(`scripts/backlog`, `BACKLOGS`), and adding `scootnotify`, `scootlaunch` and
-`scootgreet` areas is a tooling change outside this docs-only PR; see
-[Decisions needed](#decisions-needed).
+### Where they live
 
-Every ticket's `blocked` names its predecessors by slug, so `scripts/backlog resolve`
-unblocks the next one. **The roots are blocked on the maintainer's go-ahead**, so a
-`claim --next` swarm does not start building three apps off the back of a
-design PR.
+All live in `docs/scootbar/backlog/` (area `scootbar`, milestone `M7`), the backlog that
+already holds the three pointer entries this plan turns into epics. Two compositor-side
+tickets, scoot's greeter host mode and the layer-shell default output, live in
+`docs/backlog/core/`. `scripts/backlog` knows a fixed set of areas (`scripts/backlog`,
+`BACKLOGS`). Adding `scootnotify`, `scootlaunch` and `scootgreet` areas is a tooling change
+outside this docs-only PR.
+
+### How the gates stay closed
+
+`scripts/backlog` has only `open`, `research` and `resolved` (`STATUSES`, `scripts/backlog:59`).
+`resolve` runs `unblock_dependents` (`scripts/backlog:628-650`), which strips a slug from every
+dependent's `blocked` when it appears there as a list item. A gate ticket resolved as a
+**no** would therefore unblock the build ticket it was meant to stop, and a `claim --next`
+swarm would pick it up.
+
+So **every ticket that a gate guards names the gate in prose**:
+`blocked: "…, GO verdict recorded in notify-prototype (a human removes this clause)"`.
+The regex matches a slug only at the start of the field or after `,`, `;`, `and` or `or`
+(`scripts/backlog:634-635`). A slug preceded by "in " is not a list item, so it survives
+`resolve`. This was checked by running the script's own regex on both forms.
+
+When a gate is resolved:
+
+- **go:** a human deletes that clause from the guarded tickets, which then unblock normally;
+- **no:** a human resolves the epic and the guarded tickets as won't-do, with the gate's evidence.
+
+No tooling change is needed. A `decision` status with a recorded verdict would make it
+mechanical, and is in the [Deferred](#deferred) list.
+
+The guarded tickets are:
+
+- `notify-server`, guarded by `notify-prototype`;
+- `launch-desktop-index`, guarded by `launch-prototype`;
+- `greet-greetd-client`, guarded by `greet-prototype`;
+- `scootui-extract-draw`, which needs a go from *any one* of the three gates.
+
+### Roots and edges
+
+**The roots wait on the maintainer's go-ahead**, except the four items in Start order 1,
+which are unblocked. Everything else names its predecessors by slug. The apps' tickets
+that read look fragments are blocked on #578's `look-format` (the `scoot-look` crate).
+That slug exists only once #578 merges, which is the expected merge order: #578 first.
 
 Shared:
 
 | Slug | What | Serves | Blocked by |
 |---|---|---|---|
 | `extract-scootui` (epic, existing) | the shared foundation | both | its children |
-| `scootui-keyboard-spike` | kbvm vs xkbcommon, measured | both | go-ahead |
-| `scootui-text-shaping-spike` | rustybuzz + bidi cost, measured | daily-drive | go-ahead |
-| `scootui-extract-draw` | move pure drawing, widgets, icons into `crates/scootui` | both | go-ahead |
+| `scootui-keyboard-spike` | kbvm vs xkbcommon, measured | both | none: start now |
+| `scootui-text-shaping-spike` | rustybuzz + bidi cost, measured | daily-drive | none: start now |
+| `scootui-extract-draw` | move pure drawing, widgets, icons into `crates/scootui`; create `scoot-rt` | both | a GO from any gate (prose) |
 | `scoot-dbus-extract` | move the D-Bus client into `crates/scoot-dbus` | both | `scootui-extract-draw` |
-| `scootui-extract-wayland` | move layer-surface, shm, outputs scaffolding; on-demand surfaces | both | `scootui-extract-draw` |
-| `scootui-keyboard` | keymap, modifiers, repeat, keysym to text | both | `scootui-keyboard-spike`, `scootui-extract-wayland` |
-| `scootui-entry-and-list` | text entry (password mode), virtualized list, focus ring | both | `scootui-keyboard` |
+| `scootui-extract-wayland` | move outputs, layer surfaces, shm, the poll loop's Wayland half; nothing new | both | `scootui-extract-draw` |
+| `scootui-extract-control` | move `control/{framing,paths,claim,conn}.rs`; the socket name a parameter | both | `scootui-extract-draw` |
+| `scootui-surfaces-on-demand` | the on-demand layer lifecycle, the `xdg_toplevel` kind, the memfd name | both | `scootui-extract-wayland` |
+| `scootui-keyboard` | keymap, modifiers, repeat, keysym to a caller's buffer | both | `scootui-keyboard-spike`, `scootui-extract-wayland` |
+| `scootui-entry-and-list` | text entry (password mode), virtualized list, focus chain | both | `scootui-keyboard` |
 
-scootnotify (detail in [scootnotify.md](scootnotify.md#tickets)): `scootnotify` (epic),
-`notify-prototype`, `notify-server`, `notify-popups`, `notify-control`,
-`notify-bar-feed`, `notify-nix`, `notify-packaging`, `notify-default-flip`.
-
-scootlaunch (detail in [scootlaunch.md](scootlaunch.md#tickets)): `launcher` (epic),
-`launch-desktop-index`, `launch-match-rank`, `launch-ui`, `launch-dmenu`,
-`launch-agent-json`, `launch-windows-mode`, `launch-nix`, `launch-packaging`,
-`launch-default-flip`.
-
-scootgreet (detail in [scootgreet.md](scootgreet.md#tickets)): `scootgreet` (epic),
-`greet-baseline`, `greet-greetd-client`, `greet-ui`, `greet-nixos`,
-`greet-packaging-iso`, `greet-default-flip`, plus `greet-scoot-kiosk-spike` and
-`scoot-greeter-mode` (core).
+The per-app tables are in each app's doc:
+[scootnotify](scootnotify.md#tickets), [scootlaunch](scootlaunch.md#tickets) and
+[scootgreet](scootgreet.md#tickets).
 
 ## Decisions needed
 
-Each item names the recommendation. Everything else in these four documents is
-decided, with the evidence beside it.
+Only the items that are the maintainer's call are asked. The rest are recorded as
+**defaults**: decided here with evidence, and changeable by anyone with a reason.
 
-1. **Go-ahead to start, and in what order?** The roots are blocked on it.
-   *Recommend:* start the two spikes and `scootui-extract-draw` now, then follow
-   [Start order](#start-order-across-the-three-apps). (CLAUDE.md
-   says neither of computer use or daily-drive silently wins. These serve both,
-   but they are polish over working wrappers, so the maintainer's queue decides.)
+**The maintainer's call:**
+
+1. **Go-ahead and queue.** The gated work is blocked on it.
+   *Recommend:*
+   - start now: the two spikes, `greet-baseline`, and `layer-shell-default-output`. The last is
+     unblocked in this PR because it helps mako and fuzzel today;
+   - start `notify-prototype` on the go-ahead;
+   - hold `scootui-extract-draw` until a gate says go.
 2. **The greeter's name.** *Recommend:* `scootgreet` ([Names](#names)).
-3. **A backlog area per app.** Today the tickets live in scootbar's M7.
-   *Recommend:* yes, once each app's first code PR lands. That is a small
-   `scripts/backlog` change (three `BACKLOGS`/`RESOLVED`/`INDEXES` rows plus a
-   test) and a `git mv` of open entries, so it should not be a side effect of a
-   design PR.
-4. **A second shared crate.** *Recommend:* `scoot-dbus` separate from `scootui`
-   (three consumers, none of them drawing). The alternative is a `dbus`
-   feature inside `scootui`: fewer crates, but a misleading name.
-5. **A C library in the shell family**, if the keyboard spike lands on
-   libxkbcommon. *Recommend:* accept it, confined to one small wrapper crate,
-   if `kbvm` fails the layout set. A launcher or greeter that types the wrong
-   character is worse than a dynamic library that every Wayland session already
-   has in its closure.
-6. **SVG app icons in scootlaunch.** Many apps ship scalable-only icons, and
-   `resvg` (0.48.1, Apache-2.0 OR MIT) with `tiny-skia` (BSD-3-Clause) is the
-   only sound renderer, though not small. *Recommend:* behind a default-on `svg`
-   feature in scootlaunch only, measured in `launch-ui`, with a waiver ruling on
-   its size row as scootbar's tray icons got. The fallback is a letter tile.
-7. **Shaping in scootnotify's default build**: decided by the spike's gate
-   above. It is listed here because if the gate fails, the maintainer chooses
-   between shipping without RTL and Indic scripts (documented) and paying the
-   size.
-8. **Notification history on disk**: *Recommend:* no. History stays in memory
-   (OTP codes and message previews should not be written down).
-   An opt-in `history-file` can come later if asked for.
-9. **scoot as the greeter's host** (a locked-down kiosk mode in scoot) instead of
-   cage. *Recommend:* cage hosts scootgreet first, and the kiosk mode is a later,
-   opt-in step gated on its spike ([scootgreet.md](scootgreet.md#which-compositor-hosts-it)).
-10. **Theming goes through the live-looks contract (PR #578, its D5 and D9).** *Recommend:*
-    yes. The apps read only the look layer, and Stylix arrives as the `stylix` look. This
-    plan is written against that contract. If D5 is decided the other way (Stylix stays
-    an evaluation-time layer), the fallback is scootbar's per-leaf ladder
-    (`nix/modules/scootbar.nix:7-28`) in each app's Nix module, and the `*-nix` tickets
-    say so. The [requests to the contract](#requests-to-the-contract) need the contract
-    owner's answer either way.
+3. **A C library in the shell family**, if the keyboard spike lands on libxkbcommon.
+   *Recommend:* accept it, confined to one small wrapper crate, if `kbvm` fails the layout set.
+   A greeter that types the wrong character is worse than a dynamic library that every Wayland
+   session already has. Mostly an engineering call, but it changes a family property, so it
+   is asked.
+4. **The `resvg` size waiver** for SVG app icons in scootlaunch. *Recommend:* default-on `svg`,
+   PNG preferred when the theme has one, waiver ruled on the measured row (as the tray's were).
+5. **The greeter host.** *Recommend:* cage. A scoot kiosk host only if cage fails the GPU-free
+   check in `greet-baseline`. Whether to add that compositor attack surface at the login
+   screen at all is the maintainer's call.
+6. **(a) Which output an output-less layer surface goes to**, the one wlr-layer-shell calls
+   "most recently interacted with". *Recommend:* the output under the pointer, as scoot's new
+   windows already do (`protocols.md:1017-1021`). That is in `layer-shell-default-output`.
+   The alternative is the keyboard-focused window's output; it gives nothing on an empty
+   workspace, and IPC has no focused-output field. This changes mako and fuzzel today.
+7. **(b) App scopes in scoot's own spawn path.** Binds spawn into `scoot.service`'s cgroup
+   (`crates/scoot/src/compositor/state.rs:1733-1803`, a plain `Command`). *Recommend:* yes,
+   as a later core ticket filed once `launch-spawn` proves the scope code, so Super+Return
+   apps get `app-scoot-…scope` too. It is not filed in this PR.
+8. **(c) The dmenu mode refuses unknown fuzzel flags loudly** (exit 2, listing the supported
+   ones). *Recommend:* yes. A flag that takes a value, silently ignored, eats the next argument.
+   The repo's own call sites are pinned to the supported set, and the opt-in period is when a
+   user's personal scripts surface. The alternative is warn-and-ignore for flags that take no
+   value.
+9. **(d) scootlock or scootgreet first** (they share the widget set). *Recommend:* scootgreet.
+   Its incumbent costs about 1 GiB on the login path and the ISO, which is over GitHub's 2 GB
+   cap. scootlock's incumbent (swaylock) is already small. scootlock reuses the widgets after.
+10. **(e) The greeter fallback: agreety or ReGreet.** *Recommend:* agreety. It is text-only,
+    ships in greetd's own package, and needs no compositor, GPU or font: exactly what the
+    fallback exists to survive.
+11. **(f) The greeter's default flip and screen-reader users.** *Recommend:* the flip keeps
+    ReGreet the default whenever the system enables a screen reader, and the installer offers
+    the choice ([scootgreet.md](scootgreet.md#decisions-specific-to-the-greeter)).
+
+**Defaults (decided here, not the maintainer's call):**
+
+- **No backlog area per app yet.** It is a `scripts/backlog` change (three
+  `BACKLOGS`/`RESOLVED`/`INDEXES` rows plus a test) and a `git mv` of open entries, made when
+  each app's first code lands.
+- **`scoot-dbus` is separate from `scootui`, with `scoot-rt` as their shared leaf**
+  ([above](#scoot-rt-library-cratesscoot-rt-the-leaf-both-depend-on)).
+- **Shaping in scootnotify's default build** follows the spike's gate. It escalates to the
+  maintainer only if the gate fails.
+- **No notification history on disk** (privacy). An opt-in `history-file` can come later.
+- **Theming through #578.** This is the contract owner's decision (#578 D5, D9, D14). This plan
+  follows it.
+
+## Deferred
+
+These were found by the #579 review and are deliberately not done here, each with its reason:
+
+- **A `decision` ticket status in `scripts/backlog`.** The prose-clause mechanism above covers
+  the hazard with no tooling change. A status would need its own PR with tests.
+- **The bar's `scootbg` copy of `print.rs`** stays until scootbg is moved onto the shared crates,
+  which is a later ticket behind scootbg's release gate.
+- **A message catalog for UI strings** (greeter and notifications). v1 is English, stated as a
+  regression risk in [scootgreet.md](scootgreet.md#what-the-screen-offers). Whether ReGreet
+  localizes is unverified.
+- **RTL caret and bidi in the launcher's entry**: v1 states it. IME is a follow-up (fuzzel has
+  none, so there is no regression).
+- **Greeter screen blanking:** cage has no output-power support. Stated, not solved.
+- **`greet-scoot-kiosk-spike` and `scoot-greeter-mode`** stay filed but are blocked on cage
+  failing the GPU-free check, so nothing starts them otherwise.
 
 ## Rejected alternatives
 

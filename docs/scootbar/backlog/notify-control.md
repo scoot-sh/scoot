@@ -1,30 +1,30 @@
 ---
-title: "scootnotify: `msg`, JSON, subscribe and wait, DND, history, rules, fullscreen hold"
+title: "scootnotify: the control socket, `msg`, JSON, `subscribe` and `wait`, scoped `reload`"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-popups"
+blocked: "notify-popups, scootui-extract-control"
 milestone: "M7"
 ---
 
-# scootnotify: control, DND, history, rules
+# scootnotify: the control interface
 
-Filed 2026-10-12 from the [scootnotify design](../../../dev/design/scootnotify.md#the-control-interface-and-what-an-agent-gets).
-Serves **computer use** (a stable JSON view and `wait`) and **daily-drive** (DND, history,
-rules).
+Filed 2026-10-12 from the [scootnotify design](../../../dev/design/scootnotify.md#the-control-interface-and-what-an-agent-gets);
+split in the #579 fix round. Serves **computer use**: a stable JSON view and `wait`.
 
 ## What to do
 
-The control socket through `scootui` `control`: `list`, `history`, `dismiss`, `invoke`,
-`restore`, `dnd`, `reload`, `subscribe`, `wait`, `version`, with the versioned JSON
-object. DND mode, the history ring (in memory only), `[[rule]]` matching and actions
-(`exec` with the bar's exec bounds), `fullscreen = "hold"`.
+The control socket through `scootui` `control`, with these verbs: `list`, `dismiss`, `invoke`,
+`reload` (plain, and `scope = "look"` per #578 §4.4, answering applied or refused), `subscribe`,
+`wait` and `version`. The JSON object is versioned and documented on the site in this PR.
 
 ## Acceptance
 
-Every verb tested end to end; `reload` answers applied or refused, as the live-looks contract's §4.2 requires; `wait` returns on a match and times out; a reload with a
-bad file keeps the running config and state; subscriber and connection caps; a rule `exec`
-flood bounded at 4 children; the JSON schema documented on the site in this PR.
+- Every verb tested end to end.
+- `wait` returns on a match and times out.
+- A reload with a bad file keeps the running config and state; a scoped reload ignores a
+  half-edited user file.
+- The subscriber and connection caps hold.
 
 ## Evidence the review needs
 
@@ -33,4 +33,4 @@ flood bounded at 4 children; the JSON schema documented on the site in this PR.
 
 ## Not in this ticket
 
-The bar feed, Nix.
+DND, history and rules (`notify-dnd-history-rules`).

@@ -3,7 +3,7 @@ title: "scootnotify: the org.freedesktop.Notifications server and its model, hea
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-prototype, scoot-dbus-extract"
+blocked: "GO verdict recorded in notify-prototype (a human removes this clause); scoot-dbus-extract"
 milestone: "M7"
 ---
 
@@ -13,22 +13,39 @@ Filed 2026-10-12 from the [scootnotify design](../../../dev/design/scootnotify.m
 
 ## What to do
 
-Create `crates/scootnotify` (CI classify output and job, CLAUDE.md scope already listed):
-the conformance table in the design, without drawing. Name ownership with
-`DO_NOT_QUEUE`, never replacing and never replaceable, refusing with the owner named
-(exit 3); the four methods and three signals; ids (0 skipped, live skipped, reserved in
-blocks in `$XDG_RUNTIME_DIR`); `replaces_id` and close rules; expiry from presentation
-(a stub presenter in tests); urgency defaults; caps and rate limits; markup parser;
-`image-data` validation and downscale; hints. In `scoot-dbus`: an error reply body, an
-error reply (`LimitsExceeded`) for an over-cap method call, a per-connection message cap.
+Create `crates/scootnotify`, with its CI classify output and job (the CLAUDE.md scope is already
+listed). Build the design's conformance table, without drawing:
+
+- **Name ownership** with `DO_NOT_QUEUE`, never replacing and never replaceable, refusing with
+  the owner named (exit 3).
+- **The four methods and three signals.**
+- **Ids**: 0 skipped, live ids skipped, reserved in blocks in `$XDG_RUNTIME_DIR`.
+- **`replaces_id` and close rules.**
+- **Expiry** from presentation (a stub presenter in tests), and the urgency defaults.
+- **Caps and rate limits**, the markup parser, `image-data` validation and downscale, and hints.
+- **A bad config at start runs on built-in defaults** and reports the error (never an exit
+  loop).
+
+In `scoot-dbus`:
+
+- an error reply with a body;
+- a `LimitsExceeded` reply for an over-cap method call (the discard path already reads the
+  header fields);
+- a per-connection message cap.
+
 `scootnotify daemon --check`.
 
 ## Acceptance
 
-Against a real `dbus-daemon`: every method and signal with the right reasons, refusal
-naming a running mako, `LimitsExceeded` for a 5 MiB call (no client hang), ids not reused
-across a restart, flood test bounded. Fuzz targets for Notify body, markup, image-data with
-committed corpora replayed on stable.
+Against a real `dbus-daemon`:
+
+- every method and signal, with the right reasons;
+- refusal naming a running mako;
+- `LimitsExceeded` for a 5 MiB call, with no client hang;
+- ids not reused across a restart;
+- the flood test bounded.
+
+Fuzz targets for the Notify body, markup and image-data, with committed corpora replayed on stable.
 
 ## Evidence the review needs
 
@@ -38,4 +55,4 @@ committed corpora replayed on stable.
 
 ## Not in this ticket
 
-Popups, control socket, Nix.
+Popups, the control socket, Nix.

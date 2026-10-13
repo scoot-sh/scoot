@@ -3,7 +3,7 @@ title: "scootlaunch: the desktop entry index, Exec expansion and `--list --json`
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootui-extract-draw"
+blocked: "GO verdict recorded in launch-prototype (a human removes this clause)"
 milestone: "M7"
 ---
 
@@ -14,17 +14,25 @@ Filed 2026-10-12 from the [scootlaunch design](../../../dev/design/scootlaunch.m
 
 ## What to do
 
-Create `crates/scootlaunch` (CI classify and job). Pure modules: data dirs and ids with
-precedence and `Hidden` masking, the format and escapes, localized keys in the spec's order,
-`OnlyShowIn`/`NotShowIn`, `TryExec`, actions, the Exec quoting and field codes with the
-must-reject cases, and the cache keyed by canonical path, inode and mtime (the NixOS
-store-mtime case). Symlinks followed with a visited set. `scootlaunch --list [--all] --json`.
+Create `crates/scootlaunch`, with its CI classify output and job. The modules are pure:
+
+- data dirs and ids, with precedence and `Hidden` masking;
+- the format and its escapes;
+- localized keys, in the spec's order;
+- `OnlyShowIn`/`NotShowIn` and `TryExec`;
+- actions;
+- the Exec quoting and field codes, including the must-reject cases;
+- the cache, keyed by canonical path, inode and mtime (the NixOS store-mtime case);
+- symlinks followed, with a visited set.
+
+Plus `scootlaunch --list [--all] --json`.
 
 ## Acceptance
 
-Unit tests for every rule in the design; fuzz targets for the parser and the Exec expander
-seeded from real NixOS, Fedora and Debian application dirs; the cache-vs-scan measurement
-recorded and the cache kept only if it wins beyond noise.
+- Unit tests for every rule in the design.
+- Fuzz targets for the parser and the Exec expander, seeded from real NixOS, Fedora and Debian
+  application dirs.
+- The cache-vs-scan measurement recorded, and the cache kept only if it wins beyond noise.
 
 ## Evidence the review needs
 

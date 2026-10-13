@@ -62,7 +62,9 @@ unchanged. A JSON interface an agent can use without the UI.
 **What we gain over the incumbent** (fuzzel through `scoot-launcher`;
 `docs/backlog/resolved/desktop-launcher-done.md`):
 
-- *Cost.* fuzzel is 152.4 MiB closure (41.7 MiB marginal), about 22 MB RSS open, and
+- *Cost.* fuzzel is 152.4 MiB closure (41.7 MiB marginal), about 22 MB RSS open with icons
+  (the #579 review measured fuzzel 1.14.1 open with an empty `$HOME` on the M2 at 18,944 kB
+  RSS, 15,951 kB PSS and 17 threads), and
   a 50 to 57 ms cold first frame. scootlaunch targets the bar family's libc-only closure
   (plus `resvg` if SVG icons ship), under 8 MB open, and under 35 ms ([budgets](#budgets)).
 - *Precedence done right.* Today the look's seven fuzzel color flags beat the
@@ -88,11 +90,18 @@ unchanged. A JSON interface an agent can use without the UI.
 not re-checked for the nixpkgs build), its SVG icons, its many options, and its
 maturity.
 
-**Go/no-go gate (in `launch-ui`).** Before the dmenu mode, the agent JSON and the Nix
-switch are built, `launch-ui` publishes: first frame warm and cold, open RSS, and
-keystroke-to-commit at 300 and 3,000 entries, against fuzzel in the same harness on the
-M2. Continue only if every row is at or under fuzzel's. Otherwise stop: the shared
-widgets it built still serve scootgreet, so the work is not lost.
+**Go/no-go gate (`launch-prototype`), before any extraction.** An out-of-workspace prototype
+`#[path]`-includes scootbar's sources (the pattern `crates/scootbar/fuzz/Cargo.toml:28-65` uses)
+and the keyboard spike's pick. It must show:
+
+- first frame warm and cold, open RSS, and keystroke-to-commit at 300 and 3,000 entries, all at or
+  under fuzzel's in the same harness on the M2;
+- a query typed correctly on AZERTY and `us(intl)` dead keys;
+- a mouse-picked entry re-activating an already-running single-instance app, the case scoot's
+  own source documents fuzzel failing (`crates/scoot/src/compositor/activation.rs:81-99`).
+
+The RSS and closure rows are close to certain to pass. Keystroke latency and typing
+correctness are the real risks. On a no, fuzzel stays, and nothing has been extracted for it.
 
 ## Modes
 
@@ -107,10 +116,13 @@ widgets it built still serve scootgreet, so the work is not lost.
 
 ### Windows mode
 
-It lists windows from `ext-foreign-toplevel-list-v1` (title, app id, identifier) and
-activates the chosen one with `zwlr_foreign_toplevel_handle_v1.activate(seat)`. Both
-are standard and both are implemented by scoot (`site/src/content/docs/scoot/protocols.md:1306-1441`,
-and `activate` "hands the keyboard on like a click"). It works on sway too. The brief
+It lists **and** activates through `wlr-foreign-toplevel-management`: each
+`zwlr_foreign_toplevel_handle_v1` carries `title`, `app_id` and `state`, and its `activate(seat)`
+"hands the keyboard on like a click" (`site/src/content/docs/scoot/protocols.md:1310-1330,1393-1398`).
+`ext-foreign-toplevel-list-v1` is not used. It is enumeration only, and its handles share no
+handle or identifier with wlr's (scoot describes "one window list described twice", not a
+mapping), so a window listed from one protocol could not be activated through the other. The
+mode works on sway too. The brief
 suggested scoot's IPC `windows` list. That is rejected under CLAUDE.md's
 standard-protocol rule: the protocol already carries what this mode needs, and IPC would
 tie the mode to scoot. Window icons come from matching `app_id` to a desktop
@@ -258,20 +270,22 @@ surface maps and holds it until it unmaps", `protocols.md:1037-1040`).
 
 Mouse: a click launches the row, and the wheel scrolls. The panel is centered on the
 target output, 40 em wide with 10 rows by default, and every key is configurable.
-Opening a second apps-mode instance closes the first: a `flock`ed
-`$XDG_RUNTIME_DIR/scootlaunch-<display>.lock` holds the pid, and a second
-invocation sends that pid `SIGTERM` (default action, no handler) and exits. That
-gives a toggle on one bind without IPC. dmenu instances take no lock.
+Opening a second apps-mode instance closes the first. While open, the first instance
+listens on an abstract Unix socket, `@scootlaunch-<uid>-<WAYLAND_DISPLAY>`: one fd, which exists
+only while the panel is open. A second invocation connects, sends `close`, and exits. A failed
+connect means none is open, so it opens itself. This gives a toggle on one bind with no pid file,
+so no pid-reuse window. dmenu instances do not listen.
 
-**Which output.** The launcher should open where the user is looking.
-`layer_surface` with a null output lands on scoot's *primary* output, not
-the focused one (`crates/scoot/src/compositor/layer_shell.rs:228-239`), though new
-windows open on the pointer's output (`protocols.md:1017-1021`). That
-inconsistency also hits fuzzel and mako today. It is filed as the core ticket
-[`layer-shell-default-output`](../../docs/backlog/core/layer-shell-default-output.md):
-an output-less layer surface goes to the output with the pointer, as a window does. Until
-it lands, scootlaunch takes an on-demand foreign-toplevel snapshot (the output of the
-`activated` toplevel, else null), as scootnotify does.
+**Which output.** The launcher should open where the user is looking. A `layer_surface` with a
+null output lands on scoot's *primary* output today
+(`crates/scoot/src/compositor/layer_shell.rs:228-239`), though new windows open on the pointer's
+output (`protocols.md:1017-1021`). That inconsistency hits fuzzel and mako today too, neither of
+which sets an output. It is the core ticket
+[`layer-shell-default-output`](../../docs/backlog/core/layer-shell-default-output.md), which is
+unblocked and can land before any of this. Which output counts as the one "most recently
+interacted with" (the wlr-layer-shell wording) is
+[Decisions needed (a)](shell-apps.md#decisions-needed). scootlaunch passes a null output and
+carries no output logic of its own.
 
 ## Launching correctly
 
@@ -297,7 +311,7 @@ In order, on Enter (or a click):
    (signature checked against `org.freedesktop.systemd1(5)`) with
    `app-scootlaunch-<escaped id>-<random>.scope`, the scheme systemd documents for launchers
    (`app[-<launcher>]-<ApplicationID>-<RANDOM>.scope`), mode `fail`, and properties
-   `PIDs = [pid]` and `CollectMode = inactive-or-failed`. **Verify in `launch-ui`** which
+   `PIDs = [pid]` and `CollectMode = inactive-or-failed`. **Verify in `launch-spawn`** which
    slice systemd's desktop-environment page asks for (`app.slice` is the expectation),
    and that the job completes before the launcher exits. The wait is bounded at
    500 ms. The child runs a few hundred microseconds in the launcher's cgroup before the
@@ -329,13 +343,15 @@ is supported with fuzzel's meaning:
 | `--only-match` | Enter with no match does nothing (without it, the typed text is printed) |
 | `--list-executables-in-path` | run mode |
 | `--layer=overlay` | accepted; scootlaunch is always `overlay` (`top` is hidden under fullscreen, `protocols.md:415-427`) |
-| `--background-color --text-color --border-color --selection-color --selection-text-color --match-color --prompt-color` (`rrggbbaa`) | accepted as per-invocation overrides of the roles in [the table below](#stylix-and-look-integration) (`background`/`surface`, `foreground`, `focus`, `accent`, `accent-fg`, `hover`, `foreground`), above the user's file and the look, so `fuzzel-theme.nix`'s flags and users' scripts keep working |
+| `--background-color --text-color --border-color --selection-color --selection-text-color --match-color --prompt-color` (`rrggbbaa`) | accepted as per-invocation overrides of the roles in [the table below](#stylix-and-look-integration) (`surface`, `foreground`, `focus`, `selection`, `selection-text`, `match`, `foreground`), above the user's file and the look, so `fuzzel-theme.nix`'s flags and users' scripts keep working |
 
 Plus dmenu's own `--index` (print the 0-based index) and `--placeholder`. **Any other
 flag is a loud error** (exit 2, naming the flag and the supported list), never
 silently ignored. A misparsed flag that takes a value would eat the next argument. This
 stays safe because the call sites in this repo are enumerated, and an eval pin
-(`nix/tests.nix`) keeps them inside the supported set.
+(`nix/tests.nix`) keeps them inside the supported set. The cost is that a user's own script using
+another fuzzel flag fails loudly at the switch. That is chosen deliberately, and it is
+[Decisions needed (c)](shell-apps.md#decisions-needed): the opt-in period is the discovery window.
 
 Bounds: stdin is at most 1 MiB and 65,536 lines, each at most 4 KiB (longer lines are cut at a
 char boundary). Non-UTF-8 input is decoded lossily. stdin is read to EOF before
@@ -379,14 +395,15 @@ src/dmenu.rs, windows.rs, agent.rs
 - `scootui` features: `widgets`, `icons` + `png` (+ `svg`), `wayland`, `keyboard`.
 - `scoot-dbus` for `systemd1` and `org.freedesktop.Application`.
 - `scootbg-mem`.
-- `wayland-client`, `wayland-protocols` (`staging`: `xdg-activation`, `ext-foreign-toplevel-list`).
-- `wayland-protocols-wlr` (layer shell, foreign-toplevel management).
+- `wayland-client`, `wayland-protocols` (`staging`: `xdg-activation`).
+- `wayland-protocols-wlr` (layer shell, foreign-toplevel management for windows mode).
 - `rustix`, `serde`, `serde_json`, `toml`.
 
 The **one candidate new external dependency is `resvg`**
 (0.48.1, Apache-2.0 OR MIT, with `tiny-skia` BSD-3-Clause), because a large share of
-apps ship only `scalable/apps/*.svg` icons. It sits behind a default-on `svg` feature,
-with its size row measured in `launch-ui` for a maintainer waiver ruling
+apps ship only `scalable/apps/*.svg` icons. The lookup prefers a PNG of the right size when
+the theme has one, and rasterizes SVG only when none exists. It sits behind a default-on `svg`
+feature, with its size row measured in `launch-icons` for a maintainer waiver ruling
 ([Decisions needed](shell-apps.md#decisions-needed), item 6). Without it, the fallback is a
 letter tile in the `accent` color.
 
@@ -428,7 +445,7 @@ own directory, so they are treated as untrusted input:
   arguments.
 - Icon paths must be absolute, regular files, at most 8 MiB, and PNG or SVG. An SVG gets a
   node-count cap and a render-size cap, and no external references (resvg resolves none by
-  default; `launch-ui` verifies it).
+  default; `launch-icons` verifies it).
 - dmenu stdin bounds are above. The password field is zeroized on drop
   ([shell-apps.md](shell-apps.md#keyboard-and-text-entry)), and the password is written to
   stdout only on Enter.
@@ -451,35 +468,34 @@ own directory, so they are treated as untrusted input:
 
 ## Stylix and look integration
 
-scootlaunch takes its theme only through the live-looks contract ([shell-apps.md](shell-apps.md#theme-the-live-looks-contract-stylix-and-looks); PR #578).
-At every open it reads `$XDG_STATE_HOME/scoot/look/launch.toml` merged **under** its own
-`launch.toml` per key. It needs no reload, and it never reads Stylix. The look-layer loader
-takes only allowlisted keys (colors, radius, border width, font, opacity), and strings
-pass the contract's grammar. `terminal` and anything else that runs a command is user
-config only.
+scootlaunch takes its theme only through the live-looks contract
+([shell-apps.md](shell-apps.md#theme-the-live-looks-contract-stylix-and-looks); PR #578 §9). At every
+open it reads `<state>/look/launch.toml` (#578 §4.1), merged per key as
+flags > its own `launch.toml` > the look > its defaults (#578 §4.3). It needs no reload, and it never
+reads Stylix. The loader takes only the keys #578's allowlist names for scootlaunch, and
+strings pass the contract's value grammar (#578 §3.4, §3.5). `terminal`, and anything else that
+runs a command, is user config only.
 
-Per element, with the contract's roles. The last column shows that the shipped looks
-draw what fuzzel draws for them today:
+Per element, with #578 §3.2's roles. The last column shows that the shipped looks draw what fuzzel
+draws for them today:
 
 | Element | Role | Through the `stylix` look | Shipped looks, today's fuzzel flag (`fuzzel-theme.nix:15-21`) |
 |---|---|---|---|
-| Panel fill | `surface`, alpha from `shape.popup-opacity` (request 2) | `base01` × `opacity.popups` | `--background-color` = `barColors.background` |
+| Panel fill | `surface` (default `background`), alpha `opacity.popups` | `base00` × Stylix `opacity.popups` | `--background-color` = `barColors.background` |
 | Input and row text, prompt | `foreground` | `base05` | `--text-color`, `--prompt-color` = `barColors.foreground` |
 | Placeholder, generic name, comment | `dim` | `base03` | — |
-| Matched characters | `hover` | `base0D` | `--match-color` = `barColors.hover or barColors.accent` (`hover` defaults to `accent`) |
-| Selected row fill | `accent` | `base0D` | `--selection-color` = `barColors.accent` |
-| Selected row text | `accent-fg` | `base00` (the contract's default: `background`) | `--selection-text-color` = `barColors.background` |
-| Panel border | `focus` (request 1) | `base0D` | `--border-color` = `appearance.focus_ring_active_color` |
+| Matched characters | `match` (default `hover`) | `base0A` | `--match-color` = `barColors.hover or barColors.accent` |
+| Selected row fill | `selection` (default `accent`) | `base02` | `--selection-color` = `barColors.accent` |
+| Selected row text | `selection-text` (default `accent-fg`, default `background`) | `base05` | `--selection-text-color` = `barColors.background` |
+| Panel border | `focus` (default `accent`) | `base0D` | `--border-color` = `appearance.focus_ring_active_color` |
 | Caret, entry focus ring | `accent` | `base0D` | — |
-| Text selection in the entry | `selection`, text per [request 5](shell-apps.md#requests-to-the-contract) | `base02` | — |
+| Text selection in the entry | `selection` / `selection-text` | `base02` / `base05` | — |
 | Corners | `shape.radius` | the contract's default | — |
-| Font | `fonts.ui`, `fonts.popup-size` (request 2) | `sansSerif`, `sizes.popups` | fuzzel's own font |
+| Font | `fonts.ui` at `fonts.popup-size` | `sansSerif` at `sizes.popups` | fuzzel's own font |
 | Icon theme | `[icons] theme` | the contract's default | the look's `Adwaita` (`theme-look.nix`) |
 
-Stylix's own fuzzel target puts the selected row on `base02` with `base05` text and the match
-on `base0A`. Through the contract, a Stylix user's launcher instead uses `base0D` and `base00`,
-like every other app on that look. That is the contract's call (one vocabulary), and it
-is noted here so nobody files it as a regression.
+Through the `stylix` look this is what Stylix's own fuzzel target draws: a `base00` panel, `base02`
+selection with `base05` text, `base0A` match and a `base0D` border (#578 §9).
 
 **Nix.** `programs.scootlaunch` has `enable`, `package`, `features` and `settings` (the user's
 TOML only, into `scoot/launch.toml`). There is no `stylix.enable` and no unit.
@@ -544,13 +560,16 @@ TOML only, into `scoot/launch.toml`). There is no `stylix.enable` and no unit.
 | Slug | Serves | Blocked by |
 |---|---|---|
 | [`launcher`](../../docs/scootbar/backlog/launcher.md) (epic) | daily-drive, computer use | its children |
-| [`launch-desktop-index`](../../docs/scootbar/backlog/launch-desktop-index.md): parser, ids, locale, Exec, cache; `--list --json` | computer use, daily-drive | `scootui-extract-draw` |
+| [`launch-prototype`](../../docs/scootbar/backlog/launch-prototype.md): the go/no-go gate, out of the workspace | daily-drive | `scootui-keyboard-spike` |
+| [`launch-desktop-index`](../../docs/scootbar/backlog/launch-desktop-index.md): parser, ids, locale, Exec, cache; `--list --json` | computer use, daily-drive | the GO verdict in `launch-prototype` |
 | [`launch-match-rank`](../../docs/scootbar/backlog/launch-match-rank.md): fuzzy, frecency; `--query --json` | both | `launch-desktop-index` |
-| [`launch-ui`](../../docs/scootbar/backlog/launch-ui.md): the panel, launching (token, scope), icons; the go/no-go gate | daily-drive | `launch-match-rank`, `scootui-entry-and-list`, `scoot-dbus-extract` |
-| [`launch-dmenu`](../../docs/scootbar/backlog/launch-dmenu.md): the dmenu contract and run mode | daily-drive | `launch-ui` |
-| [`launch-agent-json`](../../docs/scootbar/backlog/launch-agent-json.md): `--run-id`, the documented schema | computer use | `launch-ui` |
-| [`launch-windows-mode`](../../docs/scootbar/backlog/launch-windows-mode.md) | daily-drive | `launch-ui` |
-| [`launch-nix`](../../docs/scootbar/backlog/launch-nix.md): module, the look layer, profile switch (opt-in) | daily-drive | `launch-dmenu` |
+| [`launch-ui`](../../docs/scootbar/backlog/launch-ui.md): the panel, keys, list, the look layer | daily-drive | `launch-match-rank`, `scootui-entry-and-list`, `scootui-surfaces-on-demand`, `look-format` |
+| [`launch-spawn`](../../docs/scootbar/backlog/launch-spawn.md): the activation token, the environment, the systemd scope, the fallback fork, `DBusActivatable` | daily-drive | `launch-ui`, `scoot-dbus-extract` |
+| [`launch-icons`](../../docs/scootbar/backlog/launch-icons.md): theme inheritance, PNG first, `resvg` behind `svg` with its size row | daily-drive | `launch-ui` |
+| [`launch-dmenu`](../../docs/scootbar/backlog/launch-dmenu.md): the dmenu contract and run mode | daily-drive | `launch-spawn` |
+| [`launch-agent-json`](../../docs/scootbar/backlog/launch-agent-json.md): `--run-id`, the documented schema | computer use | `launch-spawn` |
+| [`launch-windows-mode`](../../docs/scootbar/backlog/launch-windows-mode.md) (low; after the switch) | daily-drive | `launch-nix` |
+| [`launch-nix`](../../docs/scootbar/backlog/launch-nix.md): module, the look layer, profile switch (opt-in) | daily-drive | `launch-dmenu`, `launch-icons`, `look-format` |
 | [`launch-packaging`](../../docs/scootbar/backlog/launch-packaging.md) | daily-drive | `launch-nix` |
 | [`launch-default-flip`](../../docs/scootbar/backlog/launch-default-flip.md) | daily-drive | `launch-packaging`, `launch-agent-json` |
-| [`layer-shell-default-output`](../../docs/backlog/core/layer-shell-default-output.md) (core) | daily-drive | none (independent) |
+| [`layer-shell-default-output`](../../docs/backlog/core/layer-shell-default-output.md) (core) | daily-drive | none: start now |

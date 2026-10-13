@@ -13,15 +13,18 @@ Filed 2026-10-12 from the [scootnotify design](../../../dev/design/scootnotify.m
 
 ## What to do
 
-deb (the `build-deb.sh` loop and `deb-meta.py` tables), rpm (`%check` with `--check`), Arch
-(`scootnotify` and `-git`), each with the user unit, the activation file and an example
-config; `install.sh --notify` (refusing while another daemon owns the name, naming it); the
-site `/scootnotify/` section per `site/OUTLINE.md` with sidebar and `customSets`.
+- **Packages**, each with the user unit, the activation file and an example config:
+  - deb: the `build-deb.sh` loop and the `deb-meta.py` tables;
+  - rpm: `%check` with `--check`;
+  - Arch: `scootnotify` and `-git`.
+- **`install.sh --notify`**, refusing while another daemon owns the name, and naming it.
+- **The site's `/scootnotify/` section**, per `site/OUTLINE.md`, with its sidebar entry and
+  `customSets`.
 
 ## Acceptance
 
-Each package builds in CI's packaging jobs and installs on a clean container; the site builds
-with the snippet gates green.
+Each package builds in CI's packaging jobs and installs on a clean container, and the site
+builds with the snippet gates green.
 
 ## Evidence the review needs
 

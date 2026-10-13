@@ -9,28 +9,37 @@ blocked: "greet-scoot-kiosk-spike"
 # scoot: a greeter-host mode
 
 Filed 2026-10-12 from the [scootgreet design](../../../dev/design/scootgreet.md#what-scoot-would-need). Serves
-**daily-drive**, opt-in only.
+**daily-drive**, opt-in only. Reached only if cage fails the GPU-free check
+(see [greet-scoot-kiosk-spike](../../scootbar/backlog/greet-scoot-kiosk-spike.md)).
 
 ## The gap
 
-Today scoot always creates its IPC socket (`crates/scoot/src/compositor/mod.rs:449`), ships 45
-default binds including a terminal with no no-binds mode (`config.rs:1750-1762`), reads the
-user's config dir, and does not exit when its `--` child exits
-(`site/src/content/docs/scoot/index.md:104-108`). Each is right for a session and wrong for a
-login screen.
+Each of these is right for a session and wrong for a login screen:
+
+- scoot always creates its IPC socket (`crates/scoot/src/compositor/mod.rs:449`);
+- it ships 45 default binds, including a terminal, with no no-binds mode (`config.rs:1750-1762`);
+- it reads the user's config dir;
+- it does not exit when its `--` child exits (`site/src/content/docs/scoot/index.md:104-108`).
 
 ## What to do
 
-The flag set the [spike](../../scootbar/backlog/greet-scoot-kiosk-spike.md) settles: no IPC
-socket, only the always-enforced VT-switch binds, config from an explicit root-owned path,
-XWayland refused, exit with the child's status, a reduced global list. Exposed to NixOS as
-`programs.scoot.greeter.host = "scoot"` (default `"cage"`).
+The flag set the spike settles:
+
+- no IPC socket;
+- only the always-enforced VT-switch binds;
+- config from an explicit root-owned path;
+- XWayland refused;
+- exit with the child's status;
+- a reduced global list.
+
+It is exposed to NixOS as `programs.scoot.greeter.host = "scoot"`, with `"cage"` the default.
 
 ## Acceptance
 
-Tests that each restriction holds (no socket file, a default bind does nothing, XWayland
-refused, exit status propagated); the M2 handover as the spike measured it; an independent
-security review of the global list.
+- Tests that each restriction holds: no socket file, a default bind does nothing, XWayland is
+  refused, and the exit status is propagated.
+- The M2 handover, as the spike measured it.
+- An independent security review of the global list.
 
 ## Not in this ticket
 

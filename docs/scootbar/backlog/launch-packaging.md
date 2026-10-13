@@ -13,12 +13,15 @@ Filed 2026-10-12 from the [scootlaunch design](../../../dev/design/scootlaunch.m
 
 ## What to do
 
-deb, rpm, Arch; `install.sh --launch`; the site `/scootlaunch/` section with the dmenu flag
-table, troubleshooting boxes, sidebar and `customSets`.
+- deb, rpm and Arch packages.
+- `install.sh --launch`.
+- The site's `/scootlaunch/` section, with the dmenu flag table, troubleshooting boxes, its
+  sidebar entry and `customSets`.
 
 ## Acceptance
 
-Packages build and install in CI's containers; the site builds with snippet gates green.
+The packages build and install in CI's containers, and the site builds with the snippet gates
+green.
 
 ## Evidence the review needs
 

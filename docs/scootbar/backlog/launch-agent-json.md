@@ -3,7 +3,7 @@ title: "scootlaunch: `--run-id` and the documented JSON schema for agents"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-ui"
+blocked: "launch-spawn"
 milestone: "M7"
 ---
 
@@ -14,13 +14,14 @@ Filed 2026-10-12 from the [scootlaunch design](../../../dev/design/scootlaunch.m
 
 ## What to do
 
-`--run-id ID [--action A]` through the same spawn path without a surface; the JSON schema
-for `--list`, `--query` and `--run-id` documented on the site and on the agents page.
+- `--run-id ID [--action A]` through the same spawn path, without a surface.
+- The JSON schema for `--list`, `--query` and `--run-id`, documented on the site and on the
+  agents page.
 
 ## Acceptance
 
-An agent-shaped test over the headless harness: list, query, run, then the window found by
-`scoot msg windows`; exit codes and error objects pinned.
+An agent-shaped test over the headless harness: list, query, run, then find the window with
+`scoot msg windows`. The exit codes and error objects are pinned.
 
 ## Evidence the review needs
 

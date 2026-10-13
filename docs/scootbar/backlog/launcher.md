@@ -12,6 +12,25 @@ milestone: "M7"
 Filed 2026-09-29 as a pointer, not a spec: it gets its own backlog and design
 pass when it starts. Serves **daily-drive**.
 
+## The plan (2026-10-12)
+
+The design is [dev/design/scootlaunch.md](../../../dev/design/scootlaunch.md); shared parts are in
+[shell-apps.md](../../../dev/design/shell-apps.md). The name stays `scootlaunch`, though the request said
+"scootlauncher" ([why](../../../dev/design/shell-apps.md#names)).
+
+Children, in order:
+
+1. [launch-prototype](launch-prototype.md): the go/no-go gate against fuzzel, out of the
+   workspace.
+2. [launch-desktop-index](launch-desktop-index.md), then [launch-match-rank](launch-match-rank.md).
+3. [launch-ui](launch-ui.md), then [launch-spawn](launch-spawn.md) and [launch-icons](launch-icons.md).
+4. [launch-dmenu](launch-dmenu.md) and [launch-agent-json](launch-agent-json.md).
+5. [launch-nix](launch-nix.md), [launch-packaging](launch-packaging.md),
+   [launch-default-flip](launch-default-flip.md); later, [launch-windows-mode](launch-windows-mode.md).
+
+Compositor side: [layer-shell-default-output](../../backlog/core/layer-shell-default-output.md).
+Resource tables are published here per milestone, against fuzzel, tofi, bemenu and wofi.
+
 **Name: `scootlaunch`** (settled 2026-09-29, over `scootmenu`); the picker is
 its `--dmenu` mode.
 
@@ -34,31 +53,7 @@ Its own small binary in the same shell family as the bar and
 Same standards: lowest resource use of its class, a resource ratchet against
 `fuzzel`, `wofi`, `tofi` and `bemenu`, docs in the same PR, a Nix module.
 
-## The plan (2026-10-12)
-
-The design pass happened: [dev/design/scootlaunch.md](../../../dev/design/scootlaunch.md), with the parts it
-shares in [shell-apps.md](../../../dev/design/shell-apps.md). The name stays `scootlaunch`; the request said
-"scootlauncher" ([why](../../../dev/design/shell-apps.md#names)).
-
-Children, in order (each `blocked` names its predecessors):
-
-1. [launch-desktop-index](launch-desktop-index.md): parser, ids, locale, Exec, cache; `--list --json`.
-2. [launch-match-rank](launch-match-rank.md): fuzzy and frecency; `--query --json`.
-3. [launch-ui](launch-ui.md): the panel, launching (token, scope), icons; the go/no-go gate against fuzzel.
-4. [launch-dmenu](launch-dmenu.md), [launch-agent-json](launch-agent-json.md),
-   [launch-windows-mode](launch-windows-mode.md).
-5. [launch-nix](launch-nix.md): module, Stylix, look; the opt-in launcher and picker switch.
-6. [launch-packaging](launch-packaging.md), then [launch-default-flip](launch-default-flip.md).
-
-Shared prerequisites: [scootui-entry-and-list](scootui-entry-and-list.md) (and through it the
-keyboard spike and stack), and [scoot-dbus-extract](scoot-dbus-extract.md). On the compositor
-side: [layer-shell-default-output](../../backlog/core/layer-shell-default-output.md).
-
-## Resource ratchet
-
-Published here per milestone until the app gets its own backlog, against fuzzel, tofi, bemenu
-and wofi ([budgets](../../../dev/design/scootlaunch.md#budgets)).
-
-## Theming
-
-Through the live-looks contract only (PR #578; [how this plan maps onto it](../../../dev/design/shell-apps.md#theme-the-live-looks-contract-stylix-and-looks)): the app reads the look layer under its own config, never Stylix.
+Theming contract (added 2026-10-12): read the look layer at launch, never
+Stylix or a palette of its own; see the [live looks design](../../../dev/research/live-looks-design.md),
+section 9. A `Look:` list through the dmenu mode is an optional hook
+([`look-picker`](look-picker.md)).
