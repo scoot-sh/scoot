@@ -751,21 +751,26 @@ fn field(shape: Shape, size: i32, alpha: f64) -> (Vec<Prim>, Option<Shadow>) {
 }
 
 /// The arrow body: an original six-vertex silhouette pointing north-west --
-/// a vertical left edge, a concave notch, and a tail running down-right --
-/// chamfered at its convex corners and inset for outline, shadow and bleed.
+/// a straight vertical left edge, an exact 45-degree hypotenuse, a concave
+/// notch, and a short flat-ended tail running down-right with parallel
+/// vertical edges -- chamfered lightly at its convex corners and inset for
+/// outline, shadow and bleed.
 ///
-/// Every edge is axis-aligned or exactly 45 degrees, and the fractions are
-/// chosen so that at the default 16px size (tip inset 2, bottom-right pad 4,
-/// hence a 10px drawable box) the left edge sits exactly on a pixel column,
-/// the long diagonal runs through pixel corners, and the tail's long edges
-/// are vertical pixel columns with an end slanting one pixel down to the
-/// right. No long edge straddles a pixel crack, so the 1px outline stays a
-/// crisp rim instead of a grey fringe -- which is what keeps white fill
-/// visible on light backgrounds rather than drowning it in outline.
+/// Every vertex sits on a pixel corner at the default 16px size (tip inset 2,
+/// bottom-right pad 4, hence a 10px drawable box, so tenths of the box are
+/// whole pixels): the left edge is exactly one pixel column, the long
+/// diagonal runs through pixel corners, the tail's long edges are vertical
+/// pixel columns and its end a horizontal row. No long edge straddles a
+/// pixel crack, so the 1px outline stays a crisp rim instead of a grey
+/// fringe -- which is what keeps white fill visible on light backgrounds
+/// rather than drowning it in outline.
 ///
-/// Fractions are of the drawable box (`size` minus the insets), so the
-/// shape at 4px and at 256px is the same drawing, not the same pixel count.
-fn arrow(size: i32, round: f64, alpha: f64) -> (Vec<Prim>, Option<Shadow>) {
+/// The notch is 3px deep with a 2px-tall background cut above the tail, so
+/// the cut survives the outline band and the shadow on both backgrounds;
+/// the head keeps a 4px-wide flat fill core at its widest. Fractions are of
+/// the drawable box (`size` minus the insets), so the shape at 4px and at
+/// 256px is the same drawing, not the same pixel count.
+fn arrow(size: i32, _round: f64, alpha: f64) -> (Vec<Prim>, Option<Shadow>) {
     let (tx, ty) = arrow_tip(size);
     let br = arrow_pad_br(size);
     // A bitmap too small for the insets gets an honest dot, not a polygon
@@ -790,11 +795,18 @@ fn arrow(size: i32, round: f64, alpha: f64) -> (Vec<Prim>, Option<Shadow>) {
     // The tail's two long edges (notch->tail-left and barb->tail-right) are
     // parallel by construction: barb = tail-right - (tail-left - notch).
     // The long diagonal is exactly 45 degrees (barb - tip is (t, t)), the
-    // tail edges are vertical, and the tail end slants one pixel down to
-    // the right -- every edge snapped, none straddling a pixel crack.
-    let notch = (0.20 * bw, 0.50 * bh);
-    let tail_left = (0.20 * bw, 0.86 * bh);
-    let tail_right = (0.60 * bw, 0.96 * bh);
+    // tail edges are vertical pixel columns, and the tail end is one flat
+    // horizontal row -- every vertex snapped, none straddling a pixel crack.
+    // The chamfer is the arrow's own, much smaller than the line-art
+    // rounding: at 16px the tip keeps a covered hotspot pixel and the tail
+    // corners stay square; it grows with the bitmap so large cursors are
+    // lightly rounded, never razor-sharp nor blobby. (`_round` is the
+    // line-art value, unused here: sharing it would blunt the tip over ~2px
+    // of blend at 16px, the round-2 teardrop.)
+    let arrow_round = (f64::from(size) / 80.0).clamp(0.2, 2.0);
+    let notch = (0.30 * bw, 0.50 * bh);
+    let tail_left = (0.30 * bw, 0.90 * bh);
+    let tail_right = (0.60 * bw, 1.00 * bh);
     let barb = (
         tail_right.0 - (tail_left.0 - notch.0),
         tail_right.1 - (tail_left.1 - notch.1),
@@ -811,7 +823,7 @@ fn arrow(size: i32, round: f64, alpha: f64) -> (Vec<Prim>, Option<Shadow>) {
     .map(|(x, y)| (ox + x, oy + y))
     .collect::<Vec<_>>();
     (
-        vec![Prim::Poly(chamfer(&poly, round, Some(0)))],
+        vec![Prim::Poly(chamfer(&poly, arrow_round, Some(0)))],
         arrow_shadow(size, alpha),
     )
 }
