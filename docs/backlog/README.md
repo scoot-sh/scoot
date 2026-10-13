@@ -270,8 +270,8 @@ falsify. Read `flexwm` there as `scoot`.
   zero new state
 - [`ext-workspace-v1` `urgent` state bit](./protocols/ext-workspace-urgent-state.md) — low, filed 2026-09-29 (scootbar planning); needs a policy decision first, since an xdg-activation request always focuses today
 - [Turn screens off when idle (`wlr-output-power-management`)](./resolved/output-power-management-done.md) — RESOLVED 2026-10-04 (daily-drive: idle Asahi laptop keeps both panels lit; agent IPC half included)
-- [Smaller/general protocol gaps (bundled)](./protocols/protocol-gaps-general.md)
-- [Niche protocol gaps (bundled)](./protocols/protocol-gaps-niche.md)
+- [Smaller/general protocol gaps (bundled)](./resolved/protocol-gaps-general-bundle-done.md) — every item resolved; archived 2026-10-12
+- [Niche protocol gaps (bundled)](./resolved/protocol-gaps-niche-bundle-done.md) — every item resolved or a recorded non-entry; archived 2026-10-12
 - [Virtual pointer and keyboard protocols, so wayvnc gives full remote control](./resolved/virtual-input-remote-control-done.md) — RESOLVED 2026-10-05 (PR #448): both managers behind `[virtual_input] enabled`, refused under lock, keys translated by keysym; capture already worked
 - [Per-client allow-list for the virtual-input globals via `security-context-v1`](./resolved/virtual-input-allow-list-done.md) — CLOSED 2026-10-08 as an accepted tradeoff (no code): `security-context-v1` marks sandboxed clients only, so it cannot tell wayvnc from any other same-uid client; the on/off switch stays the whole gate
 - [Opt-in keybindings for virtual keyboards](./resolved/virtual-input-binds-done.md) — RESOLVED 2026-10-07 (PR #494): `[virtual_input] binds` (default off, restart-only) lets virtual keys run binds by seat keysym for webtop/try-scoot sessions

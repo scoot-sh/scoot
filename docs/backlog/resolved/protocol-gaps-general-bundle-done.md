@@ -1,7 +1,7 @@
 ---
 title: "Smaller/general-client-compatibility protocol gaps, lower urgency, bundled here as one entry since none has design work done and none is blocking anything else on this list."
 status: "resolved"
-area: "protocols"
+area: "resolved"
 priority: "low"
 blocked: null
 ---
