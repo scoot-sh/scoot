@@ -169,6 +169,12 @@ Shared foundation ([epic](extract-scootui.md)):
 - [NixOS and the agreety fallback](greet-nixos.md), [packaging, docs and the ISO](greet-packaging-iso.md), [flip the default](greet-default-flip.md)
 - Later, opt-in: [spike: scoot as the host](greet-scoot-kiosk-spike.md), then the [core ticket](../../backlog/core/scoot-greeter-mode.md)
 
+### Live looks (filed 2026-10-12)
+The bar's half of the [live-looks epic](../../backlog/core/live-looks.md) ([design](../../../dev/research/live-looks-design.md)):
+- [scootbar reads a look layer under bar.toml, with a look-scoped reload](look-layer-scootbar.md) (high, blocked on `look-format`)
+- [A style-only reload keeps every module running and repaints](scootbar-style-reload.md) (medium)
+- [A looks picker: a bar popup module, a default keybinding, a launcher list](look-picker.md) (medium, blocked on `look-apply-cli`)
+
 ### Unscheduled (until someone asks)
 - [Gate integration tests on module features, tidy the unit-test script](resolved/scootbar-test-gating-and-script-hygiene-done.md) (low) — RESOLVED 2026-10-08 in #527
 - [Documented exec recipes for CPU/memory/pressure readouts](resolved/exec-stats-recipes-done.md) (low) — RESOLVED 2026-10-08 in #519: CPU, memory and PSI-stall exec recipes beside the exec module, each with cost and reload behavior
