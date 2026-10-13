@@ -210,8 +210,8 @@ fn bitmap_honors_the_requested_size() {
             "size {size}'s tip should be drawn"
         );
         // ... while the bitmap's own corners stay transparent padding wherever
-        // the insets fit: the tip's outline inset at the top-left, the
-        // shadow's at the bottom-right. That padding is what keeps the
+        // the insets fit: the tip's outline inset at the top-left, the clear
+        // pixel past every rim elsewhere. That padding is what keeps the
         // outline unclipped. (At the 4px minimum the whole bitmap is a dot
         // with a halo -- there is no room for padding, and the shapes tests
         // pin down what that dot guarantees instead.)
@@ -238,7 +238,7 @@ fn bitmap_honors_the_requested_colors() {
     let outline = [0x44, 0x55, 0x66, 0x80];
     let pixels = shapes::generate(Shape::Arrow, 24, fill, outline, None);
     // Outline is written with its own alpha, not forced opaque ...
-    let edge = pixel(&pixels, 24, 2, 8);
+    let edge = pixel(&pixels, 24, 1, 8);
     assert_eq!(edge, outline, "the outline edge");
     // ... and the fill likewise.
     assert_eq!(pixel(&pixels, 24, 4, 6), fill, "the interior");
@@ -1175,12 +1175,12 @@ fn a_configured_cursor_size_and_color_reach_the_rendered_pixels() {
     // The size took: the element is 48x48 (asserted through its geometry in
     // `rebuild_redraws_the_same_cursor_at_the_new_size_theme_and_color`, and
     // the interior fill above only exists in a 48px drawing), while the last
-    // row stays clear -- the arrow's bottom-right inset (outline plus
-    // shadow), which is what keeps those pixels unclipped.
+    // row stays clear -- the clear pixel past the rim, which is what keeps
+    // the rim unclipped.
     assert_eq!(
         canvas.at(px + 1, py + SIZE - 1),
         CLEAR_BGRA,
-        "the bottom row is the shadow's padding, not fill"
+        "the bottom row is padding past the rim, not fill"
     );
     assert_eq!(
         canvas.at(px + 1, py + SIZE),
@@ -1189,30 +1189,31 @@ fn a_configured_cursor_size_and_color_reach_the_rendered_pixels() {
     );
 }
 
-/// The default accent reaches the drawn pixels: the arrow's tail hint lands
+/// The default accent reaches the drawn pixels: the arrow's tail tip lands
 /// on the canvas in the ginger bytes, and disabling the accent leaves the
-/// body's own fill there instead. The bitmap position (6, 11) is the pinned
-/// tail-hint pixel from the shapes tests, translated through the hotspot.
+/// body's own fill there instead. The bitmap position (5, 11) is the pinned
+/// tail-tip pixel from the shapes tests, translated through the hotspot
+/// (2, 2) to the pointer at (50, 50).
 #[test]
 fn the_default_accent_reaches_the_rendered_pixels() {
     let canvas = Fixture::new().frame();
     assert_eq!(
-        canvas.at(54, 59),
+        canvas.at(53, 59),
         ACCENT_BGRA,
-        "the tail hint should wear the ginger accent"
+        "the tail tip should wear the ginger accent"
     );
     let bare = Fixture::with_appearance(Appearance {
         cursor_accent: None,
         ..Appearance::default()
     })
     .frame();
-    // The mark is gone (that pixel straddles the tail's end edge, so without
-    // the accent's paint it is a body/rim blend, never the ginger bytes) --
-    // and the body's own interior is untouched.
-    assert_ne!(
-        bare.at(54, 59),
-        ACCENT_BGRA,
-        "with the accent off no ginger pixel survives"
+    // The mark is gone (that pixel is inside the tail, so without the
+    // accent's paint it is the body's own fill) -- and the body's interior
+    // elsewhere is untouched.
+    assert_eq!(
+        bare.at(53, 59),
+        FILL_BGRA,
+        "with the accent off the tail tip is the body again"
     );
     assert_eq!(
         bare.at(51, 53),

@@ -37,12 +37,15 @@
 //! [`CursorImageStatus::Named`], which is the point of the protocol: the
 //! compositor's own shapes, consistently, across every client that asks.
 //!
-//! Every one of those bitmaps is procedurally generated, not an embedded
-//! image file or a copy of any cursor theme's actual pixel data -- niri's own
-//! cursor assets are GPL, Adwaita's aren't MIT-clean, and `CLAUDE.md`'s
-//! license note says not to borrow either. They are line art, not
-//! pixel-accurate theme shapes, and this module ships none of its own: no
-//! asset is embedded or vendored anywhere in this project.
+//! Every one of those bitmaps is rasterised at startup from vector outlines,
+//! not loaded from an image file. Most outlines are Mocu's (Severin Meyer's
+//! "modest xcursor theme", CC0 1.0 -- public domain, so MIT-compatible with
+//! no strings; vendored with its license under `cursor/shapes/mocu/` and
+//! credited in `NOTICE`): their SVG path data is filled by scoot's own
+//! rasterizer in the configured colors, at each output's own pixel size.
+//! The paw shapes are scoot's own geometry. Nothing is taken from niri's
+//! cursor assets (GPL) or Adwaita's (not MIT-clean) -- `CLAUDE.md`'s
+//! license note says not to borrow either.
 //!
 //! What *is* honored, when available, is the machine's own already-installed
 //! theme -- reading it carries no licensing obligation, unlike shipping one
@@ -215,6 +218,10 @@ struct ScaleEntry {
     physical: i32,
     /// One bitmap per [`Shape`], indexed by [`Shape::index`].
     shapes: [MemoryRenderBuffer; Shape::COUNT],
+    /// Each bitmap's hotspot, indexed the same way: worked out once with the
+    /// bitmaps (placing the outline art costs a parse), so the frame path
+    /// reads it rather than recomputing it.
+    hotspots: [Point<i32, Logical>; Shape::COUNT],
     /// The theme image for the current status at [`Self::physical`].
     themed: Option<Themed>,
 }
@@ -284,9 +291,7 @@ impl Cursor {
     /// job is to keep the shape's edges legible against content of a similar
     /// color, which a configurable rim could only undo. Matching the fill's
     /// alpha is what makes a translucent `cursor_color` actually look
-    /// translucent instead of an opaque rim around a see-through middle. The
-    /// arrow's soft shadow is likewise derived (28% of the fill's alpha),
-    /// never configured.
+    /// translucent instead of an opaque rim around a see-through middle.
     pub fn new(size: i32, color: Color, accent: Option<Color>, theme_name: Option<&str>) -> Self {
         let size = Appearance::clamp_cursor_size(size);
         let (fill, rim, accent_px) = color_triple(color, accent);
@@ -381,6 +386,7 @@ impl Cursor {
             scale: sane,
             physical,
             shapes,
+            hotspots: Shape::ALL.map(|shape| shape.hotspot(physical)),
             themed: None,
         };
         entry.themed = self.resolve_themed(entry.physical);
@@ -751,7 +757,7 @@ impl Cursor {
                 let physical = entry.physical;
                 (
                     &entry.shapes[shape.index()],
-                    shape.hotspot(physical),
+                    entry.hotspots[shape.index()],
                     Rectangle::<f64, Logical>::from_size(Size::from((
                         f64::from(physical),
                         f64::from(physical),

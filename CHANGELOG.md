@@ -18,6 +18,11 @@ scoot has not cut a numbered release yet; entries are dated.
   default `#e57f29`): `"none"` (any case) draws no mark, an unset or
   empty value keeps the default. Setting `appearance.cursor_color =
   "#ffffff"` restores the old white-pointer look (with a black rim).
+  The outlines are the CC0 [Mocu](https://github.com/sevmeyer/mocu-xcursor)
+  cursor art (vendored with its license, credited in `NOTICE`), filled by
+  scoot's own rasteriser and fitted to the pixel grid so the 16px default
+  stays crisp; the paw shapes are scoot's own. The old arrow's drop shadow
+  is gone (the rim carries the edge).
   See [Appearance](site/src/content/docs/scoot/appearance.md#the-fallback-cursor-family).
 
 ### Unreleased — sharp cursors on high-DPI outputs (behavior change)

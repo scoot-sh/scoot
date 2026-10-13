@@ -123,40 +123,82 @@ fn named_icons_map_to_the_shape_that_means_them() {
     }
 }
 
+/// The shapes that point with a feature of their art (a tip, a fingertip,
+/// the lens) rather than with their middle.
+const POINTING: [Shape; 9] = [
+    Shape::Arrow,
+    Shape::PointerBadge,
+    Shape::WaitBadge,
+    Shape::Help,
+    Shape::Hand,
+    Shape::Grab,
+    Shape::Grabbing,
+    Shape::ZoomIn,
+    Shape::ZoomOut,
+];
+
 #[test]
-fn the_arrow_family_points_with_its_tip_the_hand_with_its_fingertip() {
-    let size = 16;
-    let (tx, ty) = arrow_tip(size);
-    // The tip sits inside the bitmap (room for rim and shadow), never at
-    // the corner itself -- and the hotspot is exactly that tip.
-    assert!(tx > 0 && ty > 0, "the tip needs its rim inset");
-    for shape in [
-        Shape::Arrow,
-        Shape::PointerBadge,
-        Shape::WaitBadge,
-        Shape::Help,
-    ] {
-        assert_eq!(
-            shape.hotspot(size),
-            (tx, ty).into(),
-            "{shape:?}'s hotspot is its arrow tip, not the bitmap corner"
-        );
+fn every_hotspot_is_mocus_carried_into_the_bitmap() {
+    for size in [16, 20, 24, 32, 48, 256] {
+        for shape in Shape::ALL {
+            let hot = shape.hotspot(size);
+            assert!(
+                hot.x >= 0 && hot.y >= 0 && hot.x < size && hot.y < size,
+                "{shape:?} at {size}px hotspots outside its bitmap at {hot:?}"
+            );
+            if POINTING.contains(&shape) {
+                // A pointing shape's hotspot pixel is part of the drawing:
+                // the user points with what they see.
+                let pixels = paint(shape, size);
+                assert_ne!(
+                    alpha(&pixels, size, hot.x, hot.y),
+                    0,
+                    "{shape:?} at {size}px points with a transparent pixel {hot:?}"
+                );
+            } else {
+                assert_eq!(
+                    hot,
+                    (size / 2, size / 2).into(),
+                    "{shape:?} is symmetric about its middle, so that is its hotspot"
+                );
+            }
+        }
     }
-    // The pointing glove aims with its index fingertip, inside the bitmap.
-    let fingertip = Shape::Hand.hotspot(size);
-    assert!(fingertip.x > 0 && fingertip.y >= 0);
-    assert_eq!(fingertip, hand::fingertip(size));
-    for shape in Shape::ALL.into_iter().filter(|s| {
-        !matches!(
-            s,
-            Shape::Arrow | Shape::PointerBadge | Shape::WaitBadge | Shape::Help | Shape::Hand
-        )
-    }) {
-        assert_eq!(
-            shape.hotspot(size),
-            (size / 2, size / 2).into(),
-            "{shape:?} is symmetric about its middle, so that is its hotspot"
-        );
+}
+
+#[test]
+fn the_arrow_family_points_with_the_arrows_tip() {
+    // The tip pixel is the hotspot: fill is drawn at and just inside it,
+    // never above or left of it (only the rim is there), so the click lands
+    // on the very point of the arrow at every size and on every badge.
+    for size in [16, 20, 24, 32, 48, 256] {
+        let tip = Shape::Arrow.hotspot(size);
+        for shape in [
+            Shape::Arrow,
+            Shape::PointerBadge,
+            Shape::WaitBadge,
+            Shape::Help,
+        ] {
+            assert_eq!(shape.hotspot(size), tip, "{shape:?} at {size}px");
+            let pixels = generate(shape, size, FILL, RIM, None);
+            let deep = size / 8;
+            assert_eq!(
+                pixel(&pixels, size, tip.x + 1, tip.y + 2 + deep),
+                FILL,
+                "{shape:?} at {size}px: the arrow body is not just below its tip"
+            );
+            for (x, y) in [
+                (tip.x - 1, tip.y),
+                (tip.x, tip.y - 1),
+                (tip.x - 1, tip.y - 1),
+            ] {
+                assert_ne!(
+                    pixel(&pixels, size, x, y),
+                    FILL,
+                    "{shape:?} at {size}px draws fill above or left of its tip at ({x}, {y})"
+                );
+            }
+        }
     }
 }
 
@@ -506,40 +548,28 @@ fn disabling_the_accent_keeps_every_shape_but_removes_the_mark() {
 fn the_accent_mark_lands_where_the_shape_promises() {
     // One pinned accent pixel per marked family, so a refactor that silently
     // drops a mark (or moves it off the shape) fails here rather than only
-    // in a screenshot: the arrow's tail hint, the text stem, the move dot,
-    // the crosshair dot. Positions were read off the 16px renders the
-    // concept comparison judged.
-    let size = 16;
-    let arrow = paint(Shape::Arrow, size);
-    assert_eq!(
-        pixel(&arrow, size, 6, 11),
-        ACCENT,
-        "the arrow's tail hint left the tail end"
-    );
-    let text = paint(Shape::Text, size);
-    assert_eq!(
-        pixel(&text, size, 8, 7),
-        ACCENT,
-        "the text stem mark left the stem"
-    );
-    let resize = paint(Shape::ResizeEw, size);
-    assert_eq!(
-        pixel(&resize, size, 8, 8),
-        ACCENT,
-        "the resize centre line left the shaft"
-    );
-    let move_shape = paint(Shape::Move, size);
-    assert_eq!(
-        pixel(&move_shape, size, 8, 8),
-        ACCENT,
-        "the move centre dot left the crossing"
-    );
-    let crosshair = paint(Shape::Crosshair, size);
-    assert_eq!(
-        pixel(&crosshair, size, 8, 8),
-        ACCENT,
-        "the crosshair dot left the centre"
-    );
+    // in a screenshot. Positions were read off the renders the contact
+    // sheet judged, at the 16px default and at 24px (Mocu's own grid, one
+    // unit per pixel).
+    let pins: [(Shape, i32, (i32, i32), &str); 9] = [
+        (Shape::Arrow, 16, (5, 11), "the arrow's tail tip"),
+        (Shape::Arrow, 24, (8, 16), "the arrow's tail tip"),
+        (Shape::Hand, 16, (5, 11), "the hand's cuff"),
+        (Shape::ResizeEw, 16, (8, 8), "the resize shaft"),
+        (Shape::Move, 16, (8, 8), "the move centre"),
+        (Shape::Crosshair, 16, (8, 8), "the crosshair centre"),
+        (Shape::NotAllowed, 16, (5, 5), "the not-allowed slash"),
+        (Shape::SplitV, 16, (8, 8), "the split divider"),
+        (Shape::ResizeNs, 16, (8, 8), "the resize shaft"),
+    ];
+    for (shape, size, (x, y), what) in pins {
+        let pixels = paint(shape, size);
+        assert_eq!(
+            pixel(&pixels, size, x, y),
+            ACCENT,
+            "{what} left its place: {shape:?} at {size}px ({x}, {y})"
+        );
+    }
 }
 
 #[test]
@@ -548,18 +578,13 @@ fn the_balanced_shapes_are_centred_on_the_bitmap() {
     // which only reads correctly if neither end outweighs the other. Exact
     // mirror symmetry is not available to ask for -- a stroke on an
     // even-sized grid cannot straddle the half-pixel the mirror axis falls
-    // on, and the arrow's shadow is deliberately offset -- so what is
-    // asserted is the property that actually shows: the centroid of everything
-    // drawn sits within one pixel of the bitmap's middle. A rasterizer that
-    // biases one end of a stroke moves that centroid and shows up here and
-    // nowhere else. The arrow family is exempt: those bodies are
-    // intentionally asymmetric (and their shadows offset), their balance
-    // point is the tip -- and so is the hand, which aims with its fingertip.
-    // The grab hands and the magnifiers are exempt too: fingers over a palm,
-    // and a lens with a handle, are inherently off-centre mass (the ±1px
-    // bound is absolute, so any asymmetry fails it by 256px), and both read
-    // by silhouette, not by balance -- their hotspot is the middle by
-    // convention, which `the_arrow_family_points...` pins above.
+    // on -- so what is asserted is the property that actually shows: the
+    // centroid of everything drawn sits within one pixel of the bitmap's
+    // middle. A rasterizer or a grid fit that biases one end of a stroke
+    // moves that centroid and shows up here and nowhere else. The pointing
+    // shapes are exempt: the arrow family, the hands and the magnifiers are
+    // asymmetric by design and aim with a feature of their art (see
+    // `every_hotspot_is_mocus_carried_into_the_bitmap`).
     for size in sizes() {
         for shape in [
             Shape::Text,
