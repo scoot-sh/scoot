@@ -368,6 +368,148 @@ fn a_fractional_scale_keeps_the_hotspot_offset_exact() {
 }
 
 // -------------------------------------------------------------------------
+// Scale-aware bitmaps: one prebuilt set per output scale
+// -------------------------------------------------------------------------
+
+/// The bitmap edge for a logical cursor size on an output scale:
+/// `round(logical * scale)` physical pixels. Non-finite scales fall back to
+/// the logical size rather than panicking or allocating absurdly.
+#[test]
+fn hidpi_bitmap_sizes_round_logical_times_scale() {
+    assert_eq!(physical_size(16, 1.0), 16);
+    assert_eq!(physical_size(16, 1.25), 20);
+    assert_eq!(physical_size(16, 1.5), 24);
+    assert_eq!(physical_size(16, 2.0), 32);
+    assert_eq!(physical_size(16, 3.0), 48);
+    assert_eq!(physical_size(24, 2.0), 48);
+    assert_eq!(physical_size(16, f64::NAN), 16);
+    assert_eq!(physical_size(16, 0.0), 16);
+    assert_eq!(physical_size(16, -2.0), 16);
+    // Distinct scales are distinct entries; noise around one value is not.
+    assert_eq!(scale_key(1.0), scale_key(1.0));
+    assert_ne!(scale_key(1.0), scale_key(2.0));
+    assert_eq!(scale_key(f64::NAN), scale_key(1.0));
+}
+
+/// Every scale in use keeps prebuilt bitmaps; the set stays bounded and only
+/// ever changes on cold paths (`ensure_scale`/`sync_scales`, never the frame
+/// path).
+#[test]
+fn hidpi_entries_cover_the_scales_in_use_and_stay_bounded() {
+    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), None, NO_THEME);
+    assert_eq!(cursor.scales.len(), 1, "startup builds scale 1.0");
+    cursor.ensure_scale(2.0);
+    cursor.ensure_scale(1.5);
+    assert_eq!(cursor.scales.len(), 3);
+    let physical: Vec<i32> = cursor.scales.iter().map(|entry| entry.physical).collect();
+    assert!(physical.contains(&16) && physical.contains(&32) && physical.contains(&24));
+    // Re-ensuring a kept scale rebuilds nothing (stable buffer ids, no new
+    // content for the damage tracker): the same scale's elements keep their
+    // `Id`s across the call.
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let pointer = Point::<f64, Logical>::from((10.0, 10.0));
+    let before = cursor.element(&mut renderer, pointer, 2.0);
+    cursor.ensure_scale(2.0);
+    let after = cursor.element(&mut renderer, pointer, 2.0);
+    assert_eq!(before[0].id(), after[0].id());
+    // The set is bounded: more distinct scales than fits evicts the oldest.
+    for scale in [1.25, 3.0, 1.75, 2.5] {
+        cursor.ensure_scale(scale);
+    }
+    assert!(cursor.scales.len() <= super::MAX_SCALES);
+    // ... while syncing to the live output set keeps exactly it.
+    cursor.sync_scales([1.0, 2.0]);
+    assert_eq!(cursor.scales.len(), 2);
+}
+
+/// Each output's frame draws that scale's own bitmap, sized in logical
+/// units: the on-screen size is unchanged at every scale (the geometry at
+/// the frame's scale is exactly the physical bitmap -- 1:1 sampling, never
+/// a stretched logical bitmap), and the hotspot is that bitmap's own tip.
+#[test]
+fn hidpi_elements_keep_the_logical_size_at_every_scale() {
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), None, NO_THEME);
+    let pointer = Point::<f64, Logical>::from((100.0, 100.0));
+    for scale in [1.0, 1.25, 1.5, 2.0, 3.0] {
+        cursor.ensure_scale(scale);
+        let elements = cursor.element(&mut renderer, pointer, scale);
+        assert_eq!(elements.len(), 1, "scale {scale} drew nothing");
+        let geometry = elements[0].geometry(scale.into());
+        let physical = physical_size(DEFAULT_SIZE, scale);
+        assert_eq!(
+            (geometry.size.w, geometry.size.h),
+            (physical, physical),
+            "scale {scale}: the on-screen size must be the physical bitmap"
+        );
+        // The physical hotspot sits exactly on the physical pointer.
+        let hotspot = Shape::Arrow.hotspot(physical);
+        assert_eq!(
+            (geometry.loc.x, geometry.loc.y),
+            (
+                (pointer.x * scale) as i32 - hotspot.x,
+                (pointer.y * scale) as i32 - hotspot.y
+            ),
+            "scale {scale}: the tip must sit under the pointer"
+        );
+        assert!(
+            hotspot.x >= 0 && hotspot.y >= 0 && hotspot.x < physical && hotspot.y < physical,
+            "scale {scale}: the hotspot must be inside its bitmap"
+        );
+    }
+}
+
+/// A mixed-DPI session draws each output's own bitmap: the 1x frame the 16px
+/// art, the 2x frame the 32px art, from the same cursor without rebuilding.
+#[test]
+fn mixed_scales_draw_each_outputs_own_bitmap() {
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), None, NO_THEME);
+    cursor.ensure_scale(2.0);
+    let pointer = Point::<f64, Logical>::from((50.0, 50.0));
+    let one = cursor.element(&mut renderer, pointer, 1.0);
+    let two = cursor.element(&mut renderer, pointer, 2.0);
+    let gone = one[0].geometry(1.0.into()).size;
+    assert_eq!((gone.w, gone.h), (16, 16));
+    let gtwo = two[0].geometry(2.0.into()).size;
+    assert_eq!((gtwo.w, gtwo.h), (32, 32));
+    assert_ne!(
+        one[0].id(),
+        two[0].id(),
+        "the two scales must not share a buffer"
+    );
+    // ... and repeating either frame reuses its buffers (the per-frame path
+    // allocates nothing: same entry, same stable `Id`s).
+    let one_again = cursor.element(&mut renderer, pointer, 1.0);
+    let two_again = cursor.element(&mut renderer, pointer, 2.0);
+    assert_eq!(one[0].id(), one_again[0].id());
+    assert_eq!(two[0].id(), two_again[0].id());
+}
+
+/// At scale 1 the element is what the old path built: the logical-size
+/// buffer, the logical hotspot, `element_location` arithmetic. The suites
+/// that render scale-1 frames with the cursor in them pin the pixels; this
+/// pins the construction.
+#[test]
+fn scale_1_elements_are_built_exactly_like_before() {
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), None, NO_THEME);
+    let pointer = Point::<f64, Logical>::from((12.0, 30.0));
+    let elements = cursor.element(&mut renderer, pointer, 1.0);
+    let geometry = elements[0].geometry(1.0.into());
+    assert_eq!(
+        (geometry.size.w, geometry.size.h),
+        (DEFAULT_SIZE, DEFAULT_SIZE)
+    );
+    let hotspot = Shape::Arrow.hotspot(DEFAULT_SIZE);
+    let location = element_location(pointer, hotspot, 1.0);
+    assert_eq!(
+        (geometry.loc.x as f64, geometry.loc.y as f64),
+        (location.x, location.y)
+    );
+}
+
+// -------------------------------------------------------------------------
 // A live compositor, a live client, a live renderer
 // -------------------------------------------------------------------------
 

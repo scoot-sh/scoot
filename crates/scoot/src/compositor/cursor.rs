@@ -74,7 +74,7 @@ use smithay::backend::renderer::element::{Kind, render_elements};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{IsAlive, Logical, Physical, Point, Transform};
+use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Size, Transform};
 use smithay::wayland::compositor::{SurfaceAttributes, get_parent, with_states};
 
 use super::decorations::{Appearance, Color};
@@ -138,58 +138,118 @@ pub fn contrast_rim(body: Color) -> Color {
 }
 
 /// The cursor's current image request and the persistent render buffers
-/// behind this compositor's own shapes. Those are built once (see
-/// [`Cursor::new`]) and rebuilt only by [`Cursor::rebuild`] on a config
-/// reload -- same stable-`Id` reasoning as `decorations.rs`'s persistent
-/// per-window buffers, so a static cursor doesn't read as "new content" to
-/// the damage tracker on every frame it happens to still be visible, and a
-/// client flipping between `default` and `text` as the pointer crosses a
-/// text field re-uses two buffers rather than allocating on the way past. A
+/// behind this compositor's own shapes.
+///
+/// The buffers are scale-aware: one bitmap set per output scale in use (see
+/// [`physical_size`]), built on cold paths only -- startup, reload, output
+/// add and scale change -- and selected per frame without allocating. Same
+/// stable-`Id` reasoning as `decorations.rs`'s persistent per-window buffers,
+/// per scale: a static cursor doesn't read as "new content" to the damage
+/// tracker on every frame it happens to still be visible, and a client
+/// flipping between `default` and `text` as the pointer crosses a text field
+/// re-uses two buffers rather than allocating on the way past. A
 /// client-supplied cursor surface needs no equivalent here: its texture is
 /// owned and cached by Smithay's own per-surface renderer state, keyed off
 /// the client's commits.
 pub struct Cursor {
-    /// One bitmap per [`Shape`], indexed by [`Shape::index`].
+    /// One [`ScaleEntry`] per output scale in use, in first-use order.
     ///
-    /// Built eagerly rather than on first use, for the stable-`Id` reason
-    /// above -- a buffer created mid-session is new content to the damage
-    /// tracker at the moment the pointer is moving fastest -- and because
-    /// the whole set is small: `Shape::COUNT` bitmaps of `size * size * 4`
-    /// bytes, i.e. ~10 KiB at the default 16px cursor and ~2.6 MiB at the
-    /// largest size `Appearance::MAX_CURSOR_SIZE` allows, per build rather
-    /// than per frame (`rebuild` replaces the whole set at once).
-    shapes: [MemoryRenderBuffer; Shape::COUNT],
-    /// The clamped edge length every bitmap in [`Self::shapes`] was built at,
-    /// kept so [`Shape::hotspot`] can be asked about them. Not a hotspot
-    /// itself: each shape has its own (the arrow points at its top-left
-    /// corner, the symmetric shapes at their middle), and none of them is the
-    /// hotspot of a client-supplied cursor surface -- that one belongs to the
-    /// client, lives in the surface's own user data, and is read per frame by
+    /// Built eagerly for scale 1.0 and for every live output scale (see
+    /// [`Cursor::sync_scales`]), never on the frame path, and bounded by
+    /// [`MAX_SCALES`]: the whole set is small (`Shape::COUNT` bitmaps of
+    /// `physical * physical * 4` bytes per entry -- ~22 KiB per scale at the
+    /// default 16px cursor, ~90 KiB at 2x -- per cold-path build rather than
+    /// per frame (`rebuild` replaces the whole set at once).
+    scales: Vec<ScaleEntry>,
+    /// The clamped logical edge length every entry is drawn for, kept so the
+    /// element can be sized in logical units. Not a hotspot itself: each
+    /// shape has its own (the arrow points at its top-left corner, the
+    /// symmetric shapes at their middle), and none of them is the hotspot of
+    /// a client-supplied cursor surface -- that one belongs to the client,
+    /// lives in the surface's own user data, and is read per frame by
     /// [`surface_hotspot`].
     size: i32,
+    /// The paints [`ScaleEntry`] bitmaps are built from, kept so
+    /// [`Cursor::rebuild`] and [`Cursor::ensure_scale`] build the same
+    /// pixels without re-deriving them.
+    fill: [u8; 4],
+    rim: [u8; 4],
+    accent: Option<[u8; 4]>,
     status: CursorImageStatus,
     /// The machine's own installed cursor theme, and everything drawn from it
     /// so far. Empty on a machine with no icon theme, which is the ordinary
     /// state in a container -- see `cursor/theme.rs`.
     theme: Theme,
-    /// The theme image for the *current* [`Self::status`], resolved once when
-    /// that status changes rather than per frame.
-    ///
-    /// The invariant that makes this safe to read in [`Cursor::element`]:
-    /// **every write to `status` refreshes this field in the same
-    /// statement.** There are exactly three write sites -- the struct literal
-    /// in [`Cursor::new`] (immediately followed by a refresh),
-    /// [`Cursor::set_status`] (which refreshes inline), and
-    /// [`Cursor::rebuild`] (which reloads the whole theme and then
-    /// refreshes) -- and adding a fourth without refreshing this would leave
-    /// the previous shape's pixels drawn under the new shape's name -- the
-    /// single most likely way this module could silently draw the wrong
-    /// thing.
-    ///
-    /// `None` means "no theme image for this status": a hidden cursor, a
-    /// client surface, or a named shape the theme does not carry. All three
-    /// fall through to [`Self::shapes`].
+}
+
+/// One output scale's bitmaps: the fallback shapes rasterised at
+/// [`physical_size`] pixels plus the theme image resolved at that size for
+/// the current [`Cursor::status`].
+///
+/// The per-entry theme image keeps [`Cursor::themed`'s old invariant](Cursor)
+/// in a new place: **every write to `status` refreshes every entry's image
+/// in the same statement.** There are exactly three write sites -- the
+/// constructor in [`Cursor::new`] (immediately followed by a refresh),
+/// [`Cursor::set_status`] (which refreshes inline), and [`Cursor::rebuild`]
+/// (which reloads the whole theme and then refreshes) -- and adding a fourth
+/// without refreshing these would leave the previous shape's pixels drawn
+/// under the new shape's name -- the single most likely way this module
+/// could silently draw the wrong thing.
+///
+/// `themed: None` means "no theme image for this status at this size": a
+/// hidden cursor, a client surface, or a named shape the theme does not
+/// carry. All three fall through to the entry's own shapes.
+struct ScaleEntry {
+    /// [`scale_key`] of [`Self::scale`].
+    key: u64,
+    /// The quantized output scale this entry serves.
+    scale: f64,
+    /// The bitmap edge length: `round(logical * scale)`.
+    physical: i32,
+    /// One bitmap per [`Shape`], indexed by [`Shape::index`].
+    shapes: [MemoryRenderBuffer; Shape::COUNT],
+    /// The theme image for the current status at [`Self::physical`].
     themed: Option<Themed>,
+}
+
+/// How many output scales keep prebuilt bitmaps before the oldest is
+/// evicted: 1.0 plus the fractional and 2x scales a mixed-DPI session uses,
+/// with one spare. Bounded so a session cycling scales cannot grow memory
+/// without limit; eviction only drops a cache (rebuilt on next
+/// [`Cursor::sync_scales`]), never correctness -- the frame path falls back
+/// to the nearest kept scale.
+const MAX_SCALES: usize = 4;
+
+/// The bitmap edge length for `logical`-px cursor art on an output at
+/// `scale`: `round(logical * scale)` physical pixels (16 at 1x, 20 at 1.25,
+/// 24 at 1.5, 32 at 2x), clamped to at least 1 and to [`MAX_PHYSICAL`].
+/// Non-finite or non-positive scales fall back to the logical size rather
+/// than panicking or allocating absurdly: scale math follows config and
+/// client input, both of which have produced NaN before.
+pub(crate) fn physical_size(logical: i32, scale: f64) -> i32 {
+    if !scale.is_finite() || scale <= 0.0 {
+        return logical;
+    }
+    ((f64::from(logical) * scale).round() as i32).clamp(1, MAX_PHYSICAL)
+}
+
+/// The largest physical bitmap edge this builds: far above any real cursor
+/// (`Appearance::MAX_CURSOR_SIZE` at 3x is 768), it only keeps a corrupt
+/// scale from becoming a huge allocation. Matches the overlay-plane twin's
+/// own bound (`render::cursor_plane`).
+const MAX_PHYSICAL: i32 = 1024;
+
+/// The cache key for an output scale: the scale in hundredths, so 1.0, 1.25,
+/// 1.5, 2.0 and 3.0 are distinct entries while float noise around one
+/// configured value is not. Non-finite or non-positive scales key as 1.0
+/// (see [`physical_size`]).
+pub(crate) fn scale_key(scale: f64) -> u64 {
+    let sane = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    (sane * 100.0).round().max(1.0) as u64
 }
 
 impl Cursor {
@@ -225,16 +285,22 @@ impl Cursor {
         let (fill, rim, accent_px) = color_triple(color, accent);
         let theme = Theme::load(theme_name, size);
         let mut cursor = Self {
-            shapes: Self::build_shapes(size, fill, rim, accent_px),
+            scales: Vec::new(),
             size,
+            fill,
+            rim,
+            accent: accent_px,
             status: CursorImageStatus::default_named(),
             theme,
-            themed: None,
         };
+        // The scale-1 bitmaps, eagerly: every session has a scale to draw at
+        // before any output exists to name one, and the per-frame path only
+        // ever selects entries (see `entry_for_scale`).
+        cursor.ensure_scale(1.0);
         // The default status is a *named* shape, so the themed image for it
-        // has to be resolved here too -- the field's invariant is "every
-        // write to `status` refreshes this", and the struct literal above is
-        // one such write.
+        // has to be resolved here too -- the entry invariant is "every
+        // write to `status` refreshes every entry", and the construction
+        // above is one such write.
         cursor.refresh_themed();
         cursor
     }
@@ -265,19 +331,57 @@ impl Cursor {
     ) {
         let size = Appearance::clamp_cursor_size(size);
         let (fill, rim, accent_px) = color_triple(color, accent);
-        self.shapes = Self::build_shapes(size, fill, rim, accent_px);
         self.size = size;
+        self.fill = fill;
+        self.rim = rim;
+        self.accent = accent_px;
+        // The scale-1 bitmaps first (every session keeps drawing while the
+        // reload lands), then every scale this cursor already served, at the
+        // new paints -- one atomic swap per entry, never a half-rebuilt set.
+        // `sync_scales` (called by the reload path right after) adds scales
+        // for outputs added since and drops ones no output uses anymore.
+        let keys: Vec<u64> = self.scales.iter().map(|entry| entry.key).collect();
+        self.scales.clear();
+        self.ensure_scale(1.0);
+        for key in keys {
+            if key != scale_key(1.0) {
+                self.ensure_scale(key as f64 / 100.0);
+            }
+        }
         self.theme = Theme::load(theme_name, size);
         self.refresh_themed();
     }
 
-    /// The `Shape::COUNT` fallback bitmaps for one size/color pair, in
-    /// [`Shape::index`] order. Every shape is `shapes::generate`, one family
-    /// with the same rim width, the same accent hairline, the same 4x4
-    /// supersampling and the same premultiplication.
+    /// Builds the bitmaps for one output scale: the `Shape::COUNT` fallback
+    /// bitmaps rasterised natively at [`physical_size`] pixels, in
+    /// [`Shape::index`] order, plus the current status's theme image resolved
+    /// at that size. Every shape is `shapes::generate`, one family with the
+    /// same rim width, the same accent hairline, the same supersampling and
+    /// the same premultiplication -- at physical pixels, so a 2x output
+    /// samples native art 1:1 instead of a stretched logical bitmap.
     ///
-    /// Shared by [`Cursor::new`] and [`Cursor::rebuild`] so the two cannot
-    /// disagree about what a size/color pair draws.
+    /// Cold paths only ([`Cursor::new`], [`Cursor::rebuild`],
+    /// [`Cursor::ensure_scale`]); the frame path only reads entries. Shared
+    /// by all three so they cannot disagree about what a size/scale pair
+    /// draws.
+    fn build_entry(&mut self, scale: f64) -> ScaleEntry {
+        let key = scale_key(scale);
+        let sane = key as f64 / 100.0;
+        let physical = physical_size(self.size, sane);
+        let shapes = Self::build_shapes(physical, self.fill, self.rim, self.accent);
+        let mut entry = ScaleEntry {
+            key,
+            scale: sane,
+            physical,
+            shapes,
+            themed: None,
+        };
+        entry.themed = self.resolve_themed(entry.physical);
+        entry
+    }
+
+    /// The `Shape::COUNT` fallback bitmaps for one pixel size, in
+    /// [`Shape::index`] order.
     fn build_shapes(
         size: i32,
         fill: [u8; 4],
@@ -300,6 +404,65 @@ impl Cursor {
         })
     }
 
+    /// Builds the bitmaps for `scale` unless they already exist, evicting
+    /// the oldest entry past [`MAX_SCALES`]. Called from cold paths that
+    /// know the output set changed -- output add, scale change
+    /// (`sync_scales`), [`Cursor::new`], [`Cursor::rebuild`] -- never from
+    /// the frame path, which only selects entries.
+    pub(crate) fn ensure_scale(&mut self, scale: f64) {
+        let key = scale_key(scale);
+        if self.scales.iter().any(|entry| entry.key == key) {
+            return;
+        }
+        if self.scales.len() >= MAX_SCALES {
+            self.scales.remove(0);
+        }
+        let entry = self.build_entry(scale);
+        self.scales.push(entry);
+    }
+
+    /// Builds bitmaps for every scale in `scales` and drops entries for
+    /// scales no longer in it: what output add, scale change, removal and
+    /// reload call once the live output set is known. Idempotent -- entries
+    /// for scales already served are kept with their stable `Id`s, so
+    /// calling it when nothing changed allocates nothing.
+    pub(crate) fn sync_scales(&mut self, scales: impl IntoIterator<Item = f64>) {
+        let mut keys: Vec<u64> = Vec::new();
+        for scale in scales {
+            let key = scale_key(scale);
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+            self.ensure_scale(scale);
+        }
+        if keys.is_empty() {
+            return;
+        }
+        self.scales.retain(|entry| keys.contains(&entry.key));
+    }
+
+    /// The entry the frame path draws at `scale`: the exact prebuilt scale,
+    /// else the nearest kept one. Read-only -- the backstop for a scale no
+    /// cold path ensured (a frame racing an output event): slightly soft for
+    /// at most the frames until the next sync, never an allocation and never
+    /// a missing cursor.
+    fn entry_for_scale(&self, scale: f64) -> &ScaleEntry {
+        let key = scale_key(scale);
+        if let Some(entry) = self.scales.iter().find(|entry| entry.key == key) {
+            return entry;
+        }
+        let sane = key as f64 / 100.0;
+        self.scales
+            .iter()
+            .min_by(|a, b| {
+                (a.scale - sane)
+                    .abs()
+                    .partial_cmp(&(b.scale - sane).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .expect("`Cursor::new` always builds scale 1.0")
+    }
+
     /// The machine's own cursor theme, as resolved at startup -- empty
     /// (`Theme::is_loaded() == false`) when none was found, in which case
     /// every named shape draws from `shapes.rs` instead. Read only by tests
@@ -319,21 +482,42 @@ impl Cursor {
         self.refresh_themed();
     }
 
-    /// Re-resolves [`Self::themed`] for whatever [`Self::status`] now is.
+    /// Re-resolves every entry's theme image for whatever [`Self::status`]
+    /// now is.
     ///
-    /// The one place that field is written. Called from every site that
-    /// writes `status`, which is what keeps the two from disagreeing -- see
-    /// the field's doc. Loading happens here, on the event that changed the
-    /// shape, and never on the render path; a shape already looked up (or
-    /// already known missing) costs one hash lookup.
+    /// The one place entries' images are written. Called from every site
+    /// that writes `status`, which is what keeps the two from disagreeing --
+    /// see [`ScaleEntry`]'s doc. Loading happens here, on the event that
+    /// changed the shape, and never on the render path; a shape already
+    /// looked up (or already known missing) costs one hash lookup.
     fn refresh_themed(&mut self) {
-        self.themed = match &self.status {
-            CursorImageStatus::Named(icon) => self.theme.image(*icon).cloned(),
-            // A client surface draws the client's own pixels, and a hidden
-            // cursor draws nothing; neither has a theme image, and leaving a
-            // stale one here is exactly the bug the invariant exists to stop.
+        let status = &self.status;
+        let theme = &mut self.theme;
+        for entry in &mut self.scales {
+            entry.themed = match status {
+                CursorImageStatus::Named(icon) => {
+                    theme.image_at(*icon, entry.physical.max(1) as u32).cloned()
+                }
+                // A client surface draws the client's own pixels, and a hidden
+                // cursor draws nothing; neither has a theme image, and leaving
+                // a stale one here is exactly the bug the invariant exists to
+                // stop.
+                CursorImageStatus::Surface(_) | CursorImageStatus::Hidden => None,
+            };
+        }
+    }
+
+    /// The theme image for the current status at `physical_px` physical
+    /// pixels, shared by [`Cursor::build_entry`] and [`Cursor::refresh_themed`]
+    /// so a new scale resolves what a status change would have resolved.
+    fn resolve_themed(&mut self, physical_px: i32) -> Option<Themed> {
+        match &self.status {
+            CursorImageStatus::Named(icon) => self
+                .theme
+                .image_at(*icon, physical_px.max(1) as u32)
+                .cloned(),
             CursorImageStatus::Surface(_) | CursorImageStatus::Hidden => None,
-        };
+        }
     }
 
     /// Applies this commit's `wl_surface.offset` to the cursor hotspot, if
@@ -529,27 +713,60 @@ impl Cursor {
             CursorImageStatus::Surface(_) => CursorIcon::Default,
         };
         // The machine's own theme first, this module's drawn shapes second.
-        // `themed` was resolved when the status changed, so this is a field
-        // read, not a lookup -- see `refresh_themed`. It is deliberately not
-        // consulted on the dead-surface path above: `themed` is `None` for a
-        // `Surface` status by construction, so that path always draws the
-        // arrow, which is the defensive fallback `forget_surface` normally
-        // replaces within the same dispatch.
-        let (buffer, hotspot) = match &self.themed {
-            Some(themed) => (&themed.buffer, themed.hotspot),
+        // Both were resolved for this output scale when the status last
+        // changed (or when the scale was ensured), so this is a field read,
+        // not a lookup -- see `refresh_themed`. It is deliberately not
+        // consulted on the dead-surface path above: every entry's image is
+        // `None` for a `Surface` status by construction, so that path always
+        // draws the arrow, which is the defensive fallback `forget_surface`
+        // normally replaces within the same dispatch.
+        //
+        // The entry serves this output's scale: its bitmaps are already at
+        // `round(logical * scale)` physical pixels. The element is sized in
+        // logical units, so the on-screen size is unchanged at every scale
+        // and the renderer samples the art 1:1 instead of stretching a
+        // logical bitmap.
+        let entry = self.entry_for_scale(scale);
+        let logical = Size::<i32, Logical>::from((self.size, self.size));
+        let (buffer, hotspot, src) = match &entry.themed {
+            Some(themed) => (
+                &themed.buffer,
+                themed.hotspot,
+                Rectangle::<f64, Logical>::from_size(Size::from((
+                    f64::from(themed.size.0),
+                    f64::from(themed.size.1),
+                ))),
+            ),
             None => {
                 let shape = Shape::for_icon(icon);
-                (&self.shapes[shape.index()], shape.hotspot(self.size))
+                let physical = entry.physical;
+                (
+                    &entry.shapes[shape.index()],
+                    shape.hotspot(physical),
+                    Rectangle::<f64, Logical>::from_size(Size::from((
+                        f64::from(physical),
+                        f64::from(physical),
+                    ))),
+                )
             }
         };
-        let location = element_location(pointer_location, hotspot, scale);
+        // The pointer in physical pixels minus the hotspot in the bitmap's
+        // own (physical) pixels. At scale 1 the hotspot is the logical one,
+        // so this is exactly `element_location`'s arithmetic there (pinned
+        // by its tests); at other scales the hotspot is the physical bitmap's
+        // own tip, which is what keeps the tip under the pointer when insets
+        // scale sublinearly.
+        let location = Point::<f64, Physical>::from((
+            pointer_location.x * scale - f64::from(hotspot.x),
+            pointer_location.y * scale - f64::from(hotspot.y),
+        ));
         match MemoryRenderBufferRenderElement::from_buffer(
             renderer,
             location,
             buffer,
             None,
-            None,
-            None,
+            Some(src),
+            Some(logical),
             Kind::Cursor,
         ) {
             Ok(element) => out.push(CursorElement::Fallback(element)),

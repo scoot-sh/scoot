@@ -77,10 +77,11 @@ const PITCH_PIXELS: i32 = 16;
 /// keeps a corrupt theme image from becoming a huge allocation.
 const MAX_SIDE: i32 = 1024;
 
-/// How many images the cache keeps before it starts over. Above
-/// `Shape::COUNT` plus every theme shape a session uses, so it is reached only
-/// after config reloads have left old images behind.
-const MAX_IMAGES: usize = 64;
+/// How many images the cache keeps before it starts over. Above one
+/// session's drawn shapes at every scale it serves (22 shapes times up to
+/// four cached output scales, plus every theme shape a session uses), so it
+/// is reached only after config reloads have left old images behind.
+const MAX_IMAGES: usize = 128;
 
 /// Where a plane image's pixels go: a scanout-capable `LINEAR` `Argb8888`
 /// dma-buf. A trait so the cache is testable without a GPU.
@@ -155,6 +156,13 @@ impl Upload for GbmUpload {
 struct PlaneImage {
     memory: MemoryRenderBuffer,
     dmabuf: Dmabuf,
+    /// The padded pixel dimensions.
+    width: i32,
+    height: i32,
+    /// The source buffer's pixel dimensions, for reproducing the source
+    /// element's sampling over the padded image (see `back`).
+    source_width: i32,
+    source_height: i32,
 }
 
 /// The plane images for one output's drawn cursor shapes, keyed by the source
@@ -209,17 +217,35 @@ impl<U: Upload> CursorPlanes<U> {
             // The rounded origin is where the memory element draws (its
             // geometry's location is the location it was built at, rounded),
             // so the twin draws on the same pixels.
-            let location = element.geometry(Scale::from(1.0)).loc.to_f64();
+            let at_one = element.geometry(Scale::from(1.0));
+            let location = at_one.loc.to_f64();
+            let logical = at_one.size;
             let Some(image) = self.image(renderer, element) else {
                 continue;
             };
+            // The twin reproduces the source's sampling over the padded
+            // buffer: the source's logical-to-buffer ratio times the padded
+            // size. A scale-1 cursor (buffer == logical) gets the padded
+            // size itself, exactly as before; a scale-aware element (a 32px
+            // buffer for 16 logical px) gets its logical size back, so the
+            // twin shows the same pixels 1:1. The padding stays transparent,
+            // so the twin's larger footprint changes nothing on screen --
+            // and its geometry is what the `fits` check below measures for
+            // the driver's minimum plane size.
+            let size = Size::from((
+                (image.width as f64 * logical.w as f64 / image.source_width as f64).round() as i32,
+                (image.height as f64 * logical.h as f64 / image.source_height as f64).round()
+                    as i32,
+            ));
+            let padded =
+                Rectangle::from_size(Size::from((image.width as f64, image.height as f64)));
             let inner = match MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
                 location,
                 &image.memory,
                 None,
-                None,
-                None,
+                Some(padded),
+                Some(size),
                 Kind::Cursor,
             ) {
                 Ok(inner) => inner,
@@ -281,9 +307,15 @@ impl<U: Upload> CursorPlanes<U> {
 
 /// Builds the plane image for one drawn element, or `None` for anything this
 /// does not handle: not a memory buffer, not `Argb8888`, a buffer scale or
-/// transform other than 1 and normal (the twin is built at scale 1, normal,
-/// so anything else would draw differently), a size out of range, a failed
-/// upload.
+/// transform other than 1 and normal, an element whose sampled rect is not
+/// its whole buffer (the twin pads the buffer, so a sub-rect source would
+/// show different pixels), a size out of range, a failed upload.
+///
+/// The sampled-rect check is what admits scale-aware cursor elements: they
+/// are sized in logical units while their buffer is physical, and the whole
+/// physical buffer is what the frame samples (see `cursor.rs`'s element
+/// path). A buffer-scale-1 element sampled 1:1 is exactly the old
+/// "geometry at 1.0 equals the buffer" check.
 fn build<U, R>(
     upload: &mut U,
     renderer: &mut R,
@@ -304,8 +336,9 @@ where
         return None;
     }
     let size = memory.size();
-    // At scale 1 a buffer-scale-1 element is exactly its buffer's size.
-    if element.geometry(Scale::from(1.0)).size != Size::from((size.w, size.h)) {
+    // The frame samples this whole buffer: anything else and the padded twin
+    // below would not show what the composited frame shows.
+    if element.src() != Rectangle::from_size(Size::from((f64::from(size.w), f64::from(size.h)))) {
         return None;
     }
     let (width, height) = plane_size(size.w, size.h)?;
@@ -324,7 +357,14 @@ where
         Transform::Normal,
         None,
     );
-    Some(PlaneImage { memory, dmabuf })
+    Some(PlaneImage {
+        memory,
+        dmabuf,
+        width,
+        height,
+        source_width: size.w,
+        source_height: size.h,
+    })
 }
 
 /// Whether a plane at `geometry` (the twin's, at the output's scale) keeps at

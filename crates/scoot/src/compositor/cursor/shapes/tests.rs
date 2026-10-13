@@ -612,6 +612,85 @@ fn tiny_paw_badges_drop_their_toes_instead_of_blurring_them() {
     assert_ne!(alpha(&pixels, 8, 5, 5), 0);
 }
 
+/// The fractional-scale physical bitmap sizes hold their rims too: 20px
+/// (16 at 1.25), 30px (24 at 1.25) and 40px are real bitmaps a hidpi
+/// session rasterises, so they pin the same strict edge transparency as
+/// the design sizes above.
+#[test]
+fn hidpi_physical_sizes_keep_their_rims_inside() {
+    for size in [20, 30, 40] {
+        for shape in Shape::ALL {
+            for accent in [None, Some(ACCENT)] {
+                let pixels = generate(shape, size, FILL, RIM, accent);
+                for i in 0..size {
+                    for (x, y) in [(i, 0), (i, size - 1), (0, i), (size - 1, i)] {
+                        assert_eq!(
+                            alpha(&pixels, size, x, y),
+                            0,
+                            "{shape:?} at {size}px touches the bitmap edge at ({x}, {y})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The physical bitmaps are natively rasterised, not resampled: a 32px
+/// render differs from a bilinear upscale of the 16px render of the same
+/// shape. (The hidpi path renders the 24-grid SDF at the target size; it
+/// never renders at 24 and downsamples -- the report's side-by-side sheets
+/// judge the same property by eye.)
+#[test]
+fn hidpi_buffers_are_natively_rasterised_not_upscaled() {
+    for shape in [Shape::Arrow, Shape::Text, Shape::Hand, Shape::Move] {
+        let small = generate(shape, 16, FILL, RIM, Some(ACCENT));
+        let native = generate(shape, 32, FILL, RIM, Some(ACCENT));
+        let upscaled = upscale_bilinear(&small, 16, 32);
+        let differing = native
+            .chunks_exact(4)
+            .zip(upscaled.chunks_exact(4))
+            .filter(|(a, b)| a != b)
+            .count();
+        assert!(
+            differing > 0,
+            "{shape:?}: the 32px bitmap is pixel-identical to an upscale \
+             of the 16px one -- it was resampled, not rendered"
+        );
+    }
+}
+
+/// Edge-clamped bilinear upscale of a premultiplied `Argb8888` bitmap, the
+/// same sampling the renderer applies to a logical-size buffer on a 2x
+/// output.
+fn upscale_bilinear(pixels: &[u8], from: i32, to: i32) -> Vec<u8> {
+    let sample = |x: i32, y: i32, channel: usize| -> f64 {
+        let x = x.clamp(0, from - 1);
+        let y = y.clamp(0, from - 1);
+        f64::from(pixels[((y * from + x) * 4 + channel as i32) as usize])
+    };
+    let mut out = vec![0u8; (to * to * 4) as usize];
+    for y in 0..to {
+        for x in 0..to {
+            // Source coordinate of the destination pixel's centre.
+            let gx = (f64::from(x) + 0.5) * f64::from(from) / f64::from(to) - 0.5;
+            let gy = (f64::from(y) + 0.5) * f64::from(from) / f64::from(to) - 0.5;
+            let x0 = gx.floor() as i32;
+            let y0 = gy.floor() as i32;
+            let fx = gx - f64::from(x0);
+            let fy = gy - f64::from(y0);
+            for channel in 0..4 {
+                let top = sample(x0, y0, channel) * (1.0 - fx) + sample(x0 + 1, y0, channel) * fx;
+                let bottom =
+                    sample(x0, y0 + 1, channel) * (1.0 - fx) + sample(x0 + 1, y0 + 1, channel) * fx;
+                out[((y * to + x) * 4 + channel as i32) as usize] =
+                    (top * (1.0 - fy) + bottom * fy).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    out
+}
+
 #[test]
 fn the_arrow_tip_is_drawn_and_the_corner_is_not() {
     // The hotspot contract from the bitmap's side: the tip pixel itself is

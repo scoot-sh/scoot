@@ -377,7 +377,26 @@ fn create_output(
     let scale = state.configured_scale(name);
     set_mode(&output, width, height, Some(position.into()), scale);
     state.space.map_output(&output, position);
+    // The output set changed: bitmaps for its scale are built now (cold),
+    // never on the frame path.
+    sync_cursor_scales(state);
     output
+}
+
+/// Builds cursor bitmaps for every live output's scale and drops bitmaps
+/// for scales no output uses (see `cursor.rs`'s scale-aware bitmaps).
+/// Called wherever the output set or any output's scale can change: output
+/// add (`create_output`, and its failure path `discard_output`), scale
+/// change (`rescale_outputs`), removal (`remove_output`) and cursor rebuild
+/// (`reload.rs`). Cold paths only; the frame path only selects entries.
+pub(super) fn sync_cursor_scales(state: &mut State) {
+    let mut scales = Vec::new();
+    for index in 0..state.outputs.len() {
+        if let Some((_, output)) = state.outputs.at(index) {
+            scales.push(super::output_scale::scale_of(&output));
+        }
+    }
+    state.cursor.sync_scales(scales);
 }
 
 /// Lays one output into a running left-to-right layout: where an output
@@ -423,6 +442,7 @@ struct OutputGlobal(smithay::reexports::wayland_server::backend::GlobalId);
 fn discard_output(state: &mut State, output: &Output) {
     state.space.unmap_output(output);
     retire_global(state, output);
+    sync_cursor_scales(state);
 }
 
 /// How long a withdrawn `wl_output` global stays bindable before it is
@@ -1483,6 +1503,9 @@ impl State {
         // on. The caller re-tells every surface now (`resend_output_scale`),
         // so no window is left told a scale from before.
         self.note_output_scales();
+        // The scales may just have moved: bitmaps for the new set are built
+        // now (cold), never on the frame path.
+        sync_cursor_scales(self);
     }
 
     /// Takes output `id` away while the session runs -- a `--tty` connector
@@ -1713,6 +1736,10 @@ impl State {
         if let Some(event) = removed {
             self.emit_output_removed(event);
         }
+        // The output set changed: drop bitmaps for scales no output uses
+        // anymore (bounded memory without waiting for the next scale
+        // change).
+        sync_cursor_scales(self);
         true
     }
 
