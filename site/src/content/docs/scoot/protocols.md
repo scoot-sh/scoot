@@ -2183,23 +2183,33 @@ client would have loaded for itself. Parsing is the MIT-licensed `xcursor`
 crate; nothing is vendored, and scoot ships no theme of its own.
 
 **When no theme is installed** — a linuxserver webtop or any minimal
-container — named shapes fall back to ten shapes scoot draws procedurally
-itself. The mapping collapses the names a user cannot tell apart at 16
-pixels:
+container — named shapes fall back to 22 shapes scoot draws procedurally
+itself (a near-black body, a contrasting rim, one ginger mark each — see
+[the fallback family](./appearance.md#the-fallback-cursor-family)):
 
 | Drawn as | Named shapes it answers |
 | --- | --- |
-| arrow | `default`, plus every name with no row of its own — `help`, `wait`, `progress`, `pointer`, `zoom-in`, … |
-| I-beam | `text` |
-| sideways I-beam | `vertical-text` |
-| crosshair | `crosshair`, `cell` |
-| vertical double arrow | `n-resize`, `s-resize`, `ns-resize`, `row-resize` |
-| horizontal double arrow | `e-resize`, `w-resize`, `ew-resize`, `col-resize` |
-| diagonal double arrow | `ne-resize`, `sw-resize`, `nesw-resize` / `nw-resize`, `se-resize`, `nwse-resize` |
-| four-way arrow | `move`, `all-scroll`, `all-resize`, `grab`, `grabbing` |
-| circle with a slash | `not-allowed`, `no-drop` |
+| arrow (tail hint) | `default`, `context-menu` |
+| arrow + paw badge | `progress`, `alias`, `copy` |
+| I-beam (orange stem) | `text` |
+| sideways I-beam (orange stem) | `vertical-text` |
+| pointing glove (orange cuff) | `pointer` |
+| paw print | `dnd-ask` |
+| arrow + hourglass badge | `wait` |
+| crosshair (orange centre dot) | `crosshair` |
+| thin crosshair | `cell` |
+| vertical double arrow (orange centre line) | `n-resize`, `s-resize`, `ns-resize` |
+| horizontal double arrow (orange centre line) | `e-resize`, `w-resize`, `ew-resize` |
+| diagonal double arrows (dashed orange centre) | `ne-resize`, `sw-resize`, `nesw-resize` / `nw-resize`, `se-resize`, `nwse-resize` |
+| split triangles (orange divider) | `col-resize`, `row-resize` |
+| four-way arrow (orange centre dot) | `move`, `all-scroll`, `all-resize` |
+| open hand | `grab` |
+| closed fist (orange knuckles) | `grabbing` |
+| arrow + "?" badge | `help` |
+| magnifier (orange plus / minus) | `zoom-in`, `zoom-out` |
+| ring (orange slash) | `not-allowed`, `no-drop` |
 
-The drawn shapes use the `[appearance]` `cursor_size`/`cursor_color` settings
+The drawn shapes use the `[appearance]` `cursor_size`/`cursor_color`/`cursor_accent` settings
 and are built once at startup. Theme images are loaded when a client first
 asks for that shape and cached from then on, including a negative cache so a
 theme missing `zoom-in` is not re-searched on every hover.

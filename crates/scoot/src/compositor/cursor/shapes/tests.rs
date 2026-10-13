@@ -1,4 +1,4 @@
-//! Tests for the procedural cursor shapes.
+//! Tests for the procedural cursor family.
 //!
 //! All of this is pure arithmetic over a byte buffer, so none of it needs a
 //! renderer, a client or a [`State`](crate::compositor::State) -- the tests
@@ -6,23 +6,29 @@
 //! guarding is the things that are easy to get silently wrong in a
 //! rasterizer and invisible to "it compiles": a shape drawing *outside* its
 //! own bitmap (clipped away, so it never crashes -- it just quietly loses
-//! an arrowhead), a shape drawing *nothing* at a size a config is allowed to
-//! ask for, broken premultiplication (which over-brightens under pixman's
-//! `Over`), and missing anti-aliasing (which would mean the supersampler
-//! regressed to a 1-bit mask).
+//! an arrowhead or a badge dot), a shape drawing *nothing* at a size a
+//! config is allowed to ask for, broken premultiplication (which
+//! over-brightens under pixman's `Over`), and missing anti-aliasing (which
+//! would mean the supersampler regressed to a 1-bit mask).
 
 use super::*;
 use crate::compositor::decorations::Appearance;
 
-/// An opaque white fill and the black outline `Cursor::new` pairs with it,
-/// in the premultiplied little-endian `Argb8888` the bitmaps are built in.
-const FILL: [u8; 4] = [255, 255, 255, 255];
-const OUTLINE: [u8; 4] = [0, 0, 0, 255];
+/// The family paints the tests draw with: the near-black default body, its
+/// white auto-contrasting rim, and the ginger accent -- in the premultiplied
+/// little-endian `Argb8888` the bitmaps are built in.
+const FILL: [u8; 4] = [0x1a, 0x1a, 0x1a, 255];
+const RIM: [u8; 4] = [255, 255, 255, 255];
+const ACCENT: [u8; 4] = [0x29, 0x7f, 0xe5, 255];
 const TRANSPARENT: [u8; 4] = [0, 0, 0, 0];
+
+fn paint(shape: Shape, size: i32) -> Vec<u8> {
+    generate(shape, size, FILL, RIM, Some(ACCENT))
+}
 
 /// The default cursor size, and the two ends of the range a config may ask
 /// for. Every shape is checked at all three rather than at the default alone:
-/// the smallest is where a shape's fractions collapse toward a dot and the
+/// the smallest is where a shape collapses toward the honest dot and the
 /// largest is where its arithmetic is furthest from the sizes it was drawn
 /// against.
 fn sizes() -> [i32; 3] {
@@ -31,6 +37,12 @@ fn sizes() -> [i32; 3] {
         Appearance::default().cursor_size,
         Appearance::MAX_CURSOR_SIZE,
     ]
+}
+
+/// The sizes the brief pins the bitmap-edge guarantees to: every shape at
+/// each of these must keep its fill off the edge and wrapped in rim.
+fn edge_sizes() -> [i32; 6] {
+    [16, 24, 32, 48, 64, 256]
 }
 
 fn pixel(pixels: &[u8], size: i32, x: i32, y: i32) -> [u8; 4] {
@@ -55,6 +67,7 @@ fn count(pixels: &[u8], size: i32, wanted: [u8; 4]) -> usize {
 
 #[test]
 fn every_shape_has_its_own_slot() {
+    assert_eq!(Shape::ALL.len(), Shape::COUNT);
     for (slot, shape) in Shape::ALL.into_iter().enumerate() {
         assert_eq!(
             shape.index(),
@@ -69,39 +82,41 @@ fn every_shape_has_its_own_slot() {
 fn named_icons_map_to_the_shape_that_means_them() {
     let cases = [
         (CursorIcon::Default, Shape::Arrow),
+        (CursorIcon::ContextMenu, Shape::Arrow),
         (CursorIcon::Text, Shape::Text),
         (CursorIcon::VerticalText, Shape::VerticalText),
         (CursorIcon::Crosshair, Shape::Crosshair),
-        (CursorIcon::Cell, Shape::Crosshair),
+        (CursorIcon::Cell, Shape::Precision),
         (CursorIcon::NResize, Shape::ResizeNs),
         (CursorIcon::SResize, Shape::ResizeNs),
         (CursorIcon::NsResize, Shape::ResizeNs),
-        (CursorIcon::RowResize, Shape::ResizeNs),
         (CursorIcon::EResize, Shape::ResizeEw),
         (CursorIcon::WResize, Shape::ResizeEw),
         (CursorIcon::EwResize, Shape::ResizeEw),
-        (CursorIcon::ColResize, Shape::ResizeEw),
         (CursorIcon::NeResize, Shape::ResizeNesw),
         (CursorIcon::SwResize, Shape::ResizeNesw),
         (CursorIcon::NeswResize, Shape::ResizeNesw),
         (CursorIcon::NwResize, Shape::ResizeNwse),
         (CursorIcon::SeResize, Shape::ResizeNwse),
         (CursorIcon::NwseResize, Shape::ResizeNwse),
+        (CursorIcon::ColResize, Shape::SplitV),
+        (CursorIcon::RowResize, Shape::SplitH),
         (CursorIcon::Move, Shape::Move),
         (CursorIcon::AllScroll, Shape::Move),
         (CursorIcon::AllResize, Shape::Move),
-        (CursorIcon::Grab, Shape::Move),
-        (CursorIcon::Grabbing, Shape::Move),
+        (CursorIcon::Grab, Shape::Grab),
+        (CursorIcon::Grabbing, Shape::Grabbing),
+        (CursorIcon::Pointer, Shape::Hand),
+        (CursorIcon::Progress, Shape::PointerBadge),
+        (CursorIcon::Alias, Shape::PointerBadge),
+        (CursorIcon::Copy, Shape::PointerBadge),
+        (CursorIcon::Wait, Shape::WaitBadge),
+        (CursorIcon::DndAsk, Shape::Busy),
+        (CursorIcon::Help, Shape::Help),
+        (CursorIcon::ZoomIn, Shape::ZoomIn),
+        (CursorIcon::ZoomOut, Shape::ZoomOut),
         (CursorIcon::NotAllowed, Shape::NotAllowed),
         (CursorIcon::NoDrop, Shape::NotAllowed),
-        // Not drawn specifically, and deliberately: an arrow is a better
-        // answer than a shape nobody can read at 16 pixels.
-        (CursorIcon::Help, Shape::Arrow),
-        (CursorIcon::Wait, Shape::Arrow),
-        (CursorIcon::Progress, Shape::Arrow),
-        (CursorIcon::Pointer, Shape::Arrow),
-        (CursorIcon::ZoomIn, Shape::Arrow),
-        (CursorIcon::ContextMenu, Shape::Arrow),
     ];
     for (icon, expected) in cases {
         assert_eq!(Shape::for_icon(icon), expected, "for {icon:?}");
@@ -109,23 +124,61 @@ fn named_icons_map_to_the_shape_that_means_them() {
 }
 
 #[test]
-fn the_arrow_points_with_its_tip_and_the_rest_are_centred() {
+fn the_arrow_family_points_with_its_tip_the_hand_with_its_fingertip() {
     let size = 16;
     let (tx, ty) = arrow_tip(size);
-    // The tip sits inside the bitmap (room for outline and shadow), never at
+    // The tip sits inside the bitmap (room for rim and shadow), never at
     // the corner itself -- and the hotspot is exactly that tip.
-    assert!(tx > 0 && ty > 0, "the tip needs its outline inset");
-    assert_eq!(
-        Shape::Arrow.hotspot(size),
-        (tx, ty).into(),
-        "the arrow's hotspot is its tip, not the bitmap corner"
-    );
-    for shape in Shape::ALL.into_iter().filter(|s| *s != Shape::Arrow) {
+    assert!(tx > 0 && ty > 0, "the tip needs its rim inset");
+    for shape in [
+        Shape::Arrow,
+        Shape::PointerBadge,
+        Shape::WaitBadge,
+        Shape::Help,
+    ] {
+        assert_eq!(
+            shape.hotspot(size),
+            (tx, ty).into(),
+            "{shape:?}'s hotspot is its arrow tip, not the bitmap corner"
+        );
+    }
+    // The pointing glove aims with its index fingertip, inside the bitmap.
+    let fingertip = Shape::Hand.hotspot(size);
+    assert!(fingertip.x > 0 && fingertip.y >= 0);
+    assert_eq!(fingertip, hand::fingertip(size));
+    for shape in Shape::ALL.into_iter().filter(|s| {
+        !matches!(
+            s,
+            Shape::Arrow | Shape::PointerBadge | Shape::WaitBadge | Shape::Help | Shape::Hand
+        )
+    }) {
         assert_eq!(
             shape.hotspot(size),
             (size / 2, size / 2).into(),
             "{shape:?} is symmetric about its middle, so that is its hotspot"
         );
+    }
+}
+
+#[test]
+fn tiny_sizes_draw_a_centred_dot_under_the_pointer() {
+    // Below 8px no shape is legible, so every one draws the honest dot at
+    // the middle -- which is also the hotspot there, so the dot sits under
+    // the pointer rather than beside it.
+    for size in [Appearance::MIN_CURSOR_SIZE, 5, 6, 7] {
+        for shape in Shape::ALL {
+            let pixels = paint(shape, size);
+            assert_eq!(
+                shape.hotspot(size),
+                (size / 2, size / 2).into(),
+                "{shape:?} at {size}px hotspots away from its dot"
+            );
+            assert_ne!(
+                alpha(&pixels, size, size / 2, size / 2),
+                0,
+                "{shape:?} at {size}px drew no dot at the middle"
+            );
+        }
     }
 }
 
@@ -137,7 +190,7 @@ fn the_arrow_points_with_its_tip_and_the_rest_are_centred() {
 fn every_shape_fills_its_buffer_exactly() {
     for size in sizes() {
         for shape in Shape::ALL {
-            let pixels = generate(shape, size, FILL, OUTLINE);
+            let pixels = paint(shape, size);
             assert_eq!(
                 pixels.len(),
                 (size * size * 4) as usize,
@@ -150,12 +203,10 @@ fn every_shape_fills_its_buffer_exactly() {
 #[test]
 fn every_shape_actually_draws_something_at_every_allowed_size() {
     // Any coverage at all (flat or blended): a shape that draws nothing at
-    // a size a config can ask for leaves the user pointerless. Exact flat
-    // colors are asserted separately at usable sizes -- at 4px nothing is
-    // fully covered, everything is a blend by construction.
+    // a size a config can ask for leaves the user pointerless.
     for size in sizes() {
         for shape in Shape::ALL {
-            let pixels = generate(shape, size, FILL, OUTLINE);
+            let pixels = paint(shape, size);
             let drawn = (0..size)
                 .flat_map(|y| (0..size).map(move |x| (x, y)))
                 .filter(|(x, y)| alpha(&pixels, size, *x, *y) > 0)
@@ -165,30 +216,32 @@ fn every_shape_actually_draws_something_at_every_allowed_size() {
     }
     // ... while at real sizes the fills land as flat pixels (which is what
     // keeps small exact-pixel assertions elsewhere meaningful) and every
-    // shape carries a halo -- flat outline or blends -- around its fill, so
+    // shape carries a halo -- flat rim or blends -- around its fill, so
     // it stays legible against content of a similar color. Thin strokes have
-    // no *flat* outline pixel by construction (a 1px band around a 2px
+    // no *flat* rim pixel by construction (a 1px band around a 2px
     // stroke is all partial coverage), which is why the halo counts blends.
+    // (Flat means body *or* accent: the busy paw wears its print in accent
+    // over a same-silhouette underlay, so it lands no body-colored pixel.)
     for size in [
         Appearance::default().cursor_size,
         Appearance::MAX_CURSOR_SIZE,
     ] {
         for shape in Shape::ALL {
-            let pixels = generate(shape, size, FILL, OUTLINE);
+            let pixels = paint(shape, size);
             assert!(
-                count(&pixels, size, FILL) > 0,
+                count(&pixels, size, FILL) + count(&pixels, size, ACCENT) > 0,
                 "{shape:?} at {size}px drew no flat fill at all"
             );
             let halo = (0..size)
                 .flat_map(|y| (0..size).map(move |x| (x, y)))
                 .filter(|(x, y)| {
                     let p = pixel(&pixels, size, *x, *y);
-                    p != FILL && p != TRANSPARENT
+                    p != FILL && p != ACCENT && p != TRANSPARENT
                 })
                 .count();
             assert!(
                 halo > 0,
-                "{shape:?} at {size}px has no outline halo, so it would be \
+                "{shape:?} at {size}px has no rim halo, so it would be \
                  invisible against content of a similar color"
             );
         }
@@ -197,21 +250,31 @@ fn every_shape_actually_draws_something_at_every_allowed_size() {
 
 #[test]
 fn no_shape_draws_fill_on_the_edge_of_its_own_bitmap() {
-    // A fill pixel on the bitmap's edge has no room for its outline on that
-    // side, so it would meet whatever is under the cursor with no outline
-    // between them -- the one thing the outline exists to prevent. Checked
-    // at every allowed size because the insets are a fraction of it, and the
-    // smallest size is where the fractions collapse.
-    for size in sizes() {
+    // A fill pixel on the bitmap's edge has no room for its rim on that
+    // side, so it would meet whatever is under the cursor with no rim
+    // between them -- the one thing the rim exists to prevent. Checked at
+    // the brief's pinned sizes (badge dots are what would escape here: the
+    // "?" dot at 24px is the closest any mark comes) and at the allowed
+    // extremes, where the fractions collapse (4px) or stretch (256px).
+    for size in edge_sizes().into_iter().chain(sizes()).collect::<Vec<_>>() {
         for shape in Shape::ALL {
-            let pixels = generate(shape, size, FILL, OUTLINE);
-            for i in 0..size {
-                for (x, y) in [(i, 0), (i, size - 1), (0, i), (size - 1, i)] {
-                    assert_ne!(
-                        pixel(&pixels, size, x, y),
-                        FILL,
-                        "{shape:?} at {size}px puts fill on the bitmap edge at ({x}, {y})"
-                    );
+            for accent in [None, Some(ACCENT)] {
+                let pixels = generate(shape, size, FILL, RIM, accent);
+                for i in 0..size {
+                    for (x, y) in [(i, 0), (i, size - 1), (0, i), (size - 1, i)] {
+                        assert_ne!(
+                            pixel(&pixels, size, x, y),
+                            FILL,
+                            "{shape:?} at {size}px puts fill on the bitmap edge at ({x}, {y})"
+                        );
+                        if let Some(mark) = accent {
+                            assert_ne!(
+                                pixel(&pixels, size, x, y),
+                                mark,
+                                "{shape:?} at {size}px puts accent on the bitmap edge at ({x}, {y})"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -220,21 +283,22 @@ fn no_shape_draws_fill_on_the_edge_of_its_own_bitmap() {
 
 #[test]
 fn every_fill_pixel_is_wrapped_in_non_transparent_pixels() {
-    // The property the outline exists for: no fill pixel may sit directly
+    // The property the rim exists for: no fill pixel may sit directly
     // against a transparent one, in any of the eight directions, or the
-    // shape has an unoutlined edge there. A neighbour *outside* the bitmap
+    // shape has an unrimmed edge there. A neighbour *outside* the bitmap
     // counts as a failure for the same reason -- there is no pixel there to
-    // hold the outline, so the shape's edge is bare. Neighbours are checked
-    // for *any* coverage (alpha > 0) rather than exact outline bytes,
+    // hold the rim, so the shape's edge is bare. Neighbours are checked
+    // for *any* coverage (alpha > 0) rather than exact rim bytes,
     // because anti-aliased edge pixels are blends, not flat colors.
     // Asserted over whole bitmaps rather than spot checks, since it is cheap
     // and it is the only thing keeping a thin stroke legible.
-    for size in sizes() {
+    for size in edge_sizes() {
         for shape in Shape::ALL {
-            let pixels = generate(shape, size, FILL, OUTLINE);
+            let pixels = paint(shape, size);
             for y in 0..size {
                 for x in 0..size {
-                    if pixel(&pixels, size, x, y) != FILL {
+                    let p = pixel(&pixels, size, x, y);
+                    if p != FILL && p != ACCENT {
                         continue;
                     }
                     for oy in -1..=1 {
@@ -244,7 +308,7 @@ fn every_fill_pixel_is_wrapped_in_non_transparent_pixels() {
                                 nx >= 0 && ny >= 0 && nx < size && ny < size,
                                 "{shape:?} at {size}px has fill at ({x}, {y}), whose \
                                  ({nx}, {ny}) neighbour is off the bitmap -- its \
-                                 outline is clipped there"
+                                 rim is clipped there"
                             );
                             assert_ne!(
                                 alpha(&pixels, size, nx, ny),
@@ -263,17 +327,17 @@ fn every_fill_pixel_is_wrapped_in_non_transparent_pixels() {
 #[test]
 fn every_shape_is_anti_aliased() {
     // The property the supersampler exists for: at least one pixel that is
-    // neither flat fill, flat outline nor transparent. A 1-bit mask would
-    // draw the same silhouettes with none. Checked at the default size and
-    // up, where every shape has room for real edges.
+    // neither flat fill, flat rim, flat accent nor transparent. A 1-bit mask
+    // would draw the same silhouettes with none. Checked at the default size
+    // and up, where every shape has room for real edges.
     for size in [Appearance::default().cursor_size, 48] {
         for shape in Shape::ALL {
-            let pixels = generate(shape, size, FILL, OUTLINE);
+            let pixels = paint(shape, size);
             let blended = (0..size)
                 .flat_map(|y| (0..size).map(move |x| (x, y)))
                 .filter(|(x, y)| {
                     let p = pixel(&pixels, size, *x, *y);
-                    p != FILL && p != OUTLINE && p != TRANSPARENT
+                    p != FILL && p != RIM && p != ACCENT && p != TRANSPARENT
                 })
                 .count();
             assert!(
@@ -292,18 +356,21 @@ fn every_pixel_is_premultiplied_correctly() {
     // channel byte greater than the alpha byte is not a valid premultiplied
     // pixel and would over-brighten instead of blending. Every byte of every
     // shape at every size must satisfy `channel <= alpha`, including the
-    // anti-aliased blends (which is where a straight-alpha mistake shows).
-    for size in sizes() {
+    // anti-aliased blends and the accent layer (which is where a
+    // straight-alpha mistake shows).
+    for size in edge_sizes() {
         for shape in Shape::ALL {
-            let pixels = generate(shape, size, FILL, OUTLINE);
-            for y in 0..size {
-                for x in 0..size {
-                    let [b, g, r, a] = pixel(&pixels, size, x, y);
-                    assert!(
-                        b <= a && g <= a && r <= a,
-                        "{shape:?} at {size}px drew {b},{g},{r},{a} at ({x}, {y}), \
-                         which is not premultiplied"
-                    );
+            for accent in [None, Some(ACCENT)] {
+                let pixels = generate(shape, size, FILL, RIM, accent);
+                for y in 0..size {
+                    for x in 0..size {
+                        let [b, g, r, a] = pixel(&pixels, size, x, y);
+                        assert!(
+                            b <= a && g <= a && r <= a,
+                            "{shape:?} at {size}px drew {b},{g},{r},{a} at ({x}, {y}), \
+                             which is not premultiplied"
+                        );
+                    }
                 }
             }
         }
@@ -320,29 +387,32 @@ fn a_shape_uses_the_colors_it_was_given() {
     let size = 32;
     let fill = [0x11, 0x22, 0x33, 0xff];
     let outline = [0x44, 0x55, 0x66, 0xff];
+    let accent = [0x77, 0x88, 0x99, 0xff];
     for shape in Shape::ALL {
-        let pixels = generate(shape, size, fill, outline);
+        let pixels = generate(shape, size, fill, outline, Some(accent));
         let mut exact = 0;
         for y in 0..size {
             for x in 0..size {
                 let p = pixel(&pixels, size, x, y);
-                if p == fill || p == outline || p == TRANSPARENT {
+                if p == fill || p == outline || p == accent || p == TRANSPARENT {
                     exact += 1;
                     continue;
                 }
-                // A blend of the two given colors with transparency: each
-                // channel between the color's and zero, alpha in between.
-                // (Upper bounds only: 0x44/0x55/0x66 already exceed
-                // 0x11/0x22/0x33 on every channel, so they are the maxima.)
+                // A blend of the given colors: each channel between the
+                // color's and zero. (Upper bounds only: the accent already
+                // exceeds body and rim on every channel, so it is the
+                // maximum. Fully opaque mixes are legitimate with three
+                // layers -- an accent edge inside a fully-covered body still
+                // composites to alpha 255 -- so only the channels are pinned
+                // here, not the alpha.)
                 let [b, g, r, a] = p;
                 assert!(
-                    a > 0 && a < 255,
-                    "{shape:?} drew fully transparent/opaque {p:?} at ({x}, {y}) \
-                     that matches no input"
+                    a > 0,
+                    "{shape:?} drew transparent {p:?} at ({x}, {y}) that matches no input"
                 );
                 assert!(
-                    b <= 0x44 && g <= 0x55 && r <= 0x66,
-                    "{shape:?} drew {p:?} at ({x}, {y}), outside either given color"
+                    b <= 0x77 && g <= 0x88 && r <= 0x99,
+                    "{shape:?} drew {p:?} at ({x}, {y}), outside every given color"
                 );
             }
         }
@@ -362,7 +432,7 @@ fn the_shapes_are_distinguishable_from_one_another() {
     let size = Appearance::default().cursor_size;
     let rendered: Vec<(Shape, Vec<u8>)> = Shape::ALL
         .into_iter()
-        .map(|shape| (shape, generate(shape, size, FILL, OUTLINE)))
+        .map(|shape| (shape, paint(shape, size)))
         .collect();
     for (i, (shape, pixels)) in rendered.iter().enumerate() {
         for (other, other_pixels) in &rendered[i + 1..] {
@@ -375,6 +445,66 @@ fn the_shapes_are_distinguishable_from_one_another() {
 }
 
 #[test]
+fn disabling_the_accent_keeps_every_shape_but_removes_the_mark() {
+    // `cursor_accent = "none"` must never cost the pointer: every shape still
+    // draws, and no accent-colored pixel survives anywhere.
+    let size = Appearance::default().cursor_size;
+    for shape in Shape::ALL {
+        let pixels = generate(shape, size, FILL, RIM, None);
+        let drawn = (0..size)
+            .flat_map(|y| (0..size).map(move |x| (x, y)))
+            .filter(|(x, y)| alpha(&pixels, size, *x, *y) > 0)
+            .count();
+        assert!(drawn > 0, "{shape:?} vanished with the accent off");
+        assert_eq!(
+            count(&pixels, size, ACCENT),
+            0,
+            "{shape:?} still wears the accent with it disabled"
+        );
+    }
+}
+
+#[test]
+fn the_accent_mark_lands_where_the_shape_promises() {
+    // One pinned accent pixel per marked family, so a refactor that silently
+    // drops a mark (or moves it off the shape) fails here rather than only
+    // in a screenshot: the arrow's tail hint, the text stem, the move dot,
+    // the crosshair dot. Positions were read off the 16px renders the
+    // concept comparison judged.
+    let size = 16;
+    let arrow = paint(Shape::Arrow, size);
+    assert_eq!(
+        pixel(&arrow, size, 6, 11),
+        ACCENT,
+        "the arrow's tail hint left the tail end"
+    );
+    let text = paint(Shape::Text, size);
+    assert_eq!(
+        pixel(&text, size, 8, 7),
+        ACCENT,
+        "the text stem mark left the stem"
+    );
+    let resize = paint(Shape::ResizeEw, size);
+    assert_eq!(
+        pixel(&resize, size, 8, 8),
+        ACCENT,
+        "the resize centre line left the shaft"
+    );
+    let move_shape = paint(Shape::Move, size);
+    assert_eq!(
+        pixel(&move_shape, size, 8, 8),
+        ACCENT,
+        "the move centre dot left the crossing"
+    );
+    let crosshair = paint(Shape::Crosshair, size);
+    assert_eq!(
+        pixel(&crosshair, size, 8, 8),
+        ACCENT,
+        "the crosshair dot left the centre"
+    );
+}
+
+#[test]
 fn the_balanced_shapes_are_centred_on_the_bitmap() {
     // Each of these means "this moves along that axis" (or "here, exactly"),
     // which only reads correctly if neither end outweighs the other. Exact
@@ -384,21 +514,31 @@ fn the_balanced_shapes_are_centred_on_the_bitmap() {
     // asserted is the property that actually shows: the centroid of everything
     // drawn sits within one pixel of the bitmap's middle. A rasterizer that
     // biases one end of a stroke moves that centroid and shows up here and
-    // nowhere else. The arrow is exempt: its body is intentionally
-    // asymmetric (and its shadow offset), its balance point is its tip.
+    // nowhere else. The arrow family is exempt: those bodies are
+    // intentionally asymmetric (and their shadows offset), their balance
+    // point is the tip -- and so is the hand, which aims with its fingertip.
+    // The grab hands and the magnifiers are exempt too: fingers over a palm,
+    // and a lens with a handle, are inherently off-centre mass (the ±1px
+    // bound is absolute, so any asymmetry fails it by 256px), and both read
+    // by silhouette, not by balance -- their hotspot is the middle by
+    // convention, which `the_arrow_family_points...` pins above.
     for size in sizes() {
         for shape in [
             Shape::Text,
             Shape::VerticalText,
             Shape::Crosshair,
+            Shape::Precision,
             Shape::ResizeNs,
             Shape::ResizeEw,
             Shape::ResizeNesw,
             Shape::ResizeNwse,
             Shape::Move,
             Shape::NotAllowed,
+            Shape::Busy,
+            Shape::SplitV,
+            Shape::SplitH,
         ] {
-            let pixels = generate(shape, size, FILL, OUTLINE);
+            let pixels = paint(shape, size);
             let mut drawn = 0.0;
             let (mut sum_x, mut sum_y) = (0.0, 0.0);
             for y in 0..size {
@@ -426,39 +566,52 @@ fn the_balanced_shapes_are_centred_on_the_bitmap() {
 fn the_arrow_tip_is_drawn_and_the_corner_is_not() {
     // The hotspot contract from the bitmap's side: the tip pixel itself is
     // covered (it is what the user is pointing with), while the bitmap's
-    // own corner stays transparent (the tip's outline inset). The corner
-    // check needs room for the inset, so it starts above the 4px minimum --
-    // at 4px the whole bitmap is a dot with a halo (see
-    // `bitmap_honors_the_requested_size`), and the fill-never-on-edge tests
-    // pin down what that dot guarantees instead.
-    for size in sizes() {
-        let pixels = generate(Shape::Arrow, size, FILL, OUTLINE);
-        let (tx, ty) = arrow_tip(size);
-        assert_ne!(
-            alpha(&pixels, size, tx, ty),
-            0,
-            "the arrow tip at ({tx}, {ty}) at {size}px is transparent"
-        );
-        if size > Appearance::MIN_CURSOR_SIZE {
+    // own corner stays transparent (the tip's rim inset).
+    for size in [16, 24, 32, 48, 64, 256] {
+        for shape in [
+            Shape::Arrow,
+            Shape::PointerBadge,
+            Shape::WaitBadge,
+            Shape::Help,
+        ] {
+            let pixels = paint(shape, size);
+            let tip = shape.hotspot(size);
+            assert_ne!(
+                alpha(&pixels, size, tip.x, tip.y),
+                0,
+                "{shape:?}'s tip at ({}, {}) at {size}px is transparent",
+                tip.x,
+                tip.y
+            );
             assert_eq!(
                 pixel(&pixels, size, 0, 0),
                 TRANSPARENT,
-                "the bitmap corner at {size}px is drawn -- the tip inset is gone"
+                "{shape:?}'s bitmap corner at {size}px is drawn -- the tip inset is gone"
             );
         }
+        // ... and the glove's fingertip likewise.
+        let pixels = paint(Shape::Hand, size);
+        let tip = Shape::Hand.hotspot(size);
+        assert_ne!(
+            alpha(&pixels, size, tip.x, tip.y),
+            0,
+            "the hand's fingertip at ({}, {}) at {size}px is transparent",
+            tip.x,
+            tip.y
+        );
     }
 }
 
 /// Not an assertion: prints every shape as ASCII art so a human can look at
-/// what the rasterizer actually produced. `#` is flat fill, `+` a blended
-/// pixel, `.` flat outline, space transparent. Run with
+/// what the rasterizer actually produced. `#` is flat fill, `o` flat accent,
+/// `+` a blended pixel, `.` flat rim, space transparent. Run with
 /// `cargo test -- --ignored --nocapture shape_art`.
 #[test]
 #[ignore = "prints the shapes for a human to look at; asserts nothing"]
 fn shape_art() {
     let size = 24;
     for shape in Shape::ALL {
-        let pixels = generate(shape, size, FILL, OUTLINE);
+        let pixels = paint(shape, size);
         println!("--- {shape:?} ---");
         for y in 0..size {
             let row: String = (0..size)
@@ -466,7 +619,9 @@ fn shape_art() {
                     let p = pixel(&pixels, size, x, y);
                     if p == FILL {
                         '#'
-                    } else if p == OUTLINE {
+                    } else if p == ACCENT {
+                        'o'
+                    } else if p == RIM {
                         '.'
                     } else if p == TRANSPARENT {
                         ' '
@@ -493,7 +648,7 @@ fn shape_art() {
 #[test]
 #[ignore = "writes evidence PNGs; asserts nothing"]
 fn png_dumps() {
-    dump_pngs(|shape, size| generate(shape, size, FILL, OUTLINE));
+    dump_pngs(|shape, size| generate(shape, size, FILL, RIM, Some(ACCENT)));
 }
 
 /// The bitmap source behind [`png_dumps`], split out so the before/after
@@ -609,7 +764,7 @@ fn composite_scaled(bitmap: &[u8], size: i32, scale: f64, bg: [u8; 4]) -> (Vec<u
     (rgb, w, h)
 }
 
-/// Not an assertion: times building all ten bitmaps at the default and
+/// Not an assertion: times building all bitmaps at the default and
 /// maximum sizes, the cost `Cursor::new`/`rebuild` pays once per startup or
 /// reload. Prints to stdout; run with `--nocapture`. Used for the
 /// before/after numbers in the cursor report.
@@ -623,7 +778,7 @@ fn bench_build() {
         let start = std::time::Instant::now();
         let mut bytes = 0;
         for shape in Shape::ALL {
-            bytes += generate(shape, size, FILL, OUTLINE).len();
+            bytes += paint(shape, size).len();
         }
         let elapsed = start.elapsed();
         println!(

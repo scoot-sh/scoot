@@ -23,10 +23,11 @@
 //!   compositor's own procedurally-generated bitmaps is drawn instead,
 //!   chosen by [`shapes::Shape::for_icon`]: an I-beam for `text`, a
 //!   double-headed arrow for a resize edge, a crosshair, and so on, with the
-//!   arrow below as the answer for every name none of those fits. Their size
-//!   and fill color are configurable (`[appearance]`'s
-//!   `cursor_size`/`cursor_color`, built at startup and rebuilt by
-//!   [`Cursor::rebuild`] on a config reload -- see [`Cursor::new`]).
+//!   arrow below as the answer for every name none of those fits. Their size,
+//!   body color and accent mark are configurable (`[appearance]`'s
+//!   `cursor_size`/`cursor_color`/`cursor_accent`, built at startup and
+//!   rebuilt by [`Cursor::rebuild`] on a config reload -- see
+//!   [`Cursor::new`]).
 //! - [`CursorImageStatus::Hidden`] -- nothing is drawn.
 //!
 //! A client reaches the `Named` path either through `wl_pointer.set_cursor`
@@ -103,13 +104,37 @@ render_elements! {
     Plane = plane::PlaneCursorElement<R>,
 }
 
-/// The fill/outline byte pair one configured cursor color draws as: the
-/// fill is the color itself, the outline always black at the fill's own
-/// alpha (see [`Cursor::new`]). One function so `new` and `rebuild` cannot
+/// The fill/rim/accent byte triple one configured cursor color draws as.
+///
+/// `cursor_color` keeps meaning "the body fill color". The rim
+/// auto-contrasts it ([`contrast_rim`]), both at the fill's own alpha; the
+/// accent (when enabled) follows the body's alpha too, so a translucent body
+/// never wears an opaque mark. One function so `new` and `rebuild` cannot
 /// disagree about it.
-fn outline_pair(color: Color) -> ([u8; 4], [u8; 4]) {
-    let outline = Color::new(0.0, 0.0, 0.0, color.a);
-    (color.to_argb8888(), outline.to_argb8888())
+fn color_triple(color: Color, accent: Option<Color>) -> ([u8; 4], [u8; 4], Option<[u8; 4]>) {
+    let rim = contrast_rim(color);
+    let accent_px =
+        accent.map(|mark| Color::new(mark.r, mark.g, mark.b, mark.a * color.a).to_argb8888());
+    (color.to_argb8888(), rim.to_argb8888(), accent_px)
+}
+
+/// The rim color for a body fill: white on a dark body, black on a light
+/// one, at the body's own alpha.
+///
+/// The split is on the fill's gamma-space luminance against a 0.45
+/// threshold: the default near-black body (`#1a1a1a`, luminance ~0.01) gets
+/// a white rim, the old white body a black one, and a mid-gray body
+/// (`#808080`, luminance ~0.50) still gets black -- a white rim around a
+/// mid-gray body glares, while a black one reads as definition. Matching the
+/// body's alpha is what makes a translucent `cursor_color` actually look
+/// translucent instead of an opaque rim around a see-through middle.
+pub fn contrast_rim(body: Color) -> Color {
+    let luminance = 0.2126 * body.r + 0.7152 * body.g + 0.0722 * body.b;
+    if luminance < 0.45 {
+        Color::new(1.0, 1.0, 1.0, body.a)
+    } else {
+        Color::new(0.0, 0.0, 0.0, body.a)
+    }
 }
 
 /// The cursor's current image request and the persistent render buffers
@@ -172,10 +197,11 @@ impl Cursor {
     /// keeps it for the process's lifetime, or until [`Cursor::rebuild`]
     /// replaces it on a config reload.
     ///
-    /// Called once, from `State::new`, with `appearance.cursor_size` and
-    /// `appearance.cursor_color`. [`Cursor::rebuild`] is the only other path
-    /// that builds these buffers; nothing else may, which is what keeps the
-    /// stable-`Id` reasoning on [`Self::shapes`] honest (see that field).
+    /// Called once, from `State::new`, with `appearance.cursor_size`,
+    /// `appearance.cursor_color` and `appearance.cursor_accent`.
+    /// [`Cursor::rebuild`] is the only other path that builds these buffers;
+    /// nothing else may, which is what keeps the stable-`Id` reasoning on
+    /// [`Self::shapes`] honest (see that field).
     ///
     /// `size` is put through [`Appearance::clamp_cursor_size`] again rather
     /// than trusted. `Appearance::clamped` is the load-time gate (and the
@@ -186,19 +212,20 @@ impl Cursor {
     /// the allocation, the same way `decorations::ring_rects` re-checks
     /// `width <= 0` at its own arithmetic rather than trusting its caller.
     ///
-    /// The outline is always black, at the fill's own alpha, rather than a
-    /// second config field: its whole job is to keep the shape's edges legible
-    /// against content of a similar color, which a configurable outline could
-    /// only undo. Matching the fill's alpha is what makes a translucent
-    /// `cursor_color` actually look translucent instead of an opaque black
-    /// rim around a see-through middle. The arrow's soft shadow is likewise
-    /// derived (28% of the fill's alpha), never configured.
-    pub fn new(size: i32, color: Color, theme_name: Option<&str>) -> Self {
+    /// The rim auto-contrasts the body fill (see [`contrast_rim`]), at the
+    /// fill's own alpha, rather than being a second config field: its whole
+    /// job is to keep the shape's edges legible against content of a similar
+    /// color, which a configurable rim could only undo. Matching the fill's
+    /// alpha is what makes a translucent `cursor_color` actually look
+    /// translucent instead of an opaque rim around a see-through middle. The
+    /// arrow's soft shadow is likewise derived (28% of the fill's alpha),
+    /// never configured.
+    pub fn new(size: i32, color: Color, accent: Option<Color>, theme_name: Option<&str>) -> Self {
         let size = Appearance::clamp_cursor_size(size);
-        let (fill, outline) = outline_pair(color);
+        let (fill, rim, accent_px) = color_triple(color, accent);
         let theme = Theme::load(theme_name, size);
         let mut cursor = Self {
-            shapes: Self::build_shapes(size, fill, outline),
+            shapes: Self::build_shapes(size, fill, rim, accent_px),
             size,
             status: CursorImageStatus::default_named(),
             theme,
@@ -229,32 +256,39 @@ impl Cursor {
     /// drawn as the fallback shapes), so this cannot fail either, and
     /// running it synchronously on the event loop is fine -- a reload is a
     /// cold path, not a frame.
-    pub fn rebuild(&mut self, size: i32, color: Color, theme_name: Option<&str>) {
+    pub fn rebuild(
+        &mut self,
+        size: i32,
+        color: Color,
+        accent: Option<Color>,
+        theme_name: Option<&str>,
+    ) {
         let size = Appearance::clamp_cursor_size(size);
-        let (fill, outline) = outline_pair(color);
-        self.shapes = Self::build_shapes(size, fill, outline);
+        let (fill, rim, accent_px) = color_triple(color, accent);
+        self.shapes = Self::build_shapes(size, fill, rim, accent_px);
         self.size = size;
         self.theme = Theme::load(theme_name, size);
         self.refresh_themed();
     }
 
     /// The `Shape::COUNT` fallback bitmaps for one size/color pair, in
-    /// [`Shape::index`] order. Every shape -- the arrow included -- is
-    /// `shapes::generate`, one family with the same outline width, the same
-    /// 4x4 supersampling and the same premultiplication.
+    /// [`Shape::index`] order. Every shape is `shapes::generate`, one family
+    /// with the same rim width, the same accent hairline, the same 4x4
+    /// supersampling and the same premultiplication.
     ///
     /// Shared by [`Cursor::new`] and [`Cursor::rebuild`] so the two cannot
     /// disagree about what a size/color pair draws.
     fn build_shapes(
         size: i32,
         fill: [u8; 4],
-        outline: [u8; 4],
+        rim: [u8; 4],
+        accent: Option<[u8; 4]>,
     ) -> [MemoryRenderBuffer; Shape::COUNT] {
         // `Shape::ALL` in its own order, indexed back by `Shape::index`
         // -- see that constant's doc for why the order lives there and
         // not here.
         Shape::ALL.map(|shape| {
-            let pixels = shapes::generate(shape, size, fill, outline);
+            let pixels = shapes::generate(shape, size, fill, rim, accent);
             MemoryRenderBuffer::from_slice(
                 &pixels,
                 Fourcc::Argb8888,

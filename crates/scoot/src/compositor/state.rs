@@ -1298,6 +1298,7 @@ impl State {
         let cursor = Cursor::new(
             appearance.cursor_size,
             appearance.cursor_color,
+            appearance.cursor_accent,
             appearance.cursor_theme.as_deref(),
         );
 

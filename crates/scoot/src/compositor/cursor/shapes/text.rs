@@ -1,0 +1,99 @@
+//! The text beams: the I-beam and its sideways sibling.
+//!
+//! The stem and both serifs are the body; the accent is a thin mark down the
+//! stem's middle (the orange bar the sheet's `text-select` cell shows). With
+//! the accent disabled the beam is the plain I-beam of the sheet's `text`
+//! cell, so both readings survive one geometry.
+
+use super::{Ctx, Prim, span};
+
+/// Shared I-beam builder along one axis: `vertical` draws the `text` beam,
+/// horizontal the `vertical-text` one.
+fn beam(ctx: &Ctx, vertical: bool) -> (Vec<Prim>, Vec<Prim>, Option<super::super::raster::Shadow>) {
+    let inset = (ctx.ow + ctx.w / 2.0 + 1.0).ceil();
+    let (near, far) = span(ctx.size, inset);
+    let serif = (f64::from(ctx.size) / 8.0).max(1.5);
+    let c = ctx.c;
+    let (stem, bars, mark) = if vertical {
+        (
+            Prim::Capsule {
+                ax: c,
+                ay: near,
+                bx: c,
+                by: far,
+                w: ctx.w,
+            },
+            vec![
+                Prim::Capsule {
+                    ax: c - serif,
+                    ay: near,
+                    bx: c + serif,
+                    by: near,
+                    w: ctx.w,
+                },
+                Prim::Capsule {
+                    ax: c - serif,
+                    ay: far,
+                    bx: c + serif,
+                    by: far,
+                    w: ctx.w,
+                },
+            ],
+            Prim::Capsule {
+                ax: c,
+                ay: near + (far - near) * 0.22,
+                bx: c,
+                by: far - (far - near) * 0.22,
+                w: (ctx.w * 0.42).max(0.8),
+            },
+        )
+    } else {
+        (
+            Prim::Capsule {
+                ax: near,
+                ay: c,
+                bx: far,
+                by: c,
+                w: ctx.w,
+            },
+            vec![
+                Prim::Capsule {
+                    ax: near,
+                    ay: c - serif,
+                    bx: near,
+                    by: c + serif,
+                    w: ctx.w,
+                },
+                Prim::Capsule {
+                    ax: far,
+                    ay: c - serif,
+                    bx: far,
+                    by: c + serif,
+                    w: ctx.w,
+                },
+            ],
+            Prim::Capsule {
+                ax: near + (far - near) * 0.22,
+                ay: c,
+                bx: far - (far - near) * 0.22,
+                by: c,
+                w: (ctx.w * 0.42).max(0.8),
+            },
+        )
+    };
+    let mut body = vec![stem];
+    body.extend(bars);
+    (body, vec![mark], None)
+}
+
+/// The I-beam for text entry.
+pub(crate) fn text(ctx: &Ctx) -> (Vec<Prim>, Vec<Prim>, Option<super::super::raster::Shadow>) {
+    beam(ctx, true)
+}
+
+/// The I-beam turned on its side, for vertical text.
+pub(crate) fn vertical_text(
+    ctx: &Ctx,
+) -> (Vec<Prim>, Vec<Prim>, Option<super::super::raster::Shadow>) {
+    beam(ctx, false)
+}

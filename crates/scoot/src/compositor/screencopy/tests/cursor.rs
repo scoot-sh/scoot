@@ -663,10 +663,12 @@ fn a_stream_reuses_one_region_target_and_one_pixel_buffer() {
 
     // A cursor-size change is what regrows it.
     fixture.state.appearance.cursor_size = 24;
-    fixture
-        .state
-        .cursor
-        .rebuild(24, fixture.state.appearance.cursor_color, Some(NO_THEME));
+    fixture.state.cursor.rebuild(
+        24,
+        fixture.state.appearance.cursor_color,
+        fixture.state.appearance.cursor_accent,
+        Some(NO_THEME),
+    );
     let mut backend = fixture.state.take_backend(id).expect("a backend");
     let patch = fixture
         .state

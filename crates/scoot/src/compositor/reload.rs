@@ -22,7 +22,7 @@
 //!   the same reload on.
 //! - `[appearance]` ring width and colors, background, `corner_radius`,
 //!   `prefer_no_csd`, and the cursor fields (`cursor_size`, `cursor_color`,
-//!   `cursor_theme`): applied -- every reader takes the ring/background
+//!   `cursor_accent`, `cursor_theme`): applied -- every reader takes the ring/background
 //!   values live from `State::appearance` (the render path,
 //!   `XdgDecorationHandler`), and the cursor ones rebuild `Cursor` in place
 //!   (`Cursor::rebuild`: new fallback bitmaps, the theme reloaded, the
@@ -206,6 +206,7 @@ mod field {
     pub const CORNER_RADIUS: &str = "appearance.corner_radius";
     pub const CURSOR_SIZE: &str = "appearance.cursor_size";
     pub const CURSOR_COLOR: &str = "appearance.cursor_color";
+    pub const CURSOR_ACCENT: &str = "appearance.cursor_accent";
     pub const CURSOR_THEME: &str = "appearance.cursor_theme";
     pub const CURSOR_HIDE: &str = "appearance.cursor_hide_after_ms";
     pub const PREFER_NO_CSD: &str = "appearance.prefer_no_csd";
@@ -408,8 +409,8 @@ impl State {
             // No re-render needed on its own: this only answers future
             // `zxdg_toplevel_decoration_v1` requests, it repaints nothing.
         }
-        // The cursor triple: each field reports under its own name, but one
-        // rebuild serves all three -- bitmaps, theme and re-resolution are
+        // The cursor quad: each field reports under its own name, but one
+        // rebuild serves all four -- bitmaps, theme and re-resolution are
         // one atomic swap, never a half-rebuilt cursor. `fresh` is already
         // load-clamped (including `cursor_size`), and what is stored here is
         // exactly what was compared, so the next reload agrees silently.
@@ -423,16 +424,19 @@ impl State {
         // idempotent; only a restart picks up an externally changed variable.
         let cursor_size = appearance.cursor_size != live.cursor_size;
         let cursor_color = appearance.cursor_color != live.cursor_color;
+        let cursor_accent = appearance.cursor_accent != live.cursor_accent;
         let cursor_theme = appearance.cursor_theme != live.cursor_theme;
-        if cursor_size || cursor_color || cursor_theme {
+        if cursor_size || cursor_color || cursor_accent || cursor_theme {
             self.appearance.cursor_size = appearance.cursor_size;
             self.appearance.cursor_color = appearance.cursor_color;
+            self.appearance.cursor_accent = appearance.cursor_accent;
             self.appearance
                 .cursor_theme
                 .clone_from(&appearance.cursor_theme);
             self.cursor.rebuild(
                 appearance.cursor_size,
                 appearance.cursor_color,
+                appearance.cursor_accent,
                 appearance.cursor_theme.as_deref(),
             );
             // The overlay-plane twins are keyed by the old images' ids: drop
@@ -447,6 +451,9 @@ impl State {
             }
             if cursor_color {
                 report.applied.push(field::CURSOR_COLOR.to_owned());
+            }
+            if cursor_accent {
+                report.applied.push(field::CURSOR_ACCENT.to_owned());
             }
             if cursor_theme {
                 report.applied.push(field::CURSOR_THEME.to_owned());

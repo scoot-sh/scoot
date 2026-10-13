@@ -212,12 +212,12 @@ impl From<Color> for Color32F {
 /// `LayoutConfig`. Colors are already parsed and clamps already applied by
 /// the time one of these exists; nothing downstream needs to re-check either.
 ///
-/// It mirrors the `[appearance]` *table*, not this module's own scope, so two
-/// of its fields (`cursor_size`/`cursor_color`) are consumed by `cursor.rs`
-/// rather than by anything here -- the alternative, a second config struct
-/// for one pair of fields, would split one TOML table across two types for no
-/// benefit. Everything this module's [`Color`] knows about pixel formats is
-/// shared by both consumers anyway (see [`Color::to_argb8888`]).
+/// It mirrors the `[appearance]` *table*, not this module's own scope, so three
+/// of its fields (`cursor_size`/`cursor_color`/`cursor_accent`) are consumed
+/// by `cursor.rs` rather than by anything here -- the alternative, a second
+/// config struct for three fields, would split one TOML table across two
+/// types for no benefit. Everything this module's [`Color`] knows about pixel
+/// formats is shared by both consumers anyway (see [`Color::to_argb8888`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Appearance {
     /// The focus ring's thickness around the focused window, in logical
@@ -252,11 +252,21 @@ pub struct Appearance {
     /// `cursor.rs` draws procedurally; a client that supplies its own cursor
     /// surface sizes that itself.
     pub cursor_size: i32,
-    /// The fallback cursor shape's fill color. The outline is always black
-    /// (at this color's own alpha) and the arrow alone carries a soft drop
-    /// shadow at 28% of that alpha -- neither is separately configurable,
-    /// see `cursor/shapes.rs`.
+    /// The fallback cursor shapes' body fill color: every shape's main
+    /// silhouette is drawn in this (`cursor/shapes.rs`). The rim around it
+    /// auto-contrasts -- a dark body gets a white rim, a light body a black
+    /// one, both at this color's own alpha -- so setting this to white
+    /// reproduces the pre-family white-pointer look, and a translucent value
+    /// genuinely composites (rim and accent follow its alpha). See
+    /// `cursor.rs`'s `contrast_rim`.
     pub cursor_color: Color,
+    /// The fallback cursor shapes' accent color: the small ginger mark each
+    /// shape carries (the arrow's tail hint, resize bars' centre line, the
+    /// paw, the hourglass sand, the "not allowed" slash -- see
+    /// `cursor/shapes.rs`). `None` draws no accent at all. The default is
+    /// the project's ginger orange; the accent follows the body's alpha so a
+    /// translucent body does not wear an opaque mark.
+    pub cursor_accent: Option<Color>,
     /// Which installed xcursor theme to draw named cursor shapes from, or
     /// `None` to take `$XCURSOR_THEME` (and `"default"` if that is unset too)
     /// -- see `cursor/theme.rs` for the resolution order and for why reading
@@ -299,11 +309,14 @@ impl Default for Appearance {
             // into the rounded window + ring path (see `rounded.rs`); the
             // default session never takes it.
             corner_radius: 0,
-            // The fallback cursor: a 16x16 arrow with a white fill, drawn by
-            // `cursor/shapes.rs`. Unchanged defaults, so an existing config
-            // file (or none) keeps its size and fill color.
+            // The fallback cursor: 16px bitmaps drawn by `cursor/shapes.rs`
+            // as a near-black / white-rim / ginger-accent family. An existing
+            // config file that set `cursor_color` keeps its body color (with
+            // the rim auto-contrasting as below); one that never set it moves
+            // from the old white pointer to the family look.
             cursor_size: 16,
-            cursor_color: Color::new(1.0, 1.0, 1.0, 1.0),
+            cursor_color: Color::new(26.0 / 255.0, 26.0 / 255.0, 26.0 / 255.0, 1.0),
+            cursor_accent: Some(Color::new(229.0 / 255.0, 127.0 / 255.0, 41.0 / 255.0, 1.0)),
             // Unset, i.e. follow `$XCURSOR_THEME` like every other client on
             // the machine does, rather than overriding the user's desktop
             // from a compositor default.

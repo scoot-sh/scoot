@@ -78,7 +78,7 @@ fn bitmap_hotspot_pixel_is_drawn_and_opaque() {
     // opaque for opaque colors -- the tip pixel blends fill and outline
     // under the supersampler, so it is neither flat color exactly, and its
     // corner taps fall just outside the silhouette.
-    let pixels = shapes::generate(Shape::Arrow, DEFAULT_SIZE, WHITE, BLACK);
+    let pixels = shapes::generate(Shape::Arrow, DEFAULT_SIZE, WHITE, BLACK, None);
     let hotspot = Shape::Arrow.hotspot(DEFAULT_SIZE);
     let at_tip = pixel(&pixels, DEFAULT_SIZE, hotspot.x, hotspot.y);
     assert_ne!(at_tip, TRANSPARENT, "the tip pixel is transparent");
@@ -91,7 +91,7 @@ fn bitmap_hotspot_pixel_is_drawn_and_opaque() {
 
 #[test]
 fn bitmap_is_fully_transparent_above_the_diagonal() {
-    let pixels = shapes::generate(Shape::Arrow, DEFAULT_SIZE, WHITE, BLACK);
+    let pixels = shapes::generate(Shape::Arrow, DEFAULT_SIZE, WHITE, BLACK, None);
     // (size - 1, 0): far right of the top row, well outside the arrow.
     assert_eq!(
         pixel(&pixels, DEFAULT_SIZE, DEFAULT_SIZE - 1, 0),
@@ -101,22 +101,87 @@ fn bitmap_is_fully_transparent_above_the_diagonal() {
 
 #[test]
 fn bitmap_interior_is_the_fill_color() {
-    let pixels = shapes::generate(Shape::Arrow, DEFAULT_SIZE, WHITE, BLACK);
+    let pixels = shapes::generate(Shape::Arrow, DEFAULT_SIZE, WHITE, BLACK, None);
     // (2, 4): inside the arrow body, between the left edge and the diagonal.
     assert_eq!(pixel(&pixels, DEFAULT_SIZE, 2, 4), WHITE);
 }
 
-/// The built-in defaults are what an unconfigured scoot draws: a 16x16
-/// white-filled arrow. The literals the three tests above use.
+/// The built-in defaults are what an unconfigured scoot draws: 16x16
+/// bitmaps in the near-black / white-rim / ginger-accent family. The
+/// literals the pure tests above use are explicit colors, not these
+/// defaults; what ties them together is `contrast_rim` below.
 #[test]
-fn the_default_appearance_still_describes_the_original_shape() {
+fn the_default_appearance_still_describes_the_family_paints() {
     let defaults = Appearance::default();
     assert_eq!(defaults.cursor_size, DEFAULT_SIZE);
-    assert_eq!(defaults.cursor_color.to_argb8888(), WHITE);
-    // The outline `Cursor::new` derives from that fill color.
     assert_eq!(
-        Color::new(0.0, 0.0, 0.0, defaults.cursor_color.a).to_argb8888(),
-        BLACK
+        defaults.cursor_color.to_argb8888(),
+        [0x1a, 0x1a, 0x1a, 255],
+        "the default body is near-black"
+    );
+    // The rim `Cursor::new` derives from that fill color.
+    assert_eq!(
+        super::contrast_rim(defaults.cursor_color).to_argb8888(),
+        WHITE,
+        "a dark body wears a white rim"
+    );
+    assert_eq!(
+        defaults.cursor_accent.map(|c| c.to_argb8888()),
+        Some([0x29, 0x7f, 0xe5, 255]),
+        "the default accent is the ginger orange"
+    );
+}
+
+/// The rim auto-contrast rule, both directions and the alpha following:
+///
+/// - a dark body (the near-black default) gets a white rim;
+/// - a light body (the old white pointer) gets a black rim;
+/// - a mid-gray body still gets black (a white rim around mid-gray glares);
+/// - the rim always carries the body's own alpha, so translucency reads.
+#[test]
+fn the_rim_contrasts_the_body_it_outlines() {
+    let dark = Color::parse("#1a1a1a").expect("a valid color");
+    assert_eq!(
+        super::contrast_rim(dark).to_argb8888(),
+        WHITE,
+        "a dark body wears a white rim"
+    );
+    let light = Color::parse("#ffffff").expect("a valid color");
+    assert_eq!(
+        super::contrast_rim(light).to_argb8888(),
+        BLACK,
+        "a light body wears a black rim"
+    );
+    let mid = Color::parse("#808080").expect("a valid color");
+    assert_eq!(
+        super::contrast_rim(mid).to_argb8888(),
+        BLACK,
+        "a mid-gray body still wears a black rim"
+    );
+    let ghost = Color::parse("#1a1a1a80").expect("a valid color");
+    let rim = super::contrast_rim(ghost);
+    assert_eq!(rim.a, ghost.a, "the rim follows the body's alpha");
+    assert_eq!(
+        rim.to_argb8888(),
+        [0x80, 0x80, 0x80, 0x80],
+        "a translucent dark body wears a translucent white rim"
+    );
+}
+
+/// Setting the body to white reproduces the old white-pointer look: the rim
+/// goes black by the contrast rule, and the accent still lands.
+#[test]
+fn a_white_body_draws_the_old_look_with_a_black_rim() {
+    let fixture = Fixture::with_appearance(Appearance {
+        cursor_color: Color::parse("#ffffff").expect("a valid color"),
+        ..Appearance::default()
+    });
+    let canvas = fixture.frame();
+    let (px, py) = (POINTER.0 as i32, POINTER.1 as i32);
+    assert_eq!(
+        canvas.at(px + 1, py + 3),
+        WHITE,
+        "the arrow interior is the configured white body"
     );
 }
 
@@ -131,7 +196,7 @@ fn bitmap_honors_the_requested_size() {
         48,
         Appearance::MAX_CURSOR_SIZE,
     ] {
-        let pixels = shapes::generate(Shape::Arrow, size, WHITE, BLACK);
+        let pixels = shapes::generate(Shape::Arrow, size, WHITE, BLACK, None);
         assert_eq!(
             pixels.len(),
             (size * size * 4) as usize,
@@ -171,7 +236,7 @@ fn bitmap_honors_the_requested_size() {
 fn bitmap_honors_the_requested_colors() {
     let fill = [0x11, 0x22, 0x33, 0xff];
     let outline = [0x44, 0x55, 0x66, 0x80];
-    let pixels = shapes::generate(Shape::Arrow, 24, fill, outline);
+    let pixels = shapes::generate(Shape::Arrow, 24, fill, outline, None);
     // Outline is written with its own alpha, not forced opaque ...
     let edge = pixel(&pixels, 24, 2, 8);
     assert_eq!(edge, outline, "the outline edge");
@@ -205,7 +270,7 @@ fn cursor_new_clamps_a_degenerate_or_absurd_size() {
         Appearance::MAX_CURSOR_SIZE,
         i32::MAX,
     ] {
-        let cursor = Cursor::new(size, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
+        let cursor = Cursor::new(size, Color::new(1.0, 1.0, 1.0, 1.0), None, NO_THEME);
         let elements = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0);
         assert_eq!(
             elements.len(),
@@ -231,7 +296,7 @@ fn cursor_new_clamps_a_degenerate_or_absurd_size() {
 #[test]
 fn rebuild_redraws_the_same_cursor_at_the_new_size_theme_and_color() {
     let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
-    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
+    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), None, NO_THEME);
     let geometry = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0)[0].geometry(1.0.into());
     assert_eq!(
         (geometry.size.w, geometry.size.h),
@@ -239,7 +304,7 @@ fn rebuild_redraws_the_same_cursor_at_the_new_size_theme_and_color() {
     );
 
     let fill = Color::parse("#ff0000").expect("a valid color");
-    cursor.rebuild(48, fill, Some("scoot-test-no-such-theme-either"));
+    cursor.rebuild(48, fill, None, Some("scoot-test-no-such-theme-either"));
     let geometry = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0)[0].geometry(1.0.into());
     assert_eq!(
         (geometry.size.w, geometry.size.h),
@@ -254,7 +319,7 @@ fn rebuild_redraws_the_same_cursor_at_the_new_size_theme_and_color() {
 
     // Degenerate input clamps at the allocation, like `new` -- and the theme
     // name still resolves (to nothing installed, i.e. the fallback shapes).
-    cursor.rebuild(0, fill, NO_THEME);
+    cursor.rebuild(0, fill, None, NO_THEME);
     let geometry = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0)[0].geometry(1.0.into());
     assert_eq!(
         (geometry.size.w, geometry.size.h),
@@ -904,8 +969,8 @@ fn destroying_the_cursor_surface_falls_back_to_the_builtin_shape() {
     );
     assert_eq!(
         canvas.at(51, 53),
-        [255, 255, 255, 255],
-        "its white interior"
+        FILL_BGRA,
+        "its dark family-body interior"
     );
     assert_eq!(
         canvas.at(50 + DEFAULT_SIZE, 50),
@@ -979,6 +1044,38 @@ fn a_configured_cursor_size_and_color_reach_the_rendered_pixels() {
         canvas.at(px + 1, py + SIZE),
         CLEAR_BGRA,
         "one row past the configured size"
+    );
+}
+
+/// The default accent reaches the drawn pixels: the arrow's tail hint lands
+/// on the canvas in the ginger bytes, and disabling the accent leaves the
+/// body's own fill there instead. The bitmap position (6, 11) is the pinned
+/// tail-hint pixel from the shapes tests, translated through the hotspot.
+#[test]
+fn the_default_accent_reaches_the_rendered_pixels() {
+    let canvas = Fixture::new().frame();
+    assert_eq!(
+        canvas.at(54, 59),
+        ACCENT_BGRA,
+        "the tail hint should wear the ginger accent"
+    );
+    let bare = Fixture::with_appearance(Appearance {
+        cursor_accent: None,
+        ..Appearance::default()
+    })
+    .frame();
+    // The mark is gone (that pixel straddles the tail's end edge, so without
+    // the accent's paint it is a body/rim blend, never the ginger bytes) --
+    // and the body's own interior is untouched.
+    assert_ne!(
+        bare.at(54, 59),
+        ACCENT_BGRA,
+        "with the accent off no ginger pixel survives"
+    );
+    assert_eq!(
+        bare.at(51, 53),
+        FILL_BGRA,
+        "with the accent off the body interior is intact"
     );
 }
 
@@ -1097,9 +1194,11 @@ fn a_cursor_surface_with_a_subsurface_draws_both() {
 // `wp-cursor-shape-v1`
 // -------------------------------------------------------------------------
 
-/// The BGRA bytes the default `[appearance]` draws a shape's fill in, as
-/// they land on the canvas.
-const FILL_BGRA: [u8; 4] = [255, 255, 255, 255];
+/// The BGRA bytes the default `[appearance]` draws a shape's body in, as
+/// they land on the canvas: the near-black family body.
+const FILL_BGRA: [u8; 4] = [0x1a, 0x1a, 0x1a, 255];
+/// ... and its ginger accent mark.
+const ACCENT_BGRA: [u8; 4] = [0x29, 0x7f, 0xe5, 255];
 
 #[test]
 fn the_cursor_shape_manager_is_advertised() {
@@ -1117,7 +1216,13 @@ fn the_cursor_shape_manager_is_advertised() {
 
 #[test]
 fn a_named_shape_reaches_the_rendered_pixels() {
-    let mut fixture = Fixture::new();
+    // Accent-free: the stem's own orange mark runs through the pointer, so
+    // the exact-fill assertions below need it off (the accent path is pinned
+    // separately in `the_default_accent_reaches_the_rendered_pixels`).
+    let mut fixture = Fixture::with_appearance(Appearance {
+        cursor_accent: None,
+        ..Appearance::default()
+    });
     // The default status is already `Named(Default)`, so asking for the
     // arrow would prove nothing. `Text` is the shape a terminal asks for the
     // moment the pointer is over its grid, and it is drawn as an I-beam --
@@ -1195,23 +1300,39 @@ fn different_named_shapes_draw_different_pixels() {
 }
 
 #[test]
-fn an_unmapped_shape_name_still_draws_the_arrow() {
-    // Every name this compositor does not draw something specific for falls
-    // back to the arrow rather than to nothing -- see `Shape::for_icon`. A
-    // pointer that vanishes because a client named `wait` would be a worse
-    // bug than the wrong shape.
+fn a_wait_shape_draws_the_hourglass_badge() {
+    // `wait` names the arrow-plus-hourglass badge, not the plain arrow: the
+    // tip still lands on the pointer (same hotspot), but the frame carries
+    // the badge beside it, which a plain arrow frame does not. A pointer
+    // that vanishes because a client named `wait` would be a worse bug than
+    // the wrong shape -- and the wrong shape would be a lesser one.
     let mut fixture = Fixture::new();
     fixture.run(Step::SetShape {
         shape: wp_cursor_shape_device_v1::Shape::Wait,
     });
+    assert!(
+        matches!(
+            fixture.state.cursor.status,
+            CursorImageStatus::Named(CursorIcon::Wait)
+        ),
+        "set_shape(wait) did not reach the cursor's status"
+    );
     let canvas = fixture.frame();
-    assert_eq!(canvas.count, 1, "the arrow element");
+    assert_eq!(canvas.count, 1, "the badge element");
     assert_ne!(
         canvas.at(50, 50),
         CLEAR_BGRA,
-        "the arrow's own tip, at the pointer, drew nothing"
+        "the badge's own tip, at the pointer, drew nothing"
     );
-    assert_eq!(canvas.at(51, 53), FILL_BGRA, "its white interior");
+    let mut via_default = Fixture::new();
+    via_default.run(Step::SetShape {
+        shape: wp_cursor_shape_device_v1::Shape::Default,
+    });
+    assert_ne!(
+        canvas.pixels,
+        via_default.frame().pixels,
+        "wait rendered exactly the plain arrow -- the badge is missing"
+    );
 }
 
 #[test]
@@ -1423,7 +1544,7 @@ fn an_offset_on_another_surface_leaves_the_cursor_alone() {
 #[test]
 fn fallback_element_is_one_exactly_sized_allocation() {
     let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
-    let cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
+    let cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), None, NO_THEME);
     let elements = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0);
     assert_eq!(elements.len(), 1, "one element for the fallback cursor");
     assert_eq!(elements.capacity(), 1, "exactly sized, with no slack");
@@ -1435,7 +1556,7 @@ fn fallback_element_is_one_exactly_sized_allocation() {
 #[test]
 fn hidden_cursor_allocates_nothing() {
     let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
-    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
+    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), None, NO_THEME);
     cursor.set_status(CursorImageStatus::Hidden);
     let elements = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0);
     assert!(elements.is_empty(), "a hidden cursor draws nothing");

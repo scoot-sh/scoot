@@ -20,8 +20,8 @@
 //! time any renderer sees it, so pixman and a future GPU tier composite
 //! byte-identical input. A 4x4 grid (16 taps, fewer past 64px -- see
 //! [`supersample`]) is the whole anti-aliasing budget: cheap enough that
-//! all ten shapes at the default size still build in milliseconds (see the
-//! benchmark in the cursor report), smooth enough that a 1px outline
+//! all twenty-two shapes at the default size still build in milliseconds (see the
+//! benchmark in the cursor report), smooth enough that a 1px rim
 //! survives a bilinear upscale to a scale-2 output.
 //!
 //! # Coordinate convention
@@ -127,38 +127,72 @@ fn straight_from_premul(pixel: [u8; 4]) -> (f64, f64, f64, f64) {
     )
 }
 
+/// One flat-color coat of paint over the bitmap: a fill plus the rim around
+/// it. The body always wears one; the accent wears one only when the config
+/// enables it.
+pub struct Coat {
+    /// Flat color, premultiplied little-endian `Argb8888`.
+    pub fill: [u8; 4],
+    /// Rim color, in the caller's color (the body's auto-contrasting rim --
+    /// see `shapes::generate`).
+    pub outline: [u8; 4],
+    /// How far past the fill edge the rim reaches, in pixels.
+    pub outline_width: f64,
+}
+
+/// The accent coat: the family mark's own signed-distance field plus the
+/// paint for it. `None` (accent disabled, or a shape with no mark) skips the
+/// field entirely, so an accent-free build costs what the old one did.
+pub struct Accent<'a> {
+    /// Signed distance to the accent mark's edge, negative inside, in pixels
+    /// -- the same convention as the body field [`render`] takes.
+    pub field: &'a dyn Fn(f64, f64) -> f64,
+    /// The mark's paint.
+    pub coat: Coat,
+}
+
 /// Renders `field` (signed distance to the fill edge, negative inside, in
 /// pixels) into a fresh `size * size * 4` premultiplied `Argb8888` buffer.
 ///
-/// `fill`/`outline` are single premultiplied `[B, G, R, A]` pixels, the same
-/// layout `cursor.rs` has always used; the outline is composited verbatim in
-/// the caller's color (which `Cursor` always builds as black at the fill's
-/// own alpha -- see `outline_pair` -- the color policy lives there, not
-/// here). `outline_width` is how far past the fill edge the outline
-/// reaches, in pixels. `shadow` (usually `None` except for the arrow -- a
-/// soft shadow on 1px line art reads as blur, not depth) is composited
-/// underneath both, always black.
+/// `body` is the body's paint (fill plus rim, both single premultiplied
+/// `[B, G, R, A]` pixels in the same layout `cursor.rs` has always used; the
+/// rim is composited verbatim in the caller's color, which `Cursor` always
+/// builds as the auto-contrasting rim at the fill's own alpha -- see
+/// `contrast_rim` -- the color policy lives there, not here). `accent`
+/// (usually `Some` -- the family's ginger mark, drawn with its own hairline
+/// of the same rim color) is composited over the body; `None` skips its
+/// field entirely. `shadow` (usually `None` except for the arrow -- a soft
+/// shadow on 1px line art reads as blur, not depth) is composited underneath
+/// both, always black.
 ///
-/// `bounds` is the field's tight bounding box `(min_x, min_y, max_x, max_y)`
-/// already expanded by the caller past every layer that can paint
-/// (outline, shadow, one pixel of bleed): taps outside it are transparent
-/// without evaluating the field, which is what keeps large bitmaps cheap.
+/// `bounds` is the union of both fields' tight bounding boxes, already
+/// expanded by the caller past every layer that can paint
+/// (rims, shadow, one pixel of bleed): taps outside it are transparent
+/// without evaluating either field, which is what keeps large bitmaps cheap.
 /// `None` evaluates everywhere (the unit tests' choice).
 ///
-/// Layer order, back to front: transparent, shadow, outline, fill -- each
-/// `Over` the last in premultiplied space, so a translucent fill genuinely
-/// composites instead of replacing.
+/// Layer order, back to front: transparent, shadow, body rim, body fill,
+/// accent rim, accent fill -- each `Over` the last in premultiplied
+/// space, so a translucent fill genuinely composites instead of replacing.
 pub fn render(
     size: i32,
     field: &dyn Fn(f64, f64) -> f64,
-    fill: [u8; 4],
-    outline: [u8; 4],
-    outline_width: f64,
+    body: Coat,
+    accent: Option<Accent<'_>>,
     shadow: Option<Shadow>,
     bounds: Option<[f64; 4]>,
 ) -> Vec<u8> {
-    let (fr, fg, fb, fa) = straight_from_premul(fill);
-    let (orr, ogg, obb, oa) = straight_from_premul(outline);
+    let (fr, fg, fb, fa) = straight_from_premul(body.fill);
+    let (orr, ogg, obb, oa) = straight_from_premul(body.outline);
+    let outline_width = body.outline_width;
+    let (ar, ag, ab, aa, aorr, aogg, aobb, aoa, aow) = match &accent {
+        Some(mark) => {
+            let (r, g, b, alpha) = straight_from_premul(mark.coat.fill);
+            let (or, og, ob, oa) = straight_from_premul(mark.coat.outline);
+            (r, g, b, alpha, or, og, ob, oa, mark.coat.outline_width)
+        }
+        None => (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    };
     let ss = supersample(size);
     let taps = f64::from(ss * ss);
     let step = 1.0 / f64::from(ss);
@@ -169,6 +203,8 @@ pub fn render(
         for x in 0..size {
             let mut fill_cov = 0.0;
             let mut outline_cov = 0.0;
+            let mut afill_cov = 0.0;
+            let mut aoutline_cov = 0.0;
             let mut shadow_cov = 0.0;
             for sy in 0..ss {
                 for sx in 0..ss {
@@ -195,10 +231,20 @@ pub fn render(
                             shadow_cov += 1.0 - ds / sh.feather;
                         }
                     }
+                    if let Some(mark) = accent.as_ref() {
+                        let da = (mark.field)(px, py);
+                        if da <= 0.0 {
+                            afill_cov += 1.0;
+                        } else if da <= aow {
+                            aoutline_cov += 1.0;
+                        }
+                    }
                 }
             }
             fill_cov /= taps;
             outline_cov /= taps;
+            afill_cov /= taps;
+            aoutline_cov /= taps;
             shadow_cov /= taps;
             // Back to front, premultiplied `Over`: out = src + dst * (1 - a).
             let (mut r, mut g, mut b, mut a) = (0.0, 0.0, 0.0, 0.0);
@@ -209,8 +255,9 @@ pub fn render(
             }
             // The outline in the caller's own color, scaled by its coverage
             // -- at full coverage this is byte-identical to the flat outline
-            // the old bitmaps wrote. (`Cursor` always passes black at the
-            // fill's alpha; that policy lives in `outline_pair`, not here.)
+            // the old bitmaps wrote. (`Cursor` always passes the contrasting
+            // rim at the fill's alpha; that policy lives in `contrast_rim`,
+            // not here.)
             let ola = (outline_cov * oa).clamp(0.0, 1.0);
             r = orr * ola + r * (1.0 - ola);
             g = ogg * ola + g * (1.0 - ola);
@@ -221,6 +268,19 @@ pub fn render(
             g = fg * fla + g * (1.0 - fla);
             b = fb * fla + b * (1.0 - fla);
             a = fla + a * (1.0 - fla);
+            // The accent mark over the body, with its own hairline of the
+            // same rim color: on-body marks (the tail hint, the cuff) get a
+            // separating moat, floating ones (the paw badge) a halo.
+            let aola = (aoutline_cov * aoa).clamp(0.0, 1.0);
+            r = aorr * aola + r * (1.0 - aola);
+            g = aogg * aola + g * (1.0 - aola);
+            b = aobb * aola + b * (1.0 - aola);
+            a = aola + a * (1.0 - aola);
+            let afla = (afill_cov * aa).clamp(0.0, 1.0);
+            r = ar * afla + r * (1.0 - afla);
+            g = ag * afla + g * (1.0 - afla);
+            b = ab * afla + b * (1.0 - afla);
+            a = afla + a * (1.0 - afla);
             let idx = ((y * size + x) * 4) as usize;
             pixels[idx] = (b * 255.0).round().clamp(0.0, 255.0) as u8;
             pixels[idx + 1] = (g * 255.0).round().clamp(0.0, 255.0) as u8;
@@ -268,9 +328,12 @@ mod tests {
         let pixels = render(
             4,
             &|_, _| -1.0,
-            [10, 20, 30, 255],
-            [0, 0, 0, 255],
-            1.0,
+            Coat {
+                fill: [10, 20, 30, 255],
+                outline: [0, 0, 0, 255],
+                outline_width: 1.0,
+            },
+            None,
             None,
             None,
         );
@@ -282,12 +345,67 @@ mod tests {
         let pixels = render(
             4,
             &|_, _| f64::INFINITY,
-            [10, 20, 30, 255],
-            [0, 0, 0, 255],
-            1.0,
+            Coat {
+                fill: [10, 20, 30, 255],
+                outline: [0, 0, 0, 255],
+                outline_width: 1.0,
+            },
+            None,
             None,
             None,
         );
         assert!(pixels.iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn a_fully_covered_accent_writes_its_fill_over_the_body() {
+        // The accent composites over the body with its own flat color: at
+        // full coverage on both fields the pixel is the accent fill.
+        let pixels = render(
+            4,
+            &|_, _| -1.0,
+            Coat {
+                fill: [10, 20, 30, 255],
+                outline: [0, 0, 0, 255],
+                outline_width: 1.0,
+            },
+            Some(Accent {
+                field: &|_, _| -1.0,
+                coat: Coat {
+                    fill: [40, 50, 60, 255],
+                    outline: [0, 0, 0, 255],
+                    outline_width: 1.0,
+                },
+            }),
+            None,
+            None,
+        );
+        assert_eq!(&pixels[0..4], &[40, 50, 60, 255]);
+    }
+
+    #[test]
+    fn an_accent_outside_its_mark_leaves_the_body_alone() {
+        // Same body coverage, but the accent field is empty: the pixel is
+        // the body fill, proving the accent adds nothing where it is not.
+        let pixels = render(
+            4,
+            &|_, _| -1.0,
+            Coat {
+                fill: [10, 20, 30, 255],
+                outline: [0, 0, 0, 255],
+                outline_width: 1.0,
+            },
+            Some(Accent {
+                field: &|_, _| f64::INFINITY,
+                coat: Coat {
+                    fill: [40, 50, 60, 255],
+                    outline: [0, 0, 0, 255],
+                    outline_width: 1.0,
+                },
+            }),
+            None,
+            None,
+        );
+        assert_eq!(&pixels[0..4], &[10, 20, 30, 255]);
     }
 }
