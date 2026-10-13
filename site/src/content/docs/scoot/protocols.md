@@ -1617,8 +1617,9 @@ What to know before pointing a client at it:
 ### GPU-rendering clients (`zwp_linux_dmabuf_v1`)
 
 `zwp_linux_dmabuf_v1` is advertised (version 6), and dmabufs really are
-imported — a GPU-rendering client works here under either renderer. Under
-the default CPU renderer there is no GPU on the compositor side at all:
+imported — a GPU-rendering client works here under either renderer. On
+the CPU renderer (`--renderer cpu`, or `auto` wherever there is no GPU
+hardware stack) there is no GPU on the compositor side at all:
 the client renders with the GPU and hands over a dma-buf, and scoot `mmap`s
 it and composites it on the CPU, next to `wl_shm` clients in the same
 session. No `LIBGL_ALWAYS_SOFTWARE=1` needed. Under `--renderer gpu` the
@@ -1835,9 +1836,9 @@ or `drm: no device here has syncobj timeline eventfd support; explicit
 sync … is not offered`. The dev VM's virtio-gpu passes on the display
 device.
 
-**Where it is not, and why.** Not under `cpu` (`--headless`, `--nested`,
-the default dumb-buffer `--tty`), and not under `--renderer gpu` on
-`--headless`/`--nested`. Honouring the points needs a way to wait on an
+**Where it is not, and why.** Not on the CPU renderer (`--renderer cpu`,
+or `auto` on `--headless`, `--nested`, and dumb-buffer `--tty`), and not
+under `--renderer gpu` on `--headless`/`--nested`. Honouring the points needs a way to wait on an
 acquire point without blocking the compositor and a render fence to wait
 out before signalling a release point, and only the scanout tier has both
 wired. A client that binds the global and then has its points ignored is

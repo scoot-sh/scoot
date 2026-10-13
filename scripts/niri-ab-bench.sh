@@ -12,7 +12,7 @@
 # scoot's stays 1600x1000.
 #
 # Variants, alternated round by round (the order rotates each round):
-#   scoot-cpu     scoot --nested (default renderer)
+#   scoot-cpu     scoot --nested --renderer cpu
 #   scoot-gpu     scoot --nested --renderer gpu (llvmpipe on the VM)
 #   niri-off      niri, animations off (scripts/niri-ab/niri-anim-off.kdl)
 #   niri-on       niri, its default animations (same file minus that line)
@@ -226,7 +226,7 @@ run_session() { # round variant
     mkdir -p "$dir/cfg"
     HOST_LOG="$dir/host.log"; SURF=""
     case $v in
-        scoot-cpu) kind=scoot; cmd="$SCOOT --nested --width $WIDTH --height $HEIGHT --socket $dir/ipc.sock" ;;
+        scoot-cpu) kind=scoot; cmd="$SCOOT --nested --renderer cpu --width $WIDTH --height $HEIGHT --socket $dir/ipc.sock" ;;
         scoot-gpu) kind=scoot; cmd="$SCOOT --nested --renderer gpu --width $WIDTH --height $HEIGHT --socket $dir/ipc.sock" ;;
         # niri's default log filter hides Smithay's "GL Renderer" line, which
         # is the only record of which driver it actually rendered with.

@@ -157,7 +157,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // renderer is fixed for the process's life, and `State` carries it so a
     // later resize rebuilds the pipeline this session started with.
     //
-    // The request is flag > `SCOOT_RENDERER` > file > the CPU default, read
+    // The request is flag > `SCOOT_RENDERER` > file > the `auto` default, read
     // exactly once here and passed in as `Option<&str>` (tests never mutate
     // the process environment, which is unsafe under `cargo test`'s shared
     // process). A bad env value warns and falls through to the file -- never

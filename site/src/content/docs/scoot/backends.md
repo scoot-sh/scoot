@@ -62,9 +62,12 @@ renderer (scanout on `--tty`).
 
 `--renderer cpu|gpu|auto` (config: `[renderer] backend`, env:
 `SCOOT_RENDERER`) picks what composites each frame. **The default is
-`cpu`, the CPU renderer** — running with no GPU at all is a hard
-requirement, not a fallback tier. `auto` picks the best tier for the
-session and never fails startup:
+`auto`: it picks the best tier for the session and never fails
+startup.** CPU and GPU are equal tiers — `auto` simply resolves to the
+one that fits the session — and an explicit `--renderer cpu` or
+`--renderer gpu` always wins over it. Running with no GPU at all always
+works: wherever there is no GPU hardware stack, `auto` resolves to the
+CPU renderer.
 
 | Session | `auto` picks | Why |
 |---|---|---|
@@ -74,7 +77,7 @@ session and never fails startup:
 | `--tty`, VM / GPU-less box / display-only device / build without the scanout tier | CPU renderer | There is no hardware stack to win on; `--renderer gpu` overrides it. |
 
 The request comes from the flag first, then `SCOOT_RENDERER`, then the
-config file, then the default — an explicit `--renderer cpu` beats
+config file, then the `auto` default — an explicit `--renderer cpu` beats
 `SCOOT_RENDERER=gpu` and `backend = "gpu"`. The variable is inherited by
 child processes, including a nested `scoot` you start inside the session.
 Every session logs one line saying what was decided and why —
@@ -94,7 +97,9 @@ reload.
 > **Symptom:** `auto` chose the CPU renderer in my VM. That is intended —
 > the CPU renderer is usually faster there. `--renderer gpu` overrides it.
 
-`gpu` is opt-in:
+Forcing a tier — an explicit `--renderer cpu` or `--renderer gpu`
+( equivalently `[renderer] backend`) — pins the session to that tier
+instead of letting `auto` decide:
 
 - **What it buys.** Correctness parity with the CPU renderer on a second
   renderer, and the groundwork for scanning a GPU buffer out directly
@@ -135,7 +140,7 @@ reload.
   and keeps the CPU renderer instead of refusing to start.)
 
 Measured where it pays (Apple M2 under Asahi Linux): 4–5x less
-compositor CPU under damage than the default tier, ~0.2 W less power,
+compositor CPU under damage than the CPU tier, ~0.2 W less power,
 7–16 MB more RSS, no idle difference. A fullscreen window covering its
 output goes primary-direct (zero-copy), decided per frame; GPU clients
 get the driver's whole import set (tiled and compressed layouts,
@@ -162,7 +167,7 @@ where the panel does.
 
 | Field | Type | Default | Reload | Meaning |
 |---|---|---|---|---|
-| `[renderer] backend` | `"cpu"` / `"gpu"` / `"auto"` | `"cpu"` | restart only | Which renderer composites each frame (`gpu` is the GLES renderer). A name this build *knows* but cannot build (`gpu` with no working EGL) is a startup error; `auto` never fails startup; `--renderer` wins over the file either way. |
+| `[renderer] backend` | `"cpu"` / `"gpu"` / `"auto"` | `"auto"` | restart only | Which renderer composites each frame (`gpu` is the GLES renderer). `auto` picks the best tier for the session (GPU renderer on real hardware, CPU renderer everywhere else). A name this build *knows* but cannot build (`gpu` with no working EGL) is a startup error; `auto` never fails startup; `--renderer` wins over the file either way. |
 
 ## Which DRM device `--tty` drives
 

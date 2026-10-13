@@ -31,9 +31,12 @@ window layout OmniWM-style through the Accessibility API.
   design, but their code — including cursor-theme assets — must not be
   copied. Check licenses before borrowing from either.
 - **Backends, in order: headless, then nested (wl_shm + pixman), then tty
-  (dumb buffers + pixman).** pixman is the default renderer; GL/GPU is an
-  optional later tier, not a replacement — GPU-free operation is a hard
-  requirement for webtop/no-GPU boxes, not something a GPU path supersedes.
+  (dumb buffers + pixman).** `auto` is the default renderer request: it
+  picks the GPU tier on real hardware and the CPU tier (pixman)
+  everywhere else, and an explicit `cpu` or `gpu` always wins.
+  GPU-free operation is a hard requirement for webtop/no-GPU boxes —
+  `auto` resolves to pixman wherever there is no GPU hardware stack —
+  not something a GPU path supersedes.
 - **`scoot-core` stays platform-independent** (events and actions in,
   arrangement out; no Wayland, no I/O). A future macOS Accessibility-API
   adapter depends on this. Don't touch it without a measured reason once it's

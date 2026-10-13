@@ -53,7 +53,8 @@ request, the compositor going away), `2` for a usage error.
 `scoot` also reads `XDG_CONFIG_HOME`, the caller's
 `WAYLAND_DISPLAY` for `--nested`, and `SCOOT_RENDERER` (`cpu`, `gpu` or
 `auto`: the renderer request when `--renderer` is absent, beating the
-config file's `[renderer] backend`). `scootbar` reads `WAYLAND_DISPLAY`
+config file's `[renderer] backend`; `auto` when the file is silent
+too). `scootbar` reads `WAYLAND_DISPLAY`
 and `XDG_RUNTIME_DIR` plus `XDG_CONFIG_HOME` for `bar.toml`; `scootbg`
 reads `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR` plus `XDG_STATE_HOME`
 for its profiles.

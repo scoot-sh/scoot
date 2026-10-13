@@ -1644,6 +1644,20 @@ fn a_cpu_to_auto_change_refuses_with_restart() {
     );
 }
 
+/// A session started on the default (no flag, no env, no `[renderer]` key)
+/// must not refuse a reload of an unchanged file: the snapshot is `None`
+/// and so is the fresh parse, so request-versus-request agrees.
+#[test]
+fn a_default_session_does_not_refuse_an_unchanged_file() {
+    let mut fixture = Fixture::with_config("");
+    assert_eq!(fixture.state.startup_renderer_request, None);
+    let response = fixture.reload();
+    assert!(
+        !refused_names(&response).contains(&field::BACKEND),
+        "an unchanged default file must not refuse: {response:?}"
+    );
+}
+
 #[test]
 fn autostart_delta_runs_only_unseen_spawns() {
     // The decision underneath the reply: multiset difference against the

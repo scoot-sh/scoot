@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Asahi.md Test 4: alternating A/B of the two --tty presentation tiers on real
-# hardware -- dumb buffers + CPU renderer (the default) vs GPU scanout via
-# DrmCompositor (`--renderer gpu`, gpu-scanout build).
+# hardware -- dumb buffers + CPU renderer (`--renderer cpu`) vs GPU scanout
+# via DrmCompositor (`--renderer gpu`, gpu-scanout build).
 #
 # Unattended by design. The --tty seat can be held by only one process, and on
 # a laptop whose desktop session *is* scoot the only safe way to free it is a

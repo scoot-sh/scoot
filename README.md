@@ -49,8 +49,8 @@ trust the cache yet: [add it](https://www.scoot.sh/start/install/#or-in-a-window
 
 - **No GPU? No problem.** scoot draws with the CPU or the GPU, and both
   renderers are first-class. It runs on real hardware, in a VM with no
-  3D, in a container, or inside another desktop. With the GPU build,
-  `--renderer auto` picks the right renderer for the session, and
+  3D, in a container, or inside another desktop. The default
+  (`--renderer auto`) picks the right renderer for the session, and
   `--renderer cpu` or `--renderer gpu` always overrides it.
   ([Builds and renderers](https://www.scoot.sh/reference/builds/).)
 - **Agents can drive it.** One socket does everything computer use

@@ -391,8 +391,8 @@ fn an_invalid_env_value_warns_and_falls_through_to_the_file() {
 }
 
 #[test]
-fn the_default_request_is_the_cpu_tier() {
-    assert_eq!(DEFAULT_REQUEST, RendererRequest::Cpu);
+fn the_default_request_is_auto() {
+    assert_eq!(DEFAULT_REQUEST, RendererRequest::Auto);
 }
 
 #[test]

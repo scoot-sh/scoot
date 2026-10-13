@@ -29,9 +29,10 @@
 //!
 //! Damage tracking and the framebuffer's size are renderer-agnostic and live
 //! on [`Backend`] itself, so an implementation brings only a renderer and a
-//! target -- [`pixman::PixmanBackend`] (the default) and
-//! [`gles::GlesBackend`] (opt-in, `--renderer gpu`) are each exactly that
-//! pair -- and inherits the rest. The three things one has to satisfy are the
+//! target -- [`pixman::PixmanBackend`] (the CPU tier; what `auto` resolves
+//! to wherever there is no GPU hardware stack) and
+//! [`gles::GlesBackend`] (`--renderer gpu`, or `auto` on real hardware) is
+//! each exactly that pair -- and inherits the rest. The three things one has to satisfy are the
 //! bounds on [`draw_frame_with`]: import client buffers ([`ImportAll`] +
 //! [`ImportMem`]), bind its own target ([`Bind`]), and read that target back
 //! to main memory ([`ExportMem`]). Those bounds were written for pixman alone
@@ -331,12 +332,13 @@ pub(super) enum InPlace {
 /// never touches GL, and `State::render` `take`s the whole `Backend` out of
 /// `State` and puts it back on **every frame** (see `headless.rs`'s
 /// `render()`, which does that so it can hold `&mut State` and `&mut` the
-/// renderer at once). That is a 6.4KB memcpy twice a frame, on the default
+/// renderer at once). That is a 6.4KB memcpy twice a frame, on the CPU
 /// path, bought with nothing. Boxed, it is one startup allocation for the
 /// sessions that ask for GLES and a pointer for everyone else.
 enum Pipeline {
-    /// CPU compositing with pixman: the default, and the only mode that works
-    /// with no GPU at all.
+    /// CPU compositing with pixman: what `auto` resolves to wherever there
+    /// is no GPU hardware stack, and the only mode that works with no GPU
+    /// at all.
     Pixman(PixmanBackend),
     /// GLES compositing into an offscreen renderbuffer, read back to main
     /// memory exactly as pixman's image is. Opt-in, `--headless`/`--nested`
