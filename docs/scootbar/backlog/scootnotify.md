@@ -33,3 +33,9 @@ Its own binary, not a bar module. Outline, from the planning:
 Same standards apply: lowest resource use of its class, a resource ratchet
 against `mako`, `dunst` and `swaync`, docs in the same PR, and its own Nix
 module.
+
+Theming contract (added 2026-10-12): read the look layer and implement a
+`reload` request on the control socket (whole-file validation, keep last
+good, an applied/refused reply); see the [live looks design](../../../dev/research/live-looks-design.md),
+section 9. A "look changed" toast from scoot's `look` event is an optional
+hook.
