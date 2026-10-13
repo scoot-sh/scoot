@@ -35,6 +35,11 @@ or reloads them together.
   see [`look-layer-scoot`](look-layer-scoot.md)) → reload every running
   scootbar instance → on any first-party refusal, repoint back, re-reload
   what already ran, exit non-zero naming the app.
+- The reply (and `scoot look current`) lists every key in the user's own
+  files that shadows a look token, by name (design doc §4.3 step 6): an
+  install that `install.sh --look` seeded has the look's colors in its own
+  `config.toml` and `bar.toml` (`site/public/install.sh:446,460`), so
+  without this a swap would answer "applied" and change nothing visible.
 - `--for` reverts after the timer unless `scoot look apply --keep` arrives
   (a preview), surviving the terminal closing (a detached child or a user
   timer).
@@ -49,7 +54,8 @@ Tests: atomicity (a reader racing a swap sees the old or the new directory,
 never a mix), refuse-and-keep (a broken look leaves every app on the
 previous one), rollback (a scootbar refusal after the repoint restores the
 link and re-reloads scoot), a dangling link, a missing compositor (refused
-with a clear message, nothing changed). Benchmark on headless and on
+with a clear message, nothing changed), a shadowed key reported by name
+rather than silently winning. Benchmark on headless and on
 `--tty`: swap wall time, the compositor's frame times across a swap (no new
 dropped frames beyond what `apply()` costs today), and zero new per-frame
 allocations after it. Live: the smoke test applies two looks and checks the

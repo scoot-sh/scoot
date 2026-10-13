@@ -27,7 +27,9 @@ duplicated (`home.nix:571-573`, `scootbar.nix:482-487`).
   sizes, opacity, cursor and image into the store, and a derivation that
   runs `scoot look import-base16` on it: the `stylix` look.
 - With Stylix present and on, the catalog gains `stylix` and the declared
-  default becomes `stylix` at `mkDefault` (an explicit `look` wins).
+  default becomes `stylix` at `mkDefault` (an explicit `look` wins). A
+  scheme below the contrast bars builds with a named warning, never a
+  failed switch (Solarized Dark's accent pair is 4.08 against the 4.5 bar).
 - Delete the per-module Stylix leaf mappings in `home.nix` and
   `scootbar.nix`. Remove `programs.scootbar.stylix.enable`;
   `programs.scoot.stylix.enable` now means "synthesize the `stylix` look";

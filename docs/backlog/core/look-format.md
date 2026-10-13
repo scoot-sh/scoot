@@ -34,7 +34,11 @@ contrast check runs on generated `gtk.css` only (`nix/tests.nix:14907-14932`).
   most 8), and strict validation (§3.5): hex colors, required roles, the
   contrast bars (foreground/background 4.5, accent-fg/accent 4.5,
   accent/background 3.0, focus/background 3.0), names, license, the
-  per-app key allowlist of §3.4.
+  per-app key allowlist of §3.4. Contrast is a refusal for shipped and
+  installed looks and a named warning for looks the user's own config
+  produced (`stylix`, `import-base16`, a path in `looks`): base16
+  Solarized Dark's accent pair is 4.08, and refusing it would break a
+  working Stylix setup. Every other rule refuses for every look.
 - Pure renderers for the first-party fragments: scoot (`[appearance]`,
   `[layout] gap`, `[wallpaper]` without `command`) and scootbar (`[colors]`,
   the `[bar]` style keys, the per-module visual allowlist). Paths made

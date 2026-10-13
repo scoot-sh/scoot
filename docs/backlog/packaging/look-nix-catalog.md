@@ -28,7 +28,8 @@ The design doc's §6:
   `desktop` per Decision D2. Breaking, shipped clean (`feat(nix)!`), with
   the maintainer's own config updated in step.
 - Each look rendered by a derivation running `scoot look build` (validated
-  at build time, no import-from-derivation); the catalog linked under
+  at build time, no import-from-derivation; contrast warns rather than
+  fails for a look the user's config chose, per the design doc's §3.5); the catalog linked under
   `~/.local/share/scoot/looks/`; the declared default in a store file.
 - Remove the eval-time merges of look values into `programs.scoot.settings`
   and `programs.scootbar.settings`: the runtime layer replaces them.

@@ -25,6 +25,12 @@ an existing install, and it copies a layout along with the look.
   apply NAME`.
 - Stop writing whole config files for `--look`; a user's existing files are
   never touched.
+- Migrate what earlier runs wrote: a `config.toml` or `bar.toml` that is
+  still exactly what an earlier `install.sh --look` produced (compare with
+  what install.sh would write for that look, after its path rewrites at
+  `site/public/install.sh:428-459`) has the look's keys removed so the look
+  layer can show through; any other file is left alone and its shadowing
+  keys are named (`scoot look current` lists them).
 - Docs in the same PR: the install page's `--look` row.
 
 ## Evidence to record

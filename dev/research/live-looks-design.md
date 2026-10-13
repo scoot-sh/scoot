@@ -326,8 +326,31 @@ Strict, all-or-nothing, and the same code in CI, `install`, `watch` and
 - Contrast, the thresholds `nix/tests.nix:14907-14932` already enforces on
   `gtk.css`, applied to tokens for every app: foreground on background
   ≥ 4.5, accent-fg on accent ≥ 4.5, accent on background ≥ 3.0, plus
-  focus on background ≥ 3.0 (the ring must read). A look below a bar is
-  refused, with the pair and the ratio named.
+  focus on background ≥ 3.0 (the ring must read). Computed over the five
+  registry palettes (WCAG relative luminance, the same formula as the
+  check), every shipped look passes with room:
+
+  | Look | fg/bg | accent-fg/accent | accent/bg | focus/bg |
+  |---|---|---|---|---|
+  | vinyl-sunset | 13.2 | 7.0 | 7.0 | 7.0 |
+  | music-desk | 15.7 | 6.7 | 6.7 | 6.7 |
+  | radial-burst | 14.4 | 6.5 | 6.5 | 6.5 |
+  | moonrise | 10.5 | 6.2 | 6.2 | 5.8 |
+  | ginger-night | 16.2 | 6.8 | 6.8 | 9.1 |
+
+  **Who a contrast failure stops depends on who chose the look.** A shipped
+  look, and one arriving through `scoot look install`, is refused below a
+  bar, with the pair and the ratio named: those are looks scoot vouches for
+  or a stranger wrote. A look the user's own configuration produced (the
+  synthesized `stylix` look, an `import-base16` result, a path the user
+  lists in `looks`) gets a loud warning naming the pair and the ratio and
+  is never refused, because the user already chose those colors and a
+  refusal would break their next `home-manager switch` over a palette they
+  run today. This is not hypothetical: base16 Solarized Dark puts `base00`
+  on `base0D` at 4.08 (below 4.5), and Nord at 4.64 barely passes (same
+  formula, scheme values from their published base16 files). Every other
+  check in this list (parse, roles, allowlist, files) refuses for every
+  look.
 - Wallpaper: exists, is a format scootbg decodes, decodes fully once (the
   result cached by path, size and mtime, so a 6000x4000 JPEG's ~450 ms is
   paid once, not per swap), no larger than scootbg's own limits.
@@ -428,6 +451,18 @@ Rejected:
 5. **On any first-party refusal** (only environmental by now: everything
    was validated): repoint back to the previous target, re-run the reloads
    that already ran, and exit non-zero naming the app and the reason.
+6. **Report shadowed keys.** The reply lists, by name, every key in the
+   user's own files that overrides one of the look's tokens (for example
+   `appearance.background_color` in `config.toml`). Without this, a swap on
+   an existing install would answer "applied" and change nothing visible:
+   `install.sh --look` already wrote a look's colors and wallpaper into the
+   user's own `config.toml` and `bar.toml` (`install.sh:446,460`), and some
+   Nix users set `programs.scoot.settings.appearance.*` explicitly; under
+   user > look those keys win over every future look.
+   `scoot look current` reports the same list. Migrating the files
+   `install.sh` itself wrote is
+   [`look-install-sh`](../../docs/backlog/packaging/look-install-sh.md)'s
+   job; a file the user edited is never touched.
 
 "A half-applied look is impossible" is true per first-party app (each
 swaps whole or not at all: `reload.rs:273-277`, `respond.rs:10-12`) and
@@ -552,7 +587,9 @@ else a flat `base00`. The cursor is `stylix.cursor` when set
 
 - **Stylix on, no explicit `look`:** nothing visible changes. The
   `stylix` look is the declared default; its colors, fonts, cursor and
-  wallpaper equal what the per-leaf defaults produce today.
+  wallpaper equal what the per-leaf defaults produce today. A scheme below
+  the contrast bars (Solarized Dark's accent pair is 4.08) builds with a
+  warning, never a failed switch (§3.5).
 - **Stylix on and an explicit `look`:** this is the one behavior flip.
   Today Stylix wins where both define a key (`theming.md:38-44`); after
   this, the look wins because the user picked it. `stylix` stays in the
@@ -619,7 +656,9 @@ programs.scoot = {
 - Each look is rendered by a derivation running `scoot look build` (the
   same renderer as everywhere else; no import-from-derivation, since the
   modules only reference the output paths). The build validates (§3.5), so
-  a broken look fails `home-manager switch` before anything changes.
+  a broken look (a parse error, a forbidden key, a missing file) fails
+  `home-manager switch` before anything changes; a contrast shortfall in a
+  look the user's own config chose only warns.
 - The catalog: `~/.local/share/scoot/looks/<name>` → the rendered store
   path, one `xdg.dataFile` link per look. Read-only, garbage-collection
   rooted by the home-manager generation.
@@ -941,12 +980,14 @@ Each with the recommendation this design is written against.
   the bar with Stylix but no profile working. Breaking, done cleanly.
 - **D3. May a look carry module lists?** Recommend no. A look carries
   colors, geometry, fonts, wallpaper, cursor and the per-module *visual*
-  keys; module lists, icons that are commands, buttons and `exec` stay
-  user layout. A look that rearranges the bar on every swap is surprising,
+  keys (the glyph strings modules draw included: a glyph is text, not a
+  command); module lists, `[button.*]`/`[exec.*]`/`[push.*]` tables and
+  every `on-*` action stay user layout. A look that rearranges the bar on every swap is surprising,
   and lists invite commands.
 - **D4. The default catalog.** Recommend every shipped look plus `stylix`
-  when Stylix is on: five small directories, one shared wallpaper each,
-  only the active one's leaves read.
+  when Stylix is on: five small directories, four carrying a wallpaper
+  image (vinyl-sunset ships none, `desktop.nix:1985`), only the active
+  one's leaves read.
 - **D5. Stylix's role (the maintainer's question).** Recommend §5:
   looks are the system of record and the runtime selector, Stylix a
   synthesized `stylix` look and the default when on; user > look > default
@@ -954,8 +995,9 @@ Each with the recommendation this design is written against.
   Stylix-plus-explicit-look users.
 - **D6. A central look registry.** Recommend none: git repos and flake
   `lookPacks` only. A registry is a moderation job.
-- **D7. Gap in a look.** Recommend yes, optional (every shipped look sets
-  `gap = 20`), measured by `look-layer-scoot`'s benchmark; if a swap that
+- **D7. Gap in a look.** Recommend yes, optional (the shipped examples
+  differ: 18 for radial-burst, 22 for music-desk, 20 for the other three,
+  `docs/examples/*/scoot.toml:14-15`), measured by `look-layer-scoot`'s benchmark; if a swap that
   moves the gap costs a visible hitch, `gap` leaves the schema.
 - **D8. The default keybinding** for `scoot look next`. Recommend
   `Mod+Shift+T`, checked against the current default keymap by the
