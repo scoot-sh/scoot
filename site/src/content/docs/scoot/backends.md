@@ -87,12 +87,30 @@ Every session logs one line saying what was decided and why —
 reload refuses a changed value and `SCOOT_RENDERER` is never re-read on
 reload.
 
+Under `--tty`, `auto` decides per device: a display-only or virtual GPU
+stays on the CPU renderer without loading anything, and anywhere else the
+GPU libraries are probed in a helper process with a 2-second deadline, so
+a present-but-unresponsive library costs a warning and a CPU-renderer
+session instead of a hung startup (below). A forced `--renderer cpu`
+never probes at all.
+
 > **Symptom:** `auto` chose the CPU renderer on my GPU laptop. Read
 > `reason=` on the `renderer chosen` line. It is usually `no-gbm` or
 > `no-egl` (the GPU libraries are missing or unloadable), `no-scanout-tier`
 > (this build has no GPU scanout tier — you want the `scoot-gpu` build),
 > or `display-only` (the display device has no 3D engine). Fix the cause
 > or pass `--renderer gpu` to force the tier.
+>
+> **Symptom:** `auto` fell back to the CPU renderer with a loader-probe
+> timeout (`the libEGL loader probe timed out` / `the libgbm loader probe
+> timed out`). The library is installed but never answered — a hanging
+> constructor — and without the deadline that startup would have hung with
+> no log line at all. The session runs on the CPU renderer; pass
+> `--renderer cpu` to skip the probe, or fix or remove the broken library.
+> A forced `--renderer gpu` keeps trying the GPU tier on its own path and
+> reports a real failure loudly rather than quietly downgrading (on `--tty`
+> that loud answer is still a warning plus the CPU renderer rather than a
+> refused session, as above).
 >
 > **Symptom:** `auto` chose the CPU renderer in my VM. That is intended —
 > the CPU renderer is usually faster there. `--renderer gpu` overrides it.

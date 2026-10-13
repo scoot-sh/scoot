@@ -694,10 +694,11 @@ struct Device {
 ///
 /// `request` is the user's renderer request. The `auto` policy
 /// (`render::policy::on_device`) runs here, once per candidate device,
-/// after `DrmDevice::new`: the KMS driver name, GBM loadability and EGL
-/// loadability decide between the CPU renderer and trying the GPU tier,
-/// and the first head's outcome (including the `GL_RENDERER` check) fixes
-/// the session's reason. An explicit device (`--gpu PATH`) never implies a
+/// after `DrmDevice::new`: the KMS driver class first (display-only and
+/// virtual devices stay on the CPU renderer without probing anything),
+/// then GBM and EGL loadability in a forked helper with a deadline -- and
+/// the first head's outcome (including the `GL_RENDERER` check) fixes the
+/// session's reason. An explicit device (`--gpu PATH`) never implies a
 /// renderer: the policy runs on it as usual.
 fn open_device(
     session: &mut LibSeatSession,
@@ -788,39 +789,90 @@ fn open_device(
     // from `DRM_IOCTL_VERSION`; an ioctl failure answers `""`, which the
     // policy classifies `Other` (an unknown name must never refuse the GPU
     // tier on its own -- the `GL_RENDERER` check is what proves the stack
-    // is real). GBM loadability is the `runtime-gbm` stub probe where the
-    // stub is linked, and linked-by-construction in a plain `gpu-scanout`
-    // build; EGL is `dlopen`ed, so it gets the loader probe.
+    // is real).
     let kms_driver = DrmControl::get_driver(&drm_fd)
         .map(|version| version.name().to_string_lossy().into_owned())
         .unwrap_or_default();
-    // Whether libgbm / libEGL can be loaded. Probed only when the request
-    // can try the GPU tier: a forced `cpu` request never consults the
-    // device, so it never touches EGL or GBM on the way to the dumb tier
-    // (by construction here, not by assertion -- `on_device` is not called
-    // for it at all).
+    // Which loader probes the request needs, if any. A forced `cpu` request
+    // never consults the device, so it never touches EGL or GBM on the way
+    // to the dumb tier (by construction here, not by assertion --
+    // `on_device` is not called for it at all). A forced `gpu` request
+    // skips the probes too: `on_device` ignores the loader answers for it
+    // (always `TryGpu`), so probing would only buy a hang window and a fork
+    // for no decision -- real failures surface later, through `lib_loadable`
+    // (a startup error off `--tty`, a warned dumb-buffer fallback on it).
+    // Under `auto`, a driver class that already decides the CPU tier skips
+    // them as well: a display-only or virtual device stays on pixman however
+    // the loaders answer, so loading two libraries to be told what the
+    // driver name already says would only widen the hang surface (and cost a
+    // fork per device). Only `auto` on anything else probes -- and then in
+    // `loader`'s forked helper with a deadline, so a present-but-hanging
+    // library costs a warning and a CPU-renderer session, never a hung
+    // startup (see `render::loader` for why the helper is a process).
+    //
+    // Reason precedence note: a display-only/virtual device that is *also*
+    // missing a loader reports the driver class (`DisplayOnly`), not the
+    // loader (`NoGbm`). The driver is the stable cause -- fixing the library
+    // would still leave the CPU tier -- while a missing loader on real
+    // hardware still reports `NoGbm`/`NoEgl` exactly as before.
     let plan = match request {
         RendererRequest::Cpu => DevicePlan::Pixman(policy::Reason::Requested),
-        RendererRequest::Auto | RendererRequest::Gpu => {
-            // The `runtime-gbm` stub probe where the stub is linked (a
-            // `dlopen`, once per candidate device), linked by construction
-            // in a plain `gpu-scanout` build (where libgbm is a real
-            // `DT_NEEDED` entry). EGL is `dlopen`ed, so it gets the loader
-            // probe.
-            #[cfg(feature = "runtime-gbm")]
-            let gbm_loadable = crate::gbm_stub::real_loaded();
-            #[cfg(not(feature = "runtime-gbm"))]
-            let gbm_loadable = true;
-            let egl_loadable = super::render::egl_loadable();
-            tracing::debug!(
-                requested = %request,
-                driver = %kms_driver,
-                gbm_loadable,
-                egl_loadable,
-                "drm: candidate device renderer loaders"
-            );
-            policy::on_device(request, &kms_driver, gbm_loadable, egl_loadable)
-        }
+        RendererRequest::Gpu => DevicePlan::TryGpu {
+            reject_software: false,
+        },
+        RendererRequest::Auto => match policy::kms_class(&kms_driver) {
+            policy::KmsClass::DisplayOnly => DevicePlan::Pixman(policy::Reason::DisplayOnly),
+            policy::KmsClass::VirtualGpu => DevicePlan::Pixman(policy::Reason::VirtualGpu),
+            policy::KmsClass::Other => {
+                // The `runtime-gbm` stub probe where the stub is linked (in
+                // the helper, so a hanging libgbm cannot wedge startup),
+                // linked-by-construction `true` in a plain `gpu-scanout`
+                // build (where libgbm is a real `DT_NEEDED` entry -- a
+                // library broken badly enough hangs the exec itself, before
+                // `main`, which no probe here can bound).
+                #[cfg(feature = "runtime-gbm")]
+                let gbm_loadable = match crate::gbm_stub::probe_real_loaded(
+                    super::render::loader::PROBE_TIMEOUT,
+                ) {
+                    crate::gbm_stub::GbmProbe::Loadable => true,
+                    crate::gbm_stub::GbmProbe::Missing => false,
+                    crate::gbm_stub::GbmProbe::TimedOut => {
+                        tracing::warn!(
+                            driver = %kms_driver,
+                            timeout = ?super::render::loader::PROBE_TIMEOUT,
+                            "drm: the libgbm loader probe timed out (libgbm is present but \
+                             unresponsive); falling back to the cpu renderer and dumb buffers; \
+                             pass --renderer cpu to skip the probe"
+                        );
+                        false
+                    }
+                };
+                #[cfg(not(feature = "runtime-gbm"))]
+                let gbm_loadable = true;
+                let egl_loadable = match super::render::egl_probe() {
+                    super::render::loader::Probe::Loadable => true,
+                    super::render::loader::Probe::Missing(_) => false,
+                    super::render::loader::Probe::TimedOut => {
+                        tracing::warn!(
+                            driver = %kms_driver,
+                            timeout = ?super::render::loader::PROBE_TIMEOUT,
+                            "drm: the libEGL loader probe timed out (libEGL is present but \
+                             unresponsive); falling back to the cpu renderer and dumb buffers; \
+                             pass --renderer cpu to skip the probe"
+                        );
+                        false
+                    }
+                };
+                tracing::debug!(
+                    requested = %request,
+                    driver = %kms_driver,
+                    gbm_loadable,
+                    egl_loadable,
+                    "drm: candidate device renderer loaders"
+                );
+                policy::on_device(request, &kms_driver, gbm_loadable, egl_loadable)
+            }
+        },
     };
     tracing::debug!(
         requested = %request,

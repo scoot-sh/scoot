@@ -333,7 +333,13 @@ const FALL_BACK_HINT: &str = "; --renderer cpu needs no GPU at all";
 /// The `dlopen` soname Smithay loads libEGL under (see `lib_loadable`).
 pub(crate) const LIB_EGL_SONAME: &str = "libEGL.so.1";
 
-/// Whether `soname` can be `dlopen`ed right now.
+/// Whether `soname` can be loaded right now, without hanging the caller.
+///
+/// Runs the load in [`super::loader`]'s forked helper with a deadline: a
+/// present-but-pathological library whose constructor never returns answers
+/// `Err` (naming the timeout) instead of hanging startup. See that module
+/// for why the helper is a forked process rather than a thread, and why the
+/// fork is sound at every call site.
 ///
 /// Smithay reaches libEGL through `libloading` behind a `LazyLock` whose
 /// miss handler is `.expect("Failed to load LibEGL")` (`ffi.rs:148` at the
@@ -347,37 +353,20 @@ pub(crate) const LIB_EGL_SONAME: &str = "libEGL.so.1";
 /// workspace's release profile sets `panic = "abort"`, which turns that
 /// panic into a process abort no handler can intercept.
 ///
-/// Once per session startup at most (both callers run before the session
-/// exists), so the one `CString` allocation is off every hot path by
-/// construction. `libc` is already a direct dependency, so this adds none.
+/// `libc` is already a direct dependency, so this adds none.
 pub(super) fn lib_loadable(soname: &str) -> Result<(), Box<dyn Error>> {
-    let name =
-        std::ffi::CString::new(soname).map_err(|_| format!("{soname}: invalid library name"))?;
-    // SAFETY: `dlopen`/`dlclose`/`dlerror` are plain C calls with no
-    // Rust-side invariants to uphold; the `CString` outlives the call, the
-    // handle is closed on this thread before returning, and the `dlerror`
-    // text (if any) is copied out before any further dl* call could
-    // overwrite it.
-    unsafe {
-        libc::dlerror(); // Clear any stale error an earlier call left behind.
-        let handle = libc::dlopen(name.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
-        if handle.is_null() {
-            let text = libc::dlerror();
-            // `dlerror` may itself report nothing (or a non-UTF8 byte
-            // string); either way the operator gets a loud startup error
-            // naming the soname, never a backtrace.
-            let detail = if text.is_null() {
-                "unknown loader error".to_owned()
-            } else {
-                std::ffi::CStr::from_ptr(text)
-                    .to_string_lossy()
-                    .into_owned()
-            };
-            return Err(format!("could not load {soname}: {detail}").into());
+    match super::loader::probe_library(soname, super::loader::PROBE_TIMEOUT) {
+        super::loader::Probe::Loadable => Ok(()),
+        super::loader::Probe::Missing(detail) => {
+            Err(format!("could not load {soname}: {detail}").into())
         }
-        libc::dlclose(handle);
+        super::loader::Probe::TimedOut => Err(format!(
+            "could not load {soname}: the loader probe timed out after {}s \
+             (the library is present but unresponsive)",
+            super::loader::PROBE_TIMEOUT.as_secs()
+        )
+        .into()),
     }
-    Ok(())
 }
 
 /// One candidate device, all the way to a renderbuffer that really binds.
