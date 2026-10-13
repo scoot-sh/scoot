@@ -63,7 +63,9 @@ size (`round(cursor_size × scale)` device pixels) from the same 24-unit
 design grid, so edges stay sharp where a stretched logical bitmap would
 go soft. Mixed-DPI sessions keep one bitmap set per output scale
 (bounded, evicted when no output uses a scale); screenshots and
-captures draw the same per-scale pixels the frame shows.
+captures draw the same per-scale pixels the frame shows. A theme image
+padded beyond its nominal size draws at that nominal size, like
+everything else.
 
 ![The fallback cursor family](../../../assets/cursor-family.png)
 

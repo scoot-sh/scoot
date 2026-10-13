@@ -326,7 +326,10 @@ impl State {
         // that also moved placement pays both, and one that changed only the
         // cursor re-serves no capture that did not ask for it.
         if report.applied.iter().any(|name| {
-            name == field::CURSOR_SIZE || name == field::CURSOR_COLOR || name == field::CURSOR_THEME
+            name == field::CURSOR_SIZE
+                || name == field::CURSOR_COLOR
+                || name == field::CURSOR_ACCENT
+                || name == field::CURSOR_THEME
         }) {
             self.cursor_changed();
         }

@@ -30,7 +30,9 @@ scoot has not cut a numbered release yet; entries are dated.
   bilinear-stretched 16px image. Real cursor themes contribute the image
   nearest the physical size. One bitmap set per output scale is kept
   (bounded, built on output add/scale change and reload, never per
-  frame); mixed-DPI sessions draw each output's own set. The family
+  frame); mixed-DPI sessions draw each output's own set. A theme image
+  padded beyond its nominal size draws at that nominal size, like
+  everything else. The family
   itself is now authored on a 24-unit design grid (same pixels at 16px
   except a slightly broader paw-print toe spread).
 

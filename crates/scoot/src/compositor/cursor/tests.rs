@@ -1704,3 +1704,208 @@ fn hidden_cursor_allocates_nothing() {
     assert!(elements.is_empty(), "a hidden cursor draws nothing");
     assert_eq!(elements.capacity(), 0, "and allocates nothing to say so");
 }
+
+// -------------------------------------------------------------------------
+// Output-add-path cursor sync (F-A)
+// -------------------------------------------------------------------------
+//
+// The hidpi tests above build their scales with `ensure_scale` directly,
+// which bypasses the compositor's output lifecycle. These tests drive the
+// REAL add path -- `headless::init` (the `init_named` primary every backend
+// boots through) and `headless::add_output` (what `--headless --outputs N`
+// and the `--tty` hotplug handler funnel through) -- with per-output scales
+// from `[[outputs]]` entries, and assert the cursor cache follows the
+// registered output set. Before the fix the sync ran inside `create_output`,
+// before the caller registered the output, so none of these scales was ever
+// built and every assertion below failed on the missing entry.
+
+/// A live `State` booted at `default_scale` with `entries_toml` in force
+/// before the first output exists, plus its event loop (kept alive beside
+/// the state, the way every harness holds both).
+struct AddPath {
+    _loop: smithay::reexports::calloop::EventLoop<'static, crate::compositor::State>,
+    state: crate::compositor::State,
+}
+
+impl AddPath {
+    fn boot(default_scale: f64, entries_toml: &str) -> Self {
+        let mut event_loop: smithay::reexports::calloop::EventLoop<
+            'static,
+            crate::compositor::State,
+        > = smithay::reexports::calloop::EventLoop::try_new().expect("an event loop");
+        let display: smithay::reexports::wayland_server::Display<crate::compositor::State> =
+            smithay::reexports::wayland_server::Display::new().expect("a wayland display");
+        // Forced fallback shapes, whatever the machine running the suite has
+        // installed: every geometry assertion below describes `shapes.rs`'s
+        // own arrow hotspot, not whichever xcursor theme a desktop has.
+        let appearance = crate::compositor::decorations::Appearance {
+            cursor_theme: NO_THEME.map(str::to_owned),
+            ..crate::compositor::decorations::Appearance::default()
+        };
+        let mut state = crate::compositor::State::new(
+            &mut event_loop,
+            display,
+            scoot_core::Config::default(),
+            crate::compositor::keybindings::Keybindings::default(),
+            appearance,
+            default_scale,
+            crate::compositor::test_support::test_renderer(),
+        )
+        .expect("a compositor state");
+        state.output_entries =
+            crate::compositor::output_config::OutputEntries::from_toml(entries_toml);
+        crate::compositor::headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+        Self {
+            _loop: event_loop,
+            state,
+        }
+    }
+
+    /// The physical bitmap edge the cursor keeps for `scale`, if any.
+    fn entry_physical(&self, scale: f64) -> Option<i32> {
+        let key = scale_key(scale);
+        self.state
+            .cursor
+            .scales
+            .iter()
+            .find(|entry| entry.key == key)
+            .map(|entry| entry.physical)
+    }
+}
+
+/// That scale's element draws the native physical bitmap: its on-screen
+/// (physical) geometry is exactly the bitmap, and the physical hotspot sits
+/// exactly on the physical pointer -- the same arithmetic the per-scale
+/// element tests pin, reached here through the real add path.
+fn assert_native_element(
+    state: &crate::compositor::State,
+    renderer: &mut PixmanRenderer,
+    scale: f64,
+    physical: i32,
+) {
+    let pointer = Point::<f64, Logical>::from((100.0, 100.0));
+    let elements = state.cursor.element(renderer, pointer, scale);
+    assert_eq!(elements.len(), 1, "scale {scale} drew nothing");
+    let geometry = elements[0].geometry(scale.into());
+    assert_eq!(
+        (geometry.size.w, geometry.size.h),
+        (physical, physical),
+        "scale {scale}: the on-screen size must be the physical bitmap"
+    );
+    let hotspot = Shape::Arrow.hotspot(physical);
+    assert_eq!(
+        (geometry.loc.x, geometry.loc.y),
+        (
+            (pointer.x * scale) as i32 - hotspot.x,
+            (pointer.y * scale) as i32 - hotspot.y
+        ),
+        "scale {scale}: the tip must sit under the pointer"
+    );
+}
+
+/// A single-output session booted at scale 2 through the real primary path
+/// keeps native 2x bitmaps: without the post-registration sync the session
+/// drew the stretched 16px bitmap forever.
+#[test]
+fn add_path_boots_a_scale_2_primary_with_native_bitmaps() {
+    let fixture = AddPath::boot(1.0, "[[outputs]]\nname = \"headless\"\nscale = 2.0\n");
+    let primary = fixture.state.outputs.primary().expect("the primary output");
+    assert_eq!(
+        primary.current_scale().fractional_scale(),
+        2.0,
+        "the primary runs at its entry's scale"
+    );
+    assert_eq!(
+        fixture.entry_physical(2.0),
+        Some(32),
+        "booting at scale 2 builds the 32px entry through the add path"
+    );
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    assert_native_element(&fixture.state, &mut renderer, 2.0, 32);
+}
+
+/// `--headless --outputs 2` at mixed scales: the second output's scale is
+/// built when it is added, and each output's frame draws its own bitmap.
+#[test]
+fn add_path_second_output_at_scale_2_gets_its_own_bitmaps() {
+    let mut fixture = AddPath::boot(1.0, "[[outputs]]\nname = \"headless-2\"\nscale = 2.0\n");
+    crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    assert_eq!(
+        fixture.entry_physical(1.0),
+        Some(16),
+        "the primary's scale stays cached"
+    );
+    assert_eq!(
+        fixture.entry_physical(2.0),
+        Some(32),
+        "adding a scale-2 output builds its entry through the add path"
+    );
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let pointer = Point::<f64, Logical>::from((50.0, 50.0));
+    let one = fixture.state.cursor.element(&mut renderer, pointer, 1.0);
+    let two = fixture.state.cursor.element(&mut renderer, pointer, 2.0);
+    assert_ne!(
+        one[0].id(),
+        two[0].id(),
+        "the two scales must not share a buffer"
+    );
+    assert_native_element(&fixture.state, &mut renderer, 1.0, 16);
+    assert_native_element(&fixture.state, &mut renderer, 2.0, 32);
+}
+
+/// A runtime hotplug at a new fractional scale (the same `add_output_with`
+/// funnel `--tty` hotplug uses) builds its bitmaps on arrival, not at the
+/// next rescale/reload/removal.
+#[test]
+fn add_path_hotplug_at_1_5_builds_its_bitmaps_at_runtime() {
+    let mut fixture = AddPath::boot(1.0, "");
+    assert_eq!(fixture.entry_physical(1.5), None, "nothing runs at 1.5 yet");
+    fixture.state.output_entries = crate::compositor::output_config::OutputEntries::from_toml(
+        "[[outputs]]\nname = \"headless-2\"\nscale = 1.5\n",
+    );
+    crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a hotplugged output");
+    assert_eq!(
+        fixture.entry_physical(1.5),
+        Some(24),
+        "hotplugging a scale-1.5 output builds the 24px entry"
+    );
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    assert_native_element(&fixture.state, &mut renderer, 1.5, 24);
+}
+
+/// Removing an output prunes the scale no output uses anymore, and re-adding
+/// it rebuilds the native bitmaps -- the sync runs on every add, not just
+/// the first.
+#[test]
+fn add_path_remove_then_readd_rebuilds_its_bitmaps() {
+    let mut fixture = AddPath::boot(1.0, "[[outputs]]\nname = \"headless-2\"\nscale = 2.0\n");
+    let second =
+        crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+            .expect("a second headless output");
+    assert_eq!(fixture.entry_physical(2.0), Some(32));
+    assert!(
+        fixture.state.remove_output(second),
+        "the hotplugged output removes"
+    );
+    assert_eq!(
+        fixture.entry_physical(2.0),
+        None,
+        "removal drops the scale no output uses anymore"
+    );
+    assert_eq!(
+        fixture.entry_physical(1.0),
+        Some(16),
+        "the primary's scale survives the removal"
+    );
+    crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("the output comes back");
+    assert_eq!(
+        fixture.entry_physical(2.0),
+        Some(32),
+        "re-adding the scale-2 output rebuilds its entry"
+    );
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    assert_native_element(&fixture.state, &mut renderer, 2.0, 32);
+}

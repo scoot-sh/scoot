@@ -157,9 +157,16 @@ pub struct Cursor {
     /// Built eagerly for scale 1.0 and for every live output scale (see
     /// [`Cursor::sync_scales`]), never on the frame path, and bounded by
     /// [`MAX_SCALES`]: the whole set is small (`Shape::COUNT` bitmaps of
-    /// `physical * physical * 4` bytes per entry -- ~22 KiB per scale at the
-    /// default 16px cursor, ~90 KiB at 2x -- per cold-path build rather than
-    /// per frame (`rebuild` replaces the whole set at once).
+    /// `physical * physical * 4` bytes per entry -- 22,528 B per scale at
+    /// the default 16px cursor, 90,112 B at 2x; 163,328 B for 16+24+32,
+    /// 198,528 B for four distinct scales at logical 16 (16/20/24/32) --
+    /// per cold-path build rather than per frame (`rebuild` replaces the
+    /// whole set at once). The bound is on the count of scales, not on
+    /// bytes: at logical 256 four scales (physical 256/320/384/512) hold
+    /// 50,823,168 B (~48 MiB), and rebuilding that set costs about a
+    /// second on the event-loop thread -- rare (a 256px cursor at four
+    /// live scales) and acceptable, which is why no byte cap complicates
+    /// this further.
     scales: Vec<ScaleEntry>,
     /// The clamped logical edge length every entry is drawn for, kept so the
     /// element can be sized in logical units. Not a hotspot itself: each
@@ -442,10 +449,12 @@ impl Cursor {
     }
 
     /// The entry the frame path draws at `scale`: the exact prebuilt scale,
-    /// else the nearest kept one. Read-only -- the backstop for a scale no
-    /// cold path ensured (a frame racing an output event): slightly soft for
-    /// at most the frames until the next sync, never an allocation and never
-    /// a missing cursor.
+    /// else the nearest kept one. Read-only -- the defensive backstop for a
+    /// scale no cold path ensured, never the plan: every output add, scale
+    /// change, removal and reload syncs its scales right after the live set
+    /// changes (see `headless::sync_cursor_scales`), so a miss means a caller
+    /// forgot its sync and draws soft until it is fixed. Never an allocation
+    /// and never a missing cursor.
     fn entry_for_scale(&self, scale: f64) -> &ScaleEntry {
         let key = scale_key(scale);
         if let Some(entry) = self.scales.iter().find(|entry| entry.key == key) {
