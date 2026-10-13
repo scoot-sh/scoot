@@ -504,16 +504,34 @@ So:
    ```sh
    #!/bin/sh
    # scootgreet-greeter: greetd's default_session.command (greetd execs it under sh -c).
-   /abs/bin/scootgreet session || exec /abs/bin/scootgreet-fallback
+   /abs/bin/scootgreet session && exit 0
+   status=$?
+   # The wrapper logs the supervisor's status itself: the supervisor may be what failed.
+   # A failed write must never block the fallback, hence the `|| :` and no `set -e`.
+   printf '%s scootgreet session exited %s\n' "$(date -u +%FT%TZ)" "$status" \
+       >>/var/lib/scootgreet/fallback.log 2>/dev/null || :
+   exec /abs/bin/scootgreet-fallback
    ```
 
-   `scootgreet-fallback` is a second `sh` script:
+   `scootgreet-fallback` is a second `sh` script. **The session command is baked into it at build
+   or install time.** It cannot come from `greet.toml`'s `fallback-session`, because only the
+   supervisor reads that file, and the fallback runs exactly when the supervisor has failed.
+   With an empty or unset variable, agreety would get `--cmd ""`: getopts' `opt_default` gives
+   `Some("")` (`agreety/src/main.rs:139,159`), greetd runs `sh -c "exec "`, and the user bounces
+   straight back. So:
 
    ```sh
    #!/bin/sh
-   /abs/bin/agreety --cmd "$FALLBACK_SESSION" && exit 0
-   exec /abs/bin/agreety --cmd "$FALLBACK_SESSION"
+   # Under Nix, @session@ is substituted with the scoot session's absolute Exec at build time.
+   # Packages write it at install time (default: the scoot session's absolute Exec).
+   session='@session@'
+   if [ -n "$session" ]; then set -- --cmd "$session"; else set --; fi
+   /abs/bin/agreety "$@" && exit 0
+   exec /abs/bin/agreety "$@"
    ```
+
+   With no session known, `--cmd` is left out entirely, and agreety prompts `Command:`
+   (`agreety/src/main.rs:103-106`, when `cmd` is `None`). That beats a session that exits at once.
 
    It runs agreety again only when agreety exits non-zero. That is the stale-session case:
    agreety's first request meets a session a dead greeter left, gets an `error`, cancels it,
@@ -528,6 +546,24 @@ So:
    ends at a working text login on every greeter start. So does a supervisor binary that is
    missing, exits non-zero at once, or crashes. That is the case R1 and N1 of the #579 reviews
    showed the earlier drafts got wrong.
+
+   **The supervisor's only exit-0 path is cage exiting 0.** cage returns the app's status when
+   the app goes away (`cage.c:111,658-660`), and scootgreet exits 0 only after `start_session`
+   succeeded ([invariant](#the-greetd-client)). cage can also exit 0 on its own SIGINT or SIGTERM
+   (`cage.c:223-230`), but that needs an outside signal each time, so it cannot loop by itself. Every other
+   supervisor outcome is non-zero, including its own errors, a timeout, and a signal it
+   reports. A buggy exit 0 without a session therefore cannot skip the fallback and push greetd
+   towards its start limit.
+
+   **The wrapper and the fallback must be executable.** A non-executable wrapper makes greetd's
+   `sh -c "exec …"` exit 126 on every start, which loops greetd into its start limit: a dead
+   VT1. The Nix tests and every package pin the mode (`0755`).
+
+   **Not caught: a hung cage.** The heartbeat proves scootgreet's loop is alive, not that cage
+   is putting frames on the screen. Tying it to presented frames would false-trip whenever the
+   user switches to another VT, since no frames are presented there. A cage that hangs while
+   scootgreet keeps beating leaves a frozen login screen. Recovery is `Ctrl+Alt+F2` (if cage still
+   switches VTs), ssh, SysRq, or a hard reset. That residual risk is accepted and documented.
 4. **VT escape.** `Ctrl+Alt+F2` reaches a getty on tty2: nixpkgs disables only `autovt@tty1`, and
    cage's `-s` allows the switch. `greet-nixos` verifies this on the dev VM, and the install docs
    print it next to the switch. **To verify:** after the supervisor SIGKILLs cage, whether the VT
@@ -677,8 +713,12 @@ field. The live session keeps `agreety` and autologin unchanged.
     after the deadline;
   - **the supervisor itself failing**, through the real `scootgreet-greeter` wrapper as greetd
     runs it: the `scootgreet` binary missing, `scootgreet session` exiting non-zero at once,
-    and `scootgreet session` aborting. Each must reach a working agreety login, and the
-    fallback log must name the reason;
+    and `scootgreet session` aborting. Each must reach a working agreety login **that starts
+    the scoot session** (the baked-in command, not an empty one). The wrapper's own line in
+    `fallback.log` records the exit status;
+  - the same with `/var/lib/scootgreet` missing or read-only: the log write fails silently,
+    and the fallback still runs;
+  - a fallback built with no session command: agreety prompts `Command:` instead of bouncing;
   - agreety's `--max-failures` used up, ending in a fresh greeter (greetd's restart) rather
     than a dead VT;
   - a suspend and resume at the login screen, with no fallback;
@@ -700,7 +740,10 @@ field. The live session keeps `agreety` and autologin unchanged.
   section added to `site/OUTLINE.md`'s Coming apps in the PR that ships it.
 - Packages: deb, rpm and Arch, with the `scootgreet-greeter` and `scootgreet-fallback`
   scripts and a greetd config example pointing `default_session.command` at
-  `scootgreet-greeter` (`agreety` comes with greetd). Flake `packages.scootgreet` and `nixosModules.scootgreet`.
+  `scootgreet-greeter` (`agreety` comes with greetd). Both scripts are installed mode `0755`;
+  the fallback's session command is written at install time (default: the scoot session's
+  absolute `Exec`); and `/var/lib/scootgreet` is created for the greeter user through
+  `tmpfiles.d`, as the Nix module does. Flake `packages.scootgreet` and `nixosModules.scootgreet`.
 - CI: classify and job in `greet-headless-login`, which creates the crate.
 
 ## Decisions specific to the greeter

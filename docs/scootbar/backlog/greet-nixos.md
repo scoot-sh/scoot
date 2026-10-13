@@ -41,7 +41,13 @@ greeter is static). Serves **daily-drive**.
 - `default_session.command` equals the wrapper's store path exactly, and contains no `||`, `;`
   or `&&`. The broken `cmd || fallback` form fails eval, so the tests cannot lock it in;
 - the wrapper script's body: the supervisor `||` an `exec` of the fallback, all absolute paths;
-- the fallback's body: agreety re-run only on a non-zero exit;
+- the fallback's body: agreety re-run only on a non-zero exit, with the session command
+  substituted at build time, **non-empty and absolute** (an eval pin), never read from a
+  variable or `greet.toml`;
+- the wrapper and the fallback are **executable** (mode `0755`). A non-executable wrapper exits
+  126 on every start and loops greetd into its start limit;
+- the wrapper logs the supervisor's exit status itself, and a failed log write cannot block the
+  fallback;
 - XKB env and tmpfiles;
 - today's ReGreet output byte-identical with the default.
 
@@ -52,8 +58,10 @@ On the dev VM, with greetd 0.10.3:
 - a SIGKILL mid-prompt landing on agreety;
 - **the supervisor itself failing, through the real wrapper as greetd runs it**: the
   `scootgreet` binary missing, `scootgreet session` exiting non-zero at once, and
-  `scootgreet session` aborting. Each must reach a working agreety login, and
-  `/var/lib/scootgreet/fallback.log` must name the reason;
+  `scootgreet session` aborting. Each must reach a working agreety login **that starts the
+  scoot session**, and the wrapper's own line in `/var/lib/scootgreet/fallback.log` must record
+  the exit status;
+- the same with `/var/lib/scootgreet` read-only: the fallback still runs;
 - agreety's `--max-failures` used up, ending in a fresh greeter, not a dead VT;
 - suspend and resume at the login screen, with no fallback (monotonic timers);
 - cage SIGKILLed, with agreety's prompt readable (the VT is back in text and keyboard mode);

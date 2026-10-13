@@ -14,7 +14,12 @@ Filed 2026-10-12 from the [scootgreet design](../../../dev/design/scootgreet.md#
 ## What to do
 
 - **Packages**: deb, rpm and Arch, with the `scootgreet-greeter` and `scootgreet-fallback`
-  scripts and a greetd config example whose `default_session.command` is the wrapper's path. `install.sh` never wires them.
+  scripts and a greetd config example whose `default_session.command` is the wrapper's path:
+  - both scripts installed mode `0755`, checked in each package's own test;
+  - the fallback's session command written at install time, defaulting to the scoot session's
+    absolute `Exec`, and documented;
+  - `/var/lib/scootgreet` created and owned by the greeter user (a `tmpfiles.d` entry, as the Nix
+    module has). `install.sh` never wires them.
 - **The site's greeter section**: the choice of greeter, the recovery path, and the
   screen-reader note.
 - **In `scoot-sh/scoot-iso`**:

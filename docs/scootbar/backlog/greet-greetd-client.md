@@ -25,12 +25,18 @@ supervisor that keeps a graphical greeter from stranding a login, and the secret
     suspend at the login screen does not trip them;
   - on a non-zero exit or a missed deadline: kill the group, cancel, **print the reason to the VT
     and append it to `/var/lib/scootgreet/fallback.log`**, and exec agreety by absolute path.
-- **The `scootgreet-greeter` wrapper** that greetd runs (greetd `exec`s its command under
-  `sh -c`, `worker.rs:228-235,267-272`, so the fallback must live in a script, not in the
-  command text): `scootgreet session || exec scootgreet-fallback`.
-- **`scootgreet-fallback`**, which re-runs agreety only on a non-zero exit (the stale-session
-  case). agreety exits 0 after its `--max-failures` too (`agreety/src/main.rs:173-182`), and
-  greetd's restart handles that.
+- **The `scootgreet-greeter` wrapper** that greetd runs. greetd `exec`s its command under
+  `sh -c` (`worker.rs:228-235,267-272`), so the fallback must live in a script, not in the
+  command text. On a non-zero exit, the wrapper logs the supervisor's status itself, ignoring a
+  failed write, then execs `scootgreet-fallback`.
+- **`scootgreet-fallback`**, with the session command **baked in at build or install time**
+  (never read from `greet.toml`, which only the failed supervisor reads). An empty command omits
+  `--cmd` so agreety prompts `Command:` (`agreety/src/main.rs:103-106,139,159`). It re-runs
+  agreety only on a non-zero exit (the stale-session case). agreety exits 0 after its
+  `--max-failures` too (`main.rs:173-182`), and greetd's restart handles that.
+- **The supervisor's only exit-0 path is cage exiting 0.** Everything else is non-zero.
+- **A hung cage is not caught.** The heartbeat proves scootgreet alive, not cage drawing; this is
+  documented as accepted.
 - **The secret path**:
   - a locked, zeroized two-page region: a new type in `scootbg-mem`, behind a `locked` feature
     off by default so scootbg's release-gated binary never builds it, with the crate's
@@ -47,7 +53,10 @@ supervisor that keeps a graphical greeter from stranding a login, and the secret
   - a SIGKILL with a prompt pending, landing on agreety;
   - a hang (`SCOOTGREET_TEST_HANG=1`), landing on agreety after the deadline;
   - the supervisor itself missing, exiting non-zero at once, and aborting, each through the real
-    wrapper, each reaching agreety with the reason logged;
+    wrapper, each reaching an agreety login that starts the scoot session, with the wrapper's
+    status line logged;
+  - a fallback with no baked-in command, where agreety prompts `Command:`;
+  - a non-executable wrapper caught by the tests before it ships;
 
 ## Evidence the review needs
 
