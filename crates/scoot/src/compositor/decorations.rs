@@ -260,9 +260,9 @@ pub struct Appearance {
     /// genuinely composites (rim and accent follow its alpha). See
     /// `cursor.rs`'s `contrast_rim`.
     pub cursor_color: Color,
-    /// The fallback cursor shapes' accent color: the small ginger mark each
-    /// shape carries (the arrow's tail hint, resize bars' centre line, the
-    /// paw, the hourglass sand, the "not allowed" slash -- see
+    /// The fallback cursor shapes' accent color: the ginger mark the shapes
+    /// carry (the arrow's tail tip, the resize and split shafts, the paw,
+    /// the wait spinner, the "not allowed" slash -- see
     /// `cursor/shapes.rs`). `None` draws no accent at all. The default is
     /// the project's ginger orange; the accent follows the body's alpha so a
     /// translucent body does not wear an opaque mark.

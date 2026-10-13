@@ -21,8 +21,7 @@ scoot has not cut a numbered release yet; entries are dated.
   The outlines are the CC0 [Mocu](https://github.com/sevmeyer/mocu-xcursor)
   cursor art (vendored with its license, credited in `NOTICE`), filled by
   scoot's own rasteriser and fitted to the pixel grid so the 16px default
-  stays crisp; the paw shapes are scoot's own. The old arrow's drop shadow
-  is gone (the rim carries the edge).
+  stays crisp; the paw shapes are scoot's own.
   See [Appearance](site/src/content/docs/scoot/appearance.md#the-fallback-cursor-family).
 
 ### Unreleased — sharp cursors on high-DPI outputs (behavior change)
@@ -37,9 +36,7 @@ scoot has not cut a numbered release yet; entries are dated.
   (bounded, built on output add/scale change and reload, never per
   frame); mixed-DPI sessions draw each output's own set. A theme image
   padded beyond its nominal size draws at that nominal size, like
-  everything else. The family
-  itself is now authored on a 24-unit design grid (same pixels at 16px
-  except a slightly broader paw-print toe spread).
+  everything else.
 
 ### Unreleased — renderer names are `cpu` / `gpu` / `auto` (breaking)
 

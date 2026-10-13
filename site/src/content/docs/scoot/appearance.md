@@ -57,8 +57,10 @@ are [Mocu](https://github.com/sevmeyer/mocu-xcursor), Severin Meyer's
 "modest xcursor theme", released under CC0 1.0 (public domain) and vendored
 with its license in the source tree; scoot fills Mocu's vector paths with
 its own rasteriser in your colors and adds the ginger marks. The two paw
-shapes, which Mocu has no art for, are scoot's own. Nothing is loaded from
-an image file at runtime.
+shapes, which Mocu has no art for, are scoot's own. Those paws and the
+placement of the ginger marks were drawn against concept art the project
+owner generated with ChatGPT; nothing is traced from it. Nothing is loaded
+from an image file at runtime.
 
 Mocu is drawn on a 24-pixel grid; at the default 16px each shape is
 fitted to the pixel grid so straight edges stay one crisp pixel and no

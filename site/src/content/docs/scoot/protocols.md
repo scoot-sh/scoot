@@ -2183,31 +2183,32 @@ client would have loaded for itself. Parsing is the MIT-licensed `xcursor`
 crate; nothing is vendored, and scoot ships no theme of its own.
 
 **When no theme is installed** — a linuxserver webtop or any minimal
-container — named shapes fall back to 22 shapes scoot draws procedurally
-itself (a near-black body, a contrasting rim, one ginger mark each — see
+container — named shapes fall back to 22 shapes scoot draws itself from the
+CC0 Mocu cursor art (a near-black body, a contrasting rim, a ginger mark
+where it reads — see
 [the fallback family](./appearance.md#the-fallback-cursor-family)):
 
 | Drawn as | Named shapes it answers |
 | --- | --- |
-| arrow (tail hint) | `default`, `context-menu` |
+| arrow (ginger tail tip) | `default`, `context-menu` |
 | arrow + paw badge | `progress`, `alias`, `copy` |
-| I-beam (orange stem) | `text` |
-| sideways I-beam (orange stem) | `vertical-text` |
-| pointing glove (orange cuff) | `pointer` |
+| I-beam | `text` |
+| sideways I-beam | `vertical-text` |
+| pointing hand (ginger cuff) | `pointer` |
 | paw print | `dnd-ask` |
-| arrow + hourglass badge | `wait` |
-| crosshair (orange centre dot) | `crosshair` |
-| thin crosshair | `cell` |
-| vertical double arrow (orange centre line) | `n-resize`, `s-resize`, `ns-resize` |
-| horizontal double arrow (orange centre line) | `e-resize`, `w-resize`, `ew-resize` |
-| diagonal double arrows (dashed orange centre) | `ne-resize`, `sw-resize`, `nesw-resize` / `nw-resize`, `se-resize`, `nwse-resize` |
-| split triangles (orange divider) | `col-resize`, `row-resize` |
-| four-way arrow (orange centre dot) | `move`, `all-scroll`, `all-resize` |
+| arrow + spinner badge (ginger spinner) | `wait` |
+| thin cross (ginger centre) | `crosshair` |
+| bold plus | `cell` |
+| vertical double arrow (ginger shaft) | `n-resize`, `s-resize`, `ns-resize` |
+| horizontal double arrow (ginger shaft) | `e-resize`, `w-resize`, `ew-resize` |
+| diagonal double arrows (ginger shaft) | `ne-resize`, `sw-resize`, `nesw-resize` / `nw-resize`, `se-resize`, `nwse-resize` |
+| arrows either side of a bar (ginger bar) | `col-resize`, `row-resize` |
+| four arrows around a disk (ginger disk) | `move`, `all-scroll`, `all-resize` |
 | open hand | `grab` |
-| closed fist (orange knuckles) | `grabbing` |
-| arrow + "?" badge | `help` |
-| magnifier (orange plus / minus) | `zoom-in`, `zoom-out` |
-| ring (orange slash) | `not-allowed`, `no-drop` |
+| closed hand | `grabbing` |
+| arrow + "?" | `help` |
+| magnifier (ginger plus / minus) | `zoom-in`, `zoom-out` |
+| ring and slash (ginger slash) | `not-allowed`, `no-drop` |
 
 The drawn shapes use the `[appearance]` `cursor_size`/`cursor_color`/`cursor_accent` settings
 and are built once at startup. Theme images are loaded when a client first

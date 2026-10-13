@@ -205,23 +205,102 @@ fn grid_fitting_keeps_one_unit_stems_one_whole_pixel_at_16px() {
 
 #[test]
 fn grid_fitting_leaves_mocus_own_grid_alone() {
-    // At 24px one unit is one pixel and art on Mocu's whole-unit grid is
-    // already fitted: every vertex of the vertical resize arrow (edges, head
-    // bases and the half-unit tips between them) lands exactly where Mocu
-    // puts it, shifted only so the hotspot sits on the bitmap's middle.
-    let p = family::placement(Art::ResizeNs, 24);
-    let (hx, hy) = p.px(11.5, 11.5);
-    for (x, y) in [
-        (6.0, 15.0),
-        (11.5, 21.0),
-        (17.0, 15.0),
-        (13.0, 8.0),
-        (11.5, 2.0),
-        (10.0, 8.0),
-    ] {
-        let (px, py) = p.px(x, y);
-        assert!((px - hx - (x - 11.5)).abs() < 1e-9, "x {x} moved: {px}");
-        assert!((py - hy - (y - 11.5)).abs() < 1e-9, "y {y} moved: {py}");
+    // Wherever one unit is a whole number of pixels (24px, 48px) the art on
+    // Mocu's whole-unit grid is already fitted: every vertex of the
+    // vertical resize arrow and the I-beam (edges, head bases, serifs and
+    // the half-unit tips between them) lands exactly at Mocu's scale,
+    // shifted only so the hotspot sits on the bitmap's middle.
+    for (size, k) in [(24, 1.0), (48, 2.0)] {
+        for (art, points) in [
+            (
+                Art::ResizeNs,
+                &[
+                    (6.0, 15.0),
+                    (11.5, 21.0),
+                    (17.0, 15.0),
+                    (13.0, 8.0),
+                    (11.5, 2.0),
+                    (10.0, 8.0),
+                ][..],
+            ),
+            (
+                Art::Text,
+                &[(9.0, 4.0), (11.0, 5.0), (12.0, 18.0), (14.0, 19.0)][..],
+            ),
+        ] {
+            let p = family::placement(art, size);
+            let (hx, hy) = p.px(11.5, 11.5);
+            for &(x, y) in points {
+                let (px, py) = p.px(x, y);
+                assert!(
+                    (px - hx - (x - 11.5) * k).abs() < 1e-9,
+                    "{art:?} at {size}px: x {x} moved to {px}"
+                );
+                assert!(
+                    (py - hy - (y - 11.5) * k).abs() < 1e-9,
+                    "{art:?} at {size}px: y {y} moved to {py}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn grid_fitting_moves_nothing_more_than_half_a_pixel_at_and_above_mocus_scale() {
+    // At 24px and up every feature is already a pixel or more wide, so the
+    // fit only ever rounds: no vertex of any shape lands more than half a
+    // pixel from Mocu's own proportions around the hotspot. (Below 24px the
+    // fit may widen a one-unit feature to a whole pixel, which is its job.)
+    for size in [24, 30, 32, 40, 48] {
+        for shape in Shape::ALL {
+            let Some(art) = shape.art() else { continue };
+            let p = family::placement(art, size);
+            let k = f64::from(size) / 24.0;
+            let (ox, oy) = p.px(0.0, 0.0);
+            let (ux, uy) = p.px(24.0, 24.0);
+            // The art's own scale must be intact (no shrink needed here).
+            assert!(
+                ((ux - ox) - 24.0 * k).abs() <= 1.0 && ((uy - oy) - 24.0 * k).abs() <= 1.0,
+                "{art:?} at {size}px was rescaled"
+            );
+            for i in 0..=48 {
+                let u = f64::from(i) / 2.0;
+                let (x, y) = p.px(u, u);
+                let (ax, ay) = (p.ax + (u - hot(art).0) * k, p.ay + (u - hot(art).1) * k);
+                // Extremes may also have been clamped by up to a pixel to
+                // keep their rim clear of the bitmap edge.
+                assert!(
+                    (x - ax).abs() <= 1.0 + 1e-9 && (y - ay).abs() <= 1.0 + 1e-9,
+                    "{art:?} at {size}px moves {u} by ({}, {})",
+                    x - ax,
+                    y - ay
+                );
+            }
+        }
+    }
+}
+
+fn hot(art: Art) -> (f64, f64) {
+    use mocu::*;
+    match art {
+        Art::Arrow | Art::PointerBadge | Art::WaitBadge | Art::Help => DEFAULT.hot,
+        Art::Text => TEXT.hot,
+        Art::VerticalText => VERTICAL_TEXT.hot,
+        Art::Hand => POINTER.hot,
+        Art::Crosshair => CROSSHAIR.hot,
+        Art::Cell => CELL.hot,
+        Art::ResizeNs => NS_RESIZE.hot,
+        Art::ResizeEw => EW_RESIZE.hot,
+        Art::ResizeNesw => NESW_RESIZE.hot,
+        Art::ResizeNwse => NWSE_RESIZE.hot,
+        Art::Move => ALL_SCROLL.hot,
+        Art::NotAllowed => NOT_ALLOWED.hot,
+        Art::Grab => GRAB.hot,
+        Art::Grabbing => GRABBING.hot,
+        Art::SplitV => COL_RESIZE.hot,
+        Art::SplitH => ROW_RESIZE.hot,
+        Art::ZoomIn => ZOOM_IN.hot,
+        Art::ZoomOut => ZOOM_OUT.hot,
     }
 }
 

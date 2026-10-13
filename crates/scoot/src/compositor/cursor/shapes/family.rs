@@ -33,8 +33,12 @@
 //! from the hotspot, so symmetric art stays symmetric), any two knots at
 //! least a unit apart stay at least a pixel apart (so no stem or gap ever
 //! vanishes), and everything between knots -- diagonals, arcs -- is mapped
-//! piecewise-linearly. At 24px and 48px the fit is the identity; at 16, 20
-//! and 32 it moves edges by at most half a pixel and makes them crisp.
+//! piecewise-linearly. Where a unit is a whole number of pixels (24px,
+//! 48px) every whole-unit edge already lands on the grid and stays exactly
+//! where Mocu draws it. From 24px up nothing moves more than rounding (half
+//! a pixel) plus, for an extreme tip, up to a pixel given up to keep its rim
+//! clear of the bitmap edge. Below 24px the fit is what keeps a one-unit
+//! feature a whole crisp pixel instead of a smear.
 
 use super::svgpath::{self, Subpath};
 use super::{Ctx, Prim, mocu, outline_width, paw};
@@ -583,12 +587,27 @@ fn place(src: &Source, size: i32) -> Placement {
     let [lo_x, lo_y, hi_x, hi_y] = extent(src);
     let (hx, hy) = src.hot;
     let frac = |h: f64| h - h.floor();
+    // The hotspot's sub-pixel phase. At Mocu's own scale and above, its
+    // whole grid points sit on pixel corners and its half points half a
+    // unit -- `k / 2` pixels -- past one: a `11.5` hotspot is a pixel centre
+    // at 24px but a pixel corner at 48px, so every edge a whole unit from it
+    // lands on a pixel edge at both and the fit is exact wherever `k` is
+    // whole. Below Mocu's scale nothing lands exactly anyway, and a
+    // half-unit hotspot stays on a pixel centre: symmetric art then rounds
+    // to odd, centred widths (the 16px resize shaft keeps 3px, not 2).
+    let phase = |h: f64, k: f64| {
+        if k < 1.0 {
+            frac(h)
+        } else {
+            (frac(h) * k).rem_euclid(1.0)
+        }
+    };
     let anchor = |h: f64, lo: f64, k: f64| match src.anchor {
         Anchor::Corner => {
             let want = clear + (h - lo) * k;
-            (want - frac(h)).ceil() + frac(h)
+            (want - phase(h, k)).ceil() + phase(h, k)
         }
-        Anchor::Middle => f64::from(size / 2) + frac(h),
+        Anchor::Middle => f64::from(size / 2) + phase(h, k),
     };
     let mut k = unit;
     let mut best = None;

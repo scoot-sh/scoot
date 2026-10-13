@@ -1443,8 +1443,8 @@ fn different_named_shapes_draw_different_pixels() {
 }
 
 #[test]
-fn a_wait_shape_draws_the_hourglass_badge() {
-    // `wait` names the arrow-plus-hourglass badge, not the plain arrow: the
+fn a_wait_shape_draws_the_spinner_badge() {
+    // `wait` names the arrow-plus-spinner badge, not the plain arrow: the
     // tip still lands on the pointer (same hotspot), but the frame carries
     // the badge beside it, which a plain arrow frame does not. A pointer
     // that vanishes because a client named `wait` would be a worse bug than
