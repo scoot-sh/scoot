@@ -140,9 +140,34 @@ The [umbrella](resolved/data-source-modules-done.md) holds the rules they share 
 - [The bar wakes about 40 times a minute at idle](resolved/second-wakeups-done.md) (low) — RESOLVED 2026-10-05 in #458: the clock was already minute-aligned (2 wakes); the network module redrew on raw-dBm jitter and now redraws on level change
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)
-- [Extract `scootui`](extract-scootui.md) (low): when a second consumer appears
-- [`scootlaunch`: the launcher](launcher.md) (low, pointer)
-- [`scootnotify`: the notification daemon](scootnotify.md) (low, pointer)
+Planned 2026-10-12: the designs are [dev/design/](../../../dev/design/shell-apps.md) (shared
+foundation, start order, decisions needed), [scootnotify](../../../dev/design/scootnotify.md),
+[scootlaunch](../../../dev/design/scootlaunch.md) and [scootgreet](../../../dev/design/scootgreet.md).
+The tickets live here until each app gets its own backlog (a `scripts/backlog` change the
+design lists as a decision). **The roots wait on the maintainer's go-ahead** (Decisions needed 1),
+so a `claim --next` swarm does not start them off the design PR.
+
+Shared foundation ([epic](extract-scootui.md)):
+- [Spike: the keyboard stack](scootui-keyboard-spike.md) (medium) and [Spike: shaping and bidi](scootui-text-shaping-spike.md) (medium): the two choices that are expensive to reverse
+- [Extract the drawing half](scootui-extract-draw.md), then [`scoot-dbus`](scoot-dbus-extract.md) and [the Wayland half](scootui-extract-wayland.md): mechanical moves held to the ratchet
+- [Keyboard](scootui-keyboard.md), then [entry, list and focus](scootui-entry-and-list.md)
+
+[`scootnotify`: the notification daemon](scootnotify.md) (epic):
+- [Prototype: the go/no-go gate against mako](notify-prototype.md) (medium)
+- [The D-Bus server and model](notify-server.md), [popups](notify-popups.md), [control, DND, history, rules](notify-control.md), [the bar feed](notify-bar-feed.md)
+- [Nix, Stylix and the opt-in switch](notify-nix.md), [packaging and the site](notify-packaging.md), [flip the default](notify-default-flip.md)
+
+[`scootlaunch`: the launcher](launcher.md) (epic):
+- [The desktop entry index](launch-desktop-index.md), [matching and ranking](launch-match-rank.md)
+- [The panel and launching; the go/no-go gate against fuzzel](launch-ui.md)
+- [dmenu and run](launch-dmenu.md), [the agent interface](launch-agent-json.md), [windows mode](launch-windows-mode.md)
+- [Nix, Stylix and the opt-in switch](launch-nix.md), [packaging and the site](launch-packaging.md), [flip the default](launch-default-flip.md)
+
+[`scootgreet`: the login greeter](scootgreet.md) (epic):
+- [Baseline: measure ReGreet + cage, verify the no-stranding facts](greet-baseline.md) (medium)
+- [The greetd client](greet-greetd-client.md), [the screen; the go/no-go gate](greet-ui.md)
+- [NixOS and the agreety fallback](greet-nixos.md), [packaging, docs and the ISO](greet-packaging-iso.md), [flip the default](greet-default-flip.md)
+- Later, opt-in: [spike: scoot as the host](greet-scoot-kiosk-spike.md), then the [core ticket](../../backlog/core/scoot-greeter-mode.md)
 
 ### Unscheduled (until someone asks)
 - [Gate integration tests on module features, tidy the unit-test script](resolved/scootbar-test-gating-and-script-hygiene-done.md) (low) — RESOLVED 2026-10-08 in #527

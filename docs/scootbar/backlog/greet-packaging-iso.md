@@ -1,0 +1,33 @@
+---
+title: "scootgreet: packages, site docs, and the scoot-iso target switch with its QEMU test"
+status: "open"
+area: "scootbar"
+priority: "low"
+blocked: "greet-nixos"
+milestone: "M7"
+---
+
+# scootgreet: packaging, docs and the ISO
+
+Filed 2026-10-12 from the [scootgreet design](../../../dev/design/scootgreet.md#the-installer-iso). Serves **daily-drive**.
+
+## What to do
+
+deb, rpm and Arch with the wrapper and a greetd config example (never wired by `install.sh`);
+the site greeter section (choice, recovery, the screen-reader note); in `scoot-sh/scoot-iso`,
+the target's switch to scootgreet measured for ISO and target closure delta, and
+`scripts/qemu-test.sh` typing into the focused field instead of clicking coordinates.
+
+## Acceptance
+
+Packages build; site builds; the scoot-iso QEMU test passes with scootgreet on the target.
+
+## Evidence the review needs
+
+- The standard set re-run by the reviewer on the commit under review: `cargo nextest run` for the touched crates, `cargo clippy … -- -D warnings`, `cargo fmt --check`, and the crate's fuzz targets for their CI budget.
+- Raw numbers and the exact commit SHA for every measured row (CLAUDE.md, Verification and evidence); docs updated in the same PR.
+- The ISO size before and after.
+
+## Not in this ticket
+
+The default flip.

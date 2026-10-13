@@ -803,6 +803,11 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [HDR connector signaling](./core/hdr-output-signaling.md) — low (HDR plan stage 4), blocked on HDR hardware plus a Smithay fork change (see the research ticket).
 - [Productionise runtime-loaded libgbm](./core/runtime-gbm-productionise.md) — medium (spike 2026-10-10): one default build for GPU and GPU-free boxes via a static libgbm ABI stub (no DT_NEEDED, dlopen on use, fail-closed without); needs the M2 scanout proof, the auto-detect rule, and the `scoot`/`scoot-gpu` package collapse.
 
+### Shell apps, the compositor side (filed 2026-10-12)
+The scootnotify, scootlaunch and scootgreet plans ([dev/design/shell-apps.md](../../dev/design/shell-apps.md)) live in [scootbar's backlog](../scootbar/backlog/README.md#m7--the-rest-of-the-shell-separate-products-own-backlogs-when-they-start); these two are scoot changes they want.
+- [An output-less layer surface goes to the pointer's output](./core/layer-shell-default-output.md) — low, waits on the maintainer's go-ahead: today it lands on the primary output while a new window opens under the pointer, which puts launchers and notifications on the wrong monitor (fuzzel and mako included).
+- [A locked-down greeter-host mode](./core/scoot-greeter-mode.md) — low, blocked on its spike: no IPC socket, no binds but VT switch, exit with the child; opt-in, cage stays the default host.
+
 ### Requested 2026-09-24
 - [Floating windows (dialogs auto-float, window rules, toggle, move/resize)](./resolved/floating-windows-done.md) — RESOLVED 2026-09-25 in two PRs. PR 1 (#242): the floating layer, auto-float by `xdg-dialog-v1`/parent/fixed size, `[[window_rule]]`, the toggle and focus switch, IPC. PR 2 (#243): `[floating] modifier` (Super) + left/right drag moves/resizes, the client's own `xdg_toplevel.move`/`resize` honoured on its held press (tiled windows' ignored), IPC `move-floating`/`resize-floating`, cross-output moves, a window's dialogs always drawn above it (the re-review's fullscreen-game case), resize configures paced to client acks; no allocation per pointer motion (a resize allocates only for its configures, ~11 each, about one per client ack).
 

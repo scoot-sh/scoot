@@ -4,8 +4,10 @@ You are a contributor; start here. This `dev/` tree holds the material
 that is written for maintainers and reviewers, not users: how to build
 and test (below), the dependency forks ([forks.md](forks.md)), dated
 measurement prose ([benches/](benches/benchmarks.md)), spikes
-([spikes/](spikes/scootbar/)) and research notes
-([research/](research/scootbar-research.md)). It is never deployed (no
+([spikes/](spikes/scootbar/)), research notes
+([research/](research/scootbar-research.md)) and designs for apps not
+built yet ([design/](design/shell-apps.md): scootnotify, scootlaunch,
+scootgreet). It is never deployed (no
 link from the site nav, excluded from every `llms*.txt` bundle) and a
 dev-only push starts no workflow. Backlogs (`docs/backlog/`,
 `docs/scootbar/backlog/`, `docs/scootbg/backlog/`), `docs/roadmap/` and

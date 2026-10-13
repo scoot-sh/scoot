@@ -1,9 +1,9 @@
 ---
-title: "Extract `scootui`: the shared drawing and Wayland scaffolding"
+title: "Extract `scootui`: the shared drawing and Wayland scaffolding (epic)"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "waits for a second consumer (the launcher or the notification daemon) to start; unblock by hand when one does"
+blocked: "scootui-keyboard-spike, scootui-text-shaping-spike, scootui-extract-draw, scoot-dbus-extract, scootui-extract-wayland, scootui-keyboard, scootui-entry-and-list"
 milestone: "M7"
 ---
 
@@ -77,3 +77,25 @@ binary does not grow.
 
 Two binaries build on it, both benchmarks are unchanged within the margin, and
 no consumer pays for a part it does not use.
+
+## The plan (2026-10-12)
+
+The second consumer arrived: scootnotify, then scootlaunch and scootgreet. The seam is cut
+in [dev/design/shell-apps.md](../../../dev/design/shell-apps.md#the-shared-crates-scootui-and-scoot-dbus)
+into two crates:
+
+- `scootui`: drawing, widgets, icons, Wayland scaffolding, keyboard and the control socket,
+  each behind a feature;
+- `scoot-dbus`: the D-Bus client, moved out because three apps need it and none of that need
+  is drawing.
+
+scootbg stays on its own copy for now, as the guard rails above allow.
+
+Children, in order:
+
+1. [scootui-keyboard-spike](scootui-keyboard-spike.md) and
+   [scootui-text-shaping-spike](scootui-text-shaping-spike.md), in parallel.
+2. [scootui-extract-draw](scootui-extract-draw.md), then
+   [scoot-dbus-extract](scoot-dbus-extract.md) and
+   [scootui-extract-wayland](scootui-extract-wayland.md): mechanical moves held to the ratchet.
+3. [scootui-keyboard](scootui-keyboard.md), then [scootui-entry-and-list](scootui-entry-and-list.md).

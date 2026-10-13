@@ -1,9 +1,9 @@
 ---
-title: "`scootlaunch`: the launcher, and a dmenu mode the bar's pickers can use"
+title: "`scootlaunch`: the launcher, and a dmenu mode the bar's pickers can use (epic)"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "not started: the maintainer starts it, and its own design pass and backlog come first"
+blocked: "launch-desktop-index, launch-match-rank, launch-ui, launch-dmenu, launch-agent-json, launch-windows-mode, launch-nix, launch-packaging, launch-default-flip"
 milestone: "M7"
 ---
 
@@ -33,3 +33,28 @@ Its own small binary in the same shell family as the bar and
 
 Same standards: lowest resource use of its class, a resource ratchet against
 `fuzzel`, `wofi`, `tofi` and `bemenu`, docs in the same PR, a Nix module.
+
+## The plan (2026-10-12)
+
+The design pass happened: [dev/design/scootlaunch.md](../../../dev/design/scootlaunch.md), with the parts it
+shares in [shell-apps.md](../../../dev/design/shell-apps.md). The name stays `scootlaunch`; the request said
+"scootlauncher" ([why](../../../dev/design/shell-apps.md#names)).
+
+Children, in order (each `blocked` names its predecessors):
+
+1. [launch-desktop-index](launch-desktop-index.md): parser, ids, locale, Exec, cache; `--list --json`.
+2. [launch-match-rank](launch-match-rank.md): fuzzy and frecency; `--query --json`.
+3. [launch-ui](launch-ui.md): the panel, launching (token, scope), icons; the go/no-go gate against fuzzel.
+4. [launch-dmenu](launch-dmenu.md), [launch-agent-json](launch-agent-json.md),
+   [launch-windows-mode](launch-windows-mode.md).
+5. [launch-nix](launch-nix.md): module, Stylix, look; the opt-in launcher and picker switch.
+6. [launch-packaging](launch-packaging.md), then [launch-default-flip](launch-default-flip.md).
+
+Shared prerequisites: [scootui-entry-and-list](scootui-entry-and-list.md) (and through it the
+keyboard spike and stack), and [scoot-dbus-extract](scoot-dbus-extract.md). On the compositor
+side: [layer-shell-default-output](../../backlog/core/layer-shell-default-output.md).
+
+## Resource ratchet
+
+Published here per milestone until the app gets its own backlog, against fuzzel, tofi, bemenu
+and wofi ([budgets](../../../dev/design/scootlaunch.md#budgets)).
