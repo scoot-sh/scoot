@@ -160,9 +160,8 @@ compositor default. One combination is invalid: your own
 `wallpaper.color` plus Stylix's `image` (scoot takes `image` or
 `color`, never both) — for a solid color under Stylix, set
 `programs.scoot.stylix.wallpaper.enable = false`, set your own
-`image`, or turn `stylix.enable` off. `cursor_color` and
-`cursor_accent` have no Stylix convention and stay at the compositor
-defaults.
+`image`, or turn `stylix.enable` off. `cursor_color` has no Stylix
+convention and stays at the compositor default.
 
 A direct-module setup without the flake's overlay has no `scootbg`
 package: the wallpaper default then stays off rather than failing.

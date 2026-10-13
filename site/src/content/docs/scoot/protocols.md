@@ -2180,37 +2180,17 @@ A named shape is answered from **the cursor theme already installed on the
 machine**: scoot resolves `[appearance] cursor_theme`, else `$XCURSOR_THEME`,
 else `default`, and draws that theme's own artwork — the same pixels the
 client would have loaded for itself. Parsing is the MIT-licensed `xcursor`
-crate; nothing is vendored, and scoot ships no theme of its own.
+crate.
 
 **When no theme is installed** — a linuxserver webtop or any minimal
-container — named shapes fall back to 22 shapes scoot draws itself from the
-CC0 Mocu cursor art (a near-black body, a contrasting rim, a ginger mark
-where it reads — see
-[the fallback family](./appearance.md#the-fallback-cursor-family)):
+container — named shapes fall back to scoot's built-in cursors: the CC0
+[Mocu](https://github.com/sevmeyer/mocu-xcursor) theme, built in and
+rasterised by scoot itself, Mocu's cursor of the same name for every CSS
+name (`move` draws Mocu's `grabbing` and `all-resize` its `all-scroll`, as
+Mocu aliases them; any newer name draws `default`). See
+[the built-in cursors](./appearance.md#the-built-in-cursors).
 
-| Drawn as | Named shapes it answers |
-| --- | --- |
-| arrow (ginger tail tip) | `default`, `context-menu` |
-| arrow + paw badge | `progress`, `alias`, `copy` |
-| I-beam | `text` |
-| sideways I-beam | `vertical-text` |
-| pointing hand (ginger cuff) | `pointer` |
-| paw print | `dnd-ask` |
-| arrow + spinner badge (ginger spinner) | `wait` |
-| thin cross (ginger centre) | `crosshair` |
-| bold plus | `cell` |
-| vertical double arrow (ginger shaft) | `n-resize`, `s-resize`, `ns-resize` |
-| horizontal double arrow (ginger shaft) | `e-resize`, `w-resize`, `ew-resize` |
-| diagonal double arrows (ginger shaft) | `ne-resize`, `sw-resize`, `nesw-resize` / `nw-resize`, `se-resize`, `nwse-resize` |
-| arrows either side of a bar (ginger bar) | `col-resize`, `row-resize` |
-| four arrows around a disk (ginger disk) | `move`, `all-scroll`, `all-resize` |
-| open hand | `grab` |
-| closed hand | `grabbing` |
-| arrow + "?" | `help` |
-| magnifier (ginger plus / minus) | `zoom-in`, `zoom-out` |
-| ring and slash (ginger slash) | `not-allowed`, `no-drop` |
-
-The drawn shapes use the `[appearance]` `cursor_size`/`cursor_color`/`cursor_accent` settings
+The drawn shapes use the `[appearance]` `cursor_size`/`cursor_color` settings
 and are built once at startup. Theme images are loaded when a client first
 asks for that shape and cached from then on, including a negative cache so a
 theme missing `zoom-in` is not re-searched on every hover.

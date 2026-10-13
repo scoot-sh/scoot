@@ -839,7 +839,7 @@ fn output_refusals_refuse_everything_nested_and_nothing_elsewhere() {
 
 #[test]
 fn reload_rebuilds_the_cursor_and_reports_each_field() {
-    // The Phase 1 pin: all four cursor fields move from the file into the
+    // The Phase 1 pin: all three cursor fields move from the file into the
     // live session, each under its own applied name, with the rendered
     // cursor rebuilt behind them -- and a render requested without a
     // re-arrange (no placement changed, so `apply()` must not run its
@@ -850,7 +850,6 @@ fn reload_rebuilds_the_cursor_and_reports_each_field() {
         [appearance]
         cursor_size = 24
         cursor_color = "#ff0000"
-        cursor_accent = "none"
         cursor_theme = "Adwaita"
         "##,
     );
@@ -860,7 +859,6 @@ fn reload_rebuilds_the_cursor_and_reports_each_field() {
         &[
             field::CURSOR_SIZE.to_owned(),
             field::CURSOR_COLOR.to_owned(),
-            field::CURSOR_ACCENT.to_owned(),
             field::CURSOR_THEME.to_owned(),
         ],
         "each changed cursor field reports applied: {response:?}"
@@ -874,7 +872,6 @@ fn reload_rebuilds_the_cursor_and_reports_each_field() {
         fixture.state.appearance.cursor_color,
         Color::parse("#ff0000").expect("a parsable color")
     );
-    assert_eq!(fixture.state.appearance.cursor_accent, None);
     assert_eq!(
         fixture.state.appearance.cursor_theme.as_deref(),
         Some("Adwaita")
@@ -926,35 +923,6 @@ fn a_cursor_reload_redraws_where_frames_draw_the_cursor() {
 }
 
 #[test]
-fn an_accent_only_reload_requests_a_redraw_and_moves_the_cursor_serial() {
-    // F-B: the accent is one of the four cursor paints `rebuild` swaps, so
-    // an accent-only reload is a cursor change like any other
-    // (`State::cursor_changed`): a redraw where frames draw the cursor, and
-    // a moved cursor serial (what a capture that asked for the pointer
-    // reads) everywhere. Before the gate listed only size/color/theme, an
-    // accent-only reload rebuilt silently on screen until the next motion.
-    let mut fixture = Fixture::with_config("");
-    fixture.state.frame_cursor_for_test = Some(true);
-    fixture.rewrite(
-        r##"
-        [appearance]
-        cursor_accent = "none"
-        "##,
-    );
-    let response = fixture.reload();
-    assert_eq!(applied(&response), &[field::CURSOR_ACCENT.to_owned()]);
-    assert!(fixture.state.needs_render, "the rebuilt cursor is redrawn");
-    assert!(
-        !fixture.state.scene_dirty,
-        "as a cursor change, not a scene one"
-    );
-    assert_ne!(
-        fixture.state.cursor_serial, 0,
-        "captures that asked for the pointer are re-served"
-    );
-}
-
-#[test]
 fn a_hide_delay_reload_applies_live_and_re_arms() {
     // The delay is not placement and rebuilds nothing: it only moves the
     // deadline the cursor-hide timer serves. Applying it reports under its
@@ -985,7 +953,7 @@ fn a_hide_delay_reload_applies_live_and_re_arms() {
 
 #[test]
 fn a_second_reload_after_a_cursor_change_reports_nothing() {
-    // The snapshot rule for the cursor quad (Phase 0): the first reload
+    // The snapshot rule for the cursor triple (Phase 0): the first reload
     // writes `State::appearance` alongside the rebuild, so the second diffs
     // against what the first applied rather than re-reporting it.
     let mut fixture = Fixture::with_config(

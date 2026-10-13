@@ -20,14 +20,13 @@
 //!   surface's whole subsurface tree, at the hotspot the client set.
 //! - [`CursorImageStatus::Named`] -- the client named a shape but supplied no
 //!   pixels, so there is nothing of the client's to draw. One of this
-//!   compositor's own procedurally-generated bitmaps is drawn instead,
+//!   compositor's own bitmaps is drawn instead,
 //!   chosen by [`shapes::Shape::for_icon`]: an I-beam for `text`, a
 //!   double-headed arrow for a resize edge, a crosshair, and so on, with the
-//!   arrow below as the answer for every name none of those fits. Their size,
-//!   body color and accent mark are configurable (`[appearance]`'s
-//!   `cursor_size`/`cursor_color`/`cursor_accent`, built at startup and
-//!   rebuilt by [`Cursor::rebuild`] on a config reload -- see
-//!   [`Cursor::new`]).
+//!   arrow below as the answer for every name none of those fits. Their size
+//!   and fill color are configurable (`[appearance]`'s
+//!   `cursor_size`/`cursor_color`, built at startup and rebuilt by
+//!   [`Cursor::rebuild`] on a config reload -- see [`Cursor::new`]).
 //! - [`CursorImageStatus::Hidden`] -- nothing is drawn.
 //!
 //! A client reaches the `Named` path either through `wl_pointer.set_cursor`
@@ -37,15 +36,13 @@
 //! [`CursorImageStatus::Named`], which is the point of the protocol: the
 //! compositor's own shapes, consistently, across every client that asks.
 //!
-//! Every one of those bitmaps is rasterised at startup from vector outlines,
-//! not loaded from an image file. Most outlines are Mocu's (Severin Meyer's
-//! "modest xcursor theme", CC0 1.0 -- public domain, so MIT-compatible with
-//! no strings; vendored with its license under `cursor/shapes/mocu/` and
-//! credited in `NOTICE`): their SVG path data is filled by scoot's own
-//! rasterizer in the configured colors, at each output's own pixel size.
-//! The paw shapes are scoot's own geometry. Nothing is taken from niri's
-//! cursor assets (GPL) or Adwaita's (not MIT-clean) -- `CLAUDE.md`'s
-//! license note says not to borrow either.
+//! Those bitmaps are Mocu (Severin Meyer's "modest xcursor theme", CC0 1.0
+//! -- public domain, so MIT-compatible with no strings; its SVG sources are
+//! vendored unchanged with their license under `cursor/shapes/mocu/` and
+//! credited in `NOTICE`), rasterised at startup by scoot itself at each
+//! output's own pixel size -- not loaded from an image file. Nothing is taken
+//! from niri's cursor assets (GPL) or Adwaita's (not MIT-clean) --
+//! `CLAUDE.md`'s license note says not to borrow either.
 //!
 //! What *is* honored, when available, is the machine's own already-installed
 //! theme -- reading it carries no licensing obligation, unlike shipping one
@@ -107,37 +104,29 @@ render_elements! {
     Plane = plane::PlaneCursorElement<R>,
 }
 
-/// The fill/rim/accent byte triple one configured cursor color draws as.
-///
-/// `cursor_color` keeps meaning "the body fill color". The rim
-/// auto-contrasts it ([`contrast_rim`]), both at the fill's own alpha; the
-/// accent (when enabled) follows the body's alpha too, so a translucent body
-/// never wears an opaque mark. One function so `new` and `rebuild` cannot
-/// disagree about it.
-fn color_triple(color: Color, accent: Option<Color>) -> ([u8; 4], [u8; 4], Option<[u8; 4]>) {
-    let rim = contrast_rim(color);
-    let accent_px =
-        accent.map(|mark| Color::new(mark.r, mark.g, mark.b, mark.a * color.a).to_argb8888());
-    (color.to_argb8888(), rim.to_argb8888(), accent_px)
+/// The fill/stroke byte pair one configured cursor color draws as: the fill
+/// is the color itself, the stroke its [`contrast_rim`]. One function so
+/// `new` and `rebuild` cannot disagree about it.
+fn paints(color: Color) -> ([u8; 4], [u8; 4]) {
+    (color.to_argb8888(), contrast_rim(color).to_argb8888())
 }
 
-/// The rim color for a body fill: white on a dark body, black on a light
-/// one, at the body's own alpha.
+/// The stroke color Mocu pairs with a fill: its white theme's `#222222`
+/// around a light fill, its black theme's `#f9f9f9` around a dark one, at
+/// the fill's own alpha.
 ///
 /// The split is on the fill's gamma-space luminance against a 0.45
-/// threshold: the default near-black body (`#1a1a1a`, luminance ~0.01) gets
-/// a white rim, the old white body a black one, and a mid-gray body
-/// (`#808080`, luminance ~0.50) still gets black -- a white rim around a
-/// mid-gray body glares, while a black one reads as definition. Matching the
-/// body's alpha is what makes a translucent `cursor_color` actually look
-/// translucent instead of an opaque rim around a see-through middle.
-pub fn contrast_rim(body: Color) -> Color {
-    let luminance = 0.2126 * body.r + 0.7152 * body.g + 0.0722 * body.b;
-    if luminance < 0.45 {
-        Color::new(1.0, 1.0, 1.0, body.a)
-    } else {
-        Color::new(0.0, 0.0, 0.0, body.a)
-    }
+/// threshold: Mocu's white (`#fcfcfc`) gets the dark stroke, Mocu's black
+/// (`#111111`) the light one, and a mid-gray fill (`#808080`, luminance
+/// ~0.50) still gets the dark stroke -- a light rim around mid-gray glares,
+/// while a dark one reads as definition. Matching the fill's alpha is what
+/// makes a translucent `cursor_color` actually look translucent instead of
+/// an opaque rim around a see-through middle.
+pub fn contrast_rim(fill: Color) -> Color {
+    let luminance = 0.2126 * fill.r + 0.7152 * fill.g + 0.0722 * fill.b;
+    let v: u8 = if luminance < 0.45 { 0xf9 } else { 0x22 };
+    let c = f32::from(v) / 255.0;
+    Color::new(c, c, c, fill.a)
 }
 
 /// The cursor's current image request and the persistent render buffers
@@ -160,16 +149,16 @@ pub struct Cursor {
     /// Built eagerly for scale 1.0 and for every live output scale (see
     /// [`Cursor::sync_scales`]), never on the frame path, and bounded by
     /// [`MAX_SCALES`]: the whole set is small (`Shape::COUNT` bitmaps of
-    /// `physical * physical * 4` bytes per entry -- 22,528 B per scale at
-    /// the default 16px cursor, 90,112 B at 2x; 163,328 B for 16+24+32,
-    /// 198,528 B for four distinct scales at logical 16 (16/20/24/32) --
+    /// `physical * physical * 4` bytes per entry -- 34,816 B per scale at
+    /// the default 16px cursor, 139,264 B at 2x; 252,416 B for 16+24+32,
+    /// 306,816 B for four distinct scales at logical 16 (16/20/24/32) --
     /// per cold-path build rather than per frame (`rebuild` replaces the
     /// whole set at once). The bound is on the count of scales, not on
     /// bytes: at logical 256 four scales (physical 256/320/384/512) hold
-    /// 50,823,168 B (~48 MiB), and rebuilding that set costs about a
-    /// second on the event-loop thread -- rare (a 256px cursor at four
-    /// live scales) and acceptable, which is why no byte cap complicates
-    /// this further.
+    /// 78,544,896 B (~75 MiB), and rebuilding that set costs a few seconds
+    /// on the event-loop thread -- rare (a 256px cursor at four live
+    /// scales) and accepted, which is why no byte cap complicates this
+    /// further.
     scales: Vec<ScaleEntry>,
     /// The clamped logical edge length every entry is drawn for, kept so the
     /// element can be sized in logical units. Not a hotspot itself: each
@@ -184,7 +173,6 @@ pub struct Cursor {
     /// pixels without re-deriving them.
     fill: [u8; 4],
     rim: [u8; 4],
-    accent: Option<[u8; 4]>,
     status: CursorImageStatus,
     /// The machine's own installed cursor theme, and everything drawn from it
     /// so far. Empty on a machine with no icon theme, which is the ordinary
@@ -271,8 +259,8 @@ impl Cursor {
     /// keeps it for the process's lifetime, or until [`Cursor::rebuild`]
     /// replaces it on a config reload.
     ///
-    /// Called once, from `State::new`, with `appearance.cursor_size`,
-    /// `appearance.cursor_color` and `appearance.cursor_accent`.
+    /// Called once, from `State::new`, with `appearance.cursor_size` and
+    /// `appearance.cursor_color`.
     /// [`Cursor::rebuild`] is the only other path that builds these buffers;
     /// nothing else may, which is what keeps the stable-`Id` reasoning on
     /// [`Self::shapes`] honest (see that field).
@@ -292,16 +280,15 @@ impl Cursor {
     /// color, which a configurable rim could only undo. Matching the fill's
     /// alpha is what makes a translucent `cursor_color` actually look
     /// translucent instead of an opaque rim around a see-through middle.
-    pub fn new(size: i32, color: Color, accent: Option<Color>, theme_name: Option<&str>) -> Self {
+    pub fn new(size: i32, color: Color, theme_name: Option<&str>) -> Self {
         let size = Appearance::clamp_cursor_size(size);
-        let (fill, rim, accent_px) = color_triple(color, accent);
+        let (fill, rim) = paints(color);
         let theme = Theme::load(theme_name, size);
         let mut cursor = Self {
             scales: Vec::new(),
             size,
             fill,
             rim,
-            accent: accent_px,
             status: CursorImageStatus::default_named(),
             theme,
         };
@@ -334,19 +321,12 @@ impl Cursor {
     /// drawn as the fallback shapes), so this cannot fail either, and
     /// running it synchronously on the event loop is fine -- a reload is a
     /// cold path, not a frame.
-    pub fn rebuild(
-        &mut self,
-        size: i32,
-        color: Color,
-        accent: Option<Color>,
-        theme_name: Option<&str>,
-    ) {
+    pub fn rebuild(&mut self, size: i32, color: Color, theme_name: Option<&str>) {
         let size = Appearance::clamp_cursor_size(size);
-        let (fill, rim, accent_px) = color_triple(color, accent);
+        let (fill, rim) = paints(color);
         self.size = size;
         self.fill = fill;
         self.rim = rim;
-        self.accent = accent_px;
         // The scale-1 bitmaps first (every session keeps drawing while the
         // reload lands), then every scale this cursor already served, at the
         // new paints -- one atomic swap per entry, never a half-rebuilt set.
@@ -367,10 +347,9 @@ impl Cursor {
     /// Builds the bitmaps for one output scale: the `Shape::COUNT` fallback
     /// bitmaps rasterised natively at [`physical_size`] pixels, in
     /// [`Shape::index`] order, plus the current status's theme image resolved
-    /// at that size. Every shape is `shapes::generate`, one family with the
-    /// same rim width, the same accent hairline, the same supersampling and
-    /// the same premultiplication -- at physical pixels, so a 2x output
-    /// samples native art 1:1 instead of a stretched logical bitmap.
+    /// at that size. Every shape is `shapes::generate` -- Mocu's art at
+    /// physical pixels, so a 2x output samples native art 1:1 instead of a
+    /// stretched logical bitmap.
     ///
     /// Cold paths only ([`Cursor::new`], [`Cursor::rebuild`],
     /// [`Cursor::ensure_scale`]); the frame path only reads entries. Shared
@@ -380,7 +359,7 @@ impl Cursor {
         let key = scale_key(scale);
         let sane = key as f64 / 100.0;
         let physical = physical_size(self.size, sane);
-        let shapes = Self::build_shapes(physical, self.fill, self.rim, self.accent);
+        let shapes = Self::build_shapes(physical, self.fill, self.rim);
         let mut entry = ScaleEntry {
             key,
             scale: sane,
@@ -395,17 +374,12 @@ impl Cursor {
 
     /// The `Shape::COUNT` fallback bitmaps for one pixel size, in
     /// [`Shape::index`] order.
-    fn build_shapes(
-        size: i32,
-        fill: [u8; 4],
-        rim: [u8; 4],
-        accent: Option<[u8; 4]>,
-    ) -> [MemoryRenderBuffer; Shape::COUNT] {
+    fn build_shapes(size: i32, fill: [u8; 4], rim: [u8; 4]) -> [MemoryRenderBuffer; Shape::COUNT] {
         // `Shape::ALL` in its own order, indexed back by `Shape::index`
         // -- see that constant's doc for why the order lives there and
         // not here.
         Shape::ALL.map(|shape| {
-            let pixels = shapes::generate(shape, size, fill, rim, accent);
+            let pixels = shapes::generate(shape, size, fill, rim);
             MemoryRenderBuffer::from_slice(
                 &pixels,
                 Fourcc::Argb8888,

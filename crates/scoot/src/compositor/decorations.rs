@@ -212,11 +212,11 @@ impl From<Color> for Color32F {
 /// `LayoutConfig`. Colors are already parsed and clamps already applied by
 /// the time one of these exists; nothing downstream needs to re-check either.
 ///
-/// It mirrors the `[appearance]` *table*, not this module's own scope, so three
-/// of its fields (`cursor_size`/`cursor_color`/`cursor_accent`) are consumed
-/// by `cursor.rs` rather than by anything here -- the alternative, a second
-/// config struct for three fields, would split one TOML table across two
-/// types for no benefit. Everything this module's [`Color`] knows about pixel
+/// It mirrors the `[appearance]` *table*, not this module's own scope, so two
+/// of its fields (`cursor_size`/`cursor_color`) are consumed by `cursor.rs`
+/// rather than by anything here -- the alternative, a second config struct
+/// for one pair of fields, would split one TOML table across two types for no
+/// benefit. Everything this module's [`Color`] knows about pixel
 /// formats is shared by both consumers anyway (see [`Color::to_argb8888`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Appearance {
@@ -252,21 +252,13 @@ pub struct Appearance {
     /// `cursor.rs` draws procedurally; a client that supplies its own cursor
     /// surface sizes that itself.
     pub cursor_size: i32,
-    /// The fallback cursor shapes' body fill color: every shape's main
-    /// silhouette is drawn in this (`cursor/shapes.rs`). The rim around it
-    /// auto-contrasts -- a dark body gets a white rim, a light body a black
-    /// one, both at this color's own alpha -- so setting this to white
-    /// reproduces the pre-family white-pointer look, and a translucent value
-    /// genuinely composites (rim and accent follow its alpha). See
-    /// `cursor.rs`'s `contrast_rim`.
+    /// The fallback cursor shapes' fill color (`cursor/shapes.rs` draws
+    /// Mocu). The stroke around it is Mocu's pairing -- `#222222` around a
+    /// light fill, `#f9f9f9` around a dark one, both at this color's own
+    /// alpha -- so the default `#fcfcfc` is Mocu's white theme and
+    /// `#111111` its black one, and a translucent value genuinely composites.
+    /// See `cursor.rs`'s `contrast_rim`.
     pub cursor_color: Color,
-    /// The fallback cursor shapes' accent color: the ginger mark the shapes
-    /// carry (the arrow's tail tip, the resize and split shafts, the paw,
-    /// the wait spinner, the "not allowed" slash -- see
-    /// `cursor/shapes.rs`). `None` draws no accent at all. The default is
-    /// the project's ginger orange; the accent follows the body's alpha so a
-    /// translucent body does not wear an opaque mark.
-    pub cursor_accent: Option<Color>,
     /// Which installed xcursor theme to draw named cursor shapes from, or
     /// `None` to take `$XCURSOR_THEME` (and `"default"` if that is unset too)
     /// -- see `cursor/theme.rs` for the resolution order and for why reading
@@ -309,14 +301,10 @@ impl Default for Appearance {
             // into the rounded window + ring path (see `rounded.rs`); the
             // default session never takes it.
             corner_radius: 0,
-            // The fallback cursor: 16px bitmaps drawn by `cursor/shapes.rs`
-            // as a near-black / white-rim / ginger-accent family. An existing
-            // config file that set `cursor_color` keeps its body color (with
-            // the rim auto-contrasting as below); one that never set it moves
-            // from the old white pointer to the family look.
+            // The fallback cursor: Mocu's white theme, downscaled to 16px
+            // (`cursor/shapes.rs`).
             cursor_size: 16,
-            cursor_color: Color::new(26.0 / 255.0, 26.0 / 255.0, 26.0 / 255.0, 1.0),
-            cursor_accent: Some(Color::new(229.0 / 255.0, 127.0 / 255.0, 41.0 / 255.0, 1.0)),
+            cursor_color: Color::new(252.0 / 255.0, 252.0 / 255.0, 252.0 / 255.0, 1.0),
             // Unset, i.e. follow `$XCURSOR_THEME` like every other client on
             // the machine does, rather than overriding the user's desktop
             // from a compositor default.
@@ -342,10 +330,9 @@ impl Appearance {
 
     /// The smallest [`cursor_size`](Self::cursor_size) a config may ask for.
     ///
-    /// 4 is the smallest size that draws a shape rather than a dot: below
-    /// it the fallback bitmaps' insets (outline plus anti-aliasing bleed,
-    /// and the arrow's shadow) leave no drawable box, so every shape
-    /// degrades to a soft dot (see `cursor/shapes.rs`). A pointer that small
+    /// Below 8px every fallback shape degrades to a soft dot (see
+    /// `cursor/shapes.rs`), and 4 is the smallest size that still draws that
+    /// dot with a rim. A pointer that small
     /// is indistinguishable from a dead pixel on any real display, which on
     /// `--tty` (where scoot *is* the session) leaves a user with no visible
     /// pointer and no other window manager to fix it from.

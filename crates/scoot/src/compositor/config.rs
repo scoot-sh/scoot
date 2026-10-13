@@ -174,7 +174,6 @@ struct AppearanceConfig {
     corner_radius: Option<i32>,
     cursor_size: Option<i32>,
     cursor_color: Option<String>,
-    cursor_accent: Option<String>,
     cursor_theme: Option<String>,
     cursor_hide_after_ms: Option<u64>,
     prefer_no_csd: Option<bool>,
@@ -227,27 +226,6 @@ impl AppearanceConfig {
             corner_radius: self.corner_radius.unwrap_or(defaults.corner_radius),
             cursor_size: self.cursor_size.unwrap_or(defaults.cursor_size),
             cursor_color: color(self.cursor_color, "cursor_color", defaults.cursor_color),
-            // `"none"` (any case) means no accent at all; an empty string is
-            // unset like `cursor_theme`'s (it falls back to the default
-            // ginger rather than silently disabling the family mark).
-            // Anything else parses as a color, with the same per-field
-            // fallback as every other color above.
-            cursor_accent: match self.cursor_accent {
-                None => defaults.cursor_accent,
-                Some(raw) if raw.eq_ignore_ascii_case("none") => None,
-                Some(raw) if raw.is_empty() => defaults.cursor_accent,
-                Some(raw) => match Color::parse(&raw) {
-                    Some(accent) => Some(accent),
-                    None => {
-                        tracing::warn!(
-                            field = "cursor_accent",
-                            value = %raw,
-                            "invalid color in config file; using the default for this field only"
-                        );
-                        defaults.cursor_accent
-                    }
-                },
-            },
             // An empty string is treated as unset rather than as a theme
             // named "": it is what a user writing `cursor_theme = ""` to mean
             // "no override" would expect, and `Theme::load` would otherwise
@@ -974,11 +952,6 @@ pub fn default_config_toml() -> String {
         "# cursor_color = \"{}\"\n",
         hex(appearance.cursor_color)
     ));
-    out.push_str("# Ginger mark each fallback shape carries; \"none\" draws no accent.\n");
-    match appearance.cursor_accent {
-        Some(accent) => out.push_str(&format!("# cursor_accent = \"{}\"\n", hex(accent))),
-        None => out.push_str("# cursor_accent = \"none\"\n"),
-    }
     out.push_str(
         "# Unset follows $XCURSOR_THEME, then \"default\"; name one here only to override that.\n",
     );
@@ -3196,7 +3169,6 @@ mod tests {
             corner_radius = 12
             cursor_size = 32
             cursor_color = "#ff8000"
-            cursor_accent = "#00ff00"
             cursor_theme = "Adwaita"
             prefer_no_csd = false
         "##;
@@ -3213,11 +3185,6 @@ mod tests {
         assert_eq!(
             loaded.appearance.cursor_color,
             Color::new(1.0, 128.0 / 255.0, 0.0, 1.0)
-        );
-        assert_eq!(
-            loaded.appearance.cursor_accent,
-            Some(Color::new(0.0, 1.0, 0.0, 1.0)),
-            "cursor_accent did not round-trip"
         );
         assert_eq!(
             loaded.appearance.focus_ring_active_color,
@@ -3415,7 +3382,6 @@ mod tests {
             [appearance]
             cursor_size = 48
             cursor_color = "#0080ff"
-            cursor_accent = "none"
             cursor_hide_after_ms = 3000
         "##,
         );
@@ -3425,7 +3391,6 @@ mod tests {
             loaded.appearance.cursor_color,
             Color::new(0.0, 128.0 / 255.0, 1.0, 1.0)
         );
-        assert_eq!(loaded.appearance.cursor_accent, None);
         assert_eq!(loaded.appearance.cursor_hide_after_ms, 3_000);
         assert_eq!(
             loaded.appearance.focus_ring_active_color,
@@ -3489,45 +3454,6 @@ mod tests {
         assert_eq!(
             loaded.appearance.cursor_size, 24,
             "a bad color must not cost a valid neighboring field"
-        );
-    }
-
-    /// `"none"` (any case) disables the family mark; anything else parses as
-    /// a color, and garbage falls back to the ginger default like every
-    /// other color field.
-    #[test]
-    fn cursor_accent_none_color_and_garbage_each_resolve() {
-        for (configured, expected) in [
-            ("none", None),
-            ("NONE", None),
-            ("None", None),
-            ("", Appearance::default().cursor_accent),
-            ("#00ff00", Color::parse("#00ff00")),
-            ("not-a-color", Appearance::default().cursor_accent),
-        ] {
-            let (_dir, path) =
-                write_temp(&format!("[appearance]\ncursor_accent = \"{configured}\"\n"));
-            let loaded = load_from(&path, true).expect("an accent value must not fail startup");
-            assert_eq!(
-                loaded.appearance.cursor_accent, expected,
-                "cursor_accent = {configured:?} resolved wrongly"
-            );
-        }
-    }
-
-    /// Unset means the ginger default, not "no accent": only an explicit
-    /// `"none"` turns the mark off.
-    #[test]
-    fn an_unset_cursor_accent_is_the_ginger_default() {
-        let (_dir, path) = write_temp("[appearance]\ncursor_size = 24\n");
-        let loaded = load_from(&path, true).expect("valid config");
-        assert_eq!(
-            loaded.appearance.cursor_accent,
-            Appearance::default().cursor_accent
-        );
-        assert!(
-            loaded.appearance.cursor_accent.is_some(),
-            "unset must not disable the accent"
         );
     }
 
@@ -4413,7 +4339,6 @@ mod tests {
             "corner_radius",
             "cursor_size",
             "cursor_color",
-            "cursor_accent",
             "cursor_theme",
             "cursor_hide_after_ms",
             "prefer_no_csd",
@@ -4534,13 +4459,6 @@ mod tests {
             ),
             format!("# cursor_size = {}", appearance.cursor_size),
             format!("# cursor_color = \"{}\"", hex(appearance.cursor_color)),
-            format!(
-                "# cursor_accent = \"{}\"",
-                appearance
-                    .cursor_accent
-                    .map(hex)
-                    .unwrap_or_else(|| "none".into())
-            ),
             format!("# prefer_no_csd = {}", appearance.prefer_no_csd),
             format!("# auto = {}", FloatingRules::default().auto),
             format!(

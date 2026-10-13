@@ -498,7 +498,7 @@ fn the_frame_records_what_it_composited_of_the_cursor() {
     // The arrow's hotspot is its tip, inset from the bitmap corner for the
     // outline and shadow -- so the footprint sits up-left of the pointer by
     // exactly that inset.
-    let hotspot = crate::compositor::cursor::shapes::Shape::Arrow
+    let hotspot = crate::compositor::cursor::shapes::Shape::Default
         .hotspot(fixture.state.appearance.cursor_size);
     assert_eq!(
         (footprint.loc.x, footprint.loc.y),
@@ -663,12 +663,10 @@ fn a_stream_reuses_one_region_target_and_one_pixel_buffer() {
 
     // A cursor-size change is what regrows it.
     fixture.state.appearance.cursor_size = 24;
-    fixture.state.cursor.rebuild(
-        24,
-        fixture.state.appearance.cursor_color,
-        fixture.state.appearance.cursor_accent,
-        Some(NO_THEME),
-    );
+    fixture
+        .state
+        .cursor
+        .rebuild(24, fixture.state.appearance.cursor_color, Some(NO_THEME));
     let mut backend = fixture.state.take_backend(id).expect("a backend");
     let patch = fixture
         .state

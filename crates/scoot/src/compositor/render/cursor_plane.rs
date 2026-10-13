@@ -78,10 +78,11 @@ const PITCH_PIXELS: i32 = 16;
 const MAX_SIDE: i32 = 1024;
 
 /// How many images the cache keeps before it starts over. Above one
-/// session's drawn shapes at every scale it serves (22 shapes times up to
-/// four cached output scales, plus every theme shape a session uses), so it
-/// is reached only after config reloads have left old images behind.
-const MAX_IMAGES: usize = 128;
+/// session's drawn shapes at every scale it serves (`Shape::COUNT`, 34,
+/// times up to four cached output scales, plus every theme shape a session
+/// uses), so it is reached only after config reloads have left old images
+/// behind.
+const MAX_IMAGES: usize = 192;
 
 /// Where a plane image's pixels go: a scanout-capable `LINEAR` `Argb8888`
 /// dma-buf. A trait so the cache is testable without a GPU.

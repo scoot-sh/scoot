@@ -9,20 +9,24 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
-### Unreleased — drawn fallback cursor family (behavior change)
+### Unreleased — the built-in cursors are Mocu (behavior change)
 
-- **The built-in pointer is now a near-black/white-rim/ginger family
-  instead of a plain white arrow.** Where no cursor theme is installed,
-  all 22 fallback shapes draw in that look. New option
-  `appearance.cursor_accent` (`"#rrggbb"` / `"#rrggbbaa"` / `"none"`,
-  default `#e57f29`): `"none"` (any case) draws no mark, an unset or
-  empty value keeps the default. Setting `appearance.cursor_color =
-  "#ffffff"` restores the old white-pointer look (with a black rim).
-  The outlines are the CC0 [Mocu](https://github.com/sevmeyer/mocu-xcursor)
-  cursor art (vendored with its license, credited in `NOTICE`), filled by
-  scoot's own rasteriser and fitted to the pixel grid so the 16px default
-  stays crisp; the paw shapes are scoot's own.
-  See [Appearance](site/src/content/docs/scoot/appearance.md#the-fallback-cursor-family).
+- **Where no cursor theme is installed, scoot now draws
+  [Mocu](https://github.com/sevmeyer/mocu-xcursor)** (Severin Meyer's
+  CC0 cursor theme, built in with its license and credited in `NOTICE`)
+  instead of its own plain arrow and handful of shapes. Every CSS cursor
+  name gets Mocu's cursor of that name (`move` draws Mocu's `grabbing`
+  and `all-resize` its `all-scroll`, as Mocu aliases them), rasterised by
+  scoot at each output's pixel size and fitted to the pixel grid so the
+  16px default stays crisp. `appearance.cursor_color` is Mocu's fill
+  (default `#fcfcfc`, Mocu's white; `"#111111"` is its black theme) and
+  the outline follows Mocu's pairing, `#222222` or `#f9f9f9`, instead of
+  always black.
+  See [Appearance](site/src/content/docs/scoot/appearance.md#the-built-in-cursors).
+- **Breaking, for configs written against the unreleased cursor branch
+  only:** `appearance.cursor_accent` is gone (no release ever had it).
+  `[appearance]` rejects unknown keys, so a config that still sets it
+  falls back to defaults with an error in the log; delete the line.
 
 ### Unreleased — sharp cursors on high-DPI outputs (behavior change)
 

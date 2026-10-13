@@ -2,10 +2,10 @@
 //!
 //! # Why this exists, and why it is not a license problem
 //!
-//! `cursor/shapes.rs` draws twenty-two shapes because scoot may not *ship* a cursor
-//! theme: niri's assets are GPL and Adwaita's are not MIT-clean, so there is
-//! nothing this repository is allowed to carry. That constraint is about
-//! **shipping an asset**, and it was wrongly read as blocking per-shape
+//! `cursor/shapes.rs` draws its own cursors (Mocu, which is CC0 and so the
+//! one theme this repository may carry) because scoot may not ship niri's
+//! assets (GPL) or Adwaita's (not MIT-clean). That constraint is about
+//! **shipping an asset**, and it was once wrongly read as blocking per-shape
 //! cursors altogether (see `docs/backlog/resolved/cursor-theme-name-done.md`,
 //! which used to say so).
 //!

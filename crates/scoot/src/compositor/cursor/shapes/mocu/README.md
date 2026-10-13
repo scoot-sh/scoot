@@ -1,8 +1,7 @@
 # Mocu cursor art (vendored)
 
-These SVG files are the source art for most of scoot's built-in cursor
-shapes. They come unchanged from **Mocu**, "a modest xcursor theme" by
-Severin Meyer:
+These SVG files are scoot's built-in cursors. They come unchanged from
+**Mocu**, "a modest xcursor theme" by Severin Meyer:
 
 - Repository: <https://github.com/sevmeyer/mocu-xcursor>
 - Commit: `efdd71279b79bf1e2566c38becc5e7c4ab2d900c` (release 1.1,
@@ -13,23 +12,21 @@ Severin Meyer:
 
 ## How scoot uses them
 
-scoot does not render these files and does not ship them in the binary.
-The `d` path strings and hotspots of the shapes it uses are copied
-verbatim into `../mocu.rs`, and a unit test checks that each copied string
-still appears in its file here, so the two cannot drift apart. At startup
-scoot flattens those paths at the bitmap's own pixel size and fills them
-with its own rasterizer, painting them in the configured
-`cursor_color`, its contrasting rim and the ginger `cursor_accent`. The
-accent marks (the arrow's tail tip, the resize shafts, the hand's cuff and
-so on) are scoot's own additions, clipped from Mocu's outlines.
+The files are compiled into scoot (`include_str!`) and read at startup by
+`../mocu.rs`, which takes what Mocu's own build draws from each one: the
+outlines, their stroke widths, the hotspot, the drop shadow and, for the two
+busy cursors, the spinner mask (its first animation frame). scoot then fills
+them with its own rasterizer at each output's pixel size, grid-fitting them
+so the 16px default stays crisp, in Mocu's own paints: the fill (`#fafbfc` in
+the sources) is `cursor_color`, Mocu's white `#fcfcfc` by default, and the
+stroke (`#1a1b1c`) is Mocu's pairing for that fill (`#222222`, or `#f9f9f9`
+around a dark fill, as in Mocu's black theme). Mocu's left-handed variants
+are not used.
 
-Mocu's three placeholder colors map to scoot's paints: the fill
-(`#fafbfc`) is `cursor_color`, the stroke (`#1a1b1c`) is the auto-contrast
-rim, and the 10% drop shadow (`#0a0b0c`) is not drawn.
+Every CSS cursor name draws the Mocu cursor of the same name, except `move`
+(Mocu's own alias for it: `grabbing`) and `all-resize` (which Mocu does not
+name: `all-scroll`).
 
-Shapes Mocu has no art for (the paw-print busy cursor and the paw badge on
-the progress pointer) are drawn by `../paw.rs` in scoot's own geometry.
-
-To update: copy the new `src/svg/*.svg` files over these, update the
-commit above, and copy any changed `d` strings into `../mocu.rs`. The
-provenance test names any string that no longer matches.
+To update: copy the new `src/svg/*.svg` files over these and update the
+commit above. The tests read every file and fail on one that no longer
+yields its outlines and hotspot.

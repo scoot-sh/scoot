@@ -1,444 +1,326 @@
-//! The cursor family scoot draws itself, and which named shape each
-//! [`CursorIcon`] maps onto.
+//! The cursor shapes scoot draws where no cursor theme is installed: Mocu,
+//! and which Mocu cursor each [`CursorIcon`] maps onto.
 //!
-//! # Where the shapes come from
+//! # Mocu
 //!
-//! Most outlines are Mocu's -- Severin Meyer's "modest xcursor theme",
-//! released under CC0 1.0 (public domain, so free to use in this MIT project
-//! with no conditions; vendored with its license under `shapes/mocu/` and
-//! credited in `NOTICE`). [`mocu`] holds the SVG path data copied verbatim
-//! from those files; [`svgpath`] flattens it and [`family`] places it in the
-//! bitmap and cuts the accent marks out of it. Mocu has no paw, so the busy
-//! paw and the pointer's paw badge are scoot's own geometry ([`paw`]). The
-//! user's concept sheet is reference for intent only: nothing is traced
-//! from it, and it is never embedded, vendored or committed.
+//! Every shape is Mocu, Severin Meyer's "modest xcursor theme", released
+//! under CC0 1.0 (public domain, so free to use in this MIT project with no
+//! conditions). Its SVG sources are vendored unchanged with their license
+//! under `shapes/mocu/` and credited in `NOTICE`; [`mocu`] reads them,
+//! [`svgpath`] flattens their outlines, [`place`] puts each in the bitmap
+//! and [`raster`](super::raster) fills it -- the same layers Mocu's own
+//! build renders: a faint drop shadow, each outline stroked and filled, and
+//! the busy spinner. Nothing is redrawn, recolored beyond Mocu's own two
+//! paints, or added.
 //!
 //! These are drawn rather than loaded because a machine with no cursor theme
 //! installed (a webtop, a minimal container) is the everyday case this
 //! fallback exists for, and `wp_cursor_shape_device_v1.set_shape` deserves
-//! more than one arrow for every request there.
+//! the right shape for every request there.
 //!
-//! # The family
+//! # Paints
 //!
-//! Every shape is painted the way Mocu paints its own: the outline filled
-//! with the body color ([`Appearance::cursor_color`], near-black by
-//! default), ringed by the auto-contrasting rim (white on a dark body, black
-//! on a light one -- see `contrast_rim` in `super`). On top sits the ginger
-//! accent ([`Appearance::cursor_accent`], `None` draws no mark) where it
-//! reads at 16px: the arrow's tail tip, the resize and split shafts, the
-//! move centre, the not-allowed slash, the hand's cuff, the magnifier's sign
-//! and the wait spinner. See [`Shape::for_icon`] for how CSS names map onto
-//! the shapes.
+//! Mocu's fill is [`Appearance::cursor_color`] (Mocu's white, `#fcfcfc`, by
+//! default) and its stroke the paired rim `contrast_rim` derives (Mocu's
+//! `#222222` around a light fill, its `#f9f9f9` around a dark one -- Mocu's
+//! black variant). The shadow is Mocu's: black at 10% opacity, one unit
+//! down and right.
 //!
-//! # How a shape is built
+//! [`Appearance::cursor_color`]: crate::compositor::decorations::Appearance::cursor_color
 //!
-//! Each shape is two signed-distance fields over a `size x size` grid -- the
-//! body outlines plus the accent mark -- and [`raster`](super::raster)
-//! evaluates both at 4x4 subpixel taps per pixel, once per shape per output
-//! scale at startup or on config reload (never per frame, never per
-//! `set_shape` request, which is an array index into buffers built here).
-//! The rim sits *outside* every fill (a band `outline_width` pixels wide);
-//! a mark that floats off the body (the paw badge) gets its own rim-colored
-//! hairline, a mark inlaid in the body does not.
-//!
-//! Every shape keeps its rim clear of the bitmap edge at every size a config
-//! can ask for: there is always a transparent pixel between the rim and the
-//! edge, so the rim is never clipped, and the tests assert it. Below 8px
-//! every shape degrades to an honest soft dot under the pointer rather than
-//! a half-legible drawing.
+//! All of this runs once per shape per output scale, at startup or on
+//! config reload -- never per frame and never per `set_shape` request,
+//! which is an array index into buffers built here. Below 8px every shape is
+//! an honest dot under the pointer rather than a half-legible drawing.
 
 use smithay::input::pointer::CursorIcon;
 use smithay::utils::{Logical, Point};
 
 use super::raster;
+use svgpath::Subpath;
 
-pub mod family;
 pub(crate) mod mocu;
-pub mod paw;
-pub(crate) mod prim;
+pub(crate) mod place;
 pub(crate) mod svgpath;
-
-pub(crate) use prim::{Prim, outline_width};
 
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_mocu;
 
-/// One drawable cursor shape.
-///
-/// Not a mirror of [`CursorIcon`] -- see [`Shape::for_icon`] for the mapping.
-/// The set covers the concept sheet's family: the arrow, its three badges,
-/// the text beams, the hands, the paw, the resize/move/split arrows and the
-/// symbols.
+/// One drawable cursor: one Mocu cursor, named after it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
-    /// The pointer itself: Mocu's arrow, ginger tail tip.
-    Arrow,
-    /// The arrow plus a ginger paw badge at the lower right (progress).
-    PointerBadge,
-    /// Mocu's I-beam.
-    Text,
-    /// Mocu's sideways I-beam, for vertical text.
-    VerticalText,
-    /// Mocu's pointing hand, ginger cuff.
-    Hand,
-    /// A single ginger paw print (scoot's own geometry).
-    Busy,
-    /// The arrow plus Mocu's progress badge, its spinner frozen in ginger.
-    WaitBadge,
-    /// Mocu's hairline crosshair, ginger centre.
-    Crosshair,
-    /// Mocu's bold `cell` plus, for picking cells.
-    Precision,
-    /// Mocu's vertical double arrow, ginger shaft.
-    ResizeNs,
-    /// Mocu's horizontal double arrow, ginger shaft.
-    ResizeEw,
-    /// Mocu's bottom-left to top-right double arrow, ginger shaft.
-    ResizeNesw,
-    /// Mocu's top-left to bottom-right double arrow, ginger shaft.
-    ResizeNwse,
-    /// Mocu's four-way arrows around a ginger centre disk.
-    Move,
-    /// Mocu's ring, ginger slash.
-    NotAllowed,
-    /// Mocu's arrow plus question mark.
+    Default,
+    ContextMenu,
     Help,
-    /// Mocu's open hand.
+    Pointer,
+    Progress,
+    Wait,
+    Cell,
+    Crosshair,
+    Text,
+    VerticalText,
+    Alias,
+    Copy,
+    NoDrop,
+    NotAllowed,
     Grab,
-    /// Mocu's closed hand.
     Grabbing,
-    /// Mocu's column resize: arrows either side of a ginger bar.
-    SplitV,
-    /// Mocu's row resize: arrows above and below a ginger bar.
-    SplitH,
-    /// Mocu's magnifier, ginger plus.
+    EResize,
+    NResize,
+    NeResize,
+    NwResize,
+    SResize,
+    SeResize,
+    SwResize,
+    WResize,
+    EwResize,
+    NsResize,
+    NeswResize,
+    NwseResize,
+    ColResize,
+    RowResize,
+    AllScroll,
     ZoomIn,
-    /// Mocu's magnifier, ginger minus.
     ZoomOut,
+    DndAsk,
 }
 
 impl Shape {
-    /// Every shape, in the order [`Shape::index`] numbers them.
-    ///
-    /// The one place that order is written down -- [`Cursor`](super::Cursor)
-    /// builds its buffers by walking this, and reads them back by
-    /// [`Shape::index`], so the two cannot drift apart.
+    /// Every shape, in the order [`Shape::index`] numbers them -- the same
+    /// order as [`mocu::FILES`], which is how a shape finds its file.
     pub const ALL: [Shape; Self::COUNT] = [
-        Shape::Arrow,
-        Shape::PointerBadge,
+        Shape::Default,
+        Shape::ContextMenu,
+        Shape::Help,
+        Shape::Pointer,
+        Shape::Progress,
+        Shape::Wait,
+        Shape::Cell,
+        Shape::Crosshair,
         Shape::Text,
         Shape::VerticalText,
-        Shape::Hand,
-        Shape::Busy,
-        Shape::WaitBadge,
-        Shape::Crosshair,
-        Shape::Precision,
-        Shape::ResizeNs,
-        Shape::ResizeEw,
-        Shape::ResizeNesw,
-        Shape::ResizeNwse,
-        Shape::Move,
+        Shape::Alias,
+        Shape::Copy,
+        Shape::NoDrop,
         Shape::NotAllowed,
-        Shape::Help,
         Shape::Grab,
         Shape::Grabbing,
-        Shape::SplitV,
-        Shape::SplitH,
+        Shape::EResize,
+        Shape::NResize,
+        Shape::NeResize,
+        Shape::NwResize,
+        Shape::SResize,
+        Shape::SeResize,
+        Shape::SwResize,
+        Shape::WResize,
+        Shape::EwResize,
+        Shape::NsResize,
+        Shape::NeswResize,
+        Shape::NwseResize,
+        Shape::ColResize,
+        Shape::RowResize,
+        Shape::AllScroll,
         Shape::ZoomIn,
         Shape::ZoomOut,
+        Shape::DndAsk,
     ];
 
     /// How many shapes there are, i.e. how many bitmaps
-    /// [`Cursor`](super::Cursor) holds.
-    pub const COUNT: usize = 22;
+    /// [`Cursor`](super::Cursor) holds per output scale.
+    pub const COUNT: usize = 34;
 
-    /// This shape's slot in [`Shape::ALL`].
+    /// This shape's slot in [`Shape::ALL`] and [`mocu::FILES`].
     pub fn index(self) -> usize {
-        match self {
-            Shape::Arrow => 0,
-            Shape::PointerBadge => 1,
-            Shape::Text => 2,
-            Shape::VerticalText => 3,
-            Shape::Hand => 4,
-            Shape::Busy => 5,
-            Shape::WaitBadge => 6,
-            Shape::Crosshair => 7,
-            Shape::Precision => 8,
-            Shape::ResizeNs => 9,
-            Shape::ResizeEw => 10,
-            Shape::ResizeNesw => 11,
-            Shape::ResizeNwse => 12,
-            Shape::Move => 13,
-            Shape::NotAllowed => 14,
-            Shape::Help => 15,
-            Shape::Grab => 16,
-            Shape::Grabbing => 17,
-            Shape::SplitV => 18,
-            Shape::SplitH => 19,
-            Shape::ZoomIn => 20,
-            Shape::ZoomOut => 21,
-        }
+        self as usize
     }
 
-    /// The shape drawn for a client's requested [`CursorIcon`].
+    /// The Mocu cursor name this shape draws (its file under `mocu/`).
+    #[cfg(test)]
+    pub fn name(self) -> &'static str {
+        mocu::FILES[self.index()].0
+    }
+
+    /// The shape drawn for a client's requested [`CursorIcon`]: Mocu's
+    /// cursor of the same name. Mocu has a file for every CSS cursor name
+    /// but two, which take Mocu's own alias for them: `move` is Mocu's
+    /// `grabbing` (Mocu's `aliases.txt`: `move grabbing`), and `all-resize`,
+    /// which Mocu does not name, is its four-way `all-scroll`.
     ///
     /// Total by construction -- a `_` arm, not an enumeration of the rest:
     /// [`CursorIcon`] is a non-exhaustive upstream enum, so a version bump
     /// that adds an icon must keep compiling and must show *something*
-    /// rather than nothing. [`Shape::Arrow`] is that something.
-    ///
-    /// The mapping from the concept sheet's names (which are the user's own,
-    /// not CSS names): `default` is [`Shape::Arrow`]; `pointer` (arrow plus
-    /// paw badge) is [`Shape::PointerBadge`], what CSS `progress` draws;
-    /// `hand` is [`Shape::Hand`], what CSS `pointer` draws; `busy` is
-    /// [`Shape::Busy`]; `wait` is [`Shape::WaitBadge`] (Mocu's progress badge
-    /// rather than the sheet's hourglass: Mocu's art wins where both exist);
-    /// `help` is [`Shape::Help`]; `text`/`column-select` are [`Shape::Text`]
-    /// and [`Shape::VerticalText`] (CSS `vertical-text` is the sideways
-    /// beam, so that is how it is drawn); `crosshair`/`precision` are
-    /// [`Shape::Crosshair`]/[`Shape::Precision`] (Mocu's `cell`); the four
-    /// resize cells are the resize arrows; `move` is [`Shape::Move`];
-    /// `not-allowed` is [`Shape::NotAllowed`]; `grab`/`grabbing` are
-    /// [`Shape::Grab`]/[`Shape::Grabbing`]; `split-vertical`/
-    /// `split-horizontal` are [`Shape::SplitV`]/[`Shape::SplitH`] (Mocu's
-    /// `col-resize`/`row-resize`). The magnifiers have no sheet cell; they
-    /// are Mocu's `zoom-in`/`zoom-out`.
+    /// rather than nothing. [`Shape::Default`] is that something.
     pub fn for_icon(icon: CursorIcon) -> Shape {
         match icon {
+            CursorIcon::ContextMenu => Shape::ContextMenu,
+            CursorIcon::Help => Shape::Help,
+            CursorIcon::Pointer => Shape::Pointer,
+            CursorIcon::Progress => Shape::Progress,
+            CursorIcon::Wait => Shape::Wait,
+            CursorIcon::Cell => Shape::Cell,
+            CursorIcon::Crosshair => Shape::Crosshair,
             CursorIcon::Text => Shape::Text,
             CursorIcon::VerticalText => Shape::VerticalText,
-            CursorIcon::Crosshair => Shape::Crosshair,
-            CursorIcon::Cell => Shape::Precision,
-            CursorIcon::NResize | CursorIcon::SResize | CursorIcon::NsResize => Shape::ResizeNs,
-            CursorIcon::EResize | CursorIcon::WResize | CursorIcon::EwResize => Shape::ResizeEw,
-            CursorIcon::NeResize | CursorIcon::SwResize | CursorIcon::NeswResize => {
-                Shape::ResizeNesw
-            }
-            CursorIcon::NwResize | CursorIcon::SeResize | CursorIcon::NwseResize => {
-                Shape::ResizeNwse
-            }
-            CursorIcon::ColResize => Shape::SplitV,
-            CursorIcon::RowResize => Shape::SplitH,
-            CursorIcon::Move | CursorIcon::AllScroll | CursorIcon::AllResize => Shape::Move,
+            CursorIcon::Alias => Shape::Alias,
+            CursorIcon::Copy => Shape::Copy,
+            CursorIcon::Move => Shape::Grabbing,
+            CursorIcon::NoDrop => Shape::NoDrop,
+            CursorIcon::NotAllowed => Shape::NotAllowed,
             CursorIcon::Grab => Shape::Grab,
             CursorIcon::Grabbing => Shape::Grabbing,
-            CursorIcon::Pointer => Shape::Hand,
-            CursorIcon::Progress | CursorIcon::Alias | CursorIcon::Copy => Shape::PointerBadge,
-            CursorIcon::Wait => Shape::WaitBadge,
-            CursorIcon::DndAsk => Shape::Busy,
-            CursorIcon::Help => Shape::Help,
+            CursorIcon::EResize => Shape::EResize,
+            CursorIcon::NResize => Shape::NResize,
+            CursorIcon::NeResize => Shape::NeResize,
+            CursorIcon::NwResize => Shape::NwResize,
+            CursorIcon::SResize => Shape::SResize,
+            CursorIcon::SeResize => Shape::SeResize,
+            CursorIcon::SwResize => Shape::SwResize,
+            CursorIcon::WResize => Shape::WResize,
+            CursorIcon::EwResize => Shape::EwResize,
+            CursorIcon::NsResize => Shape::NsResize,
+            CursorIcon::NeswResize => Shape::NeswResize,
+            CursorIcon::NwseResize => Shape::NwseResize,
+            CursorIcon::ColResize => Shape::ColResize,
+            CursorIcon::RowResize => Shape::RowResize,
+            CursorIcon::AllScroll | CursorIcon::AllResize => Shape::AllScroll,
             CursorIcon::ZoomIn => Shape::ZoomIn,
             CursorIcon::ZoomOut => Shape::ZoomOut,
-            CursorIcon::NotAllowed | CursorIcon::NoDrop => Shape::NotAllowed,
-            _ => Shape::Arrow,
+            CursorIcon::DndAsk => Shape::DndAsk,
+            _ => Shape::Default,
         }
     }
 
     /// The point within this shape's bitmap that lines up with the pointer's
-    /// actual location: Mocu's own hotspot for the shape, carried through the
-    /// same placement as its outline (see [`family`]) -- the arrow's tip, the
+    /// actual location: Mocu's own hotspot (its `<circle id="hot">`), carried
+    /// through the same placement as the outline -- the arrow's tip, the
     /// hand's fingertip, the middle of the symmetric shapes. Below
-    /// [`DOT_BELOW`] every shape is a centred dot (see [`generate`]), so every
-    /// hotspot is the middle there.
+    /// [`DOT_BELOW`] every shape is a centred dot, so the hotspot is the
+    /// middle there.
     ///
-    /// Places the shape's outline to answer, so it is a cold-path call:
+    /// Places the outline to answer, so it is a cold-path call:
     /// [`Cursor`](super::Cursor) computes it once per bitmap and keeps it.
-    /// `size` is the bitmap's edge length, already clamped by
-    /// [`Cursor::new`](super::Cursor::new).
     pub fn hotspot(self, size: i32) -> Point<i32, Logical> {
         if size < DOT_BELOW {
             return (size / 2, size / 2).into();
         }
-        match self.art() {
-            Some(art) => family::placement(art, size).hotspot(),
-            None => (size / 2, size / 2).into(),
-        }
+        place::place(&self.art(size), size).hotspot()
     }
 
-    /// The Mocu art this shape is drawn from, or `None` for scoot's own
-    /// (the busy paw).
-    fn art(self) -> Option<family::Art> {
-        use family::Art;
-        Some(match self {
-            Shape::Arrow => Art::Arrow,
-            Shape::PointerBadge => Art::PointerBadge,
-            Shape::Text => Art::Text,
-            Shape::VerticalText => Art::VerticalText,
-            Shape::Hand => Art::Hand,
-            Shape::Busy => return None,
-            Shape::WaitBadge => Art::WaitBadge,
-            Shape::Crosshair => Art::Crosshair,
-            Shape::Precision => Art::Cell,
-            Shape::ResizeNs => Art::ResizeNs,
-            Shape::ResizeEw => Art::ResizeEw,
-            Shape::ResizeNesw => Art::ResizeNesw,
-            Shape::ResizeNwse => Art::ResizeNwse,
-            Shape::Move => Art::Move,
-            Shape::NotAllowed => Art::NotAllowed,
-            Shape::Help => Art::Help,
-            Shape::Grab => Art::Grab,
-            Shape::Grabbing => Art::Grabbing,
-            Shape::SplitV => Art::SplitV,
-            Shape::SplitH => Art::SplitH,
-            Shape::ZoomIn => Art::ZoomIn,
-            Shape::ZoomOut => Art::ZoomOut,
-        })
+    /// This shape's Mocu art, curves flattened for a `size` bitmap.
+    pub(crate) fn art(self, size: i32) -> mocu::Art {
+        mocu::read(mocu::FILES[self.index()].1, tolerance(size))
     }
 }
 
-/// Bitmaps smaller than this draw a centred soft dot, not a shape: hands,
-/// paws and badges cannot read below it, and a half-drawn one would be worse
-/// than an honest dot. [`Shape::hotspot`] agrees (middle) wherever this
-/// applies, so the dot is always under the pointer.
+/// Bitmaps smaller than this draw a centred soft dot, not a shape.
+/// [`Shape::hotspot`] agrees (middle) wherever this applies.
 const DOT_BELOW: i32 = 8;
 
-/// Shared metrics for one bitmap size, computed once per [`generate`] call.
-pub(crate) struct Ctx {
-    /// Bitmap edge length.
-    pub size: i32,
-    /// One 24-grid unit in pixels (`size / 24`).
-    pub u: f64,
-    /// Rim width: 1px at the default size, growing past it.
-    pub ow: f64,
-    /// Hairline width around a floating accent mark: half the rim.
-    pub aow: f64,
-    /// Bitmap middle on the half-pixel grid (the middle of a pixel column).
-    pub c: f64,
+/// Curves flatten to within a tenth of a pixel, in grid units.
+fn tolerance(size: i32) -> f64 {
+    0.1 * 24.0 / f64::from(size.max(1))
 }
 
-impl Ctx {
-    fn new(size: i32) -> Self {
-        let ow = outline_width(size);
-        Self {
-            size,
-            u: f64::from(size) / 24.0,
-            ow,
-            aow: (ow * 0.5).max(0.5),
-            c: f64::from(size / 2) + 0.5,
-        }
-    }
-}
-
-/// Draws `shape` into a fresh `size * size * 4` byte `Argb8888` buffer.
-///
-/// `fill` is the body color and `outline` its auto-contrasting rim, both
-/// single premultiplied little-endian `Argb8888` pixels (`[B, G, R, A]`), the
-/// same layout `cursor.rs` has always used and the same one the render path
-/// scans out. `accent` is the family mark's paint (`None` draws no mark).
-/// Every shape renders through this function, so the whole set is one
-/// family: the same rim width, the same supersampling, the same
-/// premultiplication.
-pub fn generate(
-    shape: Shape,
-    size: i32,
-    fill: [u8; 4],
-    outline: [u8; 4],
-    accent: Option<[u8; 4]>,
-) -> Vec<u8> {
-    let ctx = Ctx::new(size);
-    let body_coat = raster::Coat {
-        fill,
-        outline,
-        outline_width: ctx.ow,
-    };
-    // Below `DOT_BELOW` every shape is one honest dot at the middle (which
-    // is also the hotspot there): hands and badges cannot read that small.
-    if size < DOT_BELOW {
-        let c = f64::from(size) / 2.0;
-        let dot = Prim::Disk {
-            cx: c,
-            cy: c,
-            r: 1.0,
-        };
-        let mut bounds = dot.bounds();
-        let pad = ctx.ow + 1.0;
-        bounds[0] -= pad;
-        bounds[1] -= pad;
-        bounds[2] += pad;
-        bounds[3] += pad;
-        let field = move |px: f64, py: f64| dot.distance(px, py);
-        return raster::render(size, &field, body_coat, None, Some(bounds));
-    }
-    let layers = match shape.art() {
-        Some(art) => family::draw(art, &ctx),
-        None => vec![paw::busy(&ctx)],
-    };
-    // One render per coat, each later coat composited over the earlier ones
-    // (a badge's own rim over the arrow it sits on). Nearly every shape is
-    // a single coat, which is a single render.
-    let mut out: Option<Vec<u8>> = None;
-    for layer in layers {
-        let pixels = render_layer(size, &ctx, layer, body_coat, outline, accent);
-        match out.as_mut() {
-            None => out = Some(pixels),
-            Some(dst) => raster::over(dst, &pixels),
-        }
-    }
-    out.unwrap_or_else(|| vec![0; (size * size * 4) as usize])
-}
-
-/// Rasterises one [`family::Layer`]: its body in `body_coat`, its accent
-/// mark (if any, and if `accent` paint is configured) over it.
-fn render_layer(
-    size: i32,
-    ctx: &Ctx,
-    layer: family::Layer,
-    body_coat: raster::Coat,
-    outline: [u8; 4],
-    accent: Option<[u8; 4]>,
-) -> Vec<u8> {
-    let family::Layer {
-        body: prims,
-        accent: accent_prims,
-        accent_rim,
-    } = layer;
-    // The rasterizer's skip box: the union of both fields' primitives,
-    // expanded past the rims and one pixel of bleed. Taps outside it are
-    // transparent by construction, so skipping the fields there changes
-    // nothing and keeps large bitmaps cheap.
-    let mut bounds = [
+/// An outline's bounding box grown by `pad` pixels: the rasterizer's skip
+/// box (taps outside it cannot be covered).
+fn bounds(subs: &[Subpath], pad: f64) -> Option<[f64; 4]> {
+    let mut b = [
         f64::INFINITY,
         f64::INFINITY,
         f64::NEG_INFINITY,
         f64::NEG_INFINITY,
     ];
-    for prim in prims.iter().chain(accent_prims.iter()) {
-        let b = prim.bounds();
-        bounds[0] = bounds[0].min(b[0]);
-        bounds[1] = bounds[1].min(b[1]);
-        bounds[2] = bounds[2].max(b[2]);
-        bounds[3] = bounds[3].max(b[3]);
+    for (x, y) in subs.iter().flatten() {
+        b = [b[0].min(*x), b[1].min(*y), b[2].max(*x), b[3].max(*y)];
     }
-    let pad = ctx.ow.max(ctx.aow) + 1.0;
-    bounds[0] -= pad;
-    bounds[1] -= pad;
-    bounds[2] += pad;
-    bounds[3] += pad;
-    let body = move |px: f64, py: f64| {
-        prims
+    Some([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad])
+}
+
+/// Draws `shape` into a fresh `size * size * 4` byte `Argb8888` buffer.
+///
+/// `fill` is Mocu's fill paint and `stroke` its stroke paint, both single
+/// premultiplied little-endian `Argb8888` pixels (`[B, G, R, A]`), the same
+/// layout the render path scans out. Mocu's layers stack back to front: the
+/// shadow (black at 10% of the fill's alpha), then each outline's stroke and
+/// fill, then the spinner (the stroke paint seen through Mocu's mask).
+pub fn generate(shape: Shape, size: i32, fill: [u8; 4], stroke: [u8; 4]) -> Vec<u8> {
+    // Below `DOT_BELOW` every shape is one honest dot at the middle (which
+    // is also the hotspot there).
+    if size < DOT_BELOW {
+        let c = f64::from(size) / 2.0;
+        let dot = vec![mocu::circle(c, c, 1.0, 0.05)];
+        let field = |x: f64, y: f64| raster::sd_path(x, y, &dot);
+        let coat = raster::Coat {
+            fill,
+            outline: stroke,
+            outline_width: 1.0,
+        };
+        return raster::render(size, &field, coat, None, bounds(&dot, 2.0));
+    }
+    let art = shape.art(size);
+    let p = place::place(&art, size);
+    let layers: Vec<(Vec<Subpath>, f64)> = art
+        .layers
+        .iter()
+        .map(|l| (p.map(&l.subs), place::rim(l.stroke, size)))
+        .collect();
+    // The shadow: every layer grown by its stroke, one unit down and right,
+    // as one union -- Mocu paints it as one group at 10% -- and only where
+    // no stroke or fill covers: invisible under opaque paint anyway, and
+    // under a translucent `cursor_color` it would darken the fill rather
+    // than let the background show through it.
+    let alpha = f64::from(fill[3]) / 255.0;
+    let off = place::shadow_offset(size);
+    let all: Vec<Subpath> = layers.iter().flat_map(|(s, _)| s.clone()).collect();
+    let reach = layers.iter().map(|(_, r)| *r).fold(0.0, f64::max);
+    let outer = |x: f64, y: f64| {
+        layers
             .iter()
-            .map(|p| p.distance(px, py))
-            .fold(f64::INFINITY, raster::union)
+            .map(|(subs, rim)| raster::sd_path(x, y, subs) - rim)
+            .fold(f64::INFINITY, f64::min)
     };
-    // No accent paint or no mark: the rasterizer skips the second field.
-    let Some(accent) = accent.filter(|_| !accent_prims.is_empty()) else {
-        return raster::render(size, &body, body_coat, None, Some(bounds));
+    let shadow_field = |x: f64, y: f64| outer(x - off, y - off).max(-outer(x, y));
+    let shadow = raster::Coat {
+        fill: [0, 0, 0, (0.1 * alpha * 255.0).round() as u8],
+        outline: [0; 4],
+        outline_width: 0.0,
     };
-    let mark = move |px: f64, py: f64| {
-        accent_prims
+    let shadow_box = bounds(&all, reach + 1.0).map(|b| [b[0], b[1], b[2] + off, b[3] + off]);
+    let mut out = raster::render(size, &shadow_field, shadow, None, shadow_box);
+    for (subs, rim) in &layers {
+        let field = |x: f64, y: f64| raster::sd_path(x, y, subs);
+        let coat = raster::Coat {
+            fill,
+            outline: stroke,
+            outline_width: *rim,
+        };
+        let pixels = raster::render(size, &field, coat, None, bounds(subs, rim + 1.0));
+        raster::over(&mut out, &pixels);
+    }
+    if let Some(spinner) = &art.spinner {
+        let disk = p.map(std::slice::from_ref(&spinner.disk));
+        let mask: Vec<(Vec<Subpath>, f64)> = spinner
+            .mask
             .iter()
-            .map(|p| p.distance(px, py))
-            .fold(f64::INFINITY, raster::union)
-    };
-    let coat = raster::Accent {
-        field: &mark,
-        coat: raster::Coat {
-            fill: accent,
-            outline,
-            outline_width: if accent_rim { ctx.aow } else { 0.0 },
-        },
-    };
-    raster::render(size, &body, body_coat, Some(coat), Some(bounds))
+            .map(|(subs, lum)| (p.map(subs), *lum))
+            .collect();
+        let field = |x: f64, y: f64| raster::sd_path(x, y, &disk);
+        // The last mask shape covering a point decides its opacity.
+        let opacity = |x: f64, y: f64| {
+            mask.iter()
+                .rev()
+                .find(|(subs, _)| raster::sd_path(x, y, subs) <= 0.0)
+                .map_or(0.0, |(_, lum)| *lum)
+        };
+        let coat = raster::Coat {
+            fill: stroke,
+            outline: [0; 4],
+            outline_width: 0.0,
+        };
+        let pixels = raster::render(size, &field, coat, Some(&opacity), bounds(&disk, 1.0));
+        raster::over(&mut out, &pixels);
+    }
+    out
 }
