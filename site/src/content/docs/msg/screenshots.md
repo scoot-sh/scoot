@@ -70,7 +70,7 @@ Omitted means drawn in (`SCREENSHOT_CURSOR_DEFAULT` in `scoot-ipc`);
 `false` leaves it out, and `scoot msg screenshot --no-cursor` sends that.
 "The same everywhere" is the point: an agent's script sees the pointer the
 same way under `--headless` and `--nested` (whose screens have no drawn
-cursor at all), on `--tty`'s default renderer, and on the GPU scanout tier
+cursor at all), on `--tty`'s CPU renderer, and on the GPU scanout tier
 (whose cursor rides a hardware plane) — the pointer's own image, hotspot and
 scale, at its position on the captured output and on no other output. A
 fresh session's pointer sits at the centre of the first output, so a

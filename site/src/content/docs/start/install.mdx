@@ -335,7 +335,7 @@ your `PATH`. To build `.deb`, `.rpm` or Arch packages yourself, see
 4. Find the line that names the renderer. scoot prints it in the terminal where you did step 2.
 
    ```text
-   renderer chosen requested=cpu source=default tier=cpu reason=requested driver="-" gl_renderer="-"
+   renderer chosen requested=auto source=default tier=cpu reason=nested-unmeasured driver="-" gl_renderer="-"
    ```
 
    `tier=` is the renderer that draws. `reason=` says why.
@@ -346,10 +346,11 @@ All four work? You are done.
 
 ## Which build do I need?
 
-One build is enough for most people: `scoot`. It draws with the CPU
-renderer, so it needs no GPU, and it is what the script and the default
-Nix package install. On real hardware with a GPU, the `scoot-gpu` Nix
-package scans out through the GPU. Every build, flag and renderer rule
+One build is enough for most people: `scoot`. With the default
+(`auto`) it resolves to the CPU renderer there, so it needs no GPU,
+and it is what the script and the default Nix package install. On
+real hardware with a GPU, the `scoot-gpu` Nix package scans out
+through the GPU. Every build, flag and renderer rule
 is in [Builds and renderers](../../reference/builds/); what the binary
 cache trusts is in [Use the binary cache](../binary-cache/).
 

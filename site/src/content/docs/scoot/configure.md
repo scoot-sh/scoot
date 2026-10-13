@@ -209,13 +209,13 @@ scale = 1.0
 # mode = "1920x1080"
 
 # [renderer]
-# Type string, default "cpu". One of "cpu" (pixman; the default, needs no
-# graphics device), "gpu" (GLES; scanout on --tty), or "auto" (the GPU
+# Type string, default "auto". One of "auto" (the default: the GPU
 # renderer on real hardware, the CPU renderer everywhere else; never fails
-# startup). Restart-only: a reload refuses a changed value. --renderer wins
-# over this when both name one, and SCOOT_RENDERER beats this when
-# --renderer is absent.
-# backend = "cpu"
+# startup), "cpu" (pixman; needs no graphics device), or "gpu" (GLES;
+# scanout on --tty). Restart-only: a reload refuses a changed value.
+# --renderer wins over this when both name one, and SCOOT_RENDERER beats
+# this when --renderer is absent.
+# backend = "auto"
 
 # [tty]
 # Uncomment only on hardware where the automatic DRM device search picks

@@ -3,8 +3,9 @@ title: Builds and renderers
 description: "Which scoot package to install: CPU or GPU rendering, XWayland, and how the renderer is chosen."
 ---
 
-Most people need one build: `scoot`. It draws with the CPU renderer and
-runs everywhere. This page is for everyone else.
+Most people need one build: `scoot`. It runs everywhere, and its
+default (`auto`) resolves to the CPU renderer there. This page is for
+everyone else.
 
 ## Which build do I need?
 
@@ -40,13 +41,14 @@ ls /dev/dri/renderD*
 
 - **No output (no such directory, no matches)** → no GPU to use. Take
   the default `scoot`. The VM and container case is first-class, not
-  degraded: the CPU renderer is the default, and running with no GPU is
-  a hard requirement, not a fallback tier.
+  degraded: `auto` resolves to the CPU renderer there, and running with
+  no GPU is a hard requirement, not a fallback tier.
 - **A render node listed (for example `renderD128`)** → a GPU exists.
   On real hardware, take `scoot-gpu`. On a VM the node is usually
   software (llvmpipe) — there the GPU renderer runs several times
-  *slower* than the CPU renderer, so stay on the default unless you
-  measured otherwise.
+  *slower* than the CPU renderer, so stay on the default build unless
+  you measured otherwise (`auto` still picks the CPU renderer there,
+  but the smaller closure is the honest install).
 
 ### Say it in the config
 
@@ -74,9 +76,8 @@ work with `nix profile add` and `nix run` — swap `scoot` for
 
 `--renderer cpu|gpu|auto` (config: `[renderer] backend`, env:
 `SCOOT_RENDERER`) picks what composites each frame. The default is
-`cpu`, the CPU renderer. `auto` picks the best tier for the session and
-never fails startup: the GPU renderer on real hardware under `--tty`,
-the CPU renderer in VMs, containers, nested and headless sessions. An
+`auto`: the GPU renderer on real hardware under `--tty`, the CPU
+renderer in VMs, containers, nested and headless sessions. An
 explicit `--renderer cpu` or `--renderer gpu` always wins over `auto`.
 
 Every session logs one line saying what was decided and why —

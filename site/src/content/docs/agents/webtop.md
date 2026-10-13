@@ -22,7 +22,7 @@ supervision is the container's job (there is no systemd here), and the
 D-Bus activation half is the session script's (see [the portal
 setup](../scoot/index.md#starting-a-session), s6 flavor).
 
-Why this works untouched: pixman is the default renderer and GPU-free
+Why this works untouched: `auto` resolves to pixman here and GPU-free
 operation is a hard requirement, so there is no driver to install and
 no device to pass through. The one-command check on
 [Install](../start/install.md#which-build-do-i-need) answers "no
