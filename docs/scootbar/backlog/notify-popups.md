@@ -10,7 +10,7 @@ milestone: "M7"
 # scootnotify: popups
 
 Filed 2026-10-12 from the [scootnotify design](../../../dev/design/scootnotify.md#behavior-on-screen). Serves **daily-drive**.
-`look-format` is #578's `scoot-look` crate; it exists once #578 merges (#578 first).
+`look-format` is the live-looks `scoot-look` crate (#578, merged).
 
 ## What to do
 

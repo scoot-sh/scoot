@@ -658,7 +658,7 @@ These are also listed in [shell-apps.md](shell-apps.md#decisions-needed) items 2
 |---|---|---|
 | [`scootgreet`](../../docs/scootbar/backlog/scootgreet.md) (epic) | daily-drive, computer use (scriptable VM login) | its children |
 | [`greet-baseline`](../../docs/scootbar/backlog/greet-baseline.md): measure ReGreet + cage (RSS, first frame, the marginal closure over the profile); verify cage's GPU-free path and tty2's getty | daily-drive | none: start now |
-| [`greet-prototype`](../../docs/scootbar/backlog/greet-prototype.md): the go/no-go gate, out of the workspace, against a real greetd | daily-drive | `greet-baseline`, `scootui-keyboard-spike` |
+| [`greet-prototype`](../../docs/scootbar/backlog/greet-prototype.md): the go/no-go gate, out of the workspace, against a real greetd | daily-drive | `greet-baseline`, `scootui-keyboard-spike`, the go-ahead |
 | [`greet-greetd-client`](../../docs/scootbar/backlog/greet-greetd-client.md): frames, the cancel discipline, the conversation, the locked secret path, `scootgreet login`, a fake greetd that models greetd's state | computer use, daily-drive | the GO verdict in `greet-prototype`, `scootui-extract-draw` |
 | [`greet-ui`](../../docs/scootbar/backlog/greet-ui.md): the screen, entry, focus chain, layout and Caps Lock, built-in defaults | daily-drive | `greet-greetd-client`, `scootui-entry-and-list`, `scootui-surfaces-on-demand` |
 | [`greet-users-sessions`](../../docs/scootbar/backlog/greet-users-sessions.md): `/etc/passwd`, avatars, sessions through a new `scoot-xdg` crate, remembered state | daily-drive | `greet-ui`, `launch-desktop-index` |

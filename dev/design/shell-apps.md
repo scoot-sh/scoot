@@ -359,22 +359,23 @@ unchanged.
 
 ## Theme: the live-looks contract, Stylix and looks
 
-**The theming contract for all three apps is the live-looks design**, PR #578
-(`docs/live-look-swap-design`, `dev/research/live-looks-design.md` on that branch). This
-plan was checked against its head `cd619d67`, which is still unmerged as of 2026-10-12. The
-apps adopt it; they do not define their own theming. Its §9 states what each app must do,
+**The theming contract for all three apps is the live-looks design**,
+[`dev/research/live-looks-design.md`](../research/live-looks-design.md), merged in #578 and
+#581 (`main` at `ac1cca18`). The apps adopt it; they do not define their own theming. Its §9 states what each app must do,
 and this section restates that for the apps. Section numbers (§N) and decisions (DN) are
 that document's.
 
 ### What the apps implement
 
 1. **Read the look layer.** Each app reads its fragment at `<state>/look/<fragment>` (§4.1).
-   `<state>` is `--state`, then `$SCOOT_LOOK_STATE` (which scoot exports to its children, D10,
-   §4.2), then `$XDG_STATE_HOME/scoot`, then `~/.local/state/scoot`.
+   `<state>` is `--state`, then `$SCOOT_LOOK_STATE`, then `$XDG_STATE_HOME/scoot`, then
+   `~/.local/state/scoot`. `$SCOOT_LOOK_STATE` is exported only by a private (`--headless`)
+   session, to its direct children (D10, §4.2). scootnotify's user unit therefore always
+   reads the user's state.
    - The fragments are `notify.toml` and `launch.toml`, plus `greet.toml` for the greeter
      (§3.3, §9 item 6).
    - **Precedence at runtime is flags > the user's own file > the active look's fragment >
-     the app's default**, merged on raw keys with the contract's units (§4.3).
+     the app's default**, merged on raw TOML keys before any derivation (§4.3).
    - An app never reads Stylix, a base16 file or the Nix look registry directly (§9 item 4).
 2. **Take the tokens from §3.2's single list**, never a local palette.
    - Required: `background`, `foreground`, `dim`, `accent`, `urgent`.
@@ -579,14 +580,15 @@ the ratchet's waivers do):
 
 - **CI path filters** (CLAUDE.md: "Every new package or component adds its path
   filter to the classify job … in the same PR that adds it"): each crate's first
-  PR adds a classify output (`scootui`, `scootdbus`, `scootnotify`,
+  PR adds a classify output (`scootui`, `scoot_rt`, `scoot_dbus`, `scoot_xdg`, `scootnotify`,
   `scootlaunch`, `scootgreet`), arms for `crates/<crate>/Cargo.toml` (with
   `scoot=true version=true`, as scootbar's does, because the flake reads the
   description) and `crates/<crate>/*` before the catch-all, and a job gated on its
   output (`.github/workflows/ci.yml:194-355` holds the pattern). The shared crates fan
   out: a `crates/scootui/*` change sets `scootbar`, `scootnotify`, `scootlaunch`
-  and `scootgreet`, and a `crates/scoot-dbus/*` change sets every D-Bus
-  consumer. This is the rule CLAUDE.md states: "A change to shared code fans
+  and `scootgreet`; a `crates/scoot-dbus/*` change sets every D-Bus consumer; a
+  `crates/scoot-rt/*` change sets both of those sets; and a `crates/scoot-xdg/*` change sets
+  scootlaunch and scootgreet. This is the rule CLAUDE.md states: "A change to shared code fans
   out to its dependents and nothing more".
 - **Fuzz**: each app's targets join the fuzz job with fixed budgets (scootbar's
   are 1M to 5M runs, `ci.yml:1412-1450`).
@@ -598,7 +600,7 @@ the ratchet's waivers do):
 - **Versioning**: each crate is versioned independently by `scripts/version`
   from Conventional Commits with its scope (CLAUDE.md, Commits and CI). The new
   scopes `scootnotify`, `scootlaunch` and `scootui` are already named in CLAUDE.md.
-  `scoot-dbus`, `scoot-xdg` (the desktop-entry parser, split out of scootlaunch when
+  `scoot-rt`, `scoot-dbus`, `scoot-xdg` (the desktop-entry parser, split out of scootlaunch when
   scootgreet becomes its second consumer) and `scootgreet` are not: adding each to
   CLAUDE.md's scope list, with its CI classify arms, is part of the first PR that creates
   the crate.
@@ -639,13 +641,15 @@ Ordered by what unblocks what, and by risk. **Nothing is extracted until a gate 
    - [`greet-baseline`](../../docs/scootbar/backlog/greet-baseline.md), measurement only;
    - the core ticket [`layer-shell-default-output`](../../docs/backlog/core/layer-shell-default-output.md),
      which fixes mako and fuzzel today.
-2. **The gates, out of the workspace.** Each is a prototype that `#[path]`-includes scootbar's
+2. **The gates, out of the workspace, on the go-ahead.** Each is a prototype that `#[path]`-includes scootbar's
    sources (`crates/scootbar/fuzz/Cargo.toml:28-65` already does this), so a no costs no
    refactor:
    - [`notify-prototype`](../../docs/scootbar/backlog/notify-prototype.md) can start at once;
    - [`launch-prototype`](../../docs/scootbar/backlog/launch-prototype.md) and
      [`greet-prototype`](../../docs/scootbar/backlog/greet-prototype.md) follow the keyboard
      spike.
+
+   All three wait on the maintainer's go-ahead.
 3. **The extraction, once any gate says go**, in mechanical PRs held to scootbar's ratchet:
    1. `scootui-extract-draw`, which also creates `scoot-rt`;
    2. then, in parallel: `scoot-dbus-extract`, `scootui-extract-wayland` and
@@ -715,7 +719,7 @@ The guarded tickets are:
 **The roots wait on the maintainer's go-ahead**, except the four items in Start order 1,
 which are unblocked. Everything else names its predecessors by slug. The apps' tickets
 that read look fragments are blocked on #578's `look-format` (the `scoot-look` crate).
-That slug exists only once #578 merges, which is the expected merge order: #578 first.
+That slug exists on `main` since #578 merged.
 
 Shared:
 
@@ -747,7 +751,8 @@ Only the items that are the maintainer's call are asked. The rest are recorded a
    *Recommend:*
    - start now: the two spikes, `greet-baseline`, and `layer-shell-default-output`. The last is
      unblocked in this PR because it helps mako and fuzzel today;
-   - start `notify-prototype` on the go-ahead;
+   - start the three prototypes on the go-ahead: `notify-prototype` at once, and the
+     launcher's and greeter's after the keyboard spike;
    - hold `scootui-extract-draw` until a gate says go.
 2. **The greeter's name.** *Recommend:* `scootgreet` ([Names](#names)).
 3. **A C library in the shell family**, if the keyboard spike lands on libxkbcommon.

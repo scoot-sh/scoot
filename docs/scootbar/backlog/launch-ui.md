@@ -10,7 +10,7 @@ milestone: "M7"
 # scootlaunch: the panel
 
 Filed 2026-10-12 from the [scootlaunch design](../../../dev/design/scootlaunch.md#keyboard-first-ux); split in the #579 fix
-round. Serves **daily-drive**. `look-format` is #578's crate (#578 merges first).
+round. Serves **daily-drive**. `look-format` is the live-looks `scoot-look` crate (#578, merged).
 
 ## What to do
 

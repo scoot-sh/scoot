@@ -560,7 +560,7 @@ TOML only, into `scoot/launch.toml`). There is no `stylix.enable` and no unit.
 | Slug | Serves | Blocked by |
 |---|---|---|
 | [`launcher`](../../docs/scootbar/backlog/launcher.md) (epic) | daily-drive, computer use | its children |
-| [`launch-prototype`](../../docs/scootbar/backlog/launch-prototype.md): the go/no-go gate, out of the workspace | daily-drive | `scootui-keyboard-spike` |
+| [`launch-prototype`](../../docs/scootbar/backlog/launch-prototype.md): the go/no-go gate, out of the workspace | daily-drive | `scootui-keyboard-spike`, the go-ahead |
 | [`launch-desktop-index`](../../docs/scootbar/backlog/launch-desktop-index.md): parser, ids, locale, Exec, cache; `--list --json` | computer use, daily-drive | the GO verdict in `launch-prototype` |
 | [`launch-match-rank`](../../docs/scootbar/backlog/launch-match-rank.md): fuzzy, frecency; `--query --json` | both | `launch-desktop-index` |
 | [`launch-ui`](../../docs/scootbar/backlog/launch-ui.md): the panel, keys, list, the look layer | daily-drive | `launch-match-rank`, `scootui-entry-and-list`, `scootui-surfaces-on-demand`, `look-format` |
