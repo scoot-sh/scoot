@@ -437,17 +437,37 @@ kbd {
     border: 0;
     min-width: 0;
     padding: 0 0 0.5rem;
+    overflow-wrap: anywhere;
   }
+  /* The title keeps its heading label inline in front (as in round 2),
+   * never hung in the gutter: the card is about that option/flag. */
+  .sl-markdown-content table.mtable-card tr > :first-child::before {
+    position: static;
+    width: auto;
+    margin-inline-end: 0.5rem;
+  }
+  /* Hanging label gutter (fix round 3): the cell itself is plain block
+   * so text, inline code and links keep normal inline flow and wrap as
+   * sentences. The previous label/value `display: grid` on the `td`
+   * made every text node and every inline `<code>`/link its own grid
+   * item and shredded prose-with-code cells across boxes — worse than
+   * the clipped column for exactly the option-reference rows that
+   * carry the most inline code. The label hangs in the reserved
+   * gutter instead; the value keeps the full remaining card width. */
   .sl-markdown-content table.mtable-card td {
-    display: grid;
-    grid-template-columns: 5.5rem 1fr;
-    gap: 0.5rem;
-    padding: 0.3rem 0;
+    display: block;
+    position: relative;
+    padding: 0.3rem 0 0.3rem 7rem;
     border: 0;
     min-width: 0;
+    overflow-wrap: anywhere;
   }
   .sl-markdown-content table.mtable-card td::before {
     content: attr(data-label);
+    position: absolute;
+    left: 0;
+    top: 0.3rem;
+    width: 6.5rem;
     color: var(--sl-color-gray-3);
     font-size: 0.85em;
     overflow-wrap: anywhere;
