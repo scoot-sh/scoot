@@ -288,7 +288,7 @@ default-features = false
 # libGLESv2 through `libloading` at runtime, so enabling it adds no link-time
 # dependency and a build of this crate still runs on a machine with no GL
 # stack installed at all (`--renderer gpu` is what fails there, at startup,
-# with a message -- not the build, and not the default cpu path).
+# with a message -- not the build, and not the default cpu-tier path).
 features = [
     "desktop",
     "wayland_frontend",

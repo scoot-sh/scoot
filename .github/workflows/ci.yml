@@ -583,7 +583,8 @@ jobs:
       # ------------------------------------------------------------------
       # The GPU-free build is a HARD REQUIREMENT, not a preference: scoot has
       # to run in a GPU-less container (webtop) and on boxes with no GL stack
-      # installed at all, which is why pixman is the default renderer and why
+      # installed at all, which is why the default build carries no GPU stack
+      # (`auto` resolves to pixman wherever there is no GPU hardware) and why
       # Smithay's `backend_gbm` is deliberately not in the default feature set
       # (see `crates/scoot/Cargo.toml`). Nothing but a human remembering to
       # look has enforced that so far. `ldd` reports the whole DT_NEEDED

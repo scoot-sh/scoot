@@ -1,11 +1,12 @@
 //! The GPU renderer: GLES compositing into an offscreen renderbuffer.
 //!
-//! Opt-in and never the default -- `--renderer gpu` or `[renderer] backend =
-//! "gpu"`, on `--headless` and `--nested` only (see
-//! [`RendererKind`](crate::cli::RendererKind) and `render::resolve`). GPU-free
-//! operation is a hard requirement (webtop, no-GPU boxes), so
-//! [`pixman`](super::pixman) stays the default and the only pipeline that
-//! needs no device at all.
+//! Explicitly asked for -- `--renderer gpu` or `[renderer] backend =
+//! "gpu"`, or `auto` on real hardware -- on `--headless` and `--nested`
+//! only (see [`RendererKind`](crate::cli::RendererKind) and
+//! `render::resolve`). GPU-free operation is a hard requirement (webtop,
+//! no-GPU boxes), so [`pixman`](super::pixman) stays the tier `auto`
+//! resolves to wherever there is no GPU hardware stack, and the only
+//! pipeline that needs no device at all.
 //!
 //! Like [`PixmanBackend`](super::pixman::PixmanBackend), what lives here is
 //! only what is *specific to this renderer*: the renderer and the target it
@@ -325,9 +326,9 @@ impl GlesBackend {
 /// Tacked onto every way [`GlesBackend::new`] can fail, because all three
 /// reach the operator the same way: as `compositor::run`'s startup error, on
 /// a session that has just refused to start. The one thing that is always
-/// true and always actionable there is that the default renderer needs
+/// true and always actionable there is that the CPU renderer needs
 /// nothing this one could not find.
-const FALL_BACK_HINT: &str = "; --renderer cpu, the default, needs no GPU at all";
+const FALL_BACK_HINT: &str = "; --renderer cpu needs no GPU at all";
 
 /// The `dlopen` soname Smithay loads libEGL under (see `lib_loadable`).
 pub(crate) const LIB_EGL_SONAME: &str = "libEGL.so.1";

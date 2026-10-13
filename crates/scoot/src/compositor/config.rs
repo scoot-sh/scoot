@@ -256,10 +256,10 @@ struct TtyConfig {
 }
 
 /// `[renderer]`. One field today: `backend`, which renderer composites each
-/// frame -- `"cpu"` (the default, and the only one that needs no graphics
-/// device), `"gpu"` (GLES; scanout on `--tty`), or `"auto"` (the GPU
-/// renderer on real hardware, the CPU renderer everywhere else; never fails
-/// startup). Named `backend` for the renderer *behind* the
+/// frame -- `"auto"` (the default: the GPU renderer on real hardware, the
+/// CPU renderer everywhere else; never fails startup), `"cpu"` (pixman; the
+/// only one that needs no graphics device), or `"gpu"` (GLES; scanout on
+/// `--tty`). Named `backend` for the renderer *behind* the
 /// compositor, which is a different axis from `--headless`/`--nested`/`--tty`
 /// (how the compositor presents what it drew); `site/src/content/docs/scoot/backends.md` says so in as
 /// many words.
@@ -526,7 +526,7 @@ pub struct LoadedConfig {
     /// this build knows (`cpu`, `gpu` or `auto`). `None` -- no `[renderer]`
     /// table, no `backend` key, or any other name (warned about at load,
     /// with the old `pixman`/`gles` spellings naming their new value) --
-    /// leaves the choice to `--renderer`/`SCOOT_RENDERER`, and to the CPU
+    /// leaves the choice to `--renderer`/`SCOOT_RENDERER`, and to the `auto`
     /// default when those are unset too. `--renderer` wins over this when
     /// both name one; see `render::resolve`, which is also where `--tty`
     /// overrides.
@@ -983,15 +983,15 @@ pub fn default_config_toml() -> String {
 
     out.push_str("\n[renderer]\n");
     out.push_str(
-        "# Which renderer composites each frame: \"cpu\" (pixman; the default, needs no\n\
-         # graphics device), \"gpu\" (GLES; scanout on --tty), or \"auto\" (the GPU\n\
+        "# Which renderer composites each frame: \"auto\" (the default: the GPU\n\
          # renderer on real hardware, the CPU renderer everywhere else; never fails\n\
-         # startup). --renderer wins over this when both name one, and SCOOT_RENDERER\n\
-         # beats this when --renderer is absent.\n",
+         # startup), \"cpu\" (pixman; needs no graphics device), or \"gpu\" (GLES;\n\
+         # scanout on --tty). --renderer wins over this when both name one, and\n\
+         # SCOOT_RENDERER beats this when --renderer is absent.\n",
     );
     out.push_str(&format!(
         "# backend = \"{}\"\n",
-        RendererRequest::Cpu.as_str()
+        RendererRequest::Auto.as_str()
     ));
 
     out.push_str("\n[tty]\n");
@@ -4463,7 +4463,7 @@ mod tests {
             format!("# auto = {}", FloatingRules::default().auto),
             format!(
                 "# backend = \"{}\"",
-                crate::cli::RendererRequest::Cpu.as_str()
+                crate::cli::RendererRequest::Auto.as_str()
             ),
         ] {
             assert!(

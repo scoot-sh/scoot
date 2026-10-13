@@ -42,8 +42,10 @@
 //! ## The table is the active renderer's, not a list
 //!
 //! Which renderer will do the importing is a per-session fact --
-//! `PixmanRenderer` by default, `GlesRenderer` under `--renderer gpu`, and a
-//! third `GlesRenderer` on its own EGL display under `--tty --renderer gpu`
+//! `PixmanRenderer` on the CPU tier (`--renderer cpu`, or `auto` wherever
+//! there is no GPU hardware stack), `GlesRenderer` under `--renderer gpu`
+//! (or `auto` on real hardware), and a
+//! third `GlesRenderer` on its own EGL display under `--tty` on the GPU tier
 //! (see [`render`](super::render)) -- and their importable sets are not the
 //! same. pixman's is a fixed list of fourccs at `LINEAR`; a GLES one is
 //! whatever its EGL display reports, which is a property of the driver and

@@ -203,7 +203,7 @@ pub const BACKENDS: &[BackendDoc] = &[
             FlagDoc {
                 flag: "--renderer",
                 takes: "cpu|gpu|auto",
-                default: "cpu (or $SCOOT_RENDERER, or the config file)",
+                default: "auto (or $SCOOT_RENDERER, or the config file)",
             },
             FlagDoc {
                 flag: "--xwayland",
@@ -238,7 +238,7 @@ pub const BACKENDS: &[BackendDoc] = &[
             FlagDoc {
                 flag: "--renderer",
                 takes: "cpu|gpu|auto",
-                default: "cpu (or $SCOOT_RENDERER, or the config file)",
+                default: "auto (or $SCOOT_RENDERER, or the config file)",
             },
             FlagDoc {
                 flag: "--xwayland",
@@ -273,7 +273,7 @@ pub const BACKENDS: &[BackendDoc] = &[
             FlagDoc {
                 flag: "--renderer",
                 takes: "cpu|gpu|auto",
-                default: "cpu (or $SCOOT_RENDERER, or the config file)",
+                default: "auto (or $SCOOT_RENDERER, or the config file)",
             },
             FlagDoc {
                 flag: "--xwayland",
@@ -422,11 +422,12 @@ pub const MAX_OUTPUTS: i32 = 8;
 // parses requests but never resolves them.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub enum RendererKind {
-    /// CPU compositing with pixman: the default, and the only renderer that
-    /// needs no graphics device at all. Spelled `cpu` to the user.
+    /// CPU compositing with pixman: the tier that needs no graphics device
+    /// at all, and what `auto` resolves to wherever there is no GPU
+    /// hardware stack. Spelled `cpu` to the user.
     #[default]
     Pixman,
-    /// GLES on an EGL device. Opt-in; `--headless`/`--nested` honour it in
+    /// GLES on an EGL device. `--headless`/`--nested` honour it in
     /// every build (the offscreen pipeline). Under `--tty` it needs the
     /// `gpu-scanout` Cargo feature, where the frame is composited straight
     /// into the buffer the CRTC scans out; without the feature `--tty`
@@ -476,9 +477,10 @@ impl fmt::Display for RendererKind {
 pub enum RendererRequest {
     /// Pick the best tier for this session: the GPU renderer on real
     /// hardware, the CPU renderer in VMs and headless. Never fails startup.
-    Auto,
-    /// The CPU renderer (pixman), everywhere. The default request.
+    /// The default request.
     #[default]
+    Auto,
+    /// The CPU renderer (pixman), everywhere.
     Cpu,
     /// The GPU renderer (GLES): the offscreen pipeline under
     /// `--headless`/`--nested`, scanout under `--tty` in a `gpu-scanout`
@@ -486,12 +488,15 @@ pub enum RendererRequest {
     Gpu,
 }
 
-/// The default request: the CPU tier. Every caller that defaults uses this
-/// constant, so the stage that flips the default to `auto` moves one line
-/// (and its pin test).
+/// The default request: `auto` (pick the best tier for the session).
+/// Every caller that defaults uses this constant. A changed default
+/// resolution is behaviour for the same flags (see `docs/versioning.md`):
+/// the same invocation now resolves through the `auto` policy instead of
+/// pinning the CPU tier, while an explicit `--renderer cpu|gpu`,
+/// `SCOOT_RENDERER`, or `[renderer] backend` resolves exactly as before.
 // Resolved only by the Linux compositor (see `RendererKind`).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub const DEFAULT_REQUEST: RendererRequest = RendererRequest::Cpu;
+pub const DEFAULT_REQUEST: RendererRequest = RendererRequest::Auto;
 
 impl RendererRequest {
     /// The spelling a user writes: `cpu`, `gpu` or `auto`. Shared by the
@@ -669,7 +674,7 @@ pub struct CompositorOptions {
     pub gpu: Option<PathBuf>,
     /// Which renderer composites each frame, when the command line says.
     /// `None` (the normal case) means the config file's `[renderer] backend`
-    /// decides, and the CPU renderer when that is unset too -- so this is
+    /// decides, and `auto` when that is unset too -- so this is
     /// `Option<RendererRequest>` rather than a plain `RendererRequest` precisely so
     /// that an explicit `--renderer cpu` can *override* a config file
     /// asking for `gpu`, the way `--gpu` overrides `[tty] gpu`. Resolved
@@ -1480,10 +1485,11 @@ mod tests {
             assert_eq!(request.to_string(), request.as_str());
         }
         assert_eq!(RendererKind::default(), RendererKind::Pixman);
-        // The default request is the CPU tier (pinned here; the stage that
-        // flips it to `auto` moves this test on purpose).
-        assert_eq!(DEFAULT_REQUEST, RendererRequest::Cpu);
-        assert_eq!(RendererRequest::default(), RendererRequest::Cpu);
+        // The default request is `auto`: pick the best tier for the
+        // session (pinned here; `DEFAULT_REQUEST` is the one line that
+        // names it).
+        assert_eq!(DEFAULT_REQUEST, RendererRequest::Auto);
+        assert_eq!(RendererRequest::default(), RendererRequest::Auto);
         // The request-to-tier map behind the policy: explicit requests name
         // their tier, `auto` names none.
         assert_eq!(RendererRequest::Cpu.kind(), Some(RendererKind::Pixman));

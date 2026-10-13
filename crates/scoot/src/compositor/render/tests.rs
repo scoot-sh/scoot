@@ -227,20 +227,22 @@ fn a_capture_covers_the_whole_target_at_the_backends_own_size() {
 /// The flag beats the env beats the file -- including `--renderer cpu`
 /// against a file asking for `gpu`, which is the case a plain
 /// `RendererRequest` (rather than an `Option`) at either site would quietly
-/// get wrong.
+/// get wrong. Asking for nothing means `auto`, which on headless resolves
+/// to the CPU tier (there is no device to wait for).
 #[test]
-fn the_flag_beats_the_env_beats_the_file_and_none_means_cpu() {
+fn the_flag_beats_the_env_beats_the_file_and_none_means_auto() {
     use crate::cli::{RendererRequest, RequestSource};
     use policy::{Early, Reason, Session};
-    // (flag, env, file) -> (request, source, early); no warnings anywhere here.
-    for (flag, env, file, request, source, kind) in [
+    // (flag, env, file) -> (request, source, tier, reason); no warnings anywhere here.
+    for (flag, env, file, request, source, kind, reason) in [
         (
             None,
             None,
             None,
-            RendererRequest::Cpu,
+            RendererRequest::Auto,
             RequestSource::Default,
             RendererKind::Pixman,
+            Reason::HeadlessReadsBack,
         ),
         (
             None,
@@ -249,6 +251,7 @@ fn the_flag_beats_the_env_beats_the_file_and_none_means_cpu() {
             RendererRequest::Gpu,
             RequestSource::Config,
             RendererKind::Gles,
+            Reason::Requested,
         ),
         (
             Some(RendererRequest::Gpu),
@@ -257,6 +260,7 @@ fn the_flag_beats_the_env_beats_the_file_and_none_means_cpu() {
             RendererRequest::Gpu,
             RequestSource::Flag,
             RendererKind::Gles,
+            Reason::Requested,
         ),
         (
             Some(RendererRequest::Cpu),
@@ -265,6 +269,7 @@ fn the_flag_beats_the_env_beats_the_file_and_none_means_cpu() {
             RendererRequest::Cpu,
             RequestSource::Flag,
             RendererKind::Pixman,
+            Reason::Requested,
         ),
         (
             Some(RendererRequest::Gpu),
@@ -273,6 +278,7 @@ fn the_flag_beats_the_env_beats_the_file_and_none_means_cpu() {
             RendererRequest::Gpu,
             RequestSource::Flag,
             RendererKind::Gles,
+            Reason::Requested,
         ),
         (
             None,
@@ -281,6 +287,7 @@ fn the_flag_beats_the_env_beats_the_file_and_none_means_cpu() {
             RendererRequest::Gpu,
             RequestSource::Env,
             RendererKind::Gles,
+            Reason::Requested,
         ),
     ] {
         let (got_request, got_source, early, warnings) =
@@ -289,7 +296,7 @@ fn the_flag_beats_the_env_beats_the_file_and_none_means_cpu() {
         assert_eq!(got_source, source, "{flag:?} / {env:?} / {file:?}");
         assert_eq!(
             early,
-            Early::Resolved(kind, Reason::Requested),
+            Early::Resolved(kind, reason),
             "{flag:?} / {env:?} / {file:?}"
         );
         assert!(warnings.is_empty(), "{flag:?} / {env:?} / {file:?}");
@@ -335,14 +342,14 @@ fn tty_without_a_scanout_tier_keeps_cpu_however_gpu_was_asked_for() {
         Early::Resolved(RendererKind::Pixman, Reason::NoScanoutTier),
     );
     assert!(warnings.is_empty());
-    // ...and asking for nothing under --tty is still the same default, not a
+    // ...and asking for nothing under --tty is the `auto` default, not a
     // second code path, and warns about nothing.
     let (request, source, early, warnings) = resolve_with(None, None, None, Session::Tty, false);
-    assert_eq!(request, crate::cli::RendererRequest::Cpu);
+    assert_eq!(request, crate::cli::RendererRequest::Auto);
     assert_eq!(source, crate::cli::RequestSource::Default);
     assert_eq!(
         early,
-        Early::Resolved(RendererKind::Pixman, Reason::Requested),
+        Early::Resolved(RendererKind::Pixman, Reason::NoScanoutTier),
     );
     assert!(warnings.is_empty());
 }
@@ -383,13 +390,13 @@ fn tty_with_a_scanout_tier_honours_gpu_and_defers_auto() {
         early,
         Early::Resolved(RendererKind::Pixman, Reason::Requested)
     );
-    // And the default is still the CPU renderer: having the tier available
-    // does not make it the default.
-    let (_, _, early, warnings) = resolve_with(None, None, None, Session::Tty, true);
-    assert_eq!(
-        early,
-        Early::Resolved(RendererKind::Pixman, Reason::Requested)
-    );
+    // And the default is `auto`, which defers to the device now that the
+    // tier is available: having the tier available does not pin the CPU
+    // tier.
+    let (request, source, early, warnings) = resolve_with(None, None, None, Session::Tty, true);
+    assert_eq!(request, crate::cli::RendererRequest::Auto);
+    assert_eq!(source, crate::cli::RequestSource::Default);
+    assert_eq!(early, Early::DecideOnDevice(RendererRequest::Auto));
     assert!(warnings.is_empty());
     // `auto` defers to the device.
     let (request, source, early, warnings) =
@@ -415,11 +422,18 @@ fn the_scanout_feature_changes_nothing_off_tty() {
                 Early::Resolved(RendererKind::Gles, Reason::Requested)
             );
             assert!(warnings.is_empty());
-            let (_, _, early, warnings) = resolve_with(None, None, None, session, available);
-            assert_eq!(
-                early,
-                Early::Resolved(RendererKind::Pixman, Reason::Requested)
-            );
+            // Asking for nothing is the `auto` default: the CPU tier on
+            // either session, with the reason naming why.
+            let expected = match session {
+                Session::Headless => Reason::HeadlessReadsBack,
+                Session::Nested => Reason::NestedUnmeasured,
+                Session::Tty => unreachable!(),
+            };
+            let (request, source, early, warnings) =
+                resolve_with(None, None, None, session, available);
+            assert_eq!(request, RendererRequest::Auto);
+            assert_eq!(source, crate::cli::RequestSource::Default);
+            assert_eq!(early, Early::Resolved(RendererKind::Pixman, expected));
             assert!(warnings.is_empty());
             // `auto` off `--tty` resolves without the tier either way.
             let (_, _, early, _) =
