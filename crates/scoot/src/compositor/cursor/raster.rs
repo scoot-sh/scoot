@@ -59,18 +59,35 @@ pub fn sd_segment(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
 /// three vertices contribute nothing.
 pub fn sd_path(px: f64, py: f64, subpaths: &[Vec<(f64, f64)>]) -> f64 {
     let mut outside = f64::INFINITY;
-    let mut inside = false;
     for verts in subpaths.iter().filter(|v| v.len() >= 3) {
         for i in 0..verts.len() {
             let (ax, ay) = verts[i];
             let (bx, by) = verts[(i + 1) % verts.len()];
             outside = outside.min(sd_segment(px, py, ax, ay, bx, by));
+        }
+    }
+    if inside(px, py, subpaths) {
+        -outside
+    } else {
+        outside
+    }
+}
+
+/// Whether `(px, py)` is inside the compound polygon `subpaths`, by the same
+/// even-odd rule as [`sd_path`] -- without the distance, for callers that
+/// only need the side (the spinner's mask).
+pub fn inside(px: f64, py: f64, subpaths: &[Vec<(f64, f64)>]) -> bool {
+    let mut inside = false;
+    for verts in subpaths.iter().filter(|v| v.len() >= 3) {
+        for i in 0..verts.len() {
+            let (ax, ay) = verts[i];
+            let (bx, by) = verts[(i + 1) % verts.len()];
             if (ay > py) != (by > py) && px < (bx - ax) * (py - ay) / (by - ay) + ax {
                 inside = !inside;
             }
         }
     }
-    if inside { -outside } else { outside }
+    inside
 }
 
 /// Composites the premultiplied `Argb8888` buffer `src` over `dst` in place

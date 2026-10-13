@@ -311,7 +311,7 @@ pub fn generate(shape: Shape, size: i32, fill: [u8; 4], stroke: [u8; 4]) -> Vec<
         let opacity = |x: f64, y: f64| {
             mask.iter()
                 .rev()
-                .find(|(subs, _)| raster::sd_path(x, y, subs) <= 0.0)
+                .find(|(subs, _)| raster::inside(x, y, subs))
                 .map_or(0.0, |(_, lum)| *lum)
         };
         let coat = raster::Coat {
