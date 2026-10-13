@@ -419,53 +419,54 @@ start; a stripped binary at most 2 MB; closure glibc, libgcc_s, fonts and the wa
 
 ## Stylix and look integration
 
-The login screen runs before any user session, as the `greeter` user, from `/etc`. So:
+The login screen runs before any user session, as the `greeter` user, from `/etc`, so it is
+**static** under the live-looks contract (§6.4; [shell-apps.md](shell-apps.md#theme-the-live-looks-contract-stylix-and-looks)). It reads
+`/etc/scoot/look/greet.toml` (the contract renders it at system build time from
+`programs.scoot.greeter.look`, which defaults to the declared look) merged **under**
+`/etc/scoot/greet.toml` per key. It never reads Stylix: Stylix arrives as the `stylix`
+look when that is the declared one. A live swap never touches the login screen.
 
-- **The look is baked at build or install time.** Live look swap does not apply.
-  "Apply the current look to the login screen" is a root-level step: a `nixos-rebuild switch`,
-  or copying a look's `greet.toml` to `/etc/scoot/greet.toml`. Because greetd has
-  `restartIfChanged = false`, the running greeter keeps the old look until its next start
+- **Applying a look to the greeter** is a root-level step: `nixos-rebuild switch`, or on a
+  non-Nix box `sudo scoot look apply --greeter NAME` (#578's `look-greeter` ticket, which
+  renders `greet.toml` for scootgreet as it renders `regreet.css` for ReGreet). greetd has
+  `restartIfChanged = false`, so a running greeter shows the new look from its next start
   (the next logout), and the docs say so.
+- **The loader** takes allowlisted keys only (colors, radius, fonts, wallpaper path,
+  cursor), with every string through the contract's grammar. A fragment that fails either
+  is ignored with an error line on screen, and the built-in defaults draw ([Failure
+  modes](#failure-modes-never-strand-a-login)). A look can never stop a login.
 - **NixOS module** `programs.scootgreet` (NixOS only): `enable`, `package`, `settings`
-  (TOML into `/etc/scoot/greet.toml`, mode 0644), `stylix.enable`. The profile side
-  widens `programs.scoot.greeter` with `daemon = enum [ "regreet" "scootgreet" ]`, default
+  (TOML into `/etc/scoot/greet.toml`, mode 0644). There is no `stylix.enable`.
+  `programs.scoot.greeter` gains `daemon = enum [ "regreet" "scootgreet" ]`, default
   `"regreet"`. With `"scootgreet"`, the module:
-  - points greetd's `default_session.command` at `scootgreet-session` (not nixpkgs'
-    regreet module);
+  - points greetd's `default_session.command` at `scootgreet-session`;
   - creates `/var/lib/scootgreet` with tmpfiles;
   - passes the XKB environment;
-  - keeps the GDM/SDDM refusals;
-  - keeps the forced scoot session entry (`nixos.nix:54-78`).
-- **Precedence**: user > Stylix > look > default, per leaf, as in
-  [shell-apps.md](shell-apps.md#precedence-per-leaf-as-scootbar). Stylix on NixOS is detected
-  the same way (`config.lib.stylix` exists in the NixOS module too). The look rung is gated on
-  the existing `theme.targets.greeter.enable`. The refusal of a set `greeter.background`
-  next to a Stylix regreet target becomes, for scootgreet, Stylix's `image` beating the
-  look's wallpaper at `mkDefault`, with the user's `background` beating both.
+  - keeps the GDM/SDDM refusals and the forced scoot session entry (`nixos.nix:54-78`);
+  - keeps the Stylix regreet-target assertion (`nixos.nix:86-88`) for ReGreet only.
 
-| Element | Token | Stylix | Look |
+| Element | Role | Through the `stylix` look | Shipped looks, today in ReGreet |
 |---|---|---|---|
-| Backdrop | image, else `background` | `stylix.image` (as Stylix's regreet target uses it) | `wallpaper.image` (today's `greeter.background`) |
-| Card fill | `background` | `base00` | `barColors.background` |
-| Labels, entry text, clock | `foreground` | `base05` | `barColors.foreground` |
-| Placeholder, hints, info messages, date | `dim` | `base03` | `barColors.dim` |
-| Card border | `border` | `base0D` | `appearance.focus_ring_active_color` |
-| Focus ring, caret, primary button, selected user | `accent` | `base0D` | `barColors.accent` |
-| Selected row in the selectors | `selection` / `selection-text` | `base02` / `base05` | `barColors.accent` / `barColors.background` |
-| Auth errors, Caps Lock warning, destructive confirm | `urgent` | `base08` | `barColors.urgent` |
-| Font | — | `fonts.sansSerif`, `sizes.applications` (12 pt = 16 px) | `fonts.sans` at 12 pt (today's measured greeter size, `nixos.nix:2456-2460`) |
-| Cursor | — | `stylix.cursor` | the look's Vanilla-DMZ (the cursor ReGreet never got) |
+| Backdrop | `[wallpaper] image`, else `background` | `stylix.image`, else `base00` | `wallpaper.image` (`greeter.background`, `nixos.nix:2445-2447`) |
+| Card fill | `surface` | `base01` | the look's `regreet.css` card |
+| Labels, entry text, clock | `foreground` | `base05` | CSS |
+| Placeholder, hints, info messages, date | `dim` | `base03` | CSS |
+| Card border | `focus` | `base0D` | CSS |
+| Focus ring, caret | `accent` | `base0D` | GTK focus |
+| Primary button, selected user or session | `accent` / `accent-fg` | `base0D` / `base00` | `button.suggested-action` in the CSS |
+| Auth errors, Caps Lock warning, destructive confirm | `urgent` | `base08` | `button.destructive-action` in the CSS |
+| Font | `fonts.sans` at 12 pt unless `[apps.scootgreet]` sets a size | `sansSerif` | `fonts.sans` 12 pt (`nixos.nix:2456-2460`) |
+| Cursor | `[cursor]` | `stylix.cursor` | Adwaita: the look's cursor never reached ReGreet (`theme-look.nix:61-69` vs no `cursorTheme` set) |
 
-- **Tests** (`nix/scootgreet-tests.nix`): the mapping per path, per-leaf user wins,
-  `--check` on the rendered file, the greetd command being the wrapper, the agreety
-  fallback present in the wrapper, tmpfiles, XKB env, and that `daemon = "regreet"` leaves
-  today's module output byte-identical (an eval pin against the current `_greeterPins`,
-  `nix/tests.nix:6087-6310`). The Stylix stub declares `sizes.applications`, `image` and
-  `cursor`, and says what it cannot vouch for.
-- **Without Nix**: `/etc/scoot/greet.toml` by hand (each look ships one), greetd's
-  `/etc/greetd/config.toml` pointing `default_session.command` at `scootgreet-session`, and
-  the VT-escape note beside it. `install.sh` never installs the greeter
-  ([shell-apps.md, Without Nix](shell-apps.md#without-nix)).
+- **Tests** (`nix/scootgreet-tests.nix`): the rendered `greet.toml` equals the user's
+  `settings`; `/etc/scoot/look/greet.toml` comes from `greeter.look`; the greetd command
+  is the wrapper, and the agreety fallback is in it; tmpfiles; XKB env; `daemon = "regreet"`
+  leaves today's output byte-identical (an eval pin against `_greeterPins`,
+  `nix/tests.nix:6087-6310`); `--check` on the rendered files.
+- **Without Nix**: `/etc/scoot/greet.toml` by hand, the look through the root-level apply
+  step, greetd's `/etc/greetd/config.toml` pointing `default_session.command` at
+  `scootgreet-session`, and the VT-escape note beside it. `install.sh` never installs the
+  greeter ([shell-apps.md, Without Nix](shell-apps.md#without-nix)).
 
 ## The installer ISO
 
@@ -500,7 +501,7 @@ field. The live session keeps `agreety` and autologin unchanged.
 - **M2**: a real login per look, the logind power buttons, a VT switch away and back, and a
   handoff into the scoot session with `live: true` on every output afterwards
   (`scoot msg outputs`).
-- **Goldens** per look and with a Stylix palette, for each state above.
+- **Goldens** per shipped look and for a `stylix` look, for each state above.
 
 ## Docs and packaging
 
@@ -534,7 +535,7 @@ These are also listed in [shell-apps.md](shell-apps.md#decisions-needed) items 2
 | [`greet-baseline`](../../docs/scootbar/backlog/greet-baseline.md): measure ReGreet + cage; verify cage's exit status, its GPU-free path, and tty2's getty | daily-drive | go-ahead |
 | [`greet-greetd-client`](../../docs/scootbar/backlog/greet-greetd-client.md): frames, conversation, secret path, `scootgreet login`, fake greetd | computer use, daily-drive | `greet-baseline`, `scootui-extract-draw` |
 | [`greet-ui`](../../docs/scootbar/backlog/greet-ui.md): the screen, users, sessions, power, layout and Caps Lock, built-in fallback theme; the go/no-go gate | daily-drive | `greet-greetd-client`, `scootui-entry-and-list`, `scoot-dbus-extract`, `launch-desktop-index` |
-| [`greet-nixos`](../../docs/scootbar/backlog/greet-nixos.md): module, Stylix, look, wrapper with the agreety fallback, opt-in | daily-drive | `greet-ui` |
+| [`greet-nixos`](../../docs/scootbar/backlog/greet-nixos.md): module, the static look, wrapper with the agreety fallback, opt-in | daily-drive | `greet-ui` |
 | [`greet-packaging-iso`](../../docs/scootbar/backlog/greet-packaging-iso.md): packages, docs, the scoot-iso switch and its QEMU test | daily-drive | `greet-nixos` |
 | [`greet-default-flip`](../../docs/scootbar/backlog/greet-default-flip.md) | daily-drive | `greet-packaging-iso` |
 | [`greet-scoot-kiosk-spike`](../../docs/scootbar/backlog/greet-scoot-kiosk-spike.md) (research) | daily-drive | `greet-nixos` |

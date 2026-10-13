@@ -17,9 +17,10 @@ The card and stack in the design on one on-demand `overlay` layer surface (input
 the cards' union), pointer actions with `ActivationToken` before `ActionInvoked`, expiry
 started on the first frame callback that presents a card, hover pause, idle pause through
 `ext-idle-notify` v2 input idle, `output = focused|compositor|NAME` with the on-demand
-foreign-toplevel snapshot, hotplug, zero outputs. Config `notify.toml` (style, colors,
-placement, timeouts); `msg reload` is in `notify-control`, but the reload path (re-theme in
-place) is built here.
+foreign-toplevel snapshot, hotplug, zero outputs. Config `notify.toml` (style, colors, placement, timeouts) and the look layer under it
+(`$XDG_STATE_HOME/scoot/look/notify.toml`, the live-looks contract: allowlist, string
+grammar, dangling link means no layer); `msg reload` is in `notify-control`, but the
+reload path (re-theme in place) is built here.
 
 ## Acceptance
 

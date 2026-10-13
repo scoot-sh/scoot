@@ -2,7 +2,7 @@
 
 Design pass, 2026-10-12. This covers what the notification daemon does and how it is
 built. The parts it shares with scootlaunch and scootgreet (the `scootui` and
-`scoot-dbus` crates, the theme tokens, Stylix, live look swap, CI, start
+`scoot-dbus` crates, the live-looks theming contract, CI, start
 order and the consolidated decision list) are in [shell-apps.md](shell-apps.md) and
 are not repeated here. Tickets: [the epic](../../docs/scootbar/backlog/scootnotify.md).
 
@@ -438,62 +438,75 @@ misleads**:
 
 ## Stylix and look integration
 
-The shared rules (tokens, precedence, fonts, opacity, live reload) are in
-[shell-apps.md](shell-apps.md#theme-tokens-stylix-and-looks). Per element:
+scootnotify takes its theme only through the live-looks contract ([shell-apps.md](shell-apps.md#theme-the-live-looks-contract-stylix-and-looks); PR #578).
+It reads `$XDG_STATE_HOME/scoot/look/notify.toml` merged **under** its own
+`notify.toml` per key: the user's file, then the look, then the default. It re-themes on
+`msg reload`, and it never reads Stylix. Stylix arrives as the synthesized `stylix` look.
+The look-layer loader takes only allowlisted keys: colors, radius, border width,
+font family and size, and opacity. Every string goes through the contract's grammar.
+`[[rule]]`, `exec`, placement and timeouts are user config only.
 
-| Element | Token | Stylix | Look |
+Per element, with the contract's roles. The last column shows that the shipped looks
+draw what mako draws for them today:
+
+| Element | Role | Through the `stylix` look | Shipped looks, today in mako (`notifications-home.nix:216-232`) |
 |---|---|---|---|
-| Card fill | `background` with alpha | `base00` × `opacity.popups` | `barColors.background`, opaque |
-| Summary, body | `foreground` | `base05` | `barColors.foreground` |
-| App name, age, "+N more" | `dim` | `base03` | `barColors.dim` |
-| Border, normal | `border` | `base0D` | `appearance.focus_ring_active_color` (mako's today) |
-| Border, low | `dim` | `base03` | `barColors.dim` |
-| Border, critical | `urgent` | `base08` | `barColors.urgent` (mako's critical ring today) |
-| Progress bar | `selection` | `base02` (Stylix's mako `progress-color`) | `barColors.accent` (mako's today) |
-| Action button outline / hovered fill | `accent` / `hover` | `base0D` / `base0D` | as the bar |
-| Link text | `accent`, underlined | `base0D` | `barColors.accent` |
-| Font | — | `fonts.sansSerif`, `sizes.popups` (pt → px) | `fonts.ui` |
+| Card fill | `surface`, alpha from `shape.popup-opacity` ([request 2](shell-apps.md#requests-to-the-contract)) | `base01` × `opacity.popups` | `background-color` = `barColors.background` (`surface` defaults to `background`) |
+| Summary, body | `foreground` | `base05` | `text-color` = `barColors.foreground` |
+| App name, age, "+N more" | `dim` | `base03` | (none in mako) |
+| Border, normal | `focus` ([request 1](shell-apps.md#requests-to-the-contract)) | `base0D` | `border-color` = `appearance.focus_ring_active_color` |
+| Border, low | `dim` | `base03` | (one border in mako) |
+| Border, critical | `urgent` | `base08` | `[urgency=critical] border-color` = `barColors.urgent` |
+| Progress bar | `accent` | `base0D` | `progress-color = over barColors.accent` |
+| Action button outline / hovered fill | `focus` / `hover` | `base0D` / `base0D` | — |
+| Link text (underlined) | `accent` | `base0D` | — |
+| Corners | `shape.radius` | the contract's default | — |
+| Font | `fonts.ui`, `fonts.popup-size` (request 2) | `sansSerif`, `sizes.popups` | mako's default `monospace 10` (no `font=` is generated) |
 
-**Nix.** `programs.scootnotify` with `enable`, `package`, `features`,
-`settings` (TOML), `stylix.enable` and `systemd.enable`. On Home Manager:
-`xdg.configFile."scoot/notify.toml"`; a user unit with `Type=dbus`,
-`BusName=org.freedesktop.Notifications`, `ExecStart=scootnotify daemon`,
-`ExecReload=scootnotify msg reload`, `X-Reload-Triggers` on the config file
-(not restart; [shell-apps.md](shell-apps.md#live-look-swap)), `Restart=on-failure`,
-`RestartPreventExitStatus=3`, `ExecCondition` on `WAYLAND_DISPLAY` (mako's unit has
-the same, `notifications-home.nix:318-353`), and `PartOf`/`After`/`WantedBy` the session target
-by scootbar's rule (`scoot-session.target` under the profile). The package's D-Bus
-service file is on the user's data path. NixOS: `/etc/scoot/notify.toml`,
-`services.dbus.packages`, and the same user unit.
+**Nix.** `programs.scootnotify` has `enable`, `package`, `features`, `settings` (the
+user's TOML only: contract §5.2) and `systemd.enable`. There is no `stylix.enable`. On Home
+Manager it writes `xdg.configFile."scoot/notify.toml"` and a user unit:
+
+- `Type=dbus`, `BusName=org.freedesktop.Notifications`, `ExecStart=scootnotify daemon`;
+- `ExecReload=scootnotify msg reload`, with `X-Reload-Triggers` on the config file. Not
+  restart ([shell-apps.md](shell-apps.md#live-look-swap)): a restart drops the cards and
+  the history;
+- `Restart=on-failure`, `RestartPreventExitStatus=3`;
+- `ExecCondition` on `WAYLAND_DISPLAY`, as mako's unit has (`notifications-home.nix:318-353`);
+- `PartOf`, `After` and `WantedBy` the session target, by scootbar's rule
+  (`scoot-session.target` under the profile).
+
+The package's D-Bus service file goes on the user's data path. NixOS gets
+`/etc/scoot/notify.toml`, `services.dbus.packages` and the same user unit. If the
+contract's D5 is decided the other way, the fallback is scootbar's per-leaf ladder
+(`nix/modules/scootbar.nix:7-28`) in this module
+([Decisions needed 10](shell-apps.md#decisions-needed)).
 
 **The profile switch.** `programs.scoot.desktop.notifications.daemon` widens to
 `[ "mako" "scootnotify" ]`. With `"scootnotify"`:
 
-- `programs.scootnotify.enable = mkDefault true`, with the look rungs gated on
-  `theme.targets.notifications.enable`;
+- `programs.scootnotify.enable = mkDefault true`;
 - mako and `scoot-notify-sync` are not installed;
 - the three binds (`desktop.nix:101-115`, `keys-home.nix:337-339`) run
   `scootnotify msg dismiss`, `msg dnd toggle` and `msg restore`;
 - the bar's `notifications` push table keeps its id, icons and placement, and its
   `on-click` becomes `scootnotify msg dnd toggle`;
-- `desktop.notifications.settings` is mako's flat `key=value` and does not carry
-  over. An eval warning names `programs.scootnotify.settings` when it is non-empty with
-  the new daemon. This is the one option that does not survive the swap, and the docs say so.
+- `desktop.notifications.settings` is mako's flat `key=value` and does not carry over.
+  An eval warning names `programs.scootnotify.settings` when it is non-empty with the new
+  daemon. That is the one option that does not survive the swap, and the docs say so.
 
-**Tests** (in `nix/scootbar-tests.nix`'s style, a new `nix/scootnotify-tests.nix`):
+**Tests.**
 
-- no Stylix gives the plain defaults;
-- Stylix gives exactly the table above, `font-size` 13 from 10 pt popups, and a font file;
-- each Stylix leaf yields to a user value, looped over every token;
-- the look rung applies and Stylix beats it per leaf;
-- `opacity.popups` 0.9 becomes the documented alpha;
-- the rendered TOML round-trips;
-- the real binary's `--check` accepts every rendered file and refuses a typo'd key.
-
-The Stylix stub grows to declare `stylix.fonts.sizes.popups` and
-`stylix.opacity.popups`. **What the stub cannot vouch for**, as scootbar's header
-says: a rename upstream passes the stub and misses on a real Stylix. The real-Stylix
-script (`scripts/scootbar-stylix-test.sh`, not in CI) gains a scootnotify block.
+- *Nix* (`nix/scootnotify-tests.nix`, `nix/scootbar-tests.nix`'s shape): the rendered file
+  equals the user's `settings` and nothing else; the unit fields; the profile switch both
+  ways, with mako's output byte-identical under the default; never both activation files;
+  the real binary's `--check` over every rendered file, plus a typo'd key refused.
+- *Crate*: the look-layer merge (user > look > default per key); an allowlist refusal by
+  key name; the string grammar; a dangling link meaning no layer plus a warning; a reload
+  that swaps the look with cards on screen and keeps them; a reload refused on a bad
+  fragment, keeping the last good.
+- *Goldens* per shipped look and for a `stylix` look built from a fixed base16 scheme.
+  Stylix itself is the contract's test surface (its §5.6), not this app's.
 
 ## Testing and verification
 
@@ -512,7 +525,7 @@ script (`scripts/scootbar-stylix-test.sh`, not in CI) gains a scootnotify block.
   harness's `tests/lockclient`; assert nothing drawn and the clock not started; unlock and
   assert it shows and then expires; hotplug an output (`--outputs 2` and `output-power`).
 - **Goldens**: low, normal and critical cards, with an icon, with actions, with progress, the
-  stack with "+N more", per look (five) and with a Stylix palette.
+  stack with "+N more", per shipped look and for a `stylix` look.
 - **Ratchet**: the [budgets](#budgets), against lean mako, dunst and swaync, with a flood
   row (10,000 `Notify` in 10 s from one sender: CPU, RSS before and after, wakeups) as
   the bar's runaway rows do.
@@ -548,6 +561,6 @@ entries.
 | [`notify-popups`](../../docs/scootbar/backlog/notify-popups.md): cards, stack, lock and idle rules, outputs | daily-drive | `notify-server`, `scootui-extract-wayland` |
 | [`notify-control`](../../docs/scootbar/backlog/notify-control.md): `msg`, JSON, subscribe, wait, DND, history, rules, fullscreen hold | computer use, daily-drive | `notify-popups` |
 | [`notify-bar-feed`](../../docs/scootbar/backlog/notify-bar-feed.md): native push to the bar | daily-drive | `notify-control` |
-| [`notify-nix`](../../docs/scootbar/backlog/notify-nix.md): modules, Stylix, look, profile switch (opt-in) | daily-drive | `notify-bar-feed` |
+| [`notify-nix`](../../docs/scootbar/backlog/notify-nix.md): modules, the look layer, profile switch (opt-in) | daily-drive | `notify-bar-feed` |
 | [`notify-packaging`](../../docs/scootbar/backlog/notify-packaging.md): deb, rpm, Arch, install.sh | daily-drive | `notify-nix` |
 | [`notify-default-flip`](../../docs/scootbar/backlog/notify-default-flip.md): make it the profile default | daily-drive | `notify-packaging` |

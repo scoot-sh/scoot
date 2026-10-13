@@ -155,13 +155,13 @@ Shared foundation ([epic](extract-scootui.md)):
 [`scootnotify`: the notification daemon](scootnotify.md) (epic):
 - [Prototype: the go/no-go gate against mako](notify-prototype.md) (medium)
 - [The D-Bus server and model](notify-server.md), [popups](notify-popups.md), [control, DND, history, rules](notify-control.md), [the bar feed](notify-bar-feed.md)
-- [Nix, Stylix and the opt-in switch](notify-nix.md), [packaging and the site](notify-packaging.md), [flip the default](notify-default-flip.md)
+- [Nix, the look layer and the opt-in switch](notify-nix.md), [packaging and the site](notify-packaging.md), [flip the default](notify-default-flip.md)
 
 [`scootlaunch`: the launcher](launcher.md) (epic):
 - [The desktop entry index](launch-desktop-index.md), [matching and ranking](launch-match-rank.md)
 - [The panel and launching; the go/no-go gate against fuzzel](launch-ui.md)
 - [dmenu and run](launch-dmenu.md), [the agent interface](launch-agent-json.md), [windows mode](launch-windows-mode.md)
-- [Nix, Stylix and the opt-in switch](launch-nix.md), [packaging and the site](launch-packaging.md), [flip the default](launch-default-flip.md)
+- [Nix, the look layer and the opt-in switch](launch-nix.md), [packaging and the site](launch-packaging.md), [flip the default](launch-default-flip.md)
 
 [`scootgreet`: the login greeter](scootgreet.md) (epic):
 - [Baseline: measure ReGreet + cage, verify the no-stranding facts](greet-baseline.md) (medium)

@@ -58,3 +58,7 @@ side: [layer-shell-default-output](../../backlog/core/layer-shell-default-output
 
 Published here per milestone until the app gets its own backlog, against fuzzel, tofi, bemenu
 and wofi ([budgets](../../../dev/design/scootlaunch.md#budgets)).
+
+## Theming
+
+Through the live-looks contract only (PR #578; [how this plan maps onto it](../../../dev/design/shell-apps.md#theme-the-live-looks-contract-stylix-and-looks)): the app reads the look layer under its own config, never Stylix.

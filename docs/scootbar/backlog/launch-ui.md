@@ -18,7 +18,7 @@ mouse per the design, single-instance toggle, output choice. Launching: the acti
 token from the choosing key or button serial (wait for `done`, 200 ms bound), the
 environment rules, `StartTransientUnit` into `app-scootlaunch-<id>-<random>.scope`
 (confirm the slice systemd's desktop-environment page asks for; bounded 500 ms), the
-double-fork fallback, `DBusActivatable` entries. Icons with theme inheritance, PNG, and SVG
+double-fork fallback, `DBusActivatable` entries. The look layer read at every open (`look/launch.toml`, the live-looks contract). Icons with theme inheritance, PNG, and SVG
 behind a default-on `svg` feature (`resvg`) with its size row measured for a waiver ruling.
 
 ## Acceptance

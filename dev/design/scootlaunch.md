@@ -2,7 +2,7 @@
 
 Design pass, 2026-10-12. This covers what the launcher does and how it is built. What it
 shares with scootnotify and scootgreet (`scootui`, `scoot-dbus`, the keyboard
-stack, tokens, Stylix, CI and start order) is in [shell-apps.md](shell-apps.md). The
+stack, the live-looks theming contract, CI and start order) is in [shell-apps.md](shell-apps.md). The
 tickets are under [the epic](../../docs/scootbar/backlog/launcher.md). The
 name is `scootlaunch`, not `scootlauncher` ([shell-apps.md, Names](shell-apps.md#names)).
 
@@ -329,7 +329,7 @@ is supported with fuzzel's meaning:
 | `--only-match` | Enter with no match does nothing (without it, the typed text is printed) |
 | `--list-executables-in-path` | run mode |
 | `--layer=overlay` | accepted; scootlaunch is always `overlay` (`top` is hidden under fullscreen, `protocols.md:415-427`) |
-| `--background-color --text-color --border-color --selection-color --selection-text-color --match-color --prompt-color` (`rrggbbaa`) | mapped onto tokens, so `fuzzel-theme.nix`'s flags keep working until the profile stops passing them |
+| `--background-color --text-color --border-color --selection-color --selection-text-color --match-color --prompt-color` (`rrggbbaa`) | accepted as per-invocation overrides of the roles in [the table below](#stylix-and-look-integration) (`background`/`surface`, `foreground`, `focus`, `accent`, `accent-fg`, `hover`, `foreground`), above the user's file and the look, so `fuzzel-theme.nix`'s flags and users' scripts keep working |
 
 Plus dmenu's own `--index` (print the 0-based index) and `--placeholder`. **Any other
 flag is a loud error** (exit 2, naming the flag and the supported list), never
@@ -451,31 +451,45 @@ own directory, so they are treated as untrusted input:
 
 ## Stylix and look integration
 
-The shared rules are in [shell-apps.md](shell-apps.md#theme-tokens-stylix-and-looks). Per element:
+scootlaunch takes its theme only through the live-looks contract ([shell-apps.md](shell-apps.md#theme-the-live-looks-contract-stylix-and-looks); PR #578).
+At every open it reads `$XDG_STATE_HOME/scoot/look/launch.toml` merged **under** its own
+`launch.toml` per key. It needs no reload, and it never reads Stylix. The look-layer loader
+takes only allowlisted keys (colors, radius, border width, font, opacity), and strings
+pass the contract's grammar. `terminal` and anything else that runs a command is user
+config only.
 
-| Element | Token | Stylix | Look (today's fuzzel flag) |
+Per element, with the contract's roles. The last column shows that the shipped looks
+draw what fuzzel draws for them today:
+
+| Element | Role | Through the `stylix` look | Shipped looks, today's fuzzel flag (`fuzzel-theme.nix:15-21`) |
 |---|---|---|---|
-| Panel fill | `background` with alpha | `base00` × `opacity.popups` | `barColors.background` (`--background-color`) |
-| Input text, row text | `foreground` | `base05` | `barColors.foreground` (`--text-color`) |
-| Prompt | `foreground` | `base05` | `barColors.foreground` (`--prompt-color`) |
-| Placeholder, generic name, comment | `dim` | `base03` | `barColors.dim` |
-| Matched characters | `match` | `base0A` | `barColors.hover or barColors.accent` (`--match-color`) |
-| Selected row fill | `selection` | `base02` | `barColors.accent` (`--selection-color`) |
-| Selected row text | `selection-text` | `base05` | `barColors.background` (`--selection-text-color`) |
-| Panel border | `border` | `base0D` | `appearance.focus_ring_active_color` (`--border-color`) |
-| Caret, focus ring | `accent` | `base0D` | `barColors.accent` |
-| Font | — | `fonts.sansSerif`, `sizes.popups` | `fonts.ui` |
-| Icon theme | — | none (Stylix sets no icon theme for this) | the look's `Adwaita` (`theme-look.nix`) |
+| Panel fill | `surface`, alpha from `shape.popup-opacity` (request 2) | `base01` × `opacity.popups` | `--background-color` = `barColors.background` |
+| Input and row text, prompt | `foreground` | `base05` | `--text-color`, `--prompt-color` = `barColors.foreground` |
+| Placeholder, generic name, comment | `dim` | `base03` | — |
+| Matched characters | `hover` | `base0D` | `--match-color` = `barColors.hover or barColors.accent` (`hover` defaults to `accent`) |
+| Selected row fill | `accent` | `base0D` | `--selection-color` = `barColors.accent` |
+| Selected row text | `accent-fg` | `base00` (the contract's default: `background`) | `--selection-text-color` = `barColors.background` |
+| Panel border | `focus` (request 1) | `base0D` | `--border-color` = `appearance.focus_ring_active_color` |
+| Caret, entry focus ring | `accent` | `base0D` | — |
+| Text selection in the entry | `selection`, text per [request 5](shell-apps.md#requests-to-the-contract) | `base02` | — |
+| Corners | `shape.radius` | the contract's default | — |
+| Font | `fonts.ui`, `fonts.popup-size` (request 2) | `sansSerif`, `sizes.popups` | fuzzel's own font |
+| Icon theme | `[icons] theme` | the contract's default | the look's `Adwaita` (`theme-look.nix`) |
 
-**Nix.** `programs.scootlaunch` with `enable`, `package`, `features` and `settings`
-(TOML into `scoot/launch.toml`), and `stylix.enable`. There is no unit, so there is no reload
-problem: the next open reads the new file.
+Stylix's own fuzzel target puts the selected row on `base02` with `base05` text and the match
+on `base0A`. Through the contract, a Stylix user's launcher instead uses `base0D` and `base00`,
+like every other app on that look. That is the contract's call (one vocabulary), and it
+is noted here so nobody files it as a regression.
+
+**Nix.** `programs.scootlaunch` has `enable`, `package`, `features` and `settings` (the user's
+TOML only, into `scoot/launch.toml`). There is no `stylix.enable` and no unit.
 
 **The profile switch.** `programs.scoot.desktop.launcher.daemon` widens to
 `[ "fuzzel" "scootlaunch" ]`. With `"scootlaunch"`:
 
-- `scoot-launcher` execs `scootlaunch "$@"` with **no color flags**. The look reaches the
-  config file per leaf, so the user's own `settings` win again.
+- `scoot-launcher` execs `scootlaunch "$@"` with **no color flags**. The look arrives
+  through the layer, and the user's own file wins per key again, where today fuzzel's
+  CLI flags beat it (`desktop/index.md:757-762`).
 - The pickers' `menuPackage` default and the clipboard and capture choosers call
   `scootlaunch --dmenu` with the same flags. `fuzzel-theme.nix`'s flags are no longer passed,
   but they stay accepted, so a user's own script with them keeps working.
@@ -483,18 +497,14 @@ problem: the next open reads the new file.
   `--dmenu`" (`nix/modules/launcher-home.nix:33-43`), which scootlaunch does for the
   supported set.
 
-**Tests** (`nix/scootlaunch-tests.nix`, the scootbar tests' shape):
+**Tests.**
 
-- the Stylix mapping above, including `selection` = `base02`;
-- the look mapping above, which must equal what `fuzzel-theme.nix` passes today, so the
-  swap draws the same colors;
-- the per-leaf user win for every token;
-- `opacity.popups`;
-- `--check` on every rendered file;
-- an eval pin that every flag every call site passes is in the supported set (it fails if a
-  new call site adds an unsupported flag).
-
-The stub grows `sizes.popups` and `opacity.popups`, and it states what it cannot vouch for.
+- *Nix* (`nix/scootlaunch-tests.nix`): the rendered file equals the user's `settings`;
+  fuzzel's output is byte-identical under the default; an eval pin that every flag every
+  call site passes is in the supported set (it fails if a new call site adds an unsupported
+  flag); `--check` over rendered files.
+- *Crate*: the look-layer merge, the allowlist, the grammar, and a dangling link.
+- *Goldens* per shipped look, each compared with today's fuzzel colors from the table.
 
 ## Testing and verification
 
@@ -513,7 +523,7 @@ The stub grows `sizes.popups` and `opacity.popups`, and it states what it cannot
 - **Scope**: under a user manager (the dev VM), `systemctl --user status` shows the
   launched app in `app-scootlaunch-…scope`, and the fallback path is exercised with no bus.
 - **Goldens**: the list with a query and a selection, and the password prompt, per look and
-  with a Stylix palette.
+  for a `stylix` look.
 - **Ratchet** against fuzzel, tofi, bemenu and wofi.
 - **M2**: open, type, launch on the real login per look, a dmenu round-trip from the bar's
   WiFi picker, and an AZERTY and a `us(intl)` dead-key query.
@@ -540,7 +550,7 @@ The stub grows `sizes.popups` and `opacity.popups`, and it states what it cannot
 | [`launch-dmenu`](../../docs/scootbar/backlog/launch-dmenu.md): the dmenu contract and run mode | daily-drive | `launch-ui` |
 | [`launch-agent-json`](../../docs/scootbar/backlog/launch-agent-json.md): `--run-id`, the documented schema | computer use | `launch-ui` |
 | [`launch-windows-mode`](../../docs/scootbar/backlog/launch-windows-mode.md) | daily-drive | `launch-ui` |
-| [`launch-nix`](../../docs/scootbar/backlog/launch-nix.md): module, Stylix, look, profile switch (opt-in) | daily-drive | `launch-dmenu` |
+| [`launch-nix`](../../docs/scootbar/backlog/launch-nix.md): module, the look layer, profile switch (opt-in) | daily-drive | `launch-dmenu` |
 | [`launch-packaging`](../../docs/scootbar/backlog/launch-packaging.md) | daily-drive | `launch-nix` |
 | [`launch-default-flip`](../../docs/scootbar/backlog/launch-default-flip.md) | daily-drive | `launch-packaging`, `launch-agent-json` |
 | [`layer-shell-default-output`](../../docs/backlog/core/layer-shell-default-output.md) (core) | daily-drive | none (independent) |

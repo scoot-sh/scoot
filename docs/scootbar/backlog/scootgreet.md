@@ -33,3 +33,7 @@ cage).
 ## Done when
 
 The children are resolved, or the gate in `greet-ui` says no and ReGreet stays, recorded here.
+
+## Theming
+
+Through the live-looks contract only (PR #578; [how this plan maps onto it](../../../dev/design/shell-apps.md#theme-the-live-looks-contract-stylix-and-looks)): the app reads the look layer under its own config, never Stylix, and the greeter's look is static, set by the system build.

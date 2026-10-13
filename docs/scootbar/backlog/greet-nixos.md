@@ -1,5 +1,5 @@
 ---
-title: "scootgreet: NixOS module, Stylix and look, the agreety fallback wrapper, opt-in"
+title: "scootgreet: NixOS module, the static look, the agreety fallback wrapper, opt-in"
 status: "open"
 area: "scootbar"
 priority: "low"
@@ -9,23 +9,39 @@ milestone: "M7"
 
 # scootgreet: NixOS
 
-Filed 2026-10-12 from the [scootgreet design](../../../dev/design/scootgreet.md#stylix-and-look-integration) and its
-[failure modes](../../../dev/design/scootgreet.md#failure-modes-never-strand-a-login). Serves **daily-drive**.
+Filed 2026-10-12 from the [scootgreet design](../../../dev/design/scootgreet.md#stylix-and-look-integration),
+its [failure modes](../../../dev/design/scootgreet.md#failure-modes-never-strand-a-login), and the
+[theming contract](../../../dev/design/shell-apps.md#the-greeter-is-static) (live looks, PR #578: the
+greeter is static). Serves **daily-drive**.
 
 ## What to do
 
-`programs.scootgreet` (NixOS) and `programs.scoot.greeter.daemon = "regreet" | "scootgreet"`
-(default `"regreet"`). With scootgreet: greetd's command is `scootgreet-session` (cage
-without `dbus-run-session`; on a non-zero exit, `exec agreety --cmd <default session>`),
-tmpfiles for `/var/lib/scootgreet`, `services.xserver.xkb.*` into the greeter's environment,
-the Stylix (`sizes.applications`, `image`, `cursor`) and look rungs per leaf. Each look with a
-`regreet.css` gains `greet.toml`.
+- **`programs.scootgreet`** (NixOS) and **`programs.scoot.greeter.daemon`** =
+  `"regreet" | "scootgreet"`, default `"regreet"`.
+- **With scootgreet:**
+  - greetd's command is `scootgreet-session`: cage without `dbus-run-session`, and on a
+    non-zero exit, `exec agreety --cmd <default session>`;
+  - tmpfiles create `/var/lib/scootgreet`;
+  - `services.xserver.xkb.*` go into the greeter's environment;
+  - `/etc/scoot/greet.toml` holds the user's `settings` only;
+  - `/etc/scoot/look/greet.toml` is rendered at build time from `programs.scoot.greeter.look`
+    by the contract's renderer (#578's `look-greeter` ticket; if it has not landed, this
+    ticket renders the fragment through `scoot-look` itself).
+- **The loader** refuses non-allowlisted keys, applies the grammar, and falls back to
+  built-in defaults on any fragment error.
 
 ## Acceptance
 
-`nix/scootgreet-tests.nix` pins the mapping, user wins, `--check`, the wrapper and its fallback,
-and today's ReGreet output byte-identical with the default. On the dev VM: a real login; an
-injected crash lands on agreety, never a dead VT1; `Ctrl+Alt+F2` reaches a getty.
+- `nix/scootgreet-tests.nix` pins:
+  - the rendered files;
+  - the wrapper and its fallback;
+  - XKB env and tmpfiles;
+  - today's ReGreet output byte-identical with the default.
+- On the dev VM:
+  - a real login;
+  - an injected crash lands on agreety, never a dead VT1;
+  - a broken look fragment draws the defaults and still logs in;
+  - `Ctrl+Alt+F2` reaches a getty.
 
 ## Evidence the review needs
 

@@ -22,7 +22,7 @@ object. DND mode, the history ring (in memory only), `[[rule]]` matching and act
 
 ## Acceptance
 
-Every verb tested end to end; `wait` returns on a match and times out; a reload with a
+Every verb tested end to end; `reload` answers applied or refused, as the live-looks contract's §4.2 requires; `wait` returns on a match and times out; a reload with a
 bad file keeps the running config and state; subscriber and connection caps; a rule `exec`
 flood bounded at 4 children; the JSON schema documented on the site in this PR.
 

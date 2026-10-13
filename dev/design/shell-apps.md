@@ -27,7 +27,7 @@ as of `main` at `13173a7`. Where something could not be checked, it says so.
 4. [The shared crates: `scootui` and `scoot-dbus`](#the-shared-crates-scootui-and-scoot-dbus)
 5. [Keyboard and text entry](#keyboard-and-text-entry)
 6. [Text: shaping, wrapping, emoji](#text-shaping-wrapping-emoji)
-7. [Theme tokens, Stylix and looks](#theme-tokens-stylix-and-looks)
+7. [Theme: the live-looks contract, Stylix and looks](#theme-the-live-looks-contract-stylix-and-looks)
 8. [Live look swap](#live-look-swap)
 9. [Nix modules and the desktop profile switch](#nix-modules-and-the-desktop-profile-switch)
 10. [Without Nix](#without-nix)
@@ -121,7 +121,7 @@ What exists today is in scootbar, which is binary-only (no `lib.rs`;
 | Canvas, span fills, rounded corners, premultiplied blending | yes (`src/paint.rs`) | yes | yes | yes |
 | Single-line text, glyph cache, fallback fonts, ellipsis | yes (`src/text.rs`, `src/font.rs`, `modules/ellipsis.rs`) | yes | yes | yes |
 | Multi-line wrap | tooltips only, at most 6 lines (`src/popup/wrap.rs:9,17`) | yes (body) | no | messages (PAM info text) |
-| Color tokens | six, `#rrggbb` only (`src/theme.rs:17-32`, `src/color.rs:14-47`) | + border, selection | + border, selection, match | + border, selection |
+| Color tokens | six, `#rrggbb` only (`src/theme.rs:17-32`, `src/color.rs:14-47`) | the contract's roles (+ `surface`, `focus`) | + `surface`, `focus`, `accent-fg` | + `surface`, `focus`, `accent-fg` |
 | Layer surface per output, hotplug, fractional scale | yes (`src/outputs.rs`, `src/density.rs`, `src/daemon/surfaces.rs`) | overlay, on demand | overlay, exclusive keyboard | overlay or full-screen, exclusive keyboard |
 | shm double buffer, damage | yes (`src/daemon/canvas.rs`, `SLOTS = 2` at :56) | yes | yes | yes |
 | Pointer input | yes (`src/pointer.rs`) | yes | yes | yes |
@@ -317,148 +317,158 @@ Fallback fonts: raise `MAX_FALLBACKS` from 2 to 4 in `scootui` (CJK + emoji
 + symbols + the user's), as a per-consumer constant, so the bar's bound is
 unchanged.
 
-## Theme tokens, Stylix and looks
+## Theme: the live-looks contract, Stylix and looks
 
-### One token set
+**The theming contract for all three apps is the live-looks design**, PR #578
+(`docs/live-look-swap-design`, `dev/research/live-looks-design.md` on that branch;
+unmerged as of 2026-10-12, with its token list being finalized in a review round). This
+plan adopts that contract and does not define its own theming. That contract's section 9 states what each
+app must do, and this section maps those requirements onto the apps. Section numbers
+below (§N) are that document's.
 
-All three apps read one token vocabulary, so a look or a Stylix palette maps
-once. These are the bar's six tokens (`crates/scootbar/src/theme.rs:17-32`) plus
-four that menus and cards need. Each token has exactly one source per path, because
-a config file has one key per token and the look rung sets keys one by one:
+### What the apps implement
 
-| Token | Role | Stylix slot | Why that slot (base16 styling guide: `tinted-theming/home` `styling.md`) | Look source (`nix/modules/desktop.nix` registry) |
-|---|---|---|---|---|
-| `background` | surface fill | `base00` | "Default Background" | `barColors.background` |
-| `foreground` | primary text | `base05` | "Default Foreground, Caret" | `barColors.foreground` |
-| `dim` | secondary text (app name, time, placeholder), low-urgency border | `base03` | "Comments, Invisibles"; scootbar's `dim` is `base03` (`nix/modules/scootbar.nix:479-496`), and so is Stylix's mako low-urgency border (below) | `barColors.dim` |
-| `border` | card and panel border, normal-urgency border | `base0D` | Stylix's own mako and fuzzel borders are `base0D` | `appearance.focus_ring_active_color` (what mako's `border-color` and fuzzel's `--border-color` get today) |
-| `accent` | focus ring, caret, links, primary button, highlighted choice | `base0D` | "Functions, Headings": blue. scootbar moved its Stylix accent from `base0A` to `base0D` on purpose so "highlights and window ring agree" (`scootbar.nix:102-110`) | `barColors.accent` |
-| `hover` | pointer hover | `base0D` | as the bar | `barColors.hover or barColors.accent` |
-| `urgent` | critical border, errors, Caps Lock warning | `base08` | "Red"; scootbar and Stylix's mako critical border both use `base08` | `barColors.urgent` |
-| `selection` | selected row fill | `base02` | "Selection Background", and Stylix's fuzzel `selection` | `barColors.accent` (today's fuzzel look flag, `fuzzel-theme.nix:18`) |
-| `selection-text` | text on the selected row | `base05` | Stylix's fuzzel `selection-text` | `barColors.background` (`fuzzel-theme.nix:19`) |
-| `match` | matched characters in the launcher | `base0A` | "Search Text Background", and Stylix's fuzzel `match` | `barColors.hover or barColors.accent` (`fuzzel-theme.nix:20`) |
+1. **Read the look layer.** Each app reads its fragment at
+   `$XDG_STATE_HOME/scoot/look/<file>` (§4.1). The fragment is a symlinked, atomically
+   swapped directory rendered by the `scoot-look` crate (§3.3). It is merged **under**
+   the app's own config file, per key.
+   - **Runtime precedence: the user's file per key > the active look's fragment > the
+     app's built-in default** (§5.2).
+   - An app never reads Stylix, a base16 file or the Nix look registry directly.
+   - Fragment names follow the app's own config file, as `bar.toml` does for the bar:
+     `notify.toml`, `launch.toml`, `greet.toml`. This is a naming request to the contract
+     (below).
+2. **Take the tokens from `scoot-look`'s schema**, not a local palette (§9.2). The
+   apps' element-to-role tables below use the contract's palette roles (§3.2):
+   - `background`, `surface`, `foreground`, `dim`, `accent`, `accent-fg`, `hover`, `urgent`;
+   - `border` (unfocused frames), `focus` (the active ring), `selection`;
+   - `[shape] radius`, `[fonts]`.
 
-Stylix values verified at the rev the repo's tests pin (`fb28acd59e2ac1984ec84fa496599d6b4bf3e690`,
-`scripts/scootbar-stylix-test.sh:36`). Stylix's mako target:
-normal `border-color = base0D`, low `base03`, critical `base08`,
-`text-color = base05`, `background-color = base00 + opacity.popups`,
-`progress-color = over base02`. Its fuzzel target: `background = base00 + opacity.popups`,
-`text = base05`, `placeholder = base03`, `match = base0A`,
-`selection = base02`, `selection-text = base05`, `border = base0D`.
+   When the token list is finalized, the tables are re-checked against it.
+   Anything more an app needs is **requested through the contract**, never invented
+   app-locally.
+3. **Reload.** The long-running app (scootnotify) implements `reload` on its control
+   socket: it re-reads its config and the look layer, validates both whole, keeps the last
+   good, and answers applied or refused (§4.2). `scoot look apply` drives that request in
+   its swap order, scoot, then the bars, then scootnotify (§4.3). The per-launch app
+   (scootlaunch) reads the link at every open and needs nothing else. The greeter is
+   static (§6.4; [below](#the-greeter-is-static)).
+4. **Treat a look as untrusted data.** A look carries presentation only. The allowlist is
+   a security boundary (§3.4): no commands, binds, `exec`, `on-*` or rules. Each app's
+   look-layer loader refuses non-allowlisted keys again, as defense in depth, and
+   applies the contract's string grammar (no control characters, no `=`, `[`, `]`, `"`
+   or `\`, a length cap, per the #578 review) before any look string reaches a draw path.
+   scootnotify's `[[rule]]` tables, including `exec`, and scootlaunch's `terminal` are
+   user config only and never allowlisted.
+5. **Never wedge.** A dangling or missing link means "no look layer" plus a warning at
+   startup, and a refused reload at runtime (§4.4). That is the same rule these designs
+   already set for a bad config.
 
-**The selection slot is the one deliberate split.** With Stylix, the selected row
-is `base02` with `base05` text, the base16 meaning and what every
-Stylix-themed menu does. With a look, it is the accent fill with background-colored
-text, which is what the look's fuzzel shows today. That keeps every look's current
-screenshots true and keeps Stylix users' menus consistent with their other Stylix apps. The
-alternative (accent fill everywhere) was rejected: on a base16 scheme `base0D` behind
-`base00` text can fail contrast in light schemes, and `base02` is designed for that use.
+### Stylix
+
+Stylix reaches the apps **only as the synthesized `stylix` look** (§5.2, §5.3). One
+mapping function in `scoot-look` (`import-base16`, fed by `nix/lib/look-from-stylix.nix`)
+turns the palette, fonts, sizes, opacity, cursor and image into a look. There are
+**no per-app `stylix.enable` options and no per-app slot reads**, so the earlier
+draft of this plan's user > Stylix > look ladder is withdrawn. Through that look, the
+contract's mapping gives `background = base00`, `surface = base01`,
+`foreground = base05`, `dim = border = base03`, `accent = focus = hover = base0D`,
+`urgent = base08` and `selection = base02` (§5.3). Stylix's own mako and fuzzel targets
+(checked at `fb28acd59e2ac1984ec84fa496599d6b4bf3e690`) use `base00` card backgrounds,
+`base0D` normal borders, `base03` low-urgency borders, `base08` critical borders,
+`base0A` for fuzzel's match and `base02` for fuzzel's selection. Where the contract's
+mapping differs (cards on `surface` = `base01`, the selected row on `accent`), that
+is the contract's call, so that every app on one look agrees.
+
+### Requests to the contract
+
+These are raised on PR #578, not implemented app-locally:
+
+1. **`focus` in the scootnotify and scootlaunch fragments.** §9.2 lists the bar's tokens
+   plus `surface`. The card and panel border today is the look's
+   `appearance.focus_ring_active_color` (mako's `border-color`,
+   `nix/modules/notifications-home.nix:216-232`; fuzzel's `--border-color`,
+   `nix/modules/fuzzel-theme.nix:17`). That is the contract's `focus`, which differs from
+   `accent` on two of five shipped looks (#578 review). Without `focus`, both apps' borders
+   change color on those looks the day they replace mako and fuzzel.
+2. **A popup font size and a popup opacity.** Stylix has `fonts.sizes.popups` ("notifications,
+   popups, and other overlay elements of the desktop", default `desktop`) and
+   `opacity.popups` (`stylix/fonts.nix:103-105`, `stylix/opacity.nix:18-21` at the pinned
+   rev), which its own mako and fuzzel targets use. The contract has one `fonts.size`
+   and a `shape.bar-opacity`. Proposed: `fonts.popup-size` (default `size`) and
+   `shape.popup-opacity` (default 1.0), filled from those two Stylix values by the one
+   mapping function.
+3. **The fragment names** `notify.toml`, `launch.toml` and `greet.toml`, and the
+   `[apps.scootnotify]`, `[apps.scootlaunch]` and `[apps.scootgreet]` override tables (§3.2)
+   for anything a look must set per app.
+4. **A greeter fragment** for scootgreet (§6.4 renders the greeter's CSS for ReGreet).
+   The same `render(look, "scootgreet")` produces `greet.toml`.
+5. **Text on `selection`.** The launcher's selected row uses `accent` with `accent-fg`
+   (the contract's "highlights, selection fill"). Text on `selection`, which is text
+   selection in the entry, needs a defined foreground. #578's review notes that `accent-fg`
+   defaults to `background`, which is dark on dark over `base02`.
+
+### Per-app element tables
+
+The per-app docs map each UI element to a contract role:
+[scootnotify](scootnotify.md#stylix-and-look-integration),
+[scootlaunch](scootlaunch.md#stylix-and-look-integration),
+[scootgreet](scootgreet.md#stylix-and-look-integration). Every mapping is chosen so that
+**the shipped looks draw what mako, fuzzel and ReGreet draw for them today**: background,
+foreground and dim from the bar colors, borders from `focus`, the launcher's
+selection on `accent`/`accent-fg`, and its match highlight on `hover`. The column "today" in
+each table is the evidence.
 
 ### Fonts and sizes
 
-- **Family**: Stylix `fonts.sansSerif` (`{ name, package }`), resolved to a font
-  *file* by scootbar's `fontFile` helper (`nix/modules/scootbar.nix:62-95`), which
-  is lifted into a shared Nix helper (`nix/modules/font-file.nix`) so that all four
-  modules resolve a family the same way and share its documented limits
-  (variable fonts and `.ttc` fall back to DejaVu with a warning).
-- **Size**: scootnotify and scootlaunch take `stylix.fonts.sizes.popups` ("notifications,
-  popups, and other overlay elements of the desktop", default = `desktop` = 10 pt;
-  `stylix/fonts.nix:103-105` at the pinned rev), which is exactly what Stylix's own mako and fuzzel
-  targets use. scootgreet takes `sizes.applications` (12 pt by default): the login
-  screen is read from further back and today's greeter size is 12 pt
-  (`nix/modules/nixos.nix:2456-2460`, "the measured greeter size").
-- **Conversion**: points to logical pixels with the bar's formula,
-  `px = clamp(1, 256, (pt * 4 + 1) / 3)` (`scootbar.nix:97-100`): 10 pt = 13 px,
-  12 pt = 16 px.
-- **Look**: `fonts.ui` (the bar's face, a Nerd Font Propo for glyph icons) for
-  scootnotify and scootlaunch, as the bar uses (`scootbar.nix:391-409`). For
-  scootgreet it is `fonts.sans`, the face ReGreet gets today (`nixos.nix:2456-2460`).
+- **Family**: the look's `fonts.ui`, resolved to a file (as the contract resolves the
+  bar face, §3.5) for scootnotify and scootlaunch, and `fonts.sans` for scootgreet (the
+  face ReGreet gets today, `nix/modules/nixos.nix:2456-2460`).
+- **Size**: `fonts.popup-size` once request 2 is in, else `fonts.size`, converted to
+  logical pixels by the bar's rule `px = clamp(1, 256, (pt * 4 + 1) / 3)`
+  (`nix/modules/scootbar.nix:97-100`): 10 pt = 13 px. scootgreet's own default is 12 pt
+  (16 px), today's measured greeter size. A look sets it through `[apps.scootgreet]`.
 
-### Opacity
+### The greeter is static
 
-Stylix `opacity.popups` (0.0 to 1.0, default 1.0; `stylix/opacity.nix:18-21` at
-the pinned rev) becomes scootnotify's and scootlaunch's background alpha, as
-Stylix's mako and fuzzel targets do. scootbar does not read Stylix opacity today. That
-is left alone here and noted for the bar's owner. scootgreet is opaque: the
-greeter draws over its own wallpaper, and translucency would need a
-wallpaper behind it, which it owns.
+The login screen runs before any user session, as the `greeter` user, from `/etc`
+(§6.4). It takes `programs.scoot.greeter.look`, which defaults to the declared look,
+rendered at system build time into `/etc/scoot/look/greet.toml` beside
+`/etc/scoot/greet.toml`. A live swap never touches it. On a non-Nix box,
+"apply a look to the greeter" is the explicit root-level step
+`sudo scoot look apply --greeter NAME` (#578's `look-greeter` ticket). greetd's
+`restartIfChanged = false` means a running greeter shows a new look only from its
+next start ([scootgreet.md](scootgreet.md#stylix-and-look-integration)).
 
-### Precedence (per leaf, as scootbar)
+### Example configs
 
-User > Stylix > look > plain default, implemented per leaf exactly as
-`scootbar.nix:7-28` documents. The rungs are: user at priority 100 (plain
-assignment), Stylix at `lib.mkDefault` (1000), look at `lib.mkOptionDefault`
-(1500), and the module's own plain default at `lib.mkOverride 1600` (only where the
-look also sets the same key, as the bar's `font`). Each value is set on
-`settings.colors.accent`, never on `settings.colors`, so a user's single key
-keeps the rest. Stylix presence is detected as in `scootbar.nix:40-44`
-(`config.lib ? stylix && (config.stylix.enable or false)`), with a per-app
-`programs.<app>.stylix.enable` opt-out. There is no upstream `stylix.targets.<app>`:
-that is an upstream change, and no agent opens upstream PRs (CLAUDE.md).
-
-### Look files
-
-Each look directory `docs/examples/<look>/` gains a `notify.toml` and a
-`launch.toml` beside its `bar.toml`, and the looks that ship `regreet.css`
-gain `greet.toml`. These are complete config files in each app's own format. They
-are what `install.sh --look` copies (today it copies `scoot.toml`, `bar.toml`,
-the scripts and the wallpaper, `site/public/install.sh:424-455`). The Nix
-profile does **not** apply them wholesale, exactly as it does not apply `bar.toml`'s
-geometry today. It maps the registry's roles (`barColors`, `appearance`,
-`fonts`, `isDark`, `wallpaper`) onto each app's color and font leaves.
-Geometry (radius, width, anchor) stays the app's default unless the user sets
-it. The registry needs **no new fields**. Every token above derives from fields it
-already has, so a new look keeps working with no edits for these apps.
-`look-moonrise-done.md:46-48` says looks should be "role-named colors so the
-coming registry absorbs it without rework", and this respects that.
+`docs/examples/<look>/` keeps layout only (#578 §3.4, Decision D1 moves looks to
+`looks/<name>/`). The apps' example `notify.toml` and `launch.toml` carry geometry and
+behavior with no colors. Per-app look values live in a look's `[apps.<app>]` table.
+The registry needs no new roles for these apps beyond the requests above.
 
 ## Live look swap
 
-No live-look-swap design exists in this tree or on the remote as of
-2026-10-12. There is no `docs/live-look-swap-design` branch and no open PR
-(`gh pr list`), and a grep of `docs/ dev/ nix/ site/ ROADMAP.md` finds no
-mention. The nearest mechanisms today are rebuild-time: the look is an
-eval-time enum, and units restart through `X-Restart-Triggers`
-(`nix/modules/scootbar-home.nix:49`; `notifications-home.nix:326`). So this
-plan sets a contract any swap mechanism can call, and changes nothing it
-might choose:
+Covered by the contract ([above](#theme-the-live-looks-contract-stylix-and-looks)).
+What each app adds to it:
 
-1. **Each daemon re-themes in place on `<app> msg reload`**: the same verb as
-   `scootbar msg reload` and `scoot msg reload`. A reload re-reads the config
-   file, re-maps fonts (as scootbar's reload does, `crates/scootbar/src/daemon/respond.rs:259-286`),
-   rebuilds the theme, and repaints what is on screen. State survives:
-   notifications on screen, history, DND, ids. A file that fails to parse
-   keeps the running config and answers with the error, as scootbar does. Cost
-   target: under 5 ms plus a font load. That is cheap enough to call for every
-   look change, so a swap tool can call all three without staging.
-2. **No SIGHUP.** Catching it needs `unsafe` signal registration, which
-   `forbid(unsafe_code)` refuses. This is scootbar's reason, recorded at
-   `crates/scootbar/src/daemon/mod.rs:32-34`.
-3. **No file watch by default.** An inotify watch on the config costs a
-   source and turns a half-written file into a reload. An explicit verb is what scootbar chose,
-   and these apps stay consistent with it. A swap tool that wants a
-   watch can run `inotifywait … && scootnotify msg reload`.
-4. **scootlaunch needs no signal.** It is not resident: every open reads its config,
-   so the next open after a swap draws the new look.
-5. **scootgreet is out of scope for live swap.** It runs before any user session,
-   as the `greeter` user, from `/etc`. "Apply the current look to the login screen"
-   is a root-level rebuild step ([scootgreet.md](scootgreet.md#stylix-and-look-integration)).
-6. **Under Nix, a config change reloads scootnotify rather than restarting it.** A
-   restart throws away what is on screen and the history. Home Manager supports
-   `X-Reload-Triggers` (verified in `modules/systemd.nix:140` at
-   `efa3ccb4c3cc90d832eab232976379058fa75aa3`, the rev `scripts/scootbar-stylix-test.sh:35`
-   pins, and on master) with `ExecReload = scootnotify msg reload`. On NixOS the unit is a *user* unit
-   (as `scootbar-nixos.nix` declares the bar's, with `restartTriggers`), and what
-   `switch-to-configuration` does to running user units on a config change is
-   **not verified here**. `notify-nix` checks it at the pinned nixpkgs before
-   choosing `reloadTriggers` (mind the caveat at `nix/modules/nixos.nix:2398-2402`:
-   nixpkgs warns on every rebuild when a unit sets both `reloadIfChanged` and
-   `reloadTriggers`) or an activation step that runs `scootnotify msg reload`. scootbar keeps its restart, since it holds no state worth keeping.
-
-When the live-look-swap design lands, it chooses the trigger. This contract only
-promises that the apps re-theme on `msg reload` without a restart and without
-losing state.
+- **scootnotify** re-themes in place on `msg reload`. Cards on screen, history, DND and
+  ids survive, and the cost target is under 5 ms plus a font load. Under Nix its unit
+  never restarts for a config or look change: a restart throws away what is on screen.
+  Home Manager has `X-Reload-Triggers` (`modules/systemd.nix:140` at
+  `efa3ccb4c3cc90d832eab232976379058fa75aa3`, the rev
+  `scripts/scootbar-stylix-test.sh:35` pins), with `ExecReload = scootnotify msg reload`.
+  On NixOS the unit is a *user* unit, and what `switch-to-configuration` does to it is
+  **not verified here**. `notify-nix` checks it at the pinned nixpkgs (mind
+  `nix/modules/nixos.nix:2398-2402`: nixpkgs warns when a unit sets both
+  `reloadIfChanged` and `reloadTriggers`). The contract's `scoot look sync` activation
+  step drives reloads for a look change anyway (§6.2).
+- **No SIGHUP and no file watch**: the contract's §4.2 reasons, and scootbar's
+  (`crates/scootbar/src/daemon/mod.rs:32-34`).
+- **scootlaunch**: the next open reads the new link.
+- **Optional hooks** from the contract (§7.3): scootnotify may show a "Look: NAME" card on
+  scoot's `look` event, and scootlaunch's dmenu mode serves a `Look:` picker
+  (`scoot look list | scootlaunch --dmenu | xargs scoot look apply`).
 
 ## Nix modules and the desktop profile switch
 
@@ -466,8 +476,9 @@ Each app follows the scootbar module layout (`nix/modules/scootbar.nix` plus
 `scootbar-home.nix` plus `scootbar-nixos.nix`):
 
 - `nix/modules/<app>.nix`: options (`enable`, `package`, `features`, free-form
-  `settings` typed as TOML, `stylix.enable`, `systemd.enable`), the Stylix and look
-  rungs, and the rendered `configFile`. It reads the scoot desktop profile
+  `settings` typed as TOML, `systemd.enable`) and the rendered `configFile`, which
+  holds **only what the user wrote** (contract §5.2: no look or Stylix value is merged
+  into the file; those arrive at runtime through the look layer). It reads the scoot desktop profile
   across the module boundary only by `config.programs.scoot or { }`, as
   `scootbar.nix:116-125` does, so it evaluates without the scoot module.
 - `nix/modules/<app>-home.nix` and `<app>-nixos.nix`: file placement and units.
@@ -520,8 +531,8 @@ the ratchet's waivers do):
   scootlaunch ships no unit. scootgreet ships a `greetd` config snippet, not a
   unit.
 - `site/public/install.sh` gains `--notify` and `--launch` (opt-in, mirroring how
-  `--no-bar` is opt-out for the bar) and copies the look's `notify.toml` and
-  `launch.toml` with `--look`. It never installs scootgreet: replacing a login
+  `--no-bar` is opt-out for the bar). A look reaches them through `scoot look apply`,
+  like everything else (contract §6.5). It never installs scootgreet: replacing a login
   screen from a curl pipe is the kind of hard-to-reverse change CLAUDE.md asks
   explicit confirmation for. The greeter's install docs are a manual
   `/etc/greetd/config.toml` edit, with the VT-switch recovery path written next to it.
@@ -693,6 +704,13 @@ decided, with the evidence beside it.
 9. **scoot as the greeter's host** (a locked-down kiosk mode in scoot) instead of
    cage. *Recommend:* cage hosts scootgreet first, and the kiosk mode is a later,
    opt-in step gated on its spike ([scootgreet.md](scootgreet.md#which-compositor-hosts-it)).
+10. **Theming goes through the live-looks contract (PR #578, its D5 and D9).** *Recommend:*
+    yes. The apps read only the look layer, and Stylix arrives as the `stylix` look. This
+    plan is written against that contract. If D5 is decided the other way (Stylix stays
+    an evaluation-time layer), the fallback is scootbar's per-leaf ladder
+    (`nix/modules/scootbar.nix:7-28`) in each app's Nix module, and the `*-nix` tickets
+    say so. The [requests to the contract](#requests-to-the-contract) need the contract
+    owner's answer either way.
 
 ## Rejected alternatives
 
@@ -708,5 +726,9 @@ decided, with the evidence beside it.
   0BSD) does not admit. `fuzzy-matcher` (MIT) is small but unmaintained since
   0.3.7, so it is hand-rolled ([scootlaunch.md](scootlaunch.md#matching-and-ranking)).
 - **A config watch (inotify) as the reload trigger.** See [Live look swap](#live-look-swap).
+- **A per-app Stylix mapping and `programs.<app>.stylix.enable`** (this plan's first
+  draft, modeled on scootbar's). The contract shows why it cannot coexist with live
+  swapping: a Stylix value baked into the app's file sits above the look layer, so a
+  swap could never change it (#578 §5.1).
 - **Moving scootbg onto `scootui` now.** Its release gate makes that its own
   ticket, later.

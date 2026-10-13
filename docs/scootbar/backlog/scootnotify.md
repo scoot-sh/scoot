@@ -62,3 +62,7 @@ Shared prerequisites: [scootui-extract-draw](scootui-extract-draw.md),
 Each milestone's table is published here, and kept rather than overwritten, until the app gets
 its own backlog. The [design's budgets](../../../dev/design/scootnotify.md#budgets) are the first targets, and
 lean mako, dunst and swaync are the competitors.
+
+## Theming
+
+Through the live-looks contract only (PR #578; [how this plan maps onto it](../../../dev/design/shell-apps.md#theme-the-live-looks-contract-stylix-and-looks)): the app reads the look layer under its own config, never Stylix.

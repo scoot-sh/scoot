@@ -1,5 +1,5 @@
 ---
-title: "scootlaunch: Nix module, Stylix and look rungs, the opt-in launcher and picker switch"
+title: "scootlaunch: Nix module, the look layer, the opt-in launcher and picker switch"
 status: "open"
 area: "scootbar"
 priority: "low"
@@ -7,25 +7,35 @@ blocked: "launch-dmenu"
 milestone: "M7"
 ---
 
-# scootlaunch: Nix and Stylix
+# scootlaunch: Nix and the look layer
 
-Filed 2026-10-12 from the [scootlaunch design](../../../dev/design/scootlaunch.md#stylix-and-look-integration). Serves
-**daily-drive**.
+Filed 2026-10-12 from the [scootlaunch design](../../../dev/design/scootlaunch.md#stylix-and-look-integration)
+and the [theming contract](../../../dev/design/shell-apps.md#theme-the-live-looks-contract-stylix-and-looks)
+(live looks, PR #578). Serves **daily-drive**.
 
 ## What to do
 
-`programs.scootlaunch` (home-manager and NixOS), the Stylix mapping (`selection` = `base02`,
-`match` = `base0A`, `sansSerif`, `sizes.popups`, `opacity.popups`) and the look mapping equal to
-what `fuzzel-theme.nix` passes today, per leaf. `desktop.launcher.daemon` widens to
-`"scootlaunch"` (default stays `"fuzzel"`): `scoot-launcher` execs `scootlaunch "$@"` without
-color flags, the pickers' and choosers' menu becomes `scootlaunch --dmenu`. Each look gains
-`launch.toml`.
+- **`programs.scootlaunch`** (home-manager and NixOS). The rendered `launch.toml` holds
+  only the user's `settings`.
+- **The look-layer loader** in the crate, read at every open: `look/launch.toml` under the
+  user's file, the allowlist and the grammar.
+- **`desktop.launcher.daemon`** widens to `"scootlaunch"`, and the default stays
+  `"fuzzel"`. With it, `scoot-launcher` execs `scootlaunch "$@"` without color flags, and the
+  pickers' and choosers' menu becomes `scootlaunch --dmenu`.
+
+Stylix reaches it only as the `stylix` look. The fallback if the contract's D5 goes the
+other way is scootbar's ladder.
 
 ## Acceptance
 
-`nix/scootlaunch-tests.nix` pins the mappings, user wins, `--check`, the fuzzel output
-byte-identical with the default, and an eval pin that every flag every call site passes is in
-the supported set. An M2 real-login proof per look.
+- `nix/scootlaunch-tests.nix` pins:
+  - the rendered file equals the user's `settings`;
+  - fuzzel's output is byte-identical under the default;
+  - every flag every call site passes is in the supported set (it fails when a new
+    call site adds an unsupported one);
+  - `--check`.
+- Goldens per shipped look match today's fuzzel colors per the design's table.
+- An M2 real-login proof per look.
 
 ## Evidence the review needs
 
