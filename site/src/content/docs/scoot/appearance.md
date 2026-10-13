@@ -17,7 +17,7 @@ live by `scoot msg reload`.
 | `focus_ring_inactive_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#595961` (muted gray) | Ring color around every other window. |
 | `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black) | Cleared behind all window content — the frame clear color; what shows wherever [wallpaper](../scootbg/index.md) shows nothing. |
 | `corner_radius` | integer (pixels) | `0` (square) | Window corner radius in logical pixels. Rounds window content and ring together; clamped per window to half its smaller dimension. Costs a little per frame when non-zero. Popups stay square. |
-| `cursor_size` | integer (pixels) | `16` | Both dimensions of the built-in pointer cursor bitmaps (clamped `4..=256`; drawn only under `--tty`). Also picks which size is taken out of a real cursor theme. The fallback shapes are a 22-shape anti-aliased family drawn for this compositor (not theme copies) and upscale cleanly to fractional output scales — see [the fallback family](#the-fallback-cursor-family) below. |
+| `cursor_size` | integer (pixels) | `16` | The **logical** size of the built-in pointer cursor, both dimensions (clamped `4..=256`; drawn only under `--tty`). The bitmap is rasterised at `round(cursor_size × output scale)` physical pixels -- 16 at 1x, 24 at 1.5x, 32 at 2x -- so the on-screen size never changes but a high-DPI output samples native art 1:1 instead of a stretched bitmap. A real cursor theme likewise contributes the image nearest the physical size; `XCURSOR_SIZE` still exports the logical size. The fallback shapes are a 22-shape anti-aliased family drawn for this compositor (not theme copies) -- see [the fallback family](#the-fallback-cursor-family) below. |
 | `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#1a1a1a` (near-black) | Body fill color of the built-in pointer cursor. The rim auto-contrasts the body (dark body → white rim, light body → black rim, both at the fill's own alpha), so setting this to white reproduces the old white-pointer look. A translucent fill genuinely composites (body, rim and accent all follow its alpha). The arrow alone carries a soft drop shadow at 28% of that alpha. No effect inside a real theme's artwork. |
 | `cursor_accent` | `"#rrggbb"` / `"#rrggbbaa"` / `"none"` | `#e57f29` (ginger orange) | The small ginger mark each fallback shape carries: the arrow's tail hint, the paw badge, the resize bars' centre line, the "not allowed" slash, and friends. `"none"` (any case) draws no mark; an unset or empty value keeps the default. Follows the body's alpha, so a translucent body never wears an opaque mark. No effect inside a real theme's artwork. |
 | `cursor_theme` | string | unset | Which installed xcursor theme named cursor shapes are drawn from. Unset follows `$XCURSOR_THEME`, then `default`. A name matching nothing installed is not an error: named shapes come from scoot's own drawn set. |
@@ -57,6 +57,13 @@ original vector geometry drawn by the compositor itself — no theme's
 pixels, embedded or copied. The concept art the family was designed
 against was generated with ChatGPT by the project owner; the shipped
 shapes are original geometry, never traced or pixel-copied.
+
+On a high-DPI output the family is rasterised natively at the physical
+size (`round(cursor_size × scale)` device pixels) from the same 24-unit
+design grid, so edges stay sharp where a stretched logical bitmap would
+go soft. Mixed-DPI sessions keep one bitmap set per output scale
+(bounded, evicted when no output uses a scale); screenshots and
+captures draw the same per-scale pixels the frame shows.
 
 ![The fallback cursor family](../../../assets/cursor-family.png)
 

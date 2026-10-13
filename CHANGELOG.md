@@ -20,6 +20,20 @@ scoot has not cut a numbered release yet; entries are dated.
   "#ffffff"` restores the old white-pointer look (with a black rim).
   See [Appearance](site/src/content/docs/scoot/appearance.md#the-fallback-cursor-family).
 
+### Unreleased — sharp cursors on high-DPI outputs (behavior change)
+
+- **The built-in cursor now rasterises per output scale instead of
+  stretching one bitmap.** `appearance.cursor_size` is the logical size
+  (default 16, unchanged on screen); the bitmap is drawn at
+  `round(cursor_size × output scale)` physical pixels, so a 2x output
+  shows native 32px art with a matching hotspot rather than a
+  bilinear-stretched 16px image. Real cursor themes contribute the image
+  nearest the physical size. One bitmap set per output scale is kept
+  (bounded, built on output add/scale change and reload, never per
+  frame); mixed-DPI sessions draw each output's own set. The family
+  itself is now authored on a 24-unit design grid (same pixels at 16px
+  except a slightly broader paw-print toe spread).
+
 ### Unreleased — renderer names are `cpu` / `gpu` / `auto` (breaking)
 
 - **`--renderer` now takes `cpu`, `gpu` or `auto` — the old `pixman`
