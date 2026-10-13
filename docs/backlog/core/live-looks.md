@@ -38,7 +38,8 @@ A source look is a directory with a `look.toml` of tokens; one pure crate,
 fragments into a separate rendered look. A per-session state
 (`<state>/look.json` plus a link to a rendered look) selects the active one;
 scoot and scootbar merge that layer under the user's own file on raw keys,
-with `[wallpaper]` and a few other units merged whole. `scoot look apply`
+per key, with `[wallpaper]` as the one whole unit and a derived key
+following the layer that supplied its base. `scoot look apply`
 renders and validates, records and repoints, then drives each app's
 control-socket `reload` *scoped to the look* (the user's pending edits are
 never applied by a swap), in order, under one lock, rolling back on a
@@ -54,11 +55,13 @@ stated rule.
 | [`look-format`](look-format.md) | high | both | |
 | [`look-shipped`](look-shipped.md) | high | both | `look-format` |
 | [`look-layer-scoot`](look-layer-scoot.md) | high | both | `look-format` |
+| [`look-scoped-reload`](look-scoped-reload.md) | high | both | `look-layer-scoot` |
+| [`look-session-state`](look-session-state.md) | medium | computer use | `look-layer-scoot` |
 | [`look-layer-scootbar`](../../scootbar/backlog/look-layer-scootbar.md) | high | daily-drive | `look-format` |
 | [`scootbar-style-reload`](../../scootbar/backlog/scootbar-style-reload.md) | medium | daily-drive | |
-| [`look-apply-cli`](look-apply-cli.md) | high | both | `look-shipped`, `look-layer-scoot`, `look-layer-scootbar` |
+| [`look-apply-cli`](look-apply-cli.md) | high | both | `look-shipped`, `look-scoped-reload`, `look-layer-scootbar` |
 | [`look-cycle-preview`](look-cycle-preview.md) | medium | daily-drive | `look-apply-cli` |
-| [`look-ipc`](../ipc/look-ipc.md) | medium | computer use | `look-apply-cli` |
+| [`look-ipc`](../ipc/look-ipc.md) | medium | computer use | `look-apply-cli`, `look-session-state` |
 | [`look-golden-screenshots`](../testing/look-golden-screenshots.md) | medium | computer use | `look-ipc` |
 | [`look-nix-catalog`](../packaging/look-nix-catalog.md) | high | daily-drive | `look-apply-cli` |
 | [`look-import-base16`](look-import-base16.md) | medium | daily-drive | `look-format` |
@@ -76,8 +79,9 @@ stated rule.
 | [`look-share`](look-share.md) (later) | low | daily-drive | `look-install` |
 | [`look-auto-switch`](look-auto-switch.md) (later) | low | daily-drive | `look-toolkit-live` |
 
-**The minimum slice** is `look-format` → `look-shipped` → both look layers →
-`look-apply-cli`: non-Nix, compositor, bar and wallpaper. It cannot be
+**The minimum slice** is `look-format` → `look-shipped`, `look-layer-scoot`
+→ `look-scoped-reload`, and `look-layer-scootbar` → `look-apply-cli`:
+non-Nix, compositor, bar and wallpaper. It cannot be
 dogfooded on a home-manager machine as is, because Nix writes look and
 Stylix values into the user's own files and those shadow every look; the
 design doc's section 10 gives the dogfood settings, and `look-apply-cli`

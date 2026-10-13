@@ -212,15 +212,24 @@ Where each lives (both paths, Nix and not, produce the same two trees):
 | Shipped with scoot | `<prefix>/share/scoot/looks/<name>/` (from `looks/` in the repo, D1) | built on demand into the user's cache, or at Nix build time |
 | home-manager | `~/.local/share/scoot/looks/<name>` → the source in the store (read-only links) | `~/.local/share/scoot/rendered/<name>` → the rendered store path |
 | NixOS module only | `/run/current-system/sw/share/scoot/looks/<name>` | `/run/current-system/sw/share/scoot/rendered/<name>` |
-| `scoot look install`, `new`, `import-base16` | `$XDG_DATA_HOME/scoot/user-looks/<name>/` (writable, never under a home-manager link) | `$XDG_CACHE_HOME/scoot/rendered/<name>-<hash>/` |
+| `scoot look new`, `import-base16`, `save` (the user's own) | `$XDG_DATA_HOME/scoot/user-looks/<name>/` (writable, never under a home-manager link) | `$XDG_CACHE_HOME/scoot/rendered/<name>-<hash>/` |
+| `scoot look install` (someone else's) | `$XDG_DATA_HOME/scoot/installed-looks/<name>/` | the same cache |
 
 The catalog is the union of the source directories, searched in a fixed
-order (user-looks, then home-manager, then system, then shipped). A name
-that exists in two places is not shadowed silently: `extends = "moonrise"`
-and `apply moonrise` resolve to the *shipped or declared* one, and a
-user-installed look may not take a shipped or declared name at all
-(`install` refuses it; §8.3, trust by origin). `extends` always names a
-source look; a rendered look has no `extends`.
+order (user-looks, installed-looks, home-manager, system, shipped).
+**Origin decides trust, and the directory records the origin:**
+
+- *Shipped, declared (Nix) and user-authored* looks (`new`, `import-base16`,
+  `save`) are the user's own choices: any of them can be a base for
+  `extends` or `new --from`, so a look made with `look new` can be extended
+  by the next one.
+- *Installed* looks (someone else's) can be applied but never extended, and
+  may not take the name of any look of the first kind (`install` refuses
+  it; §8.3).
+- A name that exists twice among the first kind resolves to the earliest in
+  the search order, and `scoot look list` marks the shadowed one.
+
+`extends` always names a source look; a rendered look has no `extends`.
 
 ### 3.2 `look.toml`
 
@@ -284,8 +293,12 @@ ring-inactive-width = 2               # default = ring-width
 [cursor]
 theme = "Vanilla-DMZ"
 size = 24
-accent = "#FF9A49"                    # the fallback cursor's accent (#572's cursor_accent); default = focus
+accent = "#FF9A49"                    # #rrggbb or "none"; the drawn fallback cursor's accent (#572's cursor_accent); default = focus
 # body: unset by default; the fallback cursor keeps its own near-black body
+# accent and body tint only scoot's *drawn fallback* cursor, which shows only
+# when no xcursor theme resolves; with `theme` set and installed (every
+# shipped look sets Vanilla-DMZ) they are invisible, and a themed cursor
+# is never tinted. "none" disables the accent, as #572's `cursor_accent`.
 
 [wallpaper]                           # one unit: never merged per key (§4.3)
 image = "wallpaper.png"               # inside the look dir; or `color = "#…"`, never both
@@ -435,10 +448,22 @@ Strict, all-or-nothing, the same code in CI, `install`, `watch`, `apply`
 and the Nix build. Pure checks (crate):
 
 - `schema` known; required roles present; every color is exactly
-  `#[0-9A-Fa-f]{6}` (no per-field fallback, unlike `config.rs:194-206`).
+  `#[0-9A-Fa-f]{6}` (no per-field fallback, unlike `config.rs:194-206`),
+  except `[cursor] accent`, which also takes `"none"`.
 - **Names** (`name`, `extends`): `[a-z0-9-]{1,32}`.
-- **Identifiers** (font families, cursor and icon theme names): printable
-  ASCII letters, digits, space and `-_.+` only, 1 to 64 bytes.
+- **Identifiers** (font families, cursor and icon theme names): ASCII
+  letters, digits, space and `-_.+` only, 1 to 64 bytes, starting with a
+  letter or digit (so never `.`, `..` or a hidden name: a theme named `..`
+  would resolve to the parent of `~/.icons`). ASCII-only is deliberate in
+  v1: a font family whose name is not Latin script is not expressible, and
+  a look that needs one carries the file in `[fonts.files]`.
+- **Nix attribute paths** (`[fonts.nix]`): one to eight segments joined by
+  `.`, each `[A-Za-z_][A-Za-z0-9_'-]{0,63}`; resolved only with
+  `lib.attrByPath` against `pkgs`, never evaluated as an expression, and a
+  missing attribute is an evaluation error naming it.
+- **Wallpaper URLs** (`wallpaper.image` in its URL form, §8.3): `https://`
+  only, at most 2048 bytes, printable ASCII without space, `"`, `'`, `\`,
+  `<`, `>` or a backtick, and a required `sha256` of exactly 64 hex digits.
 - **Display text** (`title`, `description`, `credits`, `license`): UTF-8
   without control characters (C0, DEL, C1), no `=`, `[`, `]`, `"`, `\`,
   at most 200 bytes (`title` 64). Display text is never written into an
@@ -559,22 +584,39 @@ user. Without a scope, an agent's `scoot msg look-apply` inside a headless
 test session would repoint the user's real desktop, which would show it at
 its next reload. So:
 
-- scoot exports `SCOOT_LOOK_STATE` to every child it spawns (as it already
-  exports the live `XCURSOR_*`, `state.rs:1850-1851`), so the bar, terminals
-  and anything they start act on the session they belong to.
-- A `--tty` session uses the user's state (`$XDG_STATE_HOME/scoot`): the
-  desktop's choice persists across logins.
-- A `--headless` or `--nested` session uses a private state under
-  `$XDG_RUNTIME_DIR/scoot-look-<display>/`, seeded at startup by copying
-  the user's `look.json` (and re-rendering its link there). Its swaps never
-  touch the user's choice. An agent test that wants full isolation still
+- **`--tty` and `--nested` sessions use the user's state**
+  (`$XDG_STATE_HOME/scoot`, deterministic, no environment needed), so the
+  choice persists across logins. `--nested` is a daily-drive path, not a
+  test path: it is the webtop deployment (`exec scoot --nested -- …`,
+  `site/src/content/docs/agents/webtop.md:17`) and the "try it first" path
+  `CLAUDE.md` names, and a private state there would lose every swap at the
+  next session restart.
+- **Only `--headless` is private by default**, under
+  `$XDG_RUNTIME_DIR/scoot-look-<display>/`, seeded at startup by copying the
+  user's `look.json` (and rendering its link there). Its swaps never touch
+  the user's choice. Any backend can opt in with `--private-look` (the nested
+  preview of §8.1 uses it); an agent test that wants full isolation still
   sets its own `XDG_STATE_HOME` and `XDG_RUNTIME_DIR`
   (`look-golden-screenshots` requires it).
+- **How the state path reaches processes:** by default it is the
+  deterministic user path, which every process computes the same way, with
+  no environment variable. Only a private session exports
+  `SCOOT_LOOK_STATE`, to its direct children (as scoot already exports the
+  live `XCURSOR_*`, `state.rs:1850-1851`). systemd user units (the bar's,
+  mako's) never see it: `resources/scoot-session` imports the launcher's own
+  environment before the compositor starts (`--all`, 499-506), which a
+  variable scoot sets only for its children is not part of, and after it
+  starts only `WAYLAND_DISPLAY`, `XDG_CURRENT_DESKTOP` and `XDG_SESSION_TYPE`
+  (597-603). So units always act on the user state: correct for `--tty` and `--nested`, which use it, and
+  harmless for private sessions, which are test and preview sessions that
+  start no user units. A private session that did start units would have
+  them act on the user state; that is a documented limitation, not a path
+  any shipped launcher takes.
 - `scoot look` run outside any session (an ssh shell) acts on the user
   state and reloads the session on the default socket only; `--state` and
   `$SCOOT_SOCKET` select another.
 
-### 4.3 Precedence, merged on raw keys, with units
+### 4.3 Precedence, merged on raw keys
 
 At runtime, per app: **flags > the user's own file > the active look's
 fragment > the app's built-in default.** The flags rung is scootbar's
@@ -582,20 +624,41 @@ fragment > the app's built-in default.** The flags rung is scootbar's
 (`crates/scootbar/src/daemon/respond.rs:184-189`; nothing in the Nix unit
 passes them).
 
-The merge happens on **raw TOML keys, before any derivation**, with these
-**units** that merge whole (the user's file setting any key of a unit takes
-the whole unit from the user, the look's whole unit otherwise):
+The merge happens on **raw TOML keys, before any derivation**, by three
+rules:
 
-| Unit | Why it cannot merge per key |
-|---|---|
-| `[wallpaper]`, including its per-output and per-workspace tables (`wallpaper/section.rs`) | `image` and `color` are mutually exclusive: a user `color` merged with a look `image` gives both, which scootbg refuses, and the session falls back to `background_color` (`docs/backlog/resolved/stylix-wallpaper-color-trap-done.md:17-24`). The same trap the Stylix fix closed would come back for every look with an image (4 of 5). |
-| bar `accent` + `hover` | scootbar derives `hover = accent` when `hover` is unset (`crates/scootbar/src/config.rs:1692`): a user `accent` with the look's `hover` would pair the user's highlight with the look's hover tint. |
-| ring `focus_ring_width` + `focus_ring_inactive_width` | the inactive width follows the active one when unset (`config.rs:209-210`). |
-| `cursor_theme` + `cursor_size` + `cursor_accent` | one rebuild serves all three (`reload.rs:411-433`). |
+1. **Every key merges per key**: the user's key if their file has it, else
+   the look's, else the app default. A user who sets only `cursor_size` (a
+   common accessibility setting) keeps the look's cursor theme and accent;
+   a user who sets only `hover` keeps the look's `accent`.
+2. **`[wallpaper]` is the one unit**, including its per-output and
+   per-workspace tables (`wallpaper/section.rs`): if the user's file has any
+   `[wallpaper]` key, the whole section is the user's, else the whole
+   section is the look's. Its keys are mutually exclusive (`image` or
+   `color`): a user `color` merged per key with a look `image` gives both,
+   which scootbg refuses, and the session falls back to `background_color`
+   (`docs/backlog/resolved/stylix-wallpaper-color-trap-done.md:17-24`), for
+   every look with an image (4 of 5).
+3. **A derived key follows the layer that supplied its base.** Where an app
+   derives one key from another when the first is unset, the merge must not
+   pair a base from one layer with a derived value from the other. The
+   pairs, published in `scoot-look` beside the allowlists:
 
-Derived values are computed after the merge, by each app as today (the
-wallpaper `fill` default, the ring re-clamp against the gap in
-`reload.rs:456-468`).
+   | App | Derived key | Base | Rule |
+   |---|---|---|---|
+   | scootbar | `colors.hover` | `colors.accent` (`crates/scootbar/src/config.rs:1692`) | the user's `hover` if set; else, if the user set `accent`, the look's `hover` is dropped so the bar derives hover from the user's accent; else the look's `hover` |
+   | scoot | `appearance.focus_ring_inactive_width` | `appearance.focus_ring_width` (`config.rs:209-210`) | the user's inactive width if set; else, if the user set the active width, the look's inactive width is dropped so it follows the user's; else the look's |
+
+   Values a look derives *inside itself* at render time (`cursor.accent`
+   defaulting to `focus`, `wallpaper.fill` to `background`) are plain keys of
+   its fragment by then and merge per key: a user who sets the ring color
+   keeps the look's cursor accent.
+
+Derived values are then computed by each app as today (the wallpaper `fill`
+default for a user section, the ring re-clamp against the gap in
+`reload.rs:456-468`). That one rebuild serves the whole cursor triple
+(`reload.rs:411-433`) is a fact about applying, not merging: the cursor keys
+merge per key and the rebuild runs once on the merged result.
 
 **A bad value in the user's file falls back to the look's value, not the
 compositor default,** and is reported: today a bad user color becomes
@@ -1152,8 +1215,10 @@ refused, shadowed }` and `EventKind::Look`.
 
 A look carries its wallpaper (`[wallpaper]`, one unit) and its cursor
 (`[cursor]` theme, size, accent). Both flow through the compositor's reload
-(`reload.rs:411-455`, `125-133`). A user who sets any `[wallpaper]` key, or
-any key of the cursor unit, keeps their whole unit across every swap (§4.3).
+(`reload.rs:411-455`, `125-133`). A user who sets any `[wallpaper]` key
+keeps their whole wallpaper section across every swap; the cursor keys merge
+per key, so a user `cursor_size` alone keeps the look's theme and accent
+(§4.3).
 
 The cursor tokens follow PR #572 (open at the time of writing): there,
 `cursor_color` becomes the near-black *body* (`#1a1a1a`) and a new
@@ -1186,17 +1251,17 @@ scootbg already supports per-output wallpapers
    `sighup.rs:5-7`'s mid-keystroke objection); an invalid save is refused
    loudly and the last good look stays.
 3. `scoot look apply moonrise --for 20` previews another look and reverts.
-4. A nested preview (`scoot --nested` has its own private state, §4.2)
-   tries a look without touching the running desktop.
+4. A nested preview (`scoot --nested --private-look`, §4.2) tries a look
+   without touching the running desktop.
 
 ### 8.2 Inheritance
 
 `extends` names a source look. Every token is inherited; `[apps.*]` merges
 per key; the `[wallpaper]` unit, `preview`, `fonts.files` and `apps/`
 leaves are inherited unless the child names its own. Resolution is in the
-crate, cycle-checked and depth-limited (§3.5). `extends` resolves to the
-shipped or declared look of that name, never to a user-installed one
-(§3.1).
+crate, cycle-checked and depth-limited (§3.5). `extends` resolves to a
+shipped, declared or user-authored look of that name (so looks made with
+`new` chain), never to an installed one (§3.1).
 
 ### 8.3 The trust boundary
 
@@ -1207,12 +1272,22 @@ top of that, for anything arriving from elsewhere:
   FIFO or socket anywhere in the source refuses the install (a symlink to
   `~/.ssh/id_ed25519` would otherwise land in the catalog and later in
   `export`). Every referenced path is resolved and must stay inside the look
-  directory. File count and total size are capped.
+  directory. File count and total size are capped. **Only the file kinds a
+  look uses are copied**, by name and place, and anything else refuses the
+  install by name (so a look directory cannot carry, say, a `.so` into the
+  catalog): `look.toml`; `preview.png`; wallpaper images ending in `.png`,
+  `.jpg`, `.jpeg`, `.webp` or `.gif` (scootbg's decoders,
+  `crates/scootbg/Cargo.toml:56-60`); `fonts/*.ttf` and `fonts/*.otf`;
+  `apps/foot.ini`, `apps/helix.toml`, `apps/btop.theme`,
+  `apps/starship.toml`, `apps/regreet.css`; `LICENSE*`, `COPYING*`,
+  `README.md`.
 - **Images:** byte and pixel caps checked from the header before decoding
   (scootbg's limits), then a full decode in `scootbg check-image`.
-- **Trust comes from origin, not name:** an installed look may not take a
-  shipped or declared name, and `extends` never resolves to an installed
-  look (§3.1, §8.2). `apps/` static leaves (foot, starship, Helix and btop
+- **Trust comes from origin, not name:** an installed look lands in
+  `installed-looks/`, may not take the name of a shipped, declared or
+  user-authored look, and `extends` never resolves to it (§3.1, §8.2); a
+  look the user made with `new`, `import-base16` or `save` is the user's
+  own and can be extended. `apps/` static leaves (foot, starship, Helix and btop
   configs can run commands) are dropped from an installed look unless
   `--trust` is given, and `--trust` prints them first. `license` is
   required.
@@ -1234,7 +1309,8 @@ top of that, for anything arriving from elsewhere:
   `XDG_STATE_HOME`/`XDG_RUNTIME_DIR` (§4.2).
 - **Swap tests:** atomicity, refuse-and-keep, rollback, scope (a pending
   user edit is not applied by a swap; a pending `[autostart]` entry does not
-  spawn), the wallpaper unit, shadowed and invalid-user keys, the lock and
+  spawn), the wallpaper unit, per-key cursor keys, both derived pairs in
+  both directions, shadowed and invalid-user keys, the lock and
   the `--for` generation check, and each corner of §6.3.
 - **Value grammar tests** per renderer: a newline, `=`, `[` and a quote in
   every string token refused by the grammar, and quoted correctly by the
@@ -1312,9 +1388,9 @@ apps always; only paths an upstream module writes stay that module's.
 ## 10. Order of implementation
 
 **The minimum slice** proves the architecture end to end on a non-Nix box
-with no Nix change: `look-format` → `look-shipped` → `look-layer-scoot` and
-`look-layer-scootbar` → `look-apply-cli` (apply, list, current, validate,
-with the lock, rollback and shadowed keys).
+with no Nix change: `look-format` → `look-shipped`, `look-layer-scoot` →
+`look-scoped-reload`, and `look-layer-scootbar` → `look-apply-cli` (apply,
+list, current, validate, with the lock, rollback and shadowed keys).
 
 **Dogfooding before `look-nix-catalog`:** on a home-manager machine the
 eval-time merges write look and Stylix values into the user's own
@@ -1324,19 +1400,24 @@ first slice's acceptance therefore runs on a non-Nix VM. The maintainer can
 dogfood it on the M2 by setting `programs.scoot.desktop.look = null`,
 `programs.scoot.stylix.enable = false` and `programs.scootbar.stylix.enable
 = false` for the duration (no look or Stylix keys then reach the files), and
-`scoot look current` lists anything still shadowing. `look-apply-cli`
-documents this.
+`scoot look current` lists anything still shadowing. The cost of those
+settings: with `desktop.look = null` the profile's theme slot is inert too
+(`themeOn = theme.enable && look != null`, `theme-home.nix:37`), so GTK, Qt, fontconfig and
+foot lose their theming while dogfooding; that is expected, and it returns
+with `look-nix-catalog`. `look-apply-cli` documents both.
 
 | # | Slug | Area | Priority | Serves | Blocked by |
 |---|---|---|---|---|---|
 | 1 | `look-format` | core | high | both | |
 | 2 | `look-shipped` | core | high | both | `look-format` |
 | 3 | `look-layer-scoot` | core | high | both | `look-format` |
+| 3a | `look-scoped-reload` | core | high | both | `look-layer-scoot` |
+| 3b | `look-session-state` | core | medium | computer use | `look-layer-scoot` |
 | 4 | `look-layer-scootbar` | scootbar | high | daily-drive | `look-format` |
 | 5 | `scootbar-style-reload` | scootbar | medium | daily-drive | |
-| 6 | `look-apply-cli` | core | high | both | `look-shipped`, `look-layer-scoot`, `look-layer-scootbar` |
+| 6 | `look-apply-cli` | core | high | both | `look-shipped`, `look-scoped-reload`, `look-layer-scootbar` |
 | 7 | `look-cycle-preview` | core | medium | daily-drive | `look-apply-cli` |
-| 8 | `look-ipc` | ipc | medium | computer use | `look-apply-cli` |
+| 8 | `look-ipc` | ipc | medium | computer use | `look-apply-cli`, `look-session-state` |
 | 9 | `look-golden-screenshots` | testing | medium | computer use | `look-ipc` |
 | 10 | `look-nix-catalog` | packaging | high | daily-drive | `look-apply-cli` |
 | 11 | `look-import-base16` | core | medium | daily-drive | `look-format` |
@@ -1419,15 +1500,37 @@ rest want the maintainer's call.
   options, no colored per-app example configs), which that plan has
   adopted; its five asks are decided in §9. The maintainer confirms the
   precedence once for both plans.
-- **D10. Per display or per user.** Persisted per user for the `--tty`
-  desktop; private per display for `--headless` and `--nested` sessions,
-  seeded from the user's choice (§4.2).
+- **D10. Per display or per user.** Persisted per user for `--tty` and
+  `--nested` (the webtop deployment and the "try it first" path are
+  daily-drive sessions whose swaps must survive a restart); private per
+  display only for `--headless`, or any backend given `--private-look`,
+  seeded from the user's choice (§4.2). The default path is deterministic,
+  so no environment variable has to reach systemd units.
 - **D11. Who owns dconf and the GTK/Qt files.** The look tool owns the dconf
   keys of §4.7 (home-manager stops writing `color-scheme` from an eval-time
   look, `theme-home.nix:628-631`), except a key the user sets in
   `dconf.settings` themselves, which home-manager keeps and `sync` leaves
   alone. `gtk.css` and `qt6ct.conf` stay scoot's stable indirection files
   unless `gtk.enable`/`qt.enable` own those paths (today's rule).
+  **Mechanics, two layers of the same rule ("never overwrite a value
+  someone else set"):**
+  - *Nix:* once scoot's modules stop defining any
+    `org/gnome/desktop/interface` key, every key left in the merged
+    `config.dconf.settings."org/gnome/desktop/interface"` was set by the user
+    or another module. The home-manager module writes those key *names*
+    (not values) into the catalog's metadata file beside `look-default`, and
+    `sync` and `apply` skip them. This reads the merged option at
+    evaluation without a cycle, because scoot no longer writes to it.
+  - *Everywhere:* `<state>/look.json` records the value the tool last wrote
+    for each key. Before writing, the tool reads the current value; if it is
+    neither unset nor what the tool last wrote, someone else changed it
+    (a settings app, a hand `gsettings set`), so the tool leaves it and the
+    reply names it.
+  - *No regression in between (N3):* `look-nix-catalog` stops
+    home-manager's eval-time `color-scheme` write only by moving that one
+    write into `sync` (run after `dconfSettings`), from the active look's
+    `polarity`, so a dark look never loses GTK's dark-mode signal before
+    `look-toolkit-live` adds the other keys and the swap-time writes.
 - **D12. Git install in v1?** No: path install in v1, git and `lookPacks`
   later (`look-share`).
 - **D13. How a look carries fonts.** Three carriers, in order:
@@ -1447,7 +1550,11 @@ rest want the maintainer's call.
   alternative keeps every costly part opt-in (`docs/examples/*/scoot.toml`'s
   "nothing here is a default" rule) by leaving `[shape]` and `[opacity]`
   out of the shipped looks, so Nix users see no change and non-Nix users
-  lose them on migration instead.
+  lose them on migration instead. **Condition (from the re-review):** the
+  shapes ship only if `look-layer-scoot`'s benchmark shows the per-frame
+  cost of rounded corners acceptable on the default CPU (pixman) renderer
+  at 1, 10 and 50 windows; if not, the shipped looks keep `[shape] radius`
+  at 0 and the docs state the trade-off.
 - **D14. Stylix targets vs an explicit look.** Ownership by path (§5.5):
   paths an upstream module (and so a Stylix target) owns stay Stylix's; the
   reply names those apps.

@@ -23,9 +23,13 @@ so the control socket is the trigger.
 ## What to do
 
 - Read `<state>/look/bar.toml` (the state resolution of the design doc's
-  section 4.1, `SCOOT_LOOK_STATE` from scoot), merged under the user's file
-  on raw keys with `accent` + `hover` as one unit (the bar derives `hover =
-  accent`, `config.rs:1692`). The flags rung (`--background`,
+  section 4.1: the deterministic user path, or `SCOOT_LOOK_STATE` when a
+  private scoot session started the bar), merged under the user's file on
+  raw keys, **per key**, with one derived pair (section 4.3, rule 3): the
+  user's `hover` if set; else, if the user set `accent`, the look's `hover`
+  is dropped so the bar derives hover from the user's accent
+  (`config.rs:1692`); else the look's `hover`. A user who sets only `hover`
+  keeps the look's `accent`. The flags rung (`--background`,
   `--foreground`) stays above both (`respond.rs:184-189`).
 - The allowlist, shared with the design doc via `scoot-look`: `[colors]`;
   `[bar]` `radius`, `popup-radius`, `opacity`, `font`, `fallback-fonts`,
@@ -48,8 +52,11 @@ so the control socket is the trigger.
 
 ## Evidence to record
 
-Tests for precedence, the unit, refusals, the feature drop, the scoped
-reload not applying a pending module-list edit, and the fixed layer.
+Tests for per-key precedence; the derived pair both ways (user `accent`
+alone: hover follows the user's accent, not the look's hover; user `hover`
+alone: the look's `accent` stays, never the built-in yellow); refusals; the
+feature drop; the scoped reload not applying a pending module-list edit;
+and the fixed layer.
 
 ## Not in this ticket
 

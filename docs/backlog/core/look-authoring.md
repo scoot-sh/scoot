@@ -19,7 +19,9 @@ Making a look today means editing `desktop.nix` and mirroring pins in
 ## What to do
 
 - `scoot look new NAME --from BASE`: a source look under `user-looks/` with
-  `extends = "BASE"`, BASE a source look (never a rendered one).
+  `extends = "BASE"`, BASE a shipped, declared or user-authored source look
+  (never a rendered one, never an installed one). A look made with `new` is
+  user-authored, so it can be the BASE of the next `new`.
 - `scoot look watch DIR`: validate and apply on save, debounced on
   `close_write`/`moved_to`, under the lock, rendering into one reused cache
   slot; an invalid save is refused loudly and the last good look stays.

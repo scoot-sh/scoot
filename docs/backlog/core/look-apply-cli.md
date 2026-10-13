@@ -3,7 +3,7 @@ title: "scoot look apply: the atomic swap, scoped reloads, rollback, list, curre
 status: "open"
 area: "core"
 priority: "high"
-blocked: "look-shipped, look-layer-scoot, look-layer-scootbar"
+blocked: "look-shipped, look-scoped-reload, look-layer-scootbar"
 ---
 
 # scoot look apply: the atomic swap, scoped reloads, rollback, list, current and validate
@@ -43,7 +43,11 @@ each with `--json`, per the design doc's sections 3.1, 4 and 7.1:
   `look-nix-catalog`, set `programs.scoot.desktop.look = null`,
   `programs.scoot.stylix.enable = false` and `programs.scootbar.stylix.enable
   = false`, or the Nix-written values in the user's own files shadow every
-  look; `scoot look current` lists anything still shadowing.
+  look; `scoot look current` lists anything still shadowing. Say what that
+  costs: with `desktop.look = null` the profile's theme slot is inert too
+  (`themeOn = theme.enable && look != null`, `nix/modules/theme-home.nix:37`),
+  so GTK, Qt, fontconfig and foot lose their theming while dogfooding,
+  until `look-nix-catalog`.
 - Docs in the same PR: a new site page for looks (pick, apply, what is live
   and what is next-launch), and the generated CLI pages.
 

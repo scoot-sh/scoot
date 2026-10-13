@@ -34,10 +34,15 @@ section 3:
   (no `gap` in v1), `[cursor]` (`accent`, optional `body`), the
   `[wallpaper]` unit, `[icons]`, `[night]`, `[apps.<app>]`.
 - `extends` resolution (cycle-checked, depth at most 8) over *source*
-  looks only.
-- The value grammar of section 3.5: names, identifiers, display text, glyph
-  strings, paths and numbers, each with its charset and length cap; NUL and
-  control characters refused everywhere; a 64 KiB file cap.
+  looks only, and never to an installed look (origin by directory, section
+  3.1).
+- The value grammar of section 3.5: names, identifiers (starting with a
+  letter or digit, so never `.` or `..`; ASCII-only by decision), Nix
+  attribute paths for `[fonts.nix]`, display text, glyph strings, paths,
+  `https://` wallpaper URLs with a required 64-hex `sha256`, and numbers,
+  each with its charset and length cap; `[cursor] accent` takes `#rrggbb` or
+  `"none"`; NUL and control characters refused everywhere; a 64 KiB file
+  cap.
 - Contrast (section 3.5): the four refusing pairs, `dim` and `urgent`
   reported; refusal or warning by origin (shipped/installed vs the user's
   own).

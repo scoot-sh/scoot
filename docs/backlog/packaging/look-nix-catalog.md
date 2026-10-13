@@ -40,9 +40,18 @@ Per the design doc's sections 3.1, 5.2 and 6:
 - Remove the eval-time merges of look values into `programs.scoot.settings`
   and `programs.scootbar.settings`.
 - The activation step `scoot look sync` (the rule of section 6.3), ordered
-  after `linkGeneration` and `dconfSettings`, and home-manager no longer
-  writing `color-scheme` from an eval-time look (D11), except a key the user
-  set in `dconf.settings`.
+  after `linkGeneration` and `dconfSettings`.
+- **`color-scheme` moves into `sync`, in this ticket** (D11, review N3):
+  home-manager stops writing it from the eval-time look
+  (`theme-home.nix:628-631`) only because `sync` now writes it from the
+  active look's `polarity`, so a dark look never loses GTK's dark-mode
+  signal before `look-toolkit-live` adds the other keys and the swap-time
+  writes. The module records the names of every key left in the merged
+  `config.dconf.settings."org/gnome/desktop/interface"` (set by the user or
+  another module, since scoot no longer defines any) in the catalog's
+  metadata file beside `look-default`, and `sync` skips those; `sync` also
+  skips a key whose current value is neither unset nor what it last wrote
+  (recorded in `<state>/look.json`).
 - The NixOS-module-only path: the catalog under
   `/run/current-system/sw/share/scoot/`, `/etc/scoot/look-default`, and
   `scoot look sync` run by `resources/scoot-session` at login.
