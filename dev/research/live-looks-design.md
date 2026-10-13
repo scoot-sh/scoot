@@ -469,9 +469,15 @@ and the Nix build. Pure checks (crate):
   IPv6), no explicit port, and not `localhost` or a name under
   `.localhost`, `.local`, `.internal` or `.home.arpa` (R5: with the
   `sha256` a look cannot read a reply back, but a swap would still make
-  scootbg send a request to a local service). A public name can still
-  resolve to a private address, so for an *installed* look the fetch
-  happens at install time instead (§8.3), never at swap time.
+  scootbg send a request to a local service). The host is lowercased and
+  one trailing dot stripped before these checks (`LOCALHOST.`), and a host
+  whose last label is all digits or starts with `0x` is refused, since curl
+  and the WHATWG parser read `127.1` and `0x7f.0.0.1` as IPv4 (F2); IDNs are
+  fine given the hash pin. A public name can still resolve to, or redirect
+  to, a private address, so for an *installed* look the fetch happens at
+  install time instead (§8.3), never at swap time, with no redirects and
+  the resolved address checked and pinned (`look-install`, F1: scootbg's own
+  fetch follows up to five redirects, `crates/scootbg/src/fetch.rs:64,347-353`).
 - **Display text** (`title`, `description`, `credits`, `license`): UTF-8
   without control characters (C0, DEL, C1), no `=`, `[`, `]`, `"`, `\`,
   at most 200 bytes (`title` 64). Display text is never written into an
@@ -1540,7 +1546,16 @@ rest want the maintainer's call.
     reply names it. **With no record yet** for a key (the first `sync` or
     `apply` after migration) and no claim on it in the Nix key-name list,
     the tool adopts the key: it writes it and starts the record, whatever
-    the current value is.
+    the current value is. **This is the one exception to "never overwrite a
+    value someone else set" (F3):** on a non-Nix box there is no Nix list,
+    so the first `apply` overwrites a `color-scheme` the user chose in a
+    settings app. The opt-out is `scoot look apply --no-toolkit` (and a
+    persistent `toolkit = false` in `<state>/look.json`, set by `scoot look
+    toolkit off`), which skips every dconf write; the docs say so where the
+    first apply is described. On a home-manager machine before
+    `look-nix-catalog`, home-manager still owns `color-scheme` and restores
+    its own value at the next activation; the dogfooding settings (§10:
+    `desktop.look = null`) stop home-manager writing it at all.
   - *Why adoption is needed (R1):* the migration switch normally clears
     the old value itself. Home-manager records each generation's managed
     dconf keys and runs `dconf reset` on every key the new generation stops

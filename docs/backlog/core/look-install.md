@@ -35,6 +35,18 @@ doc's section 8.3.
   that fails), so a swap to it never makes a network request (R5; the URL
   grammar in `look-format` already refuses userinfo, IP literals, ports and
   local names).
+- **The install-time fetch must not reuse scootbg's redirect-following
+  fetch as is (F1).** scootbg runs `curl --location --max-redirs 5 --proto
+  http,https --proto-redir http,https` (`crates/scootbg/src/fetch.rs:64,347-353`),
+  so a public URL that passes the grammar can redirect to `127.0.0.1` or a
+  LAN host, and a public name can resolve to a private address (DNS
+  rebinding). For an installed look: follow no redirects (or re-validate
+  every hop against the grammar and the address rule); resolve the host
+  first, refuse a loopback, link-local, private, unique-local or
+  unspecified address, and pin the connection to the checked address
+  (`curl --resolve host:443:ADDR`) so a second lookup cannot swap it. Test
+  each refusal: a redirect to loopback, a name resolving to RFC 1918 and
+  `fe80::/10`, and a rebinding resolver.
 - `installed-looks/` is already in `look-apply-cli`'s catalog search, so an
   installed look appears in `list` and `apply` with no change there.
 - `scoot look export NAME`: a tarball of a source look, regular files only.

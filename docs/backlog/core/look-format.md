@@ -41,7 +41,12 @@ section 3:
   attribute paths for `[fonts.nix]`, display text, glyph strings, paths,
   `https://` wallpaper URLs with a required 64-hex `sha256` (host a DNS
   name with a dot: no userinfo, IP literal, port, `localhost` or
-  `.localhost`/`.local`/`.internal`/`.home.arpa` name), and numbers,
+  `.localhost`/`.local`/`.internal`/`.home.arpa` name; the host is
+  lowercased and one trailing dot stripped *before* those checks, so
+  `LOCALHOST.` and `foo.local.` are refused; and a host whose last label is
+  all digits or starts with `0x` is refused, because curl and the WHATWG URL
+  parser read `127.1` and `0x7f.0.0.1` as IPv4 (F2); IDNs and punycode are
+  fine given the hash pin), and numbers,
   each with its charset and length cap; `[cursor] accent` takes `#rrggbb` or
   `"none"`; NUL and control characters refused everywhere; a 64 KiB file
   cap.
