@@ -56,7 +56,10 @@ Per the design doc's sections 4.1, 4.3 and 4.10:
   worker and swap them in.
 - D15's condition: measure the per-frame cost of rounded corners on the
   default CPU (pixman) renderer at 1, 10 and 50 windows; the shipped looks
-  carry a nonzero radius only if it is acceptable.
+  carry a nonzero radius only if it is acceptable. If it is, raise the
+  shipped looks' `[shape] radius` and `[opacity] bar` from the 0 and 1.0
+  `look-shipped` lifted to the examples' values (in their comments) in this
+  same PR; if not, leave them and document the trade-off.
 - Docs in the same PR: the config reference gains the look layer and its
   precedence.
 

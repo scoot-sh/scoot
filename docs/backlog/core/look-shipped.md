@@ -24,8 +24,12 @@ and fails on a missing role"; no such check exists. And a change under
 
 - Lift each look into `looks/<name>/look.toml` (D1), with no invented color:
   the registry's values, foot's 16 hues into `[terminal]`, and (if the
-  maintainer confirms D15) the examples' style values: radius, ring widths,
-  bar opacity, padding, spacing, separator. Gap stays in the example layout
+  maintainer confirms D15) the examples' style values: ring widths,
+  padding, spacing, separator. **Not yet radius or bar opacity** (D15's
+  ordering, R3): this ticket runs before `look-layer-scoot`'s pixman
+  benchmark, so it lifts `[shape] radius = 0` and `[opacity] bar = 1.0` with
+  the examples' values beside them as comments; `look-layer-scoot` raises
+  them only if its benchmark passes. Gap stays in the example layout
   configs (D7). The examples keep their layout and lose their colors (they
   point at the look).
 - A CI path filter for `looks/` in the classify job (the way scootbg's is),

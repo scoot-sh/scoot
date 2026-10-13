@@ -51,7 +51,15 @@ Per the design doc's sections 3.1, 5.2 and 6:
   another module, since scoot no longer defines any) in the catalog's
   metadata file beside `look-default`, and `sync` skips those; `sync` also
   skips a key whose current value is neither unset nor what it last wrote
-  (recorded in `<state>/look.json`).
+  (recorded in `<state>/look.json`), **except** that with no record yet and
+  no claim in that list it adopts the key (R1). On the migration switch
+  home-manager itself normally resets the old `color-scheme`, since it runs
+  `dconf reset` on keys a generation stops managing
+  (`modules/misc/dconf.nix:20,120,156` at `efa3ccb4`, the rev
+  `scripts/scootbar-stylix-test.sh:35` pins) and `sync` runs after that
+  step. That cleanup is skipped when there is no old-generation state
+  (`dconf.nix:143`), and adoption covers that case. The same one-key write
+  runs on `scoot look apply` (`look-apply-cli`).
 - The NixOS-module-only path: the catalog under
   `/run/current-system/sw/share/scoot/`, `/etc/scoot/look-default`, and
   `scoot look sync` run by `resources/scoot-session` at login.
