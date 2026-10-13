@@ -39,8 +39,8 @@ Under home-manager with Stylix, the ring and background colors and the
 cursor theme and size default from the scheme instead — a value written
 here always wins. The three built-in color defaults are stored as raw
 floats no hex string reproduces exactly: leave a color field unset to
-get the real default; only set it to change it. (The two cursor colors
-are exactly representable — `#1a1a1a` and `#e57f29` — the exceptions.)
+get the real default; only set it to change it. (The cursor color
+is the exception: its default, `#fcfcfc`, is exactly representable.)
 
 The look you picked in [the desktop profile](../desktop/index.md#pick-a-look)
 writes these same keys — `settings.appearance.background_color =
