@@ -80,7 +80,7 @@ Measured baselines (all aarch64, Asahi M2 or dev VM):
 |---|---|---|---|---|---|
 | Notifications | lean mako + `scoot-notify-sync` (busctl + jq feed) | 183.4 MiB (stock mako: 357.4 MiB) | 53.3 MiB | 9.3 MB empty, plus an 11.4 MB feed tree. Stock mako 1.11.0, idle: 9,424 kB RSS, 7,332 kB PSS, 1 thread, 8 fds | 0 wakeups/60 s idle (`desktop-notifications-done.md`, Decisions; stock re-measured by the #579 review) |
 | Launcher | fuzzel via `scoot-launcher` | 152.4 MiB | 41.7 MiB | ~22 MB open with icons, 0 closed. fuzzel 1.14.1 open, empty `$HOME`: 18,944 kB RSS, 15,951 kB PSS, 17 threads | first frame 57/50/52 ms (`desktop-launcher-done.md`, Resolution) |
-| Greeter | ReGreet 0.5.0 (GTK4, GStreamer, AccountsService) in `dbus-run-session cage` | **ReGreet 956.7 MiB; ReGreet ∪ cage 1,018.5 MiB** (307 paths; package union only: no greetd, dbus or accounts-daemon) | not measured (`greet-baseline`) | not measured (`greet-baseline`) | nixpkgs `regreet` build inputs: `accountsservice dbus glib gtk4 gst_all_1.{gstreamer,gst-plugins-good,gst-plugins-base} pango librsvg libseccomp` |
+| Greeter | ReGreet 0.5.0 (GTK4, GStreamer, AccountsService) in `dbus-run-session cage` | ReGreet 956.7 MiB; ReGreet ∪ cage 1,018.5 MiB (307 paths). cage stays the host (380.2 MiB), so **the most scootgreet can remove is 638.4 MiB** (166 paths), before subtracting what the profile already carries. Package unions only: no greetd, dbus or accounts-daemon | not measured (`greet-baseline`) | not measured (`greet-baseline`) | nixpkgs `regreet` build inputs: `accountsservice dbus glib gtk4 gst_all_1.{gstreamer,gst-plugins-good,gst-plugins-base} pango librsvg libseccomp` |
 
 The figures added in the #579 review were measured on the M2 at the pinned nixpkgs
 (`8ce4ef6c`): under `scoot --headless` with a fresh `XDG_RUNTIME_DIR` and `HOME`, sampled after
@@ -635,6 +635,8 @@ the ratchet's waivers do):
 Ordered by what unblocks what, and by risk. **Nothing is extracted until a gate says go.**
 
 1. **Start now, all independent:**
+   - (candidate) [`greet-headless-login`](../../docs/scootbar/backlog/greet-headless-login.md),
+     the Wayland-free greetd login for agents and VM tests, on the go-ahead;
    - the two spikes, [`scootui-keyboard-spike`](../../docs/scootbar/backlog/scootui-keyboard-spike.md)
      and [`scootui-text-shaping-spike`](../../docs/scootbar/backlog/scootui-text-shaping-spike.md),
      which decide the two choices that are expensive to reverse;
@@ -779,9 +781,20 @@ Only the items that are the maintainer's call are asked. The rest are recorded a
    The repo's own call sites are pinned to the supported set, and the opt-in period is when a
    user's personal scripts surface. The alternative is warn-and-ignore for flags that take no
    value.
-9. **(d) scootlock or scootgreet first** (they share the widget set). *Recommend:* scootgreet.
-   Its incumbent costs about 1 GiB on the login path and the ISO, which is over GitHub's 2 GB
-   cap. scootlock's incumbent (swaylock) is already small. scootlock reuses the widgets after.
+9. **(d) scootlock or scootgreet first** (they share the widget set). *Recommend:* decide on
+   `greet-baseline`'s number, not now.
+   - The most scootgreet can remove is what ReGreet adds beyond cage: 638.4 MiB (166 paths),
+     because cage stays the host (cage alone is 380.2 MiB; #579 re-review, pinned nixpkgs). The
+     real saving is that figure minus the GTK and GStreamer libraries the installed desktop
+     profile already carries, and it may be much smaller.
+   - scootlock's incumbent (swaylock) is already small, but a lock screen is used many times a
+     day.
+   - The rule: **scootgreet first** if its marginal saving over the installed profile is at least
+     about 300 MiB, or if the scoot-iso image is still over its size cap. That is the
+     `greet-prototype` go condition. **Otherwise scootlock first**, or neither.
+   - The computer-use half of the greeter, a headless login, does not wait on either: it is
+     [`greet-headless-login`](../../docs/scootbar/backlog/greet-headless-login.md), a candidate
+     early ticket.
 10. **(e) The greeter fallback: agreety or ReGreet.** *Recommend:* agreety. It is text-only,
     ships in greetd's own package, and needs no compositor, GPU or font: exactly what the
     fallback exists to survive.

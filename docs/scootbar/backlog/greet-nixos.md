@@ -19,8 +19,13 @@ greeter is static). Serves **daily-drive**.
 - **`programs.scootgreet`** (NixOS), and `programs.scoot.greeter.daemon` = `"regreet" |
   "scootgreet"`, default `"regreet"`.
 - **With scootgreet:**
-  - greetd's command is `scootgreet session || scootgreet-fallback`, everything by absolute
-    store path;
+  - greetd's `default_session.command` is the **`scootgreet-greeter` wrapper script's absolute
+    store path**, nothing more. greetd builds `exec <command>` and runs it with `/bin/sh -c`
+    (`greetd/src/session/worker.rs:228-235,267-272`), so a `||` in the command text never runs
+    ([why](../../../dev/design/scootgreet.md#failure-modes-never-strand-a-login)). The wrapper's body is
+    `scootgreet session || exec scootgreet-fallback`, by absolute paths;
+  - the startup deadline comes from `greet-baseline`'s measured first frame (option
+    `startupTimeout`, default 15 s);
   - `fallback-session` is the scoot session's `Exec`;
   - tmpfiles create `/var/lib/scootgreet`;
   - `services.xserver.xkb.*` go into the greeter's environment;
@@ -33,7 +38,10 @@ greeter is static). Serves **daily-drive**.
 `nix/scootgreet-tests.nix` pins:
 
 - the rendered files;
-- the command and its fallback;
+- `default_session.command` equals the wrapper's store path exactly, and contains no `||`, `;`
+  or `&&`. The broken `cmd || fallback` form fails eval, so the tests cannot lock it in;
+- the wrapper script's body: the supervisor `||` an `exec` of the fallback, all absolute paths;
+- the fallback's body: agreety re-run only on a non-zero exit;
 - XKB env and tmpfiles;
 - today's ReGreet output byte-identical with the default.
 
@@ -42,6 +50,12 @@ On the dev VM, with greetd 0.10.3:
 - a real login;
 - wrong-then-right;
 - a SIGKILL mid-prompt landing on agreety;
+- **the supervisor itself failing, through the real wrapper as greetd runs it**: the
+  `scootgreet` binary missing, `scootgreet session` exiting non-zero at once, and
+  `scootgreet session` aborting. Each must reach a working agreety login, and
+  `/var/lib/scootgreet/fallback.log` must name the reason;
+- agreety's `--max-failures` used up, ending in a fresh greeter, not a dead VT;
+- suspend and resume at the login screen, with no fallback (monotonic timers);
 - cage SIGKILLed, with agreety's prompt readable (the VT is back in text and keyboard mode);
 - a broken look fragment drawing the defaults and still logging in;
 - `Ctrl+Alt+F2` reaching a getty.

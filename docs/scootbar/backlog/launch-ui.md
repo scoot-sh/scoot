@@ -16,7 +16,7 @@ round. Serves **daily-drive**. `look-format` is the live-looks `scoot-look` crat
 
 - The `overlay` exclusive-keyboard panel with the entry and the virtualized list.
 - Keys and mouse per the design.
-- The single-instance toggle over an abstract socket (`@scootlaunch-<uid>-<display>`, no pid file).
+- The single-instance toggle over a socket file in `$XDG_RUNTIME_DIR` (`0700`), with the peer's uid checked through rustix's `socket_peercred`. There is no pid file and no abstract name another user could bind first.
 - A null output: the core ticket `layer-shell-default-output` decides which output that is.
 - The look layer, read at every open: `<state>/look/launch.toml`, the allowlist and the grammar.
 

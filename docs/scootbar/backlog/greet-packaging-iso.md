@@ -13,8 +13,8 @@ Filed 2026-10-12 from the [scootgreet design](../../../dev/design/scootgreet.md#
 
 ## What to do
 
-- **Packages**: deb, rpm and Arch, with the supervisor, `scootgreet-fallback` and a greetd
-  config example. `install.sh` never wires them.
+- **Packages**: deb, rpm and Arch, with the `scootgreet-greeter` and `scootgreet-fallback`
+  scripts and a greetd config example whose `default_session.command` is the wrapper's path. `install.sh` never wires them.
 - **The site's greeter section**: the choice of greeter, the recovery path, and the
   screen-reader note.
 - **In `scoot-sh/scoot-iso`**:

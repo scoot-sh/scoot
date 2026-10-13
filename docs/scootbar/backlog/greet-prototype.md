@@ -33,7 +33,10 @@ Against a **real greetd 0.10.3** on the dev VM:
 - the prototype SIGKILLed with a secret prompt pending lands on a working agreety login;
 - the PAM matrix: password, expired-password change, an OTP second prompt, info-only;
 - every layout the keyboard spike passes, typed into the password field, Compose included;
-- RSS and first frame against `greet-baseline`'s ReGreet numbers.
+- RSS and first frame against `greet-baseline`'s ReGreet numbers;
+- **a weight case that is still real**: `greet-baseline`'s marginal closure over the installed
+  desktop profile is at least about 300 MiB, or the scoot-iso image is still over its size cap
+  with ReGreet on it. Otherwise this is a no, whatever the other rows say.
 
 A "do not build" criterion from the design ends the epic.
 

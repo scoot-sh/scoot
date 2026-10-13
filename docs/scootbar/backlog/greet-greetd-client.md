@@ -1,53 +1,53 @@
 ---
-title: "scootgreet: the greetd client, the cancel discipline, the locked secret path, `scootgreet login`"
+title: "scootgreet: the supervisor, its wrapper and the agreety fallback, the locked secret path"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "GO verdict recorded in greet-prototype (a human removes this clause); scootui-extract-draw"
+blocked: "greet-headless-login; GO verdict recorded in greet-prototype (a human removes this clause); scootui-extract-draw"
 milestone: "M7"
 ---
 
 # scootgreet: the greetd client
 
-Filed 2026-10-12 from the [scootgreet design](../../../dev/design/scootgreet.md#the-greetd-client). Serves **computer use**
-(`scootgreet login` for VM tests and agents) and **daily-drive**.
+Filed 2026-10-12 from the [scootgreet design](../../../dev/design/scootgreet.md#the-greetd-client). Serves **daily-drive**: the
+supervisor that keeps a graphical greeter from stranding a login, and the secret path.
 
 ## What to do
 
-- **Create `crates/scootgreet`**, with its CI classify output and job; add `scootgreet` to
-  CLAUDE.md's scope list.
-- **The frame codec**: a native-endian u32 plus JSON, capped at 64 KiB.
-- **The pure conversation state machine**, with `cancel_session` before every `create_session`
-  and after every error. greetd 0.10.3 keeps a failed or abandoned session: an EOF never
-  cancels (`server.rs:73`), and the next `create_session` fails with "a session is already
-  being configured" (`context.rs:185-186`). A fingerprint prompt cannot be cancelled while PAM
-  blocks (`context.rs:233-236`), so the UI does not offer to.
+- **Build on `crates/scootgreet`**, which `greet-headless-login` created with the frame codec,
+  the conversation (with its cancel discipline) and `scootgreet login`. A fingerprint prompt
+  cannot be cancelled while PAM blocks (`context.rs:233-236`), so the UI does not offer to.
 - **The supervisor `scootgreet session`**:
   - cancel first;
   - start cage by absolute path, with a ready pipe;
-  - a 15 s first-frame deadline and a 90 s heartbeat;
-  - on a non-zero exit or a missed deadline: kill the group, cancel, and exec agreety by
-    absolute path.
-- **`scootgreet-fallback`**, the `sh` script that runs agreety up to twice.
+  - a first-frame deadline (config `startup-timeout`, default 15 s, set from
+    `greet-baseline`'s measurement) and a 90 s heartbeat, **both on `CLOCK_MONOTONIC`** so a
+    suspend at the login screen does not trip them;
+  - on a non-zero exit or a missed deadline: kill the group, cancel, **print the reason to the VT
+    and append it to `/var/lib/scootgreet/fallback.log`**, and exec agreety by absolute path.
+- **The `scootgreet-greeter` wrapper** that greetd runs (greetd `exec`s its command under
+  `sh -c`, `worker.rs:228-235,267-272`, so the fallback must live in a script, not in the
+  command text): `scootgreet session || exec scootgreet-fallback`.
+- **`scootgreet-fallback`**, which re-runs agreety only on a non-zero exit (the stale-session
+  case). agreety exits 0 after its `--max-failures` too (`agreety/src/main.rs:173-182`), and
+  greetd's restart handles that.
 - **The secret path**:
-  - a locked, zeroized two-page region, a new type in `scootbg-mem` (rustix's `mlock` is
-    `unsafe`, `src/mm/mmap.rs:312` in 1.1.5; never `mlockall`);
+  - a locked, zeroized two-page region: a new type in `scootbg-mem`, behind a `locked` feature
+    off by default so scootbg's release-gated binary never builds it, with the crate's
+    description updated (rustix's `mlock` is `unsafe`, `src/mm/mmap.rs:312` in 1.1.5; never
+    `mlockall`);
   - a hand-built `post_auth_message_response` frame;
   - `set_dumpable_behavior` (safe, `prctl.rs:140`).
-- **`scootgreet login`**, reading every answer from stdin or `--answers-fd`, never from argv.
-- **A fake greetd that models the retained `configuring` state**, checked against the real
-  greetd on the same two flows.
 
 ## Acceptance
 
-- Unit tests for every flow: OTP, password change, info-only, auth error, cancel, reconnect.
-- A buffer-after-clear test.
-- A fuzz target on frames.
+- A buffer-after-clear test on the locked page, and the password frame's escaping.
 - On a **real greetd**:
   - wrong-then-right;
   - a SIGKILL with a prompt pending, landing on agreety;
   - a hang (`SCOOTGREET_TEST_HANG=1`), landing on agreety after the deadline;
-  - `scootgreet login` logging a test user into a scoot session.
+  - the supervisor itself missing, exiting non-zero at once, and aborting, each through the real
+    wrapper, each reaching agreety with the reason logged;
 
 ## Evidence the review needs
 

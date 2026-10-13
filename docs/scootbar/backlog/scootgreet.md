@@ -3,7 +3,7 @@ title: "`scootgreet`: the login greeter (epic)"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "greet-baseline, greet-greetd-client, greet-ui, greet-nixos, greet-packaging-iso, greet-default-flip"
+blocked: "greet-baseline, greet-headless-login, greet-prototype, greet-greetd-client, greet-ui, greet-users-sessions, greet-power, greet-nixos, greet-packaging-iso, greet-default-flip"
 milestone: "M7"
 ---
 
@@ -11,8 +11,10 @@ milestone: "M7"
 
 Filed 2026-10-12 at the user's request ("And scootgreeter or scootgreet"). Serves
 **daily-drive** and **computer use**. The login screen would draw the session's look without
-ReGreet's 1,018.5 MiB of ReGreet and cage, and a VM test or agent could drive the login with one
-command.
+ReGreet's stack. The most that saves is 638.4 MiB, ReGreet's paths beyond cage (cage stays the
+host), before subtracting what the desktop profile already carries. A VM test or agent could also
+drive the login with one command, and that part does not need the screen
+([greet-headless-login](greet-headless-login.md)).
 
 The design is [dev/design/scootgreet.md](../../../dev/design/scootgreet.md), and the parts it shares with the
 other shell apps are in [shell-apps.md](../../../dev/design/shell-apps.md). The name is a recommendation

@@ -174,7 +174,7 @@ Shared foundation ([epic](extract-scootui.md)):
 
 [`scootgreet`: the login greeter](scootgreet.md) (epic):
 - [Baseline: measure ReGreet + cage](greet-baseline.md) (medium), then [the prototype: the go/no-go gate against a real greetd](greet-prototype.md) (medium)
-- [The greetd client, the supervisor and the agreety fallback](greet-greetd-client.md)
+- [A headless greetd login for agents](greet-headless-login.md) (candidate early ticket), [the supervisor and the agreety fallback](greet-greetd-client.md)
 - [The screen](greet-ui.md), [users and sessions](greet-users-sessions.md), [power](greet-power.md)
 - [NixOS](greet-nixos.md), [packaging, docs and the ISO](greet-packaging-iso.md), [flip the default](greet-default-flip.md)
 - Only if cage fails the GPU-free check: [spike: scoot as the host](greet-scoot-kiosk-spike.md), then the [core ticket](../../backlog/core/scoot-greeter-mode.md)

@@ -64,11 +64,14 @@ leaves the machine without a way to log in.
   `dbus-run-session`, and needs `accounts-daemon` enabled
   (nixpkgs `regreet.nix` L158-159). Measured by the #579 review at the pinned nixpkgs
   (`8ce4ef6c`, aarch64-linux, `nix path-info -S` against cache.nixos.org):
-  **ReGreet alone is 956.7 MiB of closure; ReGreet and cage together are 1,018.5 MiB
-  (307 paths)**. That is the package union only: it leaves out greetd, dbus and
-  accounts-daemon, and it is not the marginal cost over an installed desktop profile,
-  which may already carry GTK4. ReGreet's RSS and first frame are still unmeasured, and so is
-  that marginal number; `greet-baseline` measures all three. scootgreet needs no session bus, no
+  ReGreet alone is 956.7 MiB of closure, and ReGreet with cage is 1,018.5 MiB (307 paths).
+  **cage stays the host**, so what scootgreet can remove is only what ReGreet adds beyond
+  cage: **638.4 MiB (166 paths; cage itself is 380.2 MiB)**, re-measured in the #579
+  re-review. That is the ceiling: it is the package union, it leaves out greetd, dbus and
+  accounts-daemon, and it is not yet net of the GTK and GStreamer libraries an installed
+  desktop profile already carries. The real saving is that marginal number, which may be much
+  smaller. ReGreet's RSS and first frame are still unmeasured too; `greet-baseline` measures
+  all three. scootgreet needs no session bus, no
   GTK and no media stack. That alone removes the class of leak
   `greeter-session-leak-done.md` fixed (`dbus-run-session` and ReGreet's AT-SPI
   `dbus-daemon` surviving every greeter session: 85 closing sessions and 137 greeter
@@ -97,9 +100,8 @@ leaves the machine without a way to log in.
 features (environment variables per session, demo mode), and its CSS theming for
 users who wrote their own.
 
-**Go/no-go gate (`greet-prototype`), before any extraction.** The closure row is close to
-certain to pass (about 1 GiB against a libc-only binary), so the gate tests what can actually
-fail. It is an out-of-workspace prototype that `#[path]`-includes scootbar's sources, the
+**Go/no-go gate (`greet-prototype`), before any extraction.** The gate tests what can
+actually fail, and states the closure case explicitly instead of assuming it. It is an out-of-workspace prototype that `#[path]`-includes scootbar's sources, the
 pattern scootbar's fuzz crate already uses (`crates/scootbar/fuzz/Cargo.toml:28-65`), so no
 extraction is spent on a no. It must show:
 
@@ -109,14 +111,17 @@ extraction is spent on a no. It must show:
 - the full PAM matrix: password, wrong password, an expired-password change, an OTP second
   prompt (`pam_oath` or a test module), and an info-only message;
 - every layout the keyboard spike passes, typed into the password field, Compose included;
-- RSS and first frame against `greet-baseline`'s ReGreet numbers.
+- RSS and first frame against `greet-baseline`'s ReGreet numbers;
+- **a weight case that is still real**: either the marginal closure over the *installed
+  desktop profile* that scootgreet would remove is at least about 300 MiB (measured by
+  `greet-baseline`), or the scoot-iso image is still over its size cap with ReGreet on it.
 
 **When not to build it**, decided up front:
 
 - the two real-greetd cases cannot be made green;
 - the keyboard spike cannot type every layout the maintainer uses;
-- `greet-baseline` shows the marginal closure over the installed desktop profile is small
-  because GTK4 is already there, which leaves only the ISO case;
+- `greet-baseline` shows the marginal closure over the installed desktop profile is under
+  about 300 MiB (GTK4 is already there), and the ISO is not over its cap;
 - scootlock is chosen first ([Decisions needed (d)](shell-apps.md#decisions-needed)).
 
 On a no, ReGreet stays.
@@ -247,8 +252,15 @@ cancels. It answers **every** prompt, `visible` and `secret` alike, with the nex
 from stdin (or from `--answers-fd N`), and prints `info` and `error` messages to stderr. It
 exits 0 once the session is started. No answer ever goes in argv: a `visible` answer can be an
 OTP, and argv is readable by any local user through `/proc/PID/cmdline` unless `/proc` is
-mounted with `hidepid`. It has to run as the greeter user with the greeter's socket, exactly
-as the M2's existing scripted login does. No new privilege is introduced.
+mounted with `hidepid`.
+
+**A headless login does not need the graphical greeter.** Anything running as the greeter user
+with `GREETD_SOCK` can drive greetd, so the computer-use case (an agent or a VM test logging in)
+does not have to wait for scootgreet. The frame codec, the conversation with its cancel
+discipline, and the stdin answers can ship first as a small Wayland-free tool:
+[`greet-headless-login`](../../docs/scootbar/backlog/greet-headless-login.md), a candidate early
+ticket. Its crate is the one that later grows the UI, and `scootgreet login` is that tool. It has to run as the greeter user with the greeter's socket, exactly
+No new privilege is introduced.
 
 ## What the screen offers
 
@@ -398,7 +410,10 @@ If it is ever built, it is opt-in (`programs.scoot.greeter.host = "scoot"`).
   - **Locked memory.** Both buffers live in one small locked region (two pages): mapped,
     `mlock`ed, `MADV_DONTDUMP`, and zeroed and unlocked on drop. In rustix 1.1, `mlock` is an
     `unsafe fn` (`src/mm/mmap.rs:312` in 1.1.5), so the region is a new type in `scootbg-mem`,
-    the family's one audited `unsafe` crate. scootgreet keeps `forbid(unsafe_code)`.
+    the family's one audited `unsafe` crate. It sits **behind a `locked` feature that is off by
+    default**, so scootbg's release-gated binary never builds it, and the PR that adds it updates
+    the crate's description, which today speaks of wallpaper buffers only. scootgreet keeps
+    `forbid(unsafe_code)`.
     **Not `mlockall(MCL_FUTURE)`**, although rustix offers it safely (`mmap.rs:408`): under an
     unprivileged `RLIMIT_MEMLOCK` of 8 MiB, with an 8 MB RSS budget, it would turn ordinary
     allocations into failures, which means an abort at the login screen. (greetd itself
@@ -440,14 +455,16 @@ So:
    ("config error, using defaults") and in the journal. A wallpaper that fails to load gets the
    `background` fill. A missing font falls down the chain to the well-known fonts (the bar's
    list, `crates/scootbar/src/font.rs:52-67`).
-2. **A supervisor, `scootgreet session`, is greetd's command.** It is a code path in the same
-   binary with no Wayland, fonts or drawing. It:
+2. **A supervisor, `scootgreet session`, runs the graphical greeter.** It is a code path in the
+   same binary with no Wayland, fonts or drawing. It:
    1. sends `cancel_session` (a stale session from a previous greeter must not block the next
       one; [above](#the-greetd-client));
    2. starts `cage -s -d -m last -- scootgreet` in its own process group, by absolute store path,
       with a pipe whose write end scootgreet inherits;
-   3. requires one byte on the pipe within **15 s**, written after scootgreet's first frame is
-      presented (the startup deadline);
+   3. requires one byte on the pipe within a **startup deadline** (config `startup-timeout`,
+      default 15 s), written after scootgreet's first frame is presented. `greet-baseline`
+      measures the first frame, including the slow case: QEMU without KVM and with no GPU, the
+      scoot-iso test's setup. The default is set from that number with a margin;
    4. after that, requires a heartbeat byte at least every **90 s**. scootgreet's loop writes one
       every 30 s from a `timerfd`: two wakeups a minute at the login screen, an accepted and
       stated cost;
@@ -456,16 +473,61 @@ So:
       `cancel_session` again, and execs **agreety** by absolute path:
       `agreety --cmd <fallback-session>`.
 
+   **Both timers are `CLOCK_MONOTONIC`.** Linux's monotonic clock does not advance while the
+   machine is suspended (`CLOCK_BOOTTIME` does), so a laptop that sleeps at the login screen and
+   resumes does not trip the heartbeat. The supervisor's own waits are `poll` timeouts, which
+   are measured on the same clock, and scootgreet's heartbeat `timerfd` is created on
+   `CLOCK_MONOTONIC` explicitly.
+
+   **Every fallback says why.** Before exec'ing agreety, the supervisor:
+   - prints one line to the VT, which agreety then shares, for example
+     `scootgreet: no first frame within 15 s; text login follows`, or
+     `scootgreet: exited with status 134 (SIGABRT)`;
+   - appends the same line, timestamped, to `/var/lib/scootgreet/fallback.log` (kept to its last
+     64 lines), so the reason survives for a bug report.
+
    agreety is greetd's own text greeter, and `scoot-iso`'s live `default_session`
    (`scoot-iso` `nix/live.nix:342-352`). A greeter that cannot draw, crashes, or hangs
    degrades to a text login on the same VT, never to a dead VT.
-3. **If the supervisor itself fails**, the greetd command is
-   `scootgreet session || scootgreet-fallback`. `scootgreet-fallback` is a two-line `sh` script
-   that runs agreety up to twice. The first agreety finds a stale session, cancels it, and
-   exits 1 (`agreety/src/main.rs:113-117`); the second starts clean. A `scootgreet` that crashes
-   deterministically on some PAM flow (OTP, say) therefore still ends at a working text login on
-   every greeter start. That is the case R1 of the #579 review showed the first draft got
-   wrong.
+3. **If the supervisor itself fails, a shell wrapper catches it.** greetd does not run its
+   command directly. It builds `exec <command>` (`greetd/src/session/worker.rs:228-235`) and
+   runs that with `/bin/sh -c` (`worker.rs:267-272`). So a `default_session.command` of
+   `scootgreet session || fallback` would really be `exec scootgreet session || fallback`.
+   - If the supervisor starts, the shell is already replaced, and `||` never runs.
+   - If the exec fails (a missing or broken binary), a non-interactive shell exits at once.
+
+   Either way the fallback is unreachable. A supervisor that dies on every start would then
+   loop greetd into systemd's start limit and leave VT1 dead. **greetd's command is therefore
+   one executable `sh` wrapper, `scootgreet-greeter`**, so that greetd's `exec` replaces the
+   shell with the wrapper, not with the supervisor:
+
+   ```sh
+   #!/bin/sh
+   # scootgreet-greeter: greetd's default_session.command (greetd execs it under sh -c).
+   /abs/bin/scootgreet session || exec /abs/bin/scootgreet-fallback
+   ```
+
+   `scootgreet-fallback` is a second `sh` script:
+
+   ```sh
+   #!/bin/sh
+   /abs/bin/agreety --cmd "$FALLBACK_SESSION" && exit 0
+   exec /abs/bin/agreety --cmd "$FALLBACK_SESSION"
+   ```
+
+   It runs agreety again only when agreety exits non-zero. That is the stale-session case:
+   agreety's first request meets a session a dead greeter left, gets an `error`, cancels it,
+   and exits 1 (`agreety/src/main.rs:113-121,176-179`). The second run starts clean.
+   **agreety exits 0 when it starts a session, and also when it has used up its
+   `--max-failures` (default 5) wrong passwords** (the loop at `main.rs:173-182` ends and
+   `main` returns). So a zero exit is left to greetd: with no session started, greetd sees the
+   greeter exit, exits 0, and systemd restarts it (`Restart=on-success`). Each such cycle waits
+   for a person typing at agreety, so it cannot spin into the start limit.
+
+   A `scootgreet` that crashes deterministically on some PAM flow (OTP, say) therefore still
+   ends at a working text login on every greeter start. So does a supervisor binary that is
+   missing, exits non-zero at once, or crashes. That is the case R1 and N1 of the #579 reviews
+   showed the earlier drafts got wrong.
 4. **VT escape.** `Ctrl+Alt+F2` reaches a getty on tty2: nixpkgs disables only `autovt@tty1`, and
    cage's `-s` allows the switch. `greet-nixos` verifies this on the dev VM, and the install docs
    print it next to the switch. **To verify:** after the supervisor SIGKILLs cage, whether the VT
@@ -548,7 +610,8 @@ swap never touches the login screen.
   (TOML into `/etc/scoot/greet.toml`, mode 0644). There is no `stylix.enable`.
   `programs.scoot.greeter` gains `daemon = enum [ "regreet" "scootgreet" ]`, default
   `"regreet"`. With `"scootgreet"`, the module:
-  - sets greetd's `default_session.command` to `scootgreet session || scootgreet-fallback`;
+  - sets greetd's `default_session.command` to the **`scootgreet-greeter` wrapper's absolute
+    store path**, and nothing else, so greetd's `exec` lands on the wrapper ([why](#failure-modes-never-strand-a-login));
   - creates `/var/lib/scootgreet` with tmpfiles;
   - passes the XKB environment;
   - keeps the GDM/SDDM refusals and the forced scoot session entry (`nixos.nix:54-78`);
@@ -574,7 +637,7 @@ swap never touches the login screen.
   `nix/tests.nix:6087-6310`); `--check` on the rendered files.
 - **Without Nix**: `/etc/scoot/greet.toml` by hand, the look through the root-level apply
   step, greetd's `/etc/greetd/config.toml` pointing `default_session.command` at
-  `scootgreet session || scootgreet-fallback`, and the VT-escape note beside it. `install.sh` never installs the
+  the `scootgreet-greeter` wrapper, and the VT-escape note beside it. `install.sh` never installs the
   greeter ([shell-apps.md, Without Nix](shell-apps.md#without-nix)).
 
 ## The installer ISO
@@ -612,6 +675,13 @@ field. The live session keeps `agreety` and autologin unchanged.
   - **scootgreet SIGKILLed with a secret prompt pending**, landing on a working agreety login;
   - a hang injected (`SCOOTGREET_TEST_HANG=1` stops the heartbeat), landing on agreety
     after the deadline;
+  - **the supervisor itself failing**, through the real `scootgreet-greeter` wrapper as greetd
+    runs it: the `scootgreet` binary missing, `scootgreet session` exiting non-zero at once,
+    and `scootgreet session` aborting. Each must reach a working agreety login, and the
+    fallback log must name the reason;
+  - agreety's `--max-failures` used up, ending in a fresh greeter (greetd's restart) rather
+    than a dead VT;
+  - a suspend and resume at the login screen, with no fallback;
   - cage itself SIGKILLed, with agreety's prompt readable afterwards;
   - `scootgreet login` headless, with its answers on stdin.
 - **GPU-free**: the dev VM with no GPU, the host's software path.
@@ -628,9 +698,10 @@ field. The live session keeps `agreety` and autologin unchanged.
   (configure, `scootgreet login`, troubleshooting with `> **Symptom:**` boxes such as "the
   login screen is a text prompt", meaning the fallback ran, read the journal) go under a
   section added to `site/OUTLINE.md`'s Coming apps in the PR that ships it.
-- Packages: deb, rpm and Arch, with a greetd config example (`scootgreet session ||
-  scootgreet-fallback`) and the `scootgreet-fallback` script (`agreety` comes with greetd). Flake `packages.scootgreet` and `nixosModules.scootgreet`.
-- CI: classify and job in `greet-greetd-client`, which creates the crate.
+- Packages: deb, rpm and Arch, with the `scootgreet-greeter` and `scootgreet-fallback`
+  scripts and a greetd config example pointing `default_session.command` at
+  `scootgreet-greeter` (`agreety` comes with greetd). Flake `packages.scootgreet` and `nixosModules.scootgreet`.
+- CI: classify and job in `greet-headless-login`, which creates the crate.
 
 ## Decisions specific to the greeter
 
@@ -659,7 +730,8 @@ These are also listed in [shell-apps.md](shell-apps.md#decisions-needed) items 2
 | [`scootgreet`](../../docs/scootbar/backlog/scootgreet.md) (epic) | daily-drive, computer use (scriptable VM login) | its children |
 | [`greet-baseline`](../../docs/scootbar/backlog/greet-baseline.md): measure ReGreet + cage (RSS, first frame, the marginal closure over the profile); verify cage's GPU-free path and tty2's getty | daily-drive | none: start now |
 | [`greet-prototype`](../../docs/scootbar/backlog/greet-prototype.md): the go/no-go gate, out of the workspace, against a real greetd | daily-drive | `greet-baseline`, `scootui-keyboard-spike`, the go-ahead |
-| [`greet-greetd-client`](../../docs/scootbar/backlog/greet-greetd-client.md): frames, the cancel discipline, the conversation, the locked secret path, `scootgreet login`, a fake greetd that models greetd's state | computer use, daily-drive | the GO verdict in `greet-prototype`, `scootui-extract-draw` |
+| [`greet-headless-login`](../../docs/scootbar/backlog/greet-headless-login.md): the greetd client, the cancel discipline and `scootgreet login`, with no UI (a candidate early ticket for computer use) | computer use | the go-ahead |
+| [`greet-greetd-client`](../../docs/scootbar/backlog/greet-greetd-client.md): the supervisor and its wrapper, the fallback, the locked secret path | daily-drive | `greet-headless-login`, the GO verdict in `greet-prototype`, `scootui-extract-draw` |
 | [`greet-ui`](../../docs/scootbar/backlog/greet-ui.md): the screen, entry, focus chain, layout and Caps Lock, built-in defaults | daily-drive | `greet-greetd-client`, `scootui-entry-and-list`, `scootui-surfaces-on-demand` |
 | [`greet-users-sessions`](../../docs/scootbar/backlog/greet-users-sessions.md): `/etc/passwd`, avatars, sessions through a new `scoot-xdg` crate, remembered state | daily-drive | `greet-ui`, `launch-desktop-index` |
 | [`greet-power`](../../docs/scootbar/backlog/greet-power.md): logind power with `Can*` gating | daily-drive | `greet-ui`, `scoot-dbus-extract` |

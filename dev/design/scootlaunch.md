@@ -271,10 +271,18 @@ surface maps and holds it until it unmaps", `protocols.md:1037-1040`).
 Mouse: a click launches the row, and the wheel scrolls. The panel is centered on the
 target output, 40 em wide with 10 rows by default, and every key is configurable.
 Opening a second apps-mode instance closes the first. While open, the first instance
-listens on an abstract Unix socket, `@scootlaunch-<uid>-<WAYLAND_DISPLAY>`: one fd, which exists
-only while the panel is open. A second invocation connects, sends `close`, and exits. A failed
-connect means none is open, so it opens itself. This gives a toggle on one bind with no pid file,
-so no pid-reuse window. dmenu instances do not listen.
+listens on a socket file, `$XDG_RUNTIME_DIR/scootlaunch-<WAYLAND_DISPLAY>.sock`: one fd, which
+exists only while the panel is open, and is removed on close. A second invocation connects,
+sends `close`, and exits. A failed connect (or a stale file) means none is open, so it opens
+itself. This gives a toggle on one bind with no pid file, so there is no pid-reuse window.
+dmenu instances do not listen.
+
+A socket file rather than an abstract one, because any local user can bind an abstract name
+first. `$XDG_RUNTIME_DIR` is the user's own `0700` directory, which rules that out. The listener
+also checks the peer's uid with `SO_PEERCRED` and ignores any other, as scoot's own IPC does
+(`crates/scoot/src/compositor/ipc/listener.rs:240-307`). scoot does it with `libc`; scootlaunch
+uses rustix's safe `net::sockopt::socket_peercred` (`src/net/sockopt.rs:1692` in 1.1.5) and
+keeps `forbid(unsafe_code)`.
 
 **Which output.** The launcher should open where the user is looking. A `layer_surface` with a
 null output lands on scoot's *primary* output today
