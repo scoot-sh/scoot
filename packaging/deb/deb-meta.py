@@ -52,7 +52,7 @@ ALLOW = {
 CRATE = {"scoot": "scoot", "scootbg": "scootbg", "scootbar": "scootbar"}
 
 SHORT = {
-    "scoot": "Scrolling-tiling Wayland compositor (CPU rendering by default, no GPU needed)",
+    "scoot": "Scrolling-tiling Wayland compositor (CPU renderer, no GPU stack needed)",
     "scootbg": "Wallpaper daemon for the scoot compositor",
     "scootbar": "Status bar for the scoot compositor",
 }
@@ -60,7 +60,7 @@ SHORT = {
 LONG = {
     "scoot": (
         " scoot is a lightweight Wayland compositor with scrolling columns,\n"
-        " CPU rendering by default and full IPC for agents and scripts.\n"
+        " a CPU renderer and full IPC for agents and scripts.\n"
         " .\n"
         " This package ships the compositor, the greeter session launcher\n"
         " (scoot-session) and its wayland-sessions entry, the systemd user\n"
