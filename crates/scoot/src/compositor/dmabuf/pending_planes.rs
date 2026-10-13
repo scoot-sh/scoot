@@ -13,7 +13,7 @@
 //! clients were shed at accept, and the fd-pressure guard could not pick the
 //! offender, because none of its counted creations was past a grace (see
 //! `docs/backlog/resolved/client-held-fd-bound-done.md`). This is on every
-//! tier that offers the dmabuf global, the default pixman one included.
+//! tier that offers the dmabuf global, the pixman one included.
 //!
 //! Every plane's fd is also recorded in the per-client fd ledger
 //! (`client_fds.rs`) on `add`, and stays counted there, as the client's, for

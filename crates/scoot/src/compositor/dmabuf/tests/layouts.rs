@@ -678,7 +678,7 @@ fn every_advertised_layout_imports_and_draws() {
 /// the client sends afterwards imports and draws on the resized target.
 ///
 /// Named renderers rather than `SCOOT_TEST_RENDERER`, so the GLES half runs
-/// in the default suite. Under pixman the resize rebuilds the backend and the
+/// in the plain suite (without `SCOOT_TEST_RENDERER=gpu`). Under pixman the resize rebuilds the backend and the
 /// buffer is mapped again; that half pins only that it still draws.
 ///
 /// The frame after the resize carries no client commit at all, so the only
