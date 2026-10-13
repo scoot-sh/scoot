@@ -601,6 +601,18 @@ fn the_balanced_shapes_are_centred_on_the_bitmap() {
 }
 
 #[test]
+fn tiny_paw_badges_drop_their_toes_instead_of_blurring_them() {
+    // The 24-grid simplification rule ([`super::design`]): a paw toe
+    // narrower than TOE_DROP_BELOW never rasterises -- the 8px pointer badge
+    // keeps its pad alone. A full print keeps all four prims.
+    assert_eq!(super::paw::prims(0.0, 0.0, 1.0).len(), 1);
+    assert_eq!(super::paw::prims(0.0, 0.0, 4.0).len(), 4);
+    // ... and the badge still draws at 8px (pad only, no toes).
+    let pixels = paint(Shape::PointerBadge, 8);
+    assert_ne!(alpha(&pixels, 8, 5, 5), 0);
+}
+
+#[test]
 fn the_arrow_tip_is_drawn_and_the_corner_is_not() {
     // The hotspot contract from the bitmap's side: the tip pixel itself is
     // covered (it is what the user is pointing with), while the bitmap's

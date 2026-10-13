@@ -1,5 +1,8 @@
 //! The symbols: crosshairs, the "not allowed" ring and the magnifiers.
 //!
+//! Authored on the 24-unit grid ([`super::design`]): the precision stroke
+//! below is 2 grid units, the same pixels as the old `size / 12`.
+//!
 //! The crosshair keeps its predecessors' plus in the body color with an
 //! orange centre dot; precision is the same idea drawn thinner with no dot,
 //! which is what tells the two apart. The ring is body-colored (it follows
@@ -38,7 +41,7 @@ pub(crate) fn crosshair(ctx: &Ctx) -> (Vec<Prim>, Vec<Prim>, Option<super::super
 
 /// A thinner plain crosshair, for precise picking.
 pub(crate) fn precision(ctx: &Ctx) -> (Vec<Prim>, Vec<Prim>, Option<super::super::raster::Shadow>) {
-    let w = (f64::from(ctx.size) / 12.0).max(1.2);
+    let w = (2.0 * ctx.u).max(1.2);
     let inset = (ctx.ow + w / 2.0 + 1.0).ceil();
     let (near, far) = span(ctx.size, inset);
     let body = vec![

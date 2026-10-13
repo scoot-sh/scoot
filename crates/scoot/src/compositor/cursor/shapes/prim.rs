@@ -8,7 +8,8 @@ use super::super::raster::{self, Shadow};
 
 /// How far past the fill edge the rim reaches, in pixels: 1px at the
 /// default size, growing slightly with the bitmap so a large cursor keeps a
-/// visible rim, capped so it never becomes a border.
+/// visible rim, capped so it never becomes a border. In grid units
+/// ([`super::design`]) that is `1.5u` clamped to `1.0..=2.5`.
 pub(crate) fn outline_width(size: i32) -> f64 {
     (f64::from(size) / 16.0).clamp(1.0, 2.5)
 }
@@ -17,7 +18,8 @@ pub(crate) fn outline_width(size: i32) -> f64 {
 /// size so a stroke carries a solid core inside its own rim on both
 /// sides (a 1.6px stem's core dissolves into edge blends at 16px), growing
 /// from there so a large cursor is a larger drawing rather than the same
-/// hairline on a bigger grid.
+/// hairline on a bigger grid. In grid units that is `8/3u` floored at 2px
+/// (see [`super::design::MIN_STROKE`]).
 pub(crate) fn stroke_width(size: i32) -> f64 {
     (f64::from(size) / 9.0).max(2.0)
 }

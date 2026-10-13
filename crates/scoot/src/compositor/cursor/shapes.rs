@@ -67,6 +67,7 @@ use smithay::utils::{Logical, Point};
 use super::raster::{self, Shadow};
 
 pub mod arrow;
+pub mod design;
 pub mod hand;
 pub mod paw;
 pub(crate) mod prim;
@@ -293,9 +294,17 @@ const DOT_BELOW: i32 = 8;
 
 /// Shared metrics for one bitmap size, computed once per [`generate`] call
 /// and handed to whichever family module draws the shape.
+///
+/// All absolute geometry derives from the 24-unit design grid (see
+/// [`design`]): `u` is one grid unit (`size / 24`), so a coordinate written
+/// as `9.0 * u` is grid column 9 at every target size. The rim, stroke and
+/// rounding below are the same values the family has always used, expressed
+/// in `u` (e.g. the 1px rim at 16px is `1.5u`).
 pub(crate) struct Ctx {
     /// Bitmap edge length.
     pub size: i32,
+    /// One 24-grid unit in pixels.
+    pub u: f64,
     /// Rim width: 1px at the default size, growing slightly past it.
     pub ow: f64,
     /// Line-art stroke width: 2px at the default size so a stroke carries a
@@ -317,12 +326,20 @@ impl Ctx {
         let ow = outline_width(size);
         Self {
             size,
+            u: design::unit(size),
             ow,
             w: stroke_width(size),
             aow: (ow * 0.5).max(0.5),
             c: f64::from(size / 2) + 0.5,
             round: (f64::from(size) / 20.0).max(0.8),
         }
+    }
+
+    /// Grid coordinate `g` (in 24ths of the bitmap edge) in pixels.
+    /// Computed as `g * size / 24` (left-associative) so whole and half
+    /// grid units land exactly: grid 9 at 16px is precisely 6.0.
+    pub(crate) fn g(&self, g: f64) -> f64 {
+        g * f64::from(self.size) / design::GRID
     }
 }
 

@@ -1,5 +1,8 @@
 //! The text beams: the I-beam and its sideways sibling.
 //!
+//! Authored on the 24-unit grid ([`super::design`]): the serif reach below
+//! is 3 grid units, the same 2px at 16px the beam has always used.
+//!
 //! The stem and both serifs are the body; the accent is a thin mark down the
 //! stem's middle (the orange bar the sheet's `text-select` cell shows). With
 //! the accent disabled the beam is the plain I-beam of the sheet's `text`
@@ -23,7 +26,8 @@ fn beam(ctx: &Ctx, vertical: bool) -> (Vec<Prim>, Vec<Prim>, Option<super::super
         serif_scale = 0.85;
     }
     let (near, far) = span(ctx.size, inset);
-    let serif = (f64::from(ctx.size) / 8.0).max(1.5) * serif_scale;
+    // 3 grid units: the same reach as the old `size / 8`.
+    let serif = (3.0 * f64::from(ctx.size) / super::design::GRID).max(1.5) * serif_scale;
     let c = ctx.c;
     let (stem, bars, mark) = if vertical {
         (

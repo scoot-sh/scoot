@@ -1,6 +1,10 @@
 //! The move/resize family: shafts with heads in the body color, the orange
 //! centre mark as accent.
 //!
+//! Authored on the 24-unit grid ([`super::design`]): head reach, half-width
+//! and diagonal-head values below are grid units (4.8/4.0/6.0u), the same
+//! pixels as the old `size / 5`, `size / 6`, `size / 4`.
+//!
 //! Orthogonal resizes carry a solid centre line, diagonals a dashed one
 //! (their 45-degree shafts have no solid core to read by, so the dashes must
 //! flare as separate ticks to say which way they point); move carries a
@@ -26,12 +30,9 @@ fn metrics(ctx: &Ctx) -> Metrics {
     Metrics {
         near,
         far,
-        head: (f64::from(ctx.size) / 5.0).max(3.0).min((far - near) / 2.0),
-        half_base: (f64::from(ctx.size) / 6.0)
-            .max(2.0)
-            .min(ctx.c - near)
-            .min(far - ctx.c),
-        diag_head: (f64::from(ctx.size) / 4.0).max(4.0).min((far - near) / 2.0),
+        head: (4.8 * ctx.u).max(3.0).min((far - near) / 2.0),
+        half_base: (4.0 * ctx.u).max(2.0).min(ctx.c - near).min(far - ctx.c),
+        diag_head: (6.0 * ctx.u).max(4.0).min((far - near) / 2.0),
         c: ctx.c,
     }
 }
@@ -203,11 +204,9 @@ pub(crate) fn move_shape(
     let inset = ctx.ow + 0.5;
     let (near, far) = span(ctx.size, inset);
     let span_len = far - near;
-    let mhead = (f64::from(ctx.size) / 5.5).max(3.0).min(span_len / 2.0);
-    let mhalf = (f64::from(ctx.size) / 8.0)
-        .max(1.8)
-        .min(ctx.c - near)
-        .min(far - ctx.c);
+    // 24/5.5 and 3 grid units: the same pixels as the old size/5.5, size/8.
+    let mhead = (24.0 / 5.5 * ctx.u).max(3.0).min(span_len / 2.0);
+    let mhalf = (3.0 * ctx.u).max(1.8).min(ctx.c - near).min(far - ctx.c);
     // The shafts stop half a stroke short of the head tips: round caps
     // overhang their endpoints by `w / 2`, which at large sizes dwarfs the
     // tip inset and would spill fill off the bitmap edge. Ending flush with
@@ -265,9 +264,7 @@ pub(crate) fn move_shape(
 /// splitter, not an eye.
 pub(crate) fn split_v(ctx: &Ctx) -> (Vec<Prim>, Vec<Prim>, Option<super::super::raster::Shadow>) {
     let m = metrics(ctx);
-    let h = (f64::from(ctx.size) / 6.0)
-        .max(2.8)
-        .min((m.far - m.near) / 2.0 - 0.5);
+    let h = (4.0 * ctx.u).max(2.8).min((m.far - m.near) / 2.0 - 0.5);
     let gap = (ctx.w * 0.35).max(0.8) / 2.0 + ctx.aow + 0.9;
     let left = Prim::Poly(chamfer(
         &[(m.near, m.c), (m.c - gap, m.c - h), (m.c - gap, m.c + h)],
@@ -293,9 +290,7 @@ pub(crate) fn split_v(ctx: &Ctx) -> (Vec<Prim>, Vec<Prim>, Option<super::super::
 /// (F4): see `split_v`.
 pub(crate) fn split_h(ctx: &Ctx) -> (Vec<Prim>, Vec<Prim>, Option<super::super::raster::Shadow>) {
     let m = metrics(ctx);
-    let h = (f64::from(ctx.size) / 6.0)
-        .max(2.8)
-        .min((m.far - m.near) / 2.0 - 0.5);
+    let h = (4.0 * ctx.u).max(2.8).min((m.far - m.near) / 2.0 - 0.5);
     let gap = (ctx.w * 0.35).max(0.8) / 2.0 + ctx.aow + 0.9;
     let top = Prim::Poly(chamfer(
         &[(m.c, m.near), (m.c - h, m.c - gap), (m.c + h, m.c - gap)],
