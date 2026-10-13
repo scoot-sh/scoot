@@ -39,7 +39,9 @@ section 3:
 - The value grammar of section 3.5: names, identifiers (starting with a
   letter or digit, so never `.` or `..`; ASCII-only by decision), Nix
   attribute paths for `[fonts.nix]`, display text, glyph strings, paths,
-  `https://` wallpaper URLs with a required 64-hex `sha256`, and numbers,
+  `https://` wallpaper URLs with a required 64-hex `sha256` (host a DNS
+  name with a dot: no userinfo, IP literal, port, `localhost` or
+  `.localhost`/`.local`/`.internal`/`.home.arpa` name), and numbers,
   each with its charset and length cap; `[cursor] accent` takes `#rrggbb` or
   `"none"`; NUL and control characters refused everywhere; a 64 KiB file
   cap.

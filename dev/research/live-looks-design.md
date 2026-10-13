@@ -464,6 +464,14 @@ and the Nix build. Pure checks (crate):
 - **Wallpaper URLs** (`wallpaper.image` in its URL form, §8.3): `https://`
   only, at most 2048 bytes, printable ASCII without space, `"`, `'`, `\`,
   `<`, `>` or a backtick, and a required `sha256` of exactly 64 hex digits.
+  The host must be a DNS name with at least one dot: no userinfo (`@`
+  anywhere before the path), no IP literal (dotted IPv4 or a bracketed
+  IPv6), no explicit port, and not `localhost` or a name under
+  `.localhost`, `.local`, `.internal` or `.home.arpa` (R5: with the
+  `sha256` a look cannot read a reply back, but a swap would still make
+  scootbg send a request to a local service). A public name can still
+  resolve to a private address, so for an *installed* look the fetch
+  happens at install time instead (§8.3), never at swap time.
 - **Display text** (`title`, `description`, `credits`, `license`): UTF-8
   without control characters (C0, DEL, C1), no `=`, `[`, `]`, `"`, `\`,
   at most 200 bytes (`title` 64). Display text is never written into an
@@ -1296,9 +1304,13 @@ top of that, for anything arriving from elsewhere:
   be an option), `https://` and `ssh://` only, then the `install PATH` path
   on the result.
 - **Wallpaper by URL** (the vinyl-sunset case, `theming.md:31-34`): a look
-  may reference `https://` plus a required `sha256`, which scootbg fetches
-  once and caches (`site/.../scootbg/from-url.md`). The first swap to such a
-  look makes a network fetch; the apply reply says so.
+  may reference `https://` plus a required `sha256` (the URL grammar of
+  §3.5), which scootbg fetches once and caches
+  (`site/.../scootbg/from-url.md`). For a shipped, declared or
+  user-authored look the first swap to it makes that fetch, and the apply
+  reply says so. For an *installed* look, `install` fetches and verifies the
+  image into the cache at install time and refuses the install if the fetch
+  fails, so a swap to someone else's look never makes a network request.
 
 ### 8.4 Tests
 
@@ -1525,12 +1537,30 @@ rest want the maintainer's call.
     for each key. Before writing, the tool reads the current value; if it is
     neither unset nor what the tool last wrote, someone else changed it
     (a settings app, a hand `gsettings set`), so the tool leaves it and the
-    reply names it.
-  - *No regression in between (N3):* `look-nix-catalog` stops
+    reply names it. **With no record yet** for a key (the first `sync` or
+    `apply` after migration) and no claim on it in the Nix key-name list,
+    the tool adopts the key: it writes it and starts the record, whatever
+    the current value is.
+  - *Why adoption is needed (R1):* the migration switch normally clears
+    the old value itself. Home-manager records each generation's managed
+    dconf keys and runs `dconf reset` on every key the new generation stops
+    managing (`modules/misc/dconf.nix:20,120,156` at `efa3ccb4`, the rev
+    `scripts/scootbar-stylix-test.sh:35` pins), and `sync` runs after that
+    `dconfSettings` step, so the profile's old eval-time `color-scheme`
+    arrives unset. But that cleanup skips an activation that has no
+    old-generation state ("Can't do cleanup if we don't know the old
+    state", `dconf.nix:143`), which would leave the stale `prefer-dark` in
+    place; without adoption the "someone else set it" rule would then lock
+    the key forever.
+  - *No regression in between (N3, R2):* `look-nix-catalog` stops
     home-manager's eval-time `color-scheme` write only by moving that one
     write into `sync` (run after `dconfSettings`), from the active look's
     `polarity`, so a dark look never loses GTK's dark-mode signal before
-    `look-toolkit-live` adds the other keys and the swap-time writes.
+    `look-toolkit-live` adds the other keys and the swap-time writes. Until
+    then `scoot look apply` does the same one-key `color-scheme` write as
+    `sync` (from `look-apply-cli` on, under the same rules), so a live swap
+    across polarity (to music-desk and back) never leaves dark/light stale
+    until the next activation.
 - **D12. Git install in v1?** No: path install in v1, git and `lookPacks`
   later (`look-share`).
 - **D13. How a look carries fonts.** Three carriers, in order:
@@ -1554,7 +1584,11 @@ rest want the maintainer's call.
   shapes ship only if `look-layer-scoot`'s benchmark shows the per-frame
   cost of rounded corners acceptable on the default CPU (pixman) renderer
   at 1, 10 and 50 windows; if not, the shipped looks keep `[shape] radius`
-  at 0 and the docs state the trade-off.
+  at 0 and the docs state the trade-off. **Ordering (R3):** `look-shipped`
+  runs before that benchmark, so it lifts `[shape] radius = 0` and
+  `[opacity] bar = 1.0` with the examples' values beside them as comments,
+  and `look-layer-scoot` raises them to the examples' values in the same
+  PR as its pixman benchmark, only if the benchmark passes.
 - **D14. Stylix targets vs an explicit look.** Ownership by path (§5.5):
   paths an upstream module (and so a Stylix target) owns stay Stylix's; the
   reply names those apps.

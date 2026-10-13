@@ -30,6 +30,13 @@ doc's section 8.3.
   total size capped, `license` required, the name of a shipped, declared or
   user-authored look refused, `apps/` static leaves dropped unless `--trust`
   (printed first). An installed look can be applied but never extended.
+- A wallpaper given by URL in an installed look is fetched, verified
+  against its `sha256` and cached at install time (the install refuses if
+  that fails), so a swap to it never makes a network request (R5; the URL
+  grammar in `look-format` already refuses userinfo, IP literals, ports and
+  local names).
+- `installed-looks/` is already in `look-apply-cli`'s catalog search, so an
+  installed look appears in `list` and `apply` with no change there.
 - `scoot look export NAME`: a tarball of a source look, regular files only.
 - `scoot look save NAME`: the user's own appearance and color values as a
   source look in `user-looks/` (user-authored, so extendable).
