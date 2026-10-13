@@ -1,6 +1,6 @@
 //! Tests for the cursor module.
 //!
-//! The pure arithmetic ([`generate_bitmap`], [`element_location`]) is unit
+//! The pure arithmetic ([`shapes::generate`], [`element_location`]) is unit
 //! tested directly. Everything about a *client-supplied* cursor surface
 //! needs a real `wl_surface` with a real committed buffer, so those tests
 //! drive an actual `wayland-client` connection through an actual [`State`]
@@ -9,7 +9,7 @@
 //! ones follow `SCOOT_TEST_RENDERER`; the few that build their own renderer
 //! below are pixman by construction). That
 //! is what distinguishes "drew the client's image" from "drew the fallback
-//! triangle"; asserting on the element enum's variant alone would pass even
+//! arrow"; asserting on the element enum's variant alone would pass even
 //! if the element were positioned or imported wrongly.
 //!
 //! Deliberately *not* covered here, and verified on real `--tty` hardware
@@ -52,7 +52,7 @@ use crate::compositor::test_support::{Harness, pixel};
 // -------------------------------------------------------------------------
 
 /// The default size and colors `Appearance::default()` resolves to, spelled
-/// out as `generate_bitmap`'s own parameters -- they are config values now,
+/// out as `shapes::generate`'s own parameters -- they are config values now,
 /// not compile-time constants, so the pure tests pass them explicitly and
 /// `the_default_appearance_still_describes_the_original_shape` below is what
 /// ties these literals back to the real defaults.
@@ -73,15 +73,26 @@ const TRANSPARENT: [u8; 4] = [0, 0, 0, 0];
 const NO_THEME: Option<&str> = Some("scoot-test-no-such-theme");
 
 #[test]
-fn bitmap_hotspot_pixel_is_the_outline_color() {
-    let pixels = generate_bitmap(DEFAULT_SIZE, WHITE, BLACK);
-    assert_eq!(pixel(&pixels, DEFAULT_SIZE, 0, 0), BLACK);
+fn bitmap_hotspot_pixel_is_drawn_and_opaque() {
+    // The arrow's tip: covered (it is what the user points with) and nearly
+    // opaque for opaque colors -- the tip pixel blends fill and outline
+    // under the supersampler, so it is neither flat color exactly, and its
+    // corner taps fall just outside the silhouette.
+    let pixels = shapes::generate(Shape::Default, DEFAULT_SIZE, WHITE, BLACK);
+    let hotspot = Shape::Default.hotspot(DEFAULT_SIZE);
+    let at_tip = pixel(&pixels, DEFAULT_SIZE, hotspot.x, hotspot.y);
+    assert_ne!(at_tip, TRANSPARENT, "the tip pixel is transparent");
+    assert!(
+        at_tip[3] > 128,
+        "the tip pixel is mostly transparent: {:?}",
+        at_tip
+    );
 }
 
 #[test]
 fn bitmap_is_fully_transparent_above_the_diagonal() {
-    let pixels = generate_bitmap(DEFAULT_SIZE, WHITE, BLACK);
-    // (size - 1, 0): far right of the top row, well outside the triangle.
+    let pixels = shapes::generate(Shape::Default, DEFAULT_SIZE, WHITE, BLACK);
+    // (size - 1, 0): far right of the top row, well outside the arrow.
     assert_eq!(
         pixel(&pixels, DEFAULT_SIZE, DEFAULT_SIZE - 1, 0),
         TRANSPARENT
@@ -90,23 +101,72 @@ fn bitmap_is_fully_transparent_above_the_diagonal() {
 
 #[test]
 fn bitmap_interior_is_the_fill_color() {
-    let pixels = generate_bitmap(DEFAULT_SIZE, WHITE, BLACK);
-    // (1, 3): strictly inside the triangle (0 < x < y).
-    assert_eq!(pixel(&pixels, DEFAULT_SIZE, 1, 3), WHITE);
+    let pixels = shapes::generate(Shape::Default, DEFAULT_SIZE, WHITE, BLACK);
+    // (2, 4): inside the arrow body, between the left edge and the diagonal.
+    assert_eq!(pixel(&pixels, DEFAULT_SIZE, 2, 4), WHITE);
 }
 
-/// The built-in defaults are what an unconfigured scoot draws, and they must
-/// stay the 16x16 white-on-black triangle this module shipped with -- the
-/// literals the three tests above use.
+/// The built-in defaults are what an unconfigured scoot draws: 16x16
+/// bitmaps in Mocu's white theme -- fill `#fcfcfc`, stroke `#222222`. The
+/// literals the pure tests above use are explicit colors, not these
+/// defaults; what ties them together is `contrast_rim` below.
 #[test]
-fn the_default_appearance_still_describes_the_original_shape() {
+fn the_default_appearance_is_mocus_white_theme() {
     let defaults = Appearance::default();
     assert_eq!(defaults.cursor_size, DEFAULT_SIZE);
-    assert_eq!(defaults.cursor_color.to_argb8888(), WHITE);
-    // The outline `Cursor::new` derives from that fill color.
     assert_eq!(
-        Color::new(0.0, 0.0, 0.0, defaults.cursor_color.a).to_argb8888(),
-        BLACK
+        defaults.cursor_color.to_argb8888(),
+        [0xfc, 0xfc, 0xfc, 255],
+        "the default fill is Mocu's white"
+    );
+    assert_eq!(
+        super::contrast_rim(defaults.cursor_color).to_argb8888(),
+        [0x22, 0x22, 0x22, 255],
+        "Mocu's white theme strokes in #222222"
+    );
+}
+
+/// The stroke pairing, both of Mocu's themes and the alpha following:
+///
+/// - a light fill (Mocu's white, or any light color) gets Mocu's `#222222`;
+/// - a dark fill (Mocu's black `#111111`) gets Mocu's `#f9f9f9`;
+/// - a mid-gray fill still gets the dark stroke (a light rim glares);
+/// - the stroke always carries the fill's own alpha, so translucency reads.
+#[test]
+fn the_stroke_is_mocus_pairing_for_the_fill() {
+    let pairs = [
+        ("#fcfcfc", [0x22, 0x22, 0x22, 255]),
+        ("#ffffff", [0x22, 0x22, 0x22, 255]),
+        ("#808080", [0x22, 0x22, 0x22, 255]),
+        ("#111111", [0xf9, 0xf9, 0xf9, 255]),
+    ];
+    for (fill, stroke) in pairs {
+        let fill = Color::parse(fill).expect("a valid color");
+        assert_eq!(super::contrast_rim(fill).to_argb8888(), stroke, "{fill:?}");
+    }
+    let ghost = Color::parse("#11111180").expect("a valid color");
+    let rim = super::contrast_rim(ghost);
+    assert_eq!(rim.a, ghost.a, "the stroke follows the fill's alpha");
+    assert_eq!(
+        rim.to_argb8888()[3],
+        0x80,
+        "a translucent fill wears a translucent stroke"
+    );
+}
+
+/// Setting the fill to white draws white with Mocu's dark stroke.
+#[test]
+fn a_white_fill_draws_white_with_a_dark_stroke() {
+    let fixture = Fixture::with_appearance(Appearance {
+        cursor_color: Color::parse("#ffffff").expect("a valid color"),
+        ..Appearance::default()
+    });
+    let canvas = fixture.frame();
+    let (px, py) = (POINTER.0 as i32, POINTER.1 as i32);
+    assert_eq!(
+        canvas.at(px + 1, py + 3),
+        WHITE,
+        "the arrow interior is the configured white body"
     );
 }
 
@@ -121,44 +181,55 @@ fn bitmap_honors_the_requested_size() {
         48,
         Appearance::MAX_CURSOR_SIZE,
     ] {
-        let pixels = generate_bitmap(size, WHITE, BLACK);
+        let pixels = shapes::generate(Shape::Default, size, WHITE, BLACK);
         assert_eq!(
             pixels.len(),
             (size * size * 4) as usize,
             "wrong buffer length for size {size}"
         );
-        // The bottom-left corner is inside the triangle at every size >= 3,
-        // which is what proves the shape grew with the buffer.
-        assert_eq!(
-            pixel(&pixels, size, 1, size - 1),
-            WHITE,
-            "size {size}'s bottom row should be filled"
+        // The tip (the hotspot) is drawn at every size ...
+        let hotspot = Shape::Default.hotspot(size);
+        assert_ne!(
+            pixel(&pixels, size, hotspot.x, hotspot.y),
+            TRANSPARENT,
+            "size {size}'s tip should be drawn"
         );
-        // ...and the bottom-right corner is on the diagonal, i.e. outline.
-        assert_eq!(
-            pixel(&pixels, size, size - 1, size - 1),
-            BLACK,
-            "size {size}'s diagonal should reach the far corner"
-        );
+        // ... while the corners away from the tip stay transparent: the
+        // shape scaled with the bitmap rather than spilling past it. (The
+        // top-left corner holds the tip's stroke, exactly where Mocu puts
+        // it; at the 4px minimum the whole bitmap is a dot with a halo, and
+        // the shapes tests pin down what that dot guarantees instead.)
+        if size > Appearance::MIN_CURSOR_SIZE {
+            for (x, y) in [(size - 1, 0), (0, size - 1), (size - 1, size - 1)] {
+                assert_eq!(
+                    pixel(&pixels, size, x, y),
+                    TRANSPARENT,
+                    "size {size}'s corner ({x}, {y}) should be transparent padding"
+                );
+            }
+        }
     }
 }
 
 /// Both colors are written through verbatim, with no channel reordering and
 /// no fallback to the old hardcoded white/black. Uses colors whose four bytes
-/// are all distinct, so a swap anywhere would change the assertion.
+/// are all distinct, so a swap anywhere would change the assertion; the
+/// sampled pixels are fully covered at this size (see the shapes tests for
+/// how the edges blend).
 #[test]
 fn bitmap_honors_the_requested_colors() {
     let fill = [0x11, 0x22, 0x33, 0xff];
     let outline = [0x44, 0x55, 0x66, 0x80];
-    let pixels = generate_bitmap(8, fill, outline);
-    assert_eq!(pixel(&pixels, 8, 1, 3), fill, "the interior");
-    assert_eq!(pixel(&pixels, 8, 0, 0), outline, "the hotspot corner");
-    assert_eq!(pixel(&pixels, 8, 0, 5), outline, "the left edge");
-    assert_eq!(pixel(&pixels, 8, 5, 5), outline, "the diagonal");
+    let pixels = shapes::generate(Shape::Default, 24, fill, outline);
+    // Outline is written with its own alpha, not forced opaque ...
+    let edge = pixel(&pixels, 24, 0, 8);
+    assert_eq!(edge, outline, "the outline edge");
+    // ... and the fill likewise.
+    assert_eq!(pixel(&pixels, 24, 4, 6), fill, "the interior");
     assert_eq!(
-        pixel(&pixels, 8, 7, 0),
+        pixel(&pixels, 24, 20, 4),
         TRANSPARENT,
-        "outside the triangle stays transparent whatever the colors are"
+        "outside the arrow stays transparent whatever the colors are"
     );
 }
 
@@ -281,6 +352,148 @@ fn a_fractional_scale_keeps_the_hotspot_offset_exact() {
 }
 
 // -------------------------------------------------------------------------
+// Scale-aware bitmaps: one prebuilt set per output scale
+// -------------------------------------------------------------------------
+
+/// The bitmap edge for a logical cursor size on an output scale:
+/// `round(logical * scale)` physical pixels. Non-finite scales fall back to
+/// the logical size rather than panicking or allocating absurdly.
+#[test]
+fn hidpi_bitmap_sizes_round_logical_times_scale() {
+    assert_eq!(physical_size(16, 1.0), 16);
+    assert_eq!(physical_size(16, 1.25), 20);
+    assert_eq!(physical_size(16, 1.5), 24);
+    assert_eq!(physical_size(16, 2.0), 32);
+    assert_eq!(physical_size(16, 3.0), 48);
+    assert_eq!(physical_size(24, 2.0), 48);
+    assert_eq!(physical_size(16, f64::NAN), 16);
+    assert_eq!(physical_size(16, 0.0), 16);
+    assert_eq!(physical_size(16, -2.0), 16);
+    // Distinct scales are distinct entries; noise around one value is not.
+    assert_eq!(scale_key(1.0), scale_key(1.0));
+    assert_ne!(scale_key(1.0), scale_key(2.0));
+    assert_eq!(scale_key(f64::NAN), scale_key(1.0));
+}
+
+/// Every scale in use keeps prebuilt bitmaps; the set stays bounded and only
+/// ever changes on cold paths (`ensure_scale`/`sync_scales`, never the frame
+/// path).
+#[test]
+fn hidpi_entries_cover_the_scales_in_use_and_stay_bounded() {
+    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
+    assert_eq!(cursor.scales.len(), 1, "startup builds scale 1.0");
+    cursor.ensure_scale(2.0);
+    cursor.ensure_scale(1.5);
+    assert_eq!(cursor.scales.len(), 3);
+    let physical: Vec<i32> = cursor.scales.iter().map(|entry| entry.physical).collect();
+    assert!(physical.contains(&16) && physical.contains(&32) && physical.contains(&24));
+    // Re-ensuring a kept scale rebuilds nothing (stable buffer ids, no new
+    // content for the damage tracker): the same scale's elements keep their
+    // `Id`s across the call.
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let pointer = Point::<f64, Logical>::from((10.0, 10.0));
+    let before = cursor.element(&mut renderer, pointer, 2.0);
+    cursor.ensure_scale(2.0);
+    let after = cursor.element(&mut renderer, pointer, 2.0);
+    assert_eq!(before[0].id(), after[0].id());
+    // The set is bounded: more distinct scales than fits evicts the oldest.
+    for scale in [1.25, 3.0, 1.75, 2.5] {
+        cursor.ensure_scale(scale);
+    }
+    assert!(cursor.scales.len() <= super::MAX_SCALES);
+    // ... while syncing to the live output set keeps exactly it.
+    cursor.sync_scales([1.0, 2.0]);
+    assert_eq!(cursor.scales.len(), 2);
+}
+
+/// Each output's frame draws that scale's own bitmap, sized in logical
+/// units: the on-screen size is unchanged at every scale (the geometry at
+/// the frame's scale is exactly the physical bitmap -- 1:1 sampling, never
+/// a stretched logical bitmap), and the hotspot is that bitmap's own tip.
+#[test]
+fn hidpi_elements_keep_the_logical_size_at_every_scale() {
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
+    let pointer = Point::<f64, Logical>::from((100.0, 100.0));
+    for scale in [1.0, 1.25, 1.5, 2.0, 3.0] {
+        cursor.ensure_scale(scale);
+        let elements = cursor.element(&mut renderer, pointer, scale);
+        assert_eq!(elements.len(), 1, "scale {scale} drew nothing");
+        let geometry = elements[0].geometry(scale.into());
+        let physical = physical_size(DEFAULT_SIZE, scale);
+        assert_eq!(
+            (geometry.size.w, geometry.size.h),
+            (physical, physical),
+            "scale {scale}: the on-screen size must be the physical bitmap"
+        );
+        // The physical hotspot sits exactly on the physical pointer.
+        let hotspot = Shape::Default.hotspot(physical);
+        assert_eq!(
+            (geometry.loc.x, geometry.loc.y),
+            (
+                (pointer.x * scale) as i32 - hotspot.x,
+                (pointer.y * scale) as i32 - hotspot.y
+            ),
+            "scale {scale}: the tip must sit under the pointer"
+        );
+        assert!(
+            hotspot.x >= 0 && hotspot.y >= 0 && hotspot.x < physical && hotspot.y < physical,
+            "scale {scale}: the hotspot must be inside its bitmap"
+        );
+    }
+}
+
+/// A mixed-DPI session draws each output's own bitmap: the 1x frame the 16px
+/// art, the 2x frame the 32px art, from the same cursor without rebuilding.
+#[test]
+fn mixed_scales_draw_each_outputs_own_bitmap() {
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
+    cursor.ensure_scale(2.0);
+    let pointer = Point::<f64, Logical>::from((50.0, 50.0));
+    let one = cursor.element(&mut renderer, pointer, 1.0);
+    let two = cursor.element(&mut renderer, pointer, 2.0);
+    let gone = one[0].geometry(1.0.into()).size;
+    assert_eq!((gone.w, gone.h), (16, 16));
+    let gtwo = two[0].geometry(2.0.into()).size;
+    assert_eq!((gtwo.w, gtwo.h), (32, 32));
+    assert_ne!(
+        one[0].id(),
+        two[0].id(),
+        "the two scales must not share a buffer"
+    );
+    // ... and repeating either frame reuses its buffers (the per-frame path
+    // allocates nothing: same entry, same stable `Id`s).
+    let one_again = cursor.element(&mut renderer, pointer, 1.0);
+    let two_again = cursor.element(&mut renderer, pointer, 2.0);
+    assert_eq!(one[0].id(), one_again[0].id());
+    assert_eq!(two[0].id(), two_again[0].id());
+}
+
+/// At scale 1 the element is what the old path built: the logical-size
+/// buffer, the logical hotspot, `element_location` arithmetic. The suites
+/// that render scale-1 frames with the cursor in them pin the pixels; this
+/// pins the construction.
+#[test]
+fn scale_1_elements_are_built_exactly_like_before() {
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
+    let pointer = Point::<f64, Logical>::from((12.0, 30.0));
+    let elements = cursor.element(&mut renderer, pointer, 1.0);
+    let geometry = elements[0].geometry(1.0.into());
+    assert_eq!(
+        (geometry.size.w, geometry.size.h),
+        (DEFAULT_SIZE, DEFAULT_SIZE)
+    );
+    let hotspot = Shape::Default.hotspot(DEFAULT_SIZE);
+    let location = element_location(pointer, hotspot, 1.0);
+    assert_eq!(
+        (geometry.loc.x as f64, geometry.loc.y as f64),
+        (location.x, location.y)
+    );
+}
+
+// -------------------------------------------------------------------------
 // A live compositor, a live client, a live renderer
 // -------------------------------------------------------------------------
 
@@ -290,9 +503,9 @@ const POINTER: (f64, f64) = (50.0, 50.0);
 /// Side of the square framebuffer the live tests render into.
 const CANVAS: i32 = 100;
 /// The clear color those renders start from, and the BGRA bytes it lands as.
-/// Deliberately not black: the fallback triangle's own hotspot pixel is
-/// opaque black, so a black canvas could not tell "drew the fallback" from
-/// "drew nothing".
+/// Deliberately not black: the fallback arrow's own hotspot pixel is
+/// near-opaque black, so a black canvas could not tell "drew the fallback"
+/// from "drew nothing".
 const CLEAR: [f32; 4] = [0.0, 0.5019608, 1.0, 1.0];
 const CLEAR_BGRA: [u8; 4] = [255, 128, 0, 255];
 /// The opaque BGRA color a test client commits to its cursor surface.
@@ -839,7 +1052,7 @@ fn a_cursor_surface_with_no_buffer_draws_nothing() {
     let mut fixture = Fixture::new();
     fixture.run(Step::CreateBareCursorSurface);
     fixture.run(Step::SetCursor { hotspot: (0, 0) });
-    // Not the fallback triangle: the client did supply a cursor, it just has
+    // Not the fallback arrow: the client did supply a cursor, it just has
     // no content yet, and inventing a shape for it would flash the wrong
     // image between `set_cursor` and the client's first commit.
     fixture.frame().assert_blank();
@@ -870,15 +1083,20 @@ fn destroying_the_cursor_surface_falls_back_to_the_builtin_shape() {
 
     let canvas = fixture.frame();
     assert_eq!(canvas.count, 1, "the fallback element");
-    assert_eq!(
+    assert_ne!(
         canvas.at(50, 50),
-        [0, 0, 0, 255],
-        "the triangle's own point"
+        CLEAR_BGRA,
+        "the arrow's own tip, at the pointer, drew nothing"
+    );
+    assert_eq!(
+        canvas.at(50, 50)[3],
+        255,
+        "the tip pixel should be opaque for opaque colors"
     );
     assert_eq!(
         canvas.at(51, 53),
-        [255, 255, 255, 255],
-        "its white interior"
+        FILL_BGRA,
+        "its interior is the default fill"
     );
     assert_eq!(
         canvas.at(50 + DEFAULT_SIZE, 50),
@@ -918,22 +1136,36 @@ fn a_configured_cursor_size_and_color_reach_the_rendered_pixels() {
     assert_eq!(canvas.count, 1, "the fallback element");
 
     let (px, py) = (POINTER.0 as i32, POINTER.1 as i32);
-    assert_eq!(canvas.at(px, py), BLACK, "the hotspot is still the outline");
-    assert_eq!(canvas.at(px, py + 10), BLACK, "the left edge");
-    assert_eq!(canvas.at(px + 10, py + 10), BLACK, "the diagonal");
+    // The hotspot pixel blends fill and outline under the supersampler, so
+    // it is neither flat color exactly -- but it is fully covered (opaque)
+    // and darker than the fill: the tip's stroke, not fill and not
+    // background.
+    let hot = canvas.at(px, py);
+    assert_eq!(hot[3], 255, "the hotspot pixel should be opaque");
+    assert_ne!(hot, CLEAR_BGRA, "the hotspot drew nothing");
+    assert_ne!(hot, fill_bgra, "the hotspot is fill, not rim");
+    assert!(hot[2] < fill_bgra[2], "the hotspot should be rim-dark");
+    // Mocu's stroke for a light fill, `#222222`, 2px wide at this size.
+    let stroke = [0x22, 0x22, 0x22, 0xff];
+    assert_eq!(canvas.at(px - 2, py + 10), stroke, "the left edge");
+    // Just above the long diagonal: the diagonal runs at about 45 degrees
+    // from the tip, so two pixels up of it sits mid-stroke (about 1.4px off
+    // the fill edge, inside the 2px stroke) and draws flat stroke.
+    assert_eq!(canvas.at(px + 11, py + 9), stroke, "the diagonal");
     assert_eq!(canvas.at(px + 2, py + 20), fill_bgra, "the configured fill");
     assert_eq!(
         canvas.at(px + 40, py + 2),
         CLEAR_BGRA,
-        "outside the triangle, still the clear color"
+        "outside the arrow, still the clear color"
     );
-    // The size took: the last row of a 48px shape is filled, the row after it
-    // is off the bitmap entirely. This is what a still-16x16 buffer (or a
-    // 48px buffer with a 16px shape in it) would fail.
+    // The size took: the element is 48x48 (asserted through its geometry in
+    // `rebuild_redraws_the_same_cursor_at_the_new_size_theme_and_color`, and
+    // the interior fill above only exists in a 48px drawing), while the last
+    // row stays clear -- the arrow ends well inside its bitmap.
     assert_eq!(
         canvas.at(px + 1, py + SIZE - 1),
-        fill_bgra,
-        "the bottom row of the configured size"
+        CLEAR_BGRA,
+        "the bottom row is clear, not fill"
     );
     assert_eq!(
         canvas.at(px + 1, py + SIZE),
@@ -1057,10 +1289,9 @@ fn a_cursor_surface_with_a_subsurface_draws_both() {
 // `wp-cursor-shape-v1`
 // -------------------------------------------------------------------------
 
-/// The BGRA bytes the default `[appearance]` draws a shape's fill and outline
-/// in, as they land on the canvas.
-const FILL_BGRA: [u8; 4] = [255, 255, 255, 255];
-const OUTLINE_BGRA: [u8; 4] = [0, 0, 0, 255];
+/// The BGRA bytes the default `[appearance]` fills a shape with, as they
+/// land on the canvas: Mocu's white.
+const FILL_BGRA: [u8; 4] = [0xfc, 0xfc, 0xfc, 255];
 
 #[test]
 fn the_cursor_shape_manager_is_advertised() {
@@ -1098,23 +1329,25 @@ fn a_named_shape_reaches_the_rendered_pixels() {
 
     let canvas = fixture.frame();
     assert_eq!(canvas.count, 1, "one element for a named shape");
-    // The I-beam is centred on the pointer (see `Shape::hotspot`), so its
-    // 16x16 bitmap occupies x 42..58, y 42..58 -- and the arrow's own
+    // The I-beam's hotspot is Mocu's, on its stem (see `Shape::hotspot`),
+    // so its 16x16 bitmap sits around the pointer -- and the arrow's own
     // top-left point, at the pointer itself, is nowhere in it.
+    let hot = Shape::Text.hotspot(DEFAULT_SIZE);
+    let left = 50 - hot.x;
     assert_eq!(
         canvas.at(50, 50),
         FILL_BGRA,
         "the I-beam's stem runs through the pointer"
     );
     assert_eq!(
-        canvas.at(41, 50),
+        canvas.at(left - 1, 50),
         CLEAR_BGRA,
-        "one pixel left of the centred 16x16 bitmap"
+        "one pixel left of the 16x16 bitmap"
     );
     assert_eq!(
-        canvas.at(58, 50),
+        canvas.at(left + DEFAULT_SIZE, 50),
         CLEAR_BGRA,
-        "one pixel right of the centred 16x16 bitmap"
+        "one pixel right of the 16x16 bitmap"
     );
     // The arrow would have filled the quadrant below-right of the pointer;
     // the I-beam does not, which is what distinguishes "drew the shape asked
@@ -1156,23 +1389,38 @@ fn different_named_shapes_draw_different_pixels() {
 }
 
 #[test]
-fn an_unmapped_shape_name_still_draws_the_arrow() {
-    // Every name this compositor does not draw something specific for falls
-    // back to the arrow rather than to nothing -- see `Shape::for_icon`. A
+fn a_wait_shape_draws_the_spinner() {
+    // `wait` names Mocu's busy spinner, not the plain arrow: the pointer
+    // sits at its centre (Mocu's hotspot), where the spinner is drawn. A
     // pointer that vanishes because a client named `wait` would be a worse
-    // bug than the wrong shape.
+    // bug than the wrong shape -- and the wrong shape would be a lesser one.
     let mut fixture = Fixture::new();
     fixture.run(Step::SetShape {
         shape: wp_cursor_shape_device_v1::Shape::Wait,
     });
-    let canvas = fixture.frame();
-    assert_eq!(canvas.count, 1, "the arrow element");
-    assert_eq!(
-        canvas.at(50, 50),
-        OUTLINE_BGRA,
-        "the arrow's own point, at the pointer"
+    assert!(
+        matches!(
+            fixture.state.cursor.status,
+            CursorImageStatus::Named(CursorIcon::Wait)
+        ),
+        "set_shape(wait) did not reach the cursor's status"
     );
-    assert_eq!(canvas.at(51, 53), FILL_BGRA, "its white interior");
+    let canvas = fixture.frame();
+    assert_eq!(canvas.count, 1, "the spinner element");
+    assert_ne!(
+        canvas.at(50, 50),
+        CLEAR_BGRA,
+        "the spinner's centre, at the pointer, drew nothing"
+    );
+    let mut via_default = Fixture::new();
+    via_default.run(Step::SetShape {
+        shape: wp_cursor_shape_device_v1::Shape::Default,
+    });
+    assert_ne!(
+        canvas.pixels,
+        via_default.frame().pixels,
+        "wait rendered exactly the plain arrow"
+    );
 }
 
 #[test]
@@ -1401,4 +1649,209 @@ fn hidden_cursor_allocates_nothing() {
     let elements = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0);
     assert!(elements.is_empty(), "a hidden cursor draws nothing");
     assert_eq!(elements.capacity(), 0, "and allocates nothing to say so");
+}
+
+// -------------------------------------------------------------------------
+// Output-add-path cursor sync (F-A)
+// -------------------------------------------------------------------------
+//
+// The hidpi tests above build their scales with `ensure_scale` directly,
+// which bypasses the compositor's output lifecycle. These tests drive the
+// REAL add path -- `headless::init` (the `init_named` primary every backend
+// boots through) and `headless::add_output` (what `--headless --outputs N`
+// and the `--tty` hotplug handler funnel through) -- with per-output scales
+// from `[[outputs]]` entries, and assert the cursor cache follows the
+// registered output set. Before the fix the sync ran inside `create_output`,
+// before the caller registered the output, so none of these scales was ever
+// built and every assertion below failed on the missing entry.
+
+/// A live `State` booted at `default_scale` with `entries_toml` in force
+/// before the first output exists, plus its event loop (kept alive beside
+/// the state, the way every harness holds both).
+struct AddPath {
+    _loop: smithay::reexports::calloop::EventLoop<'static, crate::compositor::State>,
+    state: crate::compositor::State,
+}
+
+impl AddPath {
+    fn boot(default_scale: f64, entries_toml: &str) -> Self {
+        let mut event_loop: smithay::reexports::calloop::EventLoop<
+            'static,
+            crate::compositor::State,
+        > = smithay::reexports::calloop::EventLoop::try_new().expect("an event loop");
+        let display: smithay::reexports::wayland_server::Display<crate::compositor::State> =
+            smithay::reexports::wayland_server::Display::new().expect("a wayland display");
+        // Forced fallback shapes, whatever the machine running the suite has
+        // installed: every geometry assertion below describes `shapes.rs`'s
+        // own arrow hotspot, not whichever xcursor theme a desktop has.
+        let appearance = crate::compositor::decorations::Appearance {
+            cursor_theme: NO_THEME.map(str::to_owned),
+            ..crate::compositor::decorations::Appearance::default()
+        };
+        let mut state = crate::compositor::State::new(
+            &mut event_loop,
+            display,
+            scoot_core::Config::default(),
+            crate::compositor::keybindings::Keybindings::default(),
+            appearance,
+            default_scale,
+            crate::compositor::test_support::test_renderer(),
+        )
+        .expect("a compositor state");
+        state.output_entries =
+            crate::compositor::output_config::OutputEntries::from_toml(entries_toml);
+        crate::compositor::headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+        Self {
+            _loop: event_loop,
+            state,
+        }
+    }
+
+    /// The physical bitmap edge the cursor keeps for `scale`, if any.
+    fn entry_physical(&self, scale: f64) -> Option<i32> {
+        let key = scale_key(scale);
+        self.state
+            .cursor
+            .scales
+            .iter()
+            .find(|entry| entry.key == key)
+            .map(|entry| entry.physical)
+    }
+}
+
+/// That scale's element draws the native physical bitmap: its on-screen
+/// (physical) geometry is exactly the bitmap, and the physical hotspot sits
+/// exactly on the physical pointer -- the same arithmetic the per-scale
+/// element tests pin, reached here through the real add path.
+fn assert_native_element(
+    state: &crate::compositor::State,
+    renderer: &mut PixmanRenderer,
+    scale: f64,
+    physical: i32,
+) {
+    let pointer = Point::<f64, Logical>::from((100.0, 100.0));
+    let elements = state.cursor.element(renderer, pointer, scale);
+    assert_eq!(elements.len(), 1, "scale {scale} drew nothing");
+    let geometry = elements[0].geometry(scale.into());
+    assert_eq!(
+        (geometry.size.w, geometry.size.h),
+        (physical, physical),
+        "scale {scale}: the on-screen size must be the physical bitmap"
+    );
+    let hotspot = Shape::Default.hotspot(physical);
+    assert_eq!(
+        (geometry.loc.x, geometry.loc.y),
+        (
+            (pointer.x * scale) as i32 - hotspot.x,
+            (pointer.y * scale) as i32 - hotspot.y
+        ),
+        "scale {scale}: the tip must sit under the pointer"
+    );
+}
+
+/// A single-output session booted at scale 2 through the real primary path
+/// keeps native 2x bitmaps: without the post-registration sync the session
+/// drew the stretched 16px bitmap forever.
+#[test]
+fn add_path_boots_a_scale_2_primary_with_native_bitmaps() {
+    let fixture = AddPath::boot(1.0, "[[outputs]]\nname = \"headless\"\nscale = 2.0\n");
+    let primary = fixture.state.outputs.primary().expect("the primary output");
+    assert_eq!(
+        primary.current_scale().fractional_scale(),
+        2.0,
+        "the primary runs at its entry's scale"
+    );
+    assert_eq!(
+        fixture.entry_physical(2.0),
+        Some(32),
+        "booting at scale 2 builds the 32px entry through the add path"
+    );
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    assert_native_element(&fixture.state, &mut renderer, 2.0, 32);
+}
+
+/// `--headless --outputs 2` at mixed scales: the second output's scale is
+/// built when it is added, and each output's frame draws its own bitmap.
+#[test]
+fn add_path_second_output_at_scale_2_gets_its_own_bitmaps() {
+    let mut fixture = AddPath::boot(1.0, "[[outputs]]\nname = \"headless-2\"\nscale = 2.0\n");
+    crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    assert_eq!(
+        fixture.entry_physical(1.0),
+        Some(16),
+        "the primary's scale stays cached"
+    );
+    assert_eq!(
+        fixture.entry_physical(2.0),
+        Some(32),
+        "adding a scale-2 output builds its entry through the add path"
+    );
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let pointer = Point::<f64, Logical>::from((50.0, 50.0));
+    let one = fixture.state.cursor.element(&mut renderer, pointer, 1.0);
+    let two = fixture.state.cursor.element(&mut renderer, pointer, 2.0);
+    assert_ne!(
+        one[0].id(),
+        two[0].id(),
+        "the two scales must not share a buffer"
+    );
+    assert_native_element(&fixture.state, &mut renderer, 1.0, 16);
+    assert_native_element(&fixture.state, &mut renderer, 2.0, 32);
+}
+
+/// A runtime hotplug at a new fractional scale (the same `add_output_with`
+/// funnel `--tty` hotplug uses) builds its bitmaps on arrival, not at the
+/// next rescale/reload/removal.
+#[test]
+fn add_path_hotplug_at_1_5_builds_its_bitmaps_at_runtime() {
+    let mut fixture = AddPath::boot(1.0, "");
+    assert_eq!(fixture.entry_physical(1.5), None, "nothing runs at 1.5 yet");
+    fixture.state.output_entries = crate::compositor::output_config::OutputEntries::from_toml(
+        "[[outputs]]\nname = \"headless-2\"\nscale = 1.5\n",
+    );
+    crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a hotplugged output");
+    assert_eq!(
+        fixture.entry_physical(1.5),
+        Some(24),
+        "hotplugging a scale-1.5 output builds the 24px entry"
+    );
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    assert_native_element(&fixture.state, &mut renderer, 1.5, 24);
+}
+
+/// Removing an output prunes the scale no output uses anymore, and re-adding
+/// it rebuilds the native bitmaps -- the sync runs on every add, not just
+/// the first.
+#[test]
+fn add_path_remove_then_readd_rebuilds_its_bitmaps() {
+    let mut fixture = AddPath::boot(1.0, "[[outputs]]\nname = \"headless-2\"\nscale = 2.0\n");
+    let second =
+        crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+            .expect("a second headless output");
+    assert_eq!(fixture.entry_physical(2.0), Some(32));
+    assert!(
+        fixture.state.remove_output(second),
+        "the hotplugged output removes"
+    );
+    assert_eq!(
+        fixture.entry_physical(2.0),
+        None,
+        "removal drops the scale no output uses anymore"
+    );
+    assert_eq!(
+        fixture.entry_physical(1.0),
+        Some(16),
+        "the primary's scale survives the removal"
+    );
+    crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("the output comes back");
+    assert_eq!(
+        fixture.entry_physical(2.0),
+        Some(32),
+        "re-adding the scale-2 output rebuilds its entry"
+    );
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    assert_native_element(&fixture.state, &mut renderer, 2.0, 32);
 }

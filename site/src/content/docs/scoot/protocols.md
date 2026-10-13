@@ -2181,24 +2181,15 @@ A named shape is answered from **the cursor theme already installed on the
 machine**: scoot resolves `[appearance] cursor_theme`, else `$XCURSOR_THEME`,
 else `default`, and draws that theme's own artwork — the same pixels the
 client would have loaded for itself. Parsing is the MIT-licensed `xcursor`
-crate; nothing is vendored, and scoot ships no theme of its own.
+crate.
 
 **When no theme is installed** — a linuxserver webtop or any minimal
-container — named shapes fall back to ten shapes scoot draws procedurally
-itself. The mapping collapses the names a user cannot tell apart at 16
-pixels:
-
-| Drawn as | Named shapes it answers |
-| --- | --- |
-| arrow | `default`, plus every name with no row of its own — `help`, `wait`, `progress`, `pointer`, `zoom-in`, … |
-| I-beam | `text` |
-| sideways I-beam | `vertical-text` |
-| crosshair | `crosshair`, `cell` |
-| vertical double arrow | `n-resize`, `s-resize`, `ns-resize`, `row-resize` |
-| horizontal double arrow | `e-resize`, `w-resize`, `ew-resize`, `col-resize` |
-| diagonal double arrow | `ne-resize`, `sw-resize`, `nesw-resize` / `nw-resize`, `se-resize`, `nwse-resize` |
-| four-way arrow | `move`, `all-scroll`, `all-resize`, `grab`, `grabbing` |
-| circle with a slash | `not-allowed`, `no-drop` |
+container — named shapes fall back to scoot's built-in cursors: the CC0
+[Mocu](https://github.com/sevmeyer/mocu-xcursor) theme, built in and
+rasterised by scoot itself, Mocu's cursor of the same name for every CSS
+name (`move` draws Mocu's `grabbing` and `all-resize` its `all-scroll`, as
+Mocu aliases them; any newer name draws `default`). See
+[the built-in cursors](./appearance.md#the-built-in-cursors).
 
 The drawn shapes use the `[appearance]` `cursor_size`/`cursor_color` settings
 and are built once at startup. Theme images are loaded when a client first

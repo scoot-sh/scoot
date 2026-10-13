@@ -2,10 +2,10 @@
 //!
 //! # Why this exists, and why it is not a license problem
 //!
-//! `cursor/shapes.rs` draws ten shapes because scoot may not *ship* a cursor
-//! theme: niri's assets are GPL and Adwaita's are not MIT-clean, so there is
-//! nothing this repository is allowed to carry. That constraint is about
-//! **shipping an asset**, and it was wrongly read as blocking per-shape
+//! `cursor/shapes.rs` draws its own cursors (Mocu, which is CC0 and so the
+//! one theme this repository may carry) because scoot may not ship niri's
+//! assets (GPL) or Adwaita's (not MIT-clean). That constraint is about
+//! **shipping an asset**, and it was once wrongly read as blocking per-shape
 //! cursors altogether (see `docs/backlog/resolved/cursor-theme-name-done.md`,
 //! which used to say so).
 //!
@@ -67,6 +67,10 @@ const DEFAULT_THEME: &str = "default";
 #[derive(Clone, Debug)]
 pub struct Themed {
     pub buffer: MemoryRenderBuffer,
+    /// The image's own pixel dimensions. Needed because the element is sized
+    /// in logical units while the buffer is physical: `src` must cover the
+    /// whole image (a padded theme image is larger than its nominal size).
+    pub size: (i32, i32),
     /// The theme's own hotspot for this shape, in the image's pixels. Not
     /// interchangeable with a [`Shape`](super::shapes::Shape)'s: a theme's
     /// I-beam is anchored where *that artwork* puts its centre, which is not
@@ -84,12 +88,15 @@ pub struct Theme {
     /// The name actually resolved, kept so it can be exported to children
     /// (see [`Theme::name`]).
     name: String,
-    /// The nominal size to pick images at.
+    /// The nominal logical size images are picked at when no physical size
+    /// is given. What `XCURSOR_SIZE` exports (clients pick their own sizes
+    /// off it) and what [`Theme::image`] resolves with.
     size: u32,
-    /// What has been looked up. `None` memoizes "this theme does not have
-    /// that shape", so a missing icon costs one failed lookup per session
-    /// rather than one per `set_cursor`.
-    cache: HashMap<CursorIcon, Option<Themed>>,
+    /// What has been looked up, keyed by shape and nominal size.
+    /// `None` memoizes "this theme does not have that shape at that size",
+    /// so a missing icon costs one failed lookup per session rather than one
+    /// per `set_cursor`.
+    cache: HashMap<(CursorIcon, u32), Option<Themed>>,
 }
 
 impl Theme {
@@ -163,13 +170,27 @@ impl Theme {
     ///
     /// `None` means "draw the procedural shape instead": either no theme at
     /// all, or a theme that does not carry this shape under any of its
-    /// names.
+    /// names. Resolves at the nominal (logical) size; use [`Theme::image_at`]
+    /// for a physical size.
     pub fn image(&mut self, icon: CursorIcon) -> Option<&Themed> {
+        self.image_at(icon, self.size)
+    }
+
+    /// The theme's image for `icon` nearest to `size_px` physical pixels,
+    /// loading and caching it on first ask.
+    ///
+    /// What the scale-aware cursor path resolves per output scale: the real
+    /// theme's artwork at (nearest to) the bitmap's physical pixels, so a
+    /// 2x output draws the theme's 32px art, not its 16px art stretched.
+    /// `None` means the same "draw the procedural shape instead" as
+    /// [`Theme::image`].
+    pub fn image_at(&mut self, icon: CursorIcon, size_px: u32) -> Option<&Themed> {
         // Not `entry().or_insert_with()`: the closure would need `&self.theme`
         // while `entry` holds `&mut self.cache`. Two statements instead, which
         // also keeps the load out of the common (cached) path entirely.
-        if !self.cache.contains_key(&icon) {
-            let loaded = self.load_image(icon);
+        let key = (icon, size_px);
+        if !self.cache.contains_key(&key) {
+            let loaded = self.load_image_at(icon, size_px);
             if loaded.is_none() {
                 tracing::debug!(
                     ?icon,
@@ -177,12 +198,12 @@ impl Theme {
                     "the cursor theme has no image for this shape; drawing it instead"
                 );
             }
-            self.cache.insert(icon, loaded);
+            self.cache.insert(key, loaded);
         }
-        self.cache.get(&icon).and_then(Option::as_ref)
+        self.cache.get(&key).and_then(Option::as_ref)
     }
 
-    fn load_image(&self, icon: CursorIcon) -> Option<Themed> {
+    fn load_image_at(&self, icon: CursorIcon, size_px: u32) -> Option<Themed> {
         let theme = self.theme.as_ref()?;
         let path = lookup(theme, icon)?;
         let bytes = std::fs::read(&path)
@@ -194,7 +215,7 @@ impl Theme {
                 tracing::warn!(?path, %error, "could not read a cursor theme file");
             })
             .ok()?;
-        decode(&bytes, self.size)
+        decode(&bytes, size_px)
     }
 }
 
@@ -224,6 +245,7 @@ fn decode(bytes: &[u8], size: u32) -> Option<Themed> {
             Transform::Normal,
             None,
         ),
+        size: (image.width as i32, image.height as i32),
         hotspot: (image.xhot as i32, image.yhot as i32).into(),
     })
 }

@@ -401,27 +401,59 @@ fn a_format_other_than_argb8888_composites_without_an_upload() {
 }
 
 #[test]
-fn a_buffer_scale_or_transform_the_twin_cannot_copy_composites_without_an_upload() {
+fn a_transform_the_twin_cannot_copy_composites_without_an_upload() {
+    // A rotated element samples different buffer pixels than the padded
+    // twin's top-left copy holds, so it stays composited (and is remembered,
+    // not retried).
     let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
     let pixels = vec![0xFFu8; 24 * 24 * 4];
     let (mut planes, seen) = planes(false);
-    for (scale, transform) in [(2, Transform::Normal), (1, Transform::_90)] {
-        let buffer = MemoryRenderBuffer::from_slice(
-            &pixels,
-            Fourcc::Argb8888,
-            (24, 24),
-            scale,
-            transform,
-            None,
-        );
-        let mut elements = vec![drawn(&mut renderer, &buffer, Point::from((0.0, 0.0)))];
-        planes.back(&mut renderer, &mut elements, panel());
-        assert!(
-            matches!(elements[0], Elements::Cursor(CursorElement::Fallback(_))),
-            "scale {scale}, {transform:?}"
-        );
-    }
+    let buffer = MemoryRenderBuffer::from_slice(
+        &pixels,
+        Fourcc::Argb8888,
+        (24, 24),
+        1,
+        Transform::_90,
+        None,
+    );
+    let mut elements = vec![drawn(&mut renderer, &buffer, Point::from((0.0, 0.0)))];
+    planes.back(&mut renderer, &mut elements, panel());
+    assert!(matches!(
+        elements[0],
+        Elements::Cursor(CursorElement::Fallback(_))
+    ));
     assert!(seen.borrow().calls.is_empty());
+}
+
+#[test]
+fn a_scaled_buffer_still_twins_because_the_sampling_is_reproduced() {
+    // A buffer-scale-2 element draws its 64px buffer downscaled into 32px.
+    // The twin reproduces that sampling over the padded image (the padded
+    // size times the element's logical-to-buffer ratio), so it shows the
+    // same pixels -- unlike a transform, which no padding can reproduce.
+    // (64px, not 24: the twin's 32px footprint is what clears the driver's
+    // minimum plane size.)
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let pixels = vec![0xFFu8; 64 * 64 * 4];
+    let buffer = MemoryRenderBuffer::from_slice(
+        &pixels,
+        Fourcc::Argb8888,
+        (64, 64),
+        2,
+        Transform::Normal,
+        None,
+    );
+    let at = Point::from((5.0, 7.0));
+    let original = [drawn(&mut renderer, &buffer, at)];
+    let drawn_frame = frame(&mut renderer, &original, 1.0);
+    let mut elements = vec![drawn(&mut renderer, &buffer, at)];
+    let (mut planes, _) = planes(false);
+    planes.back(&mut renderer, &mut elements, panel());
+    assert!(matches!(
+        elements[0],
+        Elements::Cursor(CursorElement::Plane(_))
+    ));
+    assert!(drawn_frame == frame(&mut renderer, &elements, 1.0));
 }
 
 #[test]

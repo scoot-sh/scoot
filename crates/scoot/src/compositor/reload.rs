@@ -442,6 +442,10 @@ impl State {
             if let Some(tty) = self.tty.as_mut() {
                 tty.clear_cursor_overlays();
             }
+            // The paints changed for every scale, and the output set may
+            // have scales no entry serves yet: build for the live set now
+            // (cold), never on the frame path.
+            super::headless::sync_cursor_scales(self);
             if cursor_size {
                 report.applied.push(field::CURSOR_SIZE.to_owned());
             }

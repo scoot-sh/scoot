@@ -9,6 +9,39 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### Unreleased — the built-in cursors are Mocu (behavior change)
+
+- **Where no cursor theme is installed, scoot now draws
+  [Mocu](https://github.com/sevmeyer/mocu-xcursor)** (Severin Meyer's
+  CC0 cursor theme, built in with its license and credited in `NOTICE`)
+  instead of its own plain arrow and handful of shapes. Every CSS cursor
+  name gets Mocu's cursor of that name (`move` draws Mocu's `grabbing`
+  and `all-resize` its `all-scroll`, as Mocu aliases them), rasterised by
+  scoot at each output's pixel size and fitted to the pixel grid so the
+  16px default stays crisp. `appearance.cursor_color` is Mocu's fill
+  (default `#fcfcfc`, Mocu's white; `"#111111"` is its black theme) and
+  the outline follows Mocu's pairing, `#222222` or `#f9f9f9`, instead of
+  always black.
+  See [Appearance](site/src/content/docs/scoot/appearance.md#the-built-in-cursors).
+- **Breaking, for configs written against the unreleased cursor branch
+  only:** `appearance.cursor_accent` is gone (no release ever had it).
+  `[appearance]` rejects unknown keys, so a config that still sets it
+  falls back to defaults with an error in the log; delete the line.
+
+### Unreleased — sharp cursors on high-DPI outputs (behavior change)
+
+- **The built-in cursor now rasterises per output scale instead of
+  stretching one bitmap.** `appearance.cursor_size` is the logical size
+  (default 16, unchanged on screen); the bitmap is drawn at
+  `round(cursor_size × output scale)` physical pixels, so a 2x output
+  shows native 32px art with a matching hotspot rather than a
+  bilinear-stretched 16px image. Real cursor themes contribute the image
+  nearest the physical size. One bitmap set per output scale is kept
+  (bounded, built on output add/scale change and reload, never per
+  frame); mixed-DPI sessions draw each output's own set. A theme image
+  padded beyond its nominal size draws at that nominal size, like
+  everything else.
+
 ### Unreleased — renderer names are `cpu` / `gpu` / `auto` (breaking)
 
 - **`--renderer` now takes `cpu`, `gpu` or `auto` — the old `pixman`

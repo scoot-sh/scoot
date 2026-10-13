@@ -1,4 +1,5 @@
-scoot includes no third-party source files, but parts of the Wayland
+Apart from the cursor art credited at the end of this file, scoot includes
+no third-party source files, but parts of the Wayland
 compositor in crates/scoot/src/compositor follow the structure of
 Smithay's example compositors (smallvil and anvil): the protocol state
 setup, the socket and display wiring, and several handler implementations.
@@ -106,3 +107,17 @@ not embed it. It stays under the Unsplash License wherever scoot is
 redistributed; remove the file (and the `[wallpaper]` table in the example) to
 drop it. The preview docs/assets/moonrise-preview.png is a screenshot of that
 example and shows the image, so the same applies to it.
+
+----------------------------------------------------------------------------
+
+The built-in cursors are Mocu, "a modest xcursor theme" by Severin Meyer:
+
+  https://github.com/sevmeyer/mocu-xcursor
+  (commit efdd71279b79bf1e2566c38becc5e7c4ab2d900c, release 1.1)
+
+Mocu is dedicated to the public domain under CC0 1.0 Universal, which asks
+for no attribution; it is credited here anyway. The SVG sources scoot draws
+are vendored unchanged, with Mocu's LICENSE.txt, under
+crates/scoot/src/compositor/cursor/shapes/mocu/, compiled into scoot and
+rasterised by it in Mocu's own colors. The docs image
+site/src/assets/cursor-family.png shows the result.

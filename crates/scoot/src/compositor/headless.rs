@@ -130,6 +130,11 @@ pub fn init_named(
     let area = logical_area(state, &output, width, height);
     let id = state.outputs.add(output);
     state.backends.insert(id, backend);
+    // The output set changed: bitmaps for its scale are built now (cold),
+    // never on the frame path. After registration, so the new output's own
+    // scale is in the live set `sync_cursor_scales` reads -- a sync inside
+    // `create_output` would run before this `add` and miss it entirely.
+    sync_cursor_scales(state);
     state.note_output_scales();
     state.note_primary_origin();
     // Name-only: the connector-less backends (and every test) identify by
@@ -245,6 +250,12 @@ pub fn add_output_with(
     let scale = super::output_scale::scale_of(&output);
     let id = state.outputs.add(output);
     state.backends.insert(id, backend);
+    // The output set changed: bitmaps for its scale are built now (cold),
+    // never on the frame path. After registration, so the new output's own
+    // scale is in the live set `sync_cursor_scales` reads -- this is also
+    // the `--tty` hotplug path (`tty/hotplug.rs` funnels through here), so
+    // every production add site syncs in the same place.
+    sync_cursor_scales(state);
     // An output at a scale no other runs at starts `apply()`'s per-window
     // scale refresh -- which the `apply()` below, and the restore after it,
     // then use to tell any window moved onto it (see `output_scale.rs`).
@@ -315,6 +326,10 @@ pub(crate) fn add_output_without_backend(
     let area = logical_area(state, &output, width, height);
     let scale = super::output_scale::scale_of(&output);
     let id = state.outputs.add(output);
+    // Test-only, but syncs like every other add path: the cursor cache must
+    // follow the registered output set wherever the registration happens, or
+    // the next production add path forgets the same way `create_output` did.
+    sync_cursor_scales(state);
     state.note_output_scales();
     state.note_primary_origin();
     // Name-only, like the other add paths, then the added event and the
@@ -377,7 +392,36 @@ fn create_output(
     let scale = state.configured_scale(name);
     set_mode(&output, width, height, Some(position.into()), scale);
     state.space.map_output(&output, position);
+    // No cursor sync here: this output is not in `State::outputs` yet, and
+    // `sync_cursor_scales` reads only registered outputs -- syncing here
+    // would miss exactly the scale this output brings. Each caller syncs
+    // after it registers (`init_named`, `add_output_with`,
+    // `add_output_without_backend`), where the new scale is visible.
     output
+}
+
+/// Builds cursor bitmaps for every live output's scale and drops bitmaps
+/// for scales no output uses (see `cursor.rs`'s scale-aware bitmaps).
+/// Called wherever the output set or any output's scale can change, always
+/// after the registration is visible: output add (`init_named`,
+/// `add_output_with` and its test-only twin `add_output_without_backend`,
+/// which also covers the `--tty` hotplug path that funnels through
+/// `add_output_with`), scale change (`rescale_outputs`), removal
+/// (`remove_output`), cursor rebuild (`reload.rs`), and the add-failure path
+/// (`discard_output`, a no-op safety -- the output was never registered).
+/// Cold paths only; the frame path only selects entries.
+///
+/// A future add path must call this after `state.outputs.add`, never before:
+/// `create_output` deliberately does not sync, because it runs before the
+/// caller registers the output.
+pub(super) fn sync_cursor_scales(state: &mut State) {
+    let mut scales = Vec::new();
+    for index in 0..state.outputs.len() {
+        if let Some((_, output)) = state.outputs.at(index) {
+            scales.push(super::output_scale::scale_of(&output));
+        }
+    }
+    state.cursor.sync_scales(scales);
 }
 
 /// Lays one output into a running left-to-right layout: where an output
@@ -423,6 +467,7 @@ struct OutputGlobal(smithay::reexports::wayland_server::backend::GlobalId);
 fn discard_output(state: &mut State, output: &Output) {
     state.space.unmap_output(output);
     retire_global(state, output);
+    sync_cursor_scales(state);
 }
 
 /// How long a withdrawn `wl_output` global stays bindable before it is
@@ -1483,6 +1528,9 @@ impl State {
         // on. The caller re-tells every surface now (`resend_output_scale`),
         // so no window is left told a scale from before.
         self.note_output_scales();
+        // The scales may just have moved: bitmaps for the new set are built
+        // now (cold), never on the frame path.
+        sync_cursor_scales(self);
     }
 
     /// Takes output `id` away while the session runs -- a `--tty` connector
@@ -1713,6 +1761,10 @@ impl State {
         if let Some(event) = removed {
             self.emit_output_removed(event);
         }
+        // The output set changed: drop bitmaps for scales no output uses
+        // anymore (bounded memory without waiting for the next scale
+        // change).
+        sync_cursor_scales(self);
         true
     }
 

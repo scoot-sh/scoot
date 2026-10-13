@@ -47,11 +47,10 @@ const TIMEOUT: Duration = Duration::from_millis(2_000);
 /// cursor and the dark background alike.
 const WINDOW_BGRA: [u8; 4] = [0x20, 0x20, 0xE0, 0xFF];
 
-/// A cursor pixel: the fallback arrow's fill is white, and (101, 103) is
-/// inside the fill (x < y, past the 1px outline) with the hotspot at the
-/// pointer.
+/// A cursor pixel: the fallback arrow's fill is Mocu's white, and (101, 103)
+/// is a fully-covered fill pixel with the hotspot at the pointer.
 const CURSOR_AT: (i32, i32) = (101, 103);
-const CURSOR_BGRA: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+const CURSOR_BGRA: [u8; 4] = [0xFC, 0xFC, 0xFC, 0xFF];
 
 /// What the fixture passes for `cursor_theme` so every pixel assertion below
 /// describes the compositor's own drawn arrow whatever the machine running
