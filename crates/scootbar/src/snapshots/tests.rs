@@ -49,6 +49,9 @@ const NAMES: &[&str] = &[
     "workspaces-dots-1.5x",
     "workspaces-disc-1.5x",
     "workspaces-default-tile-1x",
+    "workspaces-square-1x",
+    "workspaces-square-1.5x",
+    "workspaces-square-two-digits-1x",
 ];
 
 const fn gray(v: u8) -> Color {

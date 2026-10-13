@@ -44,8 +44,8 @@
 //!
 //! The active workspace's pill is drawn by [`Module::custom_draw`] as an
 //! accent fill behind its number, with the number itself in the bar's
-//! background color; the rest draws as plain text. Its shape (`rect` by
-//! default, `pill`, `circle`), radius and inset are [`pill`]'s.
+//! background color; the rest draws as plain text. Its shape (`square` by
+//! default, `rect`, `pill`, `circle`), radius and inset are [`pill`]'s.
 //! [`Module::on_input`] hit-tests the items' rects, walked with
 //! [`Text::advance`] exactly as the text draw walks its pen, so the rects
 //! match the ink pixel for pixel; and the active pill's own drawn extent
@@ -135,9 +135,9 @@ const MAX_WORKSPACES: usize = 32;
 /// single-digit workspaces (about 26 numbered up to 99).
 pub const MAX_ITEM_GAP: u32 = 8;
 /// The spaces `item-gap` takes between two numbers when the config names
-/// none: two spaces, an even row with the default tile ([`pill`]), between
-/// the old tight one and the published looks' roomy three.
-pub const DEFAULT_ITEM_GAP: u32 = 2;
+/// none: three spaces, the published looks' roomy row, even with the
+/// default tile ([`pill`]).
+pub const DEFAULT_ITEM_GAP: u32 = 3;
 /// Output names kept at most, in bytes: `wl_output` names are short
 /// (`DP-1`, `HEADLESS-1`); longer ones are cut.
 const MAX_NAME: usize = 64;
@@ -160,8 +160,8 @@ pub struct Settings {
     /// What the module shows: the numbers, or a dot each (`dots` draws
     /// itself, and clicks land by the dots' places).
     pub display: Display,
-    /// With a `circle` pill: grow the module's own span to the disc's
-    /// diameter, so a single digit is a disc at any padding.
+    /// With a `circle` or `square` pill: grow the module's own span to the
+    /// shape's side, so a single digit is a disc or tile at any padding.
     pub disc: bool,
 }
 
@@ -174,7 +174,7 @@ impl Default for Settings {
             active_color: None,
             inactive_color: None,
             display: Display::default(),
-            disc: false,
+            disc: true,
         }
     }
 }
@@ -804,12 +804,15 @@ impl Workspaces {
         true
     }
     /// How much wider than its text the module measures with `disc`: the
-    /// disc's diameter less the active number's width (the rest of the
-    /// text stays), so the circle the pill grows into fits the span. 0
-    /// without `disc`, without a circle, showing dots, or with no active
-    /// workspace (nothing is drawn to fit).
+    /// shape's side less the active number's width (the rest of the
+    /// text stays), so the disc or tile the pill grows into fits the span.
+    /// 0 without `disc`, without a `circle` or `square`, showing dots, or
+    /// with no active workspace (nothing is drawn to fit).
     fn disc_extra(&self, measure: &Measure<'_>) -> u32 {
-        if !self.disc || self.pill.shape != Shape::Circle || self.display != Display::Numbers {
+        if !self.disc
+            || !matches!(self.pill.shape, Shape::Circle | Shape::Square)
+            || self.display != Display::Numbers
+        {
             return 0;
         }
         let mut items = [(0u32, false); MAX_WORKSPACES];

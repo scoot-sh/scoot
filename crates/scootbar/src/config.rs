@@ -1309,19 +1309,22 @@ impl File {
                     value(
                         path,
                         "workspaces.pill-shape",
-                        format_args!("takes rect, pill or circle, not `{}`", text.escape_debug()),
+                        format_args!(
+                            "takes rect, pill, circle or square, not `{}`",
+                            text.escape_debug()
+                        ),
                     )
                 })?;
             }
             if let Some(radius) = self.workspaces.pill_radius {
                 pill.radius = gap(path, "workspaces.pill-radius", Some(radius), 0)?;
-                if pill.shape != Shape::Rect {
+                if !matches!(pill.shape, Shape::Rect | Shape::Square) {
                     return Err(value(
                         path,
                         "workspaces.pill-radius",
                         format_args!(
-                            "rounds a `rect` pill; the `pill` and `circle` shapes are already \
-                             as round as they fit (drop it, or set pill-shape = \"rect\")"
+                            "rounds a `rect` or `square` pill; the `pill` and `circle` shapes are \
+                             already as round as they fit (drop it, or set pill-shape = \"rect\")"
                         ),
                     ));
                 }
@@ -1363,21 +1366,21 @@ impl File {
             }
             if let Some(disc) = self.workspaces.disc {
                 modules.workspaces.disc = disc;
-            }
-            if modules.workspaces.disc {
-                if modules.workspaces.pill.shape != Shape::Circle {
-                    return Err(value(
-                        path,
-                        "workspaces.disc",
-                        "grows the circle to a disc; it needs pill-shape = \"circle\"",
-                    ));
-                }
-                if modules.workspaces.display != Display::Numbers {
-                    return Err(value(
-                        path,
-                        "workspaces.disc",
-                        "grows the circle to a disc; dots have no pill to grow",
-                    ));
+                if disc {
+                    if !matches!(modules.workspaces.pill.shape, Shape::Circle | Shape::Square) {
+                        return Err(value(
+                            path,
+                            "workspaces.disc",
+                            "grows the shape to a disc or tile; it needs pill-shape = \"circle\" or \"square\"",
+                        ));
+                    }
+                    if modules.workspaces.display != Display::Numbers {
+                        return Err(value(
+                            path,
+                            "workspaces.disc",
+                            "grows the shape to a disc or tile; dots have no pill to grow",
+                        ));
+                    }
                 }
             }
         }
