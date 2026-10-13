@@ -305,9 +305,30 @@ kbd {
  * across four columns, so tighten them, and give the option-name column a
  * floor so its longest segment (`notifications`) fits whole. The other
  * columns keep a small floor so short tokens (`"mako"`, `true`) never
- * shatter. Wide matrices keep Starlight's contained scroll (`display:
- * block; overflow: auto`); nothing here lets a table push the page
- * sideways, and the 16px side gutter is untouched. */
+ * shatter. Tables that still overflow their box keep Starlight's contained
+ * scroll (`display: block; overflow: auto`); nothing here lets a table push
+ * the page sideways, and the 16px side gutter is untouched.
+ *
+ * Two shapes below the breakpoint (decided by evidence in the
+ * mobile-tables fix round: side-by-side screenshots of both candidates on
+ * the same 8 pages at 360/390/768/1280):
+ * - 4-5 column reference tables (tagged `.mtable-card` by the
+ *   `tableCardLabels` build pass) stack each row into a card: the first
+ *   column's value is the title, the rest read as labelled Type / Default
+ *   / Meaning lines. This is the only shape where every cell is fully
+ *   readable with vertical scrolling alone; the Rules-A/B alternative
+ *   left the prose column sliced mid-glyph behind a sideways scroll.
+ * - 6+ column matrices (and the 2-3 column tables, plus the `<kbd>` key
+ *   grids that cards would mangle) stay tables: Rule-A floors keep the
+ *   prose column at sentence width, the first column stays pinned, and a
+ *   pure-CSS scroll-cue shadow marks any edge with more content (the
+ *   `background-attachment: local/scroll` trick: covers scroll with the
+ *   content and hide the shadow on the fully-scrolled side, so fitting
+ *   tables show no cue at all).
+ *
+ * The sticky seam also paints on tables that fit (a no-op in black on
+ * black); CSS alone cannot know which tables overflow, so this is
+ * accepted, not intended per-table. */
 @media (max-width: 50rem) {
   .sl-markdown-content wbr {
     display: inline;
@@ -349,6 +370,87 @@ kbd {
     z-index: 1;
     background: var(--sl-color-bg);
     border-inline-end: 1px solid var(--sl-color-gray-5);
+  }
+  /* 6+ column matrices need sentence-width columns, not floors: the last
+   * (prose) column reads in full sentences instead of a word per line,
+   * and the table scrolls with its label column pinned. */
+  .sl-markdown-content table:has(tr > :nth-child(6)) :is(td, th):not(:first-child) {
+    min-width: 5.5rem;
+  }
+  .sl-markdown-content table:has(tr > :nth-child(6)) :is(td, th):last-child {
+    min-width: 13rem;
+  }
+  /* Scroll cue for tables that still overflow: edge shadows that show
+   * only while there is more content that way. No JS, no lie on fitting
+   * tables (the covers hide both shadows when nothing scrolls), and the
+   * one ginger accent stays out of it — plain ash on night, like the
+   * hairlines. */
+  .sl-markdown-content table {
+    background-image:
+      linear-gradient(to right, var(--sl-color-bg) 30%, transparent),
+      linear-gradient(to left, var(--sl-color-bg) 30%, transparent),
+      linear-gradient(to right, rgba(255, 255, 255, 0.22), transparent),
+      linear-gradient(to left, rgba(255, 255, 255, 0.22), transparent);
+    background-repeat: no-repeat;
+    background-size:
+      36px 100%,
+      36px 100%,
+      12px 100%,
+      12px 100%;
+    background-position:
+      0 0,
+      100% 0,
+      0 0,
+      100% 0;
+    background-attachment: local, local, scroll, scroll;
+  }
+  /* Stacked cards for the 4-5 column reference tables. The headings stay
+   * in the accessibility tree (clipped, not `display: none`) and the
+   * build pass adds explicit table/row/cell roles, so a screen reader
+   * still meets a table. Cards never scroll, so no cue and no pin. */
+  .sl-markdown-content table.mtable-card {
+    background-image: none;
+    overflow: visible;
+  }
+  .sl-markdown-content table.mtable-card thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .sl-markdown-content table.mtable-card,
+  .sl-markdown-content table.mtable-card tbody {
+    display: block;
+  }
+  .sl-markdown-content table.mtable-card tr {
+    display: block;
+    border: 1px solid var(--sl-color-gray-5);
+    padding: 0.75rem 0.9rem;
+    margin: 0 0 0.75rem;
+  }
+  .sl-markdown-content table.mtable-card tr > :first-child {
+    position: static;
+    display: block;
+    background: none;
+    border: 0;
+    min-width: 0;
+    padding: 0 0 0.5rem;
+  }
+  .sl-markdown-content table.mtable-card td {
+    display: grid;
+    grid-template-columns: 5.5rem 1fr;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+    border: 0;
+    min-width: 0;
+  }
+  .sl-markdown-content table.mtable-card td::before {
+    content: attr(data-label);
+    color: var(--sl-color-gray-3);
+    font-size: 0.85em;
+    overflow-wrap: anywhere;
   }
 }
 
