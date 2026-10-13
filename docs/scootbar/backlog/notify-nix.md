@@ -17,8 +17,9 @@ Filed 2026-10-12 from the [scootnotify design](../../../dev/design/scootnotify.m
 `programs.scootnotify` (home-manager and NixOS halves, the scootbar layout), the
 Stylix mapping (`base00/05/03/0D/08/02`, `sansSerif`, `sizes.popups`, `opacity.popups`)
 and the look mapping per leaf at the documented priorities, the user unit with
-`X-Reload-Triggers` and `ExecReload` (check the pinned home-manager supports it; check what
-NixOS switching does to a user unit before choosing its trigger), `RestartPreventExitStatus=3`,
+`X-Reload-Triggers` and `ExecReload` (home-manager at the pinned `efa3ccb` has
+`X-Reload-Triggers`, `modules/systemd.nix:140`; check what NixOS switching does to a user
+unit before choosing its trigger there), `RestartPreventExitStatus=3`,
 the D-Bus activation file. `desktop.notifications.daemon` widens to `"scootnotify"` (default
 stays `"mako"`): no mako, no feed script, the three binds and the bar's `on-click` on
 `scootnotify msg`, the eval warning for mako-shaped `notifications.settings`. Each look

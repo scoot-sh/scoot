@@ -254,7 +254,7 @@ surface maps and holds it until it unmaps", `protocols.md:1037-1040`).
 | Page Up / Page Down, Ctrl+Home / Ctrl+End | by page, to the ends |
 | Enter | launch the selection |
 | Ctrl+Enter | apps and run modes: run the typed text as a command (argv split on spaces); dmenu: print the typed text even with `--only-match` off |
-| Escape, or a click outside | close (exit 1 in dmenu, as dmenu and fuzzel do) |
+| Escape, or a click outside | close (exit 1 in dmenu, as dmenu does; the call sites treat any non-zero exit as "nothing chosen", `apps-network-pick.sh:283` `\|\| exit 0`) |
 
 Mouse: a click launches the row, and the wheel scrolls. The panel is centered on the
 target output, 40 em wide with 10 rows by default, and every key is configurable.
@@ -321,7 +321,7 @@ is supported with fuzzel's meaning:
 
 | Flag | Meaning |
 |---|---|
-| `--dmenu` | stdin lines, the pick on stdout, exit 0; Escape exits 1 |
+| `--dmenu` | stdin lines, the pick on stdout, exit 0; Escape exits 1 (fuzzel's own code not re-checked; the call sites only test zero) |
 | `--prompt=TEXT` | prompt text |
 | `--prompt-only=TEXT` | an input field with no list (the WiFi password, `apps-network-pick.sh:158`) |
 | `--password` | mask the input |
@@ -462,7 +462,8 @@ The shared rules are in [shell-apps.md](shell-apps.md#theme-tokens-stylix-and-lo
 | Matched characters | `match` | `base0A` | `barColors.hover or barColors.accent` (`--match-color`) |
 | Selected row fill | `selection` | `base02` | `barColors.accent` (`--selection-color`) |
 | Selected row text | `selection-text` | `base05` | `barColors.background` (`--selection-text-color`) |
-| Border, caret, focus ring | `accent` | `base0D` | `appearance.focus_ring_active_color` (`--border-color`) |
+| Panel border | `border` | `base0D` | `appearance.focus_ring_active_color` (`--border-color`) |
+| Caret, focus ring | `accent` | `base0D` | `barColors.accent` |
 | Font | — | `fonts.sansSerif`, `sizes.popups` | `fonts.ui` |
 | Icon theme | — | none (Stylix sets no icon theme for this) | the look's `Adwaita` (`theme-look.nix`) |
 

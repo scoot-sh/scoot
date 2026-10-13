@@ -121,7 +121,7 @@ What exists today is in scootbar, which is binary-only (no `lib.rs`;
 | Canvas, span fills, rounded corners, premultiplied blending | yes (`src/paint.rs`) | yes | yes | yes |
 | Single-line text, glyph cache, fallback fonts, ellipsis | yes (`src/text.rs`, `src/font.rs`, `modules/ellipsis.rs`) | yes | yes | yes |
 | Multi-line wrap | tooltips only, at most 6 lines (`src/popup/wrap.rs:9,17`) | yes (body) | no | messages (PAM info text) |
-| Color tokens | six, `#rrggbb` only (`src/theme.rs:17-32`, `src/color.rs:14-47`) | + border, link | + selection, match | + selection, error |
+| Color tokens | six, `#rrggbb` only (`src/theme.rs:17-32`, `src/color.rs:14-47`) | + border, selection | + border, selection, match | + border, selection |
 | Layer surface per output, hotplug, fractional scale | yes (`src/outputs.rs`, `src/density.rs`, `src/daemon/surfaces.rs`) | overlay, on demand | overlay, exclusive keyboard | overlay or full-screen, exclusive keyboard |
 | shm double buffer, damage | yes (`src/daemon/canvas.rs`, `SLOTS = 2` at :56) | yes | yes | yes |
 | Pointer input | yes (`src/pointer.rs`) | yes | yes | yes |
@@ -323,14 +323,16 @@ unchanged.
 
 All three apps read one token vocabulary, so a look or a Stylix palette maps
 once. These are the bar's six tokens (`crates/scootbar/src/theme.rs:17-32`) plus
-three that menus and cards need:
+four that menus and cards need. Each token has exactly one source per path, because
+a config file has one key per token and the look rung sets keys one by one:
 
 | Token | Role | Stylix slot | Why that slot (base16 styling guide: `tinted-theming/home` `styling.md`) | Look source (`nix/modules/desktop.nix` registry) |
 |---|---|---|---|---|
 | `background` | surface fill | `base00` | "Default Background" | `barColors.background` |
 | `foreground` | primary text | `base05` | "Default Foreground, Caret" | `barColors.foreground` |
 | `dim` | secondary text (app name, time, placeholder), low-urgency border | `base03` | "Comments, Invisibles"; scootbar's `dim` is `base03` (`nix/modules/scootbar.nix:479-496`), and so is Stylix's mako low-urgency border (below) | `barColors.dim` |
-| `accent` | border, focus ring, caret, normal-urgency border, links | `base0D` | "Functions, Headings": blue. scootbar moved its Stylix accent from `base0A` to `base0D` on purpose so "highlights and window ring agree" (`scootbar.nix:102-110`), and Stylix's own mako and fuzzel borders are `base0D` | `appearance.focus_ring_active_color` for borders (as mako and fuzzel get today), `barColors.accent` otherwise |
+| `border` | card and panel border, normal-urgency border | `base0D` | Stylix's own mako and fuzzel borders are `base0D` | `appearance.focus_ring_active_color` (what mako's `border-color` and fuzzel's `--border-color` get today) |
+| `accent` | focus ring, caret, links, primary button, highlighted choice | `base0D` | "Functions, Headings": blue. scootbar moved its Stylix accent from `base0A` to `base0D` on purpose so "highlights and window ring agree" (`scootbar.nix:102-110`) | `barColors.accent` |
 | `hover` | pointer hover | `base0D` | as the bar | `barColors.hover or barColors.accent` |
 | `urgent` | critical border, errors, Caps Lock warning | `base08` | "Red"; scootbar and Stylix's mako critical border both use `base08` | `barColors.urgent` |
 | `selection` | selected row fill | `base02` | "Selection Background", and Stylix's fuzzel `selection` | `barColors.accent` (today's fuzzel look flag, `fuzzel-theme.nix:18`) |
@@ -444,9 +446,9 @@ might choose:
    is a root-level rebuild step ([scootgreet.md](scootgreet.md#stylix-and-look-integration)).
 6. **Under Nix, a config change reloads scootnotify rather than restarting it.** A
    restart throws away what is on screen and the history. Home Manager supports
-   `X-Reload-Triggers` (verified in `nix-community/home-manager` `modules/systemd.nix`
-   on master, 2026-10-12; **check the rev the tests pin before relying on it**) with
-   `ExecReload = scootnotify msg reload`. On NixOS the unit is a *user* unit
+   `X-Reload-Triggers` (verified in `modules/systemd.nix:140` at
+   `efa3ccb4c3cc90d832eab232976379058fa75aa3`, the rev `scripts/scootbar-stylix-test.sh:35`
+   pins, and on master) with `ExecReload = scootnotify msg reload`. On NixOS the unit is a *user* unit
    (as `scootbar-nixos.nix` declares the bar's, with `restartTriggers`), and what
    `switch-to-configuration` does to running user units on a config change is
    **not verified here**. `notify-nix` checks it at the pinned nixpkgs before
@@ -547,8 +549,10 @@ the ratchet's waivers do):
 - **Versioning**: each crate is versioned independently by `scripts/version`
   from Conventional Commits with its scope (CLAUDE.md, Commits and CI). The new
   scopes `scootnotify`, `scootlaunch` and `scootui` are already named in CLAUDE.md.
-  `scoot-dbus` and `scootgreet` are not: adding them to CLAUDE.md's scope list is
-  a `docs(claude)` line in the first PR that creates each crate.
+  `scoot-dbus`, `scoot-xdg` (the desktop-entry parser, split out of scootlaunch when
+  scootgreet becomes its second consumer) and `scootgreet` are not: adding each to
+  CLAUDE.md's scope list, with its CI classify arms, is part of the first PR that creates
+  the crate.
 
 ## Testing that all three share
 

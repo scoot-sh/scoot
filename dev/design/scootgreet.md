@@ -81,8 +81,9 @@ leaves the machine without a way to log in.
   Adwaita's.
 - *Testable login.* ReGreet 0.5 shows the user and session with a Login button but **no
   password field until Login is clicked**. The `scoot-iso` QEMU test clicks fractional
-  coordinates to reveal it (`scoot-sh/scoot-iso` `scripts/qemu-test.sh`, quoted in
-  the survey). ReGreet also starts the session only after it exits, so the M2's
+  coordinates to reveal it (`scoot-sh/scoot-iso` at `75994a8`, `scripts/qemu-test.sh:667-668,719`:
+  "ReGreet 0.5 shows User+Session preselected with a Login button but no password field:
+  clicking Login reveals it"). ReGreet also starts the session only after it exits, so the M2's
   scripted login has to kill `dbus-run-session` by hand. scootgreet focuses the password
   field at once, exits the moment `start_session` succeeds, and offers a headless
   `scootgreet login` for VM test harnesses ([below](#the-greetd-client)). That serves
@@ -100,7 +101,7 @@ password, wrong password, an expired-password change, an OTP second prompt
 
 ## Today: ReGreet under greetd and cage
 
-From the survey of `nix/modules/nixos.nix` and the pinned nixpkgs:
+From `nix/modules/nixos.nix` and the pinned nixpkgs' `greetd.nix` and `regreet.nix`:
 
 - `programs.scoot.greeter.enable` (`nixos.nix:989-1030`, aliased as
   `programs.scoot.desktop.greeter` at `:167-170`) turns on nixpkgs'
@@ -142,8 +143,8 @@ From the survey of `nix/modules/nixos.nix` and the pinned nixpkgs:
 | `auth_message` | `auth_message_type` (`visible`, `secret`, `info`, `error`), `auth_message`. "There are no limits on the number and type of messages … a greeter should not make any assumptions about the messages. Must be answered with either post_auth_message_response or cancel_session." |
 
 The field names are `auth_message_type` and `auth_message`. The `greetd_ipc` crate's
-doc example uses stale names (`message`, `message_type`); the survey
-checked the real ones. scootgreet does **not** depend on `greetd_ipc` (it pulls in
+doc example uses stale names (`message`, `message_type`); the man page and the
+server's types use the real ones. scootgreet does **not** depend on `greetd_ipc` (it pulls in
 serde and a tokio-optional codec): the frame is four bytes plus JSON, and the
 password frame must be built by hand anyway ([Security](#security-model)).
 
@@ -168,9 +169,13 @@ Escape at any step      -> cancel_session; back to Idle
 - While a request is in flight (PAM's delay after a wrong password is often 2 s), input is
   disabled and a "Checking…" line is shown. The loop stays responsive: the greetd socket is
   non-blocking in the `poll` set.
+- **Invariant: scootgreet exits 0 only after `start_session` succeeded.** Every other exit
+  (a fatal error, a lost compositor) is non-zero, so the wrapper's fallback catches it. A clean
+  exit without a session would send greetd round its restart loop, which the fallback never
+  sees ([Failure modes](#failure-modes-never-strand-a-login)).
 - After `start_session` succeeds, **exit at once**: "The session will start after the
   greeter process terminates". greetd gives the greeter 5 s, then SIGTERMs every second, then
-  SIGKILLs at 10 s (`greetd/src/context.rs`, per the survey).
+  SIGKILLs at 10 s (`greetd/src/context.rs:294-314`).
 - A dropped connection cancels the session on greetd's side, and the greeter reconnects.
 - Bounds: frames at most 64 KiB (refuse larger and reconnect), messages kept on screen at most 4 (the
   newest), each at most 512 bytes and stripped of control characters.
@@ -444,7 +449,8 @@ The login screen runs before any user session, as the `greeter` user, from `/etc
 | Card fill | `background` | `base00` | `barColors.background` |
 | Labels, entry text, clock | `foreground` | `base05` | `barColors.foreground` |
 | Placeholder, hints, info messages, date | `dim` | `base03` | `barColors.dim` |
-| Focus ring, caret, primary button, selected user | `accent` | `base0D` | `appearance.focus_ring_active_color` |
+| Card border | `border` | `base0D` | `appearance.focus_ring_active_color` |
+| Focus ring, caret, primary button, selected user | `accent` | `base0D` | `barColors.accent` |
 | Selected row in the selectors | `selection` / `selection-text` | `base02` / `base05` | `barColors.accent` / `barColors.background` |
 | Auth errors, Caps Lock warning, destructive confirm | `urgent` | `base08` | `barColors.urgent` |
 | Font | — | `fonts.sansSerif`, `sizes.applications` (12 pt = 16 px) | `fonts.sans` at 12 pt (today's measured greeter size, `nixos.nix:2456-2460`) |
@@ -463,10 +469,10 @@ The login screen runs before any user session, as the `greeter` user, from `/etc
 
 ## The installer ISO
 
-`scoot-sh/scoot-iso` (a separate repo; HEAD `75994a8` per the survey) uses greetd's
+`scoot-sh/scoot-iso` (a separate repo; HEAD `75994a8`, `nix/live.nix:342-352`) uses greetd's
 `initial_session` for live-media autologin with `agreety` as the `default_session`, and
 `programs.scoot.greeter.enable` with ReGreet and the `moonrise` look for the installed
-target (`nix/target-machine.nix:202-252`). The ISO is 2.83 GiB, over GitHub's 2 GB asset cap
+target (`nix/target-machine.nix:202-252`; not re-read for this doc). The ISO is 2.83 GiB, over GitHub's 2 GB asset cap
 (`docs/backlog/core/iso-slim-under-2gb.md:15-19`). Whether the ReGreet stack is on the ISO
 image itself (rather than fetched at install) is **not verified**. `greet-packaging-iso`
 measures the ISO and target closure delta of switching the target to scootgreet, and

@@ -204,9 +204,12 @@ window covers the target output and releases them when it leaves.
 Detection binds `zwlr_foreign_toplevel_manager_v1` (v2+ for the fullscreen state)
 **only at the moment a card would be placed**, reads the burst of handles, and
 `stop`s. It never holds the manager at idle: a held manager would wake the daemon
-on every terminal's title change. Caveat recorded by the survey: the `activated` state is the
-single global focus, so a fullscreen window on an unfocused output is detected by
-`fullscreen` plus `output_enter`, not by `activated`.
+on every terminal's title change. scoot counts these binds live and releases one on `stop`
+(`crates/scoot/src/compositor/bind_budget.rs:141,194-201`, at most 8 held per client), so a
+bind-and-stop per placement never exhausts the budget. Caveat: fullscreen coverage is per
+output (`crates/scoot-core/src/world/fullscreen.rs:41-49`), while `activated` is the single
+global focus, so a fullscreen window on an unfocused output is detected by `fullscreen` plus
+`output_enter`, not by `activated`.
 
 **Outputs.** `output = "focused"` (default), `"compositor"`, or an output name.
 `focused` uses the same on-demand foreign-toplevel snapshot: the
@@ -443,7 +446,7 @@ The shared rules (tokens, precedence, fonts, opacity, live reload) are in
 | Card fill | `background` with alpha | `base00` × `opacity.popups` | `barColors.background`, opaque |
 | Summary, body | `foreground` | `base05` | `barColors.foreground` |
 | App name, age, "+N more" | `dim` | `base03` | `barColors.dim` |
-| Border, normal | `accent` | `base0D` | `appearance.focus_ring_active_color` (mako's today) |
+| Border, normal | `border` | `base0D` | `appearance.focus_ring_active_color` (mako's today) |
 | Border, low | `dim` | `base03` | `barColors.dim` |
 | Border, critical | `urgent` | `base08` | `barColors.urgent` (mako's critical ring today) |
 | Progress bar | `selection` | `base02` (Stylix's mako `progress-color`) | `barColors.accent` (mako's today) |
