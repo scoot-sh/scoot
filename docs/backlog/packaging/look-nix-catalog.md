@@ -13,44 +13,50 @@ Filed 2026-10-12, child of [`live-looks`](../core/live-looks.md). Serves
 
 ## The gap
 
-`programs.scoot.desktop.look` is an enum (`desktop.nix:195-204`) whose
-values are merged into `config.toml` and `bar.toml` at module priorities
-(`home.nix:532-539`, `scootbar.nix:374-378`), so a swap can never change a
-key the look set, and a `home-manager switch` would have no rule for a
-choice made at runtime.
+`programs.scoot.desktop.look` is an enum (`desktop.nix:195-204`) merged into
+`config.toml` and `bar.toml` at module priorities (`home.nix:532-539`,
+`scootbar.nix:374-378`), so a swap can never change a key the look set, and a
+`home-manager switch` has no rule for a choice made at runtime.
 
 ## What to do
 
-The design doc's §6:
+Per the design doc's sections 3.1, 5.2 and 6:
 
-- `programs.scoot.looks` (names, paths, derivations) and
-  `programs.scoot.look` (the declared default, or null), moved out of
-  `desktop` per Decision D2. Breaking, shipped clean (`feat(nix)!`), with
-  the maintainer's own config updated in step.
-- Each look rendered by a derivation running `scoot look build` (validated
-  at build time, no import-from-derivation; contrast warns rather than
-  fails for a look the user's config chose, per the design doc's §3.5); the catalog linked under
-  `~/.local/share/scoot/looks/`; the declared default in a store file.
+- `programs.scoot.looks` (names and source paths, read with
+  `builtins.fromTOML`; no derivations, no IFD) and `programs.scoot.look`
+  (D2), with the profile's default moved from `mkDefault` to
+  `mkOverride 1200 "ginger-night"` (`home.nix:503-505`,
+  `nixos.nix:2235-2237`), leaving priority 1000 for the Stylix source and
+  1500 to the option's `default = null`. Breaking (`feat(nix)!`), the
+  maintainer's config updated in step.
+- Each look rendered by a derivation running the `scoot-look` binary with
+  its `[fonts.nix]` packages as inputs (D13); the catalog linked as
+  `~/.local/share/scoot/looks/<name>` (sources) and
+  `~/.local/share/scoot/rendered/<name>` (renders); the declared default in
+  `~/.config/scoot/look-default`.
 - Remove the eval-time merges of look values into `programs.scoot.settings`
-  and `programs.scootbar.settings`: the runtime layer replaces them.
-- An activation step `scoot look sync` applying the switch rule of §6.3
-  (no state → default; the declared default changed → it wins; the live
-  look gone from the catalog → default, said loudly; otherwise keep the
-  live look through the new catalog) and reloading a running session.
-- A flake output `lookPacks.<name>` for look repos.
-- Retire the Nix registry once every consumer reads look directories.
+  and `programs.scootbar.settings`.
+- The activation step `scoot look sync` (the rule of section 6.3), ordered
+  after `linkGeneration` and `dconfSettings`, and home-manager no longer
+  writing `color-scheme` from an eval-time look (D11), except a key the user
+  set in `dconf.settings`.
+- The NixOS-module-only path: the catalog under
+  `/run/current-system/sw/share/scoot/`, `/etc/scoot/look-default`, and
+  `scoot look sync` run by `resources/scoot-session` at login.
 - Docs in the same PR: `site/.../scoot/theming.md` and
-  `site/.../desktop/index.md` (pick a look, the switch rule, rollback).
+  `site/.../desktop/index.md`.
 
 ## Evidence to record
 
-Module tests for each corner of §6.3 (including `look = null` and a
-rollback), a VM run of `home-manager switch` with a live choice kept and
-with a changed default, and the closure size of the catalog.
+Module tests for each corner of section 6.3 (`look = null` and a rollback
+included), for the priority table (Stylix + profile evaluates to `stylix`;
+an explicit look wins; the profile alone gives ginger-night), a VM run of
+`home-manager switch` keeping a live choice and following a changed default,
+and the catalog's closure size.
 
 ## Not in this ticket
 
-Stylix ([`look-stylix-source`](look-stylix-source.md)), the greeter
-([`look-greeter`](look-greeter.md)), third-party leaves.
+Stylix, the greeter, third-party leaves, retiring the registry,
+`lookPacks` (later, `look-share`).
 
-The design doc this implements against: [live looks](../../../dev/research/live-looks-design.md).
+The design this implements against: [live looks](../../../dev/research/live-looks-design.md).

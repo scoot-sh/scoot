@@ -372,23 +372,30 @@ Swap a whole-desktop look at runtime, with a tool, an IPC request and a
 Stylix source. Epic and design first; the children are in order of the
 first slice (non-Nix, compositor + bar + wallpaper) and then the rest.
 Design and evidence: [`dev/research/live-looks-design.md`](../../dev/research/live-looks-design.md).
-The bar's two children are in [scootbar's backlog](../scootbar/backlog/README.md#live-looks-filed-2026-10-12).
+The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.md#live-looks-filed-2026-10-12).
 
 - [**Live-swappable looks across the scoot desktop (epic)**](./core/live-looks.md) (high)
-- [The look format: look.toml tokens, the scoot-look crate, validation, the five looks lifted](./core/look-format.md) (high)
-- [The compositor reads a look layer under the user's config](./core/look-layer-scoot.md) (high, blocked on `look-format`)
-- [`scoot look apply`: the atomic swap, ordered reloads, rollback](./core/look-apply-cli.md) (high, blocked on both look layers)
-- [IPC: look-apply and looks requests, a look event](./ipc/look-ipc.md) (high, computer use)
-- [Golden screenshots per shipped look, and the validate gate in CI](./testing/look-golden-screenshots.md) (medium, computer use)
-- [Nix: the `programs.scoot.looks` catalog and the switch rule](./packaging/look-nix-catalog.md) (high)
+- [The look format: the scoot-look crate, schema, value grammar, pure validation](./core/look-format.md) (high)
+- [The five shipped looks as look.toml under looks/, validated in CI](./core/look-shipped.md) (high, blocked on `look-format`)
+- [The compositor reads a look layer, with a look-scoped reload](./core/look-layer-scoot.md) (high, blocked on `look-format`)
+- [`scoot look apply`: the atomic swap, scoped reloads, rollback](./core/look-apply-cli.md) (high, blocked on `look-shipped` and both look layers)
+- [`scoot look next`/`prev`/`random` and timed previews](./core/look-cycle-preview.md) (medium)
+- [IPC: look-apply and looks requests, a look event](./ipc/look-ipc.md) (medium, computer use)
+- [Golden screenshots per shipped look](./testing/look-golden-screenshots.md) (medium, computer use)
+- [Nix: the `programs.scoot.looks` catalog and the switch rule](./packaging/look-nix-catalog.md) (high, breaking)
 - [`scoot look import-base16`: the one base16-to-token mapping](./core/look-import-base16.md) (medium)
 - [Stylix becomes a synthesized `stylix` look instead of a layer above the look](./packaging/look-stylix-source.md) (high, breaking)
 - [GTK, libadwaita, Qt, cursor and fonts follow a swap through dconf and the portal](./packaging/look-toolkit-live.md) (medium)
-- [Third-party leaves rendered from tokens and read through the look link](./packaging/look-app-leaves.md) (medium)
-- [Authoring and sharing: look new, watch, save, install, export](./core/look-authoring.md) (medium)
-- [install.sh `--look` installs the catalog and applies a look](./packaging/look-install-sh.md) (medium)
-- [Opt-in automatic look switching](./core/look-auto-switch.md) (low)
+- [Look leaves for mako, wob, fcitx5 and the night light](./packaging/look-leaves-daemons.md) (medium)
+- [Look leaves for swaylock, fuzzel and the pickers](./packaging/look-leaves-launchers.md) (medium)
+- [Look leaves for foot, Helix, btop and starship](./packaging/look-leaves-terminal.md) (medium)
 - [The greeter's look](./packaging/look-greeter.md) (low)
+- [Retire the Nix look registry](./packaging/look-nix-retire-registry.md) (medium, last)
+- [Authoring: look new, watch and preview capture](./core/look-authoring.md) (medium)
+- [`scoot look install` from a path, export and save](./core/look-install.md) (low)
+- [install.sh `--look` installs the catalog and applies a look](./packaging/look-install-sh.md) (medium)
+- [Later: install looks from git and flake `lookPacks`](./core/look-share.md) (low, later)
+- [Later: opt-in automatic look switching](./core/look-auto-switch.md) (low, later)
 
 ### Core / config / rendering
 - [CPU-tier output swap with empty bindings can strand a headless output reporting live:true](./core/cpu-swap-empty-bindings-strand.md) — found in the #551 seat-reconnect review; the next win heals it

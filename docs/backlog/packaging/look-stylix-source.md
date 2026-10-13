@@ -9,52 +9,54 @@ blocked: "look-nix-catalog, look-import-base16"
 # Stylix becomes a synthesized stylix look instead of a layer above the look
 
 Filed 2026-10-12, child of [`live-looks`](../core/live-looks.md). Serves
-**daily-drive**. Settles the maintainer's question "do we keep stylix or
-create look support with custom looks": both, with Stylix as a source of a
-look (design doc §5, Decision D5).
+**daily-drive**. Settles "do we keep stylix or create look support with
+custom looks": both, with Stylix as a source of a look (D5, D14).
 
 ## The gap
 
-Stylix sits above the look (`scootbar.nix:7-20`): its values are baked into
-the config files as ordinary settings, which a runtime look layer sits
-under, so a swap could never change a key Stylix set. The mapping is
+Stylix sits above the look (`scootbar.nix:7-20`), baked into the user's own
+files, so a swap could never change a key Stylix set; the mapping is
 duplicated (`home.nix:571-573`, `scootbar.nix:482-487`).
 
 ## What to do
 
-- One Nix function (`nix/lib/look-from-stylix.nix`) that serializes
-  `config.lib.stylix.colors.withHashtag.base00..base0F`, the fonts and
-  sizes, opacity, cursor and image into the store, and a derivation that
-  runs `scoot look import-base16` on it: the `stylix` look.
-- With Stylix present and on, the catalog gains `stylix` and the declared
-  default becomes `stylix` at `mkDefault` (an explicit `look` wins). A
-  scheme below the contrast bars builds with a named warning, never a
-  failed switch (Solarized Dark's accent pair is 4.08 against the 4.5 bar).
-- Delete the per-module Stylix leaf mappings in `home.nix` and
-  `scootbar.nix`. Remove `programs.scootbar.stylix.enable`;
+Per the design doc's section 5:
+
+- One Nix function serializing `config.lib.stylix` (sixteen slots, fonts,
+  `sizes.desktop`/`popups`/`applications`/`terminal`, `opacity.popups` and
+  `terminal`, cursor, image) and a derivation running `scoot-look
+  import-base16` on it: the `stylix` look, with
+  `programs.scoot.stylix.extends` (default `"ginger-night"` with the desktop
+  profile on, none otherwise).
+- The declared default `"stylix"` at `mkDefault` (1000), above the
+  profile's `mkOverride 1200` and below the user.
+- Delete the per-module Stylix leaf mappings; no app module reads Stylix.
   `programs.scoot.stylix.enable` now means "synthesize the `stylix` look";
-  `programs.scoot.stylix.wallpaper.enable` means "the `stylix` look carries
-  `stylix.image`". Breaking (`feat(nix)!`), the maintainer's config updated
-  in step, and the one behavior flip stated in the changelog: with Stylix on
-  *and* an explicit `look`, the look now wins.
-- The other first-party app modules (scootlaunch, scootnotify) never read
-  Stylix themselves; they read the look layer.
-- Stylix is never a flake input or a hard dependency.
-- Docs in the same PR: rewrite `site/.../scoot/theming.md`'s precedence
-  (38-44) and Stylix (158-189) sections and `site/.../scootbar/theming.md`'s.
+  `programs.scootbar.stylix.enable` becomes the **bar-only path** (the bar
+  module renders the `stylix` look's bar fragment and sets `[look] layer`
+  when there is no catalog; an evaluation warning when there is one).
+- D14: never render a fragment for a path an upstream module owns
+  (`upstreamOwns`, `theme-home.nix:55,75-90`); the apply reply names those
+  apps "owned by Stylix's target".
+- The changelog states the visible changes of section 5.5 for profile users
+  (GTK/Qt, mako, fuzzel and pickers, swaylock, wob and fcitx5 move from
+  ginger-night's palette to Stylix's; compositor, bar, wallpaper, terminal
+  files and night temperature unchanged) and the one behavior flip for
+  explicit-look users.
+- Docs in the same PR: `theming.md` 38-44 and 158-189, and the bar's
+  theming page.
 
 ## Evidence to record
 
-Each Stylix read beyond today's stub (`base01`, `02`, `04`, `06`, `07`,
-`09`-`0F`, `fonts.monospace`, `opacity`, `polarity`) checked by hand against
-a named Stylix rev and added to the stub in `nix/tests.nix:754-807`, with the
-rev recorded in a header like `nix/scootbar-tests.nix:9-15`. A test that the
-`stylix` look's colors equal what today's leaves produce.
-`scripts/scootbar-stylix-test.sh` (the real-Stylix run) green.
+Each Stylix read beyond today's stub checked by hand against a named Stylix
+rev, the stub in `nix/tests.nix:754-807` extended, the rev recorded in a
+header like `nix/scootbar-tests.nix:9-15`; a test that the `stylix` look's
+compositor and bar colors equal today's leaves; a test that Stylix + the
+profile evaluates (no priority clash); `scripts/scootbar-stylix-test.sh`
+green, including the bar-only path on sway.
 
 ## Not in this ticket
 
-Stylix targets for apps scoot does not theme (starship, Helix, btop): left
-to Stylix's own targets.
+Stylix's own targets for apps scoot does not theme.
 
-The design doc this implements against: [live looks](../../../dev/research/live-looks-design.md).
+The design this implements against: [live looks](../../../dev/research/live-looks-design.md).

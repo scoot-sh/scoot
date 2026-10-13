@@ -1,59 +1,75 @@
 ---
-title: "The compositor reads a look layer under the user's config, refused whole when bad"
+title: "The compositor reads a look layer under the user's config, with a look-scoped reload"
 status: "open"
 area: "core"
 priority: "high"
 blocked: "look-format"
 ---
 
-# The compositor reads a look layer under the user's config, refused whole when bad
+# The compositor reads a look layer under the user's config, with a look-scoped reload
 
 Filed 2026-10-12, child of [`live-looks`](live-looks.md). Serves **both**:
-the compositor's ring, background, cursor and wallpaper are the most
-visible half of a look, and the screenshots agents take.
+the ring, background, cursor and wallpaper are the most visible half of a
+look, and the screenshots agents take.
 
 ## The gap
 
-scoot reads one file (`config::reload_from`, `config.rs:756-767`) with no
-way to layer a look under it. Inside a file that parses, a bad color falls
-back to the default per field, at startup and at reload alike
-(`config.rs:194-206,748-753`), so a look with one typo would be silently
-half-applied. A ring or background change also runs `apply()`, which
-re-arranges every window (`reload.rs:308-321`, `shell.rs:375-405`), though
-neither is placement.
+scoot reads one file (`config::reload_from`, `config.rs:756-767`). A bad
+color in it falls back to `Appearance::default()` (`config.rs:194-206`),
+which under a look layer would show neither the user's color nor the look's.
+A reload re-reads everything, so a swap would also apply the user's pending
+edits, autostart included (`reload.rs:101-112`). Ring and background changes
+run `apply()` (`reload.rs:308-321`). `[wallpaper]` is fire-and-forget
+(`reload.rs:125-133`).
 
 ## What to do
 
-- Read the look layer from `$XDG_STATE_HOME/scoot/look/scoot.toml` (the
-  design doc's §4.1), merged *under* the user's file per key (user > look >
-  default). A user opt-out key (for example `[look] layer = false`) for
-  anyone who wants their file alone.
-- The layer is parsed strictly: an unknown or non-allowlisted key (any
-  command, `[binds]`, `[autostart]`, `[wallpaper] command`, the restart-only
-  sections of `reload.rs:77-90`) or one bad color refuses the whole layer by
-  name. At startup that means "no look layer" plus an error log (startup
-  never fails over a look, the rule at `config.rs:16-23`); at reload it means
-  the reload refuses and the running session keeps everything.
-- Wallpaper paths in the layer are absolute (the renderer resolves them), so
-  the relative-path rule for the user's own file is untouched.
-- A ring/background/corner-only change requests a redraw without `apply()`,
-  the way cursor fields already do (`reload.rs:322-331`); measure first.
-- A reload option the swap can wait on: the reply comes after the wallpaper
-  run finishes, not merely after it is handed over (`reload.rs:125-133`,
-  `wallpaper/queue.rs:1-37`).
-- Docs in the same PR: the config reference on the site gains the look
-  layer and its precedence.
+Per the design doc's sections 4.1 to 4.5:
+
+- Read `<state>/look/scoot.toml` (`<state>` resolved as `--state`,
+  `$SCOOT_LOOK_STATE`, `$XDG_STATE_HOME/scoot`, `~/.local/state/scoot`) and
+  merge it under the user's file **on raw keys, before derivation**, with
+  the units merged whole: `[wallpaper]` with its per-output and
+  per-workspace tables (the color+image trap,
+  `docs/backlog/resolved/stylix-wallpaper-color-trap-done.md:17-24`), the
+  ring-width pair, the cursor triple.
+- The layer is parsed strictly against scoot's allowlist from `scoot-look`:
+  a forbidden key or a bad value refuses the whole layer (startup: no layer,
+  an error log; reload: refused, everything kept).
+- A bad *user* value for a key the layer provides falls back to the layer's
+  value, and the reply reports it as invalid and shadowing.
+- `Request::Reload` gains a scope: `look` keeps the user file as parsed at
+  the last successful load and swaps only the layer (no autostart, no binds,
+  no pending edits).
+- The reply lists shadowed keys and gains an option to wait for the
+  wallpaper run.
+- Emit `EventKind::Look` when a reload sees the layer's identity change (the
+  rendered look's hash in its `look.json`).
+- Export `SCOOT_LOOK_STATE` to children: the user state on `--tty`, a
+  private per-display state under `$XDG_RUNTIME_DIR` on `--headless` and
+  `--nested`, seeded from the user's choice (D10).
+- Ring, background and corner changes request a redraw without `apply()`
+  (measure first).
+- Measure the cursor rebuild on the loop thread in a release build at 24,
+  48 and 256 px (PR #572 reports 36.4 ms at 16 px and 1.82 s at 256 px in a
+  debug build); if it exceeds a frame at common sizes, build the bitmaps on a
+  worker and swap them in.
+- Docs in the same PR: the config reference gains the look layer and its
+  precedence.
 
 ## Evidence to record
 
-Tests: layer precedence per key, a strict-refusal test per forbidden key, a
-bad-color layer refused whole at reload and dropped at startup, a dangling
-link at startup. Benchmark before and after on headless with 1, 10 and 50
-windows: the time of a reload that changes only ring colors (with and
-without `apply()`), and frame times across it.
+Tests: precedence per key; each unit merged whole (a user `color` with a
+look `image` yields the user's section); a forbidden key and a bad value
+refused whole; a bad user color falling back to the layer; a scoped reload
+not spawning a new autostart entry nor applying a pending bind; a dangling
+link at startup; the event fired once per identity change; a headless
+session not touching the user state. Benchmarks before/after on headless
+with 1, 10 and 50 windows: a ring-only reload with and without `apply()`,
+frame times across it, and the cursor rebuild times.
 
 ## Not in this ticket
 
-The CLI that writes the link, scootbar, IPC.
+The CLI, scootbar, IPC requests.
 
-The design doc this implements against: [live looks](../../../dev/research/live-looks-design.md).
+The design this implements against: [live looks](../../../dev/research/live-looks-design.md).

@@ -146,7 +146,8 @@ The [umbrella](resolved/data-source-modules-done.md) holds the rules they share 
 
 ### Live looks (filed 2026-10-12)
 The bar's half of the [live-looks epic](../../backlog/core/live-looks.md) ([design](../../../dev/research/live-looks-design.md)):
-- [scootbar reads a look layer under bar.toml, and a style-only reload keeps its modules](look-layer-scootbar.md) (high, blocked on `look-format`)
+- [scootbar reads a look layer under bar.toml, with a look-scoped reload](look-layer-scootbar.md) (high, blocked on `look-format`)
+- [A style-only reload keeps every module running and repaints](scootbar-style-reload.md) (medium)
 - [A looks picker: a bar popup module, a default keybinding, a launcher list](look-picker.md) (medium, blocked on `look-apply-cli`)
 
 ### Unscheduled (until someone asks)

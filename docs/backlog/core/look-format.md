@@ -1,70 +1,66 @@
 ---
-title: "The look format: look.toml tokens, the scoot-look crate, validation, the five looks lifted"
+title: "The look format: the scoot-look crate, look.toml schema, value grammar and pure validation"
 status: "open"
 area: "core"
 priority: "high"
 blocked: null
 ---
 
-# The look format: look.toml tokens, the scoot-look crate, validation, the five looks lifted
+# The look format: the scoot-look crate, look.toml schema, value grammar and pure validation
 
 Filed 2026-10-12, child of [`live-looks`](live-looks.md). Serves **both**:
-every other child reads looks through this crate, and a validated format is
-what lets an agent pin a look and trust the result.
+every other child reads looks through this crate.
 
 ## The gap
 
-There is no look format. The registry is Nix attrsets with 3 compositor and
-6 bar colors per look (`nix/modules/desktop.nix:1931-2147`; radial-burst
-has no `hover`, 2032-2038). The example directories mix the look with a
-layout and commands (`docs/examples/moonrise/bar.toml:19-21,58-86`). Nothing
-compares the two. Every per-app mapping is Nix code
-(`theme-look.nix:49-59`, `theme-home.nix`, `notifications-home.nix:216-232`,
-`idle-home.nix:31-46`, `audio-home.nix:36-75`, `fuzzel-theme.nix:15-21`,
-`inputmethod-home.nix:43-74`), so a non-Nix box has none of them. The AA
-contrast check runs on generated `gtk.css` only (`nix/tests.nix:14907-14932`).
+There is no look format: the registry is Nix attrsets
+(`nix/modules/desktop.nix:1931-2147`), every per-app mapping is Nix code
+(`theme-look.nix:49-59`, `theme-home.nix`, the app modules), and nothing
+bounds what a look's strings may contain once they are written into
+line-based configs where keys run code (mako `on-button-*=exec`,
+`doc/mako.5.scd:44-54,100-114`; fuzzel `launch-prefix`/`terminal`,
+`doc/fuzzel.ini.5.scd:246,267`; GTK 3 `gtk-modules` loading an absolute
+path, `gtk/gtkmodules.c:180-181`; all at the pinned nixpkgs).
 
 ## What to do
 
-- A new pure crate `crates/scoot-look` (no Wayland, no I/O beyond reading a
-  look directory; builds on macOS): the `look.toml` schema v1 exactly as the
-  design doc's §3.2 gives it (required roles, defaults for optional roles,
-  `[terminal]`, `[fonts]`, `[shape]`, `[cursor]`, `[wallpaper]`, `[icons]`,
-  `[night]`, `[apps.<app>]`), `extends` resolution (cycle-checked, depth at
-  most 8), and strict validation (§3.5): hex colors, required roles, the
-  contrast bars (foreground/background 4.5, accent-fg/accent 4.5,
-  accent/background 3.0, focus/background 3.0), names, license, the
-  per-app key allowlist of §3.4. Contrast is a refusal for shipped and
-  installed looks and a named warning for looks the user's own config
-  produced (`stylix`, `import-base16`, a path in `looks`): base16
-  Solarized Dark's accent pair is 4.08, and refusing it would break a
-  working Stylix setup. Every other rule refuses for every look.
-- Pure renderers for the first-party fragments: scoot (`[appearance]`,
-  `[layout] gap`, `[wallpaper]` without `command`) and scootbar (`[colors]`,
-  the `[bar]` style keys, the per-module visual allowlist). Paths made
-  absolute against the look directory.
-- Lift the five shipped looks into `look.toml` files with no invented color:
-  the registry's values, the example `scoot.toml`/`bar.toml` style values
-  (radius, ring widths, gap, opacity), foot's 16 hues into `[terminal]`.
-  Place them per Decision D1 (recommended: top-level `looks/<name>/`, with a
-  CI path filter like scootbg's, since `docs/*` runs no CI:
-  `.github/workflows/ci.yml:236-246`).
-- A check that each lifted `look.toml` equals the Nix registry entry until
-  [`look-nix-catalog`](../packaging/look-nix-catalog.md) retires the
-  registry, so the two cannot drift meanwhile.
-- `cargo fuzz`-style property tests on the parser (malformed TOML, deep
-  `extends` chains, huge files: cap the file size like scootbar's 64 KiB,
-  `crates/scootbar/src/config.rs:77-79`).
+A new crate `crates/scoot-look`, **pure** (no Wayland, no fontconfig, no
+image decoder, no process spawning; builds on macOS), per the design doc's
+section 3:
+
+- The `look.toml` schema v1 (section 3.2): the thirteen palette roles with
+  their defaults, `[terminal]`, `[fonts]` with `popup-size`, `app-size`,
+  `terminal-size` and the `files`/`nix` carriers, `[opacity]`, `[shape]`
+  (no `gap` in v1), `[cursor]` (`accent`, optional `body`), the
+  `[wallpaper]` unit, `[icons]`, `[night]`, `[apps.<app>]`.
+- `extends` resolution (cycle-checked, depth at most 8) over *source*
+  looks only.
+- The value grammar of section 3.5: names, identifiers, display text, glyph
+  strings, paths and numbers, each with its charset and length cap; NUL and
+  control characters refused everywhere; a 64 KiB file cap.
+- Contrast (section 3.5): the four refusing pairs, `dim` and `urgent`
+  reported; refusal or warning by origin (shipped/installed vs the user's
+  own).
+- The per-app key allowlists in one place (scoot, scootbar, the shell apps'
+  fragments as their plan publishes them), shared by the validator and every
+  loader.
+- Pure renderers for the first-party fragments (`scoot.toml`, `bar.toml`)
+  taking resolved inputs (font files, the absolute wallpaper path, the
+  target binary's features: `popup-radius` only with scootbar's `popup`
+  feature, `crates/scootbar/src/config.rs:396-401`).
+- A small `scoot-look` binary target with no Smithay in its closure (for Nix
+  builds and the bar-only path).
 
 ## Evidence to record
 
-Unit tests per rule (each validation refusal named), the five looks
-validating, a byte-identical render check against today's generated values
-for the 3+6 colors, and the parse cost of a look (cold, microseconds).
+Unit tests per rule (each refusal named), property tests on the parser
+(malformed TOML, deep `extends` chains, huge files), and grammar tests that
+feed a newline, `=`, `[`, a quote and NUL into every string token. The
+crate's dependency list and the `scoot` binary size before and after.
 
 ## Not in this ticket
 
-Reading the layer in any app, the CLI, Nix, the third-party renderers
-(those land with their tickets, in this crate).
+The shipped looks (`look-shipped`), reading the layer in any app, the CLI,
+Nix, the third-party renderers.
 
-The design doc this implements against: [live looks](../../../dev/research/live-looks-design.md).
+The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
