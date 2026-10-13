@@ -48,6 +48,13 @@ each with `--json`, per the design doc's sections 3.1, 4 and 7.1:
   `look.json`. Without it a live swap across polarity leaves dark/light
   stale until the next activation, because `look-toolkit-live`'s full
   dconf set lands later. A box without `dconf` gets a note, not a refusal.
+  **Adoption overwrites a user's own choice on non-Nix (F3):** with no record
+  and no Nix list, the first `apply` replaces a `color-scheme` the user set
+  in a settings app. Ship the opt-out with it: `--no-toolkit` per apply,
+  and `scoot look toolkit off` (persisted in `look.json`) to skip every
+  dconf write; document both beside the first-apply description. Before
+  `look-nix-catalog`, home-manager restores its own `color-scheme` at the
+  next activation; the dogfood settings below stop that.
 - **Dogfood note in the docs:** on a home-manager machine before
   `look-nix-catalog`, set `programs.scoot.desktop.look = null`,
   `programs.scoot.stylix.enable = false` and `programs.scootbar.stylix.enable
