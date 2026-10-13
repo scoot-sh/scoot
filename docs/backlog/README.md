@@ -366,6 +366,30 @@ falsify. Read `flexwm` there as `scoot`.
   for minutes (scoot's re-probe is authoritative), `unspecified` refused, a
   natural force event needs the synthetic-trigger pairing.
 
+### Live looks (filed 2026-10-12)
+
+Swap a whole-desktop look at runtime, with a tool, an IPC request and a
+Stylix source. Epic and design first; the children are in order of the
+first slice (non-Nix, compositor + bar + wallpaper) and then the rest.
+Design and evidence: [`dev/research/live-looks-design.md`](../../dev/research/live-looks-design.md).
+The bar's two children are in [scootbar's backlog](../scootbar/backlog/README.md#live-looks-filed-2026-10-12).
+
+- [**Live-swappable looks across the scoot desktop (epic)**](./core/live-looks.md) (high)
+- [The look format: look.toml tokens, the scoot-look crate, validation, the five looks lifted](./core/look-format.md) (high)
+- [The compositor reads a look layer under the user's config](./core/look-layer-scoot.md) (high, blocked on `look-format`)
+- [`scoot look apply`: the atomic swap, ordered reloads, rollback](./core/look-apply-cli.md) (high, blocked on both look layers)
+- [IPC: look-apply and looks requests, a look event](./ipc/look-ipc.md) (high, computer use)
+- [Golden screenshots per shipped look, and the validate gate in CI](./testing/look-golden-screenshots.md) (medium, computer use)
+- [Nix: the `programs.scoot.looks` catalog and the switch rule](./packaging/look-nix-catalog.md) (high)
+- [`scoot look import-base16`: the one base16-to-token mapping](./core/look-import-base16.md) (medium)
+- [Stylix becomes a synthesized `stylix` look instead of a layer above the look](./packaging/look-stylix-source.md) (high, breaking)
+- [GTK, libadwaita, Qt, cursor and fonts follow a swap through dconf and the portal](./packaging/look-toolkit-live.md) (medium)
+- [Third-party leaves rendered from tokens and read through the look link](./packaging/look-app-leaves.md) (medium)
+- [Authoring and sharing: look new, watch, save, install, export](./core/look-authoring.md) (medium)
+- [install.sh `--look` installs the catalog and applies a look](./packaging/look-install-sh.md) (medium)
+- [Opt-in automatic look switching](./core/look-auto-switch.md) (low)
+- [The greeter's look](./packaging/look-greeter.md) (low)
+
 ### Core / config / rendering
 - [CPU-tier output swap with empty bindings can strand a headless output reporting live:true](./core/cpu-swap-empty-bindings-strand.md) — found in the #551 seat-reconnect review; the next win heals it
 - [`scoot --version`](./resolved/cli-version-flag-done.md) — RESOLVED 2026-09-21: `scoot --version` and `scootctl --version` print `scoot <version> (ipc protocol <N>)` from one shared helper (no drift, no session needed); the bare `version` word stays the remote IPC request by deliberate spelling decision.

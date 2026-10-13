@@ -77,3 +77,9 @@ binary does not grow.
 
 Two binaries build on it, both benchmarks are unchanged within the margin, and
 no consumer pays for a part it does not use.
+
+## Theming contract (added 2026-10-12)
+
+The color tokens this crate draws with come from the look layer, not a
+palette of its own: see the [live looks design](../../../dev/research/live-looks-design.md),
+section 9, and the epic [`live-looks`](../../backlog/core/live-looks.md).
