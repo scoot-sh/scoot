@@ -53,58 +53,6 @@ yet: see [Use the binary cache](../binary-cache/).
 Pick your system. The site remembers your choice.
 
 <Tabs syncKey="distro">
-<TabItem label="Any Linux">
-
-One command installs scoot, the wallpaper daemon and the bar from
-GitHub, checks each binary against the release's checksums, and tells
-you which system libraries are missing. Any distro with glibc 2.36 or
-newer (Debian 12, Ubuntu 24.04, current Fedora, Arch, openSUSE),
-x86_64 or aarch64. It never replaces a scoot that a distro package
-installed.
-
-```sh
-curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --system --look ginger-night
-```
-
-You need `curl` (or `wget`) and `sh`: `sudo apt install curl` on
-Debian and Ubuntu. Silence with a zero exit means the download itself
-failed and the script never ran — check the network and run it again.
-
-Minimal Fedora and Arch images ship no usable font, and the bar refuses
-to start without one (`no font: none of the usual font files is usable`).
-The script says so when that is you, naming the package for your distro
-(`fonts-dejavu-core` on Debian and Ubuntu, `dejavu-sans-fonts` on
-Fedora, `dejavu-fonts` on openSUSE, `ttf-dejavu` on Arch) — or point the
-bar at any file with `--font PATH` instead.
-
-The command it prints waits for confirmation; for a non-interactive run,
-add `-y` (`apt`, `dnf`) or `--noconfirm` (`pacman`). `--dry-run` lists
-the missing libraries and fonts without changing anything.
-
-Then log out and pick **scoot** on your login screen.
-
-- `--system` installs under `/usr/local` and adds scoot to the login
-  screen; it asks for `sudo`. Leave it off to install into `~/.local`
-  with no root, and start a session from a text console with
-  `scoot-session`.
-- `--look` writes one of the five [looks](../../scoot/theming/) to
-  `~/.config/scoot`. A file you already have is never overwritten.
-- `--nightly` takes `main`'s latest build instead of the newest
-  release. It is rebuilt on every merge, from the same commit Nix users
-  get.
-- `--uninstall` (with `--system` if you used it) removes exactly what
-  the script installed. Your config stays.
-
-Read the script before you run it:
-[install.sh](https://www.scoot.sh/install.sh). Every option:
-`sh install.sh --help`.
-
-This gets you the compositor, the bar and the wallpaper. The lock,
-notifications, launcher and screenshots come from your distro: [Build
-your desktop](../compose/#any-other-linux-the-parts) has the one
-command per distro.
-
-</TabItem>
 <TabItem label="NixOS">
 
 **This is the easy mode.** A flake with home-manager gets you the whole
@@ -219,7 +167,7 @@ The login screen, every piece and every option: [The scoot
 desktop](../../desktop/).
 
 </TabItem>
-<TabItem label="Other Linux with Nix">
+<TabItem label="Nix on another Linux">
 
 Nix on another distro gets the themed desktop from home-manager on its
 own: the config, the bar, the user services and the look. Your distro
@@ -286,6 +234,60 @@ login entry then runs the script's scoot, not the flake's, so keep the
 two on one version (`--nightly` follows `main`, as the flake does). Two
 pieces need your distro rather than home-manager: the lock screen's PAM
 service and backlight access ([details](../../desktop/#home-manager)).
+
+</TabItem>
+<TabItem label="Any Linux">
+
+No Nix on this machine? This is your route.
+
+One command installs scoot, the wallpaper daemon and the bar from
+GitHub, checks each binary against the release's checksums, and tells
+you which system libraries are missing. Any distro with glibc 2.36 or
+newer (Debian 12, Ubuntu 24.04, current Fedora, Arch, openSUSE),
+x86_64 or aarch64. It never replaces a scoot that a distro package
+installed.
+
+```sh
+curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --system --look ginger-night
+```
+
+You need `curl` (or `wget`) and `sh`: `sudo apt install curl` on
+Debian and Ubuntu. Silence with a zero exit means the download itself
+failed and the script never ran — check the network and run it again.
+
+Minimal Fedora and Arch images ship no usable font, and the bar refuses
+to start without one (`no font: none of the usual font files is usable`).
+The script says so when that is you, naming the package for your distro
+(`fonts-dejavu-core` on Debian and Ubuntu, `dejavu-sans-fonts` on
+Fedora, `dejavu-fonts` on openSUSE, `ttf-dejavu` on Arch) — or point the
+bar at any file with `--font PATH` instead.
+
+The command it prints waits for confirmation; for a non-interactive run,
+add `-y` (`apt`, `dnf`) or `--noconfirm` (`pacman`). `--dry-run` lists
+the missing libraries and fonts without changing anything.
+
+Then log out and pick **scoot** on your login screen.
+
+- `--system` installs under `/usr/local` and adds scoot to the login
+  screen; it asks for `sudo`. Leave it off to install into `~/.local`
+  with no root, and start a session from a text console with
+  `scoot-session`.
+- `--look` writes one of the five [looks](../../scoot/theming/) to
+  `~/.config/scoot`. A file you already have is never overwritten.
+- `--nightly` takes `main`'s latest build instead of the newest
+  release. It is rebuilt on every merge, from the same commit Nix users
+  get.
+- `--uninstall` (with `--system` if you used it) removes exactly what
+  the script installed. Your config stays.
+
+Read the script before you run it:
+[install.sh](https://www.scoot.sh/install.sh). Every option:
+`sh install.sh --help`.
+
+This gets you the compositor, the bar and the wallpaper. The lock,
+notifications, launcher and screenshots come from your distro: [Build
+your desktop](../compose/#any-other-linux-the-parts) has the one
+command per distro.
 
 </TabItem>
 <TabItem label="From source">

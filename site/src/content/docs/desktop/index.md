@@ -122,7 +122,7 @@ Standalone home-manager (Nix on another distro, or a `home.nix` kept
 next to the machine that edits it — this form also manages the config
 on macOS, for the Linux box it deploys to) takes the same `home.nix`.
 The flake for it is on [Install](../start/install.md#use-it-every-day),
-under **Other Linux with Nix**.
+under **Nix on another Linux**.
 
 A home-manager-only setup still needs two things from wherever PAM
 and the seat are configured: the locker's PAM service (else no
