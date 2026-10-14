@@ -275,12 +275,20 @@ Then log out and pick **scoot** on your login screen.
   `scoot-session`.
 - `--look` writes one of the five [looks](../../scoot/theming/) to
   `~/.config/scoot`. A file you already have is never overwritten.
+  A re-run that is already up to date still applies a `--look` you
+  name (without downloading anything); without `--look` it changes
+  nothing.
 - Re-running the script updates: it installs the newest tagged release,
   or says `already up to date (<version>)` and changes nothing
-  (`--force` reinstalls anyway). `--check` only compares the installed
-  version with the newest tag (exit 0 if current, 10 if an update
-  exists) without installing anything. To run `main` instead of a
-  tagged release, use the Nix flake above.
+  (`--force` reinstalls anyway). "Up to date" is per destination:
+  the script records where it installed (covering `--prefix` and
+  `--system`), so re-running with a different `--prefix` installs
+  there instead of reporting up to date — and if the installed
+  binaries are gone, it reinstalls rather than claiming to be
+  current. `--check` only compares the installed version with the
+  newest tag, or with the `--version` you name (exit 0 if current,
+  10 if an update exists) without installing anything. To run `main`
+  instead of a tagged release, use the Nix flake above.
 - `--uninstall` (with `--system` if you used it) removes exactly what
   the script installed. Your config stays.
 

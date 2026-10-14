@@ -137,6 +137,37 @@ export SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl" SCOOT_INSTALL_RAW_URL="file://$
 grep -q "already up to date (0.1.0)" "$work/out" || fail "offline re-run is not up to date"
 ok "re-run is already up to date without downloading"
 
+# 1b2. The version record is destination-aware: a re-run with a
+#      different --prefix installs there instead of saying up to date.
+pa=$work/prefix-a
+pb=$work/prefix-b
+run_in "$work/h-prefix" --prefix "$pa" || { cat "$work/out"; fail "prefix A install"; }
+[ -x "$pa/bin/scoot" ] || fail "prefix A has no scoot"
+grep -Fq "bin_dir=$pa/bin" "$work/h-prefix/.local/share/scoot/install-version" || fail "record has no bin_dir"
+run_in "$work/h-prefix" --prefix "$pb" || { cat "$work/out"; fail "prefix B re-run"; }
+[ -x "$pb/bin/scoot" ] || fail "prefix B got no install (prefix-blind up-to-date)"
+ok "a different --prefix installs instead of claiming up to date"
+
+# 1b3. A re-run whose binaries are gone reinstalls instead of claiming
+#      to be current.
+rm "$pb/bin/scoot" "$pb/bin/scootbg" "$pb/bin/scootbar"
+if ! run_in "$work/h-prefix" --prefix "$pb"; then cat "$work/out"; fail "reinstall after binaries deleted"; fi
+grep -q "Installing scoot" "$work/out" || fail "deleted binaries still claimed up to date"
+[ -x "$pb/bin/scoot" ] || fail "deleted binaries were not reinstalled"
+ok "missing binaries reinstall instead of claiming up to date"
+
+# 1b4. An up-to-date re-run with --look still applies the look (and
+#      downloads no binaries to do it).
+h=$work/h-look
+run_in "$h" || { cat "$work/out"; fail "look-gate install"; }
+[ ! -e "$h/.config/scoot/config.toml" ] || fail "look-gate pre-state has config"
+SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl-gone" run_in "$h" --look moonrise || { cat "$work/out"; fail "up-to-date --look"; }
+export SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl"
+grep -q "already up to date (0.1.0)" "$work/out" || fail "up-to-date --look says no up-to-date"
+[ -f "$h/.config/scoot/config.toml" ] || fail "up-to-date --look wrote no config"
+h=$work/h1
+ok "up-to-date re-run still applies --look"
+
 # 1c. --check: exit 0 when current, 10 when an update exists, 1 on error.
 if ! run_in "$h" --check; then cat "$work/out"; fail "--check when current"; fi
 grep -q "installed: 0.1.0 (scoot-v0.1.0)" "$work/out" || fail "--check prints no installed version"
@@ -257,6 +288,10 @@ if run_in "$h" --check --force; then fail "--check --force accepted"; fi
 if releases=file://$f/tags-unified.json run_in "$h" --version 9.9.9; then fail "a body-text version was accepted"; fi
 unset releases
 grep -q "no release scoot-v9.9.9" "$work/out" || fail "body-text version message"
+# A --version with regex characters must not match spuriously: it is
+# compared as a fixed string and refused with a clean "no release".
+if run_in "$h" --version '.*'; then fail "a regex version was accepted"; fi
+grep -q "no release" "$work/out" || fail "regex version message"
 ok "dry run and refusals"
 
 # 7. A missing font adds the distro's font package (F1), with the reason

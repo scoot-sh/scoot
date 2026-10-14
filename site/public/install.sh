@@ -21,9 +21,13 @@
 #      --noconfirm yourself for a non-interactive run);
 #   7. records every file it installed, so --uninstall removes exactly
 #      those (your config stays), plus what was installed
-#      (`channel=release`, version, tag, date) beside the manifest, so a
-#      re-run can say it is already up to date instead of downloading
-#      again. It never replaces a file it did not
+#      (`channel=release`, version, tag, the bin directory covering
+#      --prefix and --system, date) beside the manifest, so a re-run
+#      for the same destination can say it is already up to date
+#      instead of downloading again (a different destination, or
+#      binaries gone from the recorded one, reinstalls). A re-run
+#      with --look still applies the look when already up to date.
+#      It never replaces a file it did not
 #      install itself, such as one from a distro package.
 #
 # On Nix or NixOS, do not use this: the flake and home-manager give you
@@ -71,8 +75,9 @@ Usage: install.sh [options]
                       retired once releases share one vV tag: use --version)
   --no-bar            skip scootbar
   --check             compare the installed version with the newest tagged
-                      release and print both; exit 0 if current, 10 if an
-                      update exists, 1 on error; installs nothing
+                      release (or the --version you name) and print both;
+                      exit 0 if current, 10 if an update exists, 1 on
+                      error; installs nothing
   --force             reinstall even when the installed version is current
   --prefix DIR        binaries go to DIR/bin (default ~/.local, or
                       /usr/local with --system)
@@ -313,7 +318,13 @@ latest_tag() {
 }
 
 has_tag() {
-    grep -q "\"tag_name\": *\"$1\"" "$tmp/releases.json"
+    # Fixed-string compare: the wanted tag must equal a tag_name value
+    # exactly. A regex match here would accept odd --version values
+    # (e.g. '.*') and fail later at download instead of with a clean
+    # "no release" error. Whitespace is compacted first so the match
+    # does not depend on how the JSON spaces its colons.
+    tr -d ' \t\n\r' <"$tmp/releases.json" >"$tmp/releases.compact"
+    grep -Fq -- "\"tag_name\":\"$1\"" "$tmp/releases.compact"
 }
 
 fetch "$RELEASES_URL" "$tmp/releases.json" || die "could not list releases at $RELEASES_URL"
@@ -394,19 +405,29 @@ fi
 
 # What is already installed (the record written by an earlier run, beside
 # the manifest). Absent before this change: then nothing is current.
+# bin_dir pins the record to its destination: a re-run with a different
+# --prefix (or --system vs user) is never "up to date" for this
+# destination, and a run whose binaries are gone reinstalls instead of
+# claiming to be current. Records written before bin_dir existed have
+# no bin_dir line, so they reinstall once and heal.
 installed_version=""
 installed_tag=""
 installed_bar_tag=""
+installed_bin_dir=""
 if [ -f "$version_file" ]; then
     installed_version=$(sed -n 's/^version=//p' "$version_file" | head -n 1)
     installed_tag=$(sed -n 's/^tag=//p' "$version_file" | head -n 1)
     installed_bar_tag=$(sed -n 's/^bar_tag=//p' "$version_file" | head -n 1)
+    installed_bin_dir=$(sed -n 's/^bin_dir=//p' "$version_file" | head -n 1)
 fi
 wanted_bar_tag=""
 if [ "$with_bar" = 1 ]; then wanted_bar_tag=$bar_tag; fi
 up_to_date=0
-if [ -n "$installed_tag" ] && [ "$installed_tag" = "$scoot_tag" ] && [ "$installed_bar_tag" = "$wanted_bar_tag" ]; then
+if [ -n "$installed_tag" ] && [ "$installed_tag" = "$scoot_tag" ] && [ "$installed_bar_tag" = "$wanted_bar_tag" ] && [ "$installed_bin_dir" = "$bin_dir" ]; then
     up_to_date=1
+    [ -f "$bin_dir/scoot" ] || up_to_date=0
+    [ -f "$bin_dir/scootbg" ] || up_to_date=0
+    if [ "$with_bar" = 1 ]; then [ -f "$bin_dir/scootbar" ] || up_to_date=0; fi
 fi
 
 if [ "$check" = 1 ]; then
@@ -425,71 +446,88 @@ if [ "$check" = 1 ]; then
     fi
 fi
 
+# An up-to-date re-run with --look still applies the look (its files
+# are config, never binaries, and an existing file is never
+# overwritten), then exits without downloading anything. Without --look
+# there is nothing to do.
 if [ "$up_to_date" = 1 ] && [ "$force" = 0 ]; then
-    say "already up to date ($version)"
-    exit 0
+    if [ -z "$look" ]; then
+        say "already up to date ($version)"
+        exit 0
+    fi
+    skip_install=1
+    say "already up to date ($version); applying look $look"
+else
+    skip_install=0
 fi
 
-say "Installing scoot $label for $arch into $bin_dir"
+if [ "$skip_install" = 0 ]; then
+    say "Installing scoot $label for $arch into $bin_dir"
 
-get_asset "$scoot_tag" "$scoot_asset"
-get_asset "$scoot_tag" "$bg_asset"
-if [ "$with_bar" = 1 ]; then get_asset "$bar_tag" "$bar_asset"; fi
+    get_asset "$scoot_tag" "$scoot_asset"
+    get_asset "$scoot_tag" "$bg_asset"
+    if [ "$with_bar" = 1 ]; then get_asset "$bar_tag" "$bar_asset"; fi
 
-# The session files come from the same commit as the binaries.
-for f in resources/scoot-session resources/scoot-portals.conf \
-    resources/systemd/user/scoot.service resources/systemd/user/scoot-session.target \
-    resources/systemd/user/scoot-shutdown.target packaging/deb/scoot.desktop \
-    packaging/deb/scootbar.service; do
-    fetch "$RAW_URL/$source_ref/$f" "$tmp/$(basename "$f")" || die "could not download $f at $source_ref"
-done
+    # The session files come from the same commit as the binaries.
+    for f in resources/scoot-session resources/scoot-portals.conf \
+        resources/systemd/user/scoot.service resources/systemd/user/scoot-session.target \
+        resources/systemd/user/scoot-shutdown.target packaging/deb/scoot.desktop \
+        packaging/deb/scootbar.service; do
+        fetch "$RAW_URL/$source_ref/$f" "$tmp/$(basename "$f")" || die "could not download $f at $source_ref"
+    done
 
-sed "s|@SCOOT_BIN@|$bin_dir/scoot|g" "$tmp/scoot.service" >"$tmp/scoot.service.out"
-# The packaged unit is generic (graphical-session.target, for any
-# compositor). Installed here it runs only inside a scoot session, the
-# way the home-manager profile's bar does, never in GNOME or KDE.
-sed -e "s|^ExecStart=.*|ExecStart=$bin_dir/scootbar daemon|" \
-    -e 's|graphical-session\.target|scoot-session.target|g' \
-    "$tmp/scootbar.service" >"$tmp/scootbar.service.out"
-sed "s|^Exec=.*|Exec=$bin_dir/scoot-session|" "$tmp/scoot.desktop" >"$tmp/scoot.desktop.out"
+    sed "s|@SCOOT_BIN@|$bin_dir/scoot|g" "$tmp/scoot.service" >"$tmp/scoot.service.out"
+    # The packaged unit is generic (graphical-session.target, for any
+    # compositor). Installed here it runs only inside a scoot session, the
+    # way the home-manager profile's bar does, never in GNOME or KDE.
+    sed -e "s|^ExecStart=.*|ExecStart=$bin_dir/scootbar daemon|" \
+        -e 's|graphical-session\.target|scoot-session.target|g' \
+        "$tmp/scootbar.service" >"$tmp/scootbar.service.out"
+    sed "s|^Exec=.*|Exec=$bin_dir/scoot-session|" "$tmp/scoot.desktop" >"$tmp/scoot.desktop.out"
+fi
 
 # --- install ----------------------------------------------------------------
 
-: >"$tmp/manifest.new"
+# Up-to-date with --look skips everything below up to the look section:
+# no downloads, no writes, no refusals for a destination that is
+# already installed.
+if [ "$skip_install" = 0 ]; then
+    : >"$tmp/manifest.new"
 
-# Refuse before writing anything if a destination holds a file this
-# script did not install (a distro package, a source build). One call
-# per destination: the paths may contain spaces (a $HOME with one), so
-# they are never joined into a word-split string.
-check_ours() {
-    ours "$1" || die "$1 exists and was not installed by this script (a distro package or a source build?). Remove it first, or install elsewhere with --prefix."
-}
-check_ours "$bin_dir/scoot"
-check_ours "$bin_dir/scootbg"
-check_ours "$bin_dir/scoot-session"
-check_ours "$unit_dir/scoot.service"
-check_ours "$unit_dir/scoot-session.target"
-check_ours "$unit_dir/scoot-shutdown.target"
-check_ours "$portal_dir/scoot-portals.conf"
-if [ "$with_bar" = 1 ]; then
-    check_ours "$bin_dir/scootbar"
-    check_ours "$unit_dir/scootbar.service"
-fi
-if [ -n "$session_file" ]; then check_ours "$session_file"; fi
+    # Refuse before writing anything if a destination holds a file this
+    # script did not install (a distro package, a source build). One call
+    # per destination: the paths may contain spaces (a $HOME with one), so
+    # they are never joined into a word-split string.
+    check_ours() {
+        ours "$1" || die "$1 exists and was not installed by this script (a distro package or a source build?). Remove it first, or install elsewhere with --prefix."
+    }
+    check_ours "$bin_dir/scoot"
+    check_ours "$bin_dir/scootbg"
+    check_ours "$bin_dir/scoot-session"
+    check_ours "$unit_dir/scoot.service"
+    check_ours "$unit_dir/scoot-session.target"
+    check_ours "$unit_dir/scoot-shutdown.target"
+    check_ours "$portal_dir/scoot-portals.conf"
+    if [ "$with_bar" = 1 ]; then
+        check_ours "$bin_dir/scootbar"
+        check_ours "$unit_dir/scootbar.service"
+    fi
+    if [ -n "$session_file" ]; then check_ours "$session_file"; fi
 
-place "$tmp/$scoot_asset" "$bin_dir/scoot" 755
-place "$tmp/$bg_asset" "$bin_dir/scootbg" 755
-place "$tmp/scoot-session" "$bin_dir/scoot-session" 755
-place "$tmp/scoot.service.out" "$unit_dir/scoot.service" 644
-place "$tmp/scoot-session.target" "$unit_dir/scoot-session.target" 644
-place "$tmp/scoot-shutdown.target" "$unit_dir/scoot-shutdown.target" 644
-place "$tmp/scoot-portals.conf" "$portal_dir/scoot-portals.conf" 644
-if [ "$with_bar" = 1 ]; then
-    place "$tmp/$bar_asset" "$bin_dir/scootbar" 755
-    place "$tmp/scootbar.service.out" "$unit_dir/scootbar.service" 644
-fi
-if [ -n "$session_file" ]; then
-    place "$tmp/scoot.desktop.out" "$session_file" 644
+    place "$tmp/$scoot_asset" "$bin_dir/scoot" 755
+    place "$tmp/$bg_asset" "$bin_dir/scootbg" 755
+    place "$tmp/scoot-session" "$bin_dir/scoot-session" 755
+    place "$tmp/scoot.service.out" "$unit_dir/scoot.service" 644
+    place "$tmp/scoot-session.target" "$unit_dir/scoot-session.target" 644
+    place "$tmp/scoot-shutdown.target" "$unit_dir/scoot-shutdown.target" 644
+    place "$tmp/scoot-portals.conf" "$portal_dir/scoot-portals.conf" 644
+    if [ "$with_bar" = 1 ]; then
+        place "$tmp/$bar_asset" "$bin_dir/scootbar" 755
+        place "$tmp/scootbar.service.out" "$unit_dir/scootbar.service" 644
+    fi
+    if [ -n "$session_file" ]; then
+        place "$tmp/scoot.desktop.out" "$session_file" 644
+    fi
 fi
 
 # --- a look -------------------------------------------------------------------
@@ -548,6 +586,10 @@ if [ -n "$look" ]; then
     fi
 fi
 
+# A look-only re-run stops here: the record is already current, and
+# there is nothing to enable or report.
+if [ "$skip_install" = 1 ]; then exit 0; fi
+
 # --- record, enable --------------------------------------------------------------
 
 write_manifest
@@ -563,6 +605,7 @@ if [ "$dry_run" = 0 ]; then
         printf 'tag=%s\n' "$scoot_tag"
         printf 'bar_version=%s\n' "${bar_version:-}"
         printf 'bar_tag=%s\n' "${wanted_bar_tag:-}"
+        printf 'bin_dir=%s\n' "$bin_dir"
         printf 'date=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } >"$tmp/install-version"
     $sudo mkdir -p "$(dirname "$version_file")"
