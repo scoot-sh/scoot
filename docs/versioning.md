@@ -105,11 +105,20 @@ So `release-plz.yml` dispatches the next step itself:
 - After creating the tag, it runs `release.yml` on it (`--ref vX.Y.Z`,
   `dry_run=false`).
 - After opening or updating the release PR, it runs `ci.yml` on the PR's
-  branch. Those checks attach to the branch's head commit, which is the PR's
-  head, so they show on the PR as `workflow_dispatch` runs. The PR's own
-  `pull_request` runs still appear, held until a maintainer presses "Approve
-  workflows to run". Approving them is optional, since the dispatched run
-  covers the same jobs.
+  branch. The dispatched run's check suite attaches to the branch's head
+  commit, which is the PR's head, and GitHub associates it with the PR.
+  This was measured on #586: the run's `pull_requests` listed the PR. The
+  PR's own `pull_request` runs still appear, held until a maintainer presses
+  "Approve workflows to run".
+  - **One caveat, also measured on #586.** When a `pull_request` run of
+    `ci.yml` exists for the same commit, the PR's check list (the merge box,
+    `gh pr checks`) shows one entry per check name, and it shows the
+    `pull_request` one. The dispatched results are then only on the commit's
+    checks and in the Actions tab.
+  - **On a release PR, the held runs have not started, so they have no check
+    runs of those names.** The dispatched ones should then fill the list.
+    That has not been observed yet: the first release PR will show it.
+  - Approving the held runs is optional; they repeat the same jobs.
 
 One repository setting is needed for GITHUB_TOKEN to open the PR at all:
 Settings > Actions > General > Workflow permissions > "Allow GitHub Actions to
