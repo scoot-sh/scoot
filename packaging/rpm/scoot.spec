@@ -70,9 +70,9 @@ Recommends:     libdrm
 %endif
 
 %description
-scoot is a scrolling-tiling Wayland compositor that picks its renderer at
-run time, so the same binary runs with no GPU stack installed and scans out
-from the GPU on real hardware. This package is the
+scoot is a scrolling-tiling Wayland compositor that picks CPU or GPU drawing
+at run time, so the same binary runs with no GPU stack installed and scans
+out from the GPU on real hardware. This package is the
 compositor binary plus the greeter launcher and the systemd user units
 it starts (scoot.service, scoot-session.target, scoot-shutdown.target)
 with the portal selection: pick "scoot" on the login

@@ -1,5 +1,5 @@
 pkgbase = scoot-git
-	pkgdesc = Scrolling-tiling Wayland compositor (CPU renderer, no GPU stack needed) (git)
+	pkgdesc = Scrolling-tiling Wayland compositor (auto CPU/GPU rendering, runs without a GPU) (git)
 	pkgver = 0.2.0.r0.g0000000
 	pkgrel = 1
 	url = https://github.com/scoot-sh/scoot
@@ -21,8 +21,8 @@ pkgbase = scoot-git
 	depends = seatd
 	depends = sh
 	depends = systemd-libs
-	optdepends = mesa: GPU scanout tier (rebuild with --features gpu-scanout)
-	optdepends = libdrm: GPU scanout tier (rebuild with --features gpu-scanout)
+	optdepends = mesa: GPU scanout tier at run time (auto-detected, no rebuild needed)
+	optdepends = libdrm: GPU scanout tier at run time (auto-detected, no rebuild needed)
 	optdepends = systemd: greeter session login through scoot-session
 	provides = scoot
 	conflicts = scoot
