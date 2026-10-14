@@ -592,6 +592,10 @@
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           inherit scootbg scootbar;
+          # The desktop profile's default cursor theme (Mocu white plus
+          # Mocu-Black), built from the vendored SVGs scoot also draws
+          # as its built-in cursors (see nix/mocu-cursor-theme.nix).
+          mocu-cursor-theme = pkgs.callPackage ./nix/mocu-cursor-theme.nix { };
           # scootbar with a nixpkgs font as its default `--font`, so
           # `nix run .#scootbar-demo` shows a clock on a box with no font
           # where the bar looks; a separate output so `scootbar` never
@@ -811,6 +815,7 @@
         nixpkgs.lib.getAttrs (builtins.filter (name: built ? ${name}) [
           "scoot"
           "scootbg"
+          "mocu-cursor-theme"
           # Not `scootbar-demo`: a demo to run, not a package to build on
           # (it is scootbar plus a font a system's own font setup provides).
           "scootbar"

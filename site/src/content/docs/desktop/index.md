@@ -248,7 +248,7 @@ variables only, no daemon, so the theme costs no wakeups.
 |---|---|---|---|---|
 | GTK apps | `desktop.theme.targets.gtk.enable` | bool | `true` | `settings.ini` (GTK 3 + 4): Adwaita, or Adwaita-dark for a dark look, with the look's proportional sans, cursor and dark preference — plus `gtk.css` carrying the look's accent and surfaces (named colors and the `:root` vars libadwaita paints with), and dconf `color-scheme` carrying the dark-mode signal libadwaita follows (no `GTK_THEME` force: it would make libadwaita skip its own providers) |
 | Qt apps | `desktop.theme.targets.qt.enable` | bool | `true` | `qt6ct.conf` through `QT_QPA_PLATFORMTHEME=qt6ct` (plus `QT_PLUGIN_PATH` for its platformtheme and style): the Adwaita Qt style in the look's polarity, Adwaita icons, and a generated color scheme from the look's palette — dark looks get a dark palette, the light look a light one |
-| Cursor | `desktop.theme.targets.cursor.enable` | bool | `true` | Vanilla-DMZ at 24 px: the compositor cursor plus `XCURSOR_THEME`/`XCURSOR_SIZE` for X11 apps |
+| Cursor | `desktop.theme.targets.cursor.enable` | bool | `true` | Mocu at its native 24 px: the compositor cursor plus `XCURSOR_THEME`/`XCURSOR_SIZE` for X11 apps — the same art as the built-in fallback, as real theme files |
 | Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DejaVu Sans for sans-serif (proportional UI text in GTK/Qt apps and the greeter), FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the bar keeps its own DroidSansM Nerd Font Propo file, whose glyphs carry the module icons |
 | Login screen | `desktop.theme.targets.greeter.enable` | bool | `true` | the session wallpaper behind the login card (nothing for `vinyl-sunset`: its illustration is license-barred), the dark setting, the look's ReGreet CSS and font — needs `greeter.enable` too |
 | Terminal | `desktop.theme.targets.terminal.enable` | bool | `true` | the look's `foot.ini` from the flake |
@@ -271,6 +271,20 @@ already themed:
 ```nix title="home.nix"
 programs.scoot.desktop.theme.targets.gtk.enable = false;  # my GTK is hand-tuned
 ```
+
+The cursor is [Mocu](https://github.com/sevmeyer/mocu-xcursor): the profile
+installs it as real XCursor files (`Mocu`, white at its native 24 px, with
+`Mocu-Black` beside it in the same package — see
+`nix/mocu-cursor-theme.nix`), names it in the compositor config, and exports
+it for X11/XWayland apps through `XCURSOR_THEME`/`XCURSOR_SIZE`. It is the
+same art scoot draws as its built-in fallback cursors (see
+[Appearance](../scoot/appearance.md#the-built-in-cursors)), so the fallback
+rarely shows, and when it does it is the same family. The busy cursors are
+static first frames in both: Mocu's animation frames are not vendored. To use
+another theme, point `desktop.theme.cursor.package` at it and name it in
+`settings.appearance.cursor_theme` (a value there wins per key, and Stylix
+where present wins over the look); set `targets.cursor.enable = false` to
+leave the cursor alone entirely.
 
 If you theme an app through its own home-manager module instead
 (`programs.foot`, `programs.starship`, `programs.helix`,
