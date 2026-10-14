@@ -5,7 +5,7 @@
 # Conflicts with `scootbar`: install one or the other, never both.
 
 pkgname=scootbar-git
-pkgver=0.1.0.r0.g0000000
+pkgver=0.2.0.r0.g0000000
 pkgrel=1
 pkgdesc='Status bar for the scoot compositor (git)'
 arch=('x86_64' 'aarch64')
@@ -24,10 +24,19 @@ sha256sums=('SKIP')
 
 pkgver() {
   cd "$pkgname"
-  printf '%s.r%s.g%s' \
-    "$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/scootbar/Cargo.toml | head -1)" \
-    "$(git rev-list --count HEAD)" \
-    "$(git rev-parse --short HEAD)"
+  # The binaries' own label in pacman's spelling: `scoot --version` saying
+  # 0.2.0+14.g615608c is pkgver 0.2.0.r14.g615608c (the last v* release
+  # tag, the commits since it, the commit; docs/versioning.md). Before
+  # the first tag: the workspace version and every commit.
+  local desc
+  if desc=$(git describe --long --tags --abbrev=7 --match 'v[0-9]*' --exclude 'v*-*' 2>/dev/null); then
+    printf '%s' "$desc" | sed 's/^v//;s/-\([0-9]*\)-g\([0-9a-f]*\)$/.r\1.g\2/'
+  else
+    printf '%s.r%s.g%s' \
+      "$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" \
+      "$(git rev-list --count HEAD)" \
+      "$(git rev-parse --short=7 HEAD)"
+  fi
 }
 
 build() {

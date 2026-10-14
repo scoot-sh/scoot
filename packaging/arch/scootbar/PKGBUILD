@@ -1,7 +1,7 @@
 # scootbar: the status bar for the scoot compositor (release build).
 #
-# Built from the bar's own tag (`scootbar-v$pkgver`): the bar versions
-# independently of the compositor (docs/versioning.md). The daemon links
+# Built from the same release tag as every package here (`v$pkgver`):
+# one tag, one version for every binary (docs/versioning.md). The daemon links
 # nothing past the C library, so it carries no system-library
 # dependencies; it speaks standard Wayland protocols, so it needs no
 # versioned dependency on any compositor package. The systemd user unit
@@ -13,7 +13,7 @@
 # this exact file against a same-layout tarball of HEAD.
 
 pkgname=scootbar
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Status bar for the scoot compositor'
 arch=('x86_64' 'aarch64')
@@ -25,17 +25,17 @@ optdepends=('systemd: run the bar as a user unit (scootbar.service)'
             'ttf-dejavu: sans font the bar finds on its own')
 install=scootbar.install
 options=('!debug')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/scootbar-v$pkgver.tar.gz")
+source=("$pkgname-$pkgver.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
-  cd "scoot-scootbar-v$pkgver"
+  cd "scoot-$pkgver"
   cargo build --release --locked -p scootbar
   cargo deny list > THIRD-PARTY-LICENSES
 }
 
 package() {
-  cd "scoot-scootbar-v$pkgver"
+  cd "scoot-$pkgver"
   install -Dm755 "${CARGO_TARGET_DIR:-target}/release/scootbar" "$pkgdir/usr/bin/scootbar"
   install -Dm644 packaging/arch/scootbar/scootbar.service "$pkgdir/usr/lib/systemd/user/scootbar.service"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

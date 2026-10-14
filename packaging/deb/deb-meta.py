@@ -5,7 +5,7 @@ Renders the `DEBIAN/control` each .deb ships and checks the
 `dpkg-shlibdeps` output the build feeds it against the `ldd`-derived
 allow-list from the site's packaging page
 (`site/src/content/docs/reference/packaging.md`). Stdlib only, like
-`scripts/version` and `scripts/backlog`; tests in `test_deb.py`.
+`scripts/workspace-version` and `scripts/backlog`; tests in `test_deb.py`.
 
 Dependency model (the ticket asks for `dpkg-shlibdeps` `$auto`, the
 brief for the `ldd`-derived table): both. `build-deb.sh` runs
@@ -14,7 +14,9 @@ are derived at build time, and this module refuses any shlibdeps package
 name outside the table below -- a renamed or new system library fails
 the build instead of shipping a wrong `Depends`. The coupled pair's
 versioned dependency (`scoot` on its `scootbg`) is rendered from the
-`scootbg` .deb this same run builds.
+`scootbg` .deb this same run builds. Every package carries the
+repository's one version, `[workspace.package] version` in the root
+`Cargo.toml` (docs/versioning.md).
 """
 
 import argparse
@@ -89,9 +91,9 @@ LONG = {
 }
 
 # Extra control stanzas per package. `scoot`'s versioned `scootbg`
-# dependency is the coupled pair from docs/versioning.md: the two move
-# in lockstep, so the pair installs at one version. `{scootbg}` is
-# filled with the scootbg .deb version this run builds.
+# dependency is the coupled pair from docs/versioning.md: every binary
+# ships at the one version, so the pair installs at that version, filled
+# with the scootbg .deb version this run builds.
 SUGGESTS = {
     "scoot": None,
     "scootbg": None,
@@ -101,20 +103,26 @@ SUGGESTS = {
 }
 
 
-def crate_version(source, crate):
-    """Read `version = "X.Y.Z"` from a crate manifest under source."""
-    path = f"{source}/crates/{crate}/Cargo.toml"
+def workspace_version(source):
+    """Read `[workspace.package] version = "X.Y.Z"` from the root
+    Cargo.toml under source: the version every crate inherits."""
+    path = f"{source}/Cargo.toml"
     with open(path) as f:
         text = f.read()
-    m = re.search(r'^version = "([^"]+)"$', text, re.M)
+    table = re.search(r"(?ms)^\[workspace\.package\]\s*$(.*?)(?=^\[|\Z)", text)
+    m = table and re.search(r'^version\s*=\s*"([^"]+)"', table.group(1), re.M)
     if not m:
-        raise ValueError(f"no version in {path}")
+        raise ValueError(f"no [workspace.package] version in {path}")
     return m.group(1)
 
 
 def deb_version(source, package, revision=DEBIAN_REVISION):
-    """`<crate version>-<revision>` for a .deb built from source."""
-    return f"{crate_version(source, CRATE[package])}-{revision}"
+    """`<workspace version>-<revision>` for a .deb built from source
+    (`package` is accepted for the call sites' symmetry: every package
+    has the same version)."""
+    if package not in CRATE:
+        raise ValueError(f"unknown package {package!r}")
+    return f"{workspace_version(source)}-{revision}"
 
 
 def check_depends(package, shlibdeps_output):
@@ -198,7 +206,7 @@ def main(argv=None):
     k.add_argument("--package", choices=sorted(CRATE), required=True)
     k.add_argument("output", help="the dpkg-shlibdeps -O stdout")
 
-    v = sub.add_parser("versions", help="print crate versions (CI gate input)")
+    v = sub.add_parser("versions", help="print each package's version (CI gate input)")
     v.add_argument("--source", required=True)
 
     args = ap.parse_args(argv)
@@ -221,8 +229,9 @@ def main(argv=None):
             return 1
         print(depends)
     elif args.cmd == "versions":
+        version = workspace_version(args.source)
         for package in sorted(CRATE):
-            print(f"{package} {crate_version(source=args.source, crate=CRATE[package])}")
+            print(f"{package} {version}")
     return 0
 
 

@@ -9,16 +9,20 @@ manual maintainer step (below).
 
 | Directory | Package | Source | Version follows |
 |---|---|---|---|
-| `scoot/` | `scoot` | tag `scoot-v$pkgver` | `crates/scoot/Cargo.toml` (trio lockstep) |
-| `scootbg/` | `scootbg` | tag `scoot-v$pkgver` | `crates/scootbg/Cargo.toml` (same trio tag) |
-| `scootbar/` | `scootbar` | tag `scootbar-v$pkgver` | `crates/scootbar/Cargo.toml` (independent) |
-| `scoot-git/` | `scoot-git` | `main` | `pkgver()`: crate version, commit count, short hash |
-| `scootbg-git/` | `scootbg-git` | `main` | same scheme over `crates/scootbg/Cargo.toml` |
-| `scootbar-git/` | `scootbar-git` | `main` | same scheme over `crates/scootbar/Cargo.toml` |
+| `scoot/` | `scoot` | tag `v$pkgver` | the workspace version (`Cargo.toml`) |
+| `scootbg/` | `scootbg` | tag `v$pkgver` | the same |
+| `scootbar/` | `scootbar` | tag `v$pkgver` | the same |
+| `scoot-git/` | `scoot-git` | `main` | `pkgver()`: last `v*` tag, commits since it, short hash (`0.2.0.r14.g615608c`) |
+| `scootbg-git/` | `scootbg-git` | `main` | the same scheme |
+| `scootbar-git/` | `scootbar-git` | `main` | the same scheme |
 
-There is no `scootctl` package: it is the client library inside the
-`scoot` binary (`scoot msg`), versioned with the trio
-(docs/versioning.md). `scoot` depends on exactly `scootbg=$pkgver`:
+One tag releases every binary at the repository's one version
+(docs/versioning.md), so all three release packages carry the same
+`pkgver`, and the `-git` `pkgver` is the binaries' own build label
+(`scoot --version` says `0.2.0+14.g615608c`). Before the first tag the
+`-git` scheme counts every commit over the workspace version. There is
+no `scootctl` package: it is the client library inside the `scoot`
+binary (`scoot msg`). `scoot` depends on exactly `scootbg=$pkgver`:
 the coupled pair installs at one version, and the bar depends on no
 compositor package at all (standard Wayland protocols only).
 
@@ -101,8 +105,8 @@ line to drop if it ever misbehaves.
 
 ## Cutting a release (maintainer)
 
-1. Bump `pkgver` in the moving packages to the released version (the
-   trio together, the bar on its own).
+1. Once the `vX.Y.Z` tag exists, bump `pkgver` in all three release
+   packages to that version.
 2. `updpkgsums` in each touched directory (the `SKIP` checksums are
    placeholders: no tag exists yet to hash).
 3. `makepkg --printsrcinfo > .SRCINFO` in each touched directory and

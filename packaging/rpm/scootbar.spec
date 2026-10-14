@@ -1,7 +1,7 @@
 # scootbar: the status bar for the scoot compositor.
 #
-# Built from the bar's own tag (`scootbar-v%%{version}`): the bar versions
-# independently of the compositor (docs/versioning.md). The daemon links
+# Built from the same release tag as every spec here (`v%%{version}`): one
+# tag, one version for every binary (docs/versioning.md). The daemon links
 # nothing past the C library, so it carries no system-library dependencies;
 # it speaks standard Wayland protocols, so it needs no versioned dependency
 # on any compositor package. The systemd user unit restarts it on failure
@@ -9,17 +9,17 @@
 # nix/modules/scootbar-home.nix).
 #
 # No release is cut yet: see the Source0 note in scoot.spec, which applies
-# here with the bar's own tag and tarball basename.
+# here unchanged (the same release tarball, the same provisional basename).
 
 Name:           scootbar
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: see scoot.spec.
 %global         debug_package %{nil}
 Summary:        Status bar for the scoot compositor
 License:        MIT
 URL:            https://github.com/scoot-sh/scoot
-Source0:        https://github.com/scoot-sh/scoot/releases/download/scootbar-v%{version}/scootbar-%{version}-vendored.tar.gz
+Source0:        https://github.com/scoot-sh/scoot/releases/download/v%{version}/scoot-%{version}-vendored.tar.gz
 BuildRequires:  cargo
 BuildRequires:  gcc
 %if 0%{?suse_version}
@@ -72,5 +72,8 @@ cd source
 %doc source/packaging/rpm/bar.toml.example
 
 %changelog
+* Tue Oct 13 2026 scoot-sh <packages@scoot.sh> - 0.2.0-1
+- One version for every binary: built from the v0.2.0 release tag.
+
 * Thu Oct 08 2026 scoot-sh <packages@scoot.sh> - 0.1.0-1
 - First RPM: status bar plus user unit, from the vendored tarball.

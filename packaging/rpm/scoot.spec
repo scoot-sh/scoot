@@ -8,8 +8,9 @@
 # packaging/rpm/README.md.
 #
 # The versioned `scootbg` requirement is the coupled pair from
-# docs/backlog/packaging/rpm-package.md: scoot and scootbg move in lockstep
-# (docs/versioning.md), so the pair installs at one version.
+# docs/backlog/packaging/rpm-package.md: one tag (`v%%{version}`) releases
+# every binary at the repository's one version (docs/versioning.md), so
+# the pair installs at that version.
 #
 # No release is cut yet, so Source0 points at the release asset the release
 # job will publish; until it exists CI builds this exact file against a
@@ -18,7 +19,7 @@
 # first release names the asset; only that line changes then.
 
 Name:           scoot
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: the vendored crate sources
 # carry their upstream modes (executable .rs files, a `#!` attribute
@@ -29,7 +30,7 @@ Release:        1%{?dist}
 Summary:        Scrolling-tiling Wayland compositor
 License:        MIT
 URL:            https://github.com/scoot-sh/scoot
-Source0:        https://github.com/scoot-sh/scoot/releases/download/scoot-v%{version}/scoot-%{version}-vendored.tar.gz
+Source0:        https://github.com/scoot-sh/scoot/releases/download/v%{version}/scoot-%{version}-vendored.tar.gz
 BuildRequires:  cargo
 BuildRequires:  gcc
 %if 0%{?suse_version}
@@ -51,7 +52,7 @@ BuildRequires:  wayland-devel
 BuildRequires:  wayland-protocols-devel
 BuildRequires:  systemd-rpm-macros
 %endif
-# The coupled pair installs at one version (docs/versioning.md).
+# The coupled pair installs at the one version (docs/versioning.md).
 Requires:       scootbg = %{version}-%{release}
 
 %description
@@ -121,5 +122,8 @@ cd source
 %doc source/config.toml.example
 
 %changelog
+* Tue Oct 13 2026 scoot-sh <packages@scoot.sh> - 0.2.0-1
+- One version for every binary: built from the v0.2.0 release tag.
+
 * Thu Oct 08 2026 scoot-sh <packages@scoot.sh> - 0.1.0-1
 - First RPM: compositor plus greeter launcher, from the vendored tarball.

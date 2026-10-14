@@ -1,23 +1,23 @@
 # scootbg: the wallpaper daemon for the scoot compositor.
 #
-# Built from the same trio tag as `scoot` (`scoot-v%%{version}`): the two move
-# in lockstep (docs/versioning.md). The daemon links nothing past the C
+# Built from the same release tag as every spec here (`v%%{version}`): one
+# tag, one version for every binary (docs/versioning.md). The daemon links nothing past the C
 # library, so it carries no system-library dependencies. Its `[wallpaper]`
 # section is documented in scoot's example config
 # (/usr/share/doc/scoot/config.toml.example).
 #
 # No release is cut yet: see the Source0 note in scoot.spec, which applies
-# here unchanged (same trio tarball, same provisional basename).
+# here unchanged (the same release tarball, the same provisional basename).
 
 Name:           scootbg
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: see scoot.spec.
 %global         debug_package %{nil}
 Summary:        Wallpaper daemon for the scoot compositor
 License:        MIT
 URL:            https://github.com/scoot-sh/scoot
-Source0:        https://github.com/scoot-sh/scoot/releases/download/scoot-v%{version}/scoot-%{version}-vendored.tar.gz
+Source0:        https://github.com/scoot-sh/scoot/releases/download/v%{version}/scoot-%{version}-vendored.tar.gz
 BuildRequires:  cargo
 BuildRequires:  gcc
 
@@ -54,5 +54,8 @@ cd source
 %license source/LICENSE source/NOTICE source/THIRD-PARTY-LICENSES
 
 %changelog
+* Tue Oct 13 2026 scoot-sh <packages@scoot.sh> - 0.2.0-1
+- One version for every binary: built from the v0.2.0 release tag.
+
 * Thu Oct 08 2026 scoot-sh <packages@scoot.sh> - 0.1.0-1
 - First RPM: wallpaper daemon, from the vendored tarball.

@@ -5,15 +5,16 @@ workflow runs before it builds anything.
     scripts/release-resolve <tag> [--root DIR] [--main-ref REF]
                              [--no-github] [--json]
 
-A tag names exactly one package (`scoot-v0.2.0`, `scootbar-v0.3.0`; the
-trio's tag releases the trio's binaries). The resolve refuses -- exit 2,
-nothing built, nothing published -- when:
+One tag, `vX.Y.Z`, releases every binary (scoot, which carries `scoot
+msg`; scootbg; scootbar) at the repository's one version
+(docs/versioning.md). The resolve refuses -- exit 2, nothing built,
+nothing published -- when:
 
-- the tag is not `<package>-vX.Y.Z` or names an unknown package;
+- the tag is not `vX.Y.Z`;
 - the tag does not exist;
-- the tag's version disagrees with the package manifest (trio tags need
-  all three manifests equal: the lockstep `scripts/version check`
-  enforces in CI);
+- the tag's version is not the `[workspace.package] version` at the
+  tagged commit, or some crate there sets its own version instead of
+  inheriting it (`scripts/workspace-version --check`);
 - the tag's commit is not on the main line (`--main-ref`, default
   `origin/main`);
 - the tag's GitHub release already holds every expected asset (a
@@ -21,44 +22,46 @@ nothing built, nothing published -- when:
 
 On success it prints the release plan (or `--json`: the same for the
 workflow) and exits 0. The GitHub check needs `gh`; `--no-github`
-skips it (local dry runs). Stdlib only.
+skips it (local dry runs). Stdlib only; tests in
+`scripts/test_release_resolve.py`.
 """
 
 import argparse
+import importlib.machinery
+import importlib.util
+import io
 import json
 import re
 import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-SHIPPED = ("scoot", "scootctl", "scootbg", "scootbar")
-# A tag on any trio member releases the trio's binaries (scootctl is the
-# client library inside `scoot msg`: it versions with the trio but ships
-# no binary of its own).
-GROUP = {
-    "scoot": ("scoot", "scootctl", "scootbg"),
-    "scootctl": ("scoot", "scootctl", "scootbg"),
-    "scootbg": ("scoot", "scootctl", "scootbg"),
-    "scootbar": ("scootbar",),
-}
-BINARIES = {
-    "scoot": ("scoot", "scootbg"),
-    "scootctl": ("scoot", "scootbg"),
-    "scootbg": ("scoot", "scootbg"),
-    "scootbar": ("scootbar",),
-}
+# Every binary the repository ships. A crate without a binary (scootctl,
+# the client library inside `scoot msg`; the internal libraries) carries
+# the same version but has nothing of its own to release.
+BINARIES = ("scoot", "scootbg", "scootbar")
 ARCHES = ("x86_64-linux", "aarch64-linux")
 
-TAG_RE = re.compile(r"^([A-Za-z0-9_-]+)-v(\d+\.\d+\.\d+)$")
-MANIFEST_VERSION_RE = re.compile(r'(?m)^version\s*=\s*"([^"]+)"')
+TAG_RE = re.compile(r"^v(\d+\.\d+\.\d+)$")
 
 
-def git(*args):
-    r = subprocess.run(["git", *args], cwd=str(ROOT),
-                       capture_output=True, text=True)
-    return r
+def load_workspace_version():
+    """scripts/workspace-version as a module: the one manifest reader."""
+    path = Path(__file__).resolve().parent / "workspace-version"
+    loader = importlib.machinery.SourceFileLoader("workspace_version", str(path))
+    spec = importlib.util.spec_from_loader("workspace_version", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def git(*args, text=True):
+    return subprocess.run(["git", *args], cwd=str(ROOT),
+                          capture_output=True, text=text)
 
 
 def refuse(message):
@@ -66,17 +69,32 @@ def refuse(message):
     return 2
 
 
-def manifest_version(package):
-    text = (ROOT / "crates" / package / "Cargo.toml").read_text()
-    m = MANIFEST_VERSION_RE.search(text)
-    if not m:
-        return None
-    return m.group(1)
+def manifests_at(commit, wv):
+    """(workspace version, crates not inheriting it) at `commit`, read
+    from the commit itself rather than the work tree: the build checks
+    the tag out, so the tag's tree is what ships."""
+    r = git("archive", "--format=tar", commit, "Cargo.toml", "crates",
+            text=False)
+    if r.returncode != 0:
+        raise ValueError(f"cannot read the manifests at {commit[:8]}: "
+                         f"{r.stderr.decode(errors='replace').strip()}")
+    with tempfile.TemporaryDirectory(prefix="release-resolve-") as tmp:
+        with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tar:
+            members = [m for m in tar.getmembers()
+                       if m.name == "Cargo.toml"
+                       or (m.name.endswith("/Cargo.toml")
+                           and m.name.count("/") == 2)]
+            # The "data" filter (refuse links and paths out of `tmp`)
+            # where this Python has it; 3.14 makes it the default.
+            safe = ({"filter": "data"} if hasattr(tarfile, "data_filter")
+                    else {})
+            tar.extractall(tmp, members=members, **safe)
+        return wv.workspace_version(tmp), wv.non_inheriting(tmp)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("tag", help="package tag, e.g. scootbar-v0.2.0")
+    ap.add_argument("tag", help="release tag, e.g. v0.2.0")
     ap.add_argument("--root", default=None,
                     help="repo root (default: the checkout holding this script)")
     ap.add_argument("--main-ref", default="origin/main",
@@ -93,11 +111,9 @@ def main():
 
     m = TAG_RE.match(a.tag)
     if not m:
-        return refuse(f"tag {a.tag!r} is not <package>-vX.Y.Z")
-    package, version = m.group(1), m.group(2)
-    if package not in SHIPPED:
-        return refuse(f"tag {a.tag!r} names unknown package {package!r} "
-                      f"(shipped: {', '.join(SHIPPED)})")
+        return refuse(f"tag {a.tag!r} is not vX.Y.Z (one tag releases "
+                      f"every binary; there are no per-package tags)")
+    version = m.group(1)
 
     # The tag must exist: there is nothing to release otherwise.
     r = git("rev-parse", "--verify", f"refs/tags/{a.tag}^{{commit}}")
@@ -105,17 +121,20 @@ def main():
         return refuse(f"no such tag {a.tag!r} in this checkout")
     commit = r.stdout.strip()
 
-    # The tag's version must match the manifests. Trio tags need the
-    # whole trio equal: the three binaries ship together, so a tag that
-    # disagrees with any of them is a wrong cut, not a partial one.
-    for member in GROUP[package]:
-        manifest = manifest_version(member)
-        if manifest != version:
-            return refuse(
-                f"tag {a.tag} names {version} but "
-                f"crates/{member}/Cargo.toml carries {manifest!r}"
-                + (" (the trio moves in lockstep)" if len(GROUP[package]) > 1
-                   else " (bump the manifest in the release commit first)"))
+    # The tag's version must be the workspace version at the tagged
+    # commit, and every crate there must inherit it: a crate on a
+    # version of its own would ship a binary that disagrees with the tag.
+    try:
+        manifest, bad = manifests_at(commit, load_workspace_version())
+    except ValueError as e:
+        return refuse(f"tag {a.tag}: {e}")
+    if manifest != version:
+        return refuse(f"tag {a.tag} names {version} but the workspace "
+                      f"version at {commit[:8]} is {manifest} (tag the "
+                      f"commit the release PR merged as)")
+    if bad:
+        return refuse(f"tag {a.tag}: these crates set their own version "
+                      f"instead of the workspace's: {', '.join(bad)}")
 
     # The tag must be on the main line: releases cut from anywhere else
     # never went through main's CI.
@@ -124,11 +143,11 @@ def main():
         return refuse(f"tag {a.tag} ({commit[:8]}) is not on main "
                       f"({a.main_ref}): cut releases from main only")
 
-    binaries = list(BINARIES[package])
+    binaries = list(BINARIES)
     short = git("rev-parse", "--short", commit).stdout.strip()
     assets = ([f"{b}-{version}-{arch}" for b in binaries for arch in ARCHES]
               + [f"scoot-{short}-vendored.tar.gz",
-                 f"sbom-{package}-{version}.cyclonedx.json",
+                 f"sbom-scoot-{version}.cyclonedx.json",
                  "SHA256SUMS"])
 
     if not a.no_github:
@@ -155,15 +174,12 @@ def main():
                           f"published: {r.stderr.strip() or r.stdout.strip()}"
                           f" (failing closed; --no-github skips this check)")
 
-    plan = {"tag": a.tag, "package": package, "version": version,
-            "group": list(GROUP[package]), "binaries": binaries,
+    plan = {"tag": a.tag, "version": version, "binaries": binaries,
             "commit": commit, "assets": assets}
     if a.json:
         print(json.dumps(plan, indent=2))
     else:
-        print(f"package={package}")
         print(f"version={version}")
-        print(f"group={' '.join(plan['group'])}")
         print(f"binaries={' '.join(binaries)}")
         print(f"commit={commit}")
         print(f"assets ({len(assets)}):")

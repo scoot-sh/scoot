@@ -14,7 +14,7 @@
 # Per package the script: builds the crate, derives Depends from
 # `dpkg-shlibdeps -O` over the staged binaries (checked against the
 # ldd-derived allow-list in deb-meta.py -- a new or renamed system
-# library fails here), renders DEBIAN/control from the crate manifests
+# library fails here), renders DEBIAN/control from the workspace version
 # (no version is remembered anywhere), stages the installed files (the
 # same set as packaging/arch: the session entry, the session user
 # units, the portal selection, the bar's user unit,
@@ -79,8 +79,7 @@ else
 fi
 
 SCOOTBG_VERSION=$(python3 "$META" versions --source "$SOURCE" | sed -n 's/^scootbg //p')
-echo "--- versions: scoot/scootbg $SCOOTBG_VERSION (lockstep), scootbar $(
-    python3 "$META" versions --source "$SOURCE" | sed -n 's/^scootbar //p')"
+echo "--- version: $SCOOTBG_VERSION (the workspace version, every package)"
 
 export CARGO_NET_OFFLINE=true
 STAGE_ROOT="$OUT/stage"

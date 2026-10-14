@@ -1,6 +1,6 @@
 pkgbase = scootbar-git
 	pkgdesc = Status bar for the scoot compositor (git)
-	pkgver = 0.1.0.r0.g0000000
+	pkgver = 0.2.0.r0.g0000000
 	pkgrel = 1
 	url = https://github.com/scoot-sh/scoot
 	install = scootbar.install

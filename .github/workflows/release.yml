@@ -1,13 +1,13 @@
-# scoot releases: the tag-triggered per-package release job
-# (docs/backlog/packaging/release-artifacts.md).
+# scoot releases: the tag-triggered release job
+# (docs/backlog/packaging/release-artifacts.md, docs/versioning.md).
 #
-# WHAT IT DOES: pushing a package tag (`scoot-v0.2.0`, `scootbar-v0.3.0`;
-# a trio tag releases the trio's binaries) builds that package only and
-# publishes a GitHub Release holding, per release: the vendored source
+# WHAT IT DOES: pushing a release tag (`v0.2.0`: one tag, the
+# repository's one version) builds every binary -- scoot (with `scoot
+# msg`), scootbg, scootbar -- and publishes a GitHub Release holding the vendored source
 # tarball (`scripts/vendor-release.sh`), portable glibc binaries for
 # `x86_64-linux` and `aarch64-linux`, an SBOM (CycloneDX, cargo-cyclonedx),
-# `SHA256SUMS`, a keyless build-provenance attestation, and the
-# per-package changelog (`scripts/version changelog`) as the notes. No
+# `SHA256SUMS`, a keyless build-provenance attestation, and that
+# version's CHANGELOG.md section (`scripts/release-notes`) as the notes. No
 # manual uploads, no long-lived signing keys, no extra secrets: release
 # creation and attestation run on `GITHUB_TOKEN` alone.
 #
@@ -27,11 +27,16 @@
 # main's binaries are already on Cachix with the flake on FlakeHub
 # (`.github/workflows/nix-build.yml`).
 #
+# WHO TAGS: the release PR. release-plz (`release-plz.yml`) keeps a PR
+# open that bumps the workspace version and CHANGELOG.md; merging it
+# pushes `vX.Y.Z` with a token that triggers this workflow. A maintainer
+# can also push the tag by hand (the first one, v0.2.0, is cut that way).
+#
 # GATES (all in `scripts/release-resolve`, unit-tested in
-# `scripts/test_release_resolve.py`, plus `scripts/version check`): the
-# tag is `<package>-vX.Y.Z` for a shipped package; its version equals
-# the manifest(s) (trio tags need all three: lockstep); the tag exists
-# and its commit is on `origin/main`; a release holding every expected
+# `scripts/test_release_resolve.py`): the tag is `vX.Y.Z`; its version
+# equals the `[workspace.package] version` at the tagged commit, and
+# every crate there inherits it; the tag exists and its commit is on
+# `origin/main`; a release holding every expected
 # asset refuses a re-publish, while an incomplete one resumes, so a
 # re-run of a failed run converges instead of duplicating. Dispatch
 # takes the same gates: `tag` must exist and point at main.
@@ -69,24 +74,23 @@
 # upload), `id-token: write` plus `attestations: write` (provenance)
 # only on the publish job.
 
-name: release (tag-triggered, per package)
+name: release (tag-triggered)
 
 on:
   push:
     tags:
-      - 'scoot-v*'
-      - 'scootctl-v*'
-      - 'scootbg-v*'
-      - 'scootbar-v*'
+      - 'v*'
   pull_request:
     paths:
       - '.github/workflows/release.yml'
       - 'scripts/release-resolve'
+      - 'scripts/release-notes'
+      - 'scripts/workspace-version'
       - 'scripts/test_release_resolve.py'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Package tag to release (e.g. scootbar-v0.2.0). Must exist and point at main.'
+        description: 'Release tag (e.g. v0.2.0). Must exist and point at main.'
         required: true
       dry_run:
         description: 'Build everything, publish nothing.'
@@ -104,8 +108,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # The workflow's own CI: actionlint over this file plus the resolve
-  # tool's unit tests. Runs on pull requests that touch the release
+  # The workflow's own CI: actionlint over this file plus the release
+  # tools' unit tests. Runs on pull requests that touch the release
   # tooling, and nowhere else.
   lint:
     name: Release tooling (actionlint + resolve tests)
@@ -177,7 +181,7 @@ jobs:
           print("guards ok: single-path uploads, hidden files included, no inline github/inputs/steps in run")
           EOF
 
-      - name: scripts/release-resolve tests
+      - name: release tool tests (release-resolve, workspace-version, release-notes)
         run: python3 scripts/test_release_resolve.py
 
   # Parse the tag and run every refusal gate. Its outputs drive the rest
@@ -189,7 +193,6 @@ jobs:
     timeout-minutes: 10
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
-      package: ${{ steps.resolve.outputs.package }}
       version: ${{ steps.resolve.outputs.version }}
       binaries: ${{ steps.resolve.outputs.binaries }}
       assets: ${{ steps.resolve.outputs.assets }}
@@ -210,12 +213,6 @@ jobs:
           test -n "$tag" || { echo "::error title=No tag to release::dispatch needs the 'tag' input."; exit 1; }
           echo "value=$tag" >>"$GITHUB_OUTPUT"
 
-      # The versioning policy (trio lockstep, semver, own versions,
-      # publish = false); the tag-vs-manifest equality itself is the
-      # resolve script's, below.
-      - name: scripts/version check
-        run: python3 scripts/version check
-
       - name: scripts/release-resolve (every refusal gate)
         id: resolve
         env:
@@ -228,7 +225,6 @@ jobs:
           echo "$plan"
           {
             echo "tag=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag"])')"
-            echo "package=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["package"])')"
             echo "version=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
             echo "binaries=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["binaries"]))')"
             echo "assets=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["assets"]))')"
@@ -263,28 +259,23 @@ jobs:
 
       - name: SBOM (CycloneDX from the lockfile, cargo-cyclonedx)
         env:
-          RESOLVE_PACKAGE: ${{ needs.resolve.outputs.package }}
           RESOLVE_VERSION: ${{ needs.resolve.outputs.version }}
           RESOLVE_BINARIES: ${{ needs.resolve.outputs.binaries }}
         run: |
-          # Union SBOM over every shipped binary. A trio tag ships scoot and
-          # scootbg, but a single-package SBOM would omit the other binary's
-          # dependencies (e.g. scootbg's image-webp/zune-*/byteorder-lite
-          # decoders). cargo-cyclonedx emits crates/*/sbom.json in one run;
-          # merge the shipped binaries' (plus the trigger package's)
+          # Union SBOM over every shipped binary: a release ships scoot,
+          # scootbg and scootbar, and one crate's SBOM would omit the
+          # others' dependencies (e.g. scootbg's image-webp/zune-*/
+          # byteorder-lite decoders). cargo-cyclonedx emits crates/*/sbom.json
+          # in one run (the manifest path only picks the workspace, as it
+          # did per package before); merge the shipped binaries'
           # components, deduplicated by bom-ref, into one file.
           nix shell --inputs-from . nixpkgs#cargo-cyclonedx --command \
             cargo cyclonedx -f json --override-filename sbom \
-              --manifest-path "crates/$RESOLVE_PACKAGE/Cargo.toml"
+              --manifest-path crates/scoot/Cargo.toml
           python3 - <<'EOF'
           import json, os
-          package = os.environ["RESOLVE_PACKAGE"]
           version = os.environ["RESOLVE_VERSION"]
-          binaries = os.environ["RESOLVE_BINARIES"].split()
-          wanted = []
-          for name in [package] + binaries:
-              if name not in wanted:
-                  wanted.append(name)
+          wanted = os.environ["RESOLVE_BINARIES"].split()
           merged = {}
           base = None
           for name in wanted:
@@ -304,7 +295,7 @@ jobs:
           assert base is not None, f"no SBOM found for {wanted}"
           base["components"] = [merged[k] for k in sorted(merged)]
           runner_temp = os.environ["RUNNER_TEMP"]
-          out = f"{runner_temp}/sbom-{package}-{version}.cyclonedx.json"
+          out = f"{runner_temp}/sbom-scoot-{version}.cyclonedx.json"
           with open(out, "w") as f:
               json.dump(base, f, indent=2)
           print(base.get("bomFormat"), base.get("specVersion"), len(base["components"]), "components", f"from {wanted}")
@@ -490,12 +481,14 @@ jobs:
           (cd dist && sha256sum -- * | LC_ALL=C sort -k2 > SHA256SUMS && sha256sum -c SHA256SUMS)
           ls -l dist/
 
-      - name: Release notes (per-package changelog)
+      - name: Release notes (this version's CHANGELOG.md section)
         run: |
           {
-            echo "## ${{ needs.resolve.outputs.package }} ${{ needs.resolve.outputs.version }}"
+            echo "## scoot ${{ needs.resolve.outputs.version }}"
             echo
-            scripts/version changelog '${{ needs.resolve.outputs.package }}'
+            echo "Every binary at one version: scoot (with \`scoot msg\`), scootbg and scootbar."
+            echo
+            scripts/release-notes '${{ needs.resolve.outputs.version }}'
             echo
             echo "Built from \`$(
               git rev-parse --short '${{ needs.resolve.outputs.tag }}^{commit}')\` on main;"

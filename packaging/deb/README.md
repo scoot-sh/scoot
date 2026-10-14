@@ -10,13 +10,14 @@ step.
 
 | Package | Source | Version follows |
 |---|---|---|
-| `scoot` | trio tag `scoot-v$ver` | `crates/scoot/Cargo.toml` (trio lockstep) |
-| `scootbg` | trio tag `scoot-v$ver` | `crates/scootbg/Cargo.toml` (same trio tag) |
-| `scootbar` | bar tag `scootbar-v$ver` | `crates/scootbar/Cargo.toml` (independent) |
+| `scoot` | tag `v$ver` | the workspace version (`Cargo.toml`) |
+| `scootbg` | tag `v$ver` | the same |
+| `scootbar` | tag `v$ver` | the same |
 
-There is no `scootctl` package: it is the client library inside the
-`scoot` binary (`scoot msg`), versioned with the trio
-(docs/versioning.md). `scoot` depends on exactly `scootbg (= $ver)`:
+One tag releases every binary at the repository's one version
+(docs/versioning.md), and `deb-meta.py` reads it from the root
+`Cargo.toml`. There is no `scootctl` package: it is the client library
+inside the `scoot` binary (`scoot msg`). `scoot` depends on exactly `scootbg (= $ver)`:
 the coupled pair installs at one version, and the bar depends on no
 compositor package at all (standard Wayland protocols only).
 
@@ -31,8 +32,8 @@ The ticket's level 1 names `cargo-deb` with metadata in each crate's
   stages files; no manifest metadata), so the two distro paths stay
   one idea.
 - `cargo-deb` would be a new build dependency that itself must vendor
-  offline, and its metadata in `Cargo.toml` would entangle the
-  versioning policy (`scripts/version check` reads every manifest).
+  offline, and its metadata in `Cargo.toml` would sit beside the one
+  workspace version every crate inherits (docs/versioning.md).
 - The ticket's `$auto` requirement is kept literally: `Depends`
   versions come out of `dpkg-shlibdeps -O` at build time, checked
   against the `ldd`-derived allow-list (below) -- a renamed or new

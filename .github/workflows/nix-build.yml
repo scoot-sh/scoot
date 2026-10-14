@@ -104,8 +104,11 @@
 #
 # FLAKEHUB (below, `publish` job): after both arch builds succeed on a push
 # to main, the flake itself is published to FlakeHub as a rolling release
-# (`scoot-sh/scoot`, public, `0.1.*`), so a published flake version always
-# has its binaries on Cachix. No FlakeHub Cache (`include-output-paths:
+# (`scoot-sh/scoot`, public, `<major>.<minor + 1>.<commit count>`: from
+# workspace 0.2.x that is `0.3.*`, above every v0.2.x tag and above the
+# `0.1.*` rolling versions published before; `scripts/workspace-version
+# --rolling`), so a published flake version always has its binaries on
+# Cachix. No FlakeHub Cache (`include-output-paths:
 # false`): the maintainer declined it.
 
 name: nix build (packaged artifacts)
@@ -183,18 +186,18 @@ jobs:
           ./result-scoot-gpu-xwayland/bin/scoot --version
           ./result-scoot/bin/scoot msg --help
           ./result-scootbg/bin/scootbg --version
-          # Each packaged binary prints its own crate's version (independent
-          # versioning: the flake reads it from that crate's Cargo.toml, and
-          # `scripts/version check` keeps the trio in lockstep). The
+          # Every packaged binary prints the repository's one version
+          # (docs/versioning.md), and prints it bare: a Nix build has no
+          # `.git`, so no `+N.gSHA` label (the derivations stay free of the
+          # commit, which keeps docs-only merges off the rebuild path). The
           # protocol numbers move on their own, so only the version prefix
           # is pinned here.
-          scoot_ver=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/scoot/Cargo.toml)
-          ./result-scoot/bin/scoot --version | grep -qF "scoot $scoot_ver (ipc protocol "
-          ./result-scoot-gpu/bin/scoot --version | grep -qF "scoot $scoot_ver (ipc protocol "
-          ./result-scoot-xwayland/bin/scoot --version | grep -qF "scoot $scoot_ver (ipc protocol "
-          ./result-scoot-gpu-xwayland/bin/scoot --version | grep -qF "scoot $scoot_ver (ipc protocol "
-          scootbg_ver=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/scootbg/Cargo.toml)
-          ./result-scootbg/bin/scootbg --version | grep -qF "scootbg $scootbg_ver (protocol "
+          ver=$(scripts/workspace-version)
+          ./result-scoot/bin/scoot --version | grep -qF "scoot $ver (ipc protocol "
+          ./result-scoot-gpu/bin/scoot --version | grep -qF "scoot $ver (ipc protocol "
+          ./result-scoot-xwayland/bin/scoot --version | grep -qF "scoot $ver (ipc protocol "
+          ./result-scoot-gpu-xwayland/bin/scoot --version | grep -qF "scoot $ver (ipc protocol "
+          ./result-scootbg/bin/scootbg --version | grep -qF "scootbg $ver (protocol "
 
       - name: nix build .#scootbar .#scootbar-demo, what it links, its closure, a feature override
         run: |
@@ -202,10 +205,10 @@ jobs:
           nix build .#scootbar-demo --out-link result-scootbar-demo --print-out-paths
           ./result-scootbar/bin/scootbar --version
           ./result-scootbar-demo/bin/scootbar --version
-          # The bar prints its own crate's version, independent of the trio's.
-          scootbar_ver=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/scootbar/Cargo.toml)
-          ./result-scootbar/bin/scootbar --version | grep -qF "scootbar $scootbar_ver"
-          ./result-scootbar-demo/bin/scootbar --version | grep -qF "scootbar $scootbar_ver"
+          # The same one version, bare (see the compositor step above).
+          ver=$(scripts/workspace-version)
+          ./result-scootbar/bin/scootbar --version | grep -qxF "scootbar $ver"
+          ./result-scootbar-demo/bin/scootbar --version | grep -qxF "scootbar $ver"
           bin=result-scootbar/bin/scootbar
           echo "binary: $(stat -L -c %s "$bin") bytes (stripped)"
           ldd "$bin"
@@ -241,16 +244,29 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # Rolling versions count commits (`0.1.<count>+rev-<sha>`); a
+          # Rolling versions count commits (`0.3.<count>+rev-<sha>`); a
           # shallow checkout would miscount.
           fetch-depth: 0
 
       - uses: DeterminateSystems/nix-installer-action@v23
+
+      # The rolling version's MAJOR.MINOR, from the workspace version:
+      # the next minor, so main's rolling releases always sort above the
+      # last release tag (the same prefix nightly.yml stamps on nightly).
+      - name: Rolling prefix from the workspace version
+        id: rolling
+        run: |
+          prefix=$(scripts/workspace-version --rolling)
+          echo "rolling prefix: $prefix"
+          echo "major=${prefix%%.*}" >>"$GITHUB_OUTPUT"
+          echo "minor=${prefix#*.}" >>"$GITHUB_OUTPUT"
 
       - uses: DeterminateSystems/flakehub-push@e001ee821cdb763ef120c01f1048bfb2f938bb9c # v7
         with:
           # `scoot-sh/scoot` is the default: `{org}/{repo}` of this repo.
           visibility: public
           rolling: true
+          rolling-major: ${{ steps.rolling.outputs.major }}
+          rolling-minor: ${{ steps.rolling.outputs.minor }}
           # No FlakeHub Cache (declined): resolved store paths stay off.
           include-output-paths: false

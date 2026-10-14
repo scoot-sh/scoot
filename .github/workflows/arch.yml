@@ -121,14 +121,13 @@ jobs:
       # check the committed files, not the substitutions.
       - name: Stage the HEAD tarballs and point the PKGBUILDs at them
         run: |
-          scoot_ver=$(sed -n 's/^pkgver=//p' packaging/arch/scoot/PKGBUILD)
-          bar_ver=$(sed -n 's/^pkgver=//p' packaging/arch/scootbar/PKGBUILD)
-          git archive HEAD --prefix "scoot-scoot-v$scoot_ver/" -o .test-tarballs/scoot-test.tar.gz
-          git archive HEAD --prefix "scoot-scootbar-v$bar_ver/" -o .test-tarballs/scootbar-test.tar.gz
-          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scoot-v\$pkgver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scoot-test.tar.gz|" \
-            packaging/arch/scoot/PKGBUILD packaging/arch/scootbg/PKGBUILD
-          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/scootbar-v\$pkgver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scootbar-test.tar.gz|" \
-            packaging/arch/scootbar/PKGBUILD
+          # One tag (`v$pkgver`) for all three: GitHub's tarball of a
+          # `v`-prefixed tag unpacks to `scoot-<version>/` (the `v` is
+          # dropped), which is the directory the PKGBUILDs `cd` into.
+          ver=$(sed -n 's/^pkgver=//p' packaging/arch/scoot/PKGBUILD)
+          git archive HEAD --prefix "scoot-$ver/" -o .test-tarballs/scoot-test.tar.gz
+          sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/v\$pkgver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scoot-test.tar.gz|" \
+            packaging/arch/scoot/PKGBUILD packaging/arch/scootbg/PKGBUILD packaging/arch/scootbar/PKGBUILD
           sed -i "s|git+https://github.com/scoot-sh/scoot\.git|git+file://$GITHUB_WORKSPACE#commit=$GITHUB_SHA|" \
             packaging/arch/scoot-git/PKGBUILD packaging/arch/scootbg-git/PKGBUILD packaging/arch/scootbar-git/PKGBUILD
           # Loud if a substitution missed: an unrewritten URL would
@@ -141,19 +140,17 @@ jobs:
           fi
           ls -l .test-tarballs
 
-      # The release pkgver must name its crate's version (the trio
-      # together, the bar on its own); the -git static pkgver must
-      # start from it too (pkgver() counts past it at build time).
-      - name: PKGBUILD versions track their crate manifests
+      # Every release pkgver must name the repository's one version
+      # (scripts/workspace-version); the -git static pkgver must start
+      # from it too (pkgver() counts past the last tag at build time).
+      - name: PKGBUILD versions track the workspace version
         run: |
           python3 - <<'EOF'
-          import re, sys
-          pairs = [("scoot", "crates/scoot/Cargo.toml"),
-                   ("scootbg", "crates/scootbg/Cargo.toml"),
-                   ("scootbar", "crates/scootbar/Cargo.toml")]
+          import re, subprocess, sys
+          crate_ver = subprocess.run(["scripts/workspace-version"], check=True,
+                                     capture_output=True, text=True).stdout.strip()
           bad = False
-          for pkg, manifest in pairs:
-              crate_ver = re.search(r'^version = "(.*)"$', open(manifest).read(), re.M).group(1)
+          for pkg in ("scoot", "scootbg", "scootbar"):
               for suffix in ("", "-git"):
                   text = open(f"packaging/arch/{pkg}{suffix}/PKGBUILD").read()
                   pkgver = re.search(r'^pkgver=(.*)$', text, re.M).group(1)

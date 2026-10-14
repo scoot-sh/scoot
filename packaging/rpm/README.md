@@ -9,13 +9,14 @@ documented only (the ticket's second half is a host account away).
 
 | Spec | Package | Source tag | Version follows |
 |---|---|---|---|
-| `scoot.spec` | `scoot` | `scoot-v$Version` | `crates/scoot/Cargo.toml` (trio lockstep) |
-| `scootbg.spec` | `scootbg` | `scoot-v$Version` | `crates/scootbg/Cargo.toml` (same trio tag) |
-| `scootbar.spec` | `scootbar` | `scootbar-v$Version` | `crates/scootbar/Cargo.toml` (independent) |
+| `scoot.spec` | `scoot` | `v$Version` | the workspace version (`Cargo.toml`) |
+| `scootbg.spec` | `scootbg` | `v$Version` | the same |
+| `scootbar.spec` | `scootbar` | `v$Version` | the same |
 
-There is no `scootctl` package: it is the client library inside the
-`scoot` binary (`scoot msg`), versioned with the trio
-(docs/versioning.md). `scoot` requires exactly `scootbg=$Version-$Release`:
+One tag releases every binary at the repository's one version
+(docs/versioning.md), so all three specs carry the same `Version` and
+the same release tarball. There is no `scootctl` package: it is the
+client library inside the `scoot` binary (`scoot msg`). `scoot` requires exactly `scootbg=$Version-$Release`:
 the coupled pair installs at one version, and the bar requires no
 compositor package at all (standard Wayland protocols only).
 
@@ -170,8 +171,8 @@ and what stays manual:
    publishes) and set each spec's `Source0` basename to match (today a
    `scoot-<rev>-vendored` name the release job chooses; only that line
    changes per spec).
-2. Bump `Version` in the moving specs to the released version (the trio
-   together, the bar on its own) and reset `Release` to `1`.
+2. Bump `Version` in all three specs to the released version and reset
+   `Release` to `1`.
 3. Write the `.copr/Makefile` per package against the real asset names,
    create the COPR project, enable the chroots above, and run the first
    `buildscm` by hand.
