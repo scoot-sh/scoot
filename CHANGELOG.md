@@ -9,6 +9,7 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+<<<<<<< HEAD
 ### Unreleased — XWayland is compiled in by default (not breaking)
 
 - **Every default `scoot` build now carries XWayland support; there is no
@@ -22,6 +23,26 @@ scoot has not cut a numbered release yet; entries are dated.
   config key, or IPC shape changes, and `scoot-xwayland` /
   `scoot-gpu-xwayland` keep working until stream G collapses them.
   See [XWayland](site/src/content/docs/scoot/xwayland.md).
+=======
+### Unreleased — the nightly binaries are retired; the installer takes tagged releases and can update (breaking)
+
+- **Breaking: the portable `nightly` build is gone and `install.sh`
+  installs tagged releases only.** `--nightly` is rejected with a
+  one-line error pointing at the Nix flake for `main`, and with no
+  tagged release yet the script fails instead of installing `main`.
+  The moving `nightly` prerelease is deleted after merge. Migration:
+  drop `--nightly` (tagged releases) or take the Nix flake's rolling
+  release to run `main`. See [Install](site/src/content/docs/start/install.md)
+  and [Releases](site/src/content/docs/reference/releases.md).
+- **The same script now updates.** A re-run installs the newest tagged
+  release, or prints `already up to date (<version>)` and changes
+  nothing (`--force` reinstalls anyway). `--check` compares the
+  installed version with the newest tag without installing anything
+  (exit 0 if current, 10 if an update exists, 1 on error). What was
+  installed is recorded beside the install manifest
+  (`channel=release`, version, tag, date), and `--uninstall` removes
+  the record too.
+>>>>>>> c76bdeaef (feat(ci)!: retire the nightly binaries; the installer takes tagged releases and can update)
 
 ### Unreleased — the built-in cursors are Mocu (behavior change)
 

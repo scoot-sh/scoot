@@ -1,10 +1,10 @@
 #!/bin/sh
 # Installer gate: runs public/install.sh against a fake release tree
 # (file:// URLs, stub binaries, stub session files), so the script's
-# paths, checksum refusal, nightly fallback, look handling, uninstall and
-# missing-library/font report are proved without the network. shellcheck
-# runs first when it is on PATH (CI provides it). `pnpm test-install`;
-# CI's docs-site job.
+# paths, checksum refusal, no-tag failure, up-to-date rerun, --check,
+# --force, look handling, uninstall and missing-library/font report are
+# proved without the network. shellcheck runs first when it is on PATH
+# (CI provides it). `pnpm test-install`; CI's docs-site job.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -31,17 +31,17 @@ esac
 
 # --- a fake release tree ------------------------------------------------------
 f=$work/fake
-commit=0123456789abcdef0123456789abcdef01234567
 stub() { printf '#!/bin/sh\necho "%s"\n' "$1" >"$2" && chmod +x "$2"; }
-mkdir -p "$f/dl/scoot-v0.1.0" "$f/dl/scootbar-v0.2.0" "$f/dl/nightly"
+mkdir -p "$f/dl/scoot-v0.1.0" "$f/dl/scootbar-v0.2.0" "$f/dl/v0.3.0"
 stub "scoot 0.1.0" "$f/dl/scoot-v0.1.0/scoot-0.1.0-$arch"
 stub "scootbg 0.1.0" "$f/dl/scoot-v0.1.0/scootbg-0.1.0-$arch"
 stub "scootbar 0.2.0" "$f/dl/scootbar-v0.2.0/scootbar-0.2.0-$arch"
-for b in scoot scootbg scootbar; do stub "$b nightly" "$f/dl/nightly/$b-nightly-$arch"; done
-printf "version=0.1.42+rev-0123456\ncommit=%s\n" "$commit" >"$f/dl/nightly/nightly.txt"
+stub "scoot 0.3.0" "$f/dl/v0.3.0/scoot-0.3.0-$arch"
+stub "scootbg 0.3.0" "$f/dl/v0.3.0/scootbg-0.3.0-$arch"
+stub "scootbar 0.3.0" "$f/dl/v0.3.0/scootbar-0.3.0-$arch"
 for d in "$f"/dl/*; do (cd "$d" && sha256sum -- * >SHA256SUMS); done
 
-for ref in scoot-v0.1.0 "$commit"; do
+for ref in scoot-v0.1.0 v0.3.0; do
     r=$f/raw/$ref
     mkdir -p "$r/resources/systemd/user" "$r/packaging/deb" "$r/docs/examples/ginger-night" "$r/docs/assets/wallpapers" "$r/docs/examples/moonrise"
     printf '#!/bin/sh\n' >"$r/resources/scoot-session"
@@ -60,7 +60,9 @@ for ref in scoot-v0.1.0 "$commit"; do
     printf 'left = []\n' >"$r/docs/examples/moonrise/bar.toml"
     printf 'moon\n' >"$r/docs/assets/wallpapers/moonrise.png"
 done
-printf '[{"tag_name": "nightly"}, {"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0", "body": "compare scoot-v9.9.9 and scootbar-v9.9.9"}]' >"$f/tags.json"
+printf '[{"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0", "body": "compare scoot-v9.9.9 and scootbar-v9.9.9"}]' >"$f/tags.json"
+printf '[{"tag_name": "v0.3.0"}, {"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0"}]' >"$f/tags-unified.json"
+printf '[{"tag_name": "scoot-v0.1.1"}, {"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0"}]' >"$f/tags-new.json"
 printf '[]' >"$f/none.json"
 
 export SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl" SCOOT_INSTALL_RAW_URL="file://$f/raw"
@@ -95,9 +97,11 @@ printf '#!/bin/sh\n# fake systemctl for the installer gate: log, never touch the
 chmod +x "$work/bin/systemctl"
 : >"$work/systemctl.log"
 run_in() {
-    h=$1
-    shift
-    HOME="$h" SCOOT_INSTALL_RELEASES_URL=${releases:-file://$f/tags.json} sh "$installer" "$@" >"$work/out" 2>&1
+    (
+        h=$1
+        shift
+        HOME="$h" SCOOT_INSTALL_RELEASES_URL=${releases:-file://$f/tags.json} sh "$installer" "$@" >"$work/out" 2>&1
+    )
 }
 
 # 1. Tagged release, a look, user install.
@@ -116,12 +120,46 @@ grep -q "command = \[\"$h/.config/scoot/cpu.sh\"\]" "$h/.config/scoot/bar.toml" 
 grep -q 'image = "wallpaper.png"' "$h/.config/scoot/config.toml" || fail "look config"
 grep -q "systemctl --user enable scootbar.service" "$work/systemctl.log" || fail "bar unit not enabled"
 grep -q "systemctl --user daemon-reload" "$work/systemctl.log" || fail "no daemon-reload after install"
-ok "tagged install with a look"
+rec=$h/.local/share/scoot/install-version
+grep -q "^channel=release$" "$rec" || fail "record has no channel"
+grep -q "^version=0.1.0$" "$rec" || fail "record has no version"
+grep -q "^tag=scoot-v0.1.0$" "$rec" || fail "record has no tag"
+grep -q "^bar_tag=scootbar-v0.2.0$" "$rec" || fail "record has no bar tag"
+grep -q "^date=[0-9-]*T[0-9:]*Z$" "$rec" || fail "record has no date"
+ok "tagged install with a look and a version record"
+
+# 1b. A re-run with nothing new says so and downloads nothing: point the
+#     download and raw URLs at nowhere and it must still exit 0.
+if ! run_in "$h"; then cat "$work/out"; fail "re-run"; fi
+grep -q "already up to date (0.1.0)" "$work/out" || fail "re-run says no up-to-date"
+SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl-gone" SCOOT_INSTALL_RAW_URL="file://$f/raw-gone" run_in "$h" || { cat "$work/out"; fail "re-run downloads"; }
+export SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl" SCOOT_INSTALL_RAW_URL="file://$f/raw"
+grep -q "already up to date (0.1.0)" "$work/out" || fail "offline re-run is not up to date"
+ok "re-run is already up to date without downloading"
+
+# 1c. --check: exit 0 when current, 10 when an update exists, 1 on error.
+if ! run_in "$h" --check; then cat "$work/out"; fail "--check when current"; fi
+grep -q "installed: 0.1.0 (scoot-v0.1.0)" "$work/out" || fail "--check prints no installed version"
+grep -q "latest: 0.1.0 (scoot-v0.1.0)" "$work/out" || fail "--check prints no latest version"
+if releases=file://$f/tags-new.json run_in "$h" --check; then fail "--check missed an update"; else code=$?; fi
+[ "$code" = 10 ] || fail "--check update exit is $code, not 10"
+grep -q "latest: 0.1.1 (scoot-v0.1.1)" "$work/out" || fail "--check prints no newer latest"
+unset releases
+if run_in "$work/h-check-none" --check; then fail "--check with nothing installed exited 0"; else code=$?; fi
+[ "$code" = 1 ] || fail "--check empty exit is $code, not 1"
+grep -q "installed: none" "$work/out" || fail "--check empty prints no none"
+ok "--check exit codes"
+
+# 1d. --force reinstalls even when current.
+run_in "$h" --force || { cat "$work/out"; fail "--force"; }
+grep -q "Installing scoot scoot-v0.1.0" "$work/out" || fail "--force did not reinstall"
+[ "$("$h/.local/bin/scoot")" = "scoot 0.1.0" ] || fail "--force broke the install"
+ok "--force reinstalls"
 
 # 2. A second look never overwrites the first, and a re-run updates
 #    its own files.
 echo mine >"$h/.config/scoot/config.toml"
-run_in "$h" --look moonrise || fail "second look run"
+run_in "$h" --look moonrise --force || fail "second look run"
 [ "$(cat "$h/.config/scoot/config.toml")" = mine ] || fail "user config was overwritten"
 ok "existing config kept"
 
@@ -148,9 +186,11 @@ run_in "$h" || { cat "$work/out"; fail "install under a spaced HOME"; }
 ok "spaced HOME: refusal fires, install works"
 h=$work/h1
 
-# 3. Uninstall removes what was installed and keeps the config.
+# 3. Uninstall removes what was installed (record included) and keeps
+#    the config.
 run_in "$h" --uninstall || fail "uninstall"
 [ ! -e "$h/.local/bin/scoot" ] && [ ! -e "$h/.config/systemd/user/scoot.service" ] || fail "uninstall left files"
+[ ! -e "$h/.local/share/scoot/install-version" ] || fail "uninstall left the version record"
 [ -f "$h/.config/scoot/config.toml" ] || fail "uninstall removed the config"
 grep -q "systemctl --user disable scootbar.service" "$work/systemctl.log" || fail "bar unit not disabled on uninstall"
 ok "uninstall"
@@ -166,15 +206,35 @@ run_in "$h" --uninstall || fail "uninstall after a partial run"
 [ ! -e "$h/.local/bin/scoot" ] || fail "partial run's files not removed"
 ok "partial run recorded and removable"
 
-# 4. No tag yet: nightly, and a relative wallpaper outside the look dir.
+# 4. No tag yet: a loud failure pointing at the Nix flake, never main.
 h=$work/h2
-releases=file://$f/none.json run_in "$h" --look moonrise || { cat "$work/out"; fail "nightly fallback"; }
+if releases=file://$f/none.json run_in "$h" --look moonrise; then fail "tagless install succeeded"; fi
 unset releases
-grep -q "installing the nightly build" "$work/out" || fail "nightly fallback not announced"
-grep -q "Installing scoot nightly 0.1.42+rev-0123456" "$work/out" || fail "nightly not labeled with its rolling version"
-[ "$("$h/.local/bin/scoot")" = "scoot nightly" ] || fail "fallback is not nightly"
-[ "$(cat "$h/.config/scoot/wallpaper.png")" = moon ] || fail "relative wallpaper path"
-ok "nightly fallback"
+grep -q "no tagged release yet" "$work/out" || fail "tagless failure names no missing tag"
+grep -q "Nix flake" "$work/out" || fail "tagless failure names no Nix flake"
+[ ! -e "$h/.local" ] || fail "tagless run wrote files"
+ok "no tag fails loudly"
+
+# 4b. --nightly is retired: one line, tagged releases only, Nix pointer.
+if run_in "$h" --nightly; then fail "--nightly accepted"; fi
+grep -q "nightly channel was retired" "$work/out" || fail "--nightly names no retirement"
+grep -q "tagged releases only" "$work/out" || fail "--nightly names no tagged-only rule"
+grep -q "Nix flake" "$work/out" || fail "--nightly names no Nix flake"
+[ ! -e "$h/.local" ] || fail "--nightly wrote files"
+ok "--nightly retired"
+
+# 4c. One unified tag installs everything on that version, and
+#     --bar-version is retired with it.
+h=$work/h7
+releases=file://$f/tags-unified.json run_in "$h" || { cat "$work/out"; fail "unified install"; }
+unset releases
+[ "$("$h/.local/bin/scoot")" = "scoot 0.3.0" ] || fail "unified scoot is not 0.3.0"
+[ "$("$h/.local/bin/scootbar")" = "scootbar 0.3.0" ] || fail "unified bar is not 0.3.0"
+grep -q "^tag=v0.3.0$" "$h/.local/share/scoot/install-version" || fail "unified record has no tag"
+if releases=file://$f/tags-unified.json run_in "$h" --bar-version 0.3.0; then fail "unified --bar-version accepted"; fi
+unset releases
+grep -q "retired" "$work/out" || fail "unified --bar-version names no retirement"
+ok "unified tag"
 
 # 5. A file that fails its checksum installs nothing.
 echo tampered >>"$f/dl/scoot-v0.1.0/scootbg-0.1.0-$arch"
@@ -184,16 +244,18 @@ grep -q "does not match its checksum" "$work/out" || fail "tamper message"
 [ ! -e "$h/.local/bin/scoot" ] || fail "tampered run installed scoot"
 ok "checksum refusal"
 
-# 6. Dry run changes nothing; bad options are refused.
+# 6. Dry run changes nothing; bad options are refused. The unified tree
+#    is used because test 5 tampered with the tagged scootbg above.
 h=$work/h4
-releases=file://$f/none.json run_in "$h" --dry-run || fail "dry run"
-unset releases
+releases=file://$f/tags-unified.json run_in "$h" --dry-run || { cat "$work/out"; fail "dry run"; }
 [ ! -e "$h/.local" ] || fail "dry run wrote files"
-if run_in "$h" --look nope; then fail "unknown look accepted"; fi
-if run_in "$h" --nightly --version 1.0.0; then fail "--nightly --version accepted"; fi
+if releases=file://$f/tags-unified.json run_in "$h" --look nope; then fail "unknown look accepted"; fi
+if run_in "$h" --check --uninstall; then fail "--check --uninstall accepted"; fi
+if run_in "$h" --check --force; then fail "--check --force accepted"; fi
 # The release body mentions scoot-v9.9.9, but no such tag exists: an
 # explicit --version must match a tag_name, not any mention.
-if run_in "$h" --version 9.9.9; then fail "a body-text version was accepted"; fi
+if releases=file://$f/tags-unified.json run_in "$h" --version 9.9.9; then fail "a body-text version was accepted"; fi
+unset releases
 grep -q "no release scoot-v9.9.9" "$work/out" || fail "body-text version message"
 ok "dry run and refusals"
 
@@ -202,7 +264,7 @@ ok "dry run and refusals"
 #    stays confirmation-based. SCOOT_INSTALL_OS_RELEASE and
 #    SCOOT_INSTALL_FONTS pin the distro and the bar's candidate list so
 #    these run the same on any host; ldd and foot are shadowed so the
-#    library half of the report is deterministic too. The nightly tree is
+#    library half of the report is deterministic too. The unified tree is
 #    used because test 5 tampered with the tagged scootbg above.
 printf 'ID=arch\n' >"$f/os-arch"
 printf 'ID=fedora\n' >"$f/os-fedora"
@@ -220,7 +282,7 @@ for os in arch fedora ubuntu suse; do
     suse) want_cmd="sudo zypper install libinput10 dejavu-fonts" ;;
     esac
     export SCOOT_INSTALL_OS_RELEASE="$f/os-$os" SCOOT_INSTALL_FONTS=/nonexistent/scoot-test-font.ttf
-    if ! releases=file://$f/none.json run_in "$work/h-font-$os" --dry-run; then
+    if ! releases=file://$f/tags-unified.json run_in "$work/h-font-$os" --dry-run; then
         cat "$work/out"
         fail "dry run on $os"
     fi
@@ -242,7 +304,7 @@ ok "missing font names the distro package, with reason and note"
 # (-s: an empty file is unusable, as the bar's own loader refuses it.)
 printf 'fake-font\n' >"$work/have-font.ttf"
 export SCOOT_INSTALL_OS_RELEASE="$f/os-ubuntu" SCOOT_INSTALL_FONTS="$work/have-font.ttf"
-if ! releases=file://$f/none.json run_in "$work/h-font-ok" --dry-run; then
+if ! releases=file://$f/tags-unified.json run_in "$work/h-font-ok" --dry-run; then
     cat "$work/out"
     fail "dry run with a font"
 fi
@@ -259,7 +321,7 @@ fi
 ok "a usable font adds no package; dry run still lists libraries"
 
 export SCOOT_INSTALL_OS_RELEASE="$f/os-fedora" SCOOT_INSTALL_FONTS=/nonexistent/scoot-test-font.ttf
-if ! releases=file://$f/none.json run_in "$work/h-no-bar" --dry-run --no-bar; then
+if ! releases=file://$f/tags-unified.json run_in "$work/h-no-bar" --dry-run --no-bar; then
     cat "$work/out"
     fail "dry run with --no-bar"
 fi

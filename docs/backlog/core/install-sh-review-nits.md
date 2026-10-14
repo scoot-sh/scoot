@@ -27,4 +27,4 @@ One small PR: fix 1-3, decide on 4 (a marker file is enough), add the missing te
 
 ## Not in this ticket
 
-Checksums for the session, unit and look files (same TLS trust root as `SHA256SUMS`, so no gain), and `.deb`/`.rpm` on the nightly release.
+Checksums for the session, unit and look files (same TLS trust root as `SHA256SUMS`, so no gain), and `.deb`/`.rpm` on the tagged releases.

@@ -103,7 +103,7 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
 - `pnpm test-install` (`scripts/test-install.sh`): runs
   `public/install.sh` (served at `/install.sh`) against a fake release
   tree over `file://`: a tagged install with a look, a kept config, the
-  nightly fallback, a checksum refusal, uninstall, dry run and option
+  up-to-date re-run, `--check` exits, `--force`, uninstall, dry run and option
   refusals, after shellcheck when it is on `PATH`. CI runs it with
   shellcheck in the docs-site job.
 

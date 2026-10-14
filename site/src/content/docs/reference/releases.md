@@ -40,22 +40,18 @@ script](../../start/install/#use-it-every-day) picks the right files
 for your machine, checks them against `SHA256SUMS`, and installs the
 session files beside them.
 
-## Nightly builds
+## Tagged releases only
 
-`main` is rebuilt on every merge into one moving prerelease,
-[`nightly`](https://github.com/scoot-sh/scoot/releases/tag/nightly),
-by `nightly.yml`: the same portable build as a release (the same base
-image, toolchain and runtime libraries, built from the merged commit
-rather than the vendored tarball), so the same
-glibc floor and runtime libraries. Its files are named
-`scoot-nightly-<arch>`, `scootbg-nightly-<arch>` and
-`scootbar-nightly-<arch>`, so their URLs never change, plus
-`nightly.txt` (the commit and its version) and `SHA256SUMS`. The
-version is the one FlakeHub gives the same commit, `0.1.<commits on
-main>+rev-<commit>`, so a nightly binary and a Nix user's flake name
-the same commit. Install it with `install.sh --nightly`, and verify a file
-with `--signer-workflow scoot-sh/scoot/.github/workflows/nightly.yml`
-in the command below.
+Releases are tagged, and the [install
+script](../../start/install/#use-it-every-day) installs them: by
+default the newest tag, or the version `--version` names. When no
+tagged release exists yet the script fails instead of installing
+`main` — it never follows a moving build. To run `main`, use the Nix
+flake: every merge to `main` already lands tested binaries in the
+Cachix cache with the flake on FlakeHub (rolling release) — see
+[Install](../start/install.md). Verify a file with
+`--signer-workflow scoot-sh/scoot/.github/workflows/release.yml` in
+the command below.
 
 ## Run them on your distro
 
