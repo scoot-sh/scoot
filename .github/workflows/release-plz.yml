@@ -1,0 +1,142 @@
+# release-plz: the release PR, and the tag when it merges
+# (release-plz.toml says what it is configured to do; docs/versioning.md
+# says why the repository works this way).
+#
+# WHAT IT DOES, on every push to main:
+# - `release-pr` opens (or updates) one pull request that bumps
+#   `[workspace.package] version` and writes that version's CHANGELOG.md
+#   section from the commits since the last `vX.Y.Z` tag. Nothing is
+#   released until the maintainer merges it, and the maintainer may edit
+#   the version in the PR first.
+# - `release` notices when the push IS that PR's merge and pushes the
+#   `vX.Y.Z` tag (only that: `git_release_enable = false`, no crates.io).
+#   The tag push starts `release.yml`, which builds and publishes every
+#   binary. It is the only thing that creates a GitHub Release.
+#
+# THE TOKEN (`RELEASE_PLZ_TOKEN`, a repository secret): a tag or PR made
+# with the workflow's own GITHUB_TOKEN starts no other workflow, so the
+# tag would never reach release.yml and the release PR would get no CI.
+# The secret is a fine-grained personal access token (or a GitHub App
+# token) for this repository only, with Contents: read and write and Pull
+# requests: read and write. Without it, both jobs say so in a notice and
+# stop: nothing here falls back to GITHUB_TOKEN.
+#
+# THE FIRST TAG: until a `v*` tag exists, both jobs stop with a notice.
+# With no tag release-plz would treat the whole history as the first
+# release; the first one (v0.2.0) is cut by hand instead (the site's "cut
+# a release" page).
+#
+# PINS: every action by commit SHA (tag in a trailing comment), as in
+# release.yml: the token here can push tags that publish releases. The
+# release-plz version is the action's default at that SHA (0.3.172), the
+# one release-plz.toml was checked against.
+#
+# PERMISSIONS: GITHUB_TOKEN gets `contents: read` only; everything that
+# writes goes through RELEASE_PLZ_TOKEN.
+
+name: release-plz (release PR and tag)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Tag a merged release PR
+    if: github.repository == 'scoot-sh/scoot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # A job-level `if:` cannot read secrets, so the check is a step
+      # and everything after it keys off its output.
+      - name: Is RELEASE_PLZ_TOKEN set?
+        id: token
+        env:
+          RELEASE_PLZ_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          if [ -n "$RELEASE_PLZ_TOKEN" ]; then
+            echo "set=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice title=release-plz skipped::no RELEASE_PLZ_TOKEN secret (see the header of .github/workflows/release-plz.yml)."
+            echo "set=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.token.outputs.set == 'true'
+        with:
+          # The whole history and every tag: release-plz reads the commits
+          # since the last v* tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Has the first release been cut?
+        id: gate
+        if: steps.token.outputs.set == 'true'
+        run: |
+          if [ -n "$(git tag --list 'v[0-9]*')" ]; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice title=release-plz skipped::no v* tag yet: the first release (v0.2.0) is cut by hand (docs/versioning.md)."
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - uses: release-plz/action@8921286633dfa0c4020f7f30bd1c14fe19cbb10e # v0.5.142
+        if: steps.gate.outputs.run == 'true'
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+  release-pr:
+    name: Open or update the release PR
+    if: github.repository == 'scoot-sh/scoot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # One release PR at a time: a second push waits for the first update
+    # instead of racing it.
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      # A job-level `if:` cannot read secrets, so the check is a step
+      # and everything after it keys off its output.
+      - name: Is RELEASE_PLZ_TOKEN set?
+        id: token
+        env:
+          RELEASE_PLZ_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          if [ -n "$RELEASE_PLZ_TOKEN" ]; then
+            echo "set=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice title=release-plz skipped::no RELEASE_PLZ_TOKEN secret (see the header of .github/workflows/release-plz.yml)."
+            echo "set=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.token.outputs.set == 'true'
+        with:
+          # The whole history and every tag: release-plz reads the commits
+          # since the last v* tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Has the first release been cut?
+        id: gate
+        if: steps.token.outputs.set == 'true'
+        run: |
+          if [ -n "$(git tag --list 'v[0-9]*')" ]; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice title=release-plz skipped::no v* tag yet: the first release (v0.2.0) is cut by hand (docs/versioning.md)."
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - uses: release-plz/action@8921286633dfa0c4020f7f30bd1c14fe19cbb10e # v0.5.142
+        if: steps.gate.outputs.run == 'true'
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}

@@ -1,0 +1,106 @@
+# release-plz: proposes the next release as a pull request
+# (`.github/workflows/release-plz.yml`; docs/versioning.md says why).
+#
+# The repository has ONE version, `[workspace.package] version` in
+# Cargo.toml, inherited by every crate, and ONE tag per release, `vX.Y.Z`,
+# which `.github/workflows/release.yml` turns into the GitHub Release with
+# every binary. release-plz only proposes: its release PR bumps the
+# workspace version and writes the CHANGELOG.md section; the maintainer
+# edits either in the PR if the proposal is wrong, and merging it is the
+# release. On that merge, release-plz pushes the tag and nothing else.
+#
+# Checked against release-plz 0.3.172 (the pinned action's default):
+# - A workspace version is native: the next version is the highest next
+#   version among the crates that inherit it, written once to
+#   [workspace.package] (`command/update/updater.rs`).
+# - `git_only`: the last release is the newest tag matching `git_tag_name`
+#   (no registry), and nothing is ever `cargo publish`ed. With no such tag
+#   a crate counts as an initial release at its current version, which is
+#   why the workspace already reads 0.2.0: the first tag must be v0.2.0
+#   (FlakeHub published rolling 0.1.x; a 0.1 tag would sort below them).
+# - Every crate shares the one tag name, so only `scoot` creates it (two
+#   crates creating the same tag through the API would collide); the
+#   others still feed the version and the changelog.
+# - Pre-1.0 bumps are release-plz's default: a breaking change (`!` or a
+#   `BREAKING CHANGE:` footer) bumps the minor, anything else the patch.
+#
+# A commit counts only when it touches files of some crate under crates/:
+# a change only to resources/, packaging/, the flake or the site neither
+# bumps the version nor appears in the generated changelog.
+
+[workspace]
+git_only = true
+publish = false
+git_tag_name = "v{{ version }}"
+git_tag_enable = false
+# release.yml creates the GitHub Release (with the binaries); release-plz
+# creating one too would race it.
+git_release_enable = false
+changelog_update = false
+# No library API to check, and checking it would compile the compositor
+# (system libraries the release-plz runner does not have).
+semver_check = false
+# Only the workspace's own entries move in Cargo.lock; dependency updates
+# are their own reviewed PRs.
+dependencies_update = false
+# Tag only when a release PR merges, never on an ordinary push to main.
+release_always = false
+pr_branch_prefix = "release-plz-"
+pr_name = "chore: release v{{ version }}"
+pr_labels = ["release"]
+pr_body = """
+## Release v{{ releases[0].next_version }}
+
+Merging this PR is the release: release-plz then pushes the
+`v{{ releases[0].next_version }}` tag, and `.github/workflows/release.yml`
+builds every binary (scoot, scootbg, scootbar) at that one version and
+publishes the GitHub Release.
+
+The proposed version follows the commits since the last tag (pre-1.0: a
+breaking change bumps the minor, anything else the patch). It is a
+proposal: edit `[workspace.package] version` in `Cargo.toml` (and the
+heading in `CHANGELOG.md`) on this branch to release a different one.
+Before merging, move anything still under `## Unreleased` in
+CHANGELOG.md that belongs to this release.
+
+{% for release in releases %}{% if release.package == "scoot" %}
+### Changes
+
+{{ release.changelog }}
+{% endif %}{% endfor %}
+"""
+
+[changelog]
+# Never let a breaking change vanish behind a `skip` parser below.
+protect_breaking_commits = true
+sort_commits = "oldest"
+# Grouped by component (the Conventional Commits scope), then by kind.
+# Every skipped type is housekeeping with no user-visible behavior.
+commit_parsers = [
+  { message = "^chore(\\(.*\\))?: release", skip = true },
+  { message = "^feat", group = "added", default_scope = "general" },
+  { message = "^fix", group = "fixed", default_scope = "general" },
+  { message = "^perf", group = "performance", default_scope = "general" },
+  { message = "^refactor", group = "changed", default_scope = "general" },
+  { message = "^(test|ci|build|chore|docs|style)", skip = true },
+  { message = ".*", group = "other", default_scope = "general" },
+]
+body = """
+
+## [{{ version }}]{%- if release_link -%}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for scope, commits in commits | group_by(attribute="scope") %}
+### {{ scope }}
+
+{% for commit in commits -%}
+- {{ commit.group }}: {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}{%- if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}) {% endfor -%}){% endif %}
+{% endfor -%}
+{% endfor %}"""
+
+[[package]]
+name = "scoot"
+# The tag and the one root changelog belong to the suite; scoot carries
+# them, and every other crate's commits are folded into its section.
+git_tag_enable = true
+changelog_update = true
+changelog_path = "./CHANGELOG.md"
+changelog_include = ["scootctl", "scoot-core", "scoot-ipc", "scootbg", "scootbg-mem", "scootbar"]

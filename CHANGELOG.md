@@ -5,11 +5,19 @@ would notice while using scoot. The full engineering history, milestone by
 milestone, is in [`ROADMAP.md`](ROADMAP.md) and
 [`docs/roadmap/`](docs/roadmap/).
 
-scoot has not cut a numbered release yet; entries are dated.
+One version covers every binary (scoot, `scoot msg`, scootbg, scootbar),
+and one `vX.Y.Z` tag releases them all ([versioning](docs/versioning.md)).
+Write a note for the next release as a level-3 entry under the
+Unreleased heading below, and keep the word "Unreleased" out of every
+other heading: the release tooling looks for that one. The release PR
+inserts the version's heading and a list generated from the commits,
+grouped by component, directly under it, so every note written since the
+previous version becomes part of the new one. Before the first numbered
+release, entries were dated.
 
 ## Unreleased
 
-### Unreleased — XWayland is compiled in by default (not breaking)
+### XWayland is compiled in by default (not breaking)
 
 - **Every default `scoot` build now carries XWayland support; there is no
   separate X11 binary to pick.** XWayland still starts only when asked, by
@@ -23,7 +31,7 @@ scoot has not cut a numbered release yet; entries are dated.
   `scoot-gpu-xwayland` keep working until stream G collapses them.
   See [XWayland](site/src/content/docs/scoot/xwayland.md).
 
-### Unreleased — the nightly binaries are retired; the installer takes tagged releases and can update (breaking)
+### the nightly binaries are retired; the installer takes tagged releases and can update (breaking)
 
 - **Breaking: the portable `nightly` build is gone and `install.sh`
   installs tagged releases only.** `--nightly` is rejected with a
@@ -42,7 +50,7 @@ scoot has not cut a numbered release yet; entries are dated.
   (`channel=release`, version, tag, date), and `--uninstall` removes
   the record too.
 
-### Unreleased — the built-in cursors are Mocu (behavior change)
+### the built-in cursors are Mocu (behavior change)
 
 - **Where no cursor theme is installed, scoot now draws
   [Mocu](https://github.com/sevmeyer/mocu-xcursor)** (Severin Meyer's
@@ -61,7 +69,7 @@ scoot has not cut a numbered release yet; entries are dated.
   `[appearance]` rejects unknown keys, so a config that still sets it
   falls back to defaults with an error in the log; delete the line.
 
-### Unreleased — the desktop profile's cursor theme is Mocu (behavior change)
+### the desktop profile's cursor theme is Mocu (behavior change)
 
 - **The desktop profile now installs
   [Mocu](https://github.com/sevmeyer/mocu-xcursor) as its cursor theme**
@@ -77,7 +85,7 @@ scoot has not cut a numbered release yet; entries are dated.
   and name it in `settings.appearance.cursor_theme`.
   See [App theme](site/src/content/docs/desktop/index.md#app-theme).
 
-### Unreleased — sharp cursors on high-DPI outputs (behavior change)
+### sharp cursors on high-DPI outputs (behavior change)
 
 - **The built-in cursor now rasterises per output scale instead of
   stretching one bitmap.** `appearance.cursor_size` is the logical size
@@ -91,7 +99,7 @@ scoot has not cut a numbered release yet; entries are dated.
   padded beyond its nominal size draws at that nominal size, like
   everything else.
 
-### Unreleased — renderer names are `cpu` / `gpu` / `auto` (breaking)
+### Renderer names are `cpu` / `gpu` / `auto` (breaking)
 
 - **`--renderer` now takes `cpu`, `gpu` or `auto` — the old `pixman`
   and `gles` spellings are rejected.** The same three names work in
@@ -106,7 +114,7 @@ scoot has not cut a numbered release yet; entries are dated.
   `auto` where you used to pick per machine. See [Backends and
   rendering](site/src/content/docs/scoot/backends.md#which-renderer-draws-the-frames).
 
-### Unreleased — per-output position and live mode changes (behavior change)
+### Per-output position and live mode changes (behavior change)
 
 - **Monitors can be arranged with `position = [x, y]` in `[[outputs]]`**,
   in logical pixels — `[-1920, 0]` puts a 1080p monitor left of the
@@ -122,7 +130,7 @@ scoot has not cut a numbered release yet; entries are dated.
   running size, and the reload reply says so
   (`outputs.DP-1.mode (could not switch to 1920x1080; kept 1600x900)`).
   See [Outputs](site/src/content/docs/scoot/outputs.md).
-### Unreleased — `--tty` names the DRM-master loser after a VT switch (bug fix)
+### `--tty` names the DRM-master loser after a VT switch (bug fix)
 
 - **Switching back to a `--tty` session no longer fails silently.**
   The seat daemon sometimes loses the DRM-master re-acquire race with
@@ -137,7 +145,7 @@ scoot has not cut a numbered release yet; entries are dated.
   while the display is dead, so check `live` before trusting pixels). See [VT
   switching](site/src/content/docs/scoot/backends.md#hotplug-vt-switching-captures).
 
-### Unreleased — `--tty` reconnects the seat after a lost VT-switch master race (bug fix)
+### `--tty` reconnects the seat after a lost VT-switch master race (bug fix)
 
 - **An unprivileged `--tty` session whose switch back lost the
   seat daemon's master race gets its display back on the spot.**
@@ -175,7 +183,7 @@ scoot has not cut a numbered release yet; entries are dated.
   color](site/src/content/docs/scootbg/images.md).
 
 
-### Unreleased — ginger-night, the new default desktop look (behavior change)
+### Ginger-night, the new default desktop look (behavior change)
 
 - **A desktop profile with no `look` choice now renders the new
   `ginger-night` look** (the cat-peeking image: ginger text-glyph art on
