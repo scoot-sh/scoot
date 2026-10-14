@@ -23,31 +23,26 @@
 # directory, so CI builds the vendor-staged tree of HEAD -- the same
 # layout the published tarball unpacks to -- and nothing is rewritten.
 #
-# Path filters (the CLAUDE.md rule: CI runs only what changed): a PR or
-# a push to main runs this only when the deb tooling, the smoke script
-# they run, or this workflow could have changed. `packaging/deb` is
-# claimed as a no-op in ci.yml's classify job, so a deb-only change
-# runs here and nowhere else. Docs-only pushes start nothing: the
-# README is negated below and every other doc path never matches.
+# Triggers: PAUSED on pull requests and pushes to main (user,
+# 2026-10-13) until these packages are published; per-merge builds stay
+# with nix and the portable binaries. It still runs on a `v*` release tag,
+# weekly, and by hand (`gh workflow run`), so a broken package is found
+# before it ships. To resume per-PR runs, restore the path-filtered
+# `pull_request`/`push` triggers from git history (packaging/<distro>/**,
+# scripts/smoke-test.sh, this file).
 
 name: deb packages (.debs in a Debian container)
 
 on:
-  pull_request:
-    paths:
-      - 'packaging/deb/**'
-      - '!packaging/deb/README.md'
-      - 'scripts/smoke-test.sh'
-      - 'scripts/vendor-release.sh'
-      - '.github/workflows/deb.yml'
+  # Paused on pull requests and pushes until these packages are published
+  # (user, 2026-10-13: keep the per-merge builds to nix and the portable
+  # binaries for now). Still run on a release tag, weekly, and by hand, so a
+  # broken package is found before it is shipped, not on release day.
   push:
-    branches: [main]
-    paths:
-      - 'packaging/deb/**'
-      - '!packaging/deb/README.md'
-      - 'scripts/smoke-test.sh'
-      - 'scripts/vendor-release.sh'
-      - '.github/workflows/deb.yml'
+    tags: ['v*']
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
