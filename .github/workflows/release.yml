@@ -310,6 +310,9 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
 
       - name: Stage the tarball
+        # In the dev shell, which has the tools the script checks for
+        # (cargo-deny among them), as packaging.yml's offline check does.
+        shell: nix develop --command bash -euo pipefail {0}
         env:
           RESOLVE_VERSION: ${{ needs.resolve.outputs.version }}
         run: |
