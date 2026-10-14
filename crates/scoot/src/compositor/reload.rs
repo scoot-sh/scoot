@@ -735,7 +735,7 @@ impl State {
         if fresh.xwayland != self.startup_xwayland {
             report.refused.push(refused(
                 field::XWAYLAND,
-                "takes effect on restart: the X server starts once at startup (and needs an `xwayland` build)",
+                "takes effect on restart: the X server starts once at startup (and needs the Xwayland binary on PATH)",
             ));
         }
         // The globals are advertised once at startup (or never), so
