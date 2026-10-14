@@ -187,19 +187,35 @@ jobs:
           ver=$(scripts/workspace-version)
           ./result-scoot/bin/scoot --version | grep -qF "scoot $ver (ipc protocol "
           # The packaged single build links no libgbm (the scanout tier
-          # reaches it at run time through the in-tree stub).
-          # (`strings`, not `nm`: this binary is stripped, so the
-          # symbol table is gone -- but the stub's `dlopen("libgbm.so.1")`
-          # soname literal lives in rodata and survives the strip. Its
-          # presence in `scoot` proves the stub is linked in.
+          # reaches it at run time through the in-tree stub). Probe the
+          # real compositor behind the `makeBinaryWrapper` PATH wrapper:
+          # `wrapProgram` renames it to `.scoot-wrapped` and leaves a small
+          # ELF wrapper at `bin/scoot`, so `strings bin/scoot` sees only
+          # the wrapper (no stub literal) and `readelf -d bin/scoot` is
+          # vacuous (the wrapper links only libc) -- both checks below run
+          # against the wrapped binary, falling back to `bin/scoot` if the
+          # wrapper ever goes away. (`--version` above keeps exercising
+          # the wrapper itself: it is the shipped entry point.)
+          # (`strings`, not `nm`: this binary is stripped (`nm: no
+          # symbols`), and the stub's symbols are static, not dynamic (so
+          # `nm -D` shows no `gbm_*` either) -- but the stub's
+          # `dlopen("libgbm.so.1")` soname literal lives in rodata and
+          # survives the strip. Its presence in the wrapped binary proves
+          # the stub is linked in (build.rs compiles it exactly when the
+          # `gpu-scanout` feature is on, so the literal also proves the
+          # tier rode along).
           # `readelf` matches are scoped to NEEDED: the RUNPATH names every
           # buildInput lib dir, including mesa-libgbm's, and a bare match
           # would trip on that path while needing nothing.)
-          if readelf -d ./result-scoot/bin/scoot | grep 'NEEDED' | grep -qi 'libgbm'; then
+          scootbin=./result-scoot/bin/.scoot-wrapped
+          if [ ! -x "$scootbin" ]; then
+            scootbin=./result-scoot/bin/scoot
+          fi
+          if readelf -d "$scootbin" | grep 'NEEDED' | grep -qi 'libgbm'; then
             echo "::error title=packaged scoot references libgbm::the single build must carry no libgbm DT_NEEDED entry."
             exit 1
           fi
-          if ! strings ./result-scoot/bin/scoot | grep -qF 'libgbm.so.1'; then
+          if ! strings "$scootbin" | grep -qF 'libgbm.so.1'; then
             echo "::error title=packaged scoot lost its libgbm stub::the scanout tier reaches libgbm through the in-tree stub's dlopen; without that literal the tier could never load."
             exit 1
           fi
