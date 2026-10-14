@@ -1433,8 +1433,8 @@ in
         type = lib.types.bool;
         default = true;
         description = ''
-          Theme the cursor from the look (Vanilla-DMZ, 24 px: the
-          compositor cursor plus `XCURSOR_THEME`/`XCURSOR_SIZE`
+          Theme the cursor from the look (Mocu white at its native
+          24 px: the compositor cursor plus `XCURSOR_THEME`/`XCURSOR_SIZE`
           for X11 apps). Set to `false` to keep the cursor alone
           (a value you set in `settings.appearance` still wins).
         '';

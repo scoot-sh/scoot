@@ -207,8 +207,10 @@
 #   service (no NetworkManager takeover, no Bluetooth hardware
 #   switch -- pinned off);
 #   the theme (`desktop-theme-look` child) runs with the profile --
-#   the look's cursor in the compositor config (one priority below
-#   Stylix's), GTK settings, the qt6ct config plus
+#   the look's cursor in the compositor config (Mocu, one priority
+#   below Stylix's) and its theme files on disk (both `Mocu` and
+#   `Mocu-Black` carry every canonical and legacy cursor name, each
+#   file loading through libXcursor), GTK settings, the qt6ct config plus
 #   `QT_QPA_PLATFORMTHEME`, the dark-mode preference from the look's
 #   polarity, the fontconfig default (UI face for sans-serif,
 #   terminal face for monospace), the look's UI face as the bar's
@@ -892,6 +894,13 @@ let
   # no-picker-fat content check). Building it needs no network; off
   # Linux it is never referenced.
   leanClipClosure = if isLinux then pkgs.closureInfo { rootPaths = [ leanClip ]; } else null;
+  # The desktop profile's default cursor theme as the modules default
+  # it: Mocu white on `out` (plus Mocu-Black on `black`), built from
+  # the vendored SVGs scoot also draws as its built-in cursors. The
+  # same expression both `cursor.package` defaults import, so the pins
+  # below test what ships. Null off Linux, where the profile's tools
+  # default to null instead.
+  mocuTheme = if isLinux then import ./mocu-cursor-theme.nix { inherit pkgs; } else null;
 
   # --- scootbg ([wallpaper]) evaluations under test ---
   # NixOS: on by default with `enable`, installing the package.
@@ -6344,7 +6353,7 @@ let
           background_color = "#0E0E0E";
           focus_ring_active_color = "#FF9A30";
           focus_ring_inactive_color = "#4E2913";
-          cursor_theme = "Vanilla-DMZ";
+          cursor_theme = "Mocu";
           cursor_size = 24;
         };
       true
@@ -6650,7 +6659,7 @@ let
           background_color = "#FCFBFB";
           focus_ring_active_color = "#3D579A";
           focus_ring_inactive_color = "#D5D7DD";
-          cursor_theme = "Vanilla-DMZ";
+          cursor_theme = "Mocu";
           cursor_size = 24;
         };
       true
@@ -6731,7 +6740,7 @@ let
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
-          pkgs.vanilla-dmz
+          mocuTheme
           pkgs.adwaita-icon-theme
           pkgs.nerd-fonts.droid-sans-mono
           pkgs.dejavu_fonts.minimal
@@ -6749,7 +6758,7 @@ let
           background_color = "#271A1F";
           focus_ring_active_color = "#E59560";
           focus_ring_inactive_color = "#423F51";
-          cursor_theme = "Vanilla-DMZ";
+          cursor_theme = "Mocu";
           cursor_size = 24;
         };
       true
@@ -6769,7 +6778,7 @@ let
           background_color = "#241721";
           focus_ring_active_color = "#31a9e5";
           focus_ring_inactive_color = "#e36e38";
-          cursor_theme = "Vanilla-DMZ";
+          cursor_theme = "Mocu";
           cursor_size = 24;
         };
       true
@@ -6786,7 +6795,7 @@ let
           background_color = "#2B3648";
           focus_ring_active_color = "#FF9A49";
           focus_ring_inactive_color = "#5E4B5B";
-          cursor_theme = "Vanilla-DMZ";
+          cursor_theme = "Mocu";
           cursor_size = 24;
         };
       true
@@ -6816,7 +6825,7 @@ let
           background_color = "#0E0E0E";
           focus_ring_active_color = "#FF9A30";
           focus_ring_inactive_color = "#4E2913";
-          cursor_theme = "Vanilla-DMZ";
+          cursor_theme = "Mocu";
           cursor_size = 24;
         };
       true
@@ -7743,7 +7752,7 @@ let
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
-          pkgs.vanilla-dmz
+          mocuTheme
           pkgs.adwaita-icon-theme
           pkgs.nerd-fonts.droid-sans-mono
           pkgs.dejavu_fonts.minimal
@@ -7844,7 +7853,7 @@ let
           pkgs.playerctl
           # ...and the default look's theme seven (cursor, icon, all
           # three faces, qt6ct and its Adwaita style).
-          pkgs.vanilla-dmz
+          mocuTheme
           pkgs.adwaita-icon-theme
           pkgs.nerd-fonts.droid-sans-mono
           pkgs.dejavu_fonts.minimal
@@ -10978,7 +10987,7 @@ let
       true
     )
     (
-      assert hmTheme.config.systemd.user.sessionVariables.XCURSOR_THEME == "Vanilla-DMZ";
+      assert hmTheme.config.systemd.user.sessionVariables.XCURSOR_THEME == "Mocu";
       true
     )
     (
@@ -10986,7 +10995,7 @@ let
       true
     )
     (
-      assert hmTheme.config.programs.scoot.settings.appearance.cursor_theme == "Vanilla-DMZ";
+      assert hmTheme.config.programs.scoot.settings.appearance.cursor_theme == "Mocu";
       true
     )
     (
@@ -14536,7 +14545,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["appearance"] == {"background_color": "#FCFBFB", "focus_ring_active_color": "#3D579A", "focus_ring_inactive_color": "#D5D7DD", "cursor_theme": "Vanilla-DMZ", "cursor_size": 24}, got["appearance"]
+  assert got["appearance"] == {"background_color": "#FCFBFB", "focus_ring_active_color": "#3D579A", "focus_ring_inactive_color": "#D5D7DD", "cursor_theme": "Mocu", "cursor_size": 24}, got["appearance"]
   assert got["wallpaper"]["mode"] == "fill", got["wallpaper"]
   assert got["wallpaper"]["image"].endswith("music-desk.png"), got["wallpaper"]
   assert got["wallpaper"]["command"].endswith("/bin/scootbg"), got["wallpaper"]
@@ -14576,7 +14585,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B", "cursor_theme": "Vanilla-DMZ", "cursor_size": 24}, got["appearance"]
+  assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B", "cursor_theme": "Mocu", "cursor_size": 24}, got["appearance"]
   assert got["wallpaper"]["mode"] == "fill", got["wallpaper"]
   assert got["wallpaper"]["image"].endswith("moonrise.png"), got["wallpaper"]
   assert got["wallpaper"]["command"].endswith("/bin/scootbg"), got["wallpaper"]
@@ -14596,7 +14605,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["appearance"] == {"background_color": "#0E0E0E", "focus_ring_active_color": "#FF9A30", "focus_ring_inactive_color": "#4E2913", "cursor_theme": "Vanilla-DMZ", "cursor_size": 24}, got["appearance"]
+  assert got["appearance"] == {"background_color": "#0E0E0E", "focus_ring_active_color": "#FF9A30", "focus_ring_inactive_color": "#4E2913", "cursor_theme": "Mocu", "cursor_size": 24}, got["appearance"]
   assert got["wallpaper"]["mode"] == "fit", got["wallpaper"]
   assert got["wallpaper"]["fill"] == "#0E0E0E", got["wallpaper"]
   assert got["wallpaper"]["image"].endswith("wallpaper.png"), got["wallpaper"]
@@ -14798,7 +14807,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -x "gtk-theme-name=Adwaita" ${gtkLightConf}
     grep -F -x "gtk-icon-theme-name=Adwaita" ${gtkLightConf}
     grep -F -x "gtk-font-name=DejaVu Sans 11" ${gtkLightConf}
-    grep -F -x "gtk-cursor-theme-name=Vanilla-DMZ" ${gtkLightConf}
+    grep -F -x "gtk-cursor-theme-name=Mocu" ${gtkLightConf}
     grep -F -x "gtk-cursor-theme-size=24" ${gtkLightConf}
     grep -F -x "gtk-application-prefer-dark-theme=false" ${gtkLightConf}
     echo "ok: GTK settings carry the light look"
@@ -14930,6 +14939,37 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
         print("ok: %s text=%.2f on-accent=%.2f accent=%.2f" % (path.split("/")[-1], text, on_accent, accent))
     ' ${gtkCssLight} ${gtkCssDark} ${gtkCssBurst} ${gtkCssMoon} ${gtkCssGinger}
     echo "ok: every look's app colors pass AA"
+
+    # 13l5. The Mocu cursor theme files (`nix/mocu-cursor-theme.nix`,
+    #      the same expression both `cursor.package` defaults import):
+    #      both theme dirs with their `index.theme`, every canonical
+    #      name the compositor looks up (each `CursorIcon`'s own name --
+    #      `left_ptr`, `default`, `pointer`, `text`, `wait`,
+    #      `progress`, `crosshair`, `not-allowed`, `grab`, `grabbing`,
+    #      `all-scroll`, `col-resize`, `row-resize`, every
+    #      `n/s/e/w/ne/nw/se/sw/ew/ns/nesw/nwse-resize`, `zoom-in`,
+    #      `zoom-out`, `help`, `context-menu`, `alias`, `copy`,
+    #      `no-drop`, `cell`, `vertical-text` -- plus the legacy
+    #      aliases `hand2`, `xterm`, `watch`, `fleur`,
+    #      `sb_h_double_arrow` and the sides/corners), and every file
+    #      loadable by libXcursor: `xcur2png` loads through libXcursor
+    #      and re-emits an xcursorgen config, so rendering each file
+    #      (symlinks resolved first) is the round-trip proof that
+    #      `xcursorgen`'s output loads.
+    grep -F -x "Name=Mocu" ${mocuTheme.out}/share/icons/Mocu/index.theme
+    grep -F -x "Name=Mocu-Black" ${mocuTheme.black}/share/icons/Mocu-Black/index.theme
+    for cursor in left_ptr default pointer hand2 text xterm wait watch progress crosshair not-allowed grab grabbing all-scroll col-resize row-resize n-resize s-resize e-resize w-resize ne-resize nw-resize se-resize sw-resize ew-resize ns-resize nesw-resize nwse-resize zoom-in zoom-out help context-menu alias copy no-drop cell vertical-text fleur sb_h_double_arrow move all-resize top_side bottom_side left_side right_side top_left_corner top_right_corner bottom_left_corner bottom_right_corner; do
+      test -e "${mocuTheme.out}/share/icons/Mocu/cursors/$cursor" || { echo "white theme missing $cursor" >&2; exit 1; }
+      test -e "${mocuTheme.black}/share/icons/Mocu-Black/cursors/$cursor" || { echo "black theme missing $cursor" >&2; exit 1; }
+    done
+    echo "ok: both Mocu themes carry every canonical and legacy cursor name"
+    mkdir -p "$TMPDIR/xcur"
+    for cursor in ${mocuTheme.out}/share/icons/Mocu/cursors/* ${mocuTheme.black}/share/icons/Mocu-Black/cursors/*; do
+      target=$(readlink -f "$cursor")
+      ${pkgs.xcur2png}/bin/xcur2png -q -d "$TMPDIR/xcur" -c "$TMPDIR/xcur/probe.conf" "$target" || { echo "xcur2png refused $cursor" >&2; exit 1; }
+    done
+    echo "ok: every Mocu cursor file loads through libXcursor"
+
 
     # 13m. The look's static app files apply from the flake (foot
     #      palette, starship prompt, Helix config beside its theme,
@@ -15348,7 +15388,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))
-    assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B", "cursor_theme": "Vanilla-DMZ", "cursor_size": 24}, got["appearance"]
+    assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B", "cursor_theme": "Mocu", "cursor_size": 24}, got["appearance"]
     assert got["wallpaper"]["image"].endswith("moonrise.png"), got["wallpaper"]
     ' ${hmDocsDesktopToml}
     echo "ok: documented home-manager desktop renders moonrise"

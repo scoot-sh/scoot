@@ -382,12 +382,14 @@ in
     # below refuse loudly instead of installing nothing silently.
     cursor.package = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = if isLinux then (if pkgs ? vanilla-dmz then pkgs.vanilla-dmz else null) else null;
-      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.vanilla-dmz else null";
+      default = if isLinux then (import ../mocu-cursor-theme.nix { inherit pkgs; }) else null;
+      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then (import ./mocu-cursor-theme.nix) else null";
       description = ''
-        The cursor theme to install for the look (Vanilla-DMZ: the
-        classic X cursor, 3.3 MiB unpacked against Bibata's 322 MiB).
-        Null installs nothing. Linux-only: null off Linux.
+        The cursor theme to install for the look (Mocu white, built
+        from the vendored SVGs scoot also draws as its built-in
+        cursors -- see `nix/mocu-cursor-theme.nix`; the `black` output
+        beside it carries Mocu-Black). Null installs nothing.
+        Linux-only: null off Linux.
       '';
     };
 

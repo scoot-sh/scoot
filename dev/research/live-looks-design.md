@@ -51,7 +51,7 @@ it afterwards.
   The name is an `enum` (195-204), defaulted to `ginger-night` at
   `mkDefault` (`home.nix:503-505`, `nixos.nix:2235-2237`). The one
   reading helper is `nix/modules/theme-look.nix` (`lookFor`, `themed`,
-  `appColors`; cursor fixed at Vanilla-DMZ 24, icons Adwaita, 61-73).
+  `appColors`; cursor fixed at Mocu 24, icons Adwaita, 61-73).
 - **Three ways a look lands, all read-only.**
   - Module-priority leaves merged into the compositor's and the bar's
     TOML. `home.nix:532-539` puts the look's `appearance.*` and
@@ -291,14 +291,11 @@ ring-width = 2
 ring-inactive-width = 2               # default = ring-width
 
 [cursor]
-theme = "Vanilla-DMZ"
+theme = "Mocu"                        # the profile default: Mocu white at its native 24,
+                                      # built as real theme files from the vendored SVGs
+                                      # the built-in fallback draws (#572); Mocu-Black
+                                      # beside it in the same package
 size = 24
-accent = "#FF9A49"                    # #rrggbb or "none"; the drawn fallback cursor's accent (#572's cursor_accent); default = focus
-# body: unset by default; the fallback cursor keeps its own near-black body
-# accent and body tint only scoot's *drawn fallback* cursor, which shows only
-# when no xcursor theme resolves; with `theme` set and installed (every
-# shipped look sets Vanilla-DMZ) they are invisible, and a themed cursor
-# is never tinted. "none" disables the accent, as #572's `cursor_accent`.
 
 [wallpaper]                           # one unit: never merged per key (§4.3)
 image = "wallpaper.png"               # inside the look dir; or `color = "#…"`, never both

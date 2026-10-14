@@ -42,6 +42,22 @@ scoot has not cut a numbered release yet; entries are dated.
   `[appearance]` rejects unknown keys, so a config that still sets it
   falls back to defaults with an error in the log; delete the line.
 
+### Unreleased — the desktop profile's cursor theme is Mocu (behavior change)
+
+- **The desktop profile now installs
+  [Mocu](https://github.com/sevmeyer/mocu-xcursor) as its cursor theme**
+  (`Mocu`, white at its native 24 px, with `Mocu-Black` beside it in the
+  same package) instead of Vanilla-DMZ. It is built from the same vendored
+  SVGs scoot draws as its built-in fallback cursors (see
+  `nix/mocu-cursor-theme.nix`), so the compositor, GTK, Qt, XWayland and
+  greeter cursors all agree — and the fallback, when it shows, is the same
+  family. The busy cursors are static first frames in both (Mocu's
+  animation frames are not vendored).
+- **Breaking, for desktop-profile users:** the default cursor changes
+  shape. To keep another theme, point `desktop.theme.cursor.package` at it
+  and name it in `settings.appearance.cursor_theme`.
+  See [App theme](site/src/content/docs/desktop/index.md#app-theme).
+
 ### Unreleased — sharp cursors on high-DPI outputs (behavior change)
 
 - **The built-in cursor now rasterises per output scale instead of

@@ -759,12 +759,17 @@ in
       theme = desktop.options.theme // {
         cursor.package = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
-          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.vanilla-dmz or null else null;
-          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.vanilla-dmz else null";
+          default =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              (import ../mocu-cursor-theme.nix { inherit pkgs; })
+            else
+              null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then (import ./mocu-cursor-theme.nix) else null";
           description = ''
             The cursor theme to install system-wide for the look
-            (Vanilla-DMZ). Null installs nothing. Linux-only: null
-            off Linux.
+            (Mocu white, the same default as the home-manager side --
+            see `nix/mocu-cursor-theme.nix`). Null installs nothing.
+            Linux-only: null off Linux.
           '';
         };
 

@@ -48,14 +48,20 @@ writes these same keys — `settings.appearance.background_color =
 
 ## The built-in cursors
 
-Where no cursor theme is installed (a webtop or minimal container, the
-everyday case), scoot draws its own cursors: [Mocu](https://github.com/sevmeyer/mocu-xcursor),
+Where no cursor theme is installed (a webtop or minimal container),
+scoot draws its own cursors: [Mocu](https://github.com/sevmeyer/mocu-xcursor),
 Severin Meyer's "modest xcursor theme", released under CC0 1.0 (public
 domain). Mocu's SVG sources are built into scoot unchanged, with their
 license, and scoot rasterises them itself at each output's pixel size, as
 Mocu draws them: white fill, dark outline, a faint drop shadow. The busy
 spinners show the first frame of Mocu's animation. `cursor_color` picks the
 fill (see above). Nothing is loaded from an image file at runtime.
+
+With the desktop profile you rarely see these: the profile installs Mocu
+as real XCursor theme files too (same vendored art, white at its native
+24 px with `Mocu-Black` beside it), names it in `cursor_theme`, and
+exports it for X11 apps — so theme and fallback are the same family
+either way. See [the desktop profile](../desktop/index.md#app-theme).
 
 Mocu is drawn on a 24-pixel grid, which is how scoot draws it at 24px and
 on multiples of it. The default 16px is Mocu downscaled, with each shape

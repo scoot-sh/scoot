@@ -120,4 +120,8 @@ for no attribution; it is credited here anyway. The SVG sources scoot draws
 are vendored unchanged, with Mocu's LICENSE.txt, under
 crates/scoot/src/compositor/cursor/shapes/mocu/, compiled into scoot and
 rasterised by it in Mocu's own colors. The docs image
-site/src/assets/cursor-family.png shows the result.
+site/src/assets/cursor-family.png shows the result. The desktop profile
+ships the same art as a real XCursor theme too (`Mocu` white plus
+`Mocu-Black`, built by `nix/mocu-cursor-theme.nix` from those SVGs at
+24/32/48/64 px with the full cursor name set; the busy cursors are static
+first frames there as well), under the same CC0 dedication.

@@ -58,13 +58,15 @@ in
     dim = look.barColors.dim;
   };
 
-  # The one cursor for every look (Vanilla-DMZ: the classic X cursor,
-  # 3.3 MiB unpacked against Bibata's 322 MiB -- measured on the
-  # pinned rev -- so the fallback costs nothing). Same name and size
-  # everywhere the theme names a cursor: the compositor config, GTK's
-  # `settings.ini`, `XCURSOR_THEME`/`XCURSOR_SIZE` and the greeter.
+  # The one cursor for every look (Mocu: the same art as the
+  # compositor's built-in fallback cursors, built as a real XCursor
+  # theme from the vendored SVGs -- see `nix/mocu-cursor-theme.nix` --
+  # so compositor-drawn, GTK, Qt, XWayland and greeter cursors all
+  # agree). Same name and size everywhere the theme names a cursor:
+  # the compositor config, GTK's `settings.ini`,
+  # `XCURSOR_THEME`/`XCURSOR_SIZE` and the greeter.
   cursor = {
-    name = "Vanilla-DMZ";
+    name = "Mocu";
     size = 24;
   };
 
