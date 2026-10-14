@@ -50,7 +50,23 @@ release, entries were dated.
   (`channel=release`, version, tag, date), and `--uninstall` removes
   the record too.
 
-### the built-in cursors are Mocu (behavior change)
+### One version for every binary, and builds that say where they came from
+
+- **scoot, `scoot msg`, scootbg and scootbar now share one version, and
+  one tag (`vX.Y.Z`) releases them all.** The first release is v0.2.0.
+  Install and upgrade them together; compatibility between them is
+  carried by protocol numbers, which `--version` still prints
+  ([versions](site/src/content/docs/reference/versions.md)).
+- **A build that is not a release labels its version** with the last
+  release and the commit: `scoot 0.2.0+14.g615608c (ipc protocol 10)`.
+  The line keeps its shape, and the IPC `version` reply carries the same
+  string. Release builds, and Nix builds, print the plain version.
+- **FlakeHub's rolling releases of `main` are now numbered one minor
+  ahead of the last release** (`0.3.<commits>` while releases are
+  0.2.x). A flake input pinned to `0.1.*` stops following `main`:
+  use `https://flakehub.com/f/scoot-sh/scoot/*.tar.gz`.
+
+### The built-in cursors are Mocu (behavior change)
 
 - **Where no cursor theme is installed, scoot now draws
   [Mocu](https://github.com/sevmeyer/mocu-xcursor)** (Severin Meyer's
