@@ -10,9 +10,9 @@ mod cli;
 #[cfg(target_os = "linux")]
 mod compositor;
 
-/// The `runtime-gbm` spike's static libgbm stub probe (see `gbm-stub/`).
+/// The `gpu-scanout` static libgbm stub probe (see `gbm-stub/`).
 /// Linux-only like the compositor: the stub is only linked there.
-#[cfg(all(target_os = "linux", feature = "runtime-gbm"))]
+#[cfg(all(target_os = "linux", feature = "gpu-scanout"))]
 mod gbm_stub;
 
 use std::process::ExitCode;

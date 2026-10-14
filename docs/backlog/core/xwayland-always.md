@@ -9,10 +9,10 @@ blocked: null
 # Always compile in xwayland: pure-Rust x11rb costs no link-time dependency
 
 Filed 2026-10-10 (spike `runtime-gbm` follow-up). Serves **daily-drive**:
-today X11 support is a second build axis (`scoot-xwayland`,
-`scoot-gpu-xwayland`) a user must predict the need for; if it costs no
-link-time dependency it should be compiled in and gated at runtime like
-everything else.
+today X11 support is the last remaining build axis (`scoot-xwayland`,
+since PR #588 collapsed the GPU axis) a user must predict the need for;
+if it costs no link-time dependency it should be compiled in and gated
+at runtime like everything else.
 
 ## The gap
 
@@ -33,16 +33,18 @@ keylog/snoop by design).
    record it here.
 2. If the delta is accepted, compile the feature in by default (a
    default-on feature), keeping every runtime gate exactly as is, and
-   collapse `flake.nix` `scoot-xwayland` / `scoot-gpu-xwayland` into their
-   base packages (keeping the `PATH` wrapper for the Xwayland binary).
+   collapse `flake.nix` `scoot-xwayland` into `scoot` (keeping the `PATH`
+   wrapper for the Xwayland binary; `scoot-gpu-xwayland` is already gone,
+   collapsed in PR #588).
    The feature stays disableable: the CPU-only minimal build
    (`cargo build --no-default-features`, see
-   `runtime-gbm-productionise.md`'s stage C gate) excludes XWayland, so
+   `../resolved/runtime-gbm-productionise-done.md`'s stage C gate) excludes XWayland, so
    "compiled in by default" must mean default-on, never unconditional —
    no X11 code, no extra crates, no `Xwayland`-binary expectation in the
    minimal build.
-3. Update `install.md#which-build-do-i-need`: the X11 axis goes away with
-   the GPU axis (see `./runtime-gbm-productionise.md`), leaving one
+3. Update `install.md#which-build-do-i-need`: the X11 axis goes away
+   (the GPU axis already did in
+   `../resolved/runtime-gbm-productionise-done.md`), leaving one
    package plus the trust decision, which stays in the config, not the
    download. The minimal build gets its own documented command or
    package there too.

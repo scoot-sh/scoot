@@ -157,10 +157,9 @@ desktop options are titled **configuration.nix and home.nix**: each
 side does its half (the system installs the service, your user runs
 it), so set them in both.
 
-On real hardware with a GPU, take the GPU build: add
-`package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scoot-gpu;` to
-`programs.scoot` in `configuration.nix` (which then starts
-`{ inputs, pkgs, ... }:`), plus `hardware.graphics.enable = true;`. VMs
+On real hardware with a GPU, the same default package scans out through
+it — nothing to pick — once the OS provides the drivers
+(`hardware.graphics.enable = true;` on NixOS). VMs
 and containers stay on the default.
 
 The login screen, every piece and every option: [The scoot
@@ -360,11 +359,12 @@ All four work? You are done.
 
 ## Which build do I need?
 
-One build is enough for most people: `scoot`. With the default
-(`auto`) it resolves to the CPU renderer there, so it needs no GPU,
-and it is what the script and the default Nix package install. On
-real hardware with a GPU, the `scoot-gpu` Nix package scans out
-through the GPU. Every build, flag and renderer rule
+One build is enough for everyone: `scoot`. With the default
+(`auto`) it resolves to the CPU renderer where there is no GPU and to
+the GPU renderer on real hardware, so it is what the script and the
+default Nix package install. Only X11 apps need a different package
+(`scoot-xwayland`), and only the deliberate avoidance of all GPU code
+needs another (`scoot-minimal`). Every build, flag and renderer rule
 is in [Builds and renderers](../../reference/builds/); what the binary
 cache trusts is in [Use the binary cache](../binary-cache/).
 

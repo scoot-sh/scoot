@@ -7,27 +7,39 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# `gpu-scanout` compiles everything that allocates GPU buffers through GBM:
-# the `--tty` GPU scanout tier (`DrmCompositor` over a GBM swapchain -- see
-# `compositor/tty/`) and `--nested`'s dma-buf presentation to its host
-# (`compositor/nested/gpu.rs`). It is **off by default on purpose**. The
-# name predates the second user; one feature per link-time cost is the
-# honest axis, and a second feature for the same libgbm would double the
-# packaging matrix (`packages.scoot-gpu`) for nothing.
+# `gpu-scanout` compiles the `--tty` GPU scanout tier (`DrmCompositor` over a
+# GBM swapchain -- see `compositor/tty/`) and `--nested`'s dma-buf
+# presentation to its host (`compositor/nested/gpu.rs`). It is **on by
+# default**: one binary serves GPU and GPU-free boxes alike, and `auto`
+# (the default renderer request) picks the tier per session. GPU-free
+# operation on webtop/no-GPU boxes is a fixed project decision (see
+# `CLAUDE.md`), and this feature honors it: the tier reaches libgbm through
+# the in-tree static ABI stub (`gbm-stub/gbm_stub.c`, compiled by
+# `build.rs`) instead of a link-time dependency, so the produced binary
+# carries no libgbm `DT_NEEDED` entry (check with `readelf -d`/`ldd`) and
+# still starts where libgbm is absent, loading it by `dlopen` only when a
+# GBM entry point is actually called. Without libgbm every entry fails
+# closed, which the existing fallbacks already handle (`tty::try_scanout`
+# warns and keeps dumb buffers; `nested::gpu` keeps read-back).
 #
 # Unlike `renderer_gl`, which reaches libEGL/libGLESv2 through `dlopen` and so
-# costs a GPU-free machine nothing, Smithay's `backend_gbm` is a real
-# *link-time* dependency on libgbm: with it enabled the produced binary
-# carries `libgbm.so.1` in its `DT_NEEDED` list and will not start at all
-# where that library is absent. GPU-free operation on webtop/no-GPU boxes is a
-# fixed project decision (see `CLAUDE.md`), so the default build must not link
-# it -- `cargo build` keeps producing a binary that runs anywhere, and a
-# distribution targeting real hardware opts in with
-# `--features gpu-scanout`.
+# costs a GPU-free machine nothing either way, Smithay's `backend_gbm` is a
+# real *link-time* dependency on libgbm (`gbm-sys`'s `#[link(name = "gbm")]`)
+# -- the stub above is what keeps it out of `DT_NEEDED`. The mechanism needs
+# build.rs's `static=gbm` to resolve the `gbm_*` refs *before* gbm-sys's plain
+# `-lgbm` is processed under `--as-needed`, so the shared object is never
+# marked NEEDED; nothing in cargo/rustc contracts that order. A flipped order
+# fails loudly (a `DT_NEEDED libgbm` CI's `ldd` gate catches; the archive
+# simply goes unpulled). Verified `readelf -d` clean on debug AND release
+# (fat LTO) AND nix/crane AND an lld link (see the ticket for the raw
+# outputs); re-verify all four on any `gbm` bump or linker change.
 #
-# Off by default does not mean unexercised: the standard verification set is
-# run twice, once per feature flavour, and `ldd` on both binaries is the proof
-# that the default one really is free of libgbm.
+# A minimal CPU-only build stays available via `cargo build
+# --no-default-features`: no GBM code, no C stub (so no C compiler need),
+# no libgbm anywhere, and XWayland excludable too (see
+# `site/src/content/docs/reference/builds.md#the-smallest-build-cpu-only`).
+# In such a build `--renderer gpu` warns and keeps the CPU renderer and
+# `auto` resolves to cpu with reason `no-scanout-tier`.
 #
 # `xwayland` compiles the opt-in XWayland skeleton (`compositor/xwayland/` --
 # an X11 server inside the session, off by default behind `--xwayland` and
@@ -43,22 +55,8 @@ license.workspace = true
 # `--no-default-features` is the CPU-only minimal build without it -- no X11
 # code, no extra crates, no `Xwayland`-binary expectation.
 [features]
-default = ["xwayland"]
+default = ["gpu-scanout", "xwayland"]
 gpu-scanout = ["smithay/backend_gbm"]
-# Spike (2026-10): runtime-loaded libgbm. Same Smithay `backend_gbm` code as
-# `gpu-scanout`, but linked against the in-tree static ABI stub
-# (`gbm-stub/gbm_stub.c`, compiled by `build.rs`) instead of the system
-# libgbm: the produced binary carries no libgbm DT_NEEDED entry (check with
-# `readelf -d`/`ldd`) and still starts where libgbm is absent, loading it by
-# dlopen only when a GBM entry point is actually called. (With this feature
-# alone the GPU tier stays compiled out -- every call site is behind
-# `gpu-scanout` -- so the tier rides along once that feature is enabled too;
-# see the both-features build in the spike report.) Without libgbm every
-# entry fails closed, which the existing fallbacks already handle. Off by
-# default and orthogonal to `gpu-scanout`: a `gpu-scanout`-only build keeps
-# its old link behavior byte-identical. Do not remove `gpu-scanout` in
-# the spike -- productionisation decides the collapse (see the backlog).
-runtime-gbm = ["smithay/backend_gbm"]
 xwayland = ["smithay/xwayland"]
 
 [dependencies]
@@ -87,9 +85,11 @@ serde_json.workspace = true
 # correctly handled by build.rs's own runtime `CARGO_CFG_TARGET_OS` check.
 [build-dependencies]
 pkg-config = "0.3"
-# Only for the `runtime-gbm` spike's static libgbm stub (see `build.rs`):
-# the same version Smithay itself already resolves, so this adds a direct
-# build-dependency, not a crate.
+# Only for the `gpu-scanout` static libgbm stub (see `build.rs`): the same
+# version Smithay itself already resolves, so this adds a direct
+# build-dependency, not a crate. Only *invoked* under the feature (see
+# build.rs), so the `--no-default-features` minimal build needs no C
+# compiler.
 cc = "1"
 
 # The compositor is Linux-only; `scoot msg` builds everywhere, so the CLI can

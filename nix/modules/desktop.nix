@@ -241,7 +241,7 @@ in
     # The compositor half of XWayland support: on, the `[xwayland] enabled`
     # knob defaults on (read with `desktop.enable`). The package half stays
     # `programs.scoot.package`: point it at the flake's `scoot-xwayland`
-    # (or `scoot-gpu-xwayland`) build for X11 apps -- see site/src/content/docs/scoot/xwayland.md.
+    # build for X11 apps -- see site/src/content/docs/scoot/xwayland.md.
     # The NixOS side accepts this and reserves it; the knob itself is
     # config-file (home-manager) wiring.
     xwayland.enable = lib.mkOption {

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  *
- * Static libgbm ABI stub for the `runtime-gbm` Cargo feature (spike).
+ * Static libgbm ABI stub for the `gpu-scanout` Cargo feature.
  *
  * The problem it solves: Smithay's `backend_gbm` (via the `gbm` crate's
  * `gbm-sys`) carries `#[link(name = "gbm")]`, so any binary with the scanout
@@ -23,7 +23,7 @@
  * does fails the link loudly at build time instead of silently missing at
  * runtime. Recheck this list on any `gbm` version bump.
  *
- * `scoot_gbm_real_loaded` is the spike's own probe (1: forwarding to a
+ * `scoot_gbm_real_loaded` is the stub's own probe (1: forwarding to a
  * real libgbm, 0: fail-closed): it lets a test prove which implementation
  * answered without needing a DRM device.
  *

@@ -49,14 +49,15 @@ commands at packaging time, names move:
 | `libudev.so.1` | `systemd-libs` / `systemd-devel` | `libudev1` (minimal images: `libudev-mini1`) / `systemd-devel` |
 | `libpixman-1.so.0` | `pixman` / `pixman-devel` | `libpixman-1-0` / `libpixman-1-0-devel` |
 | `libxkbcommon.so.0` | `libxkbcommon` / `libxkbcommon-devel` | `libxkbcommon0` / `libxkbcommon-devel` |
-| `libgbm.so.1` / `libdrm.so.2` (`gpu-scanout` only) | `mesa-libgbm` / `libdrm` | not probed (not shipped; see below) |
+| `libgbm.so.1` / `libdrm.so.2` (run-time detected, never linked) | `mesa-libgbm` / `libdrm` | not probed (see below) |
 
 Notes:
 
-- The `gpu-scanout` extras stay out of the shipped build (default feature
-  set, same as the Arch packages): rebuilding with `--features
-  gpu-scanout` is a local `rpmbuild` edit (the feature on the `cargo
-  build` line, the two `-devel` packages beside it), not a separate spec.
+- The GPU libraries stay out of the link closure (the single build
+  reaches them at run time through the in-tree stub): `mesa-libgbm` /
+  `libdrm` are `Recommends` on Fedora (auto-detected, never required),
+  and rebuilding without the tier at all (`--no-default-features`) is a
+  local `rpmbuild` edit, not a separate spec.
 - Toolchain floor: both distros clear the workspace floor
   (`rust-version = "1.88"`), so no rustup is needed in the build
   containers — Fedora 43 resolves rust 1.98.1, Tumbleweed ships rust

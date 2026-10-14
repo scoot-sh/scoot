@@ -344,7 +344,7 @@ updates).
 **`nix build` fails with `error adding trust anchors from file:
 /etc/ssl/certs/ca-certificates.crt`.** That is a `nix build` run *inside* the
 builder VM (over ssh), where it downloads for itself with no CA setup. Don't
-build there: run `nix build .#scoot .#scoot-gpu` on the Mac from a shell with
+build there: run `nix build .#scoot .#scoot-minimal` on the Mac from a shell with
 `NIX_SSL_CERT_FILE` exported (above). The daemon hands the build to the
 builder and does the downloading itself. No builder restart is needed
 (2026-09-24: an agent read this error as needing a relaunch; a fresh Mac shell

@@ -175,8 +175,8 @@ optional by design, and everything it automates is documented piece by
 piece across this site.
 
 Which build sits underneath is still your call: the profile never sets
-`programs.scoot.package`, so [pick the CPU or GPU build](../start/install.md#which-build-do-i-need)
-there and the whole desktop follows it.
+`programs.scoot.package`, so [pick a build](../start/install.md#which-build-do-i-need)
+there (the default, unless you run X11 apps) and the whole desktop follows it.
 
 Two loud refusals instead of silent no-ops: `desktop.enable` without
 `programs.scoot.enable`, and a `look` without `desktop.enable`, each fail

@@ -817,6 +817,16 @@ fn open_device(
     // hardware still reports `NoGbm`/`NoEgl` exactly as before.
     let plan = match request {
         RendererRequest::Cpu => DevicePlan::Pixman(policy::Reason::Requested),
+        // Without the scanout tier compiled in, no request reaches past
+        // the policy table's `no-scanout-tier` row: probing GBM/EGL and
+        // attempting the tier here would only re-fail with a misleading
+        // `gpu-build-failed` (and a scary warn line) for what is really a
+        // build without the tier. `render::resolve` has already warned a
+        // forced `--renderer gpu` naming the missing feature; `auto` stays
+        // silent via `before_device`, as before.
+        RendererRequest::Auto | RendererRequest::Gpu if !cfg!(feature = "gpu-scanout") => {
+            DevicePlan::Pixman(policy::Reason::NoScanoutTier)
+        }
         RendererRequest::Gpu => DevicePlan::TryGpu {
             reject_software: false,
         },
@@ -824,13 +834,12 @@ fn open_device(
             policy::KmsClass::DisplayOnly => DevicePlan::Pixman(policy::Reason::DisplayOnly),
             policy::KmsClass::VirtualGpu => DevicePlan::Pixman(policy::Reason::VirtualGpu),
             policy::KmsClass::Other => {
-                // The `runtime-gbm` stub probe where the stub is linked (in
-                // the helper, so a hanging libgbm cannot wedge startup),
-                // linked-by-construction `true` in a plain `gpu-scanout`
-                // build (where libgbm is a real `DT_NEEDED` entry -- a
-                // library broken badly enough hangs the exec itself, before
-                // `main`, which no probe here can bound).
-                #[cfg(feature = "runtime-gbm")]
+                // The `gpu-scanout` stub probe where the stub is linked (in
+                // the helper, so a hanging libgbm cannot wedge startup).
+                // Without the feature the guard above already returned, so
+                // the `not` branch below is unreachable at runtime but keeps
+                // the minimal build compiling (no `gbm_stub` there).
+                #[cfg(feature = "gpu-scanout")]
                 let gbm_loadable = match crate::gbm_stub::probe_real_loaded(
                     super::render::loader::PROBE_TIMEOUT,
                 ) {
@@ -847,7 +856,7 @@ fn open_device(
                         false
                     }
                 };
-                #[cfg(not(feature = "runtime-gbm"))]
+                #[cfg(not(feature = "gpu-scanout"))]
                 let gbm_loadable = true;
                 let egl_loadable = match super::render::egl_probe() {
                     super::render::loader::Probe::Loadable => true,

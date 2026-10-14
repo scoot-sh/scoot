@@ -54,7 +54,7 @@ ALLOW = {
 CRATE = {"scoot": "scoot", "scootbg": "scootbg", "scootbar": "scootbar"}
 
 SHORT = {
-    "scoot": "Scrolling-tiling Wayland compositor (CPU renderer, no GPU stack needed)",
+    "scoot": "Scrolling-tiling Wayland compositor (auto CPU/GPU rendering, runs without a GPU)",
     "scootbg": "Wallpaper daemon for the scoot compositor",
     "scootbar": "Status bar for the scoot compositor",
 }
@@ -62,7 +62,8 @@ SHORT = {
 LONG = {
     "scoot": (
         " scoot is a lightweight Wayland compositor with scrolling columns,\n"
-        " a CPU renderer and full IPC for agents and scripts.\n"
+        " a run-time renderer choice (CPU or GPU) and full IPC for agents\n"
+        " and scripts.\n"
         " .\n"
         " This package ships the compositor, the greeter session launcher\n"
         " (scoot-session) and its wayland-sessions entry, the systemd user\n"
@@ -95,7 +96,11 @@ LONG = {
 # ships at the one version, so the pair installs at that version, filled
 # with the scootbg .deb version this run builds.
 SUGGESTS = {
-    "scoot": None,
+    # The GPU scanout tier is compiled in and reached at run time (no
+    # libgbm link dependency): `libgbm1`/`libdrm2` are auto-detected, never
+    # required -- hence `Suggests`, not `Depends` (shlibdeps derives no
+    # entry for them, and the allow-list below stays five libraries).
+    "scoot": "libgbm1, libdrm2",
     "scootbg": None,
     # The bar draws text only with a font; without one it draws a plain
     # bar. DejaVu is what the shipped example config points at.

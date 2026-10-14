@@ -42,8 +42,9 @@ release build: `scoot` 6.5 MB with those five sonames, `scootbg`
   resolves, which is also why the site's releases page names `seatd`
   on its Arch line.
 - `libudev.so.1` comes from `systemd-libs`; `libgbm.so.1`/`libdrm.so.2`
-  (the `gpu-scanout` feature's extras) from `mesa`/`libdrm`, carried
-  as `optdepends` since the shipped build is the default feature set.
+  (the GPU scanout tier's run-time libraries, auto-detected -- the shipped
+  build links neither) from `mesa`/`libdrm`, carried
+  as `optdepends` since a GPU-less box never needs them.
 - `sh` is a dependency of the `scoot` packages (the `scoot-session`
   launcher is a `sh` script, and `sh` is what the distro's own
   packages depend on — `bash` provides it); `libgcc` is one everywhere
@@ -120,11 +121,11 @@ line to drop if it ever misbehaves.
    package (CI does the same; an AUR helper builds the chain in this
    order on its own).
 
-Rebuilding with the opt-in tiers (`--features gpu-scanout` for the
-GBM scanout path, `--features xwayland` plus the `xwayland` runtime
-package) is a local `makepkg` edit, not a separate package: add the
-feature to the `cargo build` line and the matching `optdepends` to
-`depends`.
+Rebuilding with the opt-in tier (`--features xwayland` plus the
+`xwayland` runtime package) is a local `makepkg` edit, not a separate
+package: add the feature to the `cargo build` line and the matching
+`optdepends` to `depends`. The GPU scanout tier needs no such edit: it
+is on by default and detects `mesa`/`libdrm` at run time.
 
 ## What CI proves
 

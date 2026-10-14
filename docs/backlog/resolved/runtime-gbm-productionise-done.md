@@ -1,10 +1,13 @@
 ---
 title: "Productionise runtime-loaded libgbm: one default build for GPU and GPU-free boxes"
-status: "open"
-area: "core"
-priority: "medium"
-blocked: "spike PR review; Asahi M2 scanout proof"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
+resolved: "2026-10-13"
 ---
+
+# Productionise runtime-loaded libgbm: one default build for GPU and GPU-free boxes
 
 # Productionise runtime-loaded libgbm: one default build for GPU and GPU-free boxes
 
@@ -171,3 +174,82 @@ orchestrator scratchpad) and the PR discussion.
 The `xwayland`-always follow-up (`./core/xwayland-always.md`): same shape,
 separate measurement. Auto-selecting `--renderer gpu` on boxes that
 already pass `--renderer gpu` explicitly changes nothing there.
+
+## Measurements (stream G, 2026-10-14, single binary)
+
+Collapse decision: `runtime-gbm` merged INTO `gpu-scanout` (the spike
+feature is gone), `default = ["gpu-scanout"]`. One feature per tier,
+not two features for the same Smithay code: the old link-time behavior
+(`DT_NEEDED libgbm`) is gone on purpose, and the stub is proven below
+on every link flavor that matters.
+
+**Item 1, M2 scanout proof** (source `255c7cc9f`, spike
+`gpu-scanout,runtime-gbm` release build, own dir/target on the M2):
+`readelf -d` NEEDED clean (no libgbm/EGL/drm); on VT2
+`GL Renderer: "Apple M2 (G14G B0)"`,
+`renderer chosen requested=gpu source=flag tier=gpu reason=requested
+driver=apple`, `scanout="gpu"` on eDP-1 2560x1600, `scoot is up …
+renderer=gpu`; `outputs` live, screenshot 2560x1600 captured
+(`~/fx/onebuild-g-proof-gpu.png` on the box). Bare-env first run fell
+back as designed (`no libEGL.so.1` → `tier=cpu
+reason=gpu-build-failed` + dumb). `--renderer auto` (the default):
+`tier=gpu reason=hardware-renderer`. Seat released, tty1 untouched.
+
+**Item 5, link matrix** (`readelf -d` NEEDED, no libgbm): release fat
+LTO (M2) clean; debug (dev VM) clean with the `ldd` soname gate clean;
+lld link (`Linker: LLD 21.1.8` in `.comment`) clean — the
+`static=gbm`-before-`-lgbm` ordering holds under lld's `--as-needed`
+too. nix/crane and mold: CI-only (dev VM disk is the constraint).
+Ordering assumption recorded beside the `ldd` gate (`ci.yml`), in
+`build.rs` and in `crates/scoot/Cargo.toml`. Two gate false-positives
+found live and fixed: `nm | grep -i gbm_` hits hashbrown's `TagBM_E…`
+(gate names canaries now), and bare `readelf -d | grep libgbm` hits the
+dev shell's RUNPATH mesa-libgbm path (gates scope to NEEDED) — that
+RUNPATH is what the stub's `dlopen` resolves through on NixOS.
+
+**Item 4, sizes** (release fat LTO aarch64, this change): single
+7,630,928 (7.3 MB); minimal 7,037,240 (6.7 MB); `+xwayland` 8,749,552
+(8.3 MB). Collapse delta +593,688 (+8.4%) over minimal for tier+stub.
+Startup (launch → `scoot is up`, 5 alternating runs): M2 release
+`--tty` cpu mean 0.6391 / auto mean ≈0.641 (delta +2 ms); dev VM debug
+`--tty` cpu mean 0.5174 / auto mean 0.5190 (delta +1–2 ms, auto
+`no-egl` in the bare-ssh env). No startup regression either way.
+Per-frame stub cost: not re-measured — Smithay rev identical since the
+spike, stub byte-identical, `gbm` still 0.18.0 — standing ~0.08
+µs/frame (1 plane) / ~0.14 µs/frame (2 planes).
+
+**Item 6, CPU vs GPU** (`scripts/tty-tier-bench.sh`, one binary,
+`--renderer cpu` vs `--renderer gpu`, 4 rounds, medians, jiffies =
+compositor utime+stime):
+- Dev VM (virtio-gpu, llvmpipe GLES in `nix develop`; bare-ssh attempt
+  void on missing libEGL): move medians cpu 58 vs gpu 65 jiffies
+  (~+12%, near noise); width medians cpu 116 vs gpu 435.5 (~3.8x
+  dearer); idle 0 both; rss ~64 vs ~160 MB. CPU wins decisively where
+  it matters — the expected outcome; `virtual-gpu → cpu` stays.
+- M2 (eDP-1, private seatd, release single; two system-seat attempts
+  void on a held seat): move medians cpu 122 vs gpu 35 (~3.5x less
+  CPU); width medians cpu 617.5 vs gpu 171.5 (~3.6x less CPU); idle 9
+  vs 2 jiffies/10 s; rss ~120 vs ~140 MB. Reproduces the standing
+  record on the single binary; `hardware-renderer → gpu` validated.
+
+**Stage C gate (minimal product):** `--no-default-features` builds
+with `CC` pointed at a failing script (no C compiler need);
+`readelf -d` NEEDED clean; canary symbols
+(`gbm_create_device`/`scoot_gbm_real_loaded`) absent; binary starts
+(headless smoke green, `tier=cpu`). `--renderer gpu` on `--tty`
+warns `this build has no gpu scanout tier…` and keeps cpu with reason
+`no-scanout-tier`; `auto` resolves cpu with `no-scanout-tier` (an
+`open_device` early-out added for this: without it the device-time
+policy overrode the row with a misleading `gpu-build-failed`). Nix
+`packages.scoot-minimal` + CI minimal job own the product.
+
+## Resolution (2026-10-13)
+
+Landed in #588 (`feat(scoot)!:`, breaking): the stub merged into
+`gpu-scanout` (default-on, `runtime-gbm` feature gone), flake collapsed
+to `scoot` + `scoot-xwayland` + `scoot-minimal`, CI owns the minimal
+product gate, docs rewritten to one build. Evidence: M2 scanout proof
+with screenshot, both tier benches, and the link matrix live in the
+stream report (orchestrator scratchpad `onebuild-g-report.md`); suite
+counts (nextest 2471/2298, cargo test both, both smokes) in the PR body.
+The XWayland axis stays open in `../core/xwayland-always.md`.

@@ -73,22 +73,28 @@ what your package depends on, store paths are NixOS's and not yours.
 
 | Feature set | Links (sonames) | Release `scoot` |
 |---|---|---|
-| default | libinput.so.10, libseat.so.1, libudev.so.1, libpixman-1.so.0, libxkbcommon.so.0 (plus glibc, libgcc_s and their transitive closure: libevdev, libmtdev, libwacom, libgudev, libsystemd, glib) | 6.8 MB |
-| `--features gpu-scanout` | everything above, plus libgbm.so.1 and libdrm.so.2 | 7.4 MB |
-| `--features xwayland` | no new system library (pure-Rust X protocol over a socket); needs the `Xwayland` binary on `PATH` at run time | 7.9 MB |
+| default (GPU scanout tier on) | libinput.so.10, libseat.so.1, libudev.so.1, libpixman-1.so.0, libxkbcommon.so.0 (plus glibc, libgcc_s and their transitive closure: libevdev, libmtdev, libwacom, libgudev, libsystemd, glib) | 7.3 MB |
+| `--no-default-features` (CPU-only minimal) | as default, minus nothing linked (there is no GBM code to link) | 6.7 MB |
+| `--features xwayland` | no new system library (pure-Rust X protocol over a socket); needs the `Xwayland` binary on `PATH` at run time | 8.3 MB |
 
-Notes on the table: the default build deliberately links no GPU stack
-— it must run on a box with no GPU libraries installed, and CI fails a
-default build that links `libgbm` or `libEGL` (with a positive control:
-the `gpu-scanout` build must link `libgbm`, or the negative check is
-vacuous). `libEGL`/`libGLESv2` never appear in `ldd` for either build:
+Notes on the table: sizes are `cargo build --release -p scoot` on
+aarch64, re-measured for this change (previously 6.8 MB default without
+the tier, 7.4 MB with `--features gpu-scanout`). The single default
+build deliberately links no GPU stack even though it compiles the
+scanout tier — it must run on a box with no GPU libraries installed,
+and CI fails a default build that references `libgbm` (with a positive
+control: the default binary must carry the stub's `libgbm.so.1`
+`dlopen` literal, or the negative check is vacuous). `libEGL`/`libGLESv2`
+never appear in `ldd` for any build:
 the GLES renderer reaches them through `dlopen`. `xwayland` adds binary
-size and a runtime dependency only. What `gpu-scanout` buys is the
+size and a runtime dependency only. What the scanout tier buys is the
 [GBM scanout tier](../scoot/backends.md#which-renderer-draws-the-frames): without it
+(`--no-default-features`)
 `--tty` presents through DRM dumb buffers. On Debian 13 the sonames
 above resolve to `libinput10`, `libseat1`, `libudev1`,
-`libpixman-1-0`, `libxkbcommon0` (plus `libgbm1`, `libdrm2` with
-`gpu-scanout`) — checked against trixie's own `Contents-amd64.gz`;
+`libpixman-1-0`, `libxkbcommon0` (plus `libgbm1`, `libdrm2` as
+run-time `Suggests`, never `Depends`) — checked against trixie's own
+`Contents-amd64.gz`;
 other distros map the same sonames through their own file search.
 
 ### Toolchain floor: Rust 1.88

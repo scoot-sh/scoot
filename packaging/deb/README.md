@@ -55,11 +55,13 @@ closure); the wallpaper daemon and the bar link nothing past the C
 library (measured on a release build: `scootbg` and `scootbar` are
 libc-only). On Debian 12 / Ubuntu 24.04 and newer the sonames resolve
 to `libinput10`, `libseat1`, `libudev1`, `libpixman-1-0`,
-`libxkbcommon0` (plus `libc6`, `libgcc-s1` via shlibdeps). The
-`gpu-scanout` extras (`libgbm1`, `libdrm2`) are not in any shipped
-`.deb`: the shipped build is the default feature set, and rebuilding
-with the opt-in tiers is a local `build-deb.sh` run, not a separate
-package.
+`libxkbcommon0` (plus `libc6`, `libgcc-s1` via shlibdeps). The GPU
+libraries (`libgbm1`, `libdrm2`) are not in any shipped `.deb`'s
+`Depends`: the shipped build links neither (the scanout
+tier reaches them at run time), so they are `Suggests` instead --
+auto-detected where present, never required. Rebuilding without the tier
+at all (`--no-default-features`) is a local `build-deb.sh` run, not a
+separate package.
 
 The bar `Suggests: fonts-dejavu-core`: it draws text only with a font,
 and the shipped example points at DejaVu (the first path the bar

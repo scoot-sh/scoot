@@ -71,13 +71,22 @@
       # `nix build` / `nix run`, for getting the binaries without a dev shell.
       # `scoot` is the whole compositor (plus the `scoot msg` client, the
       # only client), built `-p scoot` so `$out/bin` carries only the `scoot`
-      # binary;
-      # `scoot-gpu` is the same binary with the `gpu-scanout` build feature
-      # (`--tty --renderer gpu` scans out from the GPU instead of reading
-      # back; needs OS EGL drivers -- see site/src/content/docs/start/install.md#which-build-do-i-need);
-      # `scoot-xwayland` (and `scoot-gpu-xwayland`) add the `xwayland`
+      # binary. It is the single build: the default Cargo features compile
+      # the GPU scanout tier with libgbm reached at run time through the
+      # in-tree stub (no libgbm `DT_NEEDED` -- `readelf -d` is the audit),
+      # so `--renderer gpu` scans out from the GPU on real hardware and
+      # `auto` (the default request) picks the CPU renderer where there is
+      # no GPU stack -- see site/src/content/docs/reference/builds.md;
+      # `scoot-xwayland` adds the `xwayland`
       # build feature and nixpkgs' Xwayland on `PATH` (Linux only; X11 apps
       # under `--xwayland` -- see below and site/src/content/docs/scoot/xwayland.md);
+      # `scoot-minimal` is the CPU-only product (`--no-default-features`:
+      # no GBM code, no C stub, no libgbm -- see the builds page);
+      # On Darwin the compositor is cfg'd out of the crate, so `scoot`
+      # there is the client (`scoot msg` drives a compositor running
+      # elsewhere, e.g. in a VM) -- and `scoot --headless` there exits with
+      # a message saying exactly that, so the same package is honest on
+      # both (see README's Install section).
       # On Darwin the compositor is cfg'd out of the crate, so `scoot`
       # there is the client (`scoot msg` drives a compositor running
       # elsewhere, e.g. in a VM) -- and `scoot --headless` there exits with
@@ -213,14 +222,22 @@
               " --features " + pkgs.lib.concatStringsSep "," features
             );
 
+          # The `--no-default-features` selection for the CPU-only minimal
+          # product: byte-identical discipline as `scootArgs` above, so the
+          # `depsMinimal` artifact and the `scoot-minimal` package build
+          # share it.
+          scootArgsMinimal = "--locked -p scoot --no-default-features";
+
           # The compiled dependencies, as their own store paths -- one per
-          # distinct (Cargo feature set, RUSTFLAGS) pair, five in all, and
+          # distinct (Cargo feature set, RUSTFLAGS) pair, three in all, and
           # why not fewer: cargo unifies features across the resolve, so
-          # Smithay compiled with `backend_gbm` or `xwayland` is a different
-          # artifact than Smithay without, and sharing one would recompile
-          # Smithay inside each divergent package build. The same holds for
+          # Smithay compiled with `xwayland` -- or without the default
+          # `gpu-scanout` -- is a different artifact than Smithay with the
+          # defaults, and sharing one would recompile Smithay inside each
+          # divergent package build. The same holds for
           # the flags above, which is why the compositor's set is separate
-          # from the base set: `scoot` (and the three variants) link libEGL,
+          # from the base set: `scoot` (and the two other compositor
+          # packages) link libEGL,
           # while the client, the wallpaper and the bar link nothing beyond
           # what std links. The base set is shared by `scootbg` and
           # `scootbar` alike: scootbar's feature flags gate only its own
@@ -272,21 +289,16 @@
             inherit version;
             scope = if pkgs.stdenv.hostPlatform.isDarwin then "--locked -p scoot" else "--locked";
           };
-          # The compositor's own set: `-p scoot` (byte-identical to the
-          # package build's selection via `scootArgs`) with the link flags.
-          # A separate artifact from the base set above, not a scope tweak
-          # of it: flags and scope both enter the fingerprint, so sharing
-          # would recompile one side's graph inside every build.
+          # The compositor's own set: `-p scoot` at the default features
+          # (byte-identical to the package build's selection via `scootArgs`)
+          # with the link flags. A separate artifact from the base set
+          # above, not a scope tweak of it: flags and scope both enter the
+          # fingerprint, so sharing would recompile one side's graph inside
+          # every build.
           depsScoot = mkDeps {
             pname = "scoot";
             inherit version;
             scope = scootArgs [ ];
-            withEglLink = true;
-          };
-          depsGpuScanout = mkDeps {
-            pname = "scoot-gpu";
-            inherit version;
-            scope = scootArgs [ "gpu-scanout" ];
             withEglLink = true;
           };
           depsXwayland = mkDeps {
@@ -295,13 +307,15 @@
             scope = scootArgs [ "xwayland" ];
             withEglLink = true;
           };
-          depsGpuXwayland = mkDeps {
-            pname = "scoot-gpu-xwayland";
+          # The CPU-only minimal product's set: `--no-default-features`
+          # (byte-identical to the `scoot-minimal` package build's selection
+          # via `scootArgsMinimal`). A separate artifact for the same
+          # fingerprint reason: without the default `gpu-scanout`, Smithay
+          # compiles without `backend_gbm`.
+          depsMinimal = mkDeps {
+            pname = "scoot-minimal";
             inherit version;
-            scope = scootArgs [
-              "gpu-scanout"
-              "xwayland"
-            ];
+            scope = scootArgsMinimal;
             withEglLink = true;
           };
 
@@ -334,6 +348,7 @@
               # `cargoBuildFeatures` -- the name stays so existing readers
               # keep working.
               passthru.cargoBuildFeatures = [ ];
+              passthru.cargoBuildNoDefaultFeatures = false;
 
               nativeBuildInputs = [ pkgs.pkg-config ];
               # The same list the dev shell uses, Linux-only for the same reason:
@@ -502,17 +517,18 @@
           # never the feature selection the dependency artifact was built
           # with, so these are separate `buildPackage` calls through one
           # helper rather than overrides of `scoot` -- same binaries, names
-          # and metadata either way. `cargoBuildFeatures` is kept as plain
-          # data alongside: crane consumes the features through
-          # `cargoExtraArgs`, while `buildRustPackage` took them as
-          # `cargoBuildFeatures` -- the name stays so existing readers
-          # (`ci.yml`, `nix/tests.nix`) keep working.
+          # and metadata either way. `cargoBuildFeatures` (and
+          # `cargoBuildNoDefaultFeatures`) are kept as plain data alongside:
+          # crane consumes the selection through `cargoExtraArgs`, while
+          # `buildRustPackage` took them as attrs -- the names stay so
+          # existing readers (`ci.yml`, `nix/tests.nix`) keep working.
           mkScootVariant =
             {
               pname,
               features,
               cargoArtifacts,
               descriptionSuffix,
+              noDefaultFeatures ? false,
             }:
             craneLib.buildPackage (
               cranePackage
@@ -523,10 +539,12 @@
                 inherit version;
                 # Byte-identical to the serving artifact's selection (each
                 # variant names its own `deps*` artifact built with the same
-                # features through `scootArgs`); see above for why drift
-                # costs the whole dependency graph.
-                cargoExtraArgs = scootArgs features;
+                # selection through `scootArgs`/`scootArgsMinimal`); see above
+                # for why drift costs the whole dependency graph.
+                cargoExtraArgs =
+                  scootArgs features + pkgs.lib.optionalString noDefaultFeatures " --no-default-features";
                 passthru.cargoBuildFeatures = features;
+                passthru.cargoBuildNoDefaultFeatures = noDefaultFeatures;
                 nativeBuildInputs = [ pkgs.pkg-config ];
                 buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
                   import ./vm/compositor-deps.nix pkgs
@@ -556,24 +574,21 @@
               }
             );
 
-          # The opt-in specs: the base build and the GPU scanout tier, each
-          # naming the dependency artifact compiled with its own features.
-          # The XWayland packages below derive theirs from these.
+          # The specs: the single build, the CPU-only minimal product, each
+          # naming the dependency artifact compiled with its own selection.
+          # The XWayland package below derives from the single build's spec.
           scootSpec = {
             pname = "scoot";
             features = [ ];
             cargoArtifacts = depsScoot;
             descriptionSuffix = "";
           };
-          gpuSpec = {
-            pname = "scoot-gpu";
-            features = [ "gpu-scanout" ];
-            cargoArtifacts = depsGpuScanout;
-            descriptionSuffix =
-              if pkgs.stdenv.hostPlatform.isDarwin then
-                " (gpu-scanout build feature: Linux-only, same client binary here)"
-              else
-                " (gpu-scanout build feature: --tty --renderer gpu scans out from the GPU)";
+          minimalSpec = {
+            pname = "scoot-minimal";
+            features = [ ];
+            cargoArtifacts = depsMinimal;
+            descriptionSuffix = " (CPU-only minimal product: --no-default-features, no GBM code, no libgbm)";
+            noDefaultFeatures = true;
           };
         in
         {
@@ -600,33 +615,27 @@
           scootbar-demo = pkgs.callPackage ./nix/scootbar-demo.nix { inherit scootbar; };
         }
         // {
-          # The GPU scanout tier as a package (gh #177): off by default in
-          # the build above because `backend_gbm` is a link-time libgbm
-          # dependency and GPU-free operation is a fixed decision (see
-          # `crates/scoot/Cargo.toml`), opted into here, where linking
-          # libgbm is the point. A separate `buildPackage` through
-          # `mkScootVariant` over the `gpu-scanout` dependency artifact (not
-          # an `overrideAttrs` of `scoot`: the artifact is chosen when the
-          # derivation is called, and an override cannot reach back into
-          # it); the binary stays named `scoot` (`mainProgram` unchanged),
-          # so this is a second build of the same binary with the scanout
-          # tier compiled in. `ldd` on the two is the audit: `scoot-gpu`
-          # links libgbm, `scoot` does not.
+          # The CPU-only minimal product (`--no-default-features`): no GBM
+          # code, no C stub, no libgbm anywhere. A separate `buildPackage`
+          # through `mkScootVariant` over the minimal dependency artifact
+          # (not an `overrideAttrs` of `scoot`: the artifact is chosen when
+          # the derivation is called, and an override cannot reach back into
+          # it); the binary stays named `scoot` (`mainProgram` unchanged).
+          # `readelf -d` shows no libgbm and `nm` no stub symbols -- the
+          # audit CI's minimal gate re-proves per change.
           #
-          # Darwin note: `gpu-scanout` enables Smithay's `backend_gbm`,
-          # which only compiles on Linux -- but Smithay itself is a
-          # Linux-only dependency of this crate, so on Darwin the feature
-          # resolves without building anything new and the package stays
-          # the same client-shaped binary. Proven by building, not by
-          # assuming; if that ever stops holding, gate this to Linux.
-          scoot-gpu = mkScootVariant gpuSpec;
+          # Darwin note: like `scoot` itself, the compositor is cfg'd out
+          # there, so this stays the same client-shaped binary. Proven by
+          # building, not by assuming; if that ever stops holding, gate this
+          # to Linux.
+          scoot-minimal = mkScootVariant minimalSpec;
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
           let
-            # The opt-in XWayland tier as packages: the `xwayland` Cargo
-            # feature (off in the builds above, like gpu-scanout, because a
-            # whole X server is not free -- see site/src/content/docs/scoot/xwayland.md), plus the one
-            # runtime dependency it has. Smithay starts the server as
+            # The opt-in XWayland tier as a package: the `xwayland` Cargo
+            # feature (off in the build above -- a whole X server is not
+            # free -- see site/src/content/docs/scoot/xwayland.md), plus the
+            # one runtime dependency it has. Smithay starts the server as
             # `Command::new("Xwayland")`, a `PATH` lookup and nothing else,
             # so a `--tty` login whose `PATH` lacks the binary would be a
             # Wayland-only session (logged loudly, never a failure). The
@@ -648,8 +657,7 @@
             #
             # Each variant is its spec's build with `xwayland` added --
             # features and the dependency artifact compiled with them both
-            # move together (see `mkScootVariant`), so the gpu-scanout
-            # variant keeps its own -- with the wrapper on top.
+            # move together (see `mkScootVariant`) -- with the wrapper on top.
             # `overrideAttrs` only adds the wrapper: it reaches the finished
             # derivation's own attrs, which is all wrapping needs. Linux
             # only: there is no X server, or compositor, on Darwin.
@@ -675,14 +683,13 @@
           in
           {
             scoot-xwayland = withXwayland scootSpec depsXwayland;
-            scoot-gpu-xwayland = withXwayland gpuSpec depsGpuXwayland;
           }
         )
       );
 
       # So `nix run . -- --headless -- foot` and `nix run . -- msg windows`
-      # work, `nix run .#scoot-gpu -- --tty -- ...` runs the scanout
-      # build and `nix run .#scoot-xwayland -- --headless --xwayland -- xterm`
+      # work, `nix run .#scoot-minimal -- --headless -- foot` runs the
+      # CPU-only product and `nix run .#scoot-xwayland -- --headless --xwayland -- xterm`
       # the XWayland one (Linux only), `nix run .#scootbar -- daemon --font
       # F` the bar and `nix run .#scootbar-demo` the bar with a font (Linux
       # only). Each `mainProgram` would resolve
@@ -694,9 +701,9 @@
             type = "app";
             program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.default;
           };
-          scoot-gpu = {
+          scoot-minimal = {
             type = "app";
-            program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-gpu;
+            program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-minimal;
           };
         }
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
@@ -811,6 +818,7 @@
         in
         nixpkgs.lib.getAttrs (builtins.filter (name: built ? ${name}) [
           "scoot"
+          "scoot-minimal"
           "scootbg"
           "mocu-cursor-theme"
           # Not `scootbar-demo`: a demo to run, not a package to build on
