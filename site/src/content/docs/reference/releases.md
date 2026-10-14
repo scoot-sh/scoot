@@ -20,7 +20,7 @@ A release holds one set of files per architecture (`x86_64-linux`,
 | `scoot-<version>-<arch>` | The compositor (plus the `scoot msg` client, the only client) |
 | `scootbg-<version>-<arch>` | The wallpaper daemon |
 | `scootbar-<version>-<arch>` | The status bar |
-| `scoot-<commit>-vendored.tar.gz` | The exact tagged tree plus `vendor/` (every dependency), `.cargo/config.toml`, `THIRD-PARTY-LICENSES` and `OFFLINE-BUILD.txt` |
+| `scoot-<version>-vendored.tar.gz` | The exact tagged tree plus `vendor/` (every dependency), `.cargo/config.toml`, `THIRD-PARTY-LICENSES` and `OFFLINE-BUILD.txt` |
 | `sbom-scoot-<version>.cyclonedx.json` | The locked dependencies of every shipped binary (their union), CycloneDX 1.3 |
 | `SHA256SUMS` | The checksum of every file above |
 

@@ -9,7 +9,7 @@
 # nix/modules/scootbar-home.nix).
 #
 # No release is cut yet: see the Source0 note in scoot.spec, which applies
-# here unchanged (the same release tarball, the same provisional basename).
+# here unchanged (the same release tarball, under the same name).
 
 Name:           scootbar
 Version:        0.2.0

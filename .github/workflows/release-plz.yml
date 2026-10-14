@@ -7,8 +7,9 @@
 #   `[workspace.package] version` and writes that version's CHANGELOG.md
 #   section from the commits since the last `vX.Y.Z` tag. Nothing is
 #   released until the maintainer merges it, and the maintainer may edit
-#   the version in the PR first. Then it dispatches ci.yml on the PR's
-#   branch, so the PR gets CI (see THE TOKEN).
+#   the version in the PR first. Then it dispatches the PR's checks on
+#   its branch (see THE TOKEN): ci.yml, packaging.yml (vendoring and the
+#   dependency gates) and release.yml's lint job (an empty `tag`).
 # - `release` notices when the push IS that PR's merge and creates the
 #   `vX.Y.Z` tag (only that: `git_release_enable = false`, no crates.io),
 #   then dispatches release.yml on that tag, which builds and publishes
@@ -122,7 +123,7 @@ jobs:
       contents: write
       # Open and edit the release PR.
       pull-requests: write
-      # `gh workflow run ci.yml` on the PR branch.
+      # `gh workflow run` (ci, packaging, release lint) on the PR branch.
       actions: write
     # One release PR at a time: a second push waits for the first update
     # instead of racing it.
@@ -159,7 +160,7 @@ jobs:
       # the PR (the action sets it from release-plz's JSON, which lists an
       # updated PR too); nothing is dispatched when there is nothing to
       # release.
-      - name: Dispatch ci.yml on the release PR's branch
+      - name: Dispatch the release PR's checks on its branch
         if: steps.gate.outputs.run == 'true' && steps.release-plz.outputs.prs_created == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -172,4 +173,8 @@ jobs:
             *) echo "::error title=Unexpected branch::release-plz reported '$branch'"; exit 1 ;;
           esac
           gh workflow run ci.yml --repo "$REPO" --ref "$branch"
-          echo "::notice title=CI dispatched::ci.yml on $branch ($(printf '%s' "$PR" | jq -r .html_url))"
+          gh workflow run packaging.yml --repo "$REPO" --ref "$branch"
+          # No tag (the input defaults to empty): release.yml's lint job only (actionlint, guards,
+          # the release tool tests against the bumped manifests).
+          gh workflow run release.yml --repo "$REPO" --ref "$branch"
+          echo "::notice title=Checks dispatched::ci, packaging and release lint on $branch ($(printf '%s' "$PR" | jq -r .html_url))"

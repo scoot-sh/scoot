@@ -151,9 +151,8 @@ def main():
                       f"({a.main_ref}): cut releases from main only")
 
     binaries = list(BINARIES)
-    short = git("rev-parse", "--short", commit).stdout.strip()
     assets = ([f"{b}-{version}-{arch}" for b in binaries for arch in ARCHES]
-              + [f"scoot-{short}-vendored.tar.gz",
+              + [f"scoot-{version}-vendored.tar.gz",
                  f"sbom-scoot-{version}.cyclonedx.json",
                  "SHA256SUMS"])
 

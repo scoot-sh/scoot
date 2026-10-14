@@ -252,7 +252,7 @@ jobs:
 
       # The rolling version's MAJOR.MINOR, from the workspace version:
       # the next minor, so main's rolling releases always sort above the
-      # last release tag (the same prefix nightly.yml stamps on nightly).
+      # last release tag.
       - name: Rolling prefix from the workspace version
         id: rolling
         run: |

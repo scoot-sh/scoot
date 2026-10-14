@@ -104,9 +104,12 @@ So `release-plz.yml` dispatches the next step itself:
 
 - After creating the tag, it runs `release.yml` on it (`--ref vX.Y.Z`,
   `dry_run=false`).
-- After opening or updating the release PR, it runs `ci.yml` on the PR's
-  branch. The dispatched run's check suite attaches to the branch's head
-  commit, which is the PR's head, and GitHub associates it with the PR.
+- After opening or updating the release PR, it runs the PR's checks on
+  the PR's branch: `ci.yml`, `packaging.yml` (vendoring, licenses,
+  advisories) and `release.yml` with no `tag`, which runs only its lint job
+  (actionlint, the guards, the release tool tests). A dispatched run's
+  check suite attaches to the branch's head commit, which is the PR's head,
+  and GitHub associates it with the PR.
   This was measured on #586: the run's `pull_requests` listed the PR. The
   PR's own `pull_request` runs still appear, held until a maintainer presses
   "Approve workflows to run".
@@ -189,17 +192,16 @@ Packages built from main use the same numbers in their own spelling:
 
 | Where | Spelling |
 |---|---|
-| `--version` (cargo, nightly, `-git` packages) | `0.2.0+14.g615608c` |
+| `--version` (cargo builds from a checkout, `-git` packages) | `0.2.0+14.g615608c` |
 | Arch `-git` `pkgver` | `0.2.0.r14.g615608c` |
-| FlakeHub rolling release, nightly | `0.3.<commits on main>+rev-<commit>` |
+| FlakeHub rolling release | `0.3.<commits on main>+rev-<commit>` |
 
 ## FlakeHub's rolling numbers
 
 Every push to main publishes the flake to FlakeHub as a rolling release
 numbered `<major>.<minor + 1>.<commits on main>`, from the workspace version
 (`scripts/workspace-version --rolling`, passed as `rolling-major` and
-`rolling-minor` in `.github/workflows/nix-build.yml`). The nightly binaries
-stamp the same number. While the workspace reads 0.2.x, main publishes
+`rolling-minor` in `.github/workflows/nix-build.yml`). While the workspace reads 0.2.x, main publishes
 `0.3.<count>`. That sorts above every `v0.2.x` tag and above the `0.1.<count>`
 releases published before this scheme, so a FlakeHub constraint never prefers
 an older main.
@@ -208,7 +210,7 @@ an older main.
 
 ```sh
 scripts/workspace-version            # 0.2.0
-scripts/workspace-version --rolling  # 0.3, the FlakeHub/nightly prefix
+scripts/workspace-version --rolling  # 0.3, the FlakeHub rolling prefix
 scripts/workspace-version --check    # fails if a crate sets its own version
 scripts/release-resolve v0.2.0 --no-github   # the release gate, run locally
 scripts/release-notes 0.2.0          # that version's CHANGELOG.md section

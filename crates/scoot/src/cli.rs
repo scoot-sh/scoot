@@ -581,7 +581,8 @@ pub fn renamed_renderer(value: &str) -> Option<&'static str> {
 pub enum Command {
     Help(HelpPage),
     /// `scoot --version`: identify this build without starting anything.
-    /// Prints [`scootctl::version_string`] and exits. A first-arg flag like
+    /// Prints [`scootctl::version_string_for`] of this build's
+    /// `SCOOT_BUILD_VERSION` and exits. A first-arg flag like
     /// `--help` and `--print-default-config`, not a backend and not `msg`:
     /// it needs no running compositor, and the bare `version` word stays
     /// the IPC request's (answered by the compositor over the socket --

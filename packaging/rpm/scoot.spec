@@ -12,11 +12,12 @@
 # every binary at the repository's one version (docs/versioning.md), so
 # the pair installs at that version.
 #
-# No release is cut yet, so Source0 points at the release asset the release
-# job will publish; until it exists CI builds this exact file against a
-# staged tarball of HEAD placed under the same basename (see
-# .github/workflows/rpm.yml). The basename below is provisional until the
-# first release names the asset; only that line changes then.
+# Source0 is the vendored tarball every release publishes under this exact
+# name: release.yml runs `scripts/vendor-release.sh --label <version>`, so
+# the asset is `scoot-<version>-vendored.tar.gz` (one tarball for all
+# three specs). No release is cut yet, so the URL 404s; until it exists CI
+# builds this exact file against a staged tarball of HEAD placed under the
+# same name (see .github/workflows/rpm.yml).
 
 Name:           scoot
 Version:        0.2.0

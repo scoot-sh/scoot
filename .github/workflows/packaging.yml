@@ -46,6 +46,10 @@ on:
   schedule:
     # Mondays 06:00 UTC: advisories move without repo changes.
     - cron: '0 6 * * 1'
+  # The release PR's dependency gates: release-plz opens that PR with
+  # GITHUB_TOKEN, whose `pull_request` runs wait for a maintainer's
+  # approval, so release-plz.yml dispatches this on the PR branch.
+  workflow_dispatch:
 
 permissions:
   contents: read

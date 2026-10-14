@@ -31,8 +31,8 @@ on newer requests. `scootbg` names its wallpaper protocol the same way.
 protocols to the compositor, and its own control protocol to
 `scootbar msg` (both halves come from one install).
 
-A build that is not a release (from a git checkout, the nightly, or an
-Arch `-git` package) adds where it came from:
+A build that is not a release (from a git checkout or an Arch `-git`
+package) adds where it came from:
 
 ```text
 scoot 0.2.0+14.g615608c (ipc protocol 10)
@@ -72,6 +72,6 @@ differ, the compositor's log names the refusal; kill the old daemon
 > **Symptom:** one binary prints a different version from the others.
 
 Something was upgraded on its own. Upgrade the rest to the same
-release (or the same nightly), then restart the session so every daemon
+release, then restart the session so every daemon
 runs the new build. Each release's changelog section lists what moved,
 grouped by component, so an upgrade note names the binary it changes.

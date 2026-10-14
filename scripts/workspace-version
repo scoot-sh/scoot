@@ -10,8 +10,8 @@ Every crate inherits `[workspace.package] version` from the root
 
 `--rolling` prints the `MAJOR.MINOR` prefix of main's rolling versions:
 the workspace major, and the workspace minor plus one. FlakeHub's rolling
-releases (`nix-build.yml`, `rolling-major`/`rolling-minor`) and the nightly
-(`nightly.yml`) both append `.<commit count>+rev-<sha>` to it, so a build
+releases (`nix-build.yml`, `rolling-major`/`rolling-minor`) append
+`.<commit count>+rev-<sha>` to it, so a build
 of main always sorts above every `vX.Y.*` release cut from the same
 workspace version (workspace 0.2.x gives `0.3.<count>`), and above the
 `0.1.<count>` rolling versions published before this scheme.

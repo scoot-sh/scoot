@@ -7,7 +7,7 @@
 # (/usr/share/doc/scoot/config.toml.example).
 #
 # No release is cut yet: see the Source0 note in scoot.spec, which applies
-# here unchanged (the same release tarball, the same provisional basename).
+# here unchanged (the same release tarball, under the same name).
 
 Name:           scootbg
 Version:        0.2.0

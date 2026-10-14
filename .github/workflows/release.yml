@@ -72,7 +72,11 @@
 # TRIGGERS (the CLAUDE.md rule: no always-run job; docs-only pushes
 # start nothing): tag pushes run the pipeline; `pull_request` runs only
 # the lint job and only when the release tooling changes (this file,
-# release-plz.yml and its config, the release scripts); a
+# release-plz.yml and its config, the release scripts) or what a release
+# PR changes (Cargo.toml, Cargo.lock, CHANGELOG.md, packaging/); a
+# dispatch with an empty `tag` runs only the lint job (release-plz.yml
+# does that on its PR's branch, whose pull_request run waits for
+# approval); a
 # push to main never reaches this workflow (no `branches: [main]`
 # trigger), and tag pushes always contain the release commit, so no
 # paths filter is needed on the tag trigger.
@@ -101,6 +105,13 @@ on:
       - '.github/workflows/release.yml'
       - '.github/workflows/release-plz.yml'
       - 'release-plz.toml'
+      # What a release PR changes (the workspace version, the lockfile,
+      # the changelog the notes come from, the packaging bump), so the
+      # release tooling is checked against it.
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'CHANGELOG.md'
+      - 'packaging/**'
       - 'scripts/release-resolve'
       - 'scripts/release-notes'
       - 'scripts/workspace-version'
@@ -108,8 +119,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v0.2.0). Must exist and point at main. To publish (dry_run false), run on that tag: --ref v0.2.0.'
-        required: true
+        description: 'Release tag (e.g. v0.2.0). Must exist and point at main. To publish (dry_run false), run on that tag: --ref v0.2.0. Empty: run only the lint job on the dispatched ref (what release-plz does for its PR).'
+        required: false
+        default: ''
       dry_run:
         description: 'Build everything, publish nothing (any ref). false publishes, and only on the tag itself.'
         required: true
@@ -135,7 +147,9 @@ jobs:
   # tooling, and nowhere else.
   lint:
     name: Release tooling (actionlint + resolve tests)
-    if: github.event_name == 'pull_request'
+    # Also on a dispatch without a tag: release-plz.yml runs this on the
+    # release PR's branch, whose own pull_request run waits for approval.
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.tag == '')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -210,7 +224,8 @@ jobs:
   # of the pipeline; a refusal fails the run before anything builds.
   resolve:
     name: Resolve and gate the tag
-    if: github.event_name != 'pull_request'
+    # A tag push, or a dispatch that names a tag (an empty one is lint only).
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -295,8 +310,12 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
 
       - name: Stage the tarball
+        env:
+          RESOLVE_VERSION: ${{ needs.resolve.outputs.version }}
         run: |
-          scripts/vendor-release.sh --out "$RUNNER_TEMP/vendor-release"
+          # Named by the version (`scoot-0.2.0-vendored.tar.gz`), the name
+          # the RPM specs' Source0 downloads.
+          scripts/vendor-release.sh --out "$RUNNER_TEMP/vendor-release" --label "$RESOLVE_VERSION"
           ls -l "$RUNNER_TEMP/vendor-release"
 
       - name: SBOM (CycloneDX from the lockfile, cargo-cyclonedx)

@@ -160,6 +160,8 @@ class ResolveTests(unittest.TestCase):
                 self.assertIn(f"{binary}-0.2.0-{arch}", got["assets"])
         self.assertIn("SHA256SUMS", got["assets"])
         self.assertIn("sbom-scoot-0.2.0.cyclonedx.json", got["assets"])
+        # Named by the version: the RPM specs' Source0 downloads this name.
+        self.assertIn("scoot-0.2.0-vendored.tar.gz", got["assets"])
         self.assertTrue(any(n.endswith("-vendored.tar.gz")
                             for n in got["assets"]),
                         got["assets"])

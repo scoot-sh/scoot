@@ -39,13 +39,14 @@ workspace already reads `0.2.0`. release-plz waits for this first tag, so
 cut it yourself, once.
 
 First, a small PR that gives the release its changelog heading. In
-`CHANGELOG.md`, add the version heading directly under the Unreleased
-heading, so everything written so far becomes v0.2.0's notes:
+`CHANGELOG.md`, add the version heading, dated the day you tag
+(`YYYY-MM-DD`), directly under the Unreleased heading, so everything
+written so far becomes v0.2.0's notes:
 
 ```text
 ## Unreleased
 
-## [0.2.0] - 2026-10-14
+## [0.2.0] - YYYY-MM-DD
 
 ### The built-in cursors are Mocu (behavior change)
 ...
@@ -169,9 +170,12 @@ either way the release runs once.
 > **Symptom:** the release PR exists but CI never ran on it.
 
 Its `pull_request` runs wait for "Approve workflows to run", because
-GITHUB_TOKEN opened it. The dispatched run is the real CI. If the
-"Dispatch ci.yml" step failed, run `gh workflow run ci.yml --ref <the PR's
-release-plz-… branch>`, or approve the held runs.
+GITHUB_TOKEN opened it. The dispatched runs (`ci.yml`, `packaging.yml`
+and `release.yml`'s lint job) are the real checks. If the "Dispatch the
+release PR's checks" step failed, run them yourself on the PR's
+`release-plz-…` branch (`gh workflow run ci.yml --ref <branch>`, likewise
+`packaging.yml`, and `release.yml` with no `tag`), or approve the held
+runs.
 
 ## What else the runs need
 
