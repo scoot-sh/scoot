@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""The repository's one version, and the numbers derived from it.
+
+    scripts/workspace-version [--root DIR]            # 0.2.0
+    scripts/workspace-version --rolling [--root DIR]  # 0.3
+    scripts/workspace-version --check [--root DIR]    # every crate inherits it
+
+Every crate inherits `[workspace.package] version` from the root
+`Cargo.toml` (docs/versioning.md), and one `vX.Y.Z` tag releases them all.
+
+`--rolling` prints the `MAJOR.MINOR` prefix of main's rolling versions:
+the workspace major, and the workspace minor plus one. FlakeHub's rolling
+releases (`nix-build.yml`, `rolling-major`/`rolling-minor`) append
+`.<commit count>+rev-<sha>` to it, so a build
+of main always sorts above every `vX.Y.*` release cut from the same
+workspace version (workspace 0.2.x gives `0.3.<count>`), and above the
+`0.1.<count>` rolling versions published before this scheme.
+
+`--check` refuses (exit 1) any crate under `crates/` whose manifest sets
+its own `version` instead of `version.workspace = true`.
+
+Stdlib only; tests in `scripts/test_release_resolve.py`.
+"""
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
+
+def section(text, name):
+    """The body of TOML table `[name]` (up to the next table header)."""
+    m = re.search(r"(?ms)^\[" + re.escape(name) + r"\]\s*$(.*?)(?=^\[|\Z)", text)
+    return m.group(1) if m else None
+
+
+def workspace_version(root):
+    """The `[workspace.package] version`, or raise ValueError."""
+    text = (Path(root) / "Cargo.toml").read_text()
+    body = section(text, "workspace.package")
+    if body is None:
+        raise ValueError("Cargo.toml has no [workspace.package] table")
+    m = re.search(r'(?m)^version\s*=\s*"([^"]+)"\s*(?:#.*)?$', body)
+    if not m:
+        raise ValueError("[workspace.package] sets no version")
+    version = m.group(1)
+    if not SEMVER.match(version):
+        raise ValueError(f"workspace version {version!r} is not X.Y.Z")
+    return version
+
+
+def rolling_prefix(version):
+    """`MAJOR.(MINOR+1)` for a workspace version `MAJOR.MINOR.PATCH`."""
+    major, minor, _ = (int(x) for x in SEMVER.match(version).groups())
+    return f"{major}.{minor + 1}"
+
+
+def non_inheriting(root):
+    """Crate manifests under crates/*/ that set their own version."""
+    bad = []
+    for manifest in sorted((Path(root) / "crates").glob("*/Cargo.toml")):
+        body = section(manifest.read_text(), "package") or ""
+        if not re.search(r"(?m)^version\.workspace\s*=\s*true\s*(?:#.*)?$", body):
+            bad.append(str(manifest.relative_to(root)))
+    return bad
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--root", default=str(ROOT),
+                    help="repo root (default: the checkout holding this script)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--rolling", action="store_true",
+                      help="print the MAJOR.MINOR prefix of main's rolling versions")
+    mode.add_argument("--check", action="store_true",
+                      help="fail when a crate does not inherit the workspace version")
+    a = ap.parse_args(argv)
+    try:
+        version = workspace_version(a.root)
+    except (OSError, ValueError) as e:
+        print(f"workspace-version: {e}", file=sys.stderr)
+        return 1
+    if a.check:
+        bad = non_inheriting(a.root)
+        if bad:
+            print("workspace-version: these crates set their own version; "
+                  "use `version.workspace = true` (docs/versioning.md): "
+                  + ", ".join(bad), file=sys.stderr)
+            return 1
+        print(f"ok: every crate inherits {version}")
+    elif a.rolling:
+        print(rolling_prefix(version))
+    else:
+        print(version)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

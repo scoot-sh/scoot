@@ -1214,7 +1214,7 @@ impl fmt::Display for MsgError {
 
 /// The `--version` line.
 pub fn version_string() -> String {
-    format!("scootbar {}", env!("CARGO_PKG_VERSION"))
+    format!("scootbar {}", env!("SCOOT_BUILD_VERSION"))
 }
 
 fn is_help(arg: &str) -> bool {

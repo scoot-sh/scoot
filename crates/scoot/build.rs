@@ -1,4 +1,5 @@
-//! Only needed for `--tty`'s `backend_libinput`: unlike every other
+//! Two jobs: the version label (below), and, for `--tty`'s
+//! `backend_libinput`, locating libinput. Unlike every other
 //! pkg-config-based sys crate this project links against (libseat-sys,
 //! udev-sys, xkbcommon-sys), `input-sys` (libinput's raw FFI bindings) has
 //! no build-script logic of its own to locate libinput's shared library --
@@ -9,7 +10,16 @@
 //! `pkg-config --exists libinput` succeeds. See the `Cargo.toml` comment on
 //! the `pkg-config` build-dependency this uses.
 
+// `SCOOT_BUILD_VERSION`, the version `--version` and the IPC `version`
+// reply print, on every platform (`crates/scoot-ipc/build_label.rs` says
+// how it is worked out).
+#[path = "../scoot-ipc/build_label.rs"]
+mod build_label;
+
 fn main() {
+    build_label::emit();
+    // `emit` scopes reruns to what it names, so name the stub source too.
+    println!("cargo:rerun-if-changed=gbm-stub/gbm_stub.c");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
         return;
     }

@@ -1,8 +1,8 @@
 [package]
 name = "scootbg"
 description = "Wallpaper daemon for Wayland"
-# Independent versioning: lockstep with scoot and scootctl (see crates/scoot/Cargo.toml).
-version = "0.1.0"
+# The repository's one version (docs/versioning.md).
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -239,7 +239,7 @@ impl Handler for Responder<'_> {
                     out,
                     &Reply::Version {
                         protocol: PROTOCOL_VERSION,
-                        version: env!("CARGO_PKG_VERSION"),
+                        version: env!("SCOOT_BUILD_VERSION"),
                     },
                 );
                 return Answer::Now;

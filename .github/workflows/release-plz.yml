@@ -1,0 +1,180 @@
+# release-plz: the release PR, and the tag when it merges
+# (release-plz.toml says what it is configured to do; docs/versioning.md
+# says why the repository works this way).
+#
+# WHAT IT DOES, on every push to main:
+# - `release-pr` opens (or updates) one pull request that bumps
+#   `[workspace.package] version` and writes that version's CHANGELOG.md
+#   section from the commits since the last `vX.Y.Z` tag. Nothing is
+#   released until the maintainer merges it, and the maintainer may edit
+#   the version in the PR first. Then it dispatches the PR's checks on
+#   its branch (see THE TOKEN): ci.yml, packaging.yml (vendoring and the
+#   dependency gates) and release.yml's lint job (an empty `tag`).
+# - `release` notices when the push IS that PR's merge and creates the
+#   `vX.Y.Z` tag (only that: `git_release_enable = false`, no crates.io),
+#   then dispatches release.yml on that tag, which builds and publishes
+#   every binary. release.yml is the only thing that creates a GitHub
+#   Release.
+#
+# THE TOKEN: the workflow's own GITHUB_TOKEN; no secret to create. GitHub
+# does not start workflows for events GITHUB_TOKEN causes, so the tag
+# release-plz creates starts no `push: tags` run and the PR it opens gets
+# its `pull_request` runs only after someone presses "Approve workflows to
+# run". The documented exception is what this workflow uses instead:
+# "workflow_dispatch and repository_dispatch events always create workflow
+# runs" (GitHub docs, "Triggering a workflow from a workflow":
+# https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+# So each job dispatches the next workflow explicitly (`gh workflow run`,
+# hence `actions: write`).
+#
+# ONE REPOSITORY SETTING: GITHUB_TOKEN may open pull requests only when
+# Settings > Actions > General > Workflow permissions > "Allow GitHub
+# Actions to create and approve pull requests" is on. While it is off,
+# `release-pr` fails with GitHub's "not permitted to create or approve
+# pull requests" error; the tag job does not need it.
+#
+# THE FIRST TAG: until a `v*` tag exists, both jobs stop with a notice.
+# With no tag release-plz would treat the whole history as the first
+# release; the first one (v0.2.0) is cut by hand (the site's "cut a
+# release" page).
+#
+# PINS: every action by commit SHA (tag in a trailing comment), as in
+# release.yml. The release-plz version is the action's default at that SHA
+# (0.3.172), the one release-plz.toml was checked against.
+
+name: release-plz (release PR and tag)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Tag a merged release PR
+    if: github.repository == 'scoot-sh/scoot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # The tag (through the API).
+      contents: write
+      # release-plz reads which PR the pushed commit came from.
+      pull-requests: read
+      # `gh workflow run release.yml`.
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history and every tag: release-plz reads the commits
+          # since the last v* tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Has the first release been cut?
+        id: gate
+        run: |
+          if [ -n "$(git tag --list 'v[0-9]*')" ]; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice title=release-plz skipped::no v* tag yet: the first release (v0.2.0) is cut by hand (docs/versioning.md)."
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - uses: release-plz/action@8921286633dfa0c4020f7f30bd1c14fe19cbb10e # v0.5.142
+        id: release-plz
+        if: steps.gate.outputs.run == 'true'
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Every crate reports the one shared tag, so de-duplicate. Dispatch
+      # only a tag that really exists on the remote, and only a vX.Y.Z one
+      # (release.yml refuses anything else again, at the tag's commit).
+      - name: Dispatch release.yml on the new tag
+        if: steps.gate.outputs.run == 'true' && steps.release-plz.outputs.releases_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+          REPO: ${{ github.repository }}
+        run: |
+          tags=$(printf '%s' "$RELEASES" | jq -r '[.[].tag] | unique | .[]')
+          echo "release-plz reported: ${tags:-nothing}"
+          for tag in $tags; do
+            case "$tag" in
+              v[0-9]*.[0-9]*.[0-9]*) ;;
+              *) echo "::error title=Unexpected tag::release-plz reported $tag, not vX.Y.Z"; exit 1 ;;
+            esac
+            git ls-remote --exit-code --tags "https://github.com/$REPO" "refs/tags/$tag" >/dev/null \
+              || { echo "::error title=Tag missing::$tag is not on the remote"; exit 1; }
+            gh workflow run release.yml --repo "$REPO" --ref "$tag" -f tag="$tag" -f dry_run=false
+            echo "::notice title=Release dispatched::release.yml on $tag"
+          done
+
+  release-pr:
+    name: Open or update the release PR
+    if: github.repository == 'scoot-sh/scoot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # The release branch and its commit (through the API).
+      contents: write
+      # Open and edit the release PR.
+      pull-requests: write
+      # `gh workflow run` (ci, packaging, release lint) on the PR branch.
+      actions: write
+    # One release PR at a time: a second push waits for the first update
+    # instead of racing it.
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Has the first release been cut?
+        id: gate
+        run: |
+          if [ -n "$(git tag --list 'v[0-9]*')" ]; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice title=release-plz skipped::no v* tag yet: the first release (v0.2.0) is cut by hand (docs/versioning.md)."
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - uses: release-plz/action@8921286633dfa0c4020f7f30bd1c14fe19cbb10e # v0.5.142
+        id: release-plz
+        if: steps.gate.outputs.run == 'true'
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The PR's own `pull_request` runs wait for a maintainer's approval
+      # (GITHUB_TOKEN opened or updated it), so run CI on its branch head
+      # now. `prs_created` is "true" whenever release-plz opened OR updated
+      # the PR (the action sets it from release-plz's JSON, which lists an
+      # updated PR too); nothing is dispatched when there is nothing to
+      # release.
+      - name: Dispatch the release PR's checks on its branch
+        if: steps.gate.outputs.run == 'true' && steps.release-plz.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.release-plz.outputs.pr }}
+          REPO: ${{ github.repository }}
+        run: |
+          branch=$(printf '%s' "$PR" | jq -r '.head_branch // empty')
+          case "$branch" in
+            release-plz-*) ;;
+            *) echo "::error title=Unexpected branch::release-plz reported '$branch'"; exit 1 ;;
+          esac
+          gh workflow run ci.yml --repo "$REPO" --ref "$branch"
+          gh workflow run packaging.yml --repo "$REPO" --ref "$branch"
+          # No tag (the input defaults to empty): release.yml's lint job only (actionlint, guards,
+          # the release tool tests against the bumped manifests).
+          gh workflow run release.yml --repo "$REPO" --ref "$branch"
+          echo "::notice title=Checks dispatched::ci, packaging and release lint on $branch ($(printf '%s' "$PR" | jq -r .html_url))"

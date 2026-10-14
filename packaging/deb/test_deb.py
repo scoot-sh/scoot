@@ -23,25 +23,42 @@ def run_meta(*args):
     return p
 
 
-def fake_source(versions):
+def fake_source(version):
+    """A source tree with the one workspace version every crate inherits."""
     d = Path(tempfile.mkdtemp(prefix="deb-test-"))
-    for crate, version in versions.items():
+    (d / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["crates/*"]\n\n'
+        f'[workspace.package]\nversion = "{version}"\nedition = "2024"\n\n'
+        '[workspace.dependencies]\nserde = { version = "1" }\n')
+    for crate in ("scoot", "scootbg", "scootbar"):
         cdir = d / "crates" / crate
         cdir.mkdir(parents=True)
-        (cdir / "Cargo.toml").write_text(f'[package]\nname = "{crate}"\nversion = "{version}"\n')
+        (cdir / "Cargo.toml").write_text(
+            f'[package]\nname = "{crate}"\nversion.workspace = true\n')
     return d
 
 
 class ControlTest(unittest.TestCase):
-    def test_versions_read_the_manifests(self):
+    def test_versions_read_the_workspace_version(self):
+        p = run_meta("versions", "--source", str(fake_source("0.4.2")))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stdout, "scoot 0.4.2\nscootbar 0.4.2\nscootbg 0.4.2\n")
+
+    def test_versions_of_this_tree_agree(self):
         p = run_meta("versions", "--source", str(REPO))
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn("scoot 0.1.0", p.stdout)
-        self.assertIn("scootbg 0.1.0", p.stdout)
-        self.assertIn("scootbar 0.1.0", p.stdout)
+        versions = {line.split()[1] for line in p.stdout.splitlines()}
+        self.assertEqual(len(versions), 1, p.stdout)
+
+    def test_a_tree_without_a_workspace_version_is_refused(self):
+        d = fake_source("0.2.0")
+        (d / "Cargo.toml").write_text('[workspace]\nmembers = ["crates/*"]\n')
+        p = run_meta("versions", "--source", str(d))
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("[workspace.package] version", p.stderr)
 
     def test_scoot_control_pins_its_scootbg(self):
-        src = fake_source({"scoot": "0.2.0", "scootbg": "0.2.0", "scootbar": "0.3.0"})
+        src = fake_source("0.2.0")
         p = run_meta(
             "control", "--package", "scoot", "--source", str(src),
             "--arch", "amd64", "--depends", "libc6 (>= 2.36)",
@@ -55,6 +72,27 @@ class ControlTest(unittest.TestCase):
             "Depends: libc6 (>= 2.36), scootbg (= 0.2.0-1)",
         ):
             self.assertIn(line, p.stdout)
+
+    def test_a_snapshot_suffix_rides_on_the_upstream_version(self):
+        src = fake_source("0.2.0")
+        p = run_meta(
+            "control", "--package", "scoot", "--source", str(src),
+            "--arch", "amd64", "--depends", "libc6",
+            "--upstream-suffix", "+git20261013.615608c",
+            "--scootbg-version", "0.2.0+git20261013.615608c-1",
+        )
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("Version: 0.2.0+git20261013.615608c-1", p.stdout)
+        self.assertIn("scootbg (= 0.2.0+git20261013.615608c-1)", p.stdout)
+
+    def test_a_malformed_snapshot_suffix_is_refused(self):
+        src = fake_source("0.2.0")
+        for bad in ("git20261013.615608c", "+git2026.615608c", "+git20261013.XYZ", "-dirty"):
+            p = run_meta(
+                "control", "--package", "scootbar", "--source", str(src),
+                "--arch", "amd64", "--depends", "libc6", "--upstream-suffix", bad,
+            )
+            self.assertNotEqual(p.returncode, 0, bad)
 
     def test_scoot_needs_its_scootbg_version(self):
         # Rendering scoot without the coupled version is a loud refusal,

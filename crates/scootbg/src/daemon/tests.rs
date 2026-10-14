@@ -175,7 +175,7 @@ fn version_answers_the_build_and_protocol() {
     let reply = ask(&mut responder, Request::Version.line().trim_end());
     assert_eq!(reply["type"], "version");
     assert_eq!(reply["protocol"], PROTOCOL_VERSION);
-    assert_eq!(reply["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(reply["version"], env!("SCOOT_BUILD_VERSION"));
 }
 
 #[test]

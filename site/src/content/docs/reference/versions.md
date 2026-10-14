@@ -1,11 +1,11 @@
 ---
 title: Versions and compatibility
-description: "What each binary's version means, which versions work together, and how to check."
+description: "What a scoot version means, which builds work together, and how to check."
 ---
 
-Every binary prints its own version and the protocol it speaks. When
-something disagrees after an upgrade, this page says which half to look
-at.
+scoot has one version for every binary, and every binary prints it with
+the protocol it speaks. When something disagrees after an upgrade, this
+page says which half to look at.
 
 ## Ask each binary what it is
 
@@ -18,27 +18,39 @@ scootbar --version
 Each prints one line and exits without starting anything:
 
 ```text
-scoot 0.1.0 (ipc protocol 10)
-scootbg 0.1.0 (protocol 1)
-scootbar 0.1.0
+scoot 0.2.0 (ipc protocol 10)
+scootbg 0.2.0 (protocol 1)
+scootbar 0.2.0
 ```
 
-`scoot 0.1.0` is the compositor's own version; `(ipc protocol 10)` is
-the control protocol `scoot msg` speaks, so a client checks compatibility
-before connecting. `scootbg` names its wallpaper protocol the same way.
-`scootbar` carries no protocol number: it speaks standard Wayland
-protocols, plus an optional compositor feed guarded by the IPC protocol
-number.
+`0.2.0` is the release, the same for all three: one tag, `v0.2.0`,
+releases every binary. `(ipc protocol 10)` is the control protocol
+`scoot msg` speaks, so a client can check compatibility before relying
+on newer requests. `scootbg` names its wallpaper protocol the same way.
+`scootbar` prints no protocol number: it speaks standard Wayland
+protocols to the compositor, and its own control protocol to
+`scootbar msg` (both halves come from one install).
 
-The compositor and the wallpaper daemon move together (one version
-line); the bar moves on its own, so the bar and the compositor can each
-release without the other.
+A build that is not a release (from a git checkout or an Arch `-git`
+package) adds where it came from:
+
+```text
+scoot 0.2.0+14.g615608c (ipc protocol 10)
+```
+
+That reads "14 commits past v0.2.0, at commit `615608c`". The protocol
+number is what decides compatibility, not the suffix. Before a version
+moves, the maintainer reviews it in a release pull request: a breaking
+change bumps the minor while scoot is below 1.0, anything else the
+patch.
 
 ## Which versions work together
 
+- **Everything from one release:** the supported way. Install and
+  upgrade every binary together, at one version.
 - **Bar against compositor:** any pair works as long as both speak the
-  same Wayland protocols. The optional compositor feed refuses cleanly
-  past an IPC protocol bump instead of misbehaving.
+  same Wayland protocols. The bar's one compositor action (`quit`) is a
+  single fixed request every IPC protocol so far understands.
 - **Compositor against wallpaper daemon:** the same protocol is
   required, and `scoot` checks it on every reload before sending the
   section. A version mismatch only warns: the section is still applied
@@ -57,11 +69,9 @@ Run `scootbg --version` beside `scoot --version`. If the protocols
 differ, the compositor's log names the refusal; kill the old daemon
 (`scootbg kill`) and reload, which starts the new one.
 
-> **Symptom:** the bar's optional compositor feed stopped updating.
+> **Symptom:** one binary prints a different version from the others.
 
-The feed follows the IPC protocol number. Upgrade the bar beside the
-compositor, or turn that feed's module off until they match.
-
-Releases are cut per package (`scoot-v0.2.0`, `scootbar-v0.3.0`), each
-with its own changelog section, so an upgrade note names exactly the
-binary it changes.
+Something was upgraded on its own. Upgrade the rest to the same
+release, then restart the session so every daemon
+runs the new build. Each release's changelog section lists what moved,
+grouped by component, so an upgrade note names the binary it changes.

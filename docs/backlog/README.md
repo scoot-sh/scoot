@@ -462,7 +462,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 Project-wide, not tied to one binary; the bar's own Nix package is
 [scootbar's `nix-package`](../scootbar/backlog/resolved/nix-package-done.md).
 
-- [Independent versions per shipped binary](./resolved/independent-versioning-done.md) — RESOLVED 2026-10-07 in #495: per-crate versions (trio lockstep, bar independent), `scripts/version` plan/check/changelog, per-package flake versions, version CI job, contributor `docs/versioning.md` and user `reference/versions.md`
+- [Independent versions per shipped binary](./resolved/independent-versioning-done.md) — RESOLVED 2026-10-07 in #495: per-crate versions (trio lockstep, bar independent), `scripts/version` plan/check/changelog, per-package flake versions, version CI job, contributor `docs/versioning.md` and user `reference/versions.md`; superseded 2026-10-13 by one repository-wide version (`docs/versioning.md`)
 - [Vendored sources, third-party licenses, advisories](./resolved/vendoring-and-licenses-done.md) — medium: what every distro package needs first (two git-fork dependencies vendor and resolve offline) — RESOLVED 2026-10-07 in #491
 - [Release artifacts](./resolved/release-artifacts-done.md) — RESOLVED 2026-10-07 in #498: tag-triggered release workflow with dry run, vendored tarball, portable glibc binaries for both architectures, SBOM, checksums, keyless provenance, per-package changelog notes
 - [A Nix binary cache for users](./resolved/nix-binary-cache-done.md) — RESOLVED 2026-10-07 in #499: verified serving (all Linux outputs), clean-machine proof, trust/rotation docs on site/start/binary-cache

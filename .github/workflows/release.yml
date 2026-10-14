@@ -1,13 +1,13 @@
-# scoot releases: the tag-triggered per-package release job
-# (docs/backlog/packaging/release-artifacts.md).
+# scoot releases: the tag-triggered release job
+# (docs/backlog/packaging/release-artifacts.md, docs/versioning.md).
 #
-# WHAT IT DOES: pushing a package tag (`scoot-v0.2.0`, `scootbar-v0.3.0`;
-# a trio tag releases the trio's binaries) builds that package only and
-# publishes a GitHub Release holding, per release: the vendored source
+# WHAT IT DOES: pushing a release tag (`v0.2.0`: one tag, the
+# repository's one version) builds every binary -- scoot (with `scoot
+# msg`), scootbg, scootbar -- and publishes a GitHub Release holding the vendored source
 # tarball (`scripts/vendor-release.sh`), portable glibc binaries for
 # `x86_64-linux` and `aarch64-linux`, an SBOM (CycloneDX, cargo-cyclonedx),
-# `SHA256SUMS`, a keyless build-provenance attestation, and the
-# per-package changelog (`scripts/version changelog`) as the notes. No
+# `SHA256SUMS`, a keyless build-provenance attestation, and that
+# version's CHANGELOG.md section (`scripts/release-notes`) as the notes. No
 # manual uploads, no long-lived signing keys, no extra secrets: release
 # creation and attestation run on `GITHUB_TOKEN` alone.
 #
@@ -27,16 +27,36 @@
 # main's binaries are already on Cachix with the flake on FlakeHub
 # (`.github/workflows/nix-build.yml`).
 #
+# WHO TAGS, AND HOW A RUN STARTS: two paths, one gate.
+# - The release PR. release-plz (`release-plz.yml`) keeps a PR open that
+#   bumps the workspace version and CHANGELOG.md; merging it makes
+#   release-plz create `vX.Y.Z` with GITHUB_TOKEN. A tag made that way
+#   starts no `push` run (GitHub starts no workflow for GITHUB_TOKEN
+#   events), so release-plz.yml then dispatches this workflow ON the tag
+#   (`gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z -f
+#   dry_run=false`): workflow_dispatch is the documented exception that
+#   always starts a run.
+# - A maintainer pushing a `v*` tag by hand (the first one, v0.2.0, is cut
+#   that way): the `push: tags` trigger below.
+# Both resolve the same tag through the same gates, share one
+# concurrency group per tag (so they queue, never overlap), and a run
+# that finds the release already complete stops green with a notice
+# instead of publishing again: whichever path runs second does nothing.
+# A dispatch that would publish (`dry_run: false`) must run on the tag
+# itself (`--ref vX.Y.Z`): from a branch, it is refused before anything
+# builds.
+#
 # GATES (all in `scripts/release-resolve`, unit-tested in
-# `scripts/test_release_resolve.py`, plus `scripts/version check`): the
-# tag is `<package>-vX.Y.Z` for a shipped package; its version equals
-# the manifest(s) (trio tags need all three: lockstep); the tag exists
-# and its commit is on `origin/main`; a release holding every expected
+# `scripts/test_release_resolve.py`): the tag is `vX.Y.Z`; its version
+# equals the `[workspace.package] version` at the tagged commit, and
+# every crate there inherits it; the tag exists and its commit is on
+# `origin/main`; a release holding every expected
 # asset refuses a re-publish, while an incomplete one resumes, so a
 # re-run of a failed run converges instead of duplicating. Dispatch
 # takes the same gates: `tag` must exist and point at main.
 #
-# DRY RUN: `workflow_dispatch` with `dry_run: true` (the default) runs
+# DRY RUN: `workflow_dispatch` with `dry_run: true` (the default, from any
+# ref) runs
 # resolve, vendor, both arch builds, SBOM, checksums and the changelog,
 # then prints what it would publish and stops. A dry run attests nothing
 # and creates no release; it still uploads the run's own build artifacts
@@ -45,13 +65,18 @@
 # merge; until then the lint job below plus local runs are the proof.
 #
 # RECOVERY: re-run the failed workflow run (same tag): the gates resume
-# an incomplete release and refuse a complete one. If a published
+# an incomplete release and skip a complete one. If a published
 # release is wrong, the maintainer deletes the release and the tag and
 # re-cuts (`docs/versioning.md` plus the site's "cut a release" page).
 #
 # TRIGGERS (the CLAUDE.md rule: no always-run job; docs-only pushes
 # start nothing): tag pushes run the pipeline; `pull_request` runs only
-# the lint job and only when this file or the resolve tool changes; a
+# the lint job and only when the release tooling changes (this file,
+# release-plz.yml and its config, the release scripts) or what a release
+# PR changes (Cargo.toml, Cargo.lock, CHANGELOG.md, packaging/); a
+# dispatch with an empty `tag` runs only the lint job (release-plz.yml
+# does that on its PR's branch, whose pull_request run waits for
+# approval); a
 # push to main never reaches this workflow (no `branches: [main]`
 # trigger), and tag pushes always contain the release commit, so no
 # paths filter is needed on the tag trigger.
@@ -69,27 +94,36 @@
 # upload), `id-token: write` plus `attestations: write` (provenance)
 # only on the publish job.
 
-name: release (tag-triggered, per package)
+name: release (tag-triggered)
 
 on:
   push:
     tags:
-      - 'scoot-v*'
-      - 'scootctl-v*'
-      - 'scootbg-v*'
-      - 'scootbar-v*'
+      - 'v*'
   pull_request:
     paths:
       - '.github/workflows/release.yml'
+      - '.github/workflows/release-plz.yml'
+      - 'release-plz.toml'
+      # What a release PR changes (the workspace version, the lockfile,
+      # the changelog the notes come from, the packaging bump), so the
+      # release tooling is checked against it.
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'CHANGELOG.md'
+      - 'packaging/**'
       - 'scripts/release-resolve'
+      - 'scripts/release-notes'
+      - 'scripts/workspace-version'
       - 'scripts/test_release_resolve.py'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Package tag to release (e.g. scootbar-v0.2.0). Must exist and point at main.'
-        required: true
+        description: 'Release tag (e.g. v0.2.0). Must exist and point at main. To publish (dry_run false), run on that tag: --ref v0.2.0. Empty: run only the lint job on the dispatched ref (what release-plz does for its PR).'
+        required: false
+        default: ''
       dry_run:
-        description: 'Build everything, publish nothing.'
+        description: 'Build everything, publish nothing (any ref). false publishes, and only on the tag itself.'
         required: true
         default: true
         type: boolean
@@ -99,17 +133,23 @@ permissions:
 
 # A publish must never be cancelled halfway (half-uploaded assets read
 # as complete by nothing: the gates resume them, but do not leave them).
+#
+# One group per TAG, not per ref: the tag push and a dispatch on the same
+# tag (release-plz's path) land in one queue, whichever ref started them.
+# Pull request runs (lint only) keep a group per PR.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  # The workflow's own CI: actionlint over this file plus the resolve
-  # tool's unit tests. Runs on pull requests that touch the release
+  # The workflow's own CI: actionlint over this file plus the release
+  # tools' unit tests. Runs on pull requests that touch the release
   # tooling, and nowhere else.
   lint:
     name: Release tooling (actionlint + resolve tests)
-    if: github.event_name == 'pull_request'
+    # Also on a dispatch without a tag: release-plz.yml runs this on the
+    # release PR's branch, whose own pull_request run waits for approval.
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.tag == '')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -118,7 +158,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
 
       - name: actionlint (pinned through this repo's flake.lock)
-        run: nix shell --inputs-from . nixpkgs#actionlint --command actionlint .github/workflows/release.yml
+        run: nix shell --inputs-from . nixpkgs#actionlint --command actionlint .github/workflows/release.yml .github/workflows/release-plz.yml
 
       - name: Release workflow guards (single-path artifacts, no inline context)
         run: |
@@ -177,23 +217,24 @@ jobs:
           print("guards ok: single-path uploads, hidden files included, no inline github/inputs/steps in run")
           EOF
 
-      - name: scripts/release-resolve tests
+      - name: release tool tests (release-resolve, workspace-version, release-notes)
         run: python3 scripts/test_release_resolve.py
 
   # Parse the tag and run every refusal gate. Its outputs drive the rest
   # of the pipeline; a refusal fails the run before anything builds.
   resolve:
     name: Resolve and gate the tag
-    if: github.event_name != 'pull_request'
+    # A tag push, or a dispatch that names a tag (an empty one is lint only).
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
-      package: ${{ steps.resolve.outputs.package }}
       version: ${{ steps.resolve.outputs.version }}
       binaries: ${{ steps.resolve.outputs.binaries }}
       assets: ${{ steps.resolve.outputs.assets }}
       dry_run: ${{ steps.resolve.outputs.dry_run }}
+      complete: ${{ steps.resolve.outputs.complete }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -205,16 +246,21 @@ jobs:
         env:
           PUSH_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
           INPUT_TAG: ${{ inputs.tag || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
         run: |
           tag="${PUSH_TAG:-$INPUT_TAG}"
           test -n "$tag" || { echo "::error title=No tag to release::dispatch needs the 'tag' input."; exit 1; }
+          # A dispatch that publishes runs on the tag itself, so the
+          # workflow, the scripts and the gates are the tag's own: from a
+          # branch, only a dry run.
+          if [ "$EVENT_NAME" = workflow_dispatch ] && [ "$DRY_RUN_INPUT" != true ]; then
+            if [ "$GITHUB_REF_TYPE" != tag ] || [ "$GITHUB_REF_NAME" != "$tag" ]; then
+              echo "::error title=Publishing dispatch not on its tag::dry_run=false must run with --ref $tag (this run is on $GITHUB_REF_TYPE '$GITHUB_REF_NAME'). From a branch, dispatch a dry run."
+              exit 1
+            fi
+          fi
           echo "value=$tag" >>"$GITHUB_OUTPUT"
-
-      # The versioning policy (trio lockstep, semver, own versions,
-      # publish = false); the tag-vs-manifest equality itself is the
-      # resolve script's, below.
-      - name: scripts/version check
-        run: python3 scripts/version check
 
       - name: scripts/release-resolve (every refusal gate)
         id: resolve
@@ -224,16 +270,23 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN_INPUT: ${{ inputs.dry_run }}
         run: |
-          plan=$(scripts/release-resolve --json "$TAG_TO_RESOLVE")
+          # --complete-ok: a release that already holds every asset is not
+          # an error here but a finished job (the tag push and release-plz's
+          # dispatch can both reach the same tag); the plan says so and the
+          # jobs below skip.
+          plan=$(scripts/release-resolve --json --complete-ok "$TAG_TO_RESOLVE")
           echo "$plan"
           {
             echo "tag=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag"])')"
-            echo "package=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["package"])')"
             echo "version=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
             echo "binaries=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["binaries"]))')"
             echo "assets=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["assets"]))')"
+            echo "complete=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["complete"]).lower())')"
             if [ "$EVENT_NAME" = push ]; then echo "dry_run=false"; else echo "dry_run=$DRY_RUN_INPUT"; fi
           } >>"$GITHUB_OUTPUT"
+          if printf '%s' "$plan" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["complete"] else 1)'; then
+            echo "::notice title=Already released::$TAG_TO_RESOLVE already holds every asset; nothing to build or publish."
+          fi
 
   # The vendored source tarball plus the SBOM: arch-independent, staged
   # once from the tag. The portable builds below compile this exact
@@ -244,7 +297,7 @@ jobs:
   vendor:
     name: Vendored tarball + SBOM
     needs: resolve
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -257,34 +310,33 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
 
       - name: Stage the tarball
+        env:
+          RESOLVE_VERSION: ${{ needs.resolve.outputs.version }}
         run: |
-          scripts/vendor-release.sh --out "$RUNNER_TEMP/vendor-release"
+          # Named by the version (`scoot-0.2.0-vendored.tar.gz`), the name
+          # the RPM specs' Source0 downloads.
+          scripts/vendor-release.sh --out "$RUNNER_TEMP/vendor-release" --label "$RESOLVE_VERSION"
           ls -l "$RUNNER_TEMP/vendor-release"
 
       - name: SBOM (CycloneDX from the lockfile, cargo-cyclonedx)
         env:
-          RESOLVE_PACKAGE: ${{ needs.resolve.outputs.package }}
           RESOLVE_VERSION: ${{ needs.resolve.outputs.version }}
           RESOLVE_BINARIES: ${{ needs.resolve.outputs.binaries }}
         run: |
-          # Union SBOM over every shipped binary. A trio tag ships scoot and
-          # scootbg, but a single-package SBOM would omit the other binary's
-          # dependencies (e.g. scootbg's image-webp/zune-*/byteorder-lite
-          # decoders). cargo-cyclonedx emits crates/*/sbom.json in one run;
-          # merge the shipped binaries' (plus the trigger package's)
+          # Union SBOM over every shipped binary: a release ships scoot,
+          # scootbg and scootbar, and one crate's SBOM would omit the
+          # others' dependencies (e.g. scootbg's image-webp/zune-*/
+          # byteorder-lite decoders). cargo-cyclonedx emits crates/*/sbom.json
+          # in one run (the manifest path only picks the workspace, as it
+          # did per package before); merge the shipped binaries'
           # components, deduplicated by bom-ref, into one file.
           nix shell --inputs-from . nixpkgs#cargo-cyclonedx --command \
             cargo cyclonedx -f json --override-filename sbom \
-              --manifest-path "crates/$RESOLVE_PACKAGE/Cargo.toml"
+              --manifest-path crates/scoot/Cargo.toml
           python3 - <<'EOF'
           import json, os
-          package = os.environ["RESOLVE_PACKAGE"]
           version = os.environ["RESOLVE_VERSION"]
-          binaries = os.environ["RESOLVE_BINARIES"].split()
-          wanted = []
-          for name in [package] + binaries:
-              if name not in wanted:
-                  wanted.append(name)
+          wanted = os.environ["RESOLVE_BINARIES"].split()
           merged = {}
           base = None
           for name in wanted:
@@ -304,7 +356,7 @@ jobs:
           assert base is not None, f"no SBOM found for {wanted}"
           base["components"] = [merged[k] for k in sorted(merged)]
           runner_temp = os.environ["RUNNER_TEMP"]
-          out = f"{runner_temp}/sbom-{package}-{version}.cyclonedx.json"
+          out = f"{runner_temp}/sbom-scoot-{version}.cyclonedx.json"
           with open(out, "w") as f:
               json.dump(base, f, indent=2)
           print(base.get("bomFormat"), base.get("specVersion"), len(base["components"]), "components", f"from {wanted}")
@@ -340,7 +392,7 @@ jobs:
   build:
     name: Portable binaries (${{ matrix.arch }})
     needs: [resolve, vendor]
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true'
     strategy:
       matrix:
         include:
@@ -439,7 +491,7 @@ jobs:
   publish:
     name: Publish the GitHub Release (or dry-run it)
     needs: [resolve, vendor, build]
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -490,12 +542,14 @@ jobs:
           (cd dist && sha256sum -- * | LC_ALL=C sort -k2 > SHA256SUMS && sha256sum -c SHA256SUMS)
           ls -l dist/
 
-      - name: Release notes (per-package changelog)
+      - name: Release notes (this version's CHANGELOG.md section)
         run: |
           {
-            echo "## ${{ needs.resolve.outputs.package }} ${{ needs.resolve.outputs.version }}"
+            echo "## scoot ${{ needs.resolve.outputs.version }}"
             echo
-            scripts/version changelog '${{ needs.resolve.outputs.package }}'
+            echo "Every binary at one version: scoot (with \`scoot msg\`), scootbg and scootbar."
+            echo
+            scripts/release-notes '${{ needs.resolve.outputs.version }}'
             echo
             echo "Built from \`$(
               git rev-parse --short '${{ needs.resolve.outputs.tag }}^{commit}')\` on main;"

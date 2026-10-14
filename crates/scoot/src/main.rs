@@ -75,10 +75,12 @@ fn run() -> Result<(), Failure> {
             // `scoot --version | head -c0` exits 0. Needs no compositor --
             // identifying a build without starting it is the whole point --
             // so this arm runs on every platform, like `--help`.
-            // This binary's own version (not scootctl's: the two agree only
-            // while the lockstep trio holds -- see scootctl::version_string).
-            scootctl::output::print_line(&scootctl::version_string_for(env!("CARGO_PKG_VERSION")))
-                .map_err(|error| Failure::Runtime(error.to_string()))?;
+            // The repository version, labeled with the commit for a build
+            // that is not a release (crates/scoot-ipc/build_label.rs).
+            scootctl::output::print_line(&scootctl::version_string_for(env!(
+                "SCOOT_BUILD_VERSION"
+            )))
+            .map_err(|error| Failure::Runtime(error.to_string()))?;
             Ok(())
         }
         cli::Command::Msg { request, out, json } => scootctl::run(&request, out.as_deref(), json)

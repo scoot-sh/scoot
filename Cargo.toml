@@ -3,7 +3,12 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.0"
+# One version for the whole repository: every crate inherits it
+# (`version.workspace = true`) and one `vX.Y.Z` tag releases every binary
+# at it. The release PR (release-plz, `release-plz.toml`) is the only thing
+# that moves it. What a version means, and the protocol numbers that carry
+# compatibility instead: docs/versioning.md.
+version = "0.2.0"
 edition = "2024"
 # Smithay's minimum; the compositor sets the floor for everything.
 rust-version = "1.88"

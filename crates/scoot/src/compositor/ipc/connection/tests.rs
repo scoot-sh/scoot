@@ -526,7 +526,7 @@ fn request_line(request: &Request) -> String {
 /// shape cannot quietly invalidate those counts.
 fn reply_line_len() -> usize {
     encode(&Response::Version {
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: env!("SCOOT_BUILD_VERSION").to_string(),
         protocol: scoot_ipc::PROTOCOL_VERSION,
     })
     .expect("a response encodes")

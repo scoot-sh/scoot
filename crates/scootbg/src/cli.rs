@@ -775,7 +775,7 @@ impl std::error::Error for Error {}
 pub fn version_string() -> String {
     format!(
         "scootbg {} (protocol {PROTOCOL_VERSION})",
-        env!("CARGO_PKG_VERSION")
+        env!("SCOOT_BUILD_VERSION")
     )
 }
 

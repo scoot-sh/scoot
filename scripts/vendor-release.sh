@@ -4,7 +4,10 @@
 # release job ([release-artifacts](../docs/backlog/packaging/release-artifacts.md),
 # which calls this script rather than reimplementing it).
 #
-# What it produces, in --out (default ./target/vendor-release):
+# What it produces, in --out (default ./target/vendor-release), where
+# <name> is `scoot-<label>-vendored` and the label is --label (the release
+# job passes the version: `scoot-0.2.0-vendored.tar.gz`, the name the RPM
+# specs' Source0 expects) or, by default, the short commit:
 #   <name>/                  the exact HEAD tree (via `git archive`, so the
 #                            tarball is reproducible from the commit)
 #     vendor/                `cargo vendor` output: every crates.io crate
@@ -32,13 +35,15 @@ set -eu
 
 OUT=./target/vendor-release
 CHECK_OFFLINE=0
+LABEL=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --out) OUT="$2"; shift 2 ;;
         --check-offline) CHECK_OFFLINE=1; shift ;;
+        --label) LABEL="$2"; shift 2 ;;
         -h|--help)
-            echo "usage: scripts/vendor-release.sh [--out DIR] [--check-offline]"
+            echo "usage: scripts/vendor-release.sh [--out DIR] [--label X.Y.Z] [--check-offline]"
             exit 0 ;;
         *) echo "vendor-release.sh: unknown flag $1" >&2; exit 2 ;;
     esac
@@ -57,7 +62,11 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 REV=$(git rev-parse --short HEAD)
-NAME="scoot-${REV}-vendored"
+# The label lands in a file name: a version or a commit, nothing else.
+case "${LABEL:-$REV}" in
+    *[!0-9A-Za-z.+-]* | "") echo "vendor-release.sh: bad --label '${LABEL}'" >&2; exit 2 ;;
+esac
+NAME="scoot-${LABEL:-$REV}-vendored"
 STAGE="${OUT}/${NAME}"
 
 rm -rf "$STAGE"

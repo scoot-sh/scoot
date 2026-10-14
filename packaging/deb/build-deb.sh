@@ -2,6 +2,7 @@
 # build-deb.sh: build the three scoot .debs from a source tree.
 #
 # Usage: packaging/deb/build-deb.sh --source DIR --out DIR [--revision N]
+#                                   [--upstream-suffix +git<YYYYMMDD>.<commit>]
 #
 # --source is a clean checkout or a `scripts/vendor-release.sh` staged
 # `source/` tree (the same layout the release tarball unpacks to, so
@@ -9,12 +10,14 @@
 # same command). The build runs `cargo build --release --locked
 # --offline`, so the tree must be vendored (or the registry warm);
 # `CARGO_NET_OFFLINE=true` is exported to make any network touch fail.
-# --out receives `scoot_<ver>_<arch>.deb` and friends.
+# --out receives `scoot_<ver>_<arch>.deb` and friends. --upstream-suffix
+# marks a build that is not a release (docs/versioning.md): the version
+# becomes `0.2.0+git20261013.615608c-1`, above the release it follows.
 #
 # Per package the script: builds the crate, derives Depends from
 # `dpkg-shlibdeps -O` over the staged binaries (checked against the
 # ldd-derived allow-list in deb-meta.py -- a new or renamed system
-# library fails here), renders DEBIAN/control from the crate manifests
+# library fails here), renders DEBIAN/control from the workspace version
 # (no version is remembered anywhere), stages the installed files (the
 # same set as packaging/arch: the session entry, the session user
 # units, the portal selection, the bar's user unit,
@@ -32,14 +35,16 @@ set -eu
 SOURCE=""
 OUT=""
 REVISION="1"
+SUFFIX=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --source) SOURCE="$2"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         --revision) REVISION="$2"; shift 2 ;;
+        --upstream-suffix) SUFFIX="$2"; shift 2 ;;
         -h|--help)
-            echo "usage: packaging/deb/build-deb.sh --source DIR --out DIR [--revision N]"
+            echo "usage: packaging/deb/build-deb.sh --source DIR --out DIR [--revision N] [--upstream-suffix +git<YYYYMMDD>.<commit>]"
             exit 0 ;;
         *) echo "build-deb.sh: unknown flag $1" >&2; exit 2 ;;
     esac
@@ -79,8 +84,7 @@ else
 fi
 
 SCOOTBG_VERSION=$(python3 "$META" versions --source "$SOURCE" | sed -n 's/^scootbg //p')
-echo "--- versions: scoot/scootbg $SCOOTBG_VERSION (lockstep), scootbar $(
-    python3 "$META" versions --source "$SOURCE" | sed -n 's/^scootbar //p')"
+echo "--- version: $SCOOTBG_VERSION$SUFFIX (the workspace version, every package)"
 
 export CARGO_NET_OFFLINE=true
 STAGE_ROOT="$OUT/stage"
@@ -146,12 +150,13 @@ for pkg in scoot scootbg scootbar; do
 
     python3 "$META" control --package "$pkg" --source "$SOURCE" \
         --arch "$ARCH" --depends "$DEPENDS" --revision "$REVISION" \
-        --scootbg-version "$SCOOTBG_VERSION-$REVISION" \
+        --upstream-suffix "$SUFFIX" \
+        --scootbg-version "$SCOOTBG_VERSION$SUFFIX-$REVISION" \
         >"$STAGE/DEBIAN/control"
 
     # Non-native packages (our versions carry a Debian revision) must
     # ship changelog.Debian.gz or lintian fails with no-changelog. The
-    # entry points at the per-package release notes (the user-visible
+    # entry points at the release notes (the user-visible
     # history) and the license inventory, which is where this tree's
     # history lives -- there is no Debian revision history to recount.
     # Both names come from the rendered control, so they cannot skew.

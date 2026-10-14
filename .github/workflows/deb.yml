@@ -140,10 +140,10 @@ jobs:
           name: vendor-source
           path: ${{ runner.temp }}/vendor
 
-      # The .deb versions must name their crates' versions (the trio
-      # together, the bar on its own); the scoot control must pin the
-      # scootbg version the same run builds.
-      - name: deb versions track their crate manifests
+      # Every .deb carries the repository's one version (the root
+      # Cargo.toml's [workspace.package] version); the scoot control
+      # must pin the scootbg version the same run builds.
+      - name: deb versions track the workspace version
         env:
           VENDOR_SOURCE: ${{ runner.temp }}/vendor/source
         run: |
@@ -156,8 +156,9 @@ jobs:
               capture_output=True, text=True, check=True,
           ).stdout
           got = dict(line.split() for line in out.splitlines())
-          assert got["scoot"] == got["scootbg"], f"trio skew in staged tree: {got}"
-          print(f"staged tree: scoot/scootbg {got['scoot']} (lockstep ok), scootbar {got['scootbar']}")
+          assert set(got) == {"scoot", "scootbg", "scootbar"}, got
+          assert len(set(got.values())) == 1, f"version skew in staged tree: {got}"
+          print(f"staged tree: every package at {got['scoot']}")
           EOF
 
       - name: Build the .debs in the distro container
@@ -165,13 +166,24 @@ jobs:
           VENDOR_SOURCE: ${{ runner.temp }}/vendor/source
         run: |
           src="$VENDOR_SOURCE"
+          # A release tag builds the release (`0.2.0-1`); a weekly or
+          # manual run builds a commit that is not one, and the snapshot
+          # suffix says so (`0.2.0+git<commit date>.<commit>-1`,
+          # docs/versioning.md).
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            DEB_SUFFIX=""
+          else
+            DEB_SUFFIX="+git$(TZ=UTC0 git show -s --date=format-local:%Y%m%d --format=%cd HEAD).$(git rev-parse --short=7 HEAD)"
+          fi
+          export DEB_SUFFIX
+          echo "snapshot suffix: ${DEB_SUFFIX:-none (release tag)}"
           test -f "$src/.cargo/config.toml" || { echo "::error title=Staged source has no .cargo/config.toml::the vendor artifact did not download intact."; exit 1; }
           mkdir -p "$RUNNER_TEMP/debs"
           docker run --rm \
             -v "$src:/src:ro" -v "$GITHUB_WORKSPACE/packaging:/pkg:ro" \
             -v "$RUNNER_TEMP/debs:/out" \
             -e CARGO_TARGET_DIR=/tmp/target \
-            -e RUST_TOOLCHAIN \
+            -e RUST_TOOLCHAIN -e DEB_SUFFIX \
             "$DISTRO_IMAGE" bash -euo pipefail -c '
               apt-get update -qq
               # The release job build inputs (release.yml): the -dev
@@ -196,7 +208,7 @@ jobs:
               ldd --version | head -n 1 || true
               cp -a /pkg /tmp/pkg
               chmod +x /tmp/pkg/deb/build-deb.sh /tmp/pkg/deb/make-repo-index.sh
-              /tmp/pkg/deb/build-deb.sh --source /src --out /out
+              /tmp/pkg/deb/build-deb.sh --source /src --out /out --upstream-suffix "$DEB_SUFFIX"
               ls -l /out/*.deb
               # lintian judgment here, where the log lands in the
               # artifact: any error fails, and a warning fails unless it

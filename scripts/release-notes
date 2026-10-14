@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""Print one release's section of CHANGELOG.md: the GitHub Release notes.
+
+    scripts/release-notes X.Y.Z [--changelog PATH]
+
+The release PR (release-plz, `release-plz.toml`) writes a `## [X.Y.Z]`
+section into the root CHANGELOG.md, above the hand-written notes that
+were under `## Unreleased`; `.github/workflows/release.yml` publishes that
+section as the release's notes. A heading counts whether or not it
+carries a compare link or a date (`## [0.2.1](https://...) - 2026-10-20`,
+`## [0.2.0] - 2026-10-14`, `## 0.2.0`). The section runs to the next
+`## ` heading.
+
+No section for the version is not an error (the release still ships):
+it prints a one-line pointer to the changelog and warns on stderr.
+Stdlib only; tests in `scripts/test_release_resolve.py`.
+"""
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def section(text, version):
+    """The body under `version`'s heading, or None."""
+    heading = re.compile(
+        r"^##\s+\[?v?" + re.escape(version) + r"\]?(?:\([^)]*\))?(?:\s.*)?$")
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if heading.match(line):
+            body = []
+            for rest in lines[i + 1:]:
+                if rest.startswith("## "):
+                    break
+                body.append(rest)
+            return "\n".join(body).strip("\n")
+    return None
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("version", help="X.Y.Z (a leading v is accepted)")
+    ap.add_argument("--changelog", default=str(ROOT / "CHANGELOG.md"))
+    a = ap.parse_args(argv)
+    version = a.version[1:] if a.version.startswith("v") else a.version
+    try:
+        text = Path(a.changelog).read_text()
+    except OSError as e:
+        text = ""
+        print(f"release-notes: warning: {e}", file=sys.stderr)
+    body = section(text, version)
+    if body is None or not body.strip():
+        print(f"release-notes: warning: no CHANGELOG.md section for "
+              f"{version}", file=sys.stderr)
+        print(f"See [CHANGELOG.md](https://github.com/scoot-sh/scoot/blob/"
+              f"v{version}/CHANGELOG.md) for what changed.")
+    else:
+        print(body)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -334,7 +334,7 @@ impl State {
     pub fn handle_request(&mut self, request: Request) -> Response {
         match request {
             Request::Version => Response::Version {
-                version: env!("CARGO_PKG_VERSION").to_string(),
+                version: env!("SCOOT_BUILD_VERSION").to_string(),
                 protocol: PROTOCOL_VERSION,
             },
             // Session-level like `windows`, not an `action`: actions are

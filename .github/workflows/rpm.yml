@@ -16,10 +16,11 @@
 # step, the way the AUR push is for the Arch packages.
 #
 # THE VENDORED TARBALL SUBSTITUTION: no release is cut yet, so the specs'
-# `Source0` URLs 404 until the first release names its assets. Each job
+# `Source0` URLs 404 until the first release is cut. Each job
 # stages the same-layout tarball of HEAD (`scripts/vendor-release.sh`,
 # whose output the release job publishes) and places it under SOURCES
-# with the provisional basename the spec names, so the `%setup` lines
+# with the name the spec downloads (`scoot-<version>-vendored.tar.gz`,
+# what release.yml publishes), so the `%setup` lines
 # and the offline `%build` are the real ones and only the URL part is
 # substitution.
 #
@@ -99,31 +100,26 @@ jobs:
           fi
           echo "ok: no rpmlint errors on the spec files (warnings, if any, are above)"
 
-      # The spec `Version` must name its crate's version (the trio
-      # together, the bar on its own); the staged tarball is placed
-      # under the provisional Source0 basename naming that version.
-      - name: Spec versions track their crate manifests, place the tarball
+      # Every spec `Version` must name the repository's one version
+      # (scripts/workspace-version); the staged tarball is placed under
+      # the Source0 name for that version.
+      - name: Spec versions track the workspace version, place the tarball
         run: |
           python3 - <<'EOF'
-          import re
-          pairs = [("scoot", "crates/scoot/Cargo.toml", "scoot"),
-                   ("scootbg", "crates/scootbg/Cargo.toml", "scoot"),
-                   ("scootbar", "crates/scootbar/Cargo.toml", "scootbar")]
-          for spec, manifest, tag in pairs:
-              crate_ver = re.search(r'^version = "(.*)"$', open(manifest).read(), re.M).group(1)
+          import re, subprocess
+          crate_ver = subprocess.run(["scripts/workspace-version"], check=True,
+                                     capture_output=True, text=True).stdout.strip()
+          for spec in ("scoot", "scootbg", "scootbar"):
               text = open(f"packaging/rpm/{spec}.spec").read()
               spec_ver = re.search(r'^Version:\s+(.*)$', text, re.M).group(1).strip()
               status = "ok" if spec_ver == crate_ver else "MISMATCH"
-              print(f"{spec}.spec: Version={spec_ver} crate={crate_ver} tag={tag}-v{crate_ver} {status}")
-              assert spec_ver == crate_ver, f"{spec}.spec Version {spec_ver} != crate {crate_ver}"
+              print(f"{spec}.spec: Version={spec_ver} workspace={crate_ver} tag=v{crate_ver} {status}")
+              assert spec_ver == crate_ver, f"{spec}.spec Version {spec_ver} != workspace {crate_ver}"
           EOF
           mkdir -p "$GITHUB_WORKSPACE/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          scoot_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scoot.spec)
-          bar_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scootbar.spec)
+          ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scoot.spec)
           cp "$RUNNER_TEMP"/rpm-vendor/scoot-*-vendored.tar.gz \
-            "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scoot-$scoot_ver-vendored.tar.gz"
-          cp "$RUNNER_TEMP"/rpm-vendor/scoot-*-vendored.tar.gz \
-            "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scootbar-$bar_ver-vendored.tar.gz"
+            "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scoot-$ver-vendored.tar.gz"
           ls -l "$GITHUB_WORKSPACE/rpmbuild/SOURCES"
 
       - name: rpmbuild all three specs
@@ -276,29 +272,24 @@ jobs:
           echo "ok: no rpmlint errors on the spec files (warnings, if any, are above)"
           echo '::endgroup::'
 
-          # The spec `Version` must name its crate's version (the trio
-          # together, the bar on its own); the staged tarball is placed
-          # under the provisional Source0 basename naming that version.
-          echo '::group::Spec versions track their crate manifests, place the tarball'
+          # Every spec `Version` must name the repository's one version
+          # (scripts/workspace-version); the staged tarball is placed under
+          # the Source0 name for that version.
+          echo '::group::Spec versions track the workspace version, place the tarball'
           python3 - <<'EOF'
-          import re
-          pairs = [("scoot", "crates/scoot/Cargo.toml", "scoot"),
-                   ("scootbg", "crates/scootbg/Cargo.toml", "scoot"),
-                   ("scootbar", "crates/scootbar/Cargo.toml", "scootbar")]
-          for spec, manifest, tag in pairs:
-              crate_ver = re.search(r'^version = "(.*)"$', open(manifest).read(), re.M).group(1)
+          import re, subprocess
+          crate_ver = subprocess.run(["scripts/workspace-version"], check=True,
+                                     capture_output=True, text=True).stdout.strip()
+          for spec in ("scoot", "scootbg", "scootbar"):
               text = open(f"packaging/rpm/{spec}.spec").read()
               spec_ver = re.search(r'^Version:\s+(.*)$', text, re.M).group(1).strip()
               status = "ok" if spec_ver == crate_ver else "MISMATCH"
-              print(f"{spec}.spec: Version={spec_ver} crate={crate_ver} tag={tag}-v{crate_ver} {status}")
-              assert spec_ver == crate_ver, f"{spec}.spec Version {spec_ver} != crate {crate_ver}"
+              print(f"{spec}.spec: Version={spec_ver} workspace={crate_ver} tag=v{crate_ver} {status}")
+              assert spec_ver == crate_ver, f"{spec}.spec Version {spec_ver} != workspace {crate_ver}"
           EOF
-          scoot_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scoot.spec)
-          bar_ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scootbar.spec)
+          ver=$(sed -n 's/^Version:\s*//p' packaging/rpm/scoot.spec)
           cp "$RUNNER_TEMP"/rpm-vendor/scoot-*-vendored.tar.gz \
-            "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scoot-$scoot_ver-vendored.tar.gz"
-          cp "$RUNNER_TEMP"/rpm-vendor/scoot-*-vendored.tar.gz \
-            "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scootbar-$bar_ver-vendored.tar.gz"
+            "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scoot-$ver-vendored.tar.gz"
           ls -l "$GITHUB_WORKSPACE/rpmbuild/SOURCES"
           echo '::endgroup::'
 

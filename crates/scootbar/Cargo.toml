@@ -1,10 +1,8 @@
 [package]
 name = "scootbar"
 description = "Status bar for Wayland"
-# Independent versioning: on its own, outside the scoot/scootctl/scootbg
-# lockstep trio (see crates/scoot/Cargo.toml). Starts at the same 0.1.0 the
-# workspace carried, so the first independent bump has a base to move from.
-version = "0.1.0"
+# The repository's one version (docs/versioning.md).
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

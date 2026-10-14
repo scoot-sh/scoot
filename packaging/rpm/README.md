@@ -9,13 +9,14 @@ documented only (the ticket's second half is a host account away).
 
 | Spec | Package | Source tag | Version follows |
 |---|---|---|---|
-| `scoot.spec` | `scoot` | `scoot-v$Version` | `crates/scoot/Cargo.toml` (trio lockstep) |
-| `scootbg.spec` | `scootbg` | `scoot-v$Version` | `crates/scootbg/Cargo.toml` (same trio tag) |
-| `scootbar.spec` | `scootbar` | `scootbar-v$Version` | `crates/scootbar/Cargo.toml` (independent) |
+| `scoot.spec` | `scoot` | `v$Version` | the workspace version (`Cargo.toml`) |
+| `scootbg.spec` | `scootbg` | `v$Version` | the same |
+| `scootbar.spec` | `scootbar` | `v$Version` | the same |
 
-There is no `scootctl` package: it is the client library inside the
-`scoot` binary (`scoot msg`), versioned with the trio
-(docs/versioning.md). `scoot` requires exactly `scootbg=$Version-$Release`:
+One tag releases every binary at the repository's one version
+(docs/versioning.md), so all three specs carry the same `Version` and
+the same release tarball. There is no `scootctl` package: it is the
+client library inside the `scoot` binary (`scoot msg`). `scoot` requires exactly `scootbg=$Version-$Release`:
 the coupled pair installs at one version, and the bar requires no
 compositor package at all (standard Wayland protocols only).
 
@@ -159,19 +160,21 @@ and what stays manual:
   created, nothing uploaded, no token in any file: creating the project
   and the first build is a manual maintainer step (the COPR new-project
   flow plus `copr-cli buildscm`), exactly like the AUR push stays manual
-  for the Arch packages. The `Source0` basenames in the specs are
-  provisional until the first release names the asset (see the comment
-  at the top of `scoot.spec`); the `.copr/Makefile` is written then,
-  against the real asset names, not now against guesses.
+  for the Arch packages. The `Source0` name is the release asset's real
+  name, `scoot-<version>-vendored.tar.gz` (release.yml passes the version
+  to `scripts/vendor-release.sh --label`; see the comment at the top of
+  `scoot.spec`); the `.copr/Makefile` is written at setup, against that
+  name.
 
 ## Cutting a release (maintainer)
 
-1. Name the release assets (the vendored tarballs the release job
-   publishes) and set each spec's `Source0` basename to match (today a
-   `scoot-<rev>-vendored` name the release job chooses; only that line
-   changes per spec).
-2. Bump `Version` in the moving specs to the released version (the trio
-   together, the bar on its own) and reset `Release` to `1`.
+1. Nothing to rename: every release publishes
+   `scoot-<version>-vendored.tar.gz`, the name each spec's `Source0`
+   already downloads.
+2. In the release PR, before it merges, bump `Version` in all three
+   specs to the proposed version, reset `Release` to `1` and add a
+   `%changelog` entry (`rpm.yml` runs on the release tag and fails if
+   `Version` is not the workspace version).
 3. Write the `.copr/Makefile` per package against the real asset names,
    create the COPR project, enable the chroots above, and run the first
    `buildscm` by hand.
@@ -195,5 +198,5 @@ Fedora container only: the file is identical in both jobs, and
 image's `busybox-gawk` (removed first in CI; `desktop-file-utils` stays
 out for the same reason). The one thing CI cannot prove yet: the `Source0` URLs, which
 404 until the first release is cut; until then the staged tarball is
-placed under the provisional basename, and only the URL part is
+placed under that same name, and only the URL part is
 substitution.

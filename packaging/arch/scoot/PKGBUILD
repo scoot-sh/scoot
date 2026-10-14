@@ -1,20 +1,21 @@
 # scoot: the scrolling-tiling Wayland compositor (release build).
 #
-# Built from the tagged release tarball (`scoot-v$pkgver`), the default
+# Built from the tagged release tarball (`v$pkgver`), the default
 # cargo feature set: the GPU-free compositor that runs on a box with no
 # GPU stack installed. The `gpu-scanout` and `xwayland` tiers are
 # compile-time features; rebuilding with them is documented in
 # packaging/arch/README.md.
 #
 # The versioned `scootbg` dependency is the coupled pair from
-# docs/backlog/packaging/arch-package.md: scoot and scootbg move in
-# lockstep (docs/versioning.md), so the pair installs at one version.
+# docs/backlog/packaging/arch-package.md: one tag releases every binary
+# at the repository's one version (docs/versioning.md), so the pair
+# installs at that version.
 # No tag is cut yet, so `sha256sums` is SKIP until the first release;
 # `updpkgsums` fills it then (see packaging/arch/README.md). CI builds
 # this exact file against a same-layout tarball of HEAD.
 
 pkgname=scoot
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Scrolling-tiling Wayland compositor (CPU renderer, no GPU stack needed)'
 arch=('x86_64' 'aarch64')
@@ -27,18 +28,18 @@ optdepends=('mesa: GPU scanout tier (rebuild with --features gpu-scanout)'
             'systemd: greeter session login through scoot-session')
 install=scoot.install
 options=('!debug')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/scoot-v$pkgver.tar.gz")
+source=("$pkgname-$pkgver.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
-  cd "scoot-scoot-v$pkgver"
+  cd "scoot-$pkgver"
   cargo build --release --locked -p scoot
   cargo deny list > THIRD-PARTY-LICENSES
   "${CARGO_TARGET_DIR:-target}/release/scoot" --print-default-config > config.toml.example
 }
 
 package() {
-  cd "scoot-scoot-v$pkgver"
+  cd "scoot-$pkgver"
   install -Dm755 "${CARGO_TARGET_DIR:-target}/release/scoot" "$pkgdir/usr/bin/scoot"
   install -Dm755 resources/scoot-session "$pkgdir/usr/bin/scoot-session"
   install -Dm644 packaging/arch/scoot/scoot.desktop "$pkgdir/usr/share/wayland-sessions/scoot.desktop"

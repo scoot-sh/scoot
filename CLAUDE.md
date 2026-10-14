@@ -378,13 +378,16 @@ backlog changes.
   `scoot-ipc`, `scootbg-mem`, `scootui`). A change spanning packages lists them,
   comma-separated, or is split. Non-package work uses `nix`, `ci`, `docs`,
   `backlog`, `deps` or `claude` (`CLAUDE.md` and `.claude/`).
-- **Why**: per-package semver is built from this history by
-  `scripts/version`
-  ([independent versioning](docs/backlog/resolved/independent-versioning-done.md),
-  contributor rules in [versioning](docs/versioning.md)):
-  a `feat` is a minor bump and a `fix` a patch for the package(s) in its scope, a
-  breaking change a major. So the scope must be accurate, and "breaking" for a
-  binary means its CLI, config schema or control-socket/IPC protocol.
+- **Why**: the repository has one version (`[workspace.package] version`,
+  every crate inherits it) and one `vX.Y.Z` tag releases every binary
+  ([versioning](docs/versioning.md)). release-plz reads this history to
+  propose the next version in a release PR and to write the changelog
+  grouped by scope; the maintainer decides the version there. Pre-1.0, a
+  breaking change proposes a minor bump and anything else a patch. So the
+  `!`/`BREAKING CHANGE:` marker must be honest, and "breaking" means any
+  binary's CLI, a config schema, or a control-socket/IPC protocol; the scope
+  must be accurate because it is the changelog's grouping. Compatibility
+  between components rides on protocol numbers, never on versions.
 - **PR titles follow the same form**, since a squash-merge makes the title the
   commit. History before this rule is not rewritten.
 

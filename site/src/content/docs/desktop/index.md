@@ -59,14 +59,16 @@ Cachix):
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    scoot.url = "https://flakehub.com/f/scoot-sh/scoot/0.1.*.tar.gz";
+    scoot.url = "https://flakehub.com/f/scoot-sh/scoot/*.tar.gz";
   };
 }
 ```
 
-or `fh add scoot-sh/scoot`. `0.1.*` follows the rolling release (every
-merge to `main`); pin a full version from the flake's page to hold
-still. Either way, set up the [binary cache](../start/binary-cache.md)
+or `fh add scoot-sh/scoot`. `*` follows the rolling release (every
+merge to `main`): its numbers are one minor ahead of the last release
+(`0.3.<commits>` while releases are 0.2.x), so they always sort newest.
+A constraint like `0.3.*` stops following `main` once 0.3.0 is
+released; pin a full version from the flake's page to hold still. Either way, set up the [binary cache](../start/binary-cache.md)
 or Nix compiles Smithay and the crates locally.
 
 Leave `scoot.inputs.nixpkgs.follows = "nixpkgs"` **off** unless you
