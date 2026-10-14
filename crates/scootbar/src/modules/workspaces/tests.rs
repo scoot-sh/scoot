@@ -60,7 +60,7 @@ fn drawn_module(link: Link, pill: super::Pill) -> super::Workspaces {
         active_color: None,
         inactive_color: None,
         display: super::Display::Numbers,
-        disc: false,
+        disc: true,
         seen: 0,
     }
 }
@@ -611,7 +611,11 @@ fn a_rounded_pill_cuts_its_corners_and_a_square_one_does_not() {
     let accent = [theme.accent.r, theme.accent.g, theme.accent.b];
     let bg = [theme.background.r, theme.background.g, theme.background.b];
     // The pill spans start - 4 .. end + 4 (half the padding), full height.
-    let (square, start, end) = pill_drawn(super::Pill::default());
+    let (square, start, end) = pill_drawn(super::Pill {
+        shape: super::Shape::Rect,
+        radius: 0,
+        inset: 0,
+    });
     let (left, right) = (start - PAD / 2, end + PAD / 2 - 1);
     for (x, y) in [(left, 0), (right, 0), (left, 59), (right, 59)] {
         assert_eq!(at(&square, x, y), accent, "square corner ({x},{y})");
@@ -931,7 +935,8 @@ fn geometry(pill: &Pill, full: &str, active: usize, height: u32) -> Geometry {
 fn a_circle_around_one_digit_is_as_wide_as_it_is_tall() {
     let circle = Pill {
         shape: Shape::Circle,
-        ..Pill::default()
+        radius: 0,
+        inset: 0,
     };
     let g = geometry(&circle, "1 2 3", 1, 60);
     // Rows the whole bar less nothing here: the line is 50 of 60, so the
@@ -967,7 +972,8 @@ fn a_two_digit_number_widens_a_circle_into_a_pill_rather_than_clipping() {
 fn a_press_on_a_grown_pill_is_the_active_item_not_a_neighbours() {
     let circle = Pill {
         shape: Shape::Circle,
-        ..Pill::default()
+        radius: 0,
+        inset: 0,
     };
     let full = "1 2 3";
     let font = text();
@@ -1004,7 +1010,7 @@ fn a_press_on_a_grown_pill_is_the_active_item_not_a_neighbours() {
 #[test]
 fn every_shape_keeps_the_pill_inside_its_span_whatever_the_size() {
     let font = text();
-    for shape in [Shape::Rect, Shape::Pill, Shape::Circle] {
+    for shape in [Shape::Rect, Shape::Pill, Shape::Circle, Shape::Square] {
         let pill = Pill {
             shape,
             radius: 7,
@@ -1145,6 +1151,24 @@ fn snapshot_a_pill_at_1x() {
 }
 
 #[test]
+fn snapshot_the_default_tile_at_1x() {
+    // The no-config look this change ships: whatever the defaults are, so a
+    // deliberate defaults change re-blesses this scene with the rest.
+    crate::snapshots::check(
+        "workspaces-default-tile-1x",
+        "the active workspace (2 of 1 2 3) with no workspaces config: the default tile on a 120x24 bar at scale 1",
+        &shapes_scene(
+            super::Pill::default(),
+            &[1, 2, 3],
+            1,
+            Scale::Integer(1),
+            BAR_SIZE,
+            Look::plain(),
+        ),
+    );
+}
+
+#[test]
 fn snapshot_a_circle_at_1x() {
     crate::snapshots::check(
         "workspaces-circle-1x",
@@ -1177,6 +1201,38 @@ fn snapshot_a_circle_around_two_digits_at_1x() {
 }
 
 #[test]
+fn snapshot_a_square_at_1x() {
+    crate::snapshots::check(
+        "workspaces-square-1x",
+        "the active workspace (2 of 1 2 3) in a square, inset 2, on a 120x24 bar at scale 1",
+        &shapes_scene(
+            shape(Shape::Square, 2),
+            &[1, 2, 3],
+            1,
+            Scale::Integer(1),
+            BAR_SIZE,
+            Look::plain(),
+        ),
+    );
+}
+
+#[test]
+fn snapshot_a_square_around_two_digits_at_1x() {
+    crate::snapshots::check(
+        "workspaces-square-two-digits-1x",
+        "the active workspace (10 of 9 10 11) in a square, inset 2, at scale 1: widened to a wider tile",
+        &shapes_scene(
+            shape(Shape::Square, 2),
+            &[9, 10, 11],
+            1,
+            Scale::Integer(1),
+            BAR_SIZE,
+            Look::plain(),
+        ),
+    );
+}
+
+#[test]
 fn snapshot_a_pill_at_1_5x() {
     crate::snapshots::check(
         "workspaces-pill-1.5x",
@@ -1199,6 +1255,22 @@ fn snapshot_a_circle_at_1_5x() {
         "the circle of workspaces-circle-1x at scale 1.5",
         &shapes_scene(
             shape(Shape::Circle, 2),
+            &[1, 2, 3],
+            1,
+            Scale::Fractional(180),
+            BAR_SIZE,
+            Look::plain(),
+        ),
+    );
+}
+
+#[test]
+fn snapshot_a_square_at_1_5x() {
+    crate::snapshots::check(
+        "workspaces-square-1.5x",
+        "the square of workspaces-square-1x at scale 1.5",
+        &shapes_scene(
+            shape(Shape::Square, 2),
             &[1, 2, 3],
             1,
             Scale::Fractional(180),
@@ -1303,7 +1375,7 @@ fn snapshot_state_colors_at_1_5x() {
 }
 
 /// `item-gap`: the view separates the numbers by that many spaces, and the
-/// default is the published looks' three.
+/// default is three, as in the published looks.
 #[test]
 fn the_view_separates_the_numbers_by_the_item_gap() {
     for (gap, want) in [(1, "1 2 3"), (3, "1   2   3"), (8, "1        2        3")] {
@@ -1676,7 +1748,12 @@ fn disc_grows_the_span_to_the_diameter_and_nothing_else() {
     assert_eq!(spans[0].width, natural + diameter - end, "grew to the disc");
     // No growth without the flag, without a circle, showing dots, with a
     // wide-enough number, or with no active workspace to fit.
-    let (rect, link) = started_shaped(super::Pill::default(), super::Display::Numbers, true);
+    let rect_pill = super::Pill {
+        shape: super::Shape::Rect,
+        radius: 0,
+        inset: 0,
+    };
+    let (rect, link) = started_shaped(rect_pill, super::Display::Numbers, true);
     commit(&link, "DP-1", &[(2, 1, true)]);
     let (spans, _, _, _) = bar_scene(&[rect], &style, scale, size);
     assert_eq!(spans[0].width, natural, "a rect never grows");

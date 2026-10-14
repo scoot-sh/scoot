@@ -110,9 +110,12 @@ switch a specific output's, only the focused output's bar switches
 (`focus-output` first, then click). Nothing in scootbar changes when scoot
 gains it: the click is the same `activate`.
 
-- **The pill is square and the bar's full height by default**; its shape
-  is [configurable](./modules.md##the-active-workspaces-pill): rounded, a pill, or a
-  circle.
+- **The pill is a square tile by default** (shape `square` with radius 3,
+  lifted 6 off the bar's top and bottom, its span grown to the tile,
+  three spaces between the numbers — the circle looks' composition with
+  a square instead of a disc); its shape is
+  [configurable](./modules.md##the-active-workspaces-pill): square, rect,
+  a pill, or a circle.
 - **The protocol is bound only while the module is placed.** A bar with no
   workspaces module never binds `ext_workspace_manager_v1` or `wl_seat`, so
   the compositor sends it nothing about workspaces and it wakes for none of
@@ -137,17 +140,18 @@ gains it: the click is the same `activate`.
 ### The active workspace's pill
 
 `[workspaces]` shapes the pill behind the active number (all file-only,
-logical pixels; the defaults are the square, full-height pill the module
-always drew):
+logical pixels; the defaults are the square tile: shape `square` with
+radius 3, inset 6, `disc` growing the span, and three spaces between
+the numbers):
 
 | Key | Values | Meaning |
 | --- | --- | --- |
-| `pill-shape` | `"rect"` (default), `"pill"`, `"circle"` | `rect`: the item's extent, corners per `pill-radius`. `pill`: the same extent with ends as round as fit (half circles). `circle`: at least as wide as tall, centered on the number. |
-| `pill-radius` | 0 to 1024 | a `rect`'s corner radius, cut back to half its shorter side. Refused with `pill` or `circle`, which are already as round as they fit. |
-| `pill-inset` | 0 to 1024 | the gap from the bar's top and bottom edges, so the pill is shorter than the bar. Cut back so the pill is never shorter than the text's line: the number is drawn in the bar's color over the fill, and a shorter pill would clip it away. |
+| `pill-shape` | `"square"` (default), `"rect"`, `"pill"`, `"circle"` | `square`: at least as wide as tall, centered on the number, corners per `pill-radius` — a single digit sits in a square tile at any `padding`. `rect`: the item's extent, corners per `pill-radius`. `pill`: the same extent with ends as round as fit (half circles). `circle`: at least as wide as tall, centered on the number. |
+| `pill-radius` | 0 to 1024 (default 3) | a `rect`'s or `square`'s corner radius, cut back to half its shorter side. Refused with `pill` or `circle`, which are already as round as they fit. |
+| `pill-inset` | 0 to 1024 (default 6) | the gap from the bar's top and bottom edges, so the pill is shorter than the bar. Cut back so the pill is never shorter than the text's line: the number is drawn in the bar's color over the fill, and a shorter pill would clip it away. |
 | `item-gap` | 1 to 8 (default 3) | the spaces between two numbers: one space is about a third of the font size, so 3 (the default, as in the published looks) is a roomy row and 1 the old tight one. The pill and the click target of each number follow; a click in the gap hits nothing. The module's text is cut at 256 bytes, so a bigger gap shows fewer workspaces: at the default 3, workspaces 1 to 53 fit; at 8 spaces about 26 numbered up to 99 (28 single-digit ones), the rest cut off the end. |
 | `display` | `"numbers"` (default), `"dots"` | `dots`: a dot per workspace in place of the numbers — the active one filled like the pill, the rest dim (or the state colors above). Clicks land by the dots' places, exactly as by the numbers'. A `query` still reports the numbers. |
-| `disc` | off by default | with a `circle` pill: grow the module's own span to the disc's diameter, so a single digit is a disc at any `padding`. Refused with any other shape, and showing dots. |
+| `disc` | on by default | with a `circle` or `square` pill: grow the module's own span to the shape's side, so a single digit is a disc or tile at any `padding`. Set explicitly, it is refused with any other shape and with dots. |
 | `active-color` | a color, unset by default | the active pill's fill instead of `accent`. The pointer's `hover` still wins while it is over the module. |
 | `inactive-color` | a color, unset by default | inactive numbers' ink instead of `fg` (inactive dots are `dim` unless set). |
 
@@ -173,6 +177,15 @@ pill-shape = "circle"
 pill-inset = 3
 ```
 
+```toml
+# A square tile around a one-digit number (the default look, spelled out)
+[workspaces]
+pill-shape = "square"
+pill-radius = 3
+pill-inset = 6
+disc = true            # grow the span to the tile, so it stays square
+```
+
 - **How a circle is sized**: its diameter is the pill's height (the bar's
   height less twice the inset). A **two-digit number widens the circle into
   a pill** as wide as the text needs, never a clipped disc. Growth is
@@ -181,17 +194,25 @@ pill-inset = 3
   `padding` either side). So on a crowded bar, or one whose `padding` is
   small next to its height, a single digit gets an oval rather than a
   disc: raise `padding` or the `pill-inset` until it is round, or set
-  `disc` to grow the span to the disc instead.
+  `disc` (on by default) to grow the span to the disc instead; a config
+  that sets `pill-shape = "circle"` but never `disc` now grows its span
+  too, so set `disc = false` to keep the old layout.
+- **How a square is sized**: like a circle but square — its side is the
+  pill's height, centered on the number, corners per `pill-radius`. A
+  wider number widens it into a wider tile, never clipped, stopping
+  short of the neighbours the same way. With `disc` (the default) the
+  span grows to the tile, so a single digit is square at any `padding`.
 - **Clicks follow the pill**: a press on the drawn pill of the active
   number does nothing (it is already shown), never a neighbour's switch,
-  even where a grown circle overlaps the neighbour's own click area; a press
+  even where a grown circle or tile overlaps the neighbour's own click area; a press
   on the padding around any other number still activates that workspace.
 - The corners are the same analytic coverage as the bar's, with no
   supersampling and no allocation, painted only when the module repaints
   (a workspace change). Measured (release build, one pill 80 device pixels
-  wide on a 1600x28 bar): the default square full-height pill costs 151 ns
-  (the plain fill it replaced, 153 ns); a rounded pill inset by a quarter of
-  the height costs 6.3 us, and 20 us on 3200x56 (scale 2), once per
+  wide on a 1600x28 bar): the old square full-height pill cost 151 ns
+  (the plain fill it replaced, 153 ns); the default tile, a rounded
+  square inset about a quarter of the height, costs what that rounded
+  pill costs (6.3 us, and 20 us on 3200x56 at scale 2), once per
   workspace change. Dots cost one small maximally-rounded fill each, about
   6 us at a 50-pixel test em (linear in the count: 25/49/100 us for 4/8/16
   on the dev VM); at real sizes the discs cover an order of magnitude fewer

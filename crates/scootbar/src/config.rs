@@ -485,11 +485,11 @@ struct WorkspacesFile {
     /// Extra logical pixels on each side of the module.
     #[cfg(feature = "workspaces")]
     margin: Option<u32>,
-    /// The active workspace's pill: `rect`, `pill` or `circle`.
+    /// The active workspace's pill: `rect`, `pill`, `circle` or `square` (the default).
     #[cfg(feature = "workspaces")]
     #[serde(rename = "pill-shape")]
     pill_shape: Option<String>,
-    /// A `rect` pill's corner radius, logical pixels.
+    /// A `rect` or `square` pill's corner radius, logical pixels.
     #[cfg(feature = "workspaces")]
     #[serde(rename = "pill-radius")]
     pill_radius: Option<u32>,
@@ -504,7 +504,7 @@ struct WorkspacesFile {
     /// What the module shows: `numbers` or `dots`.
     #[cfg(feature = "workspaces")]
     display: Option<String>,
-    /// With a `circle` pill: grow the module's own span to the disc.
+    /// With a `circle` or `square` pill: grow the module's own span to the disc or tile (on by default).
     #[cfg(feature = "workspaces")]
     disc: Option<bool>,
     /// The active pill's fill, instead of the `accent` token.
@@ -1309,19 +1309,22 @@ impl File {
                     value(
                         path,
                         "workspaces.pill-shape",
-                        format_args!("takes rect, pill or circle, not `{}`", text.escape_debug()),
+                        format_args!(
+                            "takes rect, pill, circle or square, not `{}`",
+                            text.escape_debug()
+                        ),
                     )
                 })?;
             }
             if let Some(radius) = self.workspaces.pill_radius {
                 pill.radius = gap(path, "workspaces.pill-radius", Some(radius), 0)?;
-                if pill.shape != Shape::Rect {
+                if !matches!(pill.shape, Shape::Rect | Shape::Square) {
                     return Err(value(
                         path,
                         "workspaces.pill-radius",
                         format_args!(
-                            "rounds a `rect` pill; the `pill` and `circle` shapes are already \
-                             as round as they fit (drop it, or set pill-shape = \"rect\")"
+                            "rounds a `rect` or `square` pill; the `pill` and `circle` shapes are \
+                             already as round as they fit (drop it, or set pill-shape = \"rect\")"
                         ),
                     ));
                 }
@@ -1363,21 +1366,21 @@ impl File {
             }
             if let Some(disc) = self.workspaces.disc {
                 modules.workspaces.disc = disc;
-            }
-            if modules.workspaces.disc {
-                if modules.workspaces.pill.shape != Shape::Circle {
-                    return Err(value(
-                        path,
-                        "workspaces.disc",
-                        "grows the circle to a disc; it needs pill-shape = \"circle\"",
-                    ));
-                }
-                if modules.workspaces.display != Display::Numbers {
-                    return Err(value(
-                        path,
-                        "workspaces.disc",
-                        "grows the circle to a disc; dots have no pill to grow",
-                    ));
+                if disc {
+                    if !matches!(modules.workspaces.pill.shape, Shape::Circle | Shape::Square) {
+                        return Err(value(
+                            path,
+                            "workspaces.disc",
+                            "grows the shape to a disc or tile; it needs pill-shape = \"circle\" or \"square\"",
+                        ));
+                    }
+                    if modules.workspaces.display != Display::Numbers {
+                        return Err(value(
+                            path,
+                            "workspaces.disc",
+                            "grows the shape to a disc or tile; dots have no pill to grow",
+                        ));
+                    }
                 }
             }
         }

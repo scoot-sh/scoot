@@ -133,7 +133,9 @@ fn a_module_margin_is_bounded_and_listed_only_when_set() {
 #[test]
 #[cfg(feature = "workspaces")]
 fn a_workspaces_margin_and_pill_are_bounded() {
-    let config = read("[workspaces]\nmargin = 3\npill-radius = 8\npill-inset = 2\n").unwrap();
+    let config =
+        read("[workspaces]\nmargin = 3\npill-shape = \"rect\"\npill-radius = 8\npill-inset = 2\n")
+            .unwrap();
     assert_eq!(config.layout.margins, [("workspaces", 3)]);
     let pill = config.modules.workspaces.pill;
     assert_eq!((pill.shape, pill.radius, pill.inset), (Shape::Rect, 8, 2));
@@ -176,12 +178,15 @@ fn the_pill_shapes_are_read_by_name() {
         ("rect", Shape::Rect),
         ("pill", Shape::Pill),
         ("circle", Shape::Circle),
+        ("square", Shape::Square),
     ] {
         let config = read(&format!("[workspaces]\npill-shape = \"{name}\"\n")).unwrap();
         assert_eq!(config.modules.workspaces.pill.shape, shape);
     }
-    // A radius goes with a rect, spelled out or by default.
+    // A radius goes with a rect or a square, spelled out or by default.
     assert!(read("[workspaces]\npill-shape = \"rect\"\npill-radius = 4\n").is_ok());
+    assert!(read("[workspaces]\npill-shape = \"square\"\npill-radius = 4\n").is_ok());
+    assert!(read("[workspaces]\npill-radius = 4\n").is_ok());
     // The inset goes with any.
     assert!(read("[workspaces]\npill-shape = \"circle\"\npill-inset = 3\n").is_ok());
     let error = read("[workspaces]\npill-shape = \"pill\"\npill-radius = 4\n")
@@ -278,17 +283,28 @@ fn the_workspaces_display_is_numbers_or_dots() {
 
 #[test]
 #[cfg(feature = "workspaces")]
-fn the_workspaces_disc_needs_a_circle_of_numbers() {
+fn the_workspaces_disc_needs_a_circle_or_square_of_numbers() {
     assert!(
-        !read("").unwrap().modules.workspaces.disc,
-        "no grown span by default"
+        read("").unwrap().modules.workspaces.disc,
+        "the span grows to the tile by default"
     );
     let config = read("[workspaces]\npill-shape = \"circle\"\ndisc = true\n").unwrap();
     assert!(config.modules.workspaces.disc);
+    let config = read("[workspaces]\npill-shape = \"square\"\ndisc = true\n").unwrap();
+    assert!(config.modules.workspaces.disc);
+    // The default disc coexists with dots (it only ever grows numbers).
+    assert!(read("[workspaces]\ndisplay = \"dots\"\n").is_ok());
     for (text, key) in [
-        ("[workspaces]\ndisc = true\n", "workspaces.disc"),
+        (
+            "[workspaces]\npill-shape = \"rect\"\ndisc = true\n",
+            "workspaces.disc",
+        ),
         (
             "[workspaces]\npill-shape = \"pill\"\ndisc = true\n",
+            "workspaces.disc",
+        ),
+        (
+            "[workspaces]\npill-shape = \"rect\"\ndisc = true\n",
             "workspaces.disc",
         ),
         (

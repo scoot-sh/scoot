@@ -12,12 +12,18 @@ fn pill(shape: Shape) -> Pill {
 }
 
 #[test]
-fn the_default_is_the_square_full_height_pill_it_always_was() {
+fn the_default_is_a_square_tile() {
     let pill = Pill::default();
-    assert_eq!(pill.shape, Shape::Rect);
-    assert_eq!(pill.rows(28, 16, ONE), (0, 28));
-    assert_eq!(pill.radius(ONE), 0);
-    assert_eq!(pill.extent((10, 30), (0, 100), (0, 28)), (10, 30));
+    assert_eq!(pill.shape, Shape::Square);
+    assert_eq!(pill.radius, 3);
+    assert_eq!(pill.inset, 6);
+    // Lifted 6 off a 28-high bar with room to spare; cut back to the room
+    // the text line leaves when there is none.
+    assert_eq!(pill.rows(28, 16, ONE), (6, 22));
+    assert_eq!(pill.rows(28, 20, ONE), (4, 24));
+    assert_eq!(pill.radius(ONE), 3);
+    // Forced to the rows' height, like a circle's disc but square.
+    assert_eq!(pill.extent((10, 20), (0, 100), (6, 22)), (7, 23));
 }
 
 #[test]
@@ -25,7 +31,8 @@ fn shapes_are_read_by_name_and_only_by_name() {
     assert_eq!(Shape::parse("rect"), Some(Shape::Rect));
     assert_eq!(Shape::parse("pill"), Some(Shape::Pill));
     assert_eq!(Shape::parse("circle"), Some(Shape::Circle));
-    for bad in ["", "Circle", "round", "dot", " pill", "pill "] {
+    assert_eq!(Shape::parse("square"), Some(Shape::Square));
+    for bad in ["", "Circle", "Square", "round", "dot", " pill", "pill "] {
         assert_eq!(Shape::parse(bad), None, "{bad:?}");
     }
 }
@@ -55,7 +62,7 @@ fn the_inset_is_cut_back_to_keep_the_text_line() {
 }
 
 #[test]
-fn only_a_rect_has_its_own_radius() {
+fn a_rect_and_a_square_keep_their_own_radius() {
     let radius = |shape| {
         Pill {
             shape,
@@ -65,6 +72,7 @@ fn only_a_rect_has_its_own_radius() {
         .radius(Scale::Integer(2))
     };
     assert_eq!(radius(Shape::Rect), 10);
+    assert_eq!(radius(Shape::Square), 10);
     assert_eq!(radius(Shape::Pill), u32::MAX);
     assert_eq!(radius(Shape::Circle), u32::MAX);
 }
@@ -74,6 +82,24 @@ fn a_pill_and_a_rect_keep_the_items_extent() {
     for shape in [Shape::Rect, Shape::Pill] {
         assert_eq!(pill(shape).extent((10, 20), (0, 100), (0, 28)), (10, 20));
     }
+}
+
+#[test]
+fn a_square_forces_a_tile_but_keeps_its_radius() {
+    // A 10-wide item on a 24-high tile: a 24-wide tile, centered, like a
+    // circle's disc but square.
+    let square = Pill {
+        shape: Shape::Square,
+        radius: 3,
+        inset: 0,
+    };
+    assert_eq!(square.extent((40, 50), (0, 200), (2, 26)), (33, 57));
+    // Already wider than tall (two digits): as wide as the text needs.
+    assert_eq!(square.extent((40, 80), (0, 200), (2, 26)), (40, 80));
+    // The room caps it, as for a circle.
+    assert_eq!(square.extent((40, 50), (35, 55), (0, 24)), (35, 55));
+    // But the corners stay its own radius, not the full roundness.
+    assert_eq!(square.radius(Scale::Integer(2)), 6);
 }
 
 #[test]

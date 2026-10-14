@@ -90,55 +90,108 @@ fn pill_cols(shot: &Shot) -> Vec<bool> {
 }
 
 /// Whether `(x, y)` is text: a text-colored pixel anywhere, or a
-/// background-colored pixel inside a pill column (the active number is
-/// drawn in the bar's background on the pill).
+/// background-colored pixel inside the pill (the active number is drawn
+/// in the bar's background on the pill). An antialiased pill edge is
+/// neither: it blends the background and the accent, reading as neither
+/// color exactly, but it is the pill's fringe, not ink. (A square
+/// full-height pill has no such edges, which is why columns alone used
+/// to be enough: nothing sat above or below the pill in its columns.)
 #[cfg(feature = "workspaces")]
-fn is_ink(shot: &Shot, pills: &[bool], x: i64, y: i64) -> bool {
+fn is_ink(shot: &Shot, pills: &[bool], rows: Option<(u32, u32)>, x: i64, y: i64) -> bool {
     if x < 0 || y < 0 || (x as u32) >= shot.width || (y as u32) >= HEIGHT {
         return false;
     }
     let pixel = shot.at(x as u32, y as u32);
-    if pixel != rgb(BAR) && pixel != rgb(ACCENT) {
-        return true;
+    if pixel == rgb(ACCENT) {
+        return false;
     }
-    pixel == rgb(BAR) && pills[x as usize]
+    if pixel == rgb(BAR) {
+        return pills[x as usize]
+            && rows.is_some_and(|(top, bottom)| (y as u32) >= top && (y as u32) <= bottom);
+    }
+    !is_fringe(pixel)
+}
+
+/// Whether `pixel` blends the bar's background and the pill's accent: every
+/// channel strictly between the two colors'. The test font's edges land on
+/// whole pixels, so glyph ink is never a blend; only the pill's analytic
+/// edges are.
+#[cfg(feature = "workspaces")]
+fn is_fringe(pixel: [u8; 3]) -> bool {
+    let bar = rgb(BAR);
+    let accent = rgb(ACCENT);
+    pixel
+        .iter()
+        .zip(bar.iter().zip(accent.iter()))
+        .all(|(&p, (&b, &a))| p > b.min(a) && p < b.max(a))
+}
+
+/// The rows holding the pill's accent color: the pill's vertical extent,
+/// so background above and below an inset tile is not read as text.
+#[cfg(feature = "workspaces")]
+fn pill_rows(shot: &Shot, pills: &[bool]) -> Option<(u32, u32)> {
+    let mut rows = (0..HEIGHT).filter(|&y| {
+        pills
+            .iter()
+            .enumerate()
+            .any(|(x, &held)| held && shot.at(x as u32, y) == rgb(ACCENT))
+    });
+    rows.next()
+        .map(|top| (top, rows.next_back().unwrap_or(top)))
 }
 
 /// The bar's text read back from the top `HEIGHT` rows of `shot`, spaces
 /// left out (`decode` skips them); empty when there is no ink yet.
 #[cfg(feature = "workspaces")]
 fn read(shot: &Shot) -> String {
-    let pills = pill_cols(shot);
-    let ink = |x: i64, y: i64| is_ink(shot, &pills, x, y);
-    let columns: Vec<i64> = (0..i64::from(shot.width))
-        .filter(|&x| (0..i64::from(HEIGHT)).any(|y| ink(x, y)))
-        .collect();
-    let (Some(&left), Some(&right)) = (columns.first(), columns.last()) else {
+    let groups = ink_groups(shot);
+    let (Some(&(left, _)), Some(&(_, right))) = (groups.first(), groups.last()) else {
         return String::new();
     };
-    testfont::decode(ink, left, right, BASELINE, f64::from(EM))
+    let pills = pill_cols(shot);
+    let rows = pill_rows(shot, &pills);
+    let ink = |x: i64, y: i64| is_ink(shot, &pills, rows, x, y);
+    testfont::decode(ink, left as i64, right as i64, BASELINE, f64::from(EM))
 }
+
+/// Ink column runs wide enough to be text: the seven-segment font draws
+/// every edge on whole pixels, and its thinnest feature is a 100-unit
+/// segment, 5 pixels at the tests' 50-pixel em. Anything narrower is the
+/// active pill's fringe (antialiased edges, rounded corner cutouts), not
+/// a digit, and must not move `decode`'s origin.
+#[cfg(feature = "workspaces")]
+const MIN_GROUP_WIDTH: u32 = 3;
 
 /// The contiguous ink column groups across the bar's rows: one per digit
 /// (spaces split them). The `n`th group's middle is where a click on the
 /// `n`th workspace lands, inside its pill.
 #[cfg(feature = "workspaces")]
 fn groups(shot: &Shot) -> Vec<(u32, u32)> {
+    ink_groups(shot)
+}
+
+#[cfg(feature = "workspaces")]
+fn ink_groups(shot: &Shot) -> Vec<(u32, u32)> {
     let pills = pill_cols(shot);
+    let rows = pill_rows(shot, &pills);
     let mut groups = Vec::new();
     let mut start = None;
     for x in 0..shot.width {
-        let inked = (0..HEIGHT).any(|y| is_ink(shot, &pills, x as i64, y as i64));
+        let inked = (0..HEIGHT).any(|y| is_ink(shot, &pills, rows, x as i64, y as i64));
         match (inked, start) {
             (true, None) => start = Some(x),
             (false, Some(first)) => {
-                groups.push((first, x - 1));
+                if x - first >= MIN_GROUP_WIDTH {
+                    groups.push((first, x - 1));
+                }
                 start = None;
             }
             _ => {}
         }
     }
-    if let Some(first) = start {
+    if let Some(first) = start
+        && shot.width - first >= MIN_GROUP_WIDTH
+    {
         groups.push((first, shot.width - 1));
     }
     groups
@@ -541,7 +594,7 @@ fn a_circle_pill_is_round_and_a_click_still_switches() {
     let path = session.runtime_dir().join("circle.toml");
     std::fs::write(
         &path,
-        "[bar]\npadding = 16\n[workspaces]\npill-shape = \"circle\"\n",
+        "[bar]\npadding = 16\n[workspaces]\npill-shape = \"circle\"\npill-inset = 0\n",
     )
     .unwrap();
     let mut args = workspaces_args();
