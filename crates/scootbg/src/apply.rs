@@ -385,7 +385,7 @@ fn exchange(mut stream: UnixStream, profile: &Profile, section: &Section) -> Res
         Reply::Ok | Reply::Other(_) => return Err(Failure::Said(unreadable(&line))),
         Reply::Closed => return Err(Failure::Gone),
     };
-    let ours = env!("CARGO_PKG_VERSION");
+    let ours = env!("SCOOT_BUILD_VERSION");
     if theirs != ours {
         warn(format_args!(
             "scootbg: apply-config: warning: the running daemon is scootbg {theirs} and this \

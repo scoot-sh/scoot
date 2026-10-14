@@ -175,31 +175,20 @@ fn action_names() -> Vec<&'static str> {
         .collect()
 }
 
-/// The `scoot --version` line: the suite's own
+/// The `scoot --version` line for the build named by `version`: that
 /// version plus the IPC protocol number, so a client can check
 /// compatibility against a remote compositor before connecting.
 ///
-/// Derived from the same two constants the wire uses --
-/// the binary's own `CARGO_PKG_VERSION`, which the IPC `version` reply also reads
-/// (so the two agree by construction), and [`scoot_ipc::PROTOCOL_VERSION`]
-/// -- never a duplicated literal, so the string cannot go stale when
-/// either moves.
-///
-/// `version_string()` answers with *this* crate's version. The `scoot`
-/// binary must not use it: it would name scootctl's version, not its own
-/// (they agree only while the lockstep trio holds). It calls
-/// [`version_string_for`] with its own `env!("CARGO_PKG_VERSION")` instead.
-pub fn version_string() -> String {
-    version_string_for(env!("CARGO_PKG_VERSION"))
-}
-
-/// One `--version` line for the binary named by `pkg_version`: the caller
-/// passes its own `env!("CARGO_PKG_VERSION")`, so each binary's line names
-/// its own build even once versions move independently.
-pub fn version_string_for(pkg_version: &str) -> String {
+/// The `scoot` binary passes its `env!("SCOOT_BUILD_VERSION")` -- the
+/// repository version, labeled `+N.gSHA` off a release tag, the same string
+/// its IPC `version` reply carries -- and the protocol comes from
+/// [`scoot_ipc::PROTOCOL_VERSION`], never a duplicated literal, so the line
+/// cannot go stale when either moves. This library has no build label of
+/// its own, which is why it takes the version instead of reading one.
+pub fn version_string_for(version: &str) -> String {
     format!(
         "scoot {} (ipc protocol {})",
-        pkg_version,
+        version,
         scoot_ipc::PROTOCOL_VERSION
     )
 }
@@ -725,36 +714,32 @@ mod tests {
     }
 
     #[test]
-    fn version_string_tracks_both_constants() {
-        // The no-drift pin: the expected line is recomputed from the same
-        // two constants the helper derives from, so moving either constant
+    fn version_string_tracks_the_protocol_constant() {
+        // The no-drift pin: the expected line is recomputed from the
+        // constant the helper derives from, so moving PROTOCOL_VERSION
         // without the string fails here. A hardcoded `"4"` surviving a
-        // `PROTOCOL_VERSION` 4 -> 5 is exactly what this catches.
+        // `PROTOCOL_VERSION` 4 -> 5 is exactly what this catches. And the
+        // shape: `scoot 0.2.0 (ipc protocol 10)`, one line, no trailing
+        // newline (`print_line` adds it).
+        let line = version_string_for("0.2.0");
         assert_eq!(
-            version_string(),
-            format!(
-                "scoot {} (ipc protocol {})",
-                env!("CARGO_PKG_VERSION"),
-                scoot_ipc::PROTOCOL_VERSION
-            )
+            line,
+            format!("scoot 0.2.0 (ipc protocol {})", scoot_ipc::PROTOCOL_VERSION)
         );
-        // And the shape the ticket fixes: `scoot 0.1.0 (ipc protocol 7)`,
-        // one line, no trailing newline (`print_line` adds it).
-        assert!(version_string().starts_with("scoot "));
-        assert!(!version_string().ends_with('\n'));
+        assert!(!line.ends_with('\n'));
     }
 
     #[test]
     fn version_string_for_names_the_version_it_is_given() {
-        // Independent versioning: each binary passes its own
-        // `env!("CARGO_PKG_VERSION")`, so its line names its own build
-        // even once versions move independently. A version the helper
-        // ignored (reading only its own `env!`) would print scootctl's
-        // version from the `scoot` binary.
-        let line = version_string_for("9.9.9");
+        // A labeled build passes its whole label; the helper prints it as
+        // given rather than reading a version of its own.
+        let line = version_string_for("0.2.0+14.g615608c");
         assert_eq!(
             line,
-            format!("scoot 9.9.9 (ipc protocol {})", scoot_ipc::PROTOCOL_VERSION)
+            format!(
+                "scoot 0.2.0+14.g615608c (ipc protocol {})",
+                scoot_ipc::PROTOCOL_VERSION
+            )
         );
     }
 

@@ -138,7 +138,7 @@ impl Handler for Responder<'_> {
             Request::Version => {
                 reply = Reply::Version {
                     protocol: PROTOCOL_VERSION,
-                    version: env!("CARGO_PKG_VERSION"),
+                    version: env!("SCOOT_BUILD_VERSION"),
                 };
                 write_reply(out, &reply);
             }

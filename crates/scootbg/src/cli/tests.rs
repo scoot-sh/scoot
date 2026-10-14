@@ -224,7 +224,7 @@ fn a_non_utf8_argument_is_an_error_not_a_panic() {
 fn the_version_line_names_the_protocol() {
     let line = version_string();
     assert!(line.starts_with("scootbg "));
-    assert!(line.contains(env!("CARGO_PKG_VERSION")));
+    assert!(line.contains(env!("SCOOT_BUILD_VERSION")));
     assert!(line.ends_with("(protocol 1)"));
 }
 

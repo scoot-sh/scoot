@@ -1070,27 +1070,30 @@ mod tests {
 
     #[test]
     fn version_line_names_this_binarys_version_and_the_protocol() {
-        // `scoot --version` names *this* binary's `CARGO_PKG_VERSION` (the
-        // same `env!` the IPC `version` reply reads) and the live
-        // `PROTOCOL_VERSION`, so a protocol bump without the string fails
-        // here rather than shipping a line that lies. It must not go
-        // through `scootctl::version_string()`: that names scootctl's own
-        // version, which agrees with this binary's only while the lockstep
-        // trio holds (independent versioning) -- `main` passes this
-        // crate's version explicitly, and this pins that the helper honors
-        // what it is given rather than reading its own.
-        let line = scootctl::version_string_for(env!("CARGO_PKG_VERSION"));
-        assert!(
-            line.contains(env!("CARGO_PKG_VERSION")),
-            "version line does not name this build: {line}"
+        // `scoot --version` names this build's `SCOOT_BUILD_VERSION` (the
+        // same `env!` the IPC `version` reply reads: the repository version,
+        // plus `+N.gSHA` off a release tag) and the live `PROTOCOL_VERSION`,
+        // so a protocol bump without the string fails here rather than
+        // shipping a line that lies.
+        let line = scootctl::version_string_for(env!("SCOOT_BUILD_VERSION"));
+        assert_eq!(
+            line,
+            format!(
+                "scoot {} (ipc protocol {})",
+                env!("SCOOT_BUILD_VERSION"),
+                scoot_ipc::PROTOCOL_VERSION
+            )
         );
+        // Whatever the label adds is SemVer build metadata after a `+`: the
+        // part before it is always a plain `X.Y.Z`.
+        let release = env!("SCOOT_BUILD_VERSION").split('+').next().unwrap_or("");
         assert!(
-            line.contains(&format!("(ipc protocol {})", scoot_ipc::PROTOCOL_VERSION)),
-            "version line does not track PROTOCOL_VERSION: {line}"
+            release.split('.').count() == 3
+                && release
+                    .split('.')
+                    .all(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit())),
+            "build version does not start with X.Y.Z: {line}"
         );
-        // And the two agree today: the trio is lockstep, so scootctl's own
-        // line still names this same version (scripts/version enforces it).
-        assert_eq!(line, scootctl::version_string());
     }
 
     #[test]

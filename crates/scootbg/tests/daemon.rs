@@ -47,7 +47,7 @@ fn query_version_and_kill() {
     let reply = json(&stdout(&version));
     assert_eq!(reply["type"], "version");
     assert_eq!(reply["protocol"], 1);
-    assert_eq!(reply["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(reply["version"], env!("SCOOT_BUILD_VERSION"));
 
     let kill = session.run(&["kill"]);
     assert!(kill.status.success(), "{}", stderr(&kill));

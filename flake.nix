@@ -86,28 +86,27 @@
       packages = forEach (
         pkgs:
         let
-          # Read from where each version already lives, so the two can't
-          # drift: independent versioning (each shipped crate carries its
-          # own `version`, enforced by `scripts/version check`). The trio
-          # scoot/scootctl/scootbg moves in lockstep, scootbar on its own;
-          # `workspaceVersion` below is only what the internal libraries
-          # (publish = false) and the shared base dependency artifact --
-          # which serves two packages at once -- are named with.
-          scootVersion = (builtins.fromTOML (builtins.readFile ./crates/scoot/Cargo.toml)).package.version;
-          scootbgVersion =
-            (builtins.fromTOML (builtins.readFile ./crates/scootbg/Cargo.toml)).package.version;
-          scootbarVersion =
-            (builtins.fromTOML (builtins.readFile ./crates/scootbar/Cargo.toml)).package.version;
-          workspaceVersion = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+          # The repository's one version (docs/versioning.md): every crate
+          # inherits `[workspace.package] version`, so every package below,
+          # and the dependency artifacts, carry it. Read, not repeated, so it
+          # cannot drift from Cargo.toml.
+          #
+          # No `self.rev` label here on purpose. A rev in any derivation
+          # changes its hash on every commit, so each merge would rebuild
+          # every package (docs-only ones included) and a `github:` user at
+          # a docs-only HEAD would miss Cachix and build locally -- the cost
+          # the `src` fileset below exists to avoid. Nix builds print the
+          # plain version; the git label (`0.2.0+14.g615608c`) comes from
+          # the binaries' build.rs where a `.git` exists (docs/versioning.md).
+          version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
           # Scoped to exactly what the build reads, so doc-only edits
           # (README/ROADMAP/CLAUDE, docs/, dev/, vm/, scripts/) -- and, worse,
           # the whole working-tree copy this replaced, which dragged
           # target/ (~1GB in-store) and .git along -- no longer bust the
           # derivation's cache and force a full rebuild. Everything else
-          # this flake reads at eval time (./Cargo.toml for
-          # `workspaceVersion`, ./crates/{scoot,scootbg,scootbar}/Cargo.toml
-          # for the versions and
-          # the descriptions, ./Cargo.lock for crane's vendor step,
+          # this flake reads at eval time (./Cargo.toml for `version`,
+          # ./crates/{scoot,scootbg,scootbar}/Cargo.toml for the
+          # descriptions, ./Cargo.lock for crane's vendor step,
           # ./vm/compositor-deps.nix for buildInputs) resolves against
           # the flake tree, not `src`, so it stays out of the filter.
           # Verified to cover the build: no build.rs outside crates/, no
@@ -270,9 +269,7 @@
           # build there; see the comment above).
           depsBase = mkDeps {
             pname = "scoot-base";
-            # The workspace version: this one artifact serves scootbg and
-            # scootbar at once, so neither package's own version names it.
-            version = workspaceVersion;
+            inherit version;
             scope = if pkgs.stdenv.hostPlatform.isDarwin then "--locked -p scoot" else "--locked";
           };
           # The compositor's own set: `-p scoot` (byte-identical to the
@@ -282,25 +279,25 @@
           # would recompile one side's graph inside every build.
           depsScoot = mkDeps {
             pname = "scoot";
-            version = scootVersion;
+            inherit version;
             scope = scootArgs [ ];
             withEglLink = true;
           };
           depsGpuScanout = mkDeps {
             pname = "scoot-gpu";
-            version = scootVersion;
+            inherit version;
             scope = scootArgs [ "gpu-scanout" ];
             withEglLink = true;
           };
           depsXwayland = mkDeps {
             pname = "scoot-xwayland";
-            version = scootVersion;
+            inherit version;
             scope = scootArgs [ "xwayland" ];
             withEglLink = true;
           };
           depsGpuXwayland = mkDeps {
             pname = "scoot-gpu-xwayland";
-            version = scootVersion;
+            inherit version;
             scope = scootArgs [
               "gpu-scanout"
               "xwayland"
@@ -310,7 +307,7 @@
 
           # Arguments shared by every package build below: sources plus the
           # lock the vendor step needs, with tests off for the reasons
-          # above. Each package adds its own `version` (its crate's own),
+          # above. Each package adds the one `version`,
           # its own `cargoArtifacts` (the dependency set matching its
           # features), its `-p` selection, and the inputs its own link step
           # needs.
@@ -320,7 +317,7 @@
             cranePackage
             // {
               pname = "scoot";
-              version = scootVersion;
+              inherit version;
               cargoArtifacts = depsScoot;
 
               # Just this crate, not the whole workspace: `$out/bin` carries
@@ -448,7 +445,7 @@
             cranePackage
             // {
               pname = "scootbg";
-              version = scootbgVersion;
+              inherit version;
               cargoArtifacts = depsBase;
               cargoExtraArgs = "--locked -p scootbg";
               passthru.cargoBuildFeatures = [ ];
@@ -486,7 +483,7 @@
           # `.override` (see nix/scootbar.nix). Shares the base dependency
           # artifact (see `mkDeps` above for why every feature set can).
           scootbar = pkgs.callPackage ./nix/scootbar.nix {
-            version = scootbarVersion;
+            inherit version;
             inherit craneLib;
             inherit (craneCommon)
               src
@@ -523,7 +520,7 @@
                 inherit pname cargoArtifacts;
                 # This helper builds only compositor variants: the
                 # compositor's own version.
-                version = scootVersion;
+                inherit version;
                 # Byte-identical to the serving artifact's selection (each
                 # variant names its own `deps*` artifact built with the same
                 # features through `scootArgs`); see above for why drift
