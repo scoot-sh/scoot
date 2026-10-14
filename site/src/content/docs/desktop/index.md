@@ -176,7 +176,7 @@ piece across this site.
 
 Which build sits underneath is still your call: the profile never sets
 `programs.scoot.package`, so [pick a build](../start/install.md#which-build-do-i-need)
-there (the default, unless you run X11 apps) and the whole desktop follows it.
+there (the default; X11 is a runtime knob, not a package) and the whole desktop follows it.
 
 Two loud refusals instead of silent no-ops: `desktop.enable` without
 `programs.scoot.enable`, and a `look` without `desktop.enable`, each fail
@@ -2519,11 +2519,11 @@ Troubleshooting, by symptom:
 
 ## XWayland, and what comes next
 
-**XWayland** is a knob plus your existing package choice: the profile's
+**XWayland** is a runtime knob on the single package: the profile's
 `desktop.xwayland.enable` defaults the compositor's `[xwayland] enabled`
-on, and you point `programs.scoot.package` at the XWayland build as in
-[the install page](../start/install.md#which-build-do-i-need). With the
-default package the knob warns and the session runs Wayland-only.
+on, and the default `scoot` package already carries XWayland — leave
+`programs.scoot.package` at the default and turn the knob on as in
+[the install page](../start/install.md#which-build-do-i-need).
 
 **Every later piece has its slot already**, off and inert: one boolean
 (plus a package override where a package is involved) per paved-path

@@ -975,7 +975,7 @@ jobs:
   # (No separate `gpu-scanout,xwayland` pair job anymore: the defaults now
   # include the scanout tier, so `--features xwayland` above *is* the pair
   # build -- its clippy, both test runners and smoke run cover the
-  # unification the old `gpu-xwayland` job existed for. The `scoot-xwayland`
+  # unification the old `gpu-xwayland` job existed for. The single `scoot`
   # package's own full release build stays covered by `nix-build.yml`.)
 
   macos:

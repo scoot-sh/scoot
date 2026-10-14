@@ -8,7 +8,7 @@
 #
 # `session` means the compositor this is running inside: the nearest
 # ancestor process named `scoot` (or `.scoot-wrapped`, the name the flake's
-# `scoot-xwayland` wrapper execs it under -- site/src/content/docs/scoot/xwayland.md) or `niri`, or else
+# single `scoot` package wrapper execs it under -- site/src/content/docs/scoot/xwayland.md) or `niri`, or else
 # the niri that
 # `$NIRI_SOCKET` names. Use it when running from a terminal in the session
 # under test. On a machine whose own desktop is
