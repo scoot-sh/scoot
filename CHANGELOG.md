@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.2.1](https://github.com/scoot-sh/scoot/compare/v0.2.0...v0.2.1) - 2026-10-14
+
+### scoot
+
+- fixed: the xwayland reload refusal names the Xwayland binary, not a build ([#593](https://github.com/scoot-sh/scoot/pull/593))
+
 ## [0.2.0] - 2026-10-14
 
 ### One `scoot` build: GPU and CPU renderers in a single binary (breaking)
