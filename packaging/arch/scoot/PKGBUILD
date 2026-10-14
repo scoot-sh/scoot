@@ -1,10 +1,14 @@
 # scoot: the scrolling-tiling Wayland compositor (release build).
 #
 # Built from the tagged release tarball (`v$pkgver`), the default
-# cargo feature set: the GPU-free compositor that runs on a box with no
-# GPU stack installed. The `gpu-scanout` and `xwayland` tiers are
-# compile-time features; rebuilding with them is documented in
-# packaging/arch/README.md.
+# cargo feature set: the single build, which runs on a box with no GPU
+# stack installed and scans out from the GPU where there is one (the
+# `gpu-scanout` tier is on by default and reaches libgbm at run time, so
+# no libgbm link dependency). The `xwayland` tier stays a compile-time
+# feature; rebuilding with it is documented in packaging/arch/README.md.
+# The default build compiles a small C stub (`crates/scoot/gbm-stub/`),
+# so a C compiler is needed at build time (base-devel, which makepkg
+# assumes; CI installs it explicitly).
 #
 # The versioned `scootbg` dependency is the coupled pair from
 # docs/backlog/packaging/arch-package.md: one tag releases every binary
@@ -17,14 +21,14 @@
 pkgname=scoot
 pkgver=0.2.0
 pkgrel=1
-pkgdesc='Scrolling-tiling Wayland compositor (CPU renderer, no GPU stack needed)'
+pkgdesc='Scrolling-tiling Wayland compositor (auto CPU/GPU rendering, runs without a GPU)'
 arch=('x86_64' 'aarch64')
 url='https://github.com/scoot-sh/scoot'
 license=('MIT')
 depends=('glibc' 'libgcc' 'libinput' 'libxkbcommon' 'pixman' "scootbg=$pkgver" 'seatd' 'sh' 'systemd-libs')
 makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
-optdepends=('mesa: GPU scanout tier (rebuild with --features gpu-scanout)'
-            'libdrm: GPU scanout tier (rebuild with --features gpu-scanout)'
+optdepends=('mesa: GPU scanout tier at run time (auto-detected, no rebuild needed)'
+            'libdrm: GPU scanout tier at run time (auto-detected, no rebuild needed)'
             'systemd: greeter session login through scoot-session')
 install=scoot.install
 options=('!debug')

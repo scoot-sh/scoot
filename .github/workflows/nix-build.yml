@@ -79,28 +79,26 @@
 # over the same binary, so building it costs a shell script, and its run
 # of `--version` proves the wrapper passes a command through.
 #
-# Which binaries the cache holds: `scoot` (the GPU-free default,
-# unchanged as the default package), `scoot-gpu` and `scoot-xwayland` (the
-# in-between variants: the `gpu-scanout` and `xwayland` Cargo features),
-# `scoot-gpu-xwayland` (the full build: both features plus Xwayland on
-# `PATH`), `scootbg`, `scootbar` and `scootbar-demo` -- built,
+# Which binaries the cache holds: `scoot` (the single build: the GPU
+# scanout tier compiled in with libgbm reached at run time, so it runs
+# with and without a GPU stack, plus the `xwayland` Cargo feature and
+# Xwayland on `PATH`), `scootbg`, `scootbar` and
+# `scootbar-demo` -- built,
 # checked (`--version` each, so the artifact runs) and pushed on both
-# architectures. The in-between variants used to be deliberately left out:
-# without crane (docs/backlog/resolved/nix-crane-done.md) each extra package
-# derivation recompiled the whole dependency graph, so each bought one
-# more full Smithay compile per push per architecture. Under crane each
-# variant is one more compiled-dependencies derivation, rebuilt only when
+# architectures. The removed `scoot-gpu`/`scoot-gpu-xwayland`,
+# `scoot-xwayland` and `scoot-minimal` packages used
+# to be deliberately separate builds; under crane each extra package
+# derivation was one more compiled-dependencies derivation, rebuilt only when
 # `Cargo.lock` or a fork rev changes (rare by design: `dev/forks.md`)
 # and substituted from the cache on every other push -- so on a code-only
 # merge they cost one small first-party-crates-only compile each (measured
 # on 4 M2 cores: 81--96 s per compositor package against 110--132 s for a
 # full-graph rebuild, 4 recompiled crates against 129--136; the client, the
 # wallpaper and the bar recompile their own crates plus a ~10-crate
-# subgraph in 13--39 s). Five dep derivations in all, ~420 MiB each in the
-# store (~130 MB compressed), so a lock change pushes about 690 MB per
-# architecture; code-only merges push only the rebuilt packages.
-# All four stay covered the way they were before any of this existed too
-# (local `nix build .#scoot-gpu`, and likewise).
+# subgraph in 13--39 s). Three dep derivations in all (scoot, base,
+# plus the docs site's own); code-only merges push only the rebuilt packages.
+# The CPU-only minimal build stays covered as a cargo-only gate in ci.yml
+# (local `cargo build -p scoot --no-default-features`, and likewise).
 #
 # FLAKEHUB (below, `publish` job): after both arch builds succeed on a push
 # to main, the flake itself is published to FlakeHub as a rolling release
@@ -173,17 +171,11 @@ jobs:
         with:
           name: scoot-sh
 
-      - name: nix build the compositor variants, scootbg, and run the packaged binaries
+      - name: nix build the compositor package, scootbg, and run the packaged binaries
         run: |
           nix build .#scoot --out-link result-scoot --print-out-paths
-          nix build .#scoot-gpu --out-link result-scoot-gpu --print-out-paths
-          nix build .#scoot-xwayland --out-link result-scoot-xwayland --print-out-paths
-          nix build .#scoot-gpu-xwayland --out-link result-scoot-gpu-xwayland --print-out-paths
           nix build .#scootbg --out-link result-scootbg --print-out-paths
           ./result-scoot/bin/scoot --version
-          ./result-scoot-gpu/bin/scoot --version
-          ./result-scoot-xwayland/bin/scoot --version
-          ./result-scoot-gpu-xwayland/bin/scoot --version
           ./result-scoot/bin/scoot msg --help
           ./result-scootbg/bin/scootbg --version
           # Every packaged binary prints the repository's one version
@@ -194,9 +186,24 @@ jobs:
           # is pinned here.
           ver=$(scripts/workspace-version)
           ./result-scoot/bin/scoot --version | grep -qF "scoot $ver (ipc protocol "
-          ./result-scoot-gpu/bin/scoot --version | grep -qF "scoot $ver (ipc protocol "
-          ./result-scoot-xwayland/bin/scoot --version | grep -qF "scoot $ver (ipc protocol "
-          ./result-scoot-gpu-xwayland/bin/scoot --version | grep -qF "scoot $ver (ipc protocol "
+          # The packaged single build links no libgbm (the scanout tier
+          # reaches it at run time through the in-tree stub).
+          # (`strings`, not `nm`: this binary is stripped, so the
+          # symbol table is gone -- but the stub's `dlopen("libgbm.so.1")`
+          # soname literal lives in rodata and survives the strip. Its
+          # presence in `scoot` proves the stub is linked in.
+          # `readelf` matches are scoped to NEEDED: the RUNPATH names every
+          # buildInput lib dir, including mesa-libgbm's, and a bare match
+          # would trip on that path while needing nothing.)
+          if readelf -d ./result-scoot/bin/scoot | grep 'NEEDED' | grep -qi 'libgbm'; then
+            echo "::error title=packaged scoot references libgbm::the single build must carry no libgbm DT_NEEDED entry."
+            exit 1
+          fi
+          if ! strings ./result-scoot/bin/scoot | grep -qF 'libgbm.so.1'; then
+            echo "::error title=packaged scoot lost its libgbm stub::the scanout tier reaches libgbm through the in-tree stub's dlopen; without that literal the tier could never load."
+            exit 1
+          fi
+          echo "ok: packaged scoot references no libgbm and carries the run-time stub"
           ./result-scootbg/bin/scootbg --version | grep -qF "scootbg $ver (protocol "
 
       - name: nix build .#scootbar .#scootbar-demo, what it links, its closure, a feature override

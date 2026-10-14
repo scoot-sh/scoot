@@ -84,17 +84,18 @@ through the system config above, which is the auditable path.
 
 ## What the cache holds
 
-All seven installable outputs on both Linux systems, as of `main`:
+All four installable outputs on both Linux systems, as of `main`:
 
 | Package | x86_64-linux | aarch64-linux | Download |
 |---|---|---|---|
-| `scoot` | cached | cached | ~3.2 / 2.9 MB |
-| `scoot-gpu` | cached | cached | ~3.4 / 3.2 MB |
-| `scoot-xwayland` | cached | cached | ~3.7 / 3.4 MB |
-| `scoot-gpu-xwayland` | cached | cached | ~4.0 / 3.7 MB |
+| `scoot` | cached | cached | ~3.7 / 3.4 MB |
 | `scootbg` | cached | cached | ~0.9 / 0.8 MB |
 | `scootbar` | cached | cached | ~1.2 / 1.1 MB |
 | `scootbar-demo` | cached (tiny wrapper) | cached (tiny wrapper) | under 1 KB over `scootbar` |
+
+The CPU-only minimal build is cargo-only
+(`cargo build --no-default-features`) and is not cached: there is no
+published minimal package to push.
 
 Not cached, by decision: the docs site (built where it deploys, never
 installed), the dev shell (contributors realise it from nixpkgs plus the

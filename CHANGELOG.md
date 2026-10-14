@@ -17,6 +17,25 @@ release, entries were dated.
 
 ## Unreleased
 
+### One `scoot` build: GPU and CPU renderers in a single binary (breaking)
+
+- **There is one build now: `scoot`.** The GPU scanout tier is compiled
+  in by default and reaches libgbm at run time instead of linking it,
+  so the same binary scans out from the GPU on real hardware and runs
+  with no GPU stack installed — and `auto` (the default renderer
+  request) picks the tier per session. XWayland is compiled in by
+  default too (`default = ["gpu-scanout", "xwayland"]`). **Breaking:**
+  the `scoot-gpu`, `scoot-gpu-xwayland` and `scoot-xwayland` packages
+  are gone (no aliases), and the `runtime-gbm` Cargo feature is gone
+  (folded into `gpu-scanout`, which is now a default feature).
+  Migration: install `scoot` where you installed any of those, and drop
+  `--features runtime-gbm` (it is already on). If you pass `--features`
+  explicitly, add `gpu-scanout` / `xwayland` or use
+  `--no-default-features` for the CPU-only minimal build (cargo only:
+  `cargo build --no-default-features` — no GBM code, no libgbm, no X11
+  code; there is no published minimal Nix package).
+  See [Builds and renderers](site/src/content/docs/reference/builds/).
+
 ### XWayland is compiled in by default (not breaking)
 
 - **Every default `scoot` build now carries XWayland support; there is no
@@ -27,8 +46,8 @@ release, entries were dated.
   turn the knob on. Without the binary (or on the CPU-only minimal build,
   `cargo build --no-default-features`, which carries no X11 code) the knob
   logs loudly and the session runs Wayland-only. Not breaking: no flag,
-  config key, or IPC shape changes, and `scoot-xwayland` /
-  `scoot-gpu-xwayland` keep working until stream G collapses them.
+  config key, or IPC shape changes (the separate `-xwayland` packages are
+  collapsed by the one-build follow-up above).
   See [XWayland](site/src/content/docs/scoot/xwayland.md).
 
 ### the nightly binaries are retired; the installer takes tagged releases and can update (breaking)

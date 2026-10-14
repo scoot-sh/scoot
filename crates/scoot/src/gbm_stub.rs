@@ -1,7 +1,7 @@
-//! The `runtime-gbm` spike's view of the static libgbm stub
+//! The `gpu-scanout` feature's view of the static libgbm stub
 //! (`gbm-stub/gbm_stub.c`).
 //!
-//! Only compiled with the spike feature: the stub archive is what satisfies
+//! Only compiled with the scanout feature: the stub archive is what satisfies
 //! gbm-sys's `-lgbm` there, so this symbol exists exactly then. The single
 //! question it answers -- is the process currently forwarding GBM to a real
 //! libgbm, or failing closed? -- is what the fail-closed test pins, and what

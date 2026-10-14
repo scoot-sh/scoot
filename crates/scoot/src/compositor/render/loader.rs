@@ -1,7 +1,7 @@
 //! A GPU library loader probe that cannot hang the session.
 //!
 //! Since the default renderer request became `auto`, a `gpu-scanout` build's
-//! `--tty` startup `dlopen`s libEGL (and, with `runtime-gbm`, libgbm) once
+//! `--tty` startup `dlopen`s libEGL and libgbm once
 //! per candidate DRM device to decide the tier. A present-but-pathological
 //! library -- one whose ELF constructor never returns -- would hang that
 //! `dlopen` forever, turning a startup that previously resolved without

@@ -834,7 +834,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [Headless VNC shows no mouse](./protocols/vnc-cursor-session.md) — medium: `create_pointer_cursor_session` is refused and wayvnc gets no cursor shape, so noVNC hides the pointer (try-scoot ships a dot as a workaround).
 - [Opt-in 10-bit scanout](./core/hdr-10bit-scanout.md) — low (HDR plan stage 2), blocked on a 10-bit-capable display for the positive path.
 - [HDR connector signaling](./core/hdr-output-signaling.md) — low (HDR plan stage 4), blocked on HDR hardware plus a Smithay fork change (see the research ticket).
-- [Productionise runtime-loaded libgbm](./core/runtime-gbm-productionise.md) — medium (spike 2026-10-10): one default build for GPU and GPU-free boxes via a static libgbm ABI stub (no DT_NEEDED, dlopen on use, fail-closed without); needs the M2 scanout proof, the auto-detect rule, and the `scoot`/`scoot-gpu` package collapse.
+- [Productionise runtime-loaded libgbm](./resolved/runtime-gbm-productionise-done.md) — RESOLVED 2026-10-13 (PR #588): one default build for GPU and GPU-free boxes via a static libgbm ABI stub (no DT_NEEDED, dlopen on use, fail-closed without); M2 scanout proven, auto policy live, `scoot`/`scoot-gpu` collapsed with a cargo-only minimal build (no published minimal package; rebase 2026-10-14 also folds `xwayland` in: `default = ["gpu-scanout", "xwayland"]`, single `scoot` package).
 
 ### Shell apps, the compositor side (filed 2026-10-12)
 The scootnotify, scootlaunch and scootgreet plans ([dev/design/shell-apps.md](../../dev/design/shell-apps.md)) live in [scootbar's backlog](../scootbar/backlog/README.md#m7--the-rest-of-the-shell-separate-products-own-backlogs-when-they-start); these two are scoot changes they want.

@@ -22,9 +22,11 @@
 # It records rather than narrates (CLAUDE.md): per-round logs, raw jiffy
 # counters, raw microwatt samples, screenshots, and a TSV. Analysis happens
 # afterwards, off this machine's critical path, so nothing here needs jq,
-# python or ImageMagick -- bash, coreutils, the two scoot builds and foot.
+# python or ImageMagick -- bash, coreutils, the scoot build and foot.
 #
-# Overrides: SCOOT_DUMB, SCOOT_GPU (binaries), TIER_A_ARGS, TIER_B_ARGS
+# Overrides: SCOOT_DUMB, SCOOT_GPU (binaries -- one build now, so both
+# default to it; the tiers still differ through TIER_A_ARGS/TIER_B_ARGS),
+# TIER_A_ARGS, TIER_B_ARGS
 # (extra args per side, defaulting to `--renderer cpu` / `--renderer gpu`),
 # OUT (output dir), ROUNDS, IDLE_SECS, MOVE_SECS/MOVE_GAP, WIDTH_SECS/WIDTH_GAP,
 # BACKEND, OVERWRITE=1 (replace a run already in OUT -- destroys its numbers).
@@ -36,7 +38,7 @@ set -uo pipefail
 # meaningless -- the script prints both versions and mtimes so the record shows
 # whether they did.
 SCOOT_DUMB=${SCOOT_DUMB:-result-scoot/bin/scoot}
-SCOOT_GPU=${SCOOT_GPU:-result-scoot-gpu/bin/scoot}
+SCOOT_GPU=${SCOOT_GPU:-result-scoot/bin/scoot}
 OUT=${OUT:-/tmp/scoot-tier-bench}
 ROUNDS=${ROUNDS:-4}
 IDLE_SECS=${IDLE_SECS:-10}
@@ -64,8 +66,8 @@ HEADLESS_SIZE=(--width 2560 --height 1600)
 
 for b in "$SCOOT_DUMB" "$SCOOT_GPU"; do
     if [ ! -x "$b" ]; then
-        echo "no scoot binary at $b -- nix build .#scoot -o result-scoot and" >&2
-        echo "nix build .#scoot-gpu -o result-scoot-gpu, or set SCOOT_DUMB/SCOOT_GPU" >&2
+        echo "no scoot binary at $b -- nix build .#scoot -o result-scoot," >&2
+        echo "or set SCOOT_DUMB/SCOOT_GPU" >&2
         exit 1
     fi
 done

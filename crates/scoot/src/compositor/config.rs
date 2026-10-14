@@ -1007,8 +1007,10 @@ pub fn default_config_toml() -> String {
     out.push_str(
         "# Run an XWayland server inside the session (opt-in X11 support, off\n\
           # by default). --xwayland wins when either names it: the two are OR-ed.\n\
-          # Needs an `xwayland` Cargo-feature build; without one the knob warns\n\
-          # and the session runs Wayland-only. `enabled` takes effect on restart.\n\
+          # Needs a build with the `xwayland` Cargo feature (on by default;\n\
+          # only `--no-default-features` minimal builds lack it); without one\n\
+          # the knob warns and the session runs Wayland-only. `enabled` takes\n\
+          # effect on restart.\n\
           # `fractional` re-applies live on reload: `sharp` draws X at\n\
           # ceil(scale) at a fractional scale (sharp, more memory), `light` at\n\
           # floor(scale) (blurry, about a quarter of the memory); 1 and integer\n\

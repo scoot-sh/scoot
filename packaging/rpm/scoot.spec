@@ -2,10 +2,13 @@
 #
 # Built from the vendored-sources release tarball (scripts/vendor-release.sh:
 # the tagged tree plus vendor/, .cargo/config.toml and THIRD-PARTY-LICENSES),
-# the default cargo feature set: the GPU-free compositor that runs on a box
-# with no GPU stack installed. The `gpu-scanout` and `xwayland` tiers are
-# compile-time features; rebuilding with them is documented in
-# packaging/rpm/README.md.
+# the default cargo feature set: the single build, which runs on a box with
+# no GPU stack installed and scans out from the GPU where there is one (the
+# `gpu-scanout` tier is on by default and reaches libgbm at run time, so no
+# libgbm link dependency). The `xwayland` tier stays a compile-time feature;
+# rebuilding with it is documented in packaging/rpm/README.md. The default
+# build compiles a small C stub (`crates/scoot/gbm-stub/`), hence
+# `BuildRequires: gcc` below.
 #
 # The versioned `scootbg` requirement is the coupled pair from
 # docs/backlog/packaging/rpm-package.md: one tag (`v%%{version}`) releases
@@ -55,10 +58,21 @@ BuildRequires:  systemd-rpm-macros
 %endif
 # The coupled pair installs at the one version (docs/versioning.md).
 Requires:       scootbg = %{version}-%{release}
+# The GPU scanout tier is compiled in and reached at run time (no libgbm
+# link dependency): these are auto-detected, never required. Names from
+# `dnf repoquery --whatprovides` on Fedora 43 (packaging/rpm/README.md);
+# the openSUSE names are not probed, so that side stays a comment.
+%if 0%{?suse_version}
+# openSUSE runtime providers of libgbm.so.1 / libdrm.so.2: see README.md.
+%else
+Recommends:     mesa-libgbm
+Recommends:     libdrm
+%endif
 
 %description
-scoot is a scrolling-tiling Wayland compositor that draws on the CPU
-by default, so it runs with no GPU stack installed. This package is the
+scoot is a scrolling-tiling Wayland compositor that picks its renderer at
+run time, so the same binary runs with no GPU stack installed and scans out
+from the GPU on real hardware. This package is the
 compositor binary plus the greeter launcher and the systemd user units
 it starts (scoot.service, scoot-session.target, scoot-shutdown.target)
 with the portal selection: pick "scoot" on the login

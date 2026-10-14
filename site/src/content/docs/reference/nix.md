@@ -12,17 +12,18 @@ Packages (`packages.<system>.*` on `x86_64-linux`):
 
 | Name | Gives you | Pick it when |
 |---|---|---|
-| `scoot` | the compositor plus the `scoot msg` client (`$out/bin` carries only `scoot`) | the default everywhere; VM, container, nested-only |
-| `scoot-gpu` | the same binary with the `gpu-scanout` feature | real hardware with a GPU (still named `scoot`) |
-| `scoot-xwayland` / `scoot-gpu-xwayland` | those two with the `xwayland` feature and Xwayland on `PATH` (Linux only) | you run X11 apps |
+| `scoot` | the compositor plus the `scoot msg` client (`$out/bin` carries only `scoot`); GPU and CPU renderers in one binary, picked at run time, with the `xwayland` feature compiled in and Xwayland on `PATH` (Linux only) | the default everywhere; VM, container, nested-only, real hardware, X11 apps too |
 | `scootbg` | the wallpaper daemon (Linux only) | `[wallpaper]` without the desktop profile |
 | `scootbar` | the status bar, no font in its closure (Linux only) | the bar with your own fonts |
 | `scootbar-demo` | the bar with a bundled font as its default | trying the bar on a box with no fonts |
 | `default` | `scoot` on every system (client-only on macOS) | `nix run` without choosing |
 
-Apps (`nix run` mirrors five of them — `default`, `scoot-gpu`,
-`scoot-xwayland`, `scootbar` and `scootbar-demo`; no `scootbg`,
-`scoot-gpu-xwayland` or docs-site app):
+The CPU-only minimal build is cargo-only
+(`cargo build --no-default-features`: no GBM code, no libgbm, no X11
+code); there is no published minimal Nix package.
+
+Apps (`nix run` mirrors three of them — `default`, `scootbar` and
+`scootbar-demo`; no `scootbg` or docs-site app):
 
 ```sh
 nix run github:scoot-sh/scoot -- --nested -- foot
@@ -38,8 +39,8 @@ bar.
 
 ## The overlay
 
-`overlays.default` adds `pkgs.scoot` and, on Linux, `pkgs.scootbg`
-and `pkgs.scootbar`:
+`overlays.default` adds `pkgs.scoot` and, on Linux, `pkgs.scootbg` and
+`pkgs.scootbar`:
 
 ```nix title="configuration.nix"
 nixpkgs.overlays = [ inputs.scoot.overlays.default ];

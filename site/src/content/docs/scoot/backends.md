@@ -97,7 +97,8 @@ never probes at all.
 > **Symptom:** `auto` chose the CPU renderer on my GPU laptop. Read
 > `reason=` on the `renderer chosen` line. It is usually `no-gbm` or
 > `no-egl` (the GPU libraries are missing or unloadable), `no-scanout-tier`
-> (this build has no GPU scanout tier — you want the `scoot-gpu` build),
+> (this binary was built without the GPU scanout tier — a
+> `--no-default-features` cargo build),
 > or `display-only` (the display device has no 3D engine). Fix the cause
 > or pass `--renderer gpu` to force the tier.
 >
