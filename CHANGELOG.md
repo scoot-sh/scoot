@@ -17,6 +17,8 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.2.0] - 2026-10-14
+
 ### One `scoot` build: GPU and CPU renderers in a single binary (breaking)
 
 - **There is one build now: `scoot`.** The GPU scanout tier is compiled
