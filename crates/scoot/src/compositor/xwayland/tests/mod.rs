@@ -348,14 +348,20 @@ fn display_reaches_spawned_children_only_while_live() {
     );
 }
 
-/// Compiled in but disabled: a session that never asks for XWayland spawns
-/// no `Xwayland` process and opens no X socket. The runtime knob stays
-/// opt-in after the default-on build flip (one-build stream X), so this is
-/// the pin that default sessions stay byte-identical: no display, no window
-/// manager, no grab, no event-loop tokens, and no child process.
+/// Compiled in but disabled: a session that never asks for XWayland starts
+/// no server and opens no X socket. The runtime knob stays opt-in after the
+/// default-on build flip (one-build stream X), so this is the pin that
+/// default sessions stay byte-identical: no display, no window manager, no
+/// grab, and no event-loop tokens, before and after dispatch.
 ///
-/// Hermetic: no server binary needed, and asserts the absence rather than
-/// the presence.
+/// Hermetic: no server binary needed, and asserts the session's own state
+/// rather than the presence. Deliberately no `/proc` child scan: `cargo
+/// test` runs tests as threads in one process with the live XWayland suites
+/// concurrent, so an `Xwayland` child of the process cannot be attributed to
+/// this session (CI hit exactly that false positive); the state below is the
+/// sound pin -- `start` (the only spawn path) stores the display in
+/// `state.xdisplay` and inserts the tokens, so a started server cannot hide
+/// from it, and `DISPLAY` is exported to children only from `xdisplay`.
 #[cfg(feature = "xwayland")]
 #[test]
 fn a_disabled_session_spawns_nothing_and_opens_no_x_socket() {
@@ -381,43 +387,6 @@ fn a_disabled_session_spawns_nothing_and_opens_no_x_socket() {
     assert!(fixture.state.xdisplay.is_none());
     assert!(fixture.state.xwm.is_none());
     assert!(fixture.state.xwayland_tokens_for_test.is_empty());
-    // No `Xwayland` child of this test process: the socket lives in the
-    // kernel bound by that child, so no child means no X socket opened on
-    // this session's behalf. Found through `/proc` the way the harness's
-    // own teardown finds its servers (parent is this process, comm is
-    // `Xwayland`), so a server started and reparented elsewhere cannot hide
-    // -- and a server this session started cannot be missed.
-    let me = std::process::id();
-    let mut ours = Vec::new();
-    if let Ok(entries) = std::fs::read_dir("/proc") {
-        for entry in entries.flatten() {
-            let Some(pid) = entry
-                .file_name()
-                .to_str()
-                .and_then(|name| name.parse::<u32>().ok())
-            else {
-                continue;
-            };
-            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
-                continue;
-            };
-            let (Some(open), Some(close)) = (stat.find('('), stat.rfind(')')) else {
-                continue;
-            };
-            let comm = &stat[open + 1..close];
-            let ppid = stat[close + 1..]
-                .split_whitespace()
-                .nth(1)
-                .and_then(|field| field.parse::<u32>().ok());
-            if comm == "Xwayland" && ppid == Some(me) {
-                ours.push(pid);
-            }
-        }
-    }
-    assert!(
-        ours.is_empty(),
-        "a disabled session has Xwayland children it never asked for: {ours:?}"
-    );
 }
 
 // -- Live half (xwayland-feature builds with the binary on PATH) ----------
