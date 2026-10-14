@@ -1,6 +1,6 @@
 //! `zwp_linux_dmabuf_v1`: advertisement *and* import.
 //!
-//! scoot composites on the CPU with pixman by default, but a client is free
+//! scoot composites on the CPU with pixman wherever there is no GPU hardware stack, but a client is free
 //! to render on the GPU and hand the result over as a dma-buf -- and Smithay's
 //! [`PixmanRenderer`](smithay::backend::renderer::pixman::PixmanRenderer)
 //! imports one without any GPU on the compositor side: it `mmap`s plane 0 of

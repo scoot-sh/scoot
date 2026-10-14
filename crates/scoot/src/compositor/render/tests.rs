@@ -20,7 +20,7 @@
 //! exactly what this project's dev VM is. A silently-skipped GLES test is
 //! worse than a failing one: `cargo test` captures output, so the skip would
 //! be invisible and "the suite passed" would mean nothing about the renderer
-//! this stage exists to add. Nothing about the default pixman path depends on
+//! this stage exists to add. Nothing about the pixman path depends on
 //! EGL being there.
 
 use smithay::backend::allocator::Fourcc;

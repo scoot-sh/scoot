@@ -1644,6 +1644,69 @@ fn a_cpu_to_auto_change_refuses_with_restart() {
     );
 }
 
+/// The same refusal from the default: a session started with no flag, no
+/// env and no `[renderer]` key (snapshot `None`) that later gains one
+/// refuses, whichever value it gains -- `cpu`, `gpu` or `auto` alike.
+/// Symmetry pins for the two transitions the suite already covers
+/// (`None`->`None` silent above, `Some(cpu)`->`Some(auto)` refusing just
+/// above): without them a regression that silenced exactly the
+/// default-gains-a-value shape would pass everything else.
+#[test]
+fn a_default_to_cpu_change_refuses_with_restart() {
+    let mut fixture = Fixture::with_config("");
+    assert_eq!(fixture.state.startup_renderer_request, None);
+    fixture.rewrite("[renderer]\nbackend = \"cpu\"\n");
+    let response = fixture.reload();
+    let entry = refused(&response)
+        .iter()
+        .find(|entry| entry.starts_with(field::BACKEND))
+        .unwrap_or_else(|| panic!("{} was not refused: {response:?}", field::BACKEND))
+        .to_owned();
+    assert!(
+        entry.contains("takes effect on restart"),
+        "a default session gaining `cpu` should name restart as the remedy: {entry}"
+    );
+}
+
+/// A default session gaining `backend = "gpu"` refuses the same way.
+#[test]
+fn a_default_to_gpu_change_refuses_with_restart() {
+    let mut fixture = Fixture::with_config("");
+    assert_eq!(fixture.state.startup_renderer_request, None);
+    fixture.rewrite("[renderer]\nbackend = \"gpu\"\n");
+    let response = fixture.reload();
+    let entry = refused(&response)
+        .iter()
+        .find(|entry| entry.starts_with(field::BACKEND))
+        .unwrap_or_else(|| panic!("{} was not refused: {response:?}", field::BACKEND))
+        .to_owned();
+    assert!(
+        entry.contains("takes effect on restart"),
+        "a default session gaining `gpu` should name restart as the remedy: {entry}"
+    );
+}
+
+/// A default session gaining `backend = "auto"` refuses the same way:
+///
+/// naming the default request explicitly is still a change on the wire
+/// (`None` vs `Some(Auto)`), even though it resolves identically.
+#[test]
+fn a_default_to_auto_change_refuses_with_restart() {
+    let mut fixture = Fixture::with_config("");
+    assert_eq!(fixture.state.startup_renderer_request, None);
+    fixture.rewrite("[renderer]\nbackend = \"auto\"\n");
+    let response = fixture.reload();
+    let entry = refused(&response)
+        .iter()
+        .find(|entry| entry.starts_with(field::BACKEND))
+        .unwrap_or_else(|| panic!("{} was not refused: {response:?}", field::BACKEND))
+        .to_owned();
+    assert!(
+        entry.contains("takes effect on restart"),
+        "a default session gaining `auto` should name restart as the remedy: {entry}"
+    );
+}
+
 /// A session started on the default (no flag, no env, no `[renderer]` key)
 /// must not refuse a reload of an unchanged file: the snapshot is `None`
 /// and so is the fresh parse, so request-versus-request agrees.

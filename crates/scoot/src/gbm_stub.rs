@@ -18,6 +18,64 @@ pub(crate) fn real_loaded() -> bool {
     unsafe { scoot_gbm_real_loaded() != 0 }
 }
 
+/// What [`probe_real_loaded`] found.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum GbmProbe {
+    /// The stub forwards to a real libgbm.
+    Loadable,
+    /// The stub is failing closed (no libgbm on the box).
+    Missing,
+    /// The probe did not answer in time: libgbm is present but
+    /// unresponsive. Callers treat this like [`GbmProbe::Missing`], with a
+    /// warning naming the timeout.
+    TimedOut,
+}
+
+/// Whether the stub forwards to a real libgbm, without hanging the caller.
+///
+/// The stub resolves its handle with `pthread_once` + `dlopen` on first
+/// use, so a present-but-pathological libgbm would hang a direct
+/// [`real_loaded`] call exactly the way libEGL hangs a direct `dlopen`.
+/// This runs that call in [`loader`](crate::compositor::render::loader)'s
+/// forked helper with a deadline instead, and the caller falls back to the
+/// CPU renderer on anything but [`GbmProbe::Loadable`].
+///
+/// The parent never calls [`real_loaded`] itself on this path, so its own
+/// `pthread_once` never fires here: a later `GbmDevice::new` (only reached
+/// when the probe said loadable) is what first resolves the parent's
+/// handle. A library too broken to answer the probe never gets loaded into
+/// the session at all.
+pub(crate) fn probe_real_loaded(timeout: std::time::Duration) -> GbmProbe {
+    use crate::compositor::render::loader;
+    let Some(pid) = loader::spawn_helper() else {
+        tracing::debug!(
+            error = %std::io::Error::last_os_error(),
+            "gbm probe could not fork; probing inline"
+        );
+        return if real_loaded() {
+            GbmProbe::Loadable
+        } else {
+            GbmProbe::Missing
+        };
+    };
+    if pid == 0 {
+        // The helper: the stub probe and `_exit`, nothing else.
+        //
+        // SAFETY: the single-threaded precondition (see `loader`'s module
+        // doc) means the inherited `pthread_once` state is pristine -- the
+        // parent never resolves its own handle on this path -- so the
+        // `dlopen` inside runs exactly as it would in a fresh process.
+        unsafe {
+            libc::_exit(i32::from(scoot_gbm_real_loaded() == 0));
+        }
+    }
+    match loader::wait_for_helper(pid, timeout) {
+        loader::Waited::Exited(0) => GbmProbe::Loadable,
+        loader::Waited::Exited(_) => GbmProbe::Missing,
+        loader::Waited::Gone => GbmProbe::TimedOut,
+    }
+}
+
 unsafe extern "C" {
     fn scoot_gbm_real_loaded() -> std::os::raw::c_int;
 }

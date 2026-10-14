@@ -381,8 +381,8 @@ fn a_viewported_single_pixel_buffer_keeps_its_edge_pixels() {
 /// A scale-unaware client on a scale-2 output: a logical-size buffer the
 /// compositor upscales 2x. Same fade, same pin -- and renderer-agnostic, so
 /// a `SCOOT_TEST_RENDERER=gpu` run proves GLES never had it (clamp to
-/// edge), while the default pixman run is the one that failed before the
-/// fork fix.
+/// edge), while the pixman run (the suite's default renderer) is the one
+/// that failed before the fork fix.
 #[test]
 fn a_logical_size_buffer_on_a_scale_two_output_keeps_its_edge_pixels() {
     let mut fixture: Fixture = Harness::headless_scaled(

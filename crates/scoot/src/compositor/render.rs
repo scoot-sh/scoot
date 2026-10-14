@@ -82,6 +82,7 @@ mod capture_cursor;
 mod cursor_plane;
 mod elements;
 mod gles;
+pub(crate) mod loader;
 #[cfg(feature = "gpu-scanout")]
 mod overlay_candidate;
 mod pixman;
@@ -214,11 +215,16 @@ fn resolve_with(
     (request, source, early, warnings)
 }
 
-/// Whether libEGL can be `dlopen`ed right now (see
-/// [`gles::lib_loadable`]). One `dlopen`+`dlclose`, run once per candidate
-/// DRM device at startup -- never on a hot path.
-pub(crate) fn egl_loadable() -> bool {
-    gles::lib_loadable(gles::LIB_EGL_SONAME).is_ok()
+/// Whether libEGL can be loaded right now, and what a failure was.
+///
+/// Runs the load in [`loader`]'s forked helper with a deadline (see that
+/// module for why a bare `dlopen` is a hang path): `Loadable` means the
+/// library is there, `Missing` that it failed fast, `TimedOut` that it is
+/// present but unresponsive. Run once per candidate DRM device at startup
+/// that the KMS driver class does not already decide (see `tty::open_device`)
+/// -- never on a hot path.
+pub(crate) fn egl_probe() -> loader::Probe {
+    loader::probe_library(gles::LIB_EGL_SONAME, loader::PROBE_TIMEOUT)
 }
 
 /// What draws this session's frames, and what it draws into.

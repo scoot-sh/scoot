@@ -55,7 +55,7 @@ BuildRequires:  systemd-rpm-macros
 Requires:       scootbg = %{version}-%{release}
 
 %description
-scoot is a scrolling-tiling Wayland compositor that renders on the CPU
+scoot is a scrolling-tiling Wayland compositor that draws on the CPU
 by default, so it runs with no GPU stack installed. This package is the
 compositor binary plus the greeter launcher and the systemd user units
 it starts (scoot.service, scoot-session.target, scoot-shutdown.target)

@@ -16,7 +16,7 @@
 pkgname=scoot
 pkgver=0.1.0
 pkgrel=1
-pkgdesc='Scrolling-tiling Wayland compositor (CPU rendering by default, no GPU needed)'
+pkgdesc='Scrolling-tiling Wayland compositor (CPU renderer, no GPU stack needed)'
 arch=('x86_64' 'aarch64')
 url='https://github.com/scoot-sh/scoot'
 license=('MIT')

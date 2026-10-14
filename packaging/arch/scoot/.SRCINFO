@@ -1,5 +1,5 @@
 pkgbase = scoot
-	pkgdesc = Scrolling-tiling Wayland compositor (CPU rendering by default, no GPU needed)
+	pkgdesc = Scrolling-tiling Wayland compositor (CPU renderer, no GPU stack needed)
 	pkgver = 0.1.0
 	pkgrel = 1
 	url = https://github.com/scoot-sh/scoot

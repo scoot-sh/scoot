@@ -537,7 +537,7 @@ fn pixmans_own_importable_set_still_contains_both_candidates() {
         };
         assert!(
             importable.contains(&format),
-            "pixman, the default renderer, can no longer import {format:?}, so \
+            "pixman, the CPU renderer, can no longer import {format:?}, so \
              scoot would stop advertising it"
         );
     }
