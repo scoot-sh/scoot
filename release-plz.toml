@@ -46,28 +46,31 @@ dependencies_update = false
 # Tag only when a release PR merges, never on an ordinary push to main.
 release_always = false
 pr_branch_prefix = "release-plz-"
-pr_name = "chore: release v{{ version }}"
+# The title is release-plz's default for packages that all move to one
+# version: `chore: release vX.Y.Z` (Conventional Commits; `chore` keeps the
+# release commit out of the next changelog).
 pr_labels = ["release"]
 pr_body = """
-## Release v{{ releases[0].next_version }}
+{%- for release in releases %}{% if release.package == "scoot" %}
+## Release v{{ release.next_version }}
 
 Merging this PR is the release: release-plz then pushes the
-`v{{ releases[0].next_version }}` tag, and `.github/workflows/release.yml`
+`v{{ release.next_version }}` tag, and `.github/workflows/release.yml`
 builds every binary (scoot, scootbg, scootbar) at that one version and
 publishes the GitHub Release.
 
-The proposed version follows the commits since the last tag (pre-1.0: a
+The proposed version follows the commits since the last tag (below 1.0: a
 breaking change bumps the minor, anything else the patch). It is a
-proposal: edit `[workspace.package] version` in `Cargo.toml` (and the
-heading in `CHANGELOG.md`) on this branch to release a different one.
-Before merging, move anything still under `## Unreleased` in
-CHANGELOG.md that belongs to this release.
-
-{% for release in releases %}{% if release.package == "scoot" %}
+proposal: to release a different version, edit `version` under
+`[workspace.package]` in `Cargo.toml` and the heading in `CHANGELOG.md` on
+this branch.
+{% if release.changelog %}
 ### Changes
 
+{% if release.title %}#### {{ release.title }}
+{% endif %}
 {{ release.changelog }}
-{% endif %}{% endfor %}
+{% endif %}{% endif %}{% endfor %}
 """
 
 [changelog]
