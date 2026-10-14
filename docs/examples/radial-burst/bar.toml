@@ -35,6 +35,7 @@ urgent = "#bf128d"
 pill-shape = "circle"
 pill-inset = 7
 item-gap = 4         # spaces between the numbers
+disc = false         # keep the span as before (the default grows it to the disc)
 
 [clock]
 format = "%-I:%M %P"

@@ -485,11 +485,11 @@ struct WorkspacesFile {
     /// Extra logical pixels on each side of the module.
     #[cfg(feature = "workspaces")]
     margin: Option<u32>,
-    /// The active workspace's pill: `rect`, `pill` or `circle`.
+    /// The active workspace's pill: `rect`, `pill`, `circle` or `square` (the default).
     #[cfg(feature = "workspaces")]
     #[serde(rename = "pill-shape")]
     pill_shape: Option<String>,
-    /// A `rect` pill's corner radius, logical pixels.
+    /// A `rect` or `square` pill's corner radius, logical pixels.
     #[cfg(feature = "workspaces")]
     #[serde(rename = "pill-radius")]
     pill_radius: Option<u32>,
@@ -504,7 +504,7 @@ struct WorkspacesFile {
     /// What the module shows: `numbers` or `dots`.
     #[cfg(feature = "workspaces")]
     display: Option<String>,
-    /// With a `circle` pill: grow the module's own span to the disc.
+    /// With a `circle` or `square` pill: grow the module's own span to the disc or tile (on by default).
     #[cfg(feature = "workspaces")]
     disc: Option<bool>,
     /// The active pill's fill, instead of the `accent` token.

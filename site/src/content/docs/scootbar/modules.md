@@ -151,7 +151,7 @@ the numbers):
 | `pill-inset` | 0 to 1024 (default 6) | the gap from the bar's top and bottom edges, so the pill is shorter than the bar. Cut back so the pill is never shorter than the text's line: the number is drawn in the bar's color over the fill, and a shorter pill would clip it away. |
 | `item-gap` | 1 to 8 (default 3) | the spaces between two numbers: one space is about a third of the font size, so 3 (the default, as in the published looks) is a roomy row and 1 the old tight one. The pill and the click target of each number follow; a click in the gap hits nothing. The module's text is cut at 256 bytes, so a bigger gap shows fewer workspaces: at the default 3, workspaces 1 to 53 fit; at 8 spaces about 26 numbered up to 99 (28 single-digit ones), the rest cut off the end. |
 | `display` | `"numbers"` (default), `"dots"` | `dots`: a dot per workspace in place of the numbers — the active one filled like the pill, the rest dim (or the state colors above). Clicks land by the dots' places, exactly as by the numbers'. A `query` still reports the numbers. |
-| `disc` | on by default | with a `circle` or `square` pill: grow the module's own span to the shape's side, so a single digit is a disc or tile at any `padding`. Refused with any other shape when set explicitly, and showing dots. |
+| `disc` | on by default | with a `circle` or `square` pill: grow the module's own span to the shape's side, so a single digit is a disc or tile at any `padding`. Set explicitly, it is refused with any other shape and with dots. |
 | `active-color` | a color, unset by default | the active pill's fill instead of `accent`. The pointer's `hover` still wins while it is over the module. |
 | `inactive-color` | a color, unset by default | inactive numbers' ink instead of `fg` (inactive dots are `dim` unless set). |
 
@@ -194,7 +194,9 @@ disc = true            # grow the span to the tile, so it stays square
   `padding` either side). So on a crowded bar, or one whose `padding` is
   small next to its height, a single digit gets an oval rather than a
   disc: raise `padding` or the `pill-inset` until it is round, or set
-  `disc` to grow the span to the disc instead.
+  `disc` (on by default) to grow the span to the disc instead; a config
+  that sets `pill-shape = "circle"` but never `disc` now grows its span
+  too, so set `disc = false` to keep the old layout.
 - **How a square is sized**: like a circle but square — its side is the
   pill's height, centered on the number, corners per `pill-radius`. A
   wider number widens it into a wider tile, never clipped, stopping
@@ -202,7 +204,7 @@ disc = true            # grow the span to the tile, so it stays square
   span grows to the tile, so a single digit is square at any `padding`.
 - **Clicks follow the pill**: a press on the drawn pill of the active
   number does nothing (it is already shown), never a neighbour's switch,
-  even where a grown circle overlaps the neighbour's own click area; a press
+  even where a grown circle or tile overlaps the neighbour's own click area; a press
   on the padding around any other number still activates that workspace.
 - The corners are the same analytic coverage as the bar's, with no
   supersampling and no allocation, painted only when the module repaints
