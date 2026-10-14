@@ -9,7 +9,7 @@ Ask the compositor questions and tell it to act: every request, `type` vs `key`,
 
 | Request | What it does |
 | --- | --- |
-| `version` | Version and IPC protocol of the running compositor — needs a session. `scoot msg --version` (or `scoot --version`) answers locally with no session, printing the binaries' own line (`scoot <version> (ipc protocol <N>)`) so a client can check compatibility before connecting. |
+| `version` | Version and IPC protocol of the running compositor — needs a session. `scoot msg --version` (or `scoot --version`) answers locally with no session, printing the binaries' own line (`scoot <version> (ipc protocol <N>)`) so a client can check compatibility before connecting. `<version>` is the release (`0.2.0`), or for a build that is not one, the last release plus the commits since it (`0.2.0+14.g615608c`); the reply's `version` field carries the same string. Compare the protocol number, not the version. |
 | `outputs` | Every output's name, rectangle, usable rectangle, scale and power state. |
 | `windows` | Every window: id, app id, title, icon, output, workspace, adoption, focus, popup grab. |
 | `keyboard` | The active keyboard layout's name and index — what a layout indicator shows, and which layout the next `type` will produce. |

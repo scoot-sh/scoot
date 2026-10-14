@@ -597,9 +597,11 @@ the ratchet's waivers do):
   `--check` on the example config), and Arch (`packaging/arch/<app>{,-git}/`).
   These come in each app's packaging ticket, after the binary is usable, not in its
   first PR.
-- **Versioning**: each crate is versioned independently by `scripts/version`
-  from Conventional Commits with its scope (CLAUDE.md, Commits and CI). The new
-  scopes `scootnotify`, `scootlaunch` and `scootui` are already named in CLAUDE.md.
+- **Versioning**: every crate inherits the repository's one version
+  (`version.workspace = true`; docs/versioning.md), and one `vX.Y.Z` tag
+  releases every binary, so a new app needs no version policy of its own. Its
+  Conventional Commits scope still matters: it groups the app's entries in the
+  changelog (CLAUDE.md, Commits and CI). The new scopes `scootnotify`, `scootlaunch` and `scootui` are already named in CLAUDE.md.
   `scoot-rt`, `scoot-dbus`, `scoot-xdg` (the desktop-entry parser, split out of scootlaunch when
   scootgreet becomes its second consumer) and `scootgreet` are not: adding each to
   CLAUDE.md's scope list, with its CI classify arms, is part of the first PR that creates

@@ -150,7 +150,7 @@ for pkg in scoot scootbg scootbar; do
 
     # Non-native packages (our versions carry a Debian revision) must
     # ship changelog.Debian.gz or lintian fails with no-changelog. The
-    # entry points at the per-package release notes (the user-visible
+    # entry points at the release notes (the user-visible
     # history) and the license inventory, which is where this tree's
     # history lives -- there is no Debian revision history to recount.
     # Both names come from the rendered control, so they cannot skew.

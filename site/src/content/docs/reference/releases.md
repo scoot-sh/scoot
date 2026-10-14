@@ -3,11 +3,11 @@ title: Releases
 description: "Get a scoot release, know which file is which, and verify it: checksums, provenance, SBOM."
 ---
 
-Every release is cut from a package tag (`scoot-v0.2.0`,
-`scootbar-v0.3.0`) by the [release workflow](#where-releases-come-from),
-nothing by hand. The compositor and the wallpaper daemon release
-together (one version line); the bar releases on its own. If you are
-deciding whether versions work together, read [Versions and
+Every release is one tag, `vX.Y.Z` (`v0.2.0`), and holds every binary
+at that one version: the compositor with `scoot msg`, the wallpaper
+daemon and the bar. The [release workflow](#where-releases-come-from)
+builds and publishes it, nothing by hand. If you are deciding whether
+versions work together, read [Versions and
 compatibility](./versions.md) first.
 
 ## Which file to download
@@ -18,10 +18,10 @@ A release holds one set of files per architecture (`x86_64-linux`,
 | File | What it is |
 |---|---|
 | `scoot-<version>-<arch>` | The compositor (plus the `scoot msg` client, the only client) |
-| `scootbg-<version>-<arch>` | The wallpaper daemon (same version as `scoot`) |
-| `scootbar-<version>-<arch>` | The status bar (only in bar releases; its version is independent) |
+| `scootbg-<version>-<arch>` | The wallpaper daemon |
+| `scootbar-<version>-<arch>` | The status bar |
 | `scoot-<commit>-vendored.tar.gz` | The exact tagged tree plus `vendor/` (every dependency), `.cargo/config.toml`, `THIRD-PARTY-LICENSES` and `OFFLINE-BUILD.txt` |
-| `sbom-<package>-<version>.cyclonedx.json` | The locked dependencies of the shipped binary (union of both binaries for trio releases), CycloneDX 1.3 |
+| `sbom-scoot-<version>.cyclonedx.json` | The locked dependencies of every shipped binary (their union), CycloneDX 1.3 |
 | `SHA256SUMS` | The checksum of every file above |
 
 The binaries are the default feature build: the GPU-free compositor
@@ -52,6 +52,11 @@ Cachix cache with the flake on FlakeHub (rolling release) — see
 [Install](../start/install.md). Verify a file with
 `--signer-workflow scoot-sh/scoot/.github/workflows/release.yml` in
 the command below.
+
+A build that is not a release says how far past one it is: `scoot
+--version` prints `scoot 0.2.0+14.g615608c (ipc protocol 10)`. The Nix
+flake's rolling release is numbered `0.3.<commits on main>`, so it sorts
+above every 0.2.x tag.
 
 ## Run them on your distro
 
@@ -118,10 +123,10 @@ jq -r '.components[].name' sbom-scoot-0.2.0.cyclonedx.json | sort | head
 
 A tag on `main` starts the [release
 workflow](https://github.com/scoot-sh/scoot/blob/main/.github/workflows/release.yml):
-it refuses a tag that disagrees with its manifest, a tag not on main,
-and a re-publish of an existing release; builds the tarball, both
-architectures, the SBOM and the checksums; and publishes the GitHub
-Release with the per-package changelog as its notes. Nix users can
+it refuses a tag that disagrees with the workspace version, a tag not
+on main, and a re-publish of an existing release; builds the tarball,
+both architectures, the SBOM and the checksums; and publishes the GitHub
+Release with that version's changelog section as its notes. Nix users can
 ignore all of the above: every merge to main already lands tested
 binaries in the Cachix cache with the flake on FlakeHub — see
 [Install](../start/install.md). Cutting a release yourself is a

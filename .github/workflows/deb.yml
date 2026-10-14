@@ -140,10 +140,10 @@ jobs:
           name: vendor-source
           path: ${{ runner.temp }}/vendor
 
-      # The .deb versions must name their crates' versions (the trio
-      # together, the bar on its own); the scoot control must pin the
-      # scootbg version the same run builds.
-      - name: deb versions track their crate manifests
+      # Every .deb carries the repository's one version (the root
+      # Cargo.toml's [workspace.package] version); the scoot control
+      # must pin the scootbg version the same run builds.
+      - name: deb versions track the workspace version
         env:
           VENDOR_SOURCE: ${{ runner.temp }}/vendor/source
         run: |
@@ -156,8 +156,9 @@ jobs:
               capture_output=True, text=True, check=True,
           ).stdout
           got = dict(line.split() for line in out.splitlines())
-          assert got["scoot"] == got["scootbg"], f"trio skew in staged tree: {got}"
-          print(f"staged tree: scoot/scootbg {got['scoot']} (lockstep ok), scootbar {got['scootbar']}")
+          assert set(got) == {"scoot", "scootbg", "scootbar"}, got
+          assert len(set(got.values())) == 1, f"version skew in staged tree: {got}"
+          print(f"staged tree: every package at {got['scoot']}")
           EOF
 
       - name: Build the .debs in the distro container

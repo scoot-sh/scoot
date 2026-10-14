@@ -143,3 +143,17 @@ trio), no new `apply-config` handshake (one already exists and was
 measured sufficient), no config-schema `version` key (strictness
 already covers it), no mutating release subcommand (the tool reads
 only; the maintainer tags).
+
+## Superseded 2026-10-13: one version for the whole repository
+
+Before any per-package tag was cut, the maintainer and two independent
+reviews chose the opposite model: one `[workspace.package] version`
+inherited by every crate, one `vX.Y.Z` tag releasing every binary,
+bumps chosen in a release-plz release PR, and compatibility carried by
+protocol numbers alone ([versioning](../../versioning.md)). The
+per-crate versions, the trio/bar split, `scripts/version` (with
+`scripts/test_version.py` and its CI job) and the `<package>-vX.Y.Z`
+tags are gone; no such tag ever existed, so nothing migrates. What
+survives from this ticket: the couplings measured above (now the
+protocol table in `docs/versioning.md`), `scootctl::version_string_for`,
+and the strict section parsing that keeps skew loud.
