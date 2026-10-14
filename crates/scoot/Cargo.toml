@@ -42,9 +42,12 @@ license.workspace = true
 # per change is expected to show *no* new `DT_NEEDED` entry on either side;
 # the cost is binary size and the runtime `Xwayland` binary on `PATH`, which
 # is why the session knob stays opt-in (see `site/src/content/docs/scoot/protocols.md#xwayland-opt-in`'s trust
-# note: any X client can keylog/snoop by design).
+# note: any X client can keylog/snoop by design). Default-on since
+# 2026-10 (one-build stream X): every default build carries it, and
+# `--no-default-features` is the CPU-only minimal build without it -- no X11
+# code, no extra crates, no `Xwayland`-binary expectation.
 [features]
-default = []
+default = ["xwayland"]
 gpu-scanout = ["smithay/backend_gbm"]
 # Spike (2026-10): runtime-loaded libgbm. Same Smithay `backend_gbm` code as
 # `gpu-scanout`, but linked against the in-tree static ABI stub

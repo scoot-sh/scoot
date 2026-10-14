@@ -52,3 +52,37 @@ keylog/snoop by design).
 Removing the `--xwayland` runtime gate: opt-in stays. Bundling an Xwayland
 binary into the closure: it stays a `PATH` lookup with a loud Wayland-only
 fallback.
+
+## Measured (stream X, 2026-10-14, Asahi M2, release `lto = "fat"`)
+
+- Stripped: default 7,037,240 B → `+xwayland` 8,090,328 B
+  (**+1,053,088 B, +15.0%**).
+- Unstripped: default 9,420,576 B → `+xwayland` 10,878,224 B
+  (**+1,457,648 B, +15.5%**).
+- `ldd` sonames and `readelf -d` NEEDED entries byte-identical (9 libs) —
+  no new DT_NEEDED, as expected for pure-Rust `x11rb`.
+- Startup (`scoot --headless -- true`, ms to `scoot is up`, 10 runs each):
+  default mean 158.4 ms, `+xwayland`-compiled-but-disabled mean 159.8 ms
+  (noise).
+- `--no-default-features` release builds, same size/ldd as the old default,
+  `cargo tree --target all --edges normal -i x11rb` clean.
+- Loud fallback re-verified live: `--xwayland` with no binary on `PATH`
+  logs `` `Xwayland` must be on PATH `` plus the searched `PATH` and runs
+  Wayland-only.
+
+## Done in stream X (2026-10-14, PR `feat/xwayland-default`)
+
+`xwayland` is now a default feature of the `scoot` crate
+(`crates/scoot/Cargo.toml`: `default = ["xwayland"]`); every runtime gate
+unchanged (opt-in by flag/config, byte-identical sessions by default).
+New unit pin: `a_disabled_session_spawns_nothing_and_opens_no_x_socket`.
+Docs in the same PR: `site/.../scoot/xwayland.md` (always compiled in;
+enabling needs the binary), one-line `protocols.md` fix, CHANGELOG.
+
+Left for stream G (owns `flake.nix`/builds/install): collapsing
+`scoot-xwayland` / `scoot-gpu-xwayland` into `scoot` / `scoot-gpu`
+(keeping the `PATH` wrapper for the Xwayland binary), the four crane
+`deps*` artifacts with them, `nix-build.yml`'s xwayland package builds,
+`ci.yml`'s `--features xwayland` pins (now redundant but green), and
+`install.md#which-build-do-i-need` + `builds.md`.
+This ticket stays open until G lands that collapse.

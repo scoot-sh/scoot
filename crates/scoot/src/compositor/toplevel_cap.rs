@@ -206,7 +206,7 @@ impl State {
 /// client stands for every X client at once; killing it would take every X
 /// window with it), and no X notion to charge an `xdg_toplevel` to.
 ///
-/// Only in `xwayland` builds: a default build carries no X code at all.
+/// Only in `xwayland` builds: a `--no-default-features` minimal build carries no X code at all.
 #[cfg(feature = "xwayland")]
 pub(super) const MAX_X11_TOPLEVELS_PER_CLIENT: u32 = 128;
 
@@ -317,7 +317,7 @@ impl X11ToplevelCap {
 /// windows share no path with managed ones, so neither count ever sees the
 /// other's windows.
 ///
-/// Only in `xwayland` builds: a default build carries no X code at all.
+/// Only in `xwayland` builds: a `--no-default-features` minimal build carries no X code at all.
 #[cfg(feature = "xwayland")]
 pub(super) const MAX_X11_UNMANAGED_PER_CLIENT: u32 = 128;
 
