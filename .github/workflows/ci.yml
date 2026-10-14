@@ -809,12 +809,16 @@ jobs:
       - name: Build --no-default-features, and assert the minimal product's contract
         shell: nix develop --command bash -euo pipefail {0}
         run: |
-          # No C compiler on PATH: proves the minimal build needs none
-          # (build.rs compiles the stub only under `gpu-scanout`).
+          # No C compiler via `CC`: proves the minimal build needs none
+          # (build.rs compiles the stub only under `gpu-scanout`). Only `CC`
+          # is faked, never `PATH`: the `cc` crate takes its compiler from
+          # `CC`, while rustc still needs the real `cc` driver to link the
+          # build script itself -- shadowing `cc` on `PATH` breaks that link
+          # step even when no C is compiled (seen live in CI).
           mkdir -p "$RUNNER_TEMP/no-cc"
           printf '#!/bin/sh\necho "C compiler invoked during a --no-default-features build" >&2\nexit 1\n' >"$RUNNER_TEMP/no-cc/cc"
           chmod +x "$RUNNER_TEMP/no-cc/cc"
-          PATH="$RUNNER_TEMP/no-cc:$PATH" CC="$RUNNER_TEMP/no-cc/cc" cargo build -p scoot --no-default-features
+          CC="$RUNNER_TEMP/no-cc/cc" cargo build -p scoot --no-default-features
           echo "ok: --no-default-features builds with no working C compiler"
           cp target/debug/scoot "$RUNNER_TEMP/scoot-minimal"
           echo "--- readelf -d target/debug/scoot (--no-default-features) ---"
