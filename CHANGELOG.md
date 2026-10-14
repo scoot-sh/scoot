@@ -9,7 +9,6 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
-<<<<<<< HEAD
 ### Unreleased — XWayland is compiled in by default (not breaking)
 
 - **Every default `scoot` build now carries XWayland support; there is no
@@ -23,7 +22,7 @@ scoot has not cut a numbered release yet; entries are dated.
   config key, or IPC shape changes, and `scoot-xwayland` /
   `scoot-gpu-xwayland` keep working until stream G collapses them.
   See [XWayland](site/src/content/docs/scoot/xwayland.md).
-=======
+
 ### Unreleased — the nightly binaries are retired; the installer takes tagged releases and can update (breaking)
 
 - **Breaking: the portable `nightly` build is gone and `install.sh`
@@ -42,7 +41,6 @@ scoot has not cut a numbered release yet; entries are dated.
   installed is recorded beside the install manifest
   (`channel=release`, version, tag, date), and `--uninstall` removes
   the record too.
->>>>>>> c76bdeaef (feat(ci)!: retire the nightly binaries; the installer takes tagged releases and can update)
 
 ### Unreleased — the built-in cursors are Mocu (behavior change)
 
