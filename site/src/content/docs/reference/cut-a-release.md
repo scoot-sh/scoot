@@ -79,13 +79,15 @@ notes written under Unreleased.
    breaking change bumps the minor, anything else the patch). To release
    a different version, edit `version` under `[workspace.package]` in
    `Cargo.toml` and the heading in `CHANGELOG.md` on the PR branch.
-2. Tidy the changelog section if it needs it, and let CI go green.
-3. Merge. release-plz pushes `vX.Y.Z`, and the release workflow builds
+2. On the same branch, bump the distro packaging to that version:
+   `pkgver` in the three Arch release PKGBUILDs (and their `.SRCINFO`),
+   `Version` and a `%changelog` entry in the three RPM specs. The Arch
+   and RPM workflows run on the release tag and fail when these lag the
+   workspace version (`packaging/arch/README.md`,
+   `packaging/rpm/README.md`).
+3. Tidy the changelog section if it needs it, and let CI go green.
+4. Merge. release-plz pushes `vX.Y.Z`, and the release workflow builds
    and publishes it.
-4. Once the release is out, bump `pkgver` in the three Arch release
-   PKGBUILDs (then `updpkgsums` and `.SRCINFO`) and `Version` in the
-   three RPM specs, in an ordinary PR
-   (`packaging/arch/README.md`, `packaging/rpm/README.md`).
 
 ## What the workflow does with the tag
 

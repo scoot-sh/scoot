@@ -64,6 +64,11 @@ breaking change bumps the minor, anything else the patch). It is a
 proposal: to release a different version, edit `version` under
 `[workspace.package]` in `Cargo.toml` and the heading in `CHANGELOG.md` on
 this branch.
+
+Before merging, on this branch: bump `pkgver` in the three Arch release
+PKGBUILDs (and their `.SRCINFO`) and `Version` (plus a `%changelog` entry)
+in the three RPM specs to v{{ release.next_version }}; the Arch and RPM
+workflows run on the tag and fail when they lag.
 {% if release.changelog %}
 ### Changes
 

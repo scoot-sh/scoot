@@ -105,10 +105,12 @@ line to drop if it ever misbehaves.
 
 ## Cutting a release (maintainer)
 
-1. Once the `vX.Y.Z` tag exists, bump `pkgver` in all three release
-   packages to that version.
-2. `updpkgsums` in each touched directory (the `SKIP` checksums are
-   placeholders: no tag exists yet to hash).
+1. In the release PR, before it merges, bump `pkgver` in all three
+   release packages to the proposed version and regenerate `.SRCINFO`
+   (`arch.yml` runs on the release tag and fails if `pkgver` is not the
+   workspace version).
+2. Once the tag exists, `updpkgsums` in each directory (the `SKIP`
+   checksums are placeholders until there is a tag tarball to hash).
 3. `makepkg --printsrcinfo > .SRCINFO` in each touched directory and
    commit it (CI fails when the committed file drifts).
 4. Copy each directory's contents into its AUR repo (`scoot`,

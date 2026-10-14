@@ -171,8 +171,10 @@ and what stays manual:
    publishes) and set each spec's `Source0` basename to match (today a
    `scoot-<rev>-vendored` name the release job chooses; only that line
    changes per spec).
-2. Bump `Version` in all three specs to the released version and reset
-   `Release` to `1`.
+2. In the release PR, before it merges, bump `Version` in all three
+   specs to the proposed version, reset `Release` to `1` and add a
+   `%changelog` entry (`rpm.yml` runs on the release tag and fails if
+   `Version` is not the workspace version).
 3. Write the `.copr/Makefile` per package against the real asset names,
    create the COPR project, enable the chroots above, and run the first
    `buildscm` by hand.

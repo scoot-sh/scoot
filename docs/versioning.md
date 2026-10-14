@@ -101,9 +101,13 @@ token) scoped to this repository, with **Contents: read and write** and **Pull
 requests: read and write**. Without it the workflow posts a notice and does
 nothing.
 
-After a release, bump the distro packaging (`packaging/arch`,
-`packaging/rpm`) to the new version. It points at the tag's tarball, so it
-can only be checksummed once the tag exists. The site's
+The release PR is also where the distro packaging moves: bump `pkgver`
+in the Arch release PKGBUILDs (with `.SRCINFO`) and `Version` in the RPM
+specs to the proposed version before merging. The Arch, Debian and RPM
+workflows run on the release tag (they are paused on pull requests until
+the packages are published), and their gates fail when the packaging lags
+the workspace version. Checksums are filled in once the tag's tarball
+exists. The site's
 [cut a release](https://www.scoot.sh/reference/cut-a-release/) page has the
 steps.
 

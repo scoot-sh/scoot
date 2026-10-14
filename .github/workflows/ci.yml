@@ -148,9 +148,7 @@ jobs:
   #   release.yml, release-plz.yml, release-plz.toml, scripts/release-resolve,
   #   scripts/release-notes, scripts/workspace-version,
   #   scripts/test_release_resolve.py      -> nothing here: release.yml's
-  #                                           lint job owns them (and
-  #                                           arch.yml/rpm.yml also run on
-  #                                           workspace-version).
+  #                                           lint job owns them.
   #   packaging/deb/*                        -> nothing here: the Debian
   #                                           container workflow
   #                                           (deb.yml) owns those files,
@@ -249,8 +247,7 @@ jobs:
                 packaging/deb/*) ;;
                 # The release tooling: release.yml's lint job owns it
                 # (actionlint over both release workflows, the tools'
-                # tests), and arch.yml/rpm.yml run on workspace-version
-                # too, so a change there alone runs nothing here.
+                # tests), so a change there alone runs nothing here.
                 .github/workflows/release.yml | .github/workflows/release-plz.yml | release-plz.toml | scripts/release-resolve | scripts/release-notes | scripts/workspace-version | scripts/test_release_resolve.py) ;;
                 # The backlog tool and its tests: only their own job.
                 scripts/backlog | scripts/test_backlog.py)
