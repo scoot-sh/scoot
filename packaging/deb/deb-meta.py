@@ -116,13 +116,22 @@ def workspace_version(source):
     return m.group(1)
 
 
-def deb_version(source, package, revision=DEBIAN_REVISION):
-    """`<workspace version>-<revision>` for a .deb built from source
-    (`package` is accepted for the call sites' symmetry: every package
-    has the same version)."""
+# A build that is not a release carries a snapshot suffix on the upstream
+# version (docs/versioning.md): `+git<YYYYMMDD>.<commit>`, so
+# `0.2.0+git20261013.615608c-1` sorts above the 0.2.0 release it follows.
+SNAPSHOT_RE = re.compile(r"^\+git[0-9]{8}\.[0-9a-f]{7,40}$")
+
+
+def deb_version(source, package, revision=DEBIAN_REVISION, suffix=""):
+    """`<workspace version><suffix>-<revision>` for a .deb built from
+    source (`package` is accepted for the call sites' symmetry: every
+    package has the same version). `suffix` is empty for a release, or a
+    snapshot suffix `+git<YYYYMMDD>.<commit>`."""
     if package not in CRATE:
         raise ValueError(f"unknown package {package!r}")
-    return f"{workspace_version(source)}-{revision}"
+    if suffix and not SNAPSHOT_RE.match(suffix):
+        raise ValueError(f"snapshot suffix {suffix!r} is not +git<YYYYMMDD>.<commit>")
+    return f"{workspace_version(source)}{suffix}-{revision}"
 
 
 def check_depends(package, shlibdeps_output):
@@ -162,14 +171,14 @@ def parse_shlibdeps(output):
 
 
 def render_control(package, source, arch, depends, scootbg_version=None,
-                    revision=DEBIAN_REVISION):
+                    revision=DEBIAN_REVISION, suffix=""):
     """Render the full DEBIAN/control text for one package."""
     # Note: no Standards-Version. That field lives in source
     # packaging (debian/control), not in an installed binary control:
     # bookworm's lintian flags it as `unknown-field` there.
     lines = [
         f"Package: {package}",
-        f"Version: {deb_version(source, package, revision)}",
+        f"Version: {deb_version(source, package, revision, suffix)}",
         f"Architecture: {arch}",
         f"Maintainer: {MAINTAINER}",
         f"Section: {SECTION}",
@@ -201,6 +210,8 @@ def main(argv=None):
     c.add_argument("--depends", default="", help="shlibdeps-derived Depends value")
     c.add_argument("--scootbg-version", default=None)
     c.add_argument("--revision", default=DEBIAN_REVISION)
+    c.add_argument("--upstream-suffix", default="",
+                   help="snapshot suffix for a non-release build: +git<YYYYMMDD>.<commit>")
 
     k = sub.add_parser("check-shlibdeps", help="check shlibdeps output against the allow-list")
     k.add_argument("--package", choices=sorted(CRATE), required=True)
@@ -215,6 +226,7 @@ def main(argv=None):
             render_control(
                 args.package, args.source, args.arch,
                 args.depends, args.scootbg_version, args.revision,
+                args.upstream_suffix,
             )
         )
     elif args.cmd == "check-shlibdeps":

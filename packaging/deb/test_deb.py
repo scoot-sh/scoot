@@ -73,6 +73,27 @@ class ControlTest(unittest.TestCase):
         ):
             self.assertIn(line, p.stdout)
 
+    def test_a_snapshot_suffix_rides_on_the_upstream_version(self):
+        src = fake_source("0.2.0")
+        p = run_meta(
+            "control", "--package", "scoot", "--source", str(src),
+            "--arch", "amd64", "--depends", "libc6",
+            "--upstream-suffix", "+git20261013.615608c",
+            "--scootbg-version", "0.2.0+git20261013.615608c-1",
+        )
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("Version: 0.2.0+git20261013.615608c-1", p.stdout)
+        self.assertIn("scootbg (= 0.2.0+git20261013.615608c-1)", p.stdout)
+
+    def test_a_malformed_snapshot_suffix_is_refused(self):
+        src = fake_source("0.2.0")
+        for bad in ("git20261013.615608c", "+git2026.615608c", "+git20261013.XYZ", "-dirty"):
+            p = run_meta(
+                "control", "--package", "scootbar", "--source", str(src),
+                "--arch", "amd64", "--depends", "libc6", "--upstream-suffix", bad,
+            )
+            self.assertNotEqual(p.returncode, 0, bad)
+
     def test_scoot_needs_its_scootbg_version(self):
         # Rendering scoot without the coupled version is a loud refusal,
         # not a control with a silently missing dependency.
