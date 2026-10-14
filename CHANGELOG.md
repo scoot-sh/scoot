@@ -9,6 +9,20 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### Unreleased — XWayland is compiled in by default (not breaking)
+
+- **Every default `scoot` build now carries XWayland support; there is no
+  separate X11 binary to pick.** XWayland still starts only when asked, by
+  `--xwayland` or `[xwayland] enabled` — default sessions are byte-identical
+  and start no X server, open no X socket, and need no Xwayland binary on
+  `PATH`. To run X11 apps: install the `Xwayland` binary beside scoot and
+  turn the knob on. Without the binary (or on the CPU-only minimal build,
+  `cargo build --no-default-features`, which carries no X11 code) the knob
+  logs loudly and the session runs Wayland-only. Not breaking: no flag,
+  config key, or IPC shape changes, and `scoot-xwayland` /
+  `scoot-gpu-xwayland` keep working until stream G collapses them.
+  See [XWayland](site/src/content/docs/scoot/xwayland.md).
+
 ### Unreleased — the built-in cursors are Mocu (behavior change)
 
 - **Where no cursor theme is installed, scoot now draws

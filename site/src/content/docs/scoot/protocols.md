@@ -548,7 +548,8 @@ behalf — a taskbar, the bind, IPC — are refused like every other action.
 `--xwayland` (or `[xwayland] enabled` in the config file — either one turns
 it on) starts an XWayland server inside the session, and `DISPLAY` is
 exported to everything the session spawns, so X11-only applications run.
-Off by default, and needs a build with the `xwayland` Cargo feature:
+Off by default at runtime, and compiled in by default at build time (only
+`--no-default-features` minimal builds lack the `xwayland` Cargo feature):
 without one the knob warns and the session runs Wayland-only, and a missing
 `Xwayland` binary at startup is the same shape (a loud log line, then a
 Wayland-only session — the session never fails to start over X).

@@ -309,7 +309,8 @@ impl RendererConfig {
 ///
 /// Off unless both the file and the flag agree it is on -- more precisely,
 /// `compositor::run` ORs `enabled` with `--xwayland`, since a flag can only
-/// say yes. Needs an `xwayland` Cargo-feature build; without one the knob
+/// say yes. Needs a build with the `xwayland` Cargo feature (on by default;
+/// only `--no-default-features` minimal builds lack it); without one the knob
 /// parses but warns and the session runs Wayland-only (see
 /// `compositor::xwayland`). `enabled` takes effect on restart, like `[tty]
 /// gpu` and `[renderer] backend` -- a reload refuses changes with a message
@@ -533,8 +534,9 @@ pub struct LoadedConfig {
     pub renderer: Option<RendererRequest>,
     /// Whether the file asks for an XWayland server in the session. `false`
     /// (the default) means Wayland-only; `true` means start one, OR-ed with
-    /// `--xwayland` in `compositor::run` (see [`XwaylandConfig`]). Needs an
-    /// `xwayland` Cargo-feature build, and takes effect on restart -- a
+    /// `--xwayland` in `compositor::run` (see [`XwaylandConfig`]). Needs a
+    /// build with the `xwayland` Cargo feature (on by default; only
+    /// `--no-default-features` minimal builds lack it), and takes effect on restart -- a
     /// reload refuses changes with a message naming that (see `reload.rs`).
     pub xwayland: bool,
     /// Whether the session offers the virtual-pointer and virtual-keyboard

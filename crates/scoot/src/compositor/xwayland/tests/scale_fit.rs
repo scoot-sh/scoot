@@ -147,12 +147,19 @@ fn a_layout_too_wide_for_x_at_its_integer_draws_x_at_1() {
 /// the fourth away comes back under it, and X returns to 2 the same way.
 #[test]
 fn a_hotplug_across_the_bound_moves_the_x_scale_both_ways() {
-    let ((), logs) = capture_logs(|| {
+    // The live half needs the `Xwayland` binary; where it is absent the
+    // fixture builder prints its `skipped --` line and yields `None`, and
+    // this test skips with it rather than asserting on logs from a session
+    // that never ran (the default suite has no binary on `PATH`; only the
+    // `SCOOT_REQUIRE_XWAYLAND` run requires it). The closure reports whether
+    // it ran so the skip survives the `capture_logs` wrapper, which must
+    // stay outside the server's spans (see the dead-server test).
+    let (ran, logs) = capture_logs(|| {
         let Some(mut live) = wide_live(
             "a_hotplug_across_the_bound_moves_the_x_scale_both_ways",
             &[WIDE; 3],
         ) else {
-            return;
+            return false;
         };
         let (xid, id, _) = managed_at(&mut live, 2);
         assert_eq!(
@@ -177,7 +184,11 @@ fn a_hotplug_across_the_bound_moves_the_x_scale_both_ways() {
             }
             settled_at(&mut live, xid, id, scale, (right, 200), what);
         }
+        true
     });
+    if !ran {
+        return;
+    }
     assert_eq!(reductions(&logs), 1, "the reduction is logged once: {logs}");
 }
 

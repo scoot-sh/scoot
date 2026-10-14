@@ -46,14 +46,15 @@
 //!
 //! ## Why this shape
 //!
-//! - **Opt-in, default off.** The server is a whole extra process (~55 MB
+//! - **Opt-in at runtime, default-on at build time.** The server is a whole extra process (~55 MB
 //!   RSS idle on the dev VM; 86.7-87.8 MB with three X clients mapped --
 //!   xterm, zenity, xclock -- re-measured for Phases 2+3, see the ticket),
 //!   a hard `PATH` dependency on the `Xwayland` binary, and a trust-model
 //!   change: any X client can keylog and snoop by design, so running one
 //!   extends full trust to it (see `site/src/content/docs/scoot/protocols.md`'s trust note).
-//!   Precedent is the `gpu-scanout` Cargo feature: own feature
-//!   (`xwayland = ["smithay/xwayland"]`), off by default, `ldd`-gated both
+//!   The Cargo feature (`xwayland = ["smithay/xwayland"]`) is on by default
+//!   since 2026-10 (one-build stream X) and stays disableable via
+//!   `--no-default-features` for the CPU-only minimal build; `ldd`-gated both
 //!   flavours (re-proven per change; the feature pulls pure-Rust `x11rb` --
 //!   the X protocol over a socket -- so the pair is expected to show *no*
 //!   new link-time library on either side).
