@@ -18,22 +18,19 @@ same binary starts with and without a GPU stack installed. What used to
 be a build choice is now a run-time choice
 ([Which renderer draws the frames](#which-renderer-draws-the-frames)).
 
-The only remaining build axis is **whether you run X11 apps**:
+The only remaining knob for X11 apps is **whether you turn them on**,
+not which package you install: every `scoot` already carries the
+`xwayland` build feature, and only if you run X11 apps should you pay
+Xwayland's own ~344 MiB of closure (all but ~12 MiB of it Xwayland's
+own, which links Mesa) and its trust decision — any X client can read
+other X clients' keys by design. To run X11 apps: install the `Xwayland`
+binary beside scoot (the Nix package already has it on `PATH` via its
+wrapper) and turn the knob on (`--xwayland` or `[xwayland] enabled`).
+(More in [XWayland](../scoot/xwayland.md).)
 
-| Package | Draws with | Needs | Pick it when |
-|---|---|---|---|
-| `scoot` (default) | CPU or GPU, picked at run time | nothing | everyone, unless the next row |
-| `scoot-xwayland` | as `scoot` | as `scoot`, plus X11 apps to run | you run X11 apps |
-| `scoot-minimal` | the CPU renderer only | nothing | you want no GPU code at all (below) |
-
-The `-xwayland` package carries a ~344 MiB larger closure (all but
-~12 MiB of it Xwayland's own, which links Mesa) and a trust decision —
-any X client can read other X clients' keys by design. Take it only if
-you run X11 apps. (More in [XWayland](../scoot/xwayland.md).)
-
-One visible side effect of the `-xwayland` package: its wrapper
-leaves the process name as `.scoot-wrapped`, not `scoot` — so `pgrep -x
-scoot` finds nothing there; use `pgrep -x .scoot-wrapped`.
+One visible side effect of the wrapper: it leaves the process name as
+`.scoot-wrapped`, not `scoot` — so `pgrep -x scoot` finds nothing there;
+use `pgrep -x .scoot-wrapped`.
 
 ### Do I have a GPU?
 
@@ -60,13 +57,12 @@ ls /dev/dri/renderD*
 
 The package knob is `programs.scoot.package` (home-manager and NixOS
 alike; the desktop profile never sets it — the choice stays yours).
-Leave the default (omit `package`) unless you run X11 apps:
+Leave the default (omit `package`): there is only one package now.
 
 ```nix title="configuration.nix"
 programs.scoot = {
   enable = true;
-  # ...plus X11 apps? Take the XWayland build.
-  # package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scoot-xwayland;
+  session.enable = true;
 };
 ```
 
@@ -74,8 +70,7 @@ programs.scoot = {
 `configuration.nix` (the Install page's `flake.nix` passes `inputs`
 down through `specialArgs`).
 
-The same names work with `nix profile add` and `nix run` — swap `scoot`
-for `scoot-xwayland` (or `scoot-minimal`) wherever it appears.
+The same name works with `nix profile add` and `nix run`.
 
 ## Which renderer draws the frames
 
@@ -103,14 +98,14 @@ Silicon; method and numbers:
 
 ## The smallest build: CPU only
 
-`cargo build --release -p scoot --no-default-features` (Nix:
-`scoot-minimal`) builds the CPU renderer with no GPU code at all: no
-GBM calls, no C stub, no libgbm reference, and no X11 code. Building it
-needs no C compiler. In such a build `--renderer gpu` warns and keeps
-the CPU renderer, and `auto` resolves to cpu with reason
-`no-scanout-tier`.
+`cargo build --release -p scoot --no-default-features` builds the CPU
+renderer with no GPU code at all: no GBM calls, no C stub, no libgbm
+reference, and no X11 code. Building it needs no C compiler. In such a
+build `--renderer gpu` warns and keeps the CPU renderer, and `auto`
+resolves to cpu with reason `no-scanout-tier`. There is no published
+minimal Nix package: the minimal build is a documented cargo command
+only.
 
-Add a tier only when you need it: the default features (the GPU scanout
-tier, on by default) or `--features xwayland`. System libraries per
-feature, the toolchain floor and the offline build: [Package scoot
-offline](./packaging.md).
+The default features are the GPU scanout tier and `xwayland`, both on
+by default. System libraries per feature, the toolchain floor and the
+offline build: [Package scoot offline](./packaging.md).

@@ -362,11 +362,13 @@ All four work? You are done.
 One build is enough for everyone: `scoot`. With the default
 (`auto`) it resolves to the CPU renderer where there is no GPU and to
 the GPU renderer on real hardware, so it is what the script and the
-default Nix package install. Only X11 apps need a different package
-(`scoot-xwayland`), and only the deliberate avoidance of all GPU code
-needs another (`scoot-minimal`). Every build, flag and renderer rule
-is in [Builds and renderers](../../reference/builds/); what the binary
-cache trusts is in [Use the binary cache](../binary-cache/).
+default Nix package install. X11 apps need no different package (the
+`xwayland` feature is compiled in; just turn the knob on), and the
+deliberate avoidance of all GPU code is a cargo-only build
+(`cargo build --no-default-features`), not a published package. Every
+build, flag and renderer rule is in [Builds and
+renderers](../../reference/builds/); what the binary cache trusts is in
+[Use the binary cache](../binary-cache/).
 
 ## Where next
 

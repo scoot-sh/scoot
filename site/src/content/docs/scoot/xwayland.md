@@ -14,14 +14,14 @@ but ~12 MiB of it Xwayland's own).
 ```nix title="configuration.nix"
 programs.scoot = {
   enable = true;
-  package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scoot;
   session.enable = true;
 };
 ```
 
-(`scoot-xwayland` and `scoot-gpu-xwayland` still exist but are now
-feature-identical to `scoot` and `scoot-gpu` respectively; stream G
-collapses those packages.)
+There is only one package: `scoot` already carries the `xwayland`
+feature with the binary on `PATH` (Linux; the `scoot-minimal` Nix
+package and the `-xwayland` suffixed packages are gone — the minimal
+build is cargo-only, `cargo build --no-default-features`).
 
 `inputs` and `pkgs` need `{ inputs, pkgs, ... }:` at the top of
 `configuration.nix` (the Install page's `flake.nix` passes `inputs`

@@ -90,8 +90,8 @@ let
   # The user units behind `session.enable`, single-sourced from
   # `resources/systemd/user/`: `@SCOOT_BIN@` becomes this package's
   # binary, so the entry above and the service always launch the same
-  # build (including the `scoot-xwayland` wrapper's `PATH` append, when
-  # that is the package). Read at eval, like the desktop file: no
+  # build (including the single `scoot` package's Xwayland `PATH`
+  # wrapper). Read at eval, like the desktop file: no
   # package rebuild when only the units change.
   sessionUnits = {
     "scoot.service".text = builtins.replaceStrings [ "@SCOOT_BIN@" ] [ "${cfg.package}/bin/scoot" ] (
@@ -1122,8 +1122,8 @@ in
     # greeter stays opt-in through `desktop.greeter` (the alias above):
     # replacing the login screen is never smuggled in by this switch.
     # The `[xwayland]` knob itself is config-file (home-manager) wiring;
-    # this side honors whatever `package` names (including the
-    # `scoot-xwayland` builds) in the entry above. In its own element
+    # this side honors whatever `package` names in the entry above. In its
+    # own element
     # (not under `cfg.enable`): with `enable` off and `desktop.enable`
     # on, the assertion below must still fire rather than going quiet.
     (lib.mkIf cfg.desktop.enable {

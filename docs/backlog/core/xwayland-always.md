@@ -88,3 +88,14 @@ Left for stream G (owns `flake.nix`/builds/install): collapsing
 `ci.yml`'s `--features xwayland` pins (now redundant but green), and
 `install.md#which-build-do-i-need` + `builds.md`.
 This ticket stays open until G lands that collapse.
+
+## Done in stream G rebase (2026-10-14, PR #588 onto `82e6d544a`)
+
+`default = ["gpu-scanout", "xwayland"]`: one published Nix package
+(`scoot`, with the Xwayland `PATH` wrapper kept); `scoot-xwayland`,
+`scoot-gpu-xwayland` and `scoot-gpu` are gone, and there is no published
+minimal Nix package — the CPU-only minimal build is cargo-only
+(`cargo build --no-default-features`, still gated in `ci.yml` by the
+no-`libgbm` `readelf`, no-stub `nm`, no-C-compiler and headless-start
+checks). Docs updated in the same PR (`builds.md`, `nix.md`,
+`packaging.md`, `xwayland.md`, `install.mdx`, `binary-cache.md`).

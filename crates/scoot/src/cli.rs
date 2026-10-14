@@ -705,9 +705,10 @@ pub struct CompositorOptions {
     /// `[xwayland] enabled`; either one turns it on (a flag can only say
     /// yes, so the two are OR-ed in `compositor::run`). X windows map into
     /// the layout like any other, behind a focus gate (see
-    /// `compositor::xwayland`). Needs an `xwayland` Cargo-feature build;
-    /// without one this warns and the session runs Wayland-only, the way
-    /// `--renderer gpu` degrades without `gpu-scanout`.
+    /// `compositor::xwayland`). Needs a build with the `xwayland` Cargo
+    /// feature (on by default; only `--no-default-features` minimal builds
+    /// lack it); without one this warns and the session runs Wayland-only,
+    /// the way `--renderer gpu` degrades without `gpu-scanout`.
     pub xwayland: bool,
 }
 

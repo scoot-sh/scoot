@@ -723,13 +723,12 @@ jobs:
           # the next run's restore cannot predict.
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
-  # The opt-in xwayland tier and the CPU-only minimal product, split out
-  # of `linux` so the jobs run in parallel: xwayland (clippy, both test
-  # runners with the live suites required, and the
-  # xwayland smoke run), and `--no-default-features` (clippy, both test
-  # runners, and the minimal-product gate: no libgbm in `readelf -d`, no
-  # stub symbols in `nm`, built with no C compiler on PATH, and the binary
-  # starts). Same `needs: changes` + scoot gate as `linux`, and
+  # The xwayland feature (default-on) and the CPU-only minimal product,
+  # split out of `linux` so the jobs run in parallel: xwayland (clippy, both
+  # test runners with the live suites required, and the xwayland smoke run),
+  # and `--no-default-features` (clippy, both test runners, and the
+  # minimal-product gate: no libgbm in `readelf -d`, no stub symbols in
+  # `nm`, built with no C compiler on PATH, and the binary starts). Same `needs: changes` + scoot gate as `linux`, and
   # the same `linux-cargo-` key prefix -- these *are* the `linux` job's
   # entries, restored read-only. This job saves nothing, so the repo keeps a
   # single `linux-cargo-` cache line (see the `linux` job's save step for why
@@ -843,8 +842,9 @@ jobs:
           echo "      no libEGL clause is asserted here either. What guards the GPU-free path is the smoke runs:"
           echo "      the default build's in linux (no loadable EGL) and the minimal start probe below."
 
-      # The opt-in XWayland tier (`--features xwayland`): nothing else here
-      # builds it, and its live suites -- window mapping, the focus gate
+      # The xwayland feature (on by default; the explicit `--features
+      # xwayland` below is a no-op union, kept to pin the selection):
+      # nothing else here builds it, and its live suites -- window mapping, the focus gate
       # (focus-steal refusals, token spending), the lock's blanking and input
       # refusal -- are security regression tests that must run somewhere
       # automated. They drive a real `Xwayland` server, so one is put on
@@ -906,8 +906,9 @@ jobs:
           cargo nextest run -p scoot --no-default-features --no-fail-fast
           cargo test -p scoot --no-default-features
 
-      # The default build's smoke run lives in `linux`, where both xwayland
-      # sections can only report "this build has no xwayland feature". This
+      # The default build's smoke run lives in `linux`, where the xwayland
+      # sections take the no-binary branch (the feature is compiled in, but
+      # no `Xwayland` binary is on `PATH` there). This
       # runs the whole script against the xwayland build with `Xwayland` and
       # `xeyes` on PATH, so the real binary's `--xwayland` path is exercised
       # end to end: the server reaching READY from `compositor::run`,

@@ -1190,14 +1190,15 @@ let
     desktop.enable = true;
     desktop.look = "moonrise";
   };
-  # ...plus the page's two commented options switched on: the XWayland
-  # package choice and the opt-in greeter (with the login user a real
-  # configuration provides, like the sibling greeter pins).
+  # ...plus the page's commented greeter option switched on: the opt-in
+  # greeter (with the login user a real configuration provides, like the
+  # sibling greeter pins). No XWayland package choice anymore: the single
+  # `scoot` carries XWayland compiled in with the binary on `PATH`.
   osDocsDesktopFull = evalNixosWith [ flake.nixosModule greeterUser ] pkgs {
     enable = true;
     desktop.enable = true;
     desktop.look = "moonrise";
-    package = built.scoot-xwayland;
+    package = built.scoot;
     greeter.enable = true;
   };
   # Standalone home-manager desktop: the page's home.nix snippet, through
@@ -5735,7 +5736,7 @@ let
       )
       (
         assert allAssertionsHold osDocsDesktopFull.config;
-        assert osDocsDesktopFull.config.programs.scoot.package.drvPath == built.scoot-xwayland.drvPath;
+        assert osDocsDesktopFull.config.programs.scoot.package.drvPath == built.scoot.drvPath;
         assert osDocsDesktopFull.config.services.displayManager.regreet.enable;
         true
       )
