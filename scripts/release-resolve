@@ -3,7 +3,7 @@
 workflow runs before it builds anything.
 
     scripts/release-resolve <tag> [--root DIR] [--main-ref REF]
-                             [--no-github] [--json]
+                             [--no-github] [--complete-ok] [--json]
 
 One tag, `vX.Y.Z`, releases every binary (scoot, which carries `scoot
 msg`; scootbg; scootbar) at the repository's one version
@@ -18,7 +18,11 @@ nothing published -- when:
 - the tag's commit is not on the main line (`--main-ref`, default
   `origin/main`);
 - the tag's GitHub release already holds every expected asset (a
-  re-publish; an incomplete one resumes, so retries converge).
+  re-publish; an incomplete one resumes, so retries converge). With
+  `--complete-ok` that is not a refusal but a finished release: the plan
+  says `"complete": true`, exit 0, and the workflow skips the build. The
+  release workflow passes it, because a maintainer's tag push and
+  release-plz's dispatch can both reach one tag.
 
 On success it prints the release plan (or `--json`: the same for the
 workflow) and exits 0. The GitHub check needs `gh`; `--no-github`
@@ -101,6 +105,9 @@ def main():
                     help="the main line the tag must be on (default origin/main)")
     ap.add_argument("--no-github", action="store_true",
                     help="skip the existing-release check (local dry runs)")
+    ap.add_argument("--complete-ok", action="store_true",
+                    help="a release already holding every asset is done, "
+                         "not refused (exit 0, \"complete\": true)")
     ap.add_argument("--json", action="store_true",
                     help="print the release plan as JSON")
     a = ap.parse_args()
@@ -150,21 +157,41 @@ def main():
                  f"sbom-scoot-{version}.cyclonedx.json",
                  "SHA256SUMS"])
 
+    complete = False
     if not a.no_github:
+        # First line: whether the release is still a draft (the publish
+        # step uploads into a draft and un-drafts it last); then one asset
+        # name per line. A draft is never complete, so a run that died
+        # before un-drafting is resumed, not skipped or refused.
         r = subprocess.run(["gh", "release", "view", a.tag,
-                            "--json", "assets", "--jq", ".assets[].name"],
+                            "--json", "isDraft,assets",
+                            "--jq", ".isDraft, .assets[].name"],
                            capture_output=True, text=True)
         if r.returncode == 0:
-            published = {line.strip() for line in r.stdout.splitlines()
-                         if line.strip()}
+            lines = [line.strip() for line in r.stdout.splitlines()
+                     if line.strip()]
+            draft = bool(lines) and lines[0] == "true"
+            published = set(lines[1:])
             missing = [n for n in assets if n not in published]
-            if not missing:
+            if draft and not missing:
+                missing = ["(the release is still a draft)"]
+            if not missing and a.complete_ok:
+                complete = True
+                print(f"release-resolve: tag {a.tag} is already published "
+                      f"with all {len(assets)} assets: nothing to do",
+                      file=sys.stderr)
+            elif not missing:
                 return refuse(f"tag {a.tag} is already published with "
                               f"all {len(assets)} assets: refusing a "
                               f"re-publish (delete the release to re-cut it)")
-            print(f"release-resolve: incomplete release resumes: "
-                  f"{len(missing)} of {len(assets)} assets still missing",
-                  file=sys.stderr)
+            elif draft and missing == ["(the release is still a draft)"]:
+                print("release-resolve: incomplete release resumes: every "
+                      "asset is up but the release is still a draft",
+                      file=sys.stderr)
+            else:
+                print(f"release-resolve: incomplete release resumes: "
+                      f"{len(missing)} of {len(assets)} assets still missing",
+                      file=sys.stderr)
         elif "release not found" in (r.stdout + r.stderr).lower() or \
                 "could not find" in (r.stdout + r.stderr).lower() or \
                 "404" in (r.stdout + r.stderr):
@@ -175,13 +202,14 @@ def main():
                           f" (failing closed; --no-github skips this check)")
 
     plan = {"tag": a.tag, "version": version, "binaries": binaries,
-            "commit": commit, "assets": assets}
+            "commit": commit, "assets": assets, "complete": complete}
     if a.json:
         print(json.dumps(plan, indent=2))
     else:
         print(f"version={version}")
         print(f"binaries={' '.join(binaries)}")
         print(f"commit={commit}")
+        print(f"complete={'true' if complete else 'false'}")
         print(f"assets ({len(assets)}):")
         for name in assets:
             print(f"  {name}")

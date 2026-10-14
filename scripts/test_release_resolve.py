@@ -107,13 +107,17 @@ class World:
 
 
 GH_ABSENT = "#!/bin/sh\necho 'release not found' >&2\nexit 1\n"
-GH_PRESENT_BARE = "#!/bin/sh\necho '{\"assets\": []}'\nexit 0\n"
+# A published release with no assets yet (the --jq output: isDraft, then
+# one asset name per line).
+GH_PRESENT_BARE = "#!/bin/sh\necho false\nexit 0\n"
 
 
-def gh_present(*names):
-    # Simulates `gh release view --json assets --jq '.assets[].name'`:
-    # one asset name per line, like the real --jq output.
-    body = "\n".join(f'echo "{n}"' for n in names)
+def gh_present(*names, draft=False):
+    # Simulates `gh release view --json isDraft,assets --jq '.isDraft,
+    # .assets[].name'`: the draft flag, then one asset name per line, like
+    # the real --jq output.
+    body = "\n".join([f'echo {"true" if draft else "false"}']
+                      + [f'echo "{n}"' for n in names])
     return f"#!/bin/sh\n{body}\nexit 0\n"
 
 
@@ -242,6 +246,58 @@ class ResolveTests(unittest.TestCase):
         r = w.resolve("v0.2.0", gh_stub=gh_present(*assets))
         self.assertEqual(r.returncode, 2)
         self.assertIn("already published", r.stderr)
+
+    def test_complete_release_is_done_with_complete_ok(self):
+        # The workflow's mode: a maintainer's tag push and release-plz's
+        # dispatch can both reach one tag; the second finds it complete
+        # and stops green instead of publishing again.
+        w = World()
+        w.tag("v0.2.0")
+        w.push_main()
+        probe = w.resolve("v0.2.0", "--json", gh_stub=GH_PRESENT_BARE)
+        assets = json.loads(probe.stdout)["assets"]
+        self.assertFalse(json.loads(probe.stdout)["complete"])
+        r = w.resolve("v0.2.0", "--json", "--complete-ok",
+                      gh_stub=gh_present(*assets))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(json.loads(r.stdout)["complete"])
+        self.assertIn("nothing to do", r.stderr)
+
+    def test_complete_ok_still_resumes_an_incomplete_release(self):
+        w = World()
+        w.tag("v0.2.0")
+        w.push_main()
+        r = w.resolve("v0.2.0", "--json", "--complete-ok",
+                      gh_stub=gh_present("SHA256SUMS"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(json.loads(r.stdout)["complete"])
+        self.assertIn("incomplete release resumes", r.stderr)
+
+    def test_a_draft_holding_every_asset_resumes(self):
+        # The publish step un-drafts last: a run that died just before it
+        # left every asset in a draft. That must resume (and un-draft),
+        # never count as published, in either mode.
+        w = World()
+        w.tag("v0.2.0")
+        w.push_main()
+        probe = w.resolve("v0.2.0", "--json", gh_stub=GH_PRESENT_BARE)
+        assets = json.loads(probe.stdout)["assets"]
+        for extra in ((), ("--complete-ok",)):
+            r = w.resolve("v0.2.0", "--json", *extra,
+                          gh_stub=gh_present(*assets, draft=True))
+            self.assertEqual(r.returncode, 0, (extra, r.stderr))
+            self.assertFalse(json.loads(r.stdout)["complete"])
+            self.assertIn("still a draft", r.stderr)
+
+    def test_complete_ok_keeps_every_other_gate(self):
+        w = World()
+        w.set_workspace_version("0.3.0")
+        w.commit("chore: release v0.3.0")
+        w.tag("v0.2.0")
+        w.push_main()
+        r = w.resolve("v0.2.0", "--complete-ok", gh_stub=GH_ABSENT)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("workspace version", r.stderr)
 
     def test_existing_incomplete_release_resumes(self):
         w = World()

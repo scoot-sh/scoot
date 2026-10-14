@@ -60,6 +60,12 @@ on:
       - '**.md'
       - 'docs/**'
       - 'dev/**'
+  # The release PR's CI. release-plz opens and updates that PR with
+  # GITHUB_TOKEN, and GitHub holds a GITHUB_TOKEN-made PR's `pull_request`
+  # runs for a maintainer's approval, so release-plz.yml dispatches this
+  # workflow on the PR branch instead (workflow_dispatch always starts a
+  # run). A dispatch is classified like a push: everything runs.
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -87,19 +87,42 @@ titled `chore: release vX.Y.Z`. It:
 
 The maintainer reviews the PR and may change the version in `Cargo.toml` and
 the heading in `CHANGELOG.md` before merging. Merging it is the release:
-release-plz pushes the `vX.Y.Z` tag, and the tag push starts
-`.github/workflows/release.yml`. That workflow checks the tag
+release-plz creates the `vX.Y.Z` tag and then starts
+`.github/workflows/release.yml` on that tag. That workflow checks the tag
 (`scripts/release-resolve`), builds every binary, and publishes the one
 GitHub Release with the vendored source tarball, portable binaries for both
 architectures, an SBOM, checksums, provenance, and the version's
 `CHANGELOG.md` section as its notes (`scripts/release-notes`).
 
-release-plz needs a repository secret, `RELEASE_PLZ_TOKEN`. A tag pushed with
-the default `GITHUB_TOKEN` starts no other workflow, so `release.yml` would
-never run. The secret is a fine-grained personal access token (or GitHub App
-token) scoped to this repository, with **Contents: read and write** and **Pull
-requests: read and write**. Without it the workflow posts a notice and does
-nothing.
+**No secret is involved.** release-plz runs on the workflow's own
+`GITHUB_TOKEN`. GitHub starts no workflow for an event that token causes,
+so neither the tag nor the PR would start anything on their own. The one
+documented exception is that "workflow_dispatch and repository_dispatch
+events always create workflow runs" ([Triggering a workflow from a
+workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)).
+So `release-plz.yml` dispatches the next step itself:
+
+- After creating the tag, it runs `release.yml` on it (`--ref vX.Y.Z`,
+  `dry_run=false`).
+- After opening or updating the release PR, it runs `ci.yml` on the PR's
+  branch. Those checks attach to the branch's head commit, which is the PR's
+  head, so they show on the PR as `workflow_dispatch` runs. The PR's own
+  `pull_request` runs still appear, held until a maintainer presses "Approve
+  workflows to run". Approving them is optional, since the dispatched run
+  covers the same jobs.
+
+One repository setting is needed for GITHUB_TOKEN to open the PR at all:
+Settings > Actions > General > Workflow permissions > "Allow GitHub Actions to
+create and approve pull requests". It also lets workflows approve pull
+requests. Nothing here approves one, and main has no required reviews.
+
+A maintainer can still push a `v*` tag by hand, which starts `release.yml`
+through its `push` trigger. Both paths share one concurrency group per tag,
+and `release-resolve --complete-ok` turns an already-complete release into a
+green no-op. A tag pushed by hand and dispatched by release-plz therefore
+releases once. A dispatch that would publish must run on the tag itself:
+from a branch it is refused before anything builds, and only a dry run is
+allowed there.
 
 The release PR is also where the distro packaging moves: bump `pkgver`
 in the Arch release PKGBUILDs (with `.SRCINFO`) and `Version` in the RPM

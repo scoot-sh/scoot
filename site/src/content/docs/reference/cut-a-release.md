@@ -5,31 +5,31 @@ description: "Maintainer task: merge the release PR (or cut the first tag by han
 
 A release is one tag, `vX.Y.Z`, that releases every binary at the
 repository's one version. You choose the version in a release pull request
-and merge it. The tag that merge pushes starts the
-[release workflow](https://github.com/scoot-sh/scoot/blob/main/.github/workflows/release.yml),
-which builds and publishes everything. What a version means, and how bumps
-are proposed, is on the [versions](./versions.md) page and in
+and merge it. release-plz then creates the tag and starts the
+[release workflow](https://github.com/scoot-sh/scoot/blob/main/.github/workflows/release.yml)
+on it, which builds and publishes everything. What a version means, and how
+bumps are proposed, is on the [versions](./versions.md) page and in
 `docs/versioning.md`.
 
-## Set up once: the release token
+## Set up once: let workflows open the release PR
 
-release-plz needs a token that can start other workflows (a tag pushed
-with the default `GITHUB_TOKEN` starts none, so no release would build).
-Create a fine-grained personal access token with:
+There is no token or secret to create: release-plz runs on the workflow's
+own `GITHUB_TOKEN`, and starts the release and the release PR's CI by
+dispatching them (`docs/versioning.md` says why that works). The one
+switch it needs is a repository setting, off by default:
 
-- **Repository access:** only `scoot-sh/scoot`.
-- **Repository permissions:** Contents: read and write; Pull requests:
-  read and write. (Metadata: read is added automatically.)
-
-Store it as an Actions secret named `RELEASE_PLZ_TOKEN`:
+**Settings > Actions > General > Workflow permissions > Allow GitHub
+Actions to create and approve pull requests.** The same thing from a
+terminal (an admin's `gh`):
 
 ```sh
-gh secret set RELEASE_PLZ_TOKEN --repo scoot-sh/scoot
+gh api -X PUT repos/scoot-sh/scoot/actions/permissions/workflow \
+  -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true
 ```
 
-The token's account authors the release PR. A GitHub App token with the
-same two permissions works too. Until the secret exists, the
-`release-plz` workflow posts a notice on every push and does nothing.
+While it is off, the "Open or update the release PR" job fails with
+GitHub's "not permitted to create or approve pull requests" error. Tagging a
+merged release PR does not need it.
 
 ## Cut the first release (v0.2.0) by hand
 
@@ -93,7 +93,7 @@ notes written under Unreleased.
 
 The run resolves the tag (`scripts/release-resolve`: the `vX.Y.Z` shape,
 the workspace version at the tagged commit, every crate inheriting it,
-on main, not already published), stages the vendored tarball and the
+on main; a release already complete is a green no-op), stages the vendored tarball and the
 SBOM once (the union of every shipped binary's locked dependencies),
 builds `scoot`, `scootbg` and `scootbar` as portable glibc binaries for
 `x86_64-linux` and `aarch64-linux` (cargo `--locked --offline` from
@@ -118,8 +118,14 @@ publish jobs hand files over):
 gh workflow run release --ref main -f tag=v0.2.0 -f dry_run=true
 ```
 
-A dry run with `dry_run=false` publishes for real; that is the escape
-hatch for re-cutting after a deleted release, not the normal path.
+`dry_run=false` publishes for real, and only on the tag itself
+(`--ref v0.2.0`); from a branch it is refused. That is the escape hatch
+for re-cutting after a deleted release, and the call release-plz makes
+after it creates a tag:
+
+```sh
+gh workflow run release --ref v0.2.0 -f tag=v0.2.0 -f dry_run=false
+```
 
 A dry run exercises the whole artifact round trip (vendor, build,
 download, assemble, checksums) but **not** the attestation or the
@@ -132,11 +138,14 @@ steps below before anyone downloads anything.
 > **Symptom:** the workflow went red on a tag push.
 
 Re-run the failed run (the run's page, "Re-run jobs"). The gates
-refuse a complete release but resume an incomplete one, re-uploading
-only what is missing, so a retry converges instead of duplicating.
+resume an incomplete release (a draft counts as incomplete),
+re-uploading only what is missing, and a run that finds the release
+complete stops green with "Already released". So a retry converges
+instead of duplicating, and a tag that both you and release-plz started
+releases once.
 
 > **Symptom:** the published release is wrong (bad notes, wrong files)
-> and a retry refuses with "already published".
+> and a re-run only says "Already released".
 
 Delete the release and its tag, then re-cut from the same commit:
 
@@ -149,11 +158,20 @@ git push origin ":refs/tags/$TAG"
 Local tags are untouched by either command; drop yours too if you
 made one (`git tag -d "$TAG"`).
 
-> **Symptom:** a release PR merged but no tag appeared.
+> **Symptom:** a release PR merged but no release appeared.
 
-The `release-plz` workflow's "Tag a merged release PR" job ran without
-the token (its notice says so) or failed. Set `RELEASE_PLZ_TOKEN` and
-re-run that job, or push the tag by hand as for the first release.
+Look at the `release-plz` workflow's "Tag a merged release PR" job. If it
+created the tag but the dispatch step failed, run the dispatch yourself
+(the `gh workflow run release --ref vX.Y.Z ...` line above). If it made no
+tag, re-run the job, or push the tag by hand as for the first release:
+either way the release runs once.
+
+> **Symptom:** the release PR exists but CI never ran on it.
+
+Its `pull_request` runs wait for "Approve workflows to run", because
+GITHUB_TOKEN opened it. The dispatched run is the real CI. If the
+"Dispatch ci.yml" step failed, run `gh workflow run ci.yml --ref <the PR's
+release-plz-… branch>`, or approve the held runs.
 
 ## What else the runs need
 
