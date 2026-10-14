@@ -2,7 +2,7 @@
 name = "scoot-ipc"
 description = "Wire protocol and client for controlling scoot"
 version.workspace = true
-# Internal library, never published: it versions with its consumer. The wire
+# Internal library, never published: it carries the repository's one version. The wire
 # contract it carries is versioned separately, by PROTOCOL_VERSION.
 publish = false
 edition.workspace = true

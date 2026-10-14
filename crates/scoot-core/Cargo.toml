@@ -2,7 +2,7 @@
 name = "scoot-core"
 description = "Platform-independent window management state and layout for scoot"
 version.workspace = true
-# Internal library, never published: it versions with its consumer.
+# Internal library, never published: it carries the repository's one version.
 publish = false
 edition.workspace = true
 rust-version.workspace = true
