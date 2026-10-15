@@ -266,8 +266,7 @@ pub fn bar_reload_outcome(socket: &Path) -> Result<bool, String> {
             // pending edits). Refuse it loudly, never retry as plain.
             match reply.get("scope").and_then(|scope| scope.as_str()) {
                 Some("look") => Ok(true),
-                _ => Err("the running bar predates the look-scoped reload: restart it"
-                    .to_owned()),
+                _ => Err("the running bar predates the look-scoped reload: restart it".to_owned()),
             }
         }
         Some("bar") => Ok(true),

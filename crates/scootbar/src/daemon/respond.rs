@@ -175,9 +175,12 @@ impl Handler for Responder<'_> {
                     Err(message) => write_reply(out, &Reply::Error { message: &message }),
                 },
                 Some(ReloadScope::Look) => match self.reload_scoped() {
-                    Ok(()) => write_reply(out, &Reply::Ok {
-                        scope: Some(ReloadScope::Look.name()),
-                    }),
+                    Ok(()) => write_reply(
+                        out,
+                        &Reply::Ok {
+                            scope: Some(ReloadScope::Look.name()),
+                        },
+                    ),
                     Err(message) => write_reply(out, &Reply::Error { message: &message }),
                 },
             },

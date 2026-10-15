@@ -187,8 +187,7 @@ pub fn apply_toolkit(
     }
     if is_private_state(state_dir) {
         notes.push(
-            "private look state (headless or --private-look): color-scheme left alone"
-                .to_owned(),
+            "private look state (headless or --private-look): color-scheme left alone".to_owned(),
         );
         return notes;
     }

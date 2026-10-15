@@ -1238,13 +1238,9 @@ fn validate_names_a_bad_wallpaper_instead_of_blank() {
         let base = super::super::catalog::tests::look_toml("badlook");
         // Swap the color wallpaper for an image one pointing at
         // `wallpaper.png`.
-        let with_wall = base.replace(
-            "color = \"#2B3648\"",
-            "image = \"wallpaper.png\"",
-        );
+        let with_wall = base.replace("color = \"#2B3648\"", "image = \"wallpaper.png\"");
         assert_ne!(with_wall, base, "the fixture carries a wallpaper color");
-        std::fs::write(sources.join("badlook").join("look.toml"), with_wall)
-            .expect("a manifest");
+        std::fs::write(sources.join("badlook").join("look.toml"), with_wall).expect("a manifest");
         let wall = sources.join("badlook").join("wallpaper.png");
         match setup {
             "symlink" => {
@@ -1261,8 +1257,7 @@ fn validate_names_a_bad_wallpaper_instead_of_blank() {
                 // Missing: nothing created.
             }
         }
-        let catalog =
-            super::super::catalog::discover_ordered(&[(sources, Origin::User)]);
+        let catalog = super::super::catalog::discover_ordered(&[(sources, Origin::User)]);
         let checks = FakeChecks::default();
         // The look may be skipped from the catalog (invalid); validate the
         // dir directly so the wallpaper check runs.

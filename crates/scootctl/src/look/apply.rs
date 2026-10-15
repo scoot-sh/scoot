@@ -540,13 +540,15 @@ fn check_inputs(
                     if key == "ui" {
                         match path_to_string(&path) {
                             Ok(text) => ui_font_file = Some(text),
-                            Err(error) => validation.errors.push(format!(
-                                "font `{family}` ({key}): {error}"
-                            )),
+                            Err(error) => validation
+                                .errors
+                                .push(format!("font `{family}` ({key}): {error}")),
                         }
                     }
                 }
-                Err(error) => validation.errors.push(format!("font `{family}` ({key}): {error}")),
+                Err(error) => validation
+                    .errors
+                    .push(format!("font `{family}` ({key}): {error}")),
             }
             continue;
         }
@@ -580,12 +582,14 @@ fn check_inputs(
                 }
                 match path_to_string(&path) {
                     Ok(text) => wallpaper_abs = Some(text),
-                    Err(error) => {
-                        validation.errors.push(format!("wallpaper `{image}`: {error}"))
-                    }
+                    Err(error) => validation
+                        .errors
+                        .push(format!("wallpaper `{image}`: {error}")),
                 }
             }
-            Err(error) => validation.errors.push(format!("wallpaper `{image}`: {error}")),
+            Err(error) => validation
+                .errors
+                .push(format!("wallpaper `{image}`: {error}")),
         }
     }
     if !validation.errors.is_empty() {
@@ -1140,13 +1144,20 @@ pub fn apply_with(
         Ok(Availability::Unavailable(note)) => report.notes.push(note),
         Err(message) if render_inputs.bar_popup && is_popup_refusal(&message) => {
             render_inputs.bar_popup = false;
-            target = render_cached(name, &chain, &merged, &render_inputs, cache, &mut report.notes)
-                .map_err(refuse)?;
+            target = render_cached(
+                name,
+                &chain,
+                &merged,
+                &render_inputs,
+                cache,
+                &mut report.notes,
+            )
+            .map_err(refuse)?;
             match checks.bar_fragment(&target.join("bar.toml")) {
                 Ok(Availability::Available(())) => {
-                    report.notes.push(
-                        "bar without `popup`: rendered without popup-radius".to_owned(),
-                    );
+                    report
+                        .notes
+                        .push("bar without `popup`: rendered without popup-radius".to_owned());
                 }
                 Ok(Availability::Unavailable(note)) => report.notes.push(note),
                 Err(retry) => return Err(refuse(retry)),
@@ -1294,7 +1305,9 @@ pub fn apply_with(
             .notes
             .push("toolkit writes off for this apply (--no-toolkit)".to_owned());
     } else {
-        report.notes.extend(apply_toolkit(state_dir, &mut record, dark, dconf));
+        report
+            .notes
+            .extend(apply_toolkit(state_dir, &mut record, dark, dconf));
         if let Err(error) = write_record(state_dir, &record) {
             report.notes.push(format!(
                 "cannot record the toolkit state: {error}: the look applied, the record lags"
@@ -1704,12 +1717,21 @@ pub fn build_to_out(
             // re-render without it rather than refusing every look.
             render_inputs.bar_popup = false;
             (scoot, bar, rendered_json) = render_once(&render_inputs)?;
-            std::fs::write(stage.join("scoot.toml"), &scoot)
-                .map_err(|error| format!("cannot write {}: {error}", stage.join("scoot.toml").display()))?;
-            std::fs::write(stage.join("bar.toml"), &bar)
-                .map_err(|error| format!("cannot write {}: {error}", stage.join("bar.toml").display()))?;
-            std::fs::write(stage.join("render.json"), &rendered_json)
-                .map_err(|error| format!("cannot write {}: {error}", stage.join("render.json").display()))?;
+            std::fs::write(stage.join("scoot.toml"), &scoot).map_err(|error| {
+                format!(
+                    "cannot write {}: {error}",
+                    stage.join("scoot.toml").display()
+                )
+            })?;
+            std::fs::write(stage.join("bar.toml"), &bar).map_err(|error| {
+                format!("cannot write {}: {error}", stage.join("bar.toml").display())
+            })?;
+            std::fs::write(stage.join("render.json"), &rendered_json).map_err(|error| {
+                format!(
+                    "cannot write {}: {error}",
+                    stage.join("render.json").display()
+                )
+            })?;
             // Rebuild the staged list to match the re-render.
             staged = vec![
                 ("scoot.toml".to_owned(), scoot.clone()),
@@ -1718,9 +1740,9 @@ pub fn build_to_out(
             ];
             match checks.bar_fragment(&stage.join("bar.toml")) {
                 Ok(Availability::Available(())) => {
-                    validation.notes.push(
-                        "bar without `popup`: rendered without popup-radius".to_owned(),
-                    );
+                    validation
+                        .notes
+                        .push("bar without `popup`: rendered without popup-radius".to_owned());
                 }
                 Ok(Availability::Unavailable(note)) => validation.notes.push(note),
                 Err(retry) => {

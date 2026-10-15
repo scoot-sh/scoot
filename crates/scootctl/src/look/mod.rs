@@ -965,9 +965,7 @@ fn run_toolkit(look: &Look, action: Option<bool>) -> Result<(), String> {
             if dconf.available() {
                 let restored = match record.color_scheme_orig.as_deref() {
                     Some("") | None => dconf.reset(crate::look::toolkit::COLOR_SCHEME_KEY),
-                    Some(orig) => {
-                        dconf.write(crate::look::toolkit::COLOR_SCHEME_KEY, orig)
-                    }
+                    Some(orig) => dconf.write(crate::look::toolkit::COLOR_SCHEME_KEY, orig),
                 };
                 if let Err(error) = restored {
                     output::warn(format_args!("note: color-scheme not restored: {error}"));
