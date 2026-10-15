@@ -1584,6 +1584,7 @@ rest want the maintainer's call.
   mtime, so a font package update re-renders instead of leaving the bar
   pointing at a vanished file.
 - **D15. Do the shipped looks carry the examples' shape and opacity?**
+  **Decided (maintainer, 2026-10-14): yes**, with the benchmark condition below.
   Recommend yes: the looks are what the previews show and what non-Nix
   users already run, and a look must behave the same on both paths. The
   cost (rounded corners per frame, an ARGB bar) is the look author's choice
