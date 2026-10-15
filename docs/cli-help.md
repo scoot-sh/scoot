@@ -1,7 +1,7 @@
 # Agent-friendly help: the contract every binary meets
 
-An agent learns scoot from `--help` before anything else, so every binary's
-help meets one contract, pinned by tests. People read it too.
+Agents learn scoot from `--help`, so every binary's
+help meets one contract, pinned by tests.
 
 ## The contract
 
@@ -11,7 +11,7 @@ help meets one contract, pinned by tests. People read it too.
   command list, the action grammar, config keys, environment variables and
   exit codes. Nothing load-bearing lives only in the docs.
 - **Example-led:** each command shows one or two real invocations with the
-  output shape, the first thing an agent copies.
+  output shape.
 - **Stable and plain:** to stdout, exit 0, no color and no pager, wrapped
   under 100 columns, the same section order in every binary: usage,
   description, commands, options, examples, exit codes, environment
@@ -20,16 +20,16 @@ help meets one contract, pinned by tests. People read it too.
 - **Machine-readable:** `--help --json` (or `help --json`) emits the same
   content as JSON, versioned with `schema_version` (currently `1`; a script
   should refuse what it does not know). Text and JSON render from the same
-  tables, and a test diffs them: every tabulated name appears in both.
+  tables: every tabulated name appears in both.
 - **Errors that teach:** a usage error names what was wrong, the nearest
   valid choice ("did you mean"), and the help topic to read, on stderr with
   exit code `2`. Garbage that is close to nothing stays a bare refusal.
 - **Single source:** the request/action grammar, the flag lists and the
   module registry each have one owner; help renders them, never a second
   copy. The typo guesser and the docs URL live once in `scoot-ipc`, which
-  every binary renders from, so a domain move is one edit. No new
-  dependencies for any of it beyond that (hand-rolled parsers, `serde_json`
-  and `scoot-ipc`, all already in the tree).
+  every binary renders from. No new
+  dependencies beyond that (hand-rolled parsers, `serde_json`
+  and `scoot-ipc`).
 
 ## Topics and JSON per binary
 
@@ -40,7 +40,7 @@ help meets one contract, pinned by tests. People read it too.
 | `scootbar` | `daemon`, `msg` | commands, daemon flags (types and defaults), msg commands, the modules in this build with their actions, exit codes, environment |
 | `scootbg` | one per command (`daemon`, `set`, `clear`, `query`, `version`, `kill`, `apply-config`) | commands, `set`'s modes and filters, exit codes, environment |
 
-One spelling note: a client verb's own row is `scoot msg help <verb>`,
+One spelling note: a client verb's row is `scoot msg help <verb>`,
 not `scoot msg <verb> --help` -- `--help` after a verb would be ambiguous
 with what the verb itself takes (`scoot msg type --help` types the text
 `--help`; `action spawn --help` runs the command

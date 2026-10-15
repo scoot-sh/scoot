@@ -5,9 +5,9 @@ trailing motion lines](docs/assets/logo.png)
 
 [![CI](https://github.com/scoot-sh/scoot/actions/workflows/ci.yml/badge.svg)](https://github.com/scoot-sh/scoot/actions/workflows/ci.yml)
 
-**scoot knocks your windows sideways.** It is a light Wayland compositor
+**scoot knocks your windows sideways.** It is a Wayland compositor
 that puts windows in columns on a strip that scrolls left and right. A
-new window never squeezes the others. The strip just gets longer.
+new window never squeezes the others; the strip just gets longer.
 
 ![scoot with the ginger-night look: a bar across the top, two terminal columns, the cat-peeking wallpaper behind](docs/assets/ginger-night-preview.png)
 
@@ -20,12 +20,12 @@ No install. Start the desktop in your browser with
 docker run --rm -p 127.0.0.1:6080:6080 ghcr.io/scoot-sh/try-scoot
 ```
 
-Open `http://127.0.0.1:6080` and click the desktop. Press `Alt+Return`
+Open `http://127.0.0.1:6080`. Press `Alt+Return`
 for a second terminal. The port stays on loopback because VNC has no
 password. To stop, press `Ctrl+C` where you started the container.
 
-On Linux with [Nix](https://nixos.org/download/), this instead opens
-scoot in a window on your current desktop. It installs nothing:
+On Linux with [Nix](https://nixos.org/download/), this opens
+scoot in a window on your current desktop (installs nothing):
 
 ```sh
 nix shell --accept-flake-config github:scoot-sh/scoot nixpkgs#foot --command scoot --nested -- foot
@@ -47,21 +47,21 @@ trust the cache yet: [add it](https://www.scoot.sh/start/install/#or-in-a-window
 
 ## Why scoot
 
-- **No GPU? No problem.** scoot draws with the CPU or the GPU, and both
-  renderers are first-class. It runs on real hardware, in a VM with no
+- **CPU or GPU.** scoot draws with the CPU or the GPU.
+  It runs on real hardware, in a VM with no
   3D, in a container, or inside another desktop. The default
   (`--renderer auto`) picks the right renderer for the session, and
   `--renderer cpu` or `--renderer gpu` always overrides it.
   ([Builds and renderers](https://www.scoot.sh/reference/builds/).)
-- **Agents can drive it.** One socket does everything computer use
-  needs: type, click, take screenshots, list windows, and wait for the
-  screen to settle. scoot's own tests drive it this way.
-- **It stays out of the way.** An idle scoot does not wake up. The bar
-  and the wallpaper daemon are just as frugal.
+- **Agents can drive it.** One socket types, clicks, takes screenshots,
+  lists windows, and waits for the
+  screen to settle.
+- **It stays out of the way.** An idle scoot does not wake up, nor do the
+  bar and the wallpaper daemon.
   ([Benchmarks](dev/benches/benchmarks.md).)
 
 If you want the most mature scrolling compositor, use
-[niri](https://github.com/niri-wm/niri). It is great, and it inspired
+[niri](https://github.com/niri-wm/niri). It inspired
 scoot.
 
 ## Five keys
@@ -81,8 +81,8 @@ All keys, and how to change them: [Keybindings](https://www.scoot.sh/scoot/keybi
 ## Make it yours
 
 scoot reads `~/.config/scoot/config.toml`. Every setting is optional,
-and a mistake never stops scoot from starting. To get the defaults,
-with comments:
+and a mistake never stops scoot from starting. To get the commented
+defaults:
 
 ```sh
 scoot --print-default-config --write
@@ -107,8 +107,8 @@ X11 apps (with the XWayland build). [Full list](https://www.scoot.sh/scoot/proto
 
 ## Not yet
 
-- **Changing display modes from `wlr-randr` or Settings.** Read-only for
-  now. Set modes in the config file.
+- **Changing display modes from `wlr-randr` or Settings.** Read-only.
+  Set modes in the config file.
 - **Some X11 extras.** X input methods (XIM) and X window icons.
 - **A macOS compositor.** On a Mac, `scoot msg` drives scoot in a Linux VM.
 
