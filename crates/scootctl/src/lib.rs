@@ -21,6 +21,7 @@
 pub mod binds;
 pub mod cli;
 pub mod help;
+pub mod look;
 pub mod msg;
 pub mod output;
 

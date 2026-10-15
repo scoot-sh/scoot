@@ -166,6 +166,9 @@ if [ -n "$SMOKE_PREFIX" ]; then
     WALLPAPER_SOCK="$SMOKE_PREFIX-wp.sock"
     WALLPAPER_LOG="$SMOKE_PREFIX-wp.log"
     WALLPAPER_DIR="$SMOKE_PREFIX-wp"
+    LOOKS_SOCK="$SMOKE_PREFIX-looks.sock"
+    LOOKS_LOG="$SMOKE_PREFIX-looks.log"
+    LOOKS_DIR="$SMOKE_PREFIX-looks"
 else
     SOCKET=${SOCKET:-/run/user/$(id -u)/scoot-smoke.sock}
     SHOT=${SHOT:-/tmp/scoot-smoke.png}
@@ -190,6 +193,9 @@ else
     WALLPAPER_SOCK="/run/user/$(id -u)/scoot-smoke-wp.sock"
     WALLPAPER_LOG=/tmp/scoot-smoke-wp.log
     WALLPAPER_DIR=/tmp/scoot-smoke-wp
+    LOOKS_SOCK="/run/user/$(id -u)/scoot-smoke-looks.sock"
+    LOOKS_LOG=/tmp/scoot-smoke-looks.log
+    LOOKS_DIR=/tmp/scoot-smoke-looks
 fi
 export SCOOT_SOCKET="$SOCKET"
 
@@ -1045,6 +1051,182 @@ run_wallpaper_test() {
 }
 if [ -n "$SCOOTBG" ]; then
     ( run_wallpaper_test ) || exit 1
+else
+    echo "skipped: no scootbg binary (see the binaries header above)"
+fi
+
+echo "=== looks: scoot look applies two looks and the background pixel of each ==="
+# Its own headless session with an empty config (no [appearance], no
+# [wallpaper]), so the looks show through unshadowed, and its own state,
+# cache and config homes, so no developer's real look is in reach (R3).
+# Always --headless: only headless sessions keep a private look state the
+# CLI can target with --state; config handling is backend-agnostic.
+# Needs scootbg beside SCOOT: an image wallpaper with no daemon to show it
+# refuses the swap and rolls it back.
+run_looks_test() {
+    local socket="$LOOKS_SOCK"
+    local log="$LOOKS_LOG"
+    local dir="$LOOKS_DIR"
+    rm -rf "$dir"
+    mkdir -p "$dir/state" "$dir/cache" "$dir/config" "$dir/runtime"
+    chmod 700 "$dir/runtime"
+    rm -f "$socket" "$log"
+    export XDG_STATE_HOME="$dir/state"
+    export XDG_CACHE_HOME="$dir/cache"
+    export XDG_CONFIG_HOME="$dir/config"
+    export XDG_RUNTIME_DIR="$dir/runtime"
+
+    # Hermetic fonts: CI runners have no Nerd Fonts, so the shipped looks
+    # must not depend on host font names. A PATH-prepended stub fc-match
+    # answers the shipped families with a real font file and the same
+    # family name, and every other family the way real fc-match answers a
+    # missing one (a fallback file with a different family), so the
+    # production family comparison still refuses unknown fonts. The file
+    # must really load: the bar's daemon --check opens it. Resolved before
+    # the prepend (first the host fc-match, then a filesystem scan), so
+    # this section also passes with a restricted FONTCONFIG_FILE.
+    # Production font check untouched.
+    local stub_dir="$dir/stub-bin"
+    mkdir -p "$stub_dir"
+    local font_file="" fam root cand
+    for fam in "DejaVu Sans" "DejaVu Sans Mono" "sans-serif"; do
+        if command -v fc-match >/dev/null 2>&1; then
+            cand=""
+            cand=$(fc-match --format='%{file}\n' "$fam" 2>/dev/null | tr -d '\n' || true)
+            if [ -n "$cand" ] && [ -f "$cand" ]; then
+                font_file="$cand"
+                break
+            fi
+        fi
+    done
+    if [ -z "$font_file" ]; then
+        for root in /usr/share/fonts /run/current-system/sw/share/fonts \
+            /run/current-system/sw/share/X11/fonts \
+            "$HOME/.local/share/fonts" "$HOME/.fonts"; do
+            if [ -d "$root" ]; then
+                cand=""
+                cand=$(find "$root" -type f \( -iname '*.ttf' -o -iname '*.otf' \) 2>/dev/null | head -1 || true)
+                if [ -n "$cand" ] && [ -f "$cand" ]; then
+                    font_file="$cand"
+                    break
+                fi
+            fi
+        done
+    fi
+    if [ -z "$font_file" ]; then
+        echo "BUG: no loadable font file for the looks stub (tried fc-match and the usual font roots)"
+        return 1
+    fi
+    {
+        cat <<EOF
+#!/bin/sh
+# \$1 is --format=%{file} or --format=%{family} (with a trailing newline),
+# \$2 is the family. Match on the field name, never the exact flag.
+fmt="\${1:-}"
+fam="\${2:-}"
+case "\$fam" in
+  "DroidSansM Nerd Font Propo"|"DejaVu Sans"|"FiraCode Nerd Font"|"DejaVu Sans Mono")
+    case "\$fmt" in
+      *file*) printf '%s\n' "$font_file" ;;
+      *) printf '%s\n' "\$fam" ;;
+    esac
+    ;;
+  *)
+    case "\$fmt" in
+      *file*) printf '%s\n' "$font_file" ;;
+      *) printf 'DejaVu Sans\n' ;;
+    esac
+    ;;
+esac
+EOF
+    } >"$stub_dir/fc-match"
+    chmod +x "$stub_dir/fc-match"
+    export PATH="$stub_dir:$PATH"
+
+    local repo
+    repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
+    export SCOOT_LOOKS_DIR="$repo/looks"
+    : >"$dir/config.toml"
+
+    "$SCOOT" --headless --width 800 --height 600 --socket "$socket" \
+        --config "$dir/config.toml" >"$log" 2>&1 &
+    # Not `local` -- and EXIT, not RETURN -- see run_config_bind_test's
+    # identical trap for why.
+    pid=$!
+    trap 'kill "$pid" 2>/dev/null || true' EXIT
+    export SCOOT_SOCKET="$socket"
+    for _ in $(seq 1 60); do
+        [ -S "$socket" ] && break
+        sleep 0.1
+    done
+    if [ ! -S "$socket" ]; then
+        echo "looks test: the control socket never appeared; compositor log:"
+        tail -20 "$log"
+        return 1
+    fi
+    # The session's private look state: the one scoot-look-*/ dir in its
+    # own runtime dir. --headless always keeps one; without it the CLI
+    # would act on the developer's real look.
+    local runtime state
+    runtime="$dir/runtime"
+    state=$(echo "$runtime"/scoot-look-*/)
+    if [ ! -d "$state" ]; then
+        echo "BUG: no private look state in $runtime:"
+        ls -la "$runtime" || true
+        return 1
+    fi
+
+    local shot="$dir/shot.png"
+    wait_wallpaper_pixel() {
+        local want="$1" what="$2"
+        for _ in $(seq 1 75); do
+            if "$SCOOT" msg screenshot --no-cursor --out "$shot" >/dev/null 2>&1 \
+                && expect_pixel_color "$shot" 10 10 "$want" "$what" >/dev/null 2>&1; then
+                echo "ok: the screen shows $what (#$want)"
+                return 0
+            fi
+            sleep 0.2
+        done
+        echo "BUG: the screen never showed $what:"
+        expect_pixel_color "$shot" 10 10 "$want" "$what (after two looks)" || true
+        tail -30 "$log"
+        return 1
+    }
+
+    echo "--- an unknown look refuses with exit 1 and touches nothing ---"
+    if "$SCOOT" look apply nosuchlook --state "$state" --socket "$socket" >/dev/null 2>&1; then
+        echo "BUG: applying an unknown look succeeded"
+        return 1
+    fi
+    if [ -e "$state/look.json" ]; then
+        echo "BUG: a refused apply recorded a choice"
+        return 1
+    fi
+    echo "ok: an unknown look refuses and records nothing"
+
+    echo "--- vinyl-sunset, then ginger-night, each pixel-checked ---"
+    if ! "$SCOOT" look apply vinyl-sunset --state "$state" --socket "$socket" >"$dir/apply.out" 2>&1; then
+        echo "BUG: applying vinyl-sunset failed:"
+        cat "$dir/apply.out"
+        tail -30 "$log"
+        return 1
+    fi
+    wait_wallpaper_pixel "271A1F" "vinyl-sunset's flat wallpaper" || return 1
+    if ! "$SCOOT" look apply ginger-night --state "$state" --socket "$socket" >"$dir/apply.out" 2>&1; then
+        echo "BUG: applying ginger-night failed:"
+        cat "$dir/apply.out"
+        tail -30 "$log"
+        return 1
+    fi
+    wait_wallpaper_pixel "0E0E0E" "ginger-night's letterbox fill" || return 1
+    if ! "$SCOOT" look current --state "$state" | grep -q "ginger-night"; then
+        echo "BUG: current does not name the applied look"
+        return 1
+    fi
+    echo "ok: two looks applied, each background pixel checked"
+}
+if [ -n "$SCOOTBG" ]; then
+    ( run_looks_test ) || exit 1
 else
     echo "skipped: no scootbg binary (see the binaries header above)"
 fi

@@ -320,6 +320,14 @@ modules as at start-up: a module's own colors (like `workspaces`
 reload while a module is left out as unavailable, which retries it.
 `reload --look` re-reads only the look layer, under a snapshot of the file,
 so a look swap never applies pending edits; with no layer it is refused.
+On the wire the scoped reload is its own `reload-look` request (never a
+`reload` with a field: a bar older than the look scope ignores unknown
+fields and would run a plain reload on the field form, applying pending
+edits before any refusal). A scoped success answers
+`{"type":"ok","scope":"look"}`; an old bar answers the `reload-look`
+request with an ordinary
+`{"type":"error","message":"unknown request \`reload-look\`"}` and applies
+nothing.
 `hide`, `show` and `toggle` are
 [below](./configure.md#hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
 `toggle` print the reply; `kill`, `set` and `invoke` print nothing on success,

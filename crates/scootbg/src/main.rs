@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod apply;
+mod check;
 mod choices;
 mod cli;
 mod client;
@@ -69,6 +70,13 @@ fn main() -> ExitCode {
             };
         }
         cli::Command::ApplyConfig(options) => return ExitCode::from(apply::run(options)),
+        cli::Command::CheckImage(path) => match check::check(&path) {
+            Ok(report) => print::print(&format!("{report}\n")),
+            Err(error) => {
+                warn(format_args!("scootbg: {error}"));
+                return ExitCode::FAILURE;
+            }
+        },
         cli::Command::Client(request) => match client::send(&request) {
             // `kill`, `set`, `clear` and the workspace mapping commands
             // print nothing on success; the others print the reply.

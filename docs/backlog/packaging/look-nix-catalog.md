@@ -3,7 +3,7 @@ title: "Nix: the programs.scoot.looks catalog, look as the declared default, the
 status: "open"
 area: "packaging"
 priority: "high"
-blocked: "look-apply-cli"
+blocked: null
 ---
 
 # Nix: the programs.scoot.looks catalog, look as the declared default, the switch rule

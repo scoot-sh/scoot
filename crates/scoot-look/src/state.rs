@@ -19,13 +19,12 @@
 //! wipes and reseeds it.
 //!
 //! [`acquire_lock`], [`write_atomic`] and [`write_record`] are the swap path
-//! the future `look-apply-cli` tool owns: every writer takes the
+//! `scoot look apply` owns: every writer takes the
 //! `<state>/look.lock` [`StateLock`] (a second writer waits a bounded time,
 //! then refuses) and writes through [`write_atomic`] (a unique temp file,
 //! opened without following symlinks, plus `rename`), so a reader racing a
 //! swap sees the old or the new directory, never a half-written one.
-//! Nothing calls them yet outside tests. A missing record is "no choice
-//! recorded yet", not an error; a corrupt one (bad JSON, a name outside the
+//! A missing record is "no choice recorded yet", not an error; a corrupt one (bad JSON, a name outside the
 //! `[a-z0-9-]{1,32}` grammar, a `rendered` that is not an absolute path
 //! without `..`) is a loud warning at the call site,
 //! and the link is left alone: startup never fails over a look.
@@ -154,6 +153,21 @@ pub struct Record {
     /// The declared default in force when the choice was made (`sync`'s
     /// rule 2 compares against it); `None` for no declared default.
     pub declared_default: Option<String>,
+    /// Whether `apply` writes the toolkit keys (today only
+    /// `org.gnome.desktop.interface color-scheme`, from the look's
+    /// polarity). `None` and `Some(true)` both mean on; only an explicit
+    /// `Some(false)` (`scoot look toolkit off`) skips every dconf write.
+    pub toolkit: Option<bool>,
+    /// The `color-scheme` value the tool last wrote, if it wrote one:
+    /// before writing again the tool reads the live value, and a value
+    /// that is neither unset nor this one means someone else changed it,
+    /// so the tool leaves it alone (design D11).
+    pub color_scheme: Option<String>,
+    /// The live `color-scheme` before the tool's first write, if it has
+    /// written one: `Some("")` means it was unset. Saved once, never
+    /// overwritten, so `toolkit off` can restore it. Back-compatible:
+    /// absent means "not saved" (an older record).
+    pub color_scheme_orig: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -168,6 +182,12 @@ struct RawRecord {
     chosen_by: Option<String>,
     #[serde(default, rename = "declared-default")]
     declared_default: Option<String>,
+    #[serde(default)]
+    toolkit: Option<bool>,
+    #[serde(default, rename = "color-scheme")]
+    color_scheme: Option<String>,
+    #[serde(default, rename = "color-scheme-orig")]
+    color_scheme_orig: Option<String>,
 }
 
 /// How reading the record went.
@@ -264,12 +284,29 @@ fn validate_record(raw: RawRecord) -> Result<Record, String> {
             "{RECORD_FILE}: `declared-default` must match [a-z0-9-]{{1,32}}, not `{declared}`"
         ));
     }
+    if let Some(scheme) = &raw.color_scheme
+        && check_display_text("color-scheme", scheme, 64).is_some()
+    {
+        return Err(format!(
+            "{RECORD_FILE}: `color-scheme` must be plain text of at most 64 bytes"
+        ));
+    }
+    if let Some(orig) = &raw.color_scheme_orig
+        && check_display_text("color-scheme-orig", orig, 64).is_some()
+    {
+        return Err(format!(
+            "{RECORD_FILE}: `color-scheme-orig` must be plain text of at most 64 bytes"
+        ));
+    }
     Ok(Record {
         name,
         rendered,
         generation,
         chosen_by: raw.chosen_by,
         declared_default: raw.declared_default,
+        toolkit: raw.toolkit,
+        color_scheme: raw.color_scheme,
+        color_scheme_orig: raw.color_scheme_orig,
     })
 }
 
@@ -298,6 +335,21 @@ pub fn record_json(record: &Record) -> String {
         out.insert(
             "declared-default".to_owned(),
             serde_json::Value::String(declared.clone()),
+        );
+    }
+    if let Some(toolkit) = record.toolkit {
+        out.insert("toolkit".to_owned(), serde_json::Value::Bool(toolkit));
+    }
+    if let Some(scheme) = &record.color_scheme {
+        out.insert(
+            "color-scheme".to_owned(),
+            serde_json::Value::String(scheme.clone()),
+        );
+    }
+    if let Some(orig) = &record.color_scheme_orig {
+        out.insert(
+            "color-scheme-orig".to_owned(),
+            serde_json::Value::String(orig.clone()),
         );
     }
     serde_json::Value::Object(out).to_string()
@@ -385,10 +437,49 @@ fn sync_dir(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The following read the no-follow policy does not cover: the user's own
+/// config files (home-manager/stow link them into the store) and catalog
+/// manifests in per-file symlink farms may be symlinks, and the `<state>/look`
+/// link itself is intentional. Same size cap as [`read_capped`], symlinks
+/// followed. The opened handle is still required to be a regular file (a
+/// FIFO refuses instead of hanging), and non-UTF-8 still refuses. Never
+/// for the record, the render cache, or look-dir inputs under validation:
+/// those keep [`read_capped`].
+pub fn read_capped_follow(path: &Path) -> Result<String, std::io::Error> {
+    use std::io::Read as _;
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    let stat = rustix::fs::fstat(&fd).map_err(std::io::Error::from)?;
+    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "not a regular file: refusing to read it",
+        ));
+    }
+    let mut buf = Vec::new();
+    File::from(fd).take(MAX_FILE + 1).read_to_end(&mut buf)?;
+    if buf.len() as u64 > MAX_FILE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("larger than {MAX_FILE} bytes: refusing to read it"),
+        ));
+    }
+    String::from_utf8(buf)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
 /// The gated read the record (and the compositor's fragment loader) share:
-/// opened `O_NONBLOCK` and required to be a regular file by `fstat`, with a
-/// size cap. A symlink is followed and judged by its target; a loop in one
-/// is the kernel's `ELOOP`. A missing file surfaces as a `NotFound` io
+/// opened `O_NONBLOCK|O_NOFOLLOW` and required to be a regular file by
+/// `fstat`, with a
+/// size cap. A symlink refuses with `ELOOP` instead of being followed;
+/// a loop in one is the kernel's `ELOOP`. A missing file surfaces as a `NotFound` io
 /// error, so [`read_record`] can tell "no choice yet" from corruption.
 pub fn read_capped(path: &Path) -> Result<String, std::io::Error> {
     use std::io::Read as _;
@@ -396,6 +487,7 @@ pub fn read_capped(path: &Path) -> Result<String, std::io::Error> {
         path,
         rustix::fs::OFlags::RDONLY
             | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::NOFOLLOW
             | rustix::fs::OFlags::CLOEXEC
             | rustix::fs::OFlags::NOCTTY,
         rustix::fs::Mode::empty(),

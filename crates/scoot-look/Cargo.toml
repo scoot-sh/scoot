@@ -29,3 +29,9 @@ rustix = { version = "1", default-features = false, features = ["std", "fs", "pr
 [[bin]]
 name = "scoot-look"
 path = "src/main.rs"
+
+# Tests only: scratch dirs as `TempDir` guards, so a run leaves no
+# `/tmp/scoot-look-state-*` dirs behind. `tempfile` is already in the
+# workspace lockfile (via `scootctl`), so this adds no new package.
+[dev-dependencies]
+tempfile = "3"

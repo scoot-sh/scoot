@@ -61,7 +61,10 @@ tag an older compositor answers an ordinary unknown-request `error` and keeps
 serving -- never a plain reload. The client prints that error and exits
 non-zero, with the running config untouched. An additive new request like
 this is not breaking, so `PROTOCOL_VERSION` stays 11 and the commit carries
-no `!` marker.
+no `!` marker. The bar's scoped reload follows the same rule the other way:
+`reload-look` is a distinct `type`, not a `scope` field on `reload`, because
+an older bar ignores unknown fields and would run a plain reload on the
+field form. `scootbar`'s `PROTOCOL_VERSION` stays 1 for the same reason.
 
 ## How a version moves
 

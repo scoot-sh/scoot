@@ -3,7 +3,7 @@ title: "Authoring: look new, watch and preview capture"
 status: "open"
 area: "core"
 priority: "medium"
-blocked: "look-apply-cli"
+blocked: null
 ---
 
 # Authoring: look new, watch and preview capture

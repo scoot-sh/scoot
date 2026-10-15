@@ -135,6 +135,10 @@ export default defineConfig({
           items: [{ label: 'Desktop profile', slug: 'desktop' }],
         },
         {
+          label: 'Looks',
+          items: [{ label: 'Pick and apply', slug: 'looks' }],
+        },
+        {
           label: 'scoot',
           items: [
             { label: 'Overview', slug: 'scoot' },
@@ -247,6 +251,12 @@ export default defineConfig({
               paths: ['desktop', 'desktop/**'],
               description:
                 'The full desktop profile: one switch plus a look.',
+            },
+            {
+              label: 'Looks',
+              paths: ['looks', 'looks/**'],
+              description:
+                'Pick a look, swap it live, and see what changes now and on next launch.',
             },
             {
               label: 'scoot',

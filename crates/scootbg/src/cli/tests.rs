@@ -38,6 +38,7 @@ fn help_is_there_for_everything() {
         ("version", Topic::Version),
         ("kill", Topic::Kill),
         ("apply-config", Topic::ApplyConfig),
+        ("check-image", Topic::CheckImage),
     ] {
         assert_eq!(args(&[name, "--help"]), Ok(Command::Help(topic)));
         assert_eq!(args(&[name, "-h"]), Ok(Command::Help(topic)));
@@ -56,6 +57,7 @@ fn the_main_help_lists_only_what_works() {
         "version",
         "kill",
         "apply-config",
+        "check-image",
         "--version",
         "--help",
     ] {

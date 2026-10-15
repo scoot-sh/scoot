@@ -3,7 +3,7 @@ title: "Look leaves for swaylock, fuzzel and the pickers"
 status: "open"
 area: "packaging"
 priority: "medium"
-blocked: "look-apply-cli"
+blocked: null
 ---
 
 # Look leaves for swaylock, fuzzel and the pickers

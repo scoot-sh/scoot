@@ -178,7 +178,7 @@ impl Handler for Subscriber {
             );
             self.to = Some(Kinds::of(&[EventKind::Module]));
         } else {
-            protocol::write_reply(out, &protocol::Reply::Ok);
+            protocol::write_reply(out, &protocol::Reply::Ok { scope: None });
         }
     }
 

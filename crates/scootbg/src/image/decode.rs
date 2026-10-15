@@ -60,6 +60,13 @@ mod tests;
 /// what a small file can make the daemon allocate.
 pub const MAX_PIXELS: u64 = 1 << 28;
 
+/// The largest image file `check-image` accepts, in bytes: 32 MiB, the same
+/// as the fetch cap (`crate::fetch::MAX_BYTES`). A file past it is refused
+/// from its size, before any header is read. (`decode_file` itself enforces
+/// only the pixel budget [`MAX_PIXELS`]; the byte cap lives in `check`
+/// and the daemon's fetch path, not here.)
+pub const MAX_FILE_BYTES: u64 = 32 << 20;
+
 /// The EXIF block read from a WebP, at most. The orientation sits in its
 /// first entries, and a JPEG's is capped at 64 KiB by its segment length.
 const EXIF_LIMIT: usize = 1 << 20;

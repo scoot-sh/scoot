@@ -3,7 +3,7 @@ title: "install.sh --look installs the catalog and applies a look instead of cop
 status: "open"
 area: "packaging"
 priority: "medium"
-blocked: "look-apply-cli"
+blocked: null
 ---
 
 # install.sh --look installs the catalog and applies a look instead of copying whole configs

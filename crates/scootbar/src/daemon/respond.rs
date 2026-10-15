@@ -138,7 +138,7 @@ impl Handler for Responder<'_> {
                 #[cfg(feature = "popup")]
                 self.qh,
             ) {
-                Ok(()) => write_reply(out, &Reply::Ok),
+                Ok(()) => write_reply(out, &Reply::Ok { scope: None }),
                 Err(message) => write_reply(out, &Reply::Error { message: &message }),
             },
             Request::Subscribe { events } => {
@@ -171,13 +171,30 @@ impl Handler for Responder<'_> {
             }
             Request::Reload { scope } => match scope {
                 None => match self.reload() {
-                    Ok(()) => write_reply(out, &Reply::Ok),
+                    Ok(()) => write_reply(out, &Reply::Ok { scope: None }),
                     Err(message) => write_reply(out, &Reply::Error { message: &message }),
                 },
                 Some(ReloadScope::Look) => match self.reload_scoped() {
-                    Ok(()) => write_reply(out, &Reply::Ok),
+                    Ok(()) => write_reply(
+                        out,
+                        &Reply::Ok {
+                            scope: Some(ReloadScope::Look.name()),
+                        },
+                    ),
                     Err(message) => write_reply(out, &Reply::Error { message: &message }),
                 },
+            },
+            // The same scoped reload under its own verb (see
+            // [`Request::ReloadLook`]): kept beside the `scope` form so a
+            // client speaking either is answered the same way.
+            Request::ReloadLook => match self.reload_scoped() {
+                Ok(()) => write_reply(
+                    out,
+                    &Reply::Ok {
+                        scope: Some(ReloadScope::Look.name()),
+                    },
+                ),
+                Err(message) => write_reply(out, &Reply::Error { message: &message }),
             },
             Request::Hide | Request::Show | Request::Toggle => {
                 // Only the flag: the loop makes or destroys the surfaces
@@ -197,10 +214,10 @@ impl Handler for Responder<'_> {
             }
             Request::Kill => {
                 self.stop = true;
-                write_reply(out, &Reply::Ok);
+                write_reply(out, &Reply::Ok { scope: None });
             }
             Request::Set { id, value } => match self.set(&id, &value) {
-                Ok(()) => write_reply(out, &Reply::Ok),
+                Ok(()) => write_reply(out, &Reply::Ok { scope: None }),
                 Err(message) => write_reply(out, &Reply::Error { message: &message }),
             },
         }

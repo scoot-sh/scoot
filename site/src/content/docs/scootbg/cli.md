@@ -39,6 +39,8 @@ scootbg version                       # the running daemon's version and protoco
 scootbg kill                          # stop it; returns once a new daemon can start
 scootbg apply-config --profile scoot '{"color":"#1e1e2e"}'
                                       # what scoot runs with its [wallpaper] section
+scootbg check-image ~/Pictures/hills.jpg
+                                      # validate a file without showing it (exit 0/1)
 scootbg --help                        # and `scootbg COMMAND --help`
 scootbg --help --json                 # the same content as JSON (see below)
 ```
@@ -232,6 +234,20 @@ setting silently not applied.
 The schema, the fingerprint's exact encoding, the precedence table and
 the protocol are in
 [README.md](https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/README.md#apply-config-scoots-wallpaper-section).
+
+
+
+## `check-image`
+
+**`scootbg check-image PATH`** validates one image file without showing
+it: what `scoot look apply` runs over a look's wallpaper before a swap.
+The byte cap (32 MiB) from the file's size, then the pixel cap from the
+header, then a full decode. The byte cap is a `check-image` gate: a
+swap-time apply enforces the pixel cap and the decode. Prints `ok: <format> <WxH>, <bytes> bytes` and exits 0. A symlink,
+a directory, a FIFO, a device, a missing file, an unknown format and a
+corrupt or oversize image refuse with exit 1, naming the reason. Opening
+cannot hang: the file is opened without blocking and refused unless it is
+a regular file.
 
 
 

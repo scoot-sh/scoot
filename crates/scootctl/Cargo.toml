@@ -9,4 +9,13 @@ license.workspace = true
 
 [dependencies]
 scoot-ipc.workspace = true
+scoot-look.workspace = true
 serde_json.workspace = true
+toml = "1"
+# The uid behind the `/run/user/<uid>` fallback (see `look/reload.rs`)
+# and the gated file reads (see `look/apply.rs`): no Wayland, no
+# fontconfig, no image decoder, no process spawning.
+rustix = { version = "1", default-features = false, features = ["std", "fs", "process"] }
+
+[dev-dependencies]
+tempfile = "3"

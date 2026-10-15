@@ -16,9 +16,10 @@
 //! {"type":"error","message":"..."}
 //! ```
 //!
-//! A `reload` carries an optional `scope`: absent re-reads the config file
-//! and the look layer both, `"look"` re-reads only the look layer under a
-//! snapshot of the file, so a look swap never applies pending edits. Any
+//! A `reload-look` re-reads only the look layer under a snapshot of the
+//! config file, so a look swap never applies pending edits. A plain
+//! `reload` re-reads both (a `reload` with `"scope":"look"` reads only the
+//! layer too, kept for older clients; new clients send `reload-look`). Any
 //! other scope is refused by name, never silently treated as a plain
 //! reload (which would apply those edits).
 //!
@@ -57,6 +58,7 @@ pub const MAX_REQUEST_LINE: usize = 64 * 1024;
 /// {"protocol":1,"type":"query"}
 /// {"protocol":1,"type":"reload"}
 /// {"protocol":1,"type":"reload","scope":"look"}
+/// {"protocol":1,"type":"reload-look"}
 /// {"protocol":1,"type":"hide"}
 /// {"protocol":1,"type":"show"}
 /// {"protocol":1,"type":"toggle"}
@@ -92,6 +94,14 @@ pub enum Request<'a> {
     /// the file and the look layer are re-read; with `"look"` only the
     /// look layer is, under a snapshot of the file.
     Reload { scope: Option<ReloadScope> },
+    /// Re-read only the look layer under a snapshot of the config file, as
+    /// [`Request::Reload`] with the look scope does. A distinct verb rather
+    /// than a field: a bar older than the look scope ignores unknown fields
+    /// and would run a *plain* reload on `reload` + `scope`, applying the
+    /// pending edits the scope exists to skip, before the client could
+    /// refuse. An old bar answers this verb with an ordinary
+    /// unknown-request `error`, which refuses the swap with nothing applied.
+    ReloadLook,
     /// Destroy every bar surface and buffer, releasing the exclusive zone.
     Hide,
     /// Make the bars again.
@@ -165,6 +175,7 @@ impl Request<'_> {
             Self::Invoke { .. } => "invoke",
             Self::Subscribe { .. } => "subscribe",
             Self::Reload { .. } => "reload",
+            Self::ReloadLook => "reload-look",
             Self::Hide => "hide",
             Self::Show => "show",
             Self::Toggle => "toggle",
@@ -228,7 +239,13 @@ impl Request<'_> {
             Self::Subscribe { events } => {
                 line.events = Some(events.iter().map(|kind| kind.name()).collect());
             }
-            Self::Layout | Self::Hide | Self::Show | Self::Toggle | Self::Kill | Self::Version => {}
+            Self::Layout
+            | Self::Hide
+            | Self::Show
+            | Self::Toggle
+            | Self::Kill
+            | Self::Version
+            | Self::ReloadLook => {}
             Self::Reload { scope } => {
                 line.scope = scope.map(|scope| scope.name());
             }
@@ -412,6 +429,10 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
             };
             Ok(Request::Reload { scope })
         }
+        // The look-scoped reload as its own verb (see the variant's docs):
+        // an old bar has no such arm and answers `Unknown`, which refuses
+        // cleanly with nothing applied.
+        "reload-look" => Ok(Request::ReloadLook),
         "hide" => Ok(Request::Hide),
         "show" => Ok(Request::Show),
         "toggle" => Ok(Request::Toggle),
@@ -518,7 +539,17 @@ pub fn write_event(out: &mut Vec<u8>, event: &Event<'_>) {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Reply<'a> {
-    Ok,
+    Ok {
+        /// The scoped-reload receipt: a look-scoped reload carries one
+        /// (`"look"`), so the CLI can tell a scoped reply from a plain one.
+        /// Plain reloads leave this absent, keeping their reply
+        /// byte-identical (`{"type":"ok"}`). The scoped reload travels as
+        /// the `reload-look` verb, so a bar older than the look scope never
+        /// sends `ok` here at all: it answers the unknown verb with an
+        /// `error`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        scope: Option<&'a str>,
+    },
     /// Whether the bars are shown now, after a `hide`, `show` or `toggle`.
     Bar {
         visible: bool,

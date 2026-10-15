@@ -3,7 +3,7 @@ title: "Look leaves for mako, wob, fcitx5 and the night light"
 status: "open"
 area: "packaging"
 priority: "medium"
-blocked: "look-apply-cli"
+blocked: null
 ---
 
 # Look leaves for mako, wob, fcitx5 and the night light

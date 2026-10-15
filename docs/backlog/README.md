@@ -381,7 +381,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [A look-scoped reload in scoot](./resolved/look-scoped-reload-done.md) (high) — RESOLVED 2026-10-15
 - [Reload wallpaper wait as a deferred reply](./core/reload-wallpaper-deferred-reply.md) (medium)
 - [Per-session look state for headless and `--private-look` sessions](./resolved/look-session-state-done.md) (medium, computer use)
-- [`scoot look apply`: the atomic swap, scoped reloads, rollback](./core/look-apply-cli.md) (high, blocked on `look-shipped`, `look-scoped-reload`)
+- [`scoot look apply`: the atomic swap, scoped reloads, rollback](./resolved/look-apply-cli-done.md) (high) — RESOLVED 2026-10-15
 - [`scoot look next`/`prev`/`random` and timed previews](./core/look-cycle-preview.md) (medium)
 - [IPC: look-apply and looks requests, a look event](./ipc/look-ipc.md) (medium, computer use)
 - [Golden screenshots per shipped look](./testing/look-golden-screenshots.md) (medium, computer use)
