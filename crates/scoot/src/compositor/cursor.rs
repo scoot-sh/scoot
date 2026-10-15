@@ -375,7 +375,7 @@ impl Cursor {
         let rebuilt = Self::rebuild_async(RebuildInput {
             size,
             color,
-            theme_name,
+            theme_name: theme_name.map(str::to_owned),
             icon: self.status_icon(),
             scales: self.scale_list(),
         });
@@ -415,7 +415,7 @@ impl Cursor {
         // its oldest-first eviction past [`MAX_SCALES`]: keeping the last
         // four is exactly what pushing each and dropping index 0 at four
         // leaves behind.
-        let mut keys = Vec::with_capacity(input.scales.len() + 1);
+        let mut keys: Vec<(u64, f64)> = Vec::with_capacity(input.scales.len() + 1);
         for scale in std::iter::once(1.0).chain(input.scales) {
             let key = scale_key(scale);
             if !keys.contains(&key) {
