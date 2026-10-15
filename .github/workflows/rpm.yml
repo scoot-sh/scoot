@@ -26,23 +26,18 @@
 #
 # Triggers: PAUSED on pull requests and pushes to main (user,
 # 2026-10-13) until these packages are published; per-merge builds stay
-# with nix and the portable binaries. It still runs on a `v*` release tag,
-# weekly, and by hand (`gh workflow run`), so a broken package is found
-# before it ships. To resume per-PR runs, restore the path-filtered
+# with nix and the portable binaries. Manual only (user, 2026-10-14): run it by hand with
+# `gh workflow run` before shipping a package. To resume per-PR runs, restore the path-filtered
 # `pull_request`/`push` triggers from git history (packaging/<distro>/**,
 # scripts/smoke-test.sh, this file).
 
 name: rpm packages (specs in Fedora and openSUSE containers)
 
 on:
-  # Paused on pull requests and pushes until these packages are published
-  # (user, 2026-10-13: keep the per-merge builds to nix and the portable
-  # binaries for now). Still run on a release tag, weekly, and by hand, so a
-  # broken package is found before it is shipped, not on release day.
-  push:
-    tags: ['v*']
-  schedule:
-    - cron: '17 6 * * 1'
+  # Manual only until these packages are published (user, 2026-10-14: not
+  # shipping them yet, keep them building). Run it by hand before shipping
+  # one; the tag and weekly runs were removed because each release went red
+  # on the version lag and the weekly run only added noise.
   workflow_dispatch:
 
 permissions:
