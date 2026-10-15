@@ -40,13 +40,19 @@ pub const SCOOT_ALLOWLIST: &[&str] = &[
 ];
 
 /// Dotted keys a look may set in scootbar's fragment: the six color roles,
-/// the bar's style (never its geometry or placement), and per-module visual
-/// keys. `workspaces.active-color` / `inactive-color` are the module's own
-/// override knobs (`crates/scootbar/src/config.rs:512-518`);
-/// `window-title.icon` is its one-glyph knob. The bar's `font` and
+/// the bar's style (never its geometry or placement), the workspaces
+/// module's visual keys, and one glyph per icon key that takes a single
+/// string. `workspaces.active-color` / `inactive-color` are the module's
+/// own override knobs (`crates/scootbar/src/config.rs:512-518`);
+/// `pill-shape`, `pill-radius`, `pill-inset` and `disc` are its pill knobs
+/// (the shape-compat refusals stay the loader's). Each `*.icon` key takes
+/// exactly one glyph in the app; the array-valued icon levels
+/// (`brightness.icon`, `battery.icon`, `network.icon-wifi`) stay user-only
+/// in v1: they are not glyph strings. The bar's `font` and
 /// `fallback-fonts` are file paths resolved by the tool
 /// (`--ui-font-file`), never overrides an author writes (round 2
-/// finding 3), so they are absent here.
+/// finding 3), so they are absent here; the loader still accepts the
+/// renderer's own `bar.font` as a fragment key.
 pub const SCOOTBAR_ALLOWLIST: &[&str] = &[
     "colors.background",
     "colors.foreground",
@@ -65,7 +71,33 @@ pub const SCOOTBAR_ALLOWLIST: &[&str] = &[
     "workspaces.inactive-color",
     "workspaces.item-gap",
     "workspaces.display",
+    "workspaces.pill-shape",
+    "workspaces.pill-radius",
+    "workspaces.pill-inset",
+    "workspaces.disc",
     "window-title.icon",
+    "clock.icon",
+    "volume.icon",
+    "microphone.icon",
+    "network.icon",
+    "network.icon-ethernet",
+    "network.icon-vpn",
+    "network.icon-offline",
+    "media.icon",
+    "media.icon-playing",
+    "media.icon-paused",
+    "bluetooth.icon",
+    "bluetooth.icon-off",
+    "bluetooth.icon-on",
+    "bluetooth.icon-connected",
+    "power.icon",
+    "power.icon-lock",
+    "power.icon-logout",
+    "power.icon-suspend",
+    "power.icon-reboot",
+    "power.icon-poweroff",
+    "battery.icon-charging",
+    "battery.icon-full",
 ];
 
 /// Dotted keys a look may set in the shell apps' fragments (design section
@@ -216,8 +248,8 @@ pub enum ValueKind {
     ImagePath,
     /// At most two identifiers (the bar's `MAX_FALLBACKS`).
     FontList,
-    /// A TOML boolean. No allowlisted key takes one today; the kind exists
-    /// so adding one cannot fall back to an unchecked scalar.
+    /// A TOML boolean. Only `workspaces.disc` takes one today; the kind
+    /// exists so adding one cannot fall back to an unchecked scalar.
     Bool,
 }
 
@@ -264,7 +296,34 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
             "workspaces.active-color" | "workspaces.inactive-color" => Some(ValueKind::Color),
             "workspaces.item-gap" => Some(ValueKind::IntRange { min: 0, max: 1024 }),
             "workspaces.display" => Some(ValueKind::Enum(&["numbers", "dots"])),
-            "window-title.icon" => Some(ValueKind::Glyph),
+            "workspaces.pill-shape" => Some(ValueKind::Enum(&["rect", "pill", "circle", "square"])),
+            "workspaces.pill-radius" | "workspaces.pill-inset" => {
+                Some(ValueKind::IntRange { min: 0, max: 1024 })
+            }
+            "workspaces.disc" => Some(ValueKind::Bool),
+            "window-title.icon"
+            | "clock.icon"
+            | "volume.icon"
+            | "microphone.icon"
+            | "network.icon"
+            | "network.icon-ethernet"
+            | "network.icon-vpn"
+            | "network.icon-offline"
+            | "media.icon"
+            | "media.icon-playing"
+            | "media.icon-paused"
+            | "bluetooth.icon"
+            | "bluetooth.icon-off"
+            | "bluetooth.icon-on"
+            | "bluetooth.icon-connected"
+            | "power.icon"
+            | "power.icon-lock"
+            | "power.icon-logout"
+            | "power.icon-suspend"
+            | "power.icon-reboot"
+            | "power.icon-poweroff"
+            | "battery.icon-charging"
+            | "battery.icon-full" => Some(ValueKind::Glyph),
             _ => None,
         },
         "scootnotify" | "scootlaunch" | "scootgreet" => match key {
@@ -294,9 +353,8 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
 /// Check one `[apps.<app>]` override value against its key's kind: the
 /// allowlist by name, then the value by kind. Every key the allowlist holds
 /// has a kind, so there is no key whose value gets only the generic string
-/// backstops. In particular `window-title.icon` is glyph-checked: it is the
-/// only glyph key allowlisted, and the old `.glyph`-suffix rule never fired
-/// on it.
+/// backstops. The `*.icon` keys are glyph-checked: each takes one string,
+/// and the array-valued icon levels are not allowlisted at all.
 pub fn check_app_value(app: &str, key: &str, value: &toml::Value) -> Option<GrammarError> {
     let field = format!("apps.{app}[{key}]");
     let refused = |reason: String| Some(GrammarError::new(field.clone(), reason));

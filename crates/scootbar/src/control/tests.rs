@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use super::claim::Claim;
 use super::conn::{Conn, Handler, STALL_DEADLINE, Status};
 use super::paths::{self, PathError, Paths};
-use super::protocol::{self, PROTOCOL_VERSION, Request};
+use super::protocol::{self, PROTOCOL_VERSION, ReloadScope, Request};
 use super::{MAX_CONNECTIONS, Server};
 
 /// A scratch directory, removed on drop (as in `config::tests`).
@@ -103,7 +103,10 @@ fn every_request_round_trips_through_its_line() {
     let requests = [
         Request::Query { id: None },
         Request::Layout,
-        Request::Reload,
+        Request::Reload { scope: None },
+        Request::Reload {
+            scope: Some(ReloadScope::Look),
+        },
         Request::Hide,
         Request::Show,
         Request::Toggle,
@@ -126,7 +129,15 @@ fn every_request_round_trips_through_its_line() {
         match (request, parsed) {
             (Request::Query { id: None }, Ok(Request::Query { id: None }))
             | (Request::Layout, Ok(Request::Layout))
-            | (Request::Reload, Ok(Request::Reload))
+            | (Request::Reload { scope: None }, Ok(Request::Reload { scope: None }))
+            | (
+                Request::Reload {
+                    scope: Some(ReloadScope::Look),
+                },
+                Ok(Request::Reload {
+                    scope: Some(ReloadScope::Look),
+                }),
+            )
             | (Request::Hide, Ok(Request::Hide))
             | (Request::Show, Ok(Request::Show))
             | (Request::Toggle, Ok(Request::Toggle))
@@ -192,6 +203,26 @@ fn requests_refuse_loudly() {
         protocol::parse(b"{\"protocol\":1,\"type\":\"query\",\"output\":\"DP-1\"}"),
         Ok(Request::Query { id: None })
     ));
+}
+
+#[test]
+fn reload_scope_is_plain_by_default_and_named_when_not() {
+    assert!(matches!(
+        protocol::parse(b"{\"protocol\":1,\"type\":\"reload\"}"),
+        Ok(Request::Reload { scope: None })
+    ));
+    assert!(matches!(
+        protocol::parse(b"{\"protocol\":1,\"type\":\"reload\",\"scope\":\"look\"}"),
+        Ok(Request::Reload {
+            scope: Some(ReloadScope::Look)
+        })
+    ));
+    // An unknown scope is refused by name: silently treating it as a
+    // plain reload would apply pending edits a scoped swap must not.
+    let error = protocol::parse(b"{\"protocol\":1,\"type\":\"reload\",\"scope\":\"everything\"}")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("everything"), "{error}");
 }
 
 #[test]

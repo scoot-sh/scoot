@@ -36,6 +36,7 @@ mod font;
 mod help;
 mod icon;
 mod layout;
+mod look;
 mod modules;
 mod outputs;
 mod paint;
@@ -106,18 +107,24 @@ fn print_out(text: &str) -> ExitCode {
     }
 }
 
-/// `daemon`: the config file, then the flags over it, then the bar. A bad
-/// file is exit status 1 (the flags were fine); a flag the file clashes
-/// with (a module placed twice between them) is a usage error.
+/// `daemon`: the config file, then the look layer under it, then the
+/// flags over both, then the bar. A bad file is exit status 1 (the flags
+/// were fine); a flag the file clashes with (a module placed twice
+/// between them) is a usage error. A missing or broken look layer is a
+/// note, never a refusal: the bar starts without one.
 fn run_daemon(command: cli::DaemonCommand) -> ExitCode {
     use print::warn;
-    let startup = match config::load_startup(command.file.as_deref()) {
+    let state = crate::look::state_dir();
+    let startup = match crate::look::load_startup(command.file.as_deref(), state.as_deref()) {
         Ok(startup) => startup,
         Err(error) => {
             warn(format_args!("scootbar: {error}"));
             return ExitCode::FAILURE;
         }
     };
+    for note in &startup.notes {
+        warn(format_args!("scootbar: note: {note}"));
+    }
     let config = if startup.from_file {
         let mut config = startup.config;
         if let Err(error) = command.given.overlay(&mut config) {
@@ -126,7 +133,15 @@ fn run_daemon(command: cli::DaemonCommand) -> ExitCode {
         }
         config
     } else {
-        *command.config
+        // No file: the flags over the defaults, with the look layer under
+        // both. The whole-layout rule holds, as when the flags built the
+        // config alone.
+        let mut config = startup.config;
+        if let Err(error) = command.given.overlay_whole(&mut config) {
+            warn(format_args!("scootbar: {error}"));
+            return ExitCode::from(USAGE_ERROR);
+        }
+        config
     };
     if command.check {
         return match daemon::check(&config) {
@@ -137,7 +152,7 @@ fn run_daemon(command: cli::DaemonCommand) -> ExitCode {
             }
         };
     }
-    match daemon::run(config, startup.file, command.given) {
+    match daemon::run(config, startup.file, command.given, startup.look) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             warn(format_args!("scootbar: {error}"));
@@ -195,7 +210,12 @@ fn run_msg(msg: cli::Msg) -> ExitCode {
         cli::Msg::Subscribe { events } => {
             subscribe(&control::protocol::Request::Subscribe { events })
         }
-        cli::Msg::Reload => send(&control::protocol::Request::Reload, true),
+        cli::Msg::Reload { look } => send(
+            &control::protocol::Request::Reload {
+                scope: look.then_some(control::protocol::ReloadScope::Look),
+            },
+            true,
+        ),
         cli::Msg::Hide => send(&control::protocol::Request::Hide, true),
         cli::Msg::Show => send(&control::protocol::Request::Show, true),
         cli::Msg::Toggle => send(&control::protocol::Request::Toggle, true),

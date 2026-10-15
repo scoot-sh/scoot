@@ -1,9 +1,10 @@
 ---
 title: "scootbar reads a look layer under bar.toml, with a look-scoped reload"
-status: "open"
-area: "scootbar"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-15"
 ---
 
 # scootbar reads a look layer under bar.toml, with a look-scoped reload

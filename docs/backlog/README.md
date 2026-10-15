@@ -380,7 +380,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [The compositor reads a look layer under the user's config](./core/look-layer-scoot.md) (high, blocked on `look-format`)
 - [A look-scoped reload in scoot](./core/look-scoped-reload.md) (high, blocked on `look-layer-scoot`)
 - [Per-session look state for headless and `--private-look` sessions](./core/look-session-state.md) (medium, computer use)
-- [`scoot look apply`: the atomic swap, scoped reloads, rollback](./core/look-apply-cli.md) (high, blocked on `look-shipped`, `look-scoped-reload`, `look-layer-scootbar`)
+- [`scoot look apply`: the atomic swap, scoped reloads, rollback](./core/look-apply-cli.md) (high, blocked on `look-shipped`, `look-scoped-reload`)
 - [`scoot look next`/`prev`/`random` and timed previews](./core/look-cycle-preview.md) (medium)
 - [IPC: look-apply and looks requests, a look event](./ipc/look-ipc.md) (medium, computer use)
 - [Golden screenshots per shipped look](./testing/look-golden-screenshots.md) (medium, computer use)

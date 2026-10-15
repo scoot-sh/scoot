@@ -183,8 +183,15 @@ pub fn check(config: &Config) -> Result<(), Error> {
 /// `scootbar msg kill` stops it. `file` is the config file a `reload`
 /// re-reads; `given` are the daemon flags, overlaid onto every reload as
 /// at start-up, so the precedence (defaults, then the file, then the
-/// flags) holds for the running bar at all times.
-pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Error> {
+/// flags) holds for the running bar at all times. `look` is the look
+/// layer's snapshot: a plain reload refreshes it, a scoped one merges
+/// under it.
+pub fn run(
+    config: Config,
+    file: Option<PathBuf>,
+    given: Given,
+    mut look: crate::look::LookState,
+) -> Result<(), Error> {
     let content = prepare(&config)?;
     // The control socket first, so a second daemon refuses before it
     // touches the compositor.
@@ -377,6 +384,7 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
                 file.as_ref(),
                 &given,
                 server.subscribers(),
+                &mut look,
             );
             let mut index = 0;
             while index < server.conns().len() {
