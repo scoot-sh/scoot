@@ -92,7 +92,7 @@ each applied field:
 whose bad values fell back to the look's. The reply answers once the
 wallpaper run is handed over, without waiting for it. The look itself
 lives at `$XDG_STATE_HOME/scoot/look/scoot.toml` (or
-`$SCOOT_LOOK_STATE/scoot.toml`); a reload with a dangling link or an
+`$SCOOT_LOOK_STATE/look/scoot.toml`); a reload with a dangling link or an
 unreadable fragment there is refused whole, keeping everything.
 
 **Refused, explicitly, pending a restart:** `[tty] gpu`, `[renderer]

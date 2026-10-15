@@ -70,11 +70,13 @@ With no look active, this file behaves as before.
 
 Where the look lives: the active look's fragment is
 `$XDG_STATE_HOME/scoot/look/scoot.toml` (usually
-`~/.local/state/scoot/look/scoot.toml`), or `$SCOOT_LOOK_STATE/scoot.toml`
+`~/.local/state/scoot/look/scoot.toml`), or `$SCOOT_LOOK_STATE/look/scoot.toml`
 when that variable names a state dir explicitly. The `look` entry itself
 is a link to the rendered look, so switching looks swaps one link.
-Populate it without Nix with `scoot-look build` (which renders a
-`look.toml` into that state dir); with Nix the catalog install does it.
+`scoot-look build <sourcedir> --out DIR` writes `scoot.toml`, `bar.toml`
+and `render.json` into DIR and creates no link: pass `--out <state>/look`
+to render in place, or point `<state>/look` at DIR afterwards. With Nix
+the catalog install does this.
 When the link is absent there is no look layer and this file behaves as
 before. A dangling link or an unreadable fragment warns at startup and
 refuses a reload whole, keeping everything.

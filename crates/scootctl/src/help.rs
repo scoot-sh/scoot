@@ -24,6 +24,12 @@ use scoot_ipc::DOCS_URL;
 /// rather than misread it.
 pub const SCHEMA_VERSION: u32 = 1;
 
+/// What `reload` does, in one phrase. The single owner: the `reload` row in
+/// [`REQUESTS`] uses this directly, and the prose blocks in [`crate::cli`]
+/// (`REQUESTS_HELP`) and the compositor's `scoot help config` must contain
+/// this same text (pinned by test), so the three cannot drift.
+pub const RELOAD_DESCRIPTION: &str = "re-read the config file and re-apply it live";
+
 /// One request verb: what it takes, what it does, one real invocation, and
 /// the shape of its reply.
 pub struct RequestDoc {
@@ -60,7 +66,7 @@ pub const REQUESTS: &[RequestDoc] = &[
     RequestDoc {
         verb: "reload",
         syntax: "reload",
-        description: "re-read the config file and re-apply it live",
+        description: RELOAD_DESCRIPTION,
         example: "scoot msg reload",
         reply: "`{\"type\":\"reloaded\",...}`",
     },
@@ -609,6 +615,21 @@ pub fn json(binary: &str, version: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_reload_prose_and_the_reload_row_share_one_string() {
+        // The three wordings cannot drift: the table row uses
+        // RELOAD_DESCRIPTION directly, and the prose must contain it verbatim.
+        let reload = REQUESTS
+            .iter()
+            .find(|request| request.verb == "reload")
+            .expect("a reload row");
+        assert_eq!(reload.description, RELOAD_DESCRIPTION);
+        assert!(
+            crate::cli::REQUESTS_HELP.contains(RELOAD_DESCRIPTION),
+            "REQUESTS_HELP drifted from RELOAD_DESCRIPTION"
+        );
+    }
 
     #[test]
     fn every_request_verb_is_in_the_prose_and_in_the_json() {

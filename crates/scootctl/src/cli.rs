@@ -21,11 +21,12 @@ use scoot_ipc::{Action, EventKind, Horizontal, PointerButton, Request, Vertical}
 
 /// The request grammar both clients print in their `--help`. The single
 /// owner: `scoot --help` embeds this same block rather than a second copy.
+/// The `reload` line contains [`crate::help::RELOAD_DESCRIPTION`] verbatim
+/// (pinned by test), so the prose and the table cannot drift.
 pub const REQUESTS_HELP: &str = "\
     version | outputs | windows
     action ACTION [ARGUMENT...]
-    reload                          re-read the config file and re-apply
-                                    what can be re-applied live
+    reload                          re-read the config file and re-apply it live
     keyboard                        the active keyboard layout's name and
                                     index -- what a layout indicator shows
     locked                          whether the session is locked -- the

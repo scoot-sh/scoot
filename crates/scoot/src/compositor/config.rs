@@ -795,6 +795,13 @@ pub struct LayeredLoaded {
     pub invalid: Vec<String>,
 }
 
+/// The user file when there is none: what a look-only install merges its
+/// layer over, at startup and on reload alike. One helper so the two paths
+/// cannot diverge about what "no user file" means.
+fn default_user_file() -> FileConfig {
+    FileConfig::default()
+}
+
 /// The config file a session started from: the explicit `--config PATH`
 /// when one was given, else the resolved XDG default path -- whether or
 /// not a file existed there at startup. What `Request::Reload` re-reads
@@ -843,6 +850,12 @@ pub fn reload_from(path: &Path, vt: bool) -> Result<LoadedConfig, ReloadError> {
 /// A layer that fails the strict parse refuses the whole reload like a bad
 /// file: the running config is untouched. Startup instead logs and runs
 /// without the layer (see [`load_with_layer`]).
+///
+/// A missing user file with a layer present reloads over
+/// [`default_user_file`] (the same defaults startup merges the layer over),
+/// so a look-only install swaps looks live; without a layer it refuses like
+/// any vanished path. Any other read failure, and any unparsable file,
+/// refuses the reload and keeps the running config.
 pub fn reload_from_with_layer(
     path: &Path,
     vt: bool,
@@ -859,7 +872,19 @@ pub fn reload_from_with_layer(
         ),
         None => None,
     };
-    let text = fs::read_to_string(path).map_err(|source| fail(source.to_string()))?;
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(source) if source.kind() == io::ErrorKind::NotFound && layer.is_some() => {
+            let file = default_user_file();
+            return Ok(LoadedConfig::from_file_with_layer(
+                file,
+                path,
+                vt,
+                layer.as_ref(),
+            ));
+        }
+        Err(source) => return Err(fail(source.to_string())),
+    };
     toml::from_str::<FileConfig>(&text)
         .map(|file| LoadedConfig::from_file_with_layer(file, path, vt, layer.as_ref()))
         .map_err(|source| fail(source.to_string()))
@@ -871,7 +896,7 @@ pub fn reload_from_with_layer(
 /// the user's own file still applies.
 ///
 /// The merge builds from the user file this same call parsed (or
-/// [`FileConfig::default`] when no user file exists or it does not parse,
+/// [`default_user_file`] when no user file exists or it does not parse,
 /// logging the failure the same way `load` does): a single read, so a plain
 /// install with only a look still gets the look, an unparsable user file
 /// still gets the look on top of defaults, and no second read can race the
@@ -923,7 +948,7 @@ pub fn load_with_layer(
                         path = %path.display(), %error,
                         "could not parse config file; using defaults"
                     );
-                    (FileConfig::default(), path.to_owned())
+                    (default_user_file(), path.to_owned())
                 }
             },
         },
@@ -934,7 +959,7 @@ pub fn load_with_layer(
             ) {
                 // Neither XDG_CONFIG_HOME nor HOME is set: nowhere sensible
                 // to look, same as "the default file doesn't exist".
-                None => (FileConfig::default(), PathBuf::from("/config.toml")),
+                None => (default_user_file(), PathBuf::from("/config.toml")),
                 Some(path) => match fs::read_to_string(&path) {
                     Ok(text) => match toml::from_str::<FileConfig>(&text) {
                         Ok(file) => (file, path),
@@ -943,18 +968,18 @@ pub fn load_with_layer(
                                 path = %path.display(), %error,
                                 "could not parse config file; using defaults"
                             );
-                            (FileConfig::default(), path)
+                            (default_user_file(), path)
                         }
                     },
                     Err(source) if source.kind() == io::ErrorKind::NotFound => {
-                        (FileConfig::default(), path)
+                        (default_user_file(), path)
                     }
                     Err(source) => {
                         tracing::error!(
                             path = %path.display(), %source,
                             "could not read the default config file; using defaults"
                         );
-                        (FileConfig::default(), path)
+                        (default_user_file(), path)
                     }
                 },
             }
@@ -2633,6 +2658,86 @@ mod tests {
         // fails the reload even though every other table is valid.
         let (_dir, path) = write_temp("[layout]\ngaps = 5\n");
         reload_from(&path, false).expect_err("an unknown field must not reload");
+    }
+
+    #[test]
+    fn reload_with_layer_and_no_user_file_applies_the_layer() {
+        // A look-only install has no user file: the reload must merge the
+        // layer over defaults, the way startup does, not refuse it.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let missing = dir.path().join("config.toml");
+        let layered = reload_from_with_layer(
+            &missing,
+            false,
+            Some("[appearance]\nbackground_color = \"#2B3648\"\n"),
+        )
+        .expect("a layer with no user file reloads over defaults");
+        assert_eq!(
+            hex(layered.loaded.appearance.background_color),
+            "#2b3648",
+            "the layer supplies what defaults leave unset"
+        );
+        assert!(layered.shadowed.is_empty());
+        assert!(layered.invalid.is_empty());
+    }
+
+    #[test]
+    fn reload_with_layer_and_no_user_file_follows_a_layer_swap() {
+        // Switching looks swaps the `look` link: two reloads with no user
+        // file, each with its layer's fragment, apply each layer in turn.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let missing = dir.path().join("config.toml");
+        let first = reload_from_with_layer(
+            &missing,
+            false,
+            Some("[appearance]\nbackground_color = \"#2B3648\"\n"),
+        )
+        .expect("the first layer reloads");
+        assert_eq!(hex(first.loaded.appearance.background_color), "#2b3648");
+        let second = reload_from_with_layer(
+            &missing,
+            false,
+            Some("[appearance]\nbackground_color = \"#FF9A49\"\n"),
+        )
+        .expect("the swapped layer reloads");
+        assert_eq!(
+            hex(second.loaded.appearance.background_color),
+            "#ff9a49",
+            "the swapped layer replaces the first"
+        );
+    }
+
+    #[test]
+    fn reload_without_a_layer_and_without_a_file_still_refuses() {
+        // No layer, no file: today's refusal stands (nothing to apply).
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let missing = dir.path().join("config.toml");
+        match reload_from_with_layer(&missing, false, None) {
+            Err(error) => assert!(
+                error.to_string().contains("keeping the running config"),
+                "the refusal keeps the session: {error}"
+            ),
+            Ok(_) => panic!("no file, no layer refuses"),
+        }
+    }
+
+    #[test]
+    fn reload_with_layer_but_an_unparsable_user_file_still_refuses() {
+        // An unparsable user file refuses the reload even with a layer: the
+        // running config is untouched (startup instead logs and runs the
+        // layer over defaults).
+        let (_dir, bad) = write_temp("this is not valid toml [[[");
+        match reload_from_with_layer(
+            &bad,
+            false,
+            Some("[appearance]\nbackground_color = \"#2B3648\"\n"),
+        ) {
+            Err(error) => assert!(
+                error.to_string().contains("keeping the running config"),
+                "the refusal keeps the session: {error}"
+            ),
+            Ok(_) => panic!("a malformed file must not reload, layer or not"),
+        }
     }
 
     #[test]
