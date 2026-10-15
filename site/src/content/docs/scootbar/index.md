@@ -4,7 +4,8 @@ description: "The lightest status bar that is still beautiful — enable it, pla
 ---
 
 A status bar for scoot, and for any compositor with
-`wlr-layer-shell-v1` (scoot, sway, niri, Hyprland). It starts as a clock,
+`wlr-layer-shell-v1` (scoot, sway, niri, Hyprland) — on scoot, it follows
+the desktop profile's look. It starts as a clock,
 gains workspaces, and grows by modules.
 
 ```sh

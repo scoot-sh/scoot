@@ -64,11 +64,15 @@ has `share/fonts/truetype/DejaVuSans.ttf`), or run the flake's
 `scootbar-demo`, which gives it DejaVu Sans by default
 (see [Enable it](./index.md#enable-it)).
 
-**A font on a read-only mount is mapped, not copied**: on NixOS only the
-pages of the glyphs drawn are resident. Any other font (your
-`~/.local/share/fonts`, `/usr/share/fonts`) is read into the bar's memory
-once, costing its size (about 740 KB for DejaVu Sans, 32 MB or more for a
-CJK font). The file is read at start and on every
+**Replacing the font file under a running bar cannot crash it**: the font is
+mapped (only the pages drawn stay resident, shared with every other program
+using it) only when root-owned, with no write bit, on a read-only mount
+(NixOS's `/nix/store`); everywhere else — including a writable file seen
+through a read-only view (`ProtectHome=read-only`, flatpak's
+`/run/host/fonts`, a read-only bind mount) — it is read into the bar's
+memory once, costing its size (about 740 KB for DejaVu Sans). A mapped file
+truncated in place (what `cp` over the file in use does) would kill the bar
+with `SIGBUS`, which is why the read path exists. The file is read at start and on every
 reload: changing `bar.font` (or any option) and running
 `scootbar msg reload` swaps it live.
 
@@ -410,7 +414,8 @@ what is now the case: `{"type":"bar","visible":false}`.
 
 ### Not built: auto-hide
 
-There is no auto-hide: a sensing strip at the edge would cost a surface,
+There is no auto-hide: auto-hide was decided against for now, not measured —
+a sensing strip at the edge would cost a surface,
 a buffer, and pointer wakeups even when unused, against a key bind that
 toggles the bar for nothing. Bind `toggle` (above) instead.
 
@@ -534,7 +539,8 @@ opacity = 0.9
   is still the protocol's, and the corner pixels are the only transparent
   ones.
 - **Opaque region**: an opaque bar tells the compositor which pixels are
-  opaque, so it can skip blending under them. A translucent bar declares
+  opaque, so it can skip blending under them (all of a square bar; all but
+  the four corner squares of a rounded one). A translucent bar declares
   none: the compositor blends all of it, which is the cost of the option.
 - **The radius is cut back to fit**: `--height` below twice the file's
   `radius` (the flag replaces the file's height), or a compositor giving
@@ -542,11 +548,14 @@ opacity = 0.9
   holds.
 - **Text is kept out of the corners, not clipped to them**: the layout
   clears the bar's ends by the radius (see [Layout](./configure.md#layout)), so no ink
-  is near a corner whatever `padding` is. A bar whose radius is 0 loses nothing.
+  is near a corner whatever `padding` is, at a cost of the radius less half a
+  padding of room at each end. A bar whose radius is 0 loses nothing.
 - **Corners are not clickable**: the surface's input region is the rounded
-  shape, so a click in a cut corner reaches what is
+  shape in logical pixels (at a fractional scale it can differ from the drawn
+  edge by one device pixel), so a click in a cut corner reaches what is
   behind the bar (the wallpaper, a window under a bar that does not reserve
-  space) instead of an invisible bar. A compositor that ignores input regions leaves
+  space) instead of an invisible bar. scoot honors `wl_surface.set_input_region`
+  on layer surfaces. A compositor that ignores input regions leaves
    the corners clickable, which is the protocol's fallback.
 - **Popups round separately**: `[bar] radius` never rounds a popup; that is
   `[bar] popup-radius` ([Popups](./modules.md#popups)), which follows this radius when
@@ -571,7 +580,9 @@ sets (at most one):
 
 `icon-path` takes the `d` attribute of an SVG `<path>`: `M m L l H h V v
 C c S s Q q T t A a Z z` with implicit repeats and shorthand numbers.
-A bad path is an error naming the byte it stopped at and the config key.
+A number that is not finite or past 1,000,000, a path not starting with
+`M`, or one that draws nothing is refused, naming the byte it stopped at
+and the config key (e.g. `clock.icon-path: not usable SVG path data: at byte 7: expected a number`).
 The bounds are 16 KiB of text, 1024 commands, and 4096 segments.
 
 The path has no size of its own, so `icon-viewbox = "min-x min-y width height"`
@@ -581,19 +592,23 @@ into the icon's square with SVG's `xMidYMid meet`: scaled uniformly, centered.
 
 The size is the **em in device pixels**, rounded, so the icon is as tall as the
 text's em at whatever scale the output is at. It is drawn tinted with the theme token of the
-view's class (`normal` `fg`, `warn` `accent`, `urgent` `urgent`, `muted` `dim`).
+view's class (`normal` `fg`, `warn` `accent`, `urgent` `urgent`, `muted` `dim`),
+so it follows the theme like the text beside it.
 A gap of one space of the primary
-font follows it when text does.
+font follows it when text does. The fill rule is SVG's default `nonzero`:
+a hole wound the other way cancels, same-direction overlap saturates.
 
 The bitmap is cached per (icon, size) in one arena of at most 4 MiB and 16
-entries; past either the cache is dropped and refilled from what is drawn next,
-and a size past 512 pixels draws nothing and takes no room. A path icon
+entries; past either the cache is dropped and refilled from what is drawn next —
+a burst of work at the next draw when several modules and scales miss together,
+never per frame in steady state — and a size past 512 pixels draws nothing and takes no room. A path icon
 costs microseconds once per (icon, size) and nothing per frame.
 
 ## Image icons
 
 `icon-image = "/abs/path.png"` (an absolute path; a relative one is refused) in
-a build with the **`icon-image`** feature. Decoded once,
+a build with the **`icon-image`** feature. Decoded once, using the `png`
+crate the tree already carries (`0.18`, MIT OR Apache-2.0, no new package),
 when the config is read (so a bad file is a refused reload naming
 `clock.icon-image`, with the running bar untouched), and dropped with the module at the next
 reload.
@@ -607,10 +622,13 @@ the config error says so, as for a module that is not built.
 
 **Where it runs**: on the daemon's main thread, when the config is read (start-up
 and every `scootbar msg reload`), so a large file stalls the bar for as long as
-it takes to decode. Nothing runs per frame.
+it takes to decode (10.7 ms for a 1024x1024 RGBA image, 24 ms worst case).
+Nothing runs per frame.
 
 Bounded like the font loader: must be a regular
-file, at most 8 MiB; the decoder has a 16 MiB allocation budget and the header's
+file (a FIFO or device is refused without a read; a symlink loop is the
+kernel's `ELOOP`), at most 8 MiB (a file that grew past that since `fstat`
+is cut and refused); the decoder has a 16 MiB allocation budget and the header's
 size is checked before any pixel buffer exists (at most 1024 x 1024).
 **Ignored on purpose**: gamma (`gAMA`), `sRGB`, ICC profiles and text chunks:
 the pixels are taken as stored. Adam7-interlaced files and APNG show the default
@@ -621,7 +639,8 @@ an animated PNG shows its default image.
 The image is fitted
 into the em-sized square keeping its aspect ratio, centered, with transparent
 margins, and drawn source-over with its own colors (not tinted). A full-color
-SVG is converted to PNG ahead of time: **no SVG files in the bar**.
+SVG is converted to PNG ahead of time (the Nix module can convert SVG to PNG
+in a derivation): **no SVG files in the bar**.
 
 ## Fonts: what the real ones do
 

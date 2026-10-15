@@ -249,7 +249,8 @@ to be installed: the Nix module's check runs it over every rendered file
 (`checks.<system>.scootbar-modules`).
 Modules that report themselves unavailable at start (the clock without a
 time zone database, say) print their note as a start does and are left out;
-that is not a failure.
+that is not a failure. It moves startup code into a function the start also
+uses; nothing is on a per-frame path.
 
 
 
@@ -377,7 +378,8 @@ now and only changes follow, so to read the state and then follow it,
 the two; this one at worst repeats one the `query` already shows). A `module` event is a `query` entry with `"type":"module"`,
 sent when that module's view changed, once per output that shows it; an
 `output` event is `{"type":"output","change":"added"|"removed","name":...}`.
-Events are **coalesced to the frame rate**: a batch goes out at
+Events are **coalesced to the frame rate**: a module that changes a hundred
+times in a frame is told once, with its latest view, and a batch goes out at
 most every 16 ms. A reload
 tells every module again. A subscribed connection serves no further requests
 (it gets one error line, however many it sends), at most 4 may be subscribed
