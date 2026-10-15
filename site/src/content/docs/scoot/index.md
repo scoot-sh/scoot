@@ -199,9 +199,9 @@ second output's own pixels). Under `--tty` every connected monitor is
 an output like these, named after its connector, placed left to right,
 added and removed as monitors plug and unplug.
 
-What it is not yet: outputs line up left to right (no position
-setting; scale and mode are set per output in the file, not from
-`wlr-randr`); new windows open on the output under the pointer.
+What it is not yet: outputs place themselves left to right unless a
+`position` pins one (positions, scale and mode are set per output in
+the file, not from `wlr-randr`); new windows open on the output under the pointer.
 Stepping across outputs is bound by default (`Super+comma` /
 `Super+period`, wrapping left and right — see [Outputs](./outputs.md)).
 A returning monitor gets its windows back: when an output is removed
