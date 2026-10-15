@@ -143,7 +143,7 @@ scoot msg reload
 
 Keybindings reload live — like the layout, outputs, appearance, floating
 rules and autostart. Only `[tty] gpu`, `[renderer] backend`,
-`[xwayland] enabled` and an output's `mode` need a restart, and a reload
+`[xwayland] enabled` and `[virtual_input]` need a restart, and a reload
 says so by name instead of silently ignoring them. A mistake never stops
 scoot from starting: it logs the problem and uses the default.
 

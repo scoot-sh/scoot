@@ -13,8 +13,8 @@ re-applies live with `scoot msg reload`. No config file yet?
 `--config PATH` loads a TOML file explicitly. Without it, scoot looks
 for `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml`, and runs on built-in defaults if
-neither exists. Eleven optional tables: `[layout]`, `[appearance]`,
-`[output]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
+neither exists. Twelve optional tables: `[layout]`, `[appearance]`,
+`[output]`, `[[outputs]]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
 `[autostart]`, `[floating]`, `[wallpaper]`, `[binds]` — plus any number of
 `[[window_rule]]` entries. Every field in every table is itself
 optional and defaults independently, so a config that only sets `gap`
@@ -74,7 +74,8 @@ No file watching: a live-edited config would fire mid-keystroke, while
 both triggers above say exactly when.
 
 **Applied live:** layout (gap, column widths, default width), output
-scales, appearance (ring, background, corners, cursor), the whole
+scales and positions, `[[outputs]]` modes (a live resize per backend —
+`--nested` refuses them, the host owns the size), appearance (ring, background, corners, cursor), the whole
 `[binds]` table, new `[autostart]` spawn entries, `[floating]` and the
 `[[window_rule]]`s (for windows that map after the reload), `[wallpaper]`
 (handed to scootbg again), `[xwayland] fractional`. The reply names
@@ -86,9 +87,8 @@ each applied field:
 ```
 
 **Refused, explicitly, pending a restart:** `[tty] gpu`, `[renderer]
-backend`, `[xwayland] enabled`, `[virtual_input] enabled`,
-`[virtual_input] binds`, and an
-`[[outputs]]` entry's `mode` — all six take effect on restart, and each
+backend`, `[xwayland] enabled`, `[virtual_input] enabled` and
+`[virtual_input] binds` — all five take effect on restart, and each
 refusal says so. A reload
 that cannot load the file at all answers an `error` instead, keeps the
 running config untouched, and logs — never defaults, never a
