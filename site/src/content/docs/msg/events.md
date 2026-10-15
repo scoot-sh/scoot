@@ -3,16 +3,15 @@ title: Events
 description: "Subscribe to output, keyboard, workspace, lock and look events over IPC."
 ---
 
-Subscribe instead of polling: dedicate a connection to the event stream and learn about outputs, layouts, workspaces, the session lock and the active look as they change.
+Subscribe instead of polling: dedicate a connection to the event stream for outputs, layouts, workspaces, the session lock and the active look.
 
 ## Events
 
-A connection that wants push notifications subscribes instead of polling.
 `subscribe` names the event kinds it wants (`output`, `keyboard`,
-`workspace`, `lock`, `look` — the five
-kinds; `scoot msg subscribe` with no names sends `output`; an empty
-`events` list on the raw socket is refused); the reply echoes the subscription; and
-afterwards that connection carries events until the session ends:
+`workspace`, `lock`, `look`;
+`scoot msg subscribe` with no names sends `output`; an empty
+`events` list on the raw socket is refused); the reply echoes the subscription,
+and afterwards that connection carries events until the session ends:
 
 ```sh
 $ scoot msg subscribe
@@ -36,10 +35,9 @@ $ scoot msg subscribe look
 ```
 
 `scoot msg subscribe` prints the answer, then one compact JSON object per
-line per event, until killed or the connection ends — so a desktop
-notification is one pipe away (`scoot msg subscribe | ... notify-send`), and
-an agent learns about a monitor leaving without polling `windows`. It exits
-0 at a clean end of stream; re-run to resubscribe.
+line per event, until killed or the connection ends — a desktop
+notification is one pipe away (`scoot msg subscribe | ... notify-send`).
+It exits 0 at a clean end of stream; re-run to resubscribe.
 
 Three rules, matching the request/reply contract beside them:
 
@@ -49,24 +47,23 @@ Three rules, matching the request/reply contract beside them:
   requests — they pipeline, so one is enough for any number of them.
 - **Filtering is by kind, not by field.** The server sends every event of
   the subscribed kinds, and the client filters or debounces further
-  itself. In particular the removal/add pair below (plus a restore when
-  the monitor held windows) fires on every monitor standby too (a
-  routine unplug to scoot) — that is accepted, and it is the difference
+  itself. The removal/add pair below (plus a restore when
+  the monitor held windows) fires on every monitor standby too;
+  that is accepted, and it is the difference
   from a notification pushed at the user unconditionally, which is why
   scoot still draws and sends nothing itself. `output_changed` fires
-  only on an applied resize, never on standby (the mode is unchanged
-  then), and a refused resize fires nothing.
+  only on an applied resize, never on standby, and a refused resize fires nothing.
 - **The same socket and the same credentials.** There is no second channel:
   a subscriber connects to the same `0600`, same-user control socket every
   other client uses.
 
 **`output_added`** — an output was added: a monitor plugged in (or back
-in) under `--tty`. It fires on **every** add — a monitor never seen this
-session, a replug of one that held no windows, and a replug that brings
+in) under `--tty`. It fires on **every** add — a first plug, a replug
+that held no windows, and a replug that brings
 windows back, which sends `output_added` first and `output_restored`
-after it. So "the connected set changed" is `output_added` plus
+after it. "The connected set changed" is `output_added` plus
 `output_removed`; `output_restored` alone misses a first plug and an
-empty monitor's replug, since neither has windows to restore. It is sent
+empty monitor's replug. It is sent
 once the output is laid out, so an `outputs` query answered after it
 lists the output. The outputs a session starts with come before any
 subscriber can exist: read `outputs` once for the baseline, then apply
@@ -98,21 +95,18 @@ the removal filed it; `moved` says how many still-open windows actually
 went back — windows moved by hand or closed in between stay where they
 are. `adopter_prev_active` / `adopter_active` are the adopter's view before
 the restore and after it returns to its pre-adopt view (`null` when the
-adopter itself is gone, e.g. a chained unplug whose middle monitor never
-returned — then nothing moved either).
+adopter itself is gone — then nothing moved either).
 
 **`output_changed`** — an output's mode changed in place: the same
-connector at a new framebuffer size, with the scale it keeps running at (a
-mode change never changes the scale). This is the re-probe resize — a
-`--tty` hotplug offering a new mode for a connector that stays connected
-(a VM window moving between displays of different densities), or a
+connector at a new framebuffer size, keeping its scale. This is the re-probe resize — a
+`--tty` hotplug offering a new mode for a connected
+connector (a VM window moving between displays of different densities), or a
 `--nested` host window being resized — not a removal: no workspace is
 adopted, nothing moves, and no restore follows. A script watching density
 recomputes the scale it wants from `width` / `height` and applies it with a
-config reload (`output.scale` and `outputs.<name>.scale` apply live);
-polling `outputs` gives the same numbers, this just says when to look. It
-fires once per applied resize, after the windows are re-laid-out at the new
-size; a resize the render target refuses fires nothing.
+config reload (`output.scale` and `outputs.<name>.scale` apply live).
+It fires once per applied resize, after the windows are re-laid-out at the new
+size; a refused resize fires nothing.
 
 | Field | Meaning |
 | --- | --- |
@@ -122,11 +116,10 @@ size; a resize the render target refuses fires nothing.
 | `scale` | The scale the output keeps running at — the scale to recompute *from*. |
 
 **`keyboard_changed`** — the seat keyboard's effective layout (xkb group)
-changed: the same `name` and `index` the `keyboard` query answers with
-(see [What the replies carry](#what-the-replies-carry)), naming the layout
+changed: the same `name` and `index` the `keyboard` query answers with,
+naming the layout
 now in effect. No standard Wayland protocol reports this to an unfocused
-client — `wl_keyboard` sends the keymap and the modifier group only to the
-client holding keyboard focus, which a bar never does — so this event (and
+client, so this event (and
 the query) is the channel a layout indicator reads.
 
 It fires once per change, never per keypress: typing on one layout sends
@@ -134,14 +127,12 @@ nothing, and one group switch sends exactly one event. Rapid successive
 switches each send their own — every event names the layout in effect when
 it was sent, so a reader that processes them in order ends where the
 keyboard is. As with the query, this is read-only: nothing over IPC
-switches the layout, and the bar's click action has nothing to call — the
-group moves only through the keymap's own mechanics (a toggle key from the
-`XKB_DEFAULT_OPTIONS` the session started with). Layout switching UI and
+switches the layout, and scoot has no layout-switch bind or action — the
+group moves only through the keymap's own mechanics (a toggle key from the `XKB_DEFAULT_OPTIONS` the session started with). Layout switching UI and
 per-window layouts are out of scope.
 
 A subscriber that stops reading is disconnected rather than buffered
-without bound: past the same 1 MiB queued-reply bound a connection
-observes, or with no byte leaving for the same 10-second stall window, the
+without bound: past the same 1 MiB queued-reply bound, or with no byte leaving for the same 10-second stall window, the
 compositor shuts the connection down and drops the subscription. Output
 removal never waits for a subscriber. A client that disconnects itself
 leaves no record behind.
@@ -149,10 +140,8 @@ leaves no record behind.
 **`workspaces`** — one output's workspace occupancy changed: which of its
 workspaces hold windows, as a full snapshot rather than a delta, so a
 subscriber that missed one is never wrong. What a bar's workspace module
-draws (dimming the empty ones) without polling `windows`, and what tells an
-agent "workspace 3 now has windows" the same way. No standard Wayland
-protocol reports this to an unfocused client — `ext-workspace-v1` carries
-the list, positions and the one `active` bit, but no "holds windows" bit,
+draws without polling `windows`. No standard Wayland
+protocol reports the "holds windows" bit to an unfocused client — `ext-workspace-v1` carries the list, positions and the one `active` bit but not that bit —
 and no other standard protocol maps a toplevel to a workspace.
 
 | Field | Meaning |
@@ -165,28 +154,23 @@ and no other standard protocol maps a toplevel to a workspace.
 One event per output whose snapshot moved — a window opened, closed or
 moved between workspaces, the active workspace switched, or an output
 added (a removed output sends nothing: its removal is already an
-`output_removed`, and there is no occupancy left to report). Coalesced to
-at most one event per output per frame tick, however fast windows churn: a
-client opening and closing windows at its maximum rate is one event per
-tick, not an event stream. A fresh subscription starts silent, like
+`output_removed`). Coalesced to
+at most one event per output per frame tick, however fast windows churn. A fresh subscription starts silent, like
 `keyboard` — read `windows` once for the baseline (the counts are the
 histogram of each window's `workspace` on its `output`) and apply snapshots
 after it — so subscribing never replays the unsubscribed interval as one
 change.
 
 **`lock_changed`** — the session locked or unlocked: the same `locked`
-flag the `locked` query answers with (see [What the replies carry](#what-the-replies-carry)),
-naming the state it moved to. What tells an agent "injected input now
-reaches the lock screen" without polling, and what a clipboard watcher
-leans on instead of its probe interval. No standard Wayland protocol
-reports this to an unfocused client — `ext-session-lock-v1` events go
-only to the lock client itself — so this event (and the query) is the
+flag the `locked` query answers with,
+naming the state it moved to. No standard Wayland protocol
+reports this to an unfocused client, so this event (and the query) is the
 channel that watches the lock.
 
-It fires once per transition, never per request: a lock that is refused
-(another client holds the session) changes nothing and sends nothing, and
+It fires once per transition, never per request: a refused lock
+changes nothing and sends nothing, and
 a takeover of an already-locked session is no transition either. A fresh
-subscription starts silent, like `keyboard` and `workspace` — read
+subscription starts silent — read
 `locked` once for the baseline and apply changes after it — so
 subscribing never replays the unsubscribed interval as one change. As
 with the query, this is read-only: nothing over IPC locks or unlocks the
