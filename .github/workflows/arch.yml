@@ -1,5 +1,5 @@
 # scoot Arch packages: the PKGBUILDs (release and `-git`) for scoot,
-# scootbg and scootbar (docs/backlog/packaging/arch-package.md).
+# scootbg and scootbar (docs/backlog/resolved/arch-package-done.md).
 #
 # WHAT IT DOES: builds all six PKGBUILDs under `packaging/arch/` in an
 # Arch container with `makepkg`, lints each PKGBUILD and each built

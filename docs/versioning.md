@@ -141,8 +141,8 @@ allowed there.
 The release PR is also where the distro packaging moves: bump `pkgver`
 in the Arch release PKGBUILDs (with `.SRCINFO`) and `Version` in the RPM
 specs to the proposed version before merging. The Arch, Debian and RPM
-workflows run on the release tag (they are paused on pull requests until
-the packages are published), and their gates fail when the packaging lags
+workflows are manual-only (`workflow_dispatch`): run each by hand before
+shipping a package, and their gates fail when the packaging lags
 the workspace version. Checksums are filled in once the tag's tarball
 exists. The site's
 [cut a release](https://www.scoot.sh/reference/cut-a-release/) page has the

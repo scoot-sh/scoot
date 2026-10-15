@@ -107,4 +107,4 @@ Both completion steps above held on re-verification: `crates/scoot/Cargo.toml`
 carries `default = ["gpu-scanout", "xwayland"]`, and `flake.nix` names
 `scoot-xwayland` only in comments describing the collapse. The "stays open
 until G lands that collapse" condition is satisfied by the stream G section
-in this same entry. Resolved via `scripts/backlog resolve xwayland-always`.
+in this same entry. Resolved on 2026-10-14.

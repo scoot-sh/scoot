@@ -1,5 +1,5 @@
 # scoot releases: the tag-triggered release job
-# (docs/backlog/packaging/release-artifacts.md, docs/versioning.md).
+# (docs/backlog/resolved/release-artifacts-done.md, docs/versioning.md).
 #
 # WHAT IT DOES: pushing a release tag (`v0.2.0`: one tag, the
 # repository's one version) builds every binary -- scoot (with `scoot

@@ -231,5 +231,4 @@ PR #208), and the two remaining items its "What done looks like" named —
 position and a live mode change — are in
 `../resolved/output-position-and-live-mode-done.md` (resolved 2026-10-08).
 `crates/scoot/src/compositor/config.rs` carries per-output position, and
-the README "Not yet" list has no monitor bullet left. Resolved via
-`scripts/backlog resolve multi-output-remainder`.
+the README "Not yet" list has no monitor bullet left. Resolved on 2026-10-14.

@@ -1,7 +1,7 @@
 #!/bin/sh
 # vendor-release.sh: stage (and tar) a vendored-sources release tree that
 # builds with no network, for distro packagers and for the tag-triggered
-# release job ([release-artifacts](../docs/backlog/packaging/release-artifacts.md),
+# release job ([release-artifacts](../docs/backlog/resolved/release-artifacts-done.md),
 # which calls this script rather than reimplementing it).
 #
 # What it produces, in --out (default ./target/vendor-release), where
@@ -107,16 +107,18 @@ Prerequisites (not vendored): a Rust toolchain >= 1.88
 (workspace rust-version; rustup or a distro toolchain that new),
 plus the system libraries in the docs site's packaging page
 ("package scoot offline": libinput, libseat, libudev, libpixman-1,
-libxkbcommon for the default build; libgbm as well with
---features gpu-scanout).
+libxkbcommon). The GPU scanout tier is compiled in by default and
+reaches libgbm at run time (dlopen, never linked), so no libgbm
+package is needed to build.
 
 Build (from this directory):
 
     cargo build --workspace --locked --offline
 
-Features: --features gpu-scanout for the GBM scanout tier (links libgbm),
---features xwayland for XWayland support (needs the Xwayland binary on
-PATH at run time, not at build time). THIRD-PARTY-LICENSES lists every
+Features: the default build carries the GBM scanout tier and XWayland
+support (needs the Xwayland binary on PATH at run time, not at build
+time). --no-default-features is the minimal CPU-only build without
+either. THIRD-PARTY-LICENSES lists every
 locked dependency and its license (scoot itself is MIT).
 EOF
 
