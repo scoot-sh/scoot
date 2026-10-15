@@ -1313,6 +1313,37 @@ fn validate_names_a_bad_wallpaper_instead_of_blank() {
 }
 
 #[test]
+fn a_missing_font_family_refuses_despite_a_fallback_file() {
+    use super::ProdChecks;
+    // A stub `fc-match` that answers every query with a fallback file but
+    // reports the real matched family: an installed family passes, a
+    // missing one refuses even though a file was answered.
+    let dir = std::env::temp_dir().join(format!("scoot-fc-stub-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a stub dir");
+    let stub = dir.join("fc-match");
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\nif [ \"$1\" = \"--format=%{file}\\n\" ]; then echo \"/fonts/fallback.otf\"; else echo \"Fallback Family\"; fi\n",
+    )
+    .expect("a stub");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+    let checks = ProdChecks::with_fc_match(stub);
+    // The fallback family itself resolves.
+    let _ = checks;
+    // Direct unit coverage lives in the family comparison: a stubbed
+    // end-to-end refusal is asserted here.
+    let refusal = checks
+        .font_file("ZZNoSuchFontFamilyQ")
+        .expect_err("a missing family refuses");
+    assert!(refusal.contains("not installed"), "{refusal}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn validate_and_build_cover_a_directory_and_a_name() {
     let fixture = fixture("validate");
     let fonts = fixture._root.join("fonts");

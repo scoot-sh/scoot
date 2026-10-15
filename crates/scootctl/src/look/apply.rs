@@ -110,6 +110,7 @@ impl std::fmt::Display for ApplyFailure {
 
 /// A font family, the wallpaper, or the bar fragment: resolved, backend
 /// missing (a note, never a refusal), or refused.
+#[derive(Debug)]
 pub enum Availability<T> {
     Available(T),
     Unavailable(String),
@@ -1919,6 +1920,17 @@ impl ProdChecks {
             scootbg: None,
             scootbar: None,
             fc_match: None,
+        }
+    }
+
+    /// Test-only: explicit helper paths, so tests pin a stub `fc-match`
+    /// without touching the process environment.
+    #[cfg(test)]
+    pub fn with_fc_match(path: PathBuf) -> Self {
+        Self {
+            scootbg: None,
+            scootbar: None,
+            fc_match: Some(path),
         }
     }
 }

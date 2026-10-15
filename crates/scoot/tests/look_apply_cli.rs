@@ -43,7 +43,7 @@ urgent = "#E87F6A"
 [fonts]
 ui = "DejaVu Sans"
 sans = "DejaVu Sans"
-mono = "DejaVu Sans Mono"
+mono = "JetBrains Mono"
 size = 10
 
 [shape]
