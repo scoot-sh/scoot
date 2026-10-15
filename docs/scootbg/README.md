@@ -1,6 +1,7 @@
 # scootbg
 
-A wallpaper daemon for Wayland, written in Rust.
+The lightest wallpaper daemon for Wayland, written in Rust, in place of
+`awww` (formerly `swww`), `swaybg`, `hyprpaper`, `wpaperd` and friends.
 It shows a color or an image on each output, and one command changes it.
 
 It is built for scoot and set up by scoot's own config, but it is not tied

@@ -4,7 +4,7 @@ description: "Every scootbg command, when it returns, apply-config, query, and e
 ---
 
 Every `scootbg` command, what it waits for, and how it fails. What scootbg
-is for is in [Overview](./index.md); in scoot, a
+is and why it exists is in [Overview](./index.md); in scoot, a
 `[wallpaper]` section runs it for you
 ([The `[wallpaper]` section](./index.md#the-wallpaper-section)).
 
@@ -55,15 +55,21 @@ JSON line (`{"type":"version","protocol":1,"version":"X.Y.Z"}`).
 ## When a command returns, and its exit status
 
 **`set` and `clear` return once it is on screen:** every targeted output
-shows the change and the compositor has processed it, so a screenshot taken straight after shows
+shows the change and the compositor has processed it (a `wl_display.sync`
+round trip after the commits), so a screenshot taken straight after shows
 it. `set --workspace` returns once the mapping is preloaded — shown at
 once where its workspace is already active, recorded otherwise — or with
-why its image cannot be shown. With `--transition`, that means once the animation has finished:
-a newer `set`
-mid-transition starts from the frame showing then (no queue). A workspace
+why its image cannot be shown. With `--transition`, that means once the animation has finished: the
+reply waits for the last frame, not the first. A newer `set`
+mid-transition starts from the frame showing then (no queue), and the
+earlier reply arrives once what replaced it is on screen. A workspace
 switch itself answers nothing (no request is in flight): it lands through
-the mapping's transition. An output unplugged meanwhile is left out of that wait; one scootbg has given up on
-(`gave-up` in `query`) is left out and shows nothing, and
+the mapping's transition. An output unplugged meanwhile is left out of that wait; one whose
+surface is not configured yet is waited for, but only until a round trip
+after scootbg made that surface: one the compositor has not configured
+by then no longer holds up the reply (the daemon says so on stderr) and
+is drawn when it is; one scootbg has given up on
+(`gave-up` in `query`, said on stderr) is left out and shows nothing, and
 `set` still exits 0. They print nothing on
 success. **A transition flag without `--transition` is refused** (exit
 2), as is a `--transition` outside `none`/`fade`/`wipe`/`grow`, a
@@ -77,12 +83,17 @@ link, no `curl`, no network, an HTTP error, an error page, a file past
 saying why, and every output keeps what it showed. An animated GIF, APNG
 or animated WebP shows its first frame: at most 64 frames and 64 MiB of
 frames, past which the `set` is refused — pass `--no-animate` for the
-first frame as a still instead.
+first frame as a still instead (playing frame by frame is a follow-up).
+A workspace-mapped animated image shows its first frame the same way
+(caps checked when it is set): `--no-animate` beside `--workspace`
+stills it; a slideshow cannot be mapped per workspace (usage error).
 A `--no-animate` still is live-only: after a restart the caps are checked
 again, so an over-cap animation is refused then and the output loses its
 wallpaper until the next `set`. **The newest request
 wins**: a `set` or `clear` sent while an earlier image is still decoding is
-never undone when that image finishes. Exit status: 0 done; 1 no daemon running,
+never undone when that image finishes; the earlier `set` changes nothing
+and returns 0 once the newer one is on screen, as a replaced color's `set`
+does. Exit status: 0 done; 1 no daemon running,
 unknown output, image that cannot be shown, or drawing failed
 (`scootbg query`'s `draw_error` says why, as the daemon's stderr does);
 2 usage error, a malformed color, an unknown
@@ -90,9 +101,11 @@ unknown output, image that cannot be shown, or drawing failed
 an `--every` without a directory, a `--no-animate` with `--every`, or a
 slideshow with `--workspace`
 included. A `set` that has to scale the image
-first probes the scaler's whole budget
-and fails here when the
-daemon has no room for it
+(`fill`, `fit` or `stretch` when the image's size differs from the output's,
+with any `--filter`) first probes the scaler's whole budget — the output,
+each scaled axis's weight tables, and the row scratch when both axes scale
+— and fails here when the
+daemon has no room for it (an address-space limit, strict overcommit)
 instead of ending the daemon; the outputs keep what they showed and the
 next `set` retries. See
 [Troubleshooting](./troubleshooting.md#symptoms).
@@ -102,31 +115,38 @@ next `set` retries. See
 ## Slideshows
 
 **`scootbg set DIR --every DURATION [--shuffle]`** cycles a directory's
-regular files, one every `DURATION`: it is listed once, when set, so a file added later starts
+regular files, one every `DURATION`, on a single timer, without polling
+the directory: it is listed once, when set, so a file added later starts
 showing after the next `set` of the directory. `DURATION` is a number and
 `s`, `m`, `h` or `d`, such as `30m`: at least `1m`, whole minutes, at most
 `7d`. The files go sorted by name, or shuffled once with `--shuffle`;
 `--mode`, `--fill`, `--filter` and `--transition` apply to every file, as
-for one image.
-An animated
-file shows its first frame, checked per step: at most 64
+for one image: each step animates like one image's `set`. An animated
+file shows its first frame, checked per step like one `set`: at most 64
 frames and 64 MiB of frames, past which that step fails (`draw_failed`
-in `query` until the next one). `--no-animate` with `--every` is a usage error (exit 2).
-A slideshow cannot be
-mapped per workspace: `set DIR --every DURATION --workspace NAME`
-is a usage error (exit 2) — map images or
+in `query` until the next one) — diagnose with `scootbg set FILE` on the
+file itself. `--no-animate` with `--every` is a usage error (exit 2):
+stilling is per image, so still one file at a time. A slideshow cannot be
+mapped per workspace either: `set DIR --every DURATION --workspace NAME`
+is a usage error on the CLI (exit 2) and is refused on the wire — map images or
 colors per workspace instead. At most 10,000 files are listed: a larger directory is
-refused outright (exit 1, naming the cap). So is a directory with an entry that cannot be
+refused outright (exit 1, naming the cap) rather than stalling the
+daemon's loop to list it. So is a directory with an entry that cannot be
 read (exit 1, naming the entry and the operating system's reason). The first file shows before `set` returns, as an image
 does — unless the first file itself cannot be shown, which still starts
-the slideshow (exit 1 saying so). A file that is not an image fails to draw when its turn comes (as a
+the slideshow (exit 1 saying so, and `query` reports the new directory):
+that file fails its turns like any file that is not an image, until the
+next rotation. A file that is not an image fails to draw when its turn comes (as a
 `set` of it would, `draw_failed` in `query` saying why) until the next
 rotation. One slideshow runs at a time. A new `set`, a `clear`, or a
-changed `apply-config` stops it; restarting the daemon shows the last image
+changed `apply-config` stops it (an unchanged section leaves it running,
+like a `set` made since); restarting the daemon shows the last image
 without resuming it. If the directory itself goes away mid-rotation, the
 slideshow stops at the next step — said on the daemon's stderr, and
-`query` no longer reports a `rotation`.
-With no slideshow the timer does not exist. With one, the daemon wakes at most once a minute.
+`query` no longer reports a `rotation` — instead of failing once a
+minute until stopped; a re-created directory starts with a fresh `set`.
+With no slideshow the timer does not exist: no file
+descriptor, no wakeups. With one, the daemon wakes at most once a minute.
 
 > **Symptom:** *`set` says the directory needs `--every`.*
 > A bare directory is only ever a slideshow: `scootbg set DIR` is a
@@ -181,17 +201,24 @@ hash, mode or filter, over
 setting silently not applied.
 
 - **Whichever you changed last wins.** The section is applied only if it
-  changed since the last `apply-config` for that profile. So a `scootbg set` made afterwards keeps showing across restarts
-  and reloads until the section itself changes.
-- **It starts the daemon when none runs**, detached,
-  starting from the section, so the saved state never
-  flashes first. With no daemon and an empty section it starts none.
+  changed since the last `apply-config` for that profile (a SHA-256
+  fingerprint of it, `command` left out, kept in the profile's state
+  file). So a `scootbg set` made afterwards keeps showing across restarts
+  and reloads until the section itself changes. The one order it cannot
+  see: a section removed while scoot is not running and re-added unchanged
+  before the next start counts as unchanged.
+- **It starts the daemon when none runs**, detached (a session of its own,
+  its stderr `apply-config`'s: send that to a file or a log, not a pipe
+  read to its end), starting from the section, so the saved state never
+  flashes first. Two started at once make one daemon, settled by its lock.
+  With no daemon and an empty section it starts none, and records the
+  clear in the profile's state instead.
 - **A running daemon adopts the profile** it is sent, whatever
   `--profile` it started with, so an `[autostart]` `scootbg daemon` ends up
   on scoot's profile too. `scootbg query` reports the profile in use
   (`"profile"`, after `"saving"`).
 - **Another build is reported:** a daemon of another version is a
-  warning, one of another protocol or too old
+  warning (the section is still sent), one of another protocol or too old
   for `apply-config` an error.
 - It returns once every output shows it, as `set` does, and prints nothing
   on success. Exit status: 0 applied or unchanged, and shown; 1 no daemon
@@ -230,35 +257,53 @@ simply waits. `scootbg query` answers, on one line (wrapped here):
 Every key is always present, `null` when not known yet. `mode` is in
 device pixels. `scale` is `wl_output`'s integer scale (a fractional one
 rounded up), and `transform` is `wl_output`'s, counter-clockwise.
-`logical` is the output's size in logical pixels. `surface.scale` is the scale an image is
-drawn at on that surface (`1.5` from
-`wp_fractional_scale_v1`, else an integer) and `surface.pixels` the size in device
+`logical` is the output's size in logical pixels: exact once the surface is
+configured, before that worked out from the mode and the best scale known
+(within a pixel). `surface.scale` is the scale an image, or a color on the
+full-size fallback, is drawn at on that surface (`1.5` from
+`wp_fractional_scale_v1`, else an integer; a color on a single-pixel or
+1×1 buffer is always drawn at 1) and `surface.pixels` the size in device
 pixels an image is drawn at, both `null` until the surface is
 configured. `surface.state` is `waiting` (the
 output has not reported itself yet), `pending`, `configured` (with `size`),
 `closed` (the compositor closed it; scootbg makes it again, once) or
-`gave-up` (closed twice: scootbg has
-stopped trying on that output until it is unplugged and plugged back
-in). `shows` is what the output has on
+`gave-up` (closed a second time over the output's life: scootbg has
+stopped trying on that output, says so on stderr, and the other outputs
+are unaffected; it lasts until that output is unplugged and plugged back
+in, which makes it a new output). `shows` is what the output has on
 screen: `{"color":"#rrggbb"}` (lowercase),
 `{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
-with `"url":"https://..."` beside `image` for a download,
+with `"url":"https://..."` beside `image` for a download (the link the
+cached file came from),
 or `null` for nothing. `draw_failed` is `true` when the last attempt to
-draw what the output should show failed,
-which tells that `null` apart from a
+draw what the output should show failed (an image that exists but cannot
+be decoded, a buffer too large, a scaling draw the daemon had no room
+for, a link that would not download), which tells that `null` apart from a
 `clear`; the next request for the output, or a new size, retries.
-`draw_error` says why while `draw_failed` is `true`, and is `null` otherwise; its wording may change. `transition`
+`draw_error` says why while `draw_failed` is `true` (the error the
+daemon's stderr gives, such as `"no such file"`, `"shared memory:
+Cannot allocate memory (os error 12)"`, or `"out of memory: cannot
+allocate ... bytes for scaling"`), and is `null` otherwise; it is
+for a person or an agent to read, and its wording may change. `transition`
 is the animation running on the output now (`"fade"`, `"wipe"` or
-`"grow"`, else `null`). While a
-slideshow runs, a `rotation` object
+`"grow"`, else `null`; `none` lands at once and is never reported). While a
+slideshow runs (`scootbg set DIR --every`, below), a `rotation` object
 follows `profile`: `{"directory":"/home/me/wallpapers","every_secs":1800,
-"shuffle":false,"files":12}`. `workspace` names the workspace active on the output now (`"1"`, `"2"`,
-... on scoot), or `null` while unknown. After the outputs, `workspaces` lists the
-live per-workspace mappings (see [A wallpaper per workspace](./workspaces.md)). `saving`
+"shuffle":false,"files":12}` — what it cycles, every how many seconds, in
+what order, and how many files that is. Which file shows now is each
+output's `shows`, as for a `set`. Absent while no slideshow runs, so a
+static wallpaper's reply is what it was. `workspace` names the workspace active on the output now (`"1"`, `"2"`,
+... on scoot), or `null` while unknown — no mapping, no workspace
+protocol, or no events yet. After the outputs, `workspaces` lists the
+live per-workspace mappings: each with its `output` (`null` for every
+output), its `workspace`, and what it shows while that workspace is
+active (see [A wallpaper per workspace](./workspaces.md)). `saving`
 (after the list) is `false` while `set` and `clear` are not saved for
 the next start (see [Restore](./restore.md#restore)), and `profile` is the profile
 whose state is restored and saved. New keys
-may be added; none changes meaning within protocol 1. The
+may be added; none changes meaning within protocol 1. If the daemon cannot
+accept clients (out of file descriptors, say), it keeps the wallpaper up,
+says so once on stderr, and retries every second rather than exit. The
 control protocol itself (one JSON object per line, for scripts that skip
 the CLI) is in [README.md](https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/README.md#the-control-protocol).
 scoot's `[wallpaper]` section, which runs `apply-config`, is in

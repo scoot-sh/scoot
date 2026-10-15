@@ -3,8 +3,6 @@ title: Wallpaper from a link
 description: "Point the wallpaper at a URL: download-once caching, sha256 pins, and every failure mode."
 ---
 
-Point `set` — or scoot's `[wallpaper]` image — at a link.
-
 ## A wallpaper from a link
 
 Point `set` (or scoot's `[wallpaper] image`) at an `http://` or `https://`
@@ -26,13 +24,18 @@ scootbg set https://example.com/hills.jpg --sha256 9f86d081884c7d659a2feaa0c55ad
 **How it works.** The cache is `$XDG_CACHE_HOME/scootbg/`
 (`~/.cache/scootbg/` when `XDG_CACHE_HOME` is unset, empty or relative),
 one file per URL, named for the URL's SHA-256. A file already there is
-shown as is; otherwise scootbg runs
-`curl --fail --location` (redirects followed, five at most),
-capped at 32 MiB and sixty seconds, verifies the pin when
+shown as is (re-checked against `sha256` when one is pinned); otherwise
+the worker thread — never the event loop — runs
+`curl --fail --location` (redirects followed, five at most; `http` and
+`https` only), capped at 32 MiB and sixty seconds, verifies the pin when
 given, checks the bytes start as PNG, JPEG, GIF or WebP, and renames the
-temporary file into place atomically. An error page, a file past the cap, a hash mismatch, no network, or
-no `curl` is an error naming the URL, and nothing is cached. A failed download is tried again
-on a new `set`, any `apply-config`, a reconfigured output, or a restart;
+temporary file into place atomically. Two daemons racing on one entry
+both download; the rename settles it, and the cache never holds a partial
+file. An error page, a file past the cap, a hash mismatch, no network, or
+no `curl` is an error naming the URL, and nothing is cached — a fixed
+link is picked up by the next request. A failed download is tried again
+on a new `set`, any `apply-config` (even an unchanged reload — scoot
+sends one per reload), a reconfigured output, or a restart;
 nothing polls. Prefer `https`, and pin `sha256` so a changed byte fails
 loudly instead of landing on screen.
 
