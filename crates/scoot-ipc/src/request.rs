@@ -25,14 +25,19 @@ pub enum PointerButton {
     Forward,
 }
 
-/// A `reload`'s scope: what it re-reads.
+/// What a look-scoped reload reply reports: which reload ran.
 ///
-/// `None` (absent on the wire) is the plain reload: the file and the look
-/// layer both. `Some(Look)` re-reads only the look layer, under a snapshot
-/// of the file from the last successful plain load. Any other scope string
-/// fails the decode, so an older server meets a newer scoped client with an
-/// ordinary `Error` like any unknown request tag -- never a silent plain
-/// reload (which would apply the pending edits the scope meant to skip).
+/// Only `Look` exists. It is the `scope` field of
+/// [`Response::Reloaded`](crate::Response::Reloaded): absent on a plain
+/// reload, `"look"` on a look-scoped one. It is response-only: the request
+/// half is two distinct tags ([`Request::Reload`] and
+/// [`Request::ReloadLook`]), because a `scope` field on the request would
+/// not protect an older server. Serde's internally-tagged unit variants
+/// drain and ignore extra fields, so an old compositor would decode
+/// `{"type":"reload","scope":"look"}` (and even `"scope":"bogus"`) as a
+/// plain `Reload` and apply the pending edits the scope exists to skip.
+/// A distinct tag fails that decode with an ordinary unknown-request
+/// `Error` instead, never a silent plain reload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReloadScope {
@@ -131,19 +136,26 @@ pub enum Request {
     /// Re-read the config file the session started from and re-apply what
     /// can be re-applied live (layout gap, appearance, keybindings).
     ///
-    /// Without a scope both the file and the look layer are re-read; with
-    /// `"look"` only the look layer is, merged under a snapshot of the file
+    /// Plain reload: both the file and the look layer are re-read. A look
+    /// swap uses [`Request::ReloadLook`] instead, never this with extra
+    /// fields. Additive like `MoveWindowToWorkspaceIndex`: a client that
+    /// never sends the new tag decodes exactly as before, and this tag is
+    /// byte-for-byte the old shape, so no `PROTOCOL_VERSION` bump for the
+    /// request half (the reply half's `Reloaded` variant is what moved the
+    /// version long ago -- see `Response::Reloaded`).
+    Reload,
+    /// Re-read only the look layer, merged under a snapshot of the file
     /// from the last successful plain load -- so a look swap never applies
-    /// pending edits. Additive like `MoveWindowToWorkspaceIndex`: a client
-    /// that never sends this tag decodes exactly as before, and a request
-    /// that omits `scope` is the old shape exactly, so no
-    /// `PROTOCOL_VERSION` bump for the request half. (The reply half is a
-    /// new `Response` variant, which is why the version still moved -- see
-    /// `Response::Reloaded`.)
-    Reload {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        scope: Option<ReloadScope>,
-    },
+    /// pending edits, spawns no autostart entry and swaps no binds.
+    ///
+    /// A distinct tag, not a `scope` field on [`Request::Reload`]: an
+    /// older server answers it with an ordinary unknown-request `Error`
+    /// and keeps serving, never a silent plain reload (which would apply
+    /// the pending edits the scope exists to skip). Additive like any new
+    /// tag, so no `PROTOCOL_VERSION` bump: a client that never sends it
+    /// speaks byte-for-byte what it did before. Answered by
+    /// `Response::Reloaded` with `"scope":"look"`.
+    ReloadLook,
     /// Subscribe this connection to events of the named kinds, dedicating
     /// it to them: the reply is `Response::Subscribed`, and afterwards the
     /// connection carries events only (any other request on it is refused

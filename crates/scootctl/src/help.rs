@@ -28,7 +28,8 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// [`REQUESTS`] uses this directly, and the prose blocks in [`crate::cli`]
 /// (`REQUESTS_HELP`) and the compositor's `scoot help config` must contain
 /// this same text (pinned by test), so the three cannot drift.
-pub const RELOAD_DESCRIPTION: &str = "re-read the config file and re-apply it live";
+pub const RELOAD_DESCRIPTION: &str =
+    "re-read the config file and re-apply it live (--look: look layer only)";
 
 /// One request verb: what it takes, what it does, one real invocation, and
 /// the shape of its reply.

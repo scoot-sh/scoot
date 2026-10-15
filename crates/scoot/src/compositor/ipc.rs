@@ -44,8 +44,8 @@ use std::time::{Duration, Instant};
 
 use scoot_core::{Action, OutputId, WindowId};
 use scoot_ipc::{
-    OutputSnapshot, OutputTarget, PROTOCOL_VERSION, Rect as WireRect, ReloadScope, Request,
-    Response, WindowSnapshot, encode, socket_path,
+    OutputSnapshot, OutputTarget, PROTOCOL_VERSION, Rect as WireRect, Request, Response,
+    WindowSnapshot, encode, socket_path,
 };
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, Mode};
@@ -340,11 +340,11 @@ impl State {
             // Session-level like `windows`, not an `action`: actions are
             // window/focus operations (and refused while locked), while this
             // re-reads the session's own config file. Applies under lock by
-            // design -- see `reload.rs`.
-            Request::Reload { scope } => match scope {
-                None => self.reload(),
-                Some(ReloadScope::Look) => self.reload_scoped(),
-            },
+            // design -- see `reload.rs`. The scoped tag is distinct, so an
+            // older server meets it with an ordinary unknown-request error,
+            // never a silent plain reload.
+            Request::Reload => self.reload(),
+            Request::ReloadLook => self.reload_scoped(),
             Request::Outputs => Response::Outputs {
                 outputs: self.output_snapshots(),
             },

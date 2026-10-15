@@ -96,7 +96,7 @@ impl Fixture {
     }
 
     fn reload(&mut self) -> Response {
-        self.state.handle_request(Request::Reload { scope: None })
+        self.state.handle_request(Request::Reload)
     }
 
     /// Runs the event loop until the cursor worker's answer lands (or a
@@ -1394,7 +1394,7 @@ fn no_config_path_is_an_error_not_a_guess() {
     )
     .expect("a compositor state");
     // `config_path` stays `None`: nowhere to reload from.
-    let response = state.handle_request(Request::Reload { scope: None });
+    let response = state.handle_request(Request::Reload);
     assert!(
         matches!(response, Response::Error { .. }),
         "a pathless reload should refuse, not read a default: {response:?}"
@@ -1829,9 +1829,7 @@ fn reload_under_lock_skips_new_spawns_without_advancing_the_snapshot() {
         format!("[autostart]\ncommands = [\"{}\"]\n", touch_entry(&marker)),
     )
     .expect("a rewritten config file");
-    let response = harness
-        .state
-        .handle_request(Request::Reload { scope: None });
+    let response = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&response).is_empty(),
         "a locked reload must apply nothing: {response:?}"
@@ -2239,9 +2237,7 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
     let client = lock_with(&mut harness);
 
     fs::write(&path, "[autostart]\ncommands = [\"quit\"]\n").expect("a rewritten config file");
-    let response = harness
-        .state
-        .handle_request(Request::Reload { scope: None });
+    let response = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&response).is_empty(),
         "a locked reload must apply nothing: {response:?}"
@@ -2265,9 +2261,7 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
     );
 
     unlock(&mut harness, client);
-    let unlocked = harness
-        .state
-        .handle_request(Request::Reload { scope: None });
+    let unlocked = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&unlocked).is_empty(),
         "a reloaded quit must apply nothing: {unlocked:?}"
@@ -2290,9 +2284,7 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
         ),
     )
     .expect("a rewritten config file");
-    let third = harness
-        .state
-        .handle_request(Request::Reload { scope: None });
+    let third = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&third).contains(&field::AUTOSTART.to_owned()),
         "the session should still serve after the quit sequence: {third:?}"
@@ -2316,9 +2308,7 @@ fn a_removed_while_locked_entry_never_runs() {
         format!("[autostart]\ncommands = [\"{}\"]\n", touch_entry(&marker)),
     )
     .expect("a rewritten config file");
-    let added = harness
-        .state
-        .handle_request(Request::Reload { scope: None });
+    let added = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&added).is_empty(),
         "a locked reload must apply nothing: {added:?}"
@@ -2335,9 +2325,7 @@ fn a_removed_while_locked_entry_never_runs() {
     );
 
     fs::write(&path, "[autostart]\ncommands = []\n").expect("a rewritten config file");
-    let removed = harness
-        .state
-        .handle_request(Request::Reload { scope: None });
+    let removed = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&removed).is_empty() && refused(&removed).is_empty(),
         "with the entry gone there is nothing actionable to skip: {removed:?}"
@@ -2348,9 +2336,7 @@ fn a_removed_while_locked_entry_never_runs() {
     );
 
     unlock(&mut harness, client);
-    let after = harness
-        .state
-        .handle_request(Request::Reload { scope: None });
+    let after = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&after).is_empty() && refused(&after).is_empty(),
         "after unlock the cancelled entry stays silent: {after:?}"
@@ -3142,7 +3128,7 @@ fn a_stale_cursor_answer_is_dropped() {
 
 // -- Look-scoped reload -------------------------------------------------------
 //
-// `Request::Reload` with `scope = "look"` merges the freshly read layer
+// `Request::ReloadLook` merges the freshly read layer
 // under a snapshot of the user file from the last successful plain load,
 // swapping only what the layer supplies. These tests pass both the plain
 // and the scoped layers explicitly (`reload_with_state` /

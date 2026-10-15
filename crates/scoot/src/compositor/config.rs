@@ -916,25 +916,22 @@ pub fn reload_from_with_layer(
 /// user's own plain reload; a half-written file cannot refuse this path
 /// because it is never read.
 ///
-/// A layer that fails the strict parse refuses the whole reload like a bad
-/// file. The snapshot parsed once, so a snapshot that no longer parses
-/// refuses too (unreachable in practice: only successfully loaded bytes are
-/// ever stored) -- and in both cases the running config is untouched.
+/// A layer that fails the strict parse refuses the whole reload, and so
+/// does a snapshot that no longer parses (unreachable in practice: only
+/// successfully loaded bytes are ever stored) -- and in both cases the
+/// running config is untouched. The error names the look layer, never the
+/// user's file: this path never reads it.
 pub fn reload_scoped_from_snapshot(
     snapshot: Option<&str>,
     layer_text: &str,
     path: &Path,
     vt: bool,
-) -> Result<LayeredLoaded, ReloadError> {
-    let fail = |reason: String| ReloadError {
-        path: path.to_owned(),
-        reason,
-    };
-    let layer = parse_layer(layer_text)
-        .map_err(|reason| fail(format!("the look layer is refused ({reason})")))?;
+) -> Result<LayeredLoaded, ScopedReloadError> {
+    let layer = parse_layer(layer_text).map_err(|reason| ScopedReloadError { reason })?;
     let file = match snapshot {
-        Some(text) => toml::from_str::<FileConfig>(text)
-            .map_err(|source| fail(format!("the look snapshot no longer parses: {source}")))?,
+        Some(text) => toml::from_str::<FileConfig>(text).map_err(|source| ScopedReloadError {
+            reason: format!("the saved config snapshot no longer parses: {source}"),
+        })?,
         None => default_user_file(),
     };
     let layered = LoadedConfig::from_file_with_layer(file, path, vt, Some(&layer));
@@ -947,6 +944,28 @@ pub fn reload_scoped_from_snapshot(
         user_text: None,
     })
 }
+
+/// A look-scoped reload that could not load. The running config is
+/// untouched; the message is what the scoped `reload` reply (and the log)
+/// carries. It names the look layer, never the user's config file: the
+/// scoped path never reads that file, so blaming it would send the user to
+/// the wrong place.
+#[derive(Debug)]
+pub struct ScopedReloadError {
+    reason: String,
+}
+
+impl fmt::Display for ScopedReloadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "could not reload the look layer: {}; keeping the running config",
+            self.reason
+        )
+    }
+}
+
+impl std::error::Error for ScopedReloadError {}
 
 /// Loads like [`load`], merged over the active look layer's fragment
 /// (`layer_text`, `None` for no layer). A layer that fails the strict parse

@@ -142,15 +142,17 @@
 //!
 //! # The look-scoped reload
 //!
-//! `Request::Reload` with `scope = "look"` (driven by `scoot look apply`,
-//! never by `SIGHUP`) merges the freshly read look layer under a snapshot
-//! of the user file -- its raw bytes from the last successful plain load,
-//! kept in [`State::user_snapshot`] -- and swaps only what the layer
-//! supplies (appearance and wallpaper). The user's file is never re-read,
-//! so a swap never applies pending edits, spawns no autostart entry and
-//! swaps no binds; a half-written file cannot refuse it. A missing or
-//! broken layer refuses it whole with everything untouched, and the reply
-//! carries the scope that ran (`Response::Reloaded::scope`).
+//! `Request::ReloadLook` (driven by `scoot look apply`, never by `SIGHUP`)
+//! merges the freshly read look layer under a snapshot of the user file --
+//! its raw bytes from the last successful plain load, kept in
+//! [`State::user_snapshot`] -- and swaps only what the layer supplies
+//! (appearance and wallpaper). The user's file is never re-read, so a swap
+//! never applies pending edits, spawns no autostart entry and swaps no
+//! binds; a half-written file cannot refuse it. A missing or broken layer
+//! refuses it whole with everything untouched, and the reply carries the
+//! scope that ran (`Response::Reloaded::scope`). The tag is distinct from
+//! `Request::Reload`, so an older compositor answers it with an ordinary
+//! unknown-request error, never a silent plain reload.
 //!
 //! # While locked
 //!
@@ -294,8 +296,8 @@ impl State {
         self.reload_with_state(look_layer_state())
     }
 
-    /// Serves `Request::Reload` scoped to the look: merges the freshly read
-    /// layer under the snapshot -- the user file's raw bytes from the last
+    /// Serves `Request::ReloadLook`: merges the freshly read layer under
+    /// the snapshot -- the user file's raw bytes from the last
     /// successful plain load -- and swaps only what the look layer supplies
     /// (appearance and wallpaper). The user's file is never re-read, so
     /// pending edits wait for their own plain reload; no autostart entry
@@ -407,10 +409,15 @@ impl State {
                 return Response::error(format!("refused: {reason}; keeping the running config"));
             }
             LookLayerState::Broken(reason) => {
+                // The startup warning ends "continuing without it": true at
+                // startup, false in a refusal, so the scoped path strips it
+                // rather than re-wrapping it. The reason already names the
+                // look layer, so no extra wrapper blaming the user's file.
+                let cleaned = reason
+                    .strip_suffix("; continuing without it")
+                    .unwrap_or(&reason);
                 tracing::error!(%reason, "config reload failed");
-                return Response::error(format!(
-                    "refused: the look layer is refused ({reason}); keeping the running config"
-                ));
+                return Response::error(format!("refused: {cleaned}; keeping the running config"));
             }
             LookLayerState::Present(fragment) => fragment,
         };

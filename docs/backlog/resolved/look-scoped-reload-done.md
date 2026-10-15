@@ -30,10 +30,10 @@ Per the design doc's section 4.4:
 
 - Keep a snapshot of the user file's raw table at every successful load
   (startup and plain reload): new state.
-- `Request::Reload` gains a scope: `look` merges the freshly read layer
+- A distinct `Request::ReloadLook`: it merges the freshly read layer
   under that snapshot (the section 4.3 rules) and swaps only what changed;
   no autostart, no binds, no pending edits. A plain reload keeps its
-  meaning. SIGHUP stays a plain reload.
+  meaning and its wire shape. SIGHUP stays a plain reload.
 - The reply says which scope ran.
 
 ## Evidence to record
@@ -56,19 +56,23 @@ decision: the snapshot is the user file's raw bytes (`State::user_snapshot`,
 `Some` only when those exact bytes parsed), not a parsed table -- so the
 scoped path re-parses bytes that already parsed once, and
 `config::FileConfig` stays private to `config.rs`. No `PROTOCOL_VERSION`
-move: the request's `scope` is omitted on the wire for a plain reload
-(the old shape exactly), and the reply's `scope` is omitted there too;
-an unknown scope string fails the decode, so an older server meets a
-newer scoped client with an ordinary error, never a silent plain reload.
+move: the scoped reload is a distinct request tag (`reload_look`), additive
+like any new tag, and the reply's `scope` is omitted on a plain reload;
+an older server meets the scoped tag with an ordinary unknown-request
+error, never a silent plain reload. (A `scope` field on `reload` would not
+hold: serde's internally-tagged unit variants drain and ignore extra
+fields, so an old compositor would decode
+`{"type":"reload","scope":"look"}` as a plain reload.)
 
 Evidence: seven scoped tests (swap-only + scope named, no autostart
 spawn, pending bind waits, half-written file, plain applies all three
 after, snapshot-advances-only-on-success, refused-leaves-everything,
-no-layer refusal); wire round-trips for both scopes plus the unknown-scope
-refusal; a live headless e2e over the real socket (plain silent without
-scope, `reload --look` swaps only the look, pending bind applies on the
-plain reload after, scoped applies over a half-written file, plain
-refuses it). Full matrix on the dev VM (Linux): nextest + cargo test on
+no-layer refusal); wire round-trips for both tags plus the older-server
+proof (the new tag fails the old request shape's decode, while
+`{"type":"reload"}` still decodes to the plain reload); a live headless
+e2e over the real socket (plain silent without scope, `reload --look`
+swaps only the look, pending bind applies on the plain reload after,
+scoped applies over a half-written file, plain refuses it). Full matrix on the dev VM (Linux): nextest + cargo test on
 default and xwayland, nextest + cargo test on `--no-default-features`
 (all green there), workspace clippy, `fmt --check`. One unrelated
 failure stands everywhere including pristine main (verified by stashing

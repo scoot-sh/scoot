@@ -360,16 +360,19 @@ pub enum Response {
     /// ignores the fields, and an older server's reply decodes with both
     /// empty.
     ///
-    /// `scope` names which reload ran: absent (plain) re-read the file and
-    /// the layer both, `"look"` re-read only the layer under the snapshot.
-    /// Added with a default like `shadowed`, so no `PROTOCOL_VERSION` move:
-    /// an older client ignores it, and an older server's reply decodes with
-    /// it absent (plain).
+    /// `scope` names which reload ran: absent (plain `Reload`, which
+    /// re-read the file and the layer both), `"look"` (scoped `ReloadLook`,
+    /// which re-read only the layer under the snapshot). Added with a
+    /// default like `shadowed`, so no `PROTOCOL_VERSION` move: an older
+    /// client ignores it, and an older server's reply decodes with it
+    /// absent (plain). A scoped request against an older compositor never
+    /// reaches a reply: the unknown `reload_look` tag is answered with an
+    /// ordinary `Error`, never a plain reload.
     ///
     /// A new variant, so this is the half that moved `PROTOCOL_VERSION` (see
     /// that constant's doc): an older client that somehow received one would
     /// fail to decode it. In practice only a client new enough to send
-    /// `Reload` ever receives one.
+    /// `Reload` or `ReloadLook` ever receives one.
     Reloaded {
         applied: Vec<String>,
         refused: Vec<String>,
