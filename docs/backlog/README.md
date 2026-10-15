@@ -379,6 +379,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [The five shipped looks as look.toml under looks/, validated in CI](./core/look-shipped.md) (high, blocked on `look-format`)
 - [The compositor reads a look layer under the user's config](./core/look-layer-scoot.md) (high, blocked on `look-format`)
 - [A look-scoped reload in scoot](./core/look-scoped-reload.md) (high, blocked on `look-layer-scoot`)
+- [Reload wallpaper wait as a deferred reply](./core/reload-wallpaper-deferred-reply.md) (medium)
 - [Per-session look state for headless and `--private-look` sessions](./core/look-session-state.md) (medium, computer use)
 - [`scoot look apply`: the atomic swap, scoped reloads, rollback](./core/look-apply-cli.md) (high, blocked on `look-shipped`, `look-scoped-reload`)
 - [`scoot look next`/`prev`/`random` and timed previews](./core/look-cycle-preview.md) (medium)
@@ -400,6 +401,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Later: opt-in automatic look switching](./core/look-auto-switch.md) (low, later)
 
 ### Core / config / rendering
+- [A refused managed X window costs the server fds](./core/xwayland-refused-cost-fd-leak.md) (medium, filed 2026-10-15 from the #613 review: `refused_cost` counts 273 fds against a 264 cap, pre-existing)
 - [`scoot --help`/JSON config section list omits `[virtual_input]`](./core/help-config-sections-omit-virtual-input.md) — low, filed 2026-10-14 (docs1 slice review): help text and `config_sections` JSON list eleven sections; the compositor implements twelve.
 - [CPU-tier output swap with empty bindings can strand a headless output reporting live:true](./core/cpu-swap-empty-bindings-strand.md) — found in the #551 seat-reconnect review; the next win heals it
 - [`scoot --version`](./resolved/cli-version-flag-done.md) — RESOLVED 2026-09-21: `scoot --version` and `scootctl --version` print `scoot <version> (ipc protocol <N>)` from one shared helper (no drift, no session needed); the bare `version` word stays the remote IPC request by deliberate spelling decision.

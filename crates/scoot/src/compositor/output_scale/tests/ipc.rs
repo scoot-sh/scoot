@@ -222,9 +222,7 @@ fn a_reload_restores_the_config_files_scale() {
         scale: Some(2.0),
     }));
     assert_eq!(fixture.scale_of(1), 2.0);
-    let response = fixture.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let response = fixture.state.handle_request(Request::Reload);
     let Response::Reloaded {
         applied, refused, ..
     } = &response
@@ -265,9 +263,7 @@ fn a_reload_reports_exactly_the_runtime_scales_it_moved() {
     let mut fixture = Fixture::with_outputs(3);
     let dir = fixture.install_config("[[outputs]]\nname = \"headless-3\"\nscale = 1.5\n");
     assert!(matches!(
-        fixture.state.handle_request(Request::Reload {
-            wait_wallpaper: false
-        }),
+        fixture.state.handle_request(Request::Reload),
         Response::Reloaded { .. }
     ));
     assert_eq!(fixture.scale_of(3), 1.5);
@@ -288,9 +284,7 @@ fn a_reload_reports_exactly_the_runtime_scales_it_moved() {
          [[outputs]]\nname = \"headless\"\nscale = 1.25\n",
     )
     .expect("the edited config");
-    let response = fixture.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let response = fixture.state.handle_request(Request::Reload);
     let Response::Reloaded {
         applied, refused, ..
     } = &response
@@ -312,9 +306,7 @@ fn a_reload_reports_exactly_the_runtime_scales_it_moved() {
     assert_eq!(fixture.scale_of(3), 1.5);
     assert!(fixture.state.runtime_scales.is_empty());
     // And a second reload agrees silently: nothing live is left to drop.
-    let response = fixture.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let response = fixture.state.handle_request(Request::Reload);
     assert_eq!(
         response,
         Response::Reloaded {
@@ -378,9 +370,7 @@ fn a_reset_goes_back_to_the_config_files_scale() {
     // The file scales `headless-2` to 1.5: a live 2.0 beats it, and a
     // reset hands it back.
     let _dir = fixture.install_config("[[outputs]]\nname = \"headless-2\"\nscale = 1.5\n");
-    let reloaded = fixture.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let reloaded = fixture.state.handle_request(Request::Reload);
     assert!(
         matches!(reloaded, Response::Reloaded { .. }),
         "the fixture config must load: {reloaded:?}"
@@ -432,9 +422,7 @@ fn a_failed_reload_keeps_the_live_scale() {
         output: OutputTarget::Id(1),
         scale: Some(2.0),
     }));
-    let response = fixture.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let response = fixture.state.handle_request(Request::Reload);
     assert!(
         matches!(response, Response::Error { .. }),
         "a malformed file must refuse the reload: {response:?}"

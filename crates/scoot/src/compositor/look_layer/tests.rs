@@ -112,3 +112,120 @@ fn a_fragment_loads_with_its_identity() {
     assert_eq!(fragment.identity.source_hash, "9f2c");
     assert!(fragment.text.contains("background_color"));
 }
+
+fn link_rendered_to(dir: &std::path::Path) -> std::path::PathBuf {
+    let rendered = dir.join("rendered");
+    fs::create_dir(&rendered).expect("a rendered dir");
+    symlink(&rendered, dir.join("look")).expect("a link");
+    rendered
+}
+
+fn load_on_thread(state_dir: std::path::PathBuf) -> super::LoadOutcome {
+    // A FIFO with no writer blocks a plain `read_to_string` forever, which
+    // would hang the test suite itself on the pre-fix code: read on a
+    // thread with a timeout, so the failure is a failed test, never a wedge.
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done_tx.send(load(&state_dir));
+    });
+    done_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("reading the layer must not block: the load took over 5 s")
+}
+
+#[test]
+fn a_fifo_fragment_refuses_without_blocking() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let rendered = link_rendered_to(dir.path());
+    rustix::fs::mkfifoat(
+        rustix::fs::CWD,
+        rendered.join(super::FRAGMENT),
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )
+    .expect("a fifo");
+    let outcome = load_on_thread(dir.path().to_owned());
+    assert!(
+        matches!(outcome.load, FragmentLoad::Absent(FragmentAbsent::Broken)),
+        "a FIFO is not a layer"
+    );
+    let warn = outcome.warn.expect("a FIFO warns");
+    assert!(
+        warn.contains("regular"),
+        "the warning names the refusal: {warn}"
+    );
+}
+
+#[test]
+fn a_directory_fragment_refuses() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let rendered = link_rendered_to(dir.path());
+    fs::create_dir(rendered.join(super::FRAGMENT)).expect("a directory at the fragment path");
+    let outcome = load_on_thread(dir.path().to_owned());
+    assert!(
+        matches!(outcome.load, FragmentLoad::Absent(FragmentAbsent::Broken)),
+        "a directory is not a layer"
+    );
+}
+
+#[test]
+fn an_oversize_fragment_refuses_without_reading_it_whole() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let rendered = link_rendered_to(dir.path());
+    let big = "[appearance]\nbackground_color = \"#112233\"\n".repeat(4096);
+    assert!(
+        big.len() as u64 > super::MAX_FILE,
+        "the test file is past the cap"
+    );
+    fs::write(rendered.join(super::FRAGMENT), big).expect("a big fragment");
+    let outcome = load(dir.path());
+    assert!(
+        matches!(outcome.load, FragmentLoad::Absent(FragmentAbsent::Broken)),
+        "an oversize fragment is refused"
+    );
+    let warn = outcome.warn.expect("an oversize fragment warns");
+    assert!(
+        warn.contains("larger"),
+        "the warning names the refusal: {warn}"
+    );
+}
+
+#[test]
+fn an_unreadable_identity_falls_back_without_blocking() {
+    // `render.json` is advisory: a FIFO, a directory or an oversize file
+    // there must neither hang the load nor refuse the layer -- the fragment
+    // loads with its content-hash identity instead.
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let rendered = link_rendered_to(dir.path());
+    fs::write(
+        rendered.join(super::FRAGMENT),
+        "[appearance]\nbackground_color = \"#112233\"\n",
+    )
+    .expect("a fragment");
+    rustix::fs::mkfifoat(
+        rustix::fs::CWD,
+        rendered.join(super::RENDER_JSON),
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )
+    .expect("a fifo");
+    let outcome = load_on_thread(dir.path().to_owned());
+    let FragmentLoad::Present(fragment) = outcome.load else {
+        panic!("a FIFO identity must not refuse the layer");
+    };
+    assert_eq!(outcome.warn, None);
+    assert_eq!(fragment.identity.name, None);
+    assert!(
+        fragment.identity.source_hash.starts_with("fragment:"),
+        "the fallback is the content hash: {}",
+        fragment.identity.source_hash
+    );
+}
+
+#[test]
+fn equal_length_fragments_without_metadata_compare_different() {
+    let first = super::fragment_fallback("[appearance]\ngap = 1\n");
+    let second = super::fragment_fallback("[appearance]\ngap = 2\n");
+    assert_ne!(
+        first, second,
+        "same-length fragments must not share an identity"
+    );
+}

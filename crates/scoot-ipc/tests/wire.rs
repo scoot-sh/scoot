@@ -15,23 +15,10 @@ fn json_of<T: serde::Serialize>(value: &T) -> Value {
 #[test]
 fn unit_requests_are_just_a_type() {
     assert_eq!(json_of(&Request::Windows), json!({ "type": "windows" }));
-    assert_eq!(
-        json_of(&Request::Reload {
-            wait_wallpaper: false,
-        }),
-        json!({ "type": "reload" })
-    );
-    assert_eq!(
-        json_of(&Request::Reload {
-            wait_wallpaper: true,
-        }),
-        json!({ "type": "reload", "wait_wallpaper": true })
-    );
+    assert_eq!(json_of(&Request::Reload), json!({ "type": "reload" }));
     assert_eq!(
         decode::<Request>(r#"{"type":"reload"}"#).unwrap(),
-        Request::Reload {
-            wait_wallpaper: false,
-        }
+        Request::Reload
     );
     assert_eq!(json_of(&Request::Keyboard), json!({ "type": "keyboard" }));
     assert_eq!(
@@ -45,16 +32,8 @@ fn unit_requests_are_just_a_type() {
         json!({ "type": "subscribe", "events": ["output"] })
     );
     assert_eq!(
-        decode::<Request>(
-            &encode(&Request::Reload {
-                wait_wallpaper: false,
-            })
-            .unwrap()
-        )
-        .unwrap(),
-        Request::Reload {
-            wait_wallpaper: false,
-        }
+        decode::<Request>(&encode(&Request::Reload).unwrap()).unwrap(),
+        Request::Reload
     );
     assert_eq!(
         decode::<Request>(
@@ -535,12 +514,7 @@ fn every_request_round_trips_on_one_line() {
         Request::Version,
         Request::Outputs,
         Request::Windows,
-        Request::Reload {
-            wait_wallpaper: false,
-        },
-        Request::Reload {
-            wait_wallpaper: true,
-        },
+        Request::Reload,
         Request::Action(Action::Spawn {
             command: vec!["foot".into()],
         }),

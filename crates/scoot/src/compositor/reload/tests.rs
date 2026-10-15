@@ -96,9 +96,7 @@ impl Fixture {
     }
 
     fn reload(&mut self) -> Response {
-        self.state.handle_request(Request::Reload {
-            wait_wallpaper: false,
-        })
+        self.state.handle_request(Request::Reload)
     }
 
     /// Runs the event loop until the cursor worker's answer lands (or a
@@ -1396,9 +1394,7 @@ fn no_config_path_is_an_error_not_a_guess() {
     )
     .expect("a compositor state");
     // `config_path` stays `None`: nowhere to reload from.
-    let response = state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let response = state.handle_request(Request::Reload);
     assert!(
         matches!(response, Response::Error { .. }),
         "a pathless reload should refuse, not read a default: {response:?}"
@@ -1833,9 +1829,7 @@ fn reload_under_lock_skips_new_spawns_without_advancing_the_snapshot() {
         format!("[autostart]\ncommands = [\"{}\"]\n", touch_entry(&marker)),
     )
     .expect("a rewritten config file");
-    let response = harness.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let response = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&response).is_empty(),
         "a locked reload must apply nothing: {response:?}"
@@ -2243,9 +2237,7 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
     let client = lock_with(&mut harness);
 
     fs::write(&path, "[autostart]\ncommands = [\"quit\"]\n").expect("a rewritten config file");
-    let response = harness.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let response = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&response).is_empty(),
         "a locked reload must apply nothing: {response:?}"
@@ -2269,9 +2261,7 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
     );
 
     unlock(&mut harness, client);
-    let unlocked = harness.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let unlocked = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&unlocked).is_empty(),
         "a reloaded quit must apply nothing: {unlocked:?}"
@@ -2294,9 +2284,7 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
         ),
     )
     .expect("a rewritten config file");
-    let third = harness.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let third = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&third).contains(&field::AUTOSTART.to_owned()),
         "the session should still serve after the quit sequence: {third:?}"
@@ -2320,9 +2308,7 @@ fn a_removed_while_locked_entry_never_runs() {
         format!("[autostart]\ncommands = [\"{}\"]\n", touch_entry(&marker)),
     )
     .expect("a rewritten config file");
-    let added = harness.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let added = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&added).is_empty(),
         "a locked reload must apply nothing: {added:?}"
@@ -2339,9 +2325,7 @@ fn a_removed_while_locked_entry_never_runs() {
     );
 
     fs::write(&path, "[autostart]\ncommands = []\n").expect("a rewritten config file");
-    let removed = harness.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let removed = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&removed).is_empty() && refused(&removed).is_empty(),
         "with the entry gone there is nothing actionable to skip: {removed:?}"
@@ -2352,9 +2336,7 @@ fn a_removed_while_locked_entry_never_runs() {
     );
 
     unlock(&mut harness, client);
-    let after = harness.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let after = harness.state.handle_request(Request::Reload);
     assert!(
         applied(&after).is_empty() && refused(&after).is_empty(),
         "after unlock the cancelled entry stays silent: {after:?}"
@@ -2866,10 +2848,11 @@ cursor_theme = "Mocu"
 "##;
 
 fn reload_with_look(fixture: &mut Fixture, text: &str) -> Response {
-    fixture.state.reload_with_state(
-        false,
-        LookLayerState::Present(look_fragment(text, "moonrise", "hash-a")),
-    )
+    fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            text, "moonrise", "hash-a",
+        )))
 }
 
 fn shadowed(response: &Response) -> &[String] {
@@ -3019,10 +3002,9 @@ fn a_bad_user_color_falls_back_to_the_layer_and_reports_both_lists() {
 #[test]
 fn a_broken_layer_refuses_the_reload_and_keeps_everything() {
     let mut fixture = Fixture::with_config("[layout]\ngap = 20\n");
-    let response = fixture.state.reload_with_state(
-        false,
-        LookLayerState::Broken("the look layer at /x cannot be read (dangling)".to_owned()),
-    );
+    let response = fixture.state.reload_with_state(LookLayerState::Broken(
+        "the look layer at /x cannot be read (dangling)".to_owned(),
+    ));
     match &response {
         Response::Error { message } => assert!(
             message.contains("keeping the running config"),
@@ -3061,10 +3043,13 @@ fn the_look_event_fires_once_per_identity_change() {
     let mut fixture = Fixture::with_config("");
     let mut reader = look_subscriber(&mut fixture.state);
 
-    fixture.state.reload_with_state(
-        false,
-        LookLayerState::Present(look_fragment(LOOK_APPEARANCE, "moonrise", "hash-a")),
-    );
+    fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_APPEARANCE,
+            "moonrise",
+            "hash-a",
+        )));
     match next_event(&mut reader) {
         Response::LookChanged { name, source_hash } => {
             assert_eq!(name.as_deref(), Some("moonrise"));
@@ -3074,10 +3059,13 @@ fn the_look_event_fires_once_per_identity_change() {
     }
 
     // Same identity twice emits nothing.
-    fixture.state.reload_with_state(
-        false,
-        LookLayerState::Present(look_fragment(LOOK_APPEARANCE, "moonrise", "hash-a")),
-    );
+    fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_APPEARANCE,
+            "moonrise",
+            "hash-a",
+        )));
     reader
         .get_mut()
         .set_nonblocking(true)
@@ -3093,17 +3081,18 @@ fn the_look_event_fires_once_per_identity_change() {
         .expect("blocking again afterwards");
 
     // A new hash emits once more; the layer going away emits with no name.
-    fixture.state.reload_with_state(
-        false,
-        LookLayerState::Present(look_fragment(LOOK_APPEARANCE, "moonrise", "hash-b")),
-    );
+    fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_APPEARANCE,
+            "moonrise",
+            "hash-b",
+        )));
     match next_event(&mut reader) {
         Response::LookChanged { source_hash, .. } => assert_eq!(source_hash, "hash-b"),
         other => panic!("a changed identity emits: {other:?}"),
     }
-    fixture
-        .state
-        .reload_with_state(false, LookLayerState::Absent);
+    fixture.state.reload_with_state(LookLayerState::Absent);
     match next_event(&mut reader) {
         Response::LookChanged { name, .. } => assert_eq!(name, None),
         other => panic!("the layer going away emits: {other:?}"),

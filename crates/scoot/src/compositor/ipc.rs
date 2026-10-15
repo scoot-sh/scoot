@@ -341,7 +341,7 @@ impl State {
             // window/focus operations (and refused while locked), while this
             // re-reads the session's own config file. Applies under lock by
             // design -- see `reload.rs`.
-            Request::Reload { wait_wallpaper } => self.reload(wait_wallpaper),
+            Request::Reload => self.reload(),
             Request::Outputs => Response::Outputs {
                 outputs: self.output_snapshots(),
             },

@@ -59,8 +59,8 @@ pub const REQUESTS: &[RequestDoc] = &[
     },
     RequestDoc {
         verb: "reload",
-        syntax: "reload [--wait-wallpaper]",
-        description: "re-read the config file and re-apply it live; --wait-wallpaper waits",
+        syntax: "reload",
+        description: "re-read the config file and re-apply it live",
         example: "scoot msg reload",
         reply: "`{\"type\":\"reloaded\",...}`",
     },

@@ -24,10 +24,8 @@ use scoot_ipc::{Action, EventKind, Horizontal, PointerButton, Request, Vertical}
 pub const REQUESTS_HELP: &str = "\
     version | outputs | windows
     action ACTION [ARGUMENT...]
-    reload [--wait-wallpaper]         re-read the config file and re-apply
+    reload                          re-read the config file and re-apply
                                     what can be re-applied live
-                                    (--wait-wallpaper waits for the
-                                    wallpaper run before answering)
     keyboard                        the active keyboard layout's name and
                                     index -- what a layout indicator shows
     locked                          whether the session is locked -- the
@@ -210,22 +208,15 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
         "outputs" => Request::Outputs,
         "windows" => Request::Windows,
         "reload" => {
-            let mut wait_wallpaper = false;
             for flag in args.by_ref() {
                 match flag.as_str() {
-                    "--wait-wallpaper" => wait_wallpaper = true,
                     "--json" => json = true,
                     other => {
-                        return Err(hinted(
-                            "flag",
-                            other.to_owned(),
-                            &["--wait-wallpaper", "--json"],
-                            "help reload",
-                        ));
+                        return Err(hinted("flag", other.to_owned(), &["--json"], "help reload"));
                     }
                 }
             }
-            Request::Reload { wait_wallpaper }
+            Request::Reload
         }
         "keyboard" => Request::Keyboard,
         "locked" => Request::Locked,
@@ -776,19 +767,7 @@ mod tests {
         assert_eq!(
             parse_msg_args(&["reload"]),
             Ok(Msg {
-                request: Request::Reload {
-                    wait_wallpaper: false,
-                },
-                out: None,
-                json: false,
-            })
-        );
-        assert_eq!(
-            parse_msg_args(&["reload", "--wait-wallpaper"]),
-            Ok(Msg {
-                request: Request::Reload {
-                    wait_wallpaper: true,
-                },
+                request: Request::Reload,
                 out: None,
                 json: false,
             })

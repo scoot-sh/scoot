@@ -28,7 +28,8 @@ mono = "FiraCode Nerd Font"
 size = 10 # renders the example bar font-size 13
 
 [opacity]
-bar = 0.82
+# 1.0 until the bar-opacity pixman benchmark passes; the example uses 0.82.
+bar = 1.0
 
 [shape]
 radius = 14

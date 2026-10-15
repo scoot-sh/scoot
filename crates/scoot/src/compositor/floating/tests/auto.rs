@@ -11,9 +11,7 @@ impl Fixture {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, toml).expect("a config file");
         self.state.config_path = Some(path);
-        let reply = self.state.handle_request(Request::Reload {
-            wait_wallpaper: false,
-        });
+        let reply = self.state.handle_request(Request::Reload);
         self.settle();
         reply
     }

@@ -1588,9 +1588,7 @@ fn a_reload_that_rebinds_a_held_key_keeps_its_release_suppressed() {
         "`super+h` is not bound, so this test proves nothing"
     );
 
-    let response = fixture.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let response = fixture.state.handle_request(Request::Reload);
     assert!(
         matches!(response, Response::Reloaded { .. }),
         "the rebinding reload was not served: {response:?}"
@@ -1626,9 +1624,7 @@ fn a_reload_that_binds_a_held_key_forwards_its_release() {
         "bare `x` is bound, so this test proves nothing"
     );
 
-    let response = fixture.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let response = fixture.state.handle_request(Request::Reload);
     assert!(
         matches!(response, Response::Reloaded { .. }),
         "the binding reload was not served: {response:?}"

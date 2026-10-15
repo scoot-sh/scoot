@@ -127,9 +127,7 @@
 //!   `wallpaper.rs`). Reported applied as `wallpaper` when the section's
 //!   values differ from what the session last handed over, and as
 //!   `wallpaper.command` when `command` does (both, when both do) --
-//!   "applied" meaning handed over, never waited on, unless the reload
-//!   asked to wait (`reload --wait-wallpaper`, which holds the reply until
-//!   the run exits, up to a bound). A section with a
+//!   "applied" meaning handed over, never waited on. A section with a
 //!   problem (inside `[wallpaper]`, an unknown key no longer fails the
 //!   whole reload) is refused by name on every reload that finds it, and
 //!   the running one is kept and re-run.
@@ -190,13 +188,6 @@ use super::look_layer::{self, Fragment, FragmentAbsent, FragmentLoad};
 use super::output_config::EntriesDiff;
 use super::tty::Tty;
 use super::wallpaper::Reloaded;
-
-/// How long a `reload --wait-wallpaper` waits for the `scootbg apply-config`
-/// run before answering anyway. scootbg bounds itself (5 s to reach a
-/// daemon, 30 s for its reply); past this the reply reports the wallpaper
-/// as handed over but unwaited-on, and the run's exit is still logged when
-/// it comes.
-const WAIT_WALLPAPER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The look layer as a reload sees it: absent, broken (refuse whole), or
 /// present with the fragment bytes to strictly validate.
@@ -284,8 +275,8 @@ impl State {
     /// `config::merge_layer`). A layer that fails the strict parse refuses
     /// the whole reload -- everything kept. A reload that sees the layer's
     /// identity change emits `EventKind::Look`.
-    pub fn reload(&mut self, wait_wallpaper: bool) -> Response {
-        self.reload_with_state(wait_wallpaper, look_layer_state())
+    pub fn reload(&mut self) -> Response {
+        self.reload_with_state(look_layer_state())
     }
 
     /// Serves a reload against an explicit look layer state. The live edge
@@ -294,11 +285,7 @@ impl State {
     /// directly, so no test depends on ambient `SCOOT_LOOK_STATE` /
     /// `XDG_STATE_HOME` and no layer test can leak into another test
     /// through process-global environment state.
-    pub(crate) fn reload_with_state(
-        &mut self,
-        wait_wallpaper: bool,
-        layer: LookLayerState,
-    ) -> Response {
+    pub(crate) fn reload_with_state(&mut self, layer: LookLayerState) -> Response {
         let Some(path) = self.config_path.clone() else {
             // Logged as well as answered: over IPC the client sees the
             // error, but a SIGHUP trigger has no reply channel, so without
@@ -336,10 +323,14 @@ impl State {
                 return Response::error(error.to_string());
             }
         };
-        let mut report = self.apply_reload(&fresh.loaded);
-        if wait_wallpaper {
-            self.wait_wallpaper(&mut report);
-        }
+        let report = self.apply_reload(&fresh.loaded);
+        // The identity commits after the apply, never before: a reload that
+        // fails to load returns above without touching either, so a broken
+        // layer or file can never advance the identity past what applied.
+        // Per-field refusals in the report do not hold it back -- the layer
+        // was seen and its applicable fields applied, and the next reload
+        // diffs against what this one did -- which is the same
+        // commit-after-apply ordering scootbar's look reload uses.
         if identity != self.look_identity {
             self.look_identity = identity.clone();
             let (name, source_hash) = match &identity {
@@ -989,30 +980,6 @@ impl State {
                     &format!("{problem}; kept the running section"),
                 ));
             }
-        }
-    }
-
-    /// Waits for the `scootbg apply-config` run this reload handed over, up
-    /// to [`WAIT_WALLPAPER_TIMEOUT`], then answers. Opt-in per reload
-    /// (`reload --wait-wallpaper`): waiting blocks the loop while scootbg
-    /// works, so the default stays fire-and-forget. Reaps through the same
-    /// path the `SIGCHLD` reaper drives, so a run that exits while waiting
-    /// is logged exactly once and the queue advances the same way.
-    fn wait_wallpaper(&mut self, report: &mut Report) {
-        if self.wallpaper.running_pid().is_none() {
-            return;
-        }
-        let deadline = std::time::Instant::now() + WAIT_WALLPAPER_TIMEOUT;
-        while self.wallpaper.running_pid().is_some() {
-            if std::time::Instant::now() >= deadline {
-                report.refused.push(refused(
-                    field::WALLPAPER,
-                    "timed out waiting for the wallpaper run; handed over, exit unwaited-on",
-                ));
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            self.reap_wallpaper();
         }
     }
 

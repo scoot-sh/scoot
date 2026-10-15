@@ -68,6 +68,17 @@ with a forbidden key or a bad value is refused whole: startup runs
 without it and logs, and a reload answers an error and keeps everything.
 With no look active, this file behaves as before.
 
+Where the look lives: the active look's fragment is
+`$XDG_STATE_HOME/scoot/look/scoot.toml` (usually
+`~/.local/state/scoot/look/scoot.toml`), or `$SCOOT_LOOK_STATE/scoot.toml`
+when that variable names a state dir explicitly. The `look` entry itself
+is a link to the rendered look, so switching looks swaps one link.
+Populate it without Nix with `scoot-look build` (which renders a
+`look.toml` into that state dir); with Nix the catalog install does it.
+When the link is absent there is no look layer and this file behaves as
+before. A dangling link or an unreadable fragment warns at startup and
+refuses a reload whole, keeping everything.
+
 ## The built-in cursors
 
 Where no cursor theme is installed (a webtop or minimal container),

@@ -30,7 +30,8 @@ mono = "DejaVu Sans Mono"
 size = 12.5 # renders the example bar font-size 17
 
 [opacity]
-bar = 0.88
+# 1.0 until the bar-opacity pixman benchmark passes; the example uses 0.88.
+bar = 1.0
 
 [shape]
 radius = 16

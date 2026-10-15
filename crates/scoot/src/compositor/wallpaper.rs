@@ -109,12 +109,6 @@ impl Wallpaper {
         self.queue.is_empty()
     }
 
-    /// The pid in flight, if any -- what `reload --wait-wallpaper` polls
-    /// before answering.
-    pub(super) fn running_pid(&self) -> Option<u32> {
-        self.queue.running_pid()
-    }
-
     /// The queue, for the glue's tests.
     #[cfg(test)]
     pub(super) fn queue_mut(&mut self) -> &mut Queue {

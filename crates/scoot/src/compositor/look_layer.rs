@@ -109,6 +109,46 @@ pub fn state_dir(
         .map(|dir| PathBuf::from(dir).join(".local/state/scoot"))
 }
 
+/// The largest look-layer file this reads: a rendered `scoot.toml` fragment
+/// and its `render.json` are both machine-rendered and small (a few KiB), so
+/// anything past this is not a look layer. Mirrors scootbar's hardened
+/// reader (`crates/scootbar/src/config.rs::read_bytes`): opened without
+/// blocking and required to be a regular file, so a FIFO planted at the
+/// fragment path can neither hang startup nor wedge the reload path, and a
+/// huge file is refused without reading it whole.
+pub const MAX_FILE: u64 = 64 * 1024;
+
+/// The gated read both the fragment and its `render.json` share: opened
+/// `O_NONBLOCK` and required to be a regular file by `fstat`, with a size
+/// cap. A symlink is followed and judged by its target -- which is how the
+/// `look` link itself resolves, the one symlink this intentionally follows;
+/// a loop in one is the kernel's `ELOOP`.
+fn read_capped(path: &Path) -> Result<String, String> {
+    use std::io::Read as _;
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|errno| errno.to_string())?;
+    let stat = rustix::fs::fstat(&fd).map_err(|errno| errno.to_string())?;
+    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile {
+        return Err("not a regular file: refusing to read it".to_owned());
+    }
+    let mut buf = Vec::new();
+    std::fs::File::from(fd)
+        .take(MAX_FILE + 1)
+        .read_to_end(&mut buf)
+        .map_err(|error| error.to_string())?;
+    if buf.len() as u64 > MAX_FILE {
+        return Err(format!("larger than {MAX_FILE} bytes: refusing to read it"));
+    }
+    String::from_utf8(buf).map_err(|error| error.to_string())
+}
+
 /// Loads the active rendered look's fragment from `state_dir`.
 ///
 /// Returns the fragment bytes plus the identity from its `render.json`, or
@@ -116,6 +156,11 @@ pub fn state_dir(
 /// (reload). Never panics on malformed input: every I/O failure maps to
 /// [`FragmentAbsent::Broken`]. Parsing and strict validation happen in
 /// `config`, which owns the target types.
+///
+/// Both files go through [`read_capped`]: a FIFO at the fragment path
+/// refuses instead of hanging the compositor, and an oversize file is
+/// refused without reading it whole -- on the reload path as well, so a
+/// hostile layer can never wedge the loop thread.
 pub fn load(state_dir: &Path) -> LoadOutcome {
     let link = state_dir.join("look");
     if std::fs::symlink_metadata(&link).is_err() {
@@ -125,7 +170,7 @@ pub fn load(state_dir: &Path) -> LoadOutcome {
         };
     }
     let fragment_path = link.join(FRAGMENT);
-    let text = match std::fs::read_to_string(&fragment_path) {
+    let text = match read_capped(&fragment_path) {
         Ok(text) => text,
         Err(error) => {
             return LoadOutcome {
@@ -147,7 +192,9 @@ pub fn load(state_dir: &Path) -> LoadOutcome {
 }
 
 /// Reads the layer's identity: the name and hash from its `render.json`,
-/// falling back to the fragment's own length when there is none.
+/// falling back to the fragment's content hash when there is none (or it
+/// cannot be read: a FIFO, a directory, an oversize file, or bad JSON all
+/// fall back rather than hanging or refusing the layer).
 fn read_identity(render_json: &Path, fragment_text: &str) -> LookIdentity {
     #[derive(serde::Deserialize, Default)]
     struct RenderJson {
@@ -156,7 +203,7 @@ fn read_identity(render_json: &Path, fragment_text: &str) -> LookIdentity {
         #[serde(default)]
         source_hash: String,
     }
-    match std::fs::read_to_string(render_json) {
+    match read_capped(render_json) {
         Ok(text) => match serde_json::from_str::<RenderJson>(&text) {
             Ok(parsed) => LookIdentity {
                 name: parsed.name,
@@ -174,12 +221,20 @@ fn read_identity(render_json: &Path, fragment_text: &str) -> LookIdentity {
     }
 }
 
-/// The identity stand-in when there is no `render.json`: two different
-/// fragments still compare different by length in every non-adversarial
-/// case, and equal-length collisions only skip an event, never corrupt
-/// state.
+/// The identity stand-in when there is no `render.json`: a cheap FNV-1a
+/// hash of the fragment bytes, so two different fragments without metadata
+/// still compare different. Length alone collides for any two equal-length
+/// fragments (which only skips a `Look` event, never corrupts state), but
+/// the hash costs one pass and removes even that.
 fn fragment_fallback(fragment_text: &str) -> String {
-    format!("fragment:{}", fragment_text.len())
+    const OFFSET: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+    let mut hash = OFFSET;
+    for byte in fragment_text.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    format!("fragment:{hash:016x}")
 }
 
 #[cfg(test)]

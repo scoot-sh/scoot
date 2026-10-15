@@ -35,7 +35,7 @@ compatibility; these numbers do.
 
 | Contract | Constant (today) | Between | Enforced |
 |---|---|---|---|
-| scoot IPC | `scoot_ipc::PROTOCOL_VERSION` (10) | scoot and any IPC client: `scoot msg` from another build (a Mac client driving a VM), agents, scripts | Advertised, not enforced. `scoot --version` prints it (`scoot 0.2.1 (ipc protocol 10)`) and the `version` reply carries it. A client compares it before relying on newer requests. `scoot msg` itself does not refuse a mismatch yet. |
+| scoot IPC | `scoot_ipc::PROTOCOL_VERSION` (11) | scoot and any IPC client: `scoot msg` from another build (a Mac client driving a VM), agents, scripts | Advertised, not enforced. `scoot --version` prints it (`scoot 0.2.1 (ipc protocol 11)`) and the `version` reply carries it. A client compares it before relying on newer requests. `scoot msg` itself does not refuse a mismatch yet. |
 | scootbg control | `scootbg::protocol::PROTOCOL_VERSION` (1) | scoot (`[wallpaper]` through `scootbg apply-config`) or the `scootbg` CLI, and the scootbg daemon | Yes, both ends. Every request names its protocol and the daemon refuses another one. `apply-config` opens with a `version` request: a different protocol is an error with the fix (`scootbg kill`, then reload), a different version only a warning. |
 | scootbar control | `scootbar::control::protocol::PROTOCOL_VERSION` (1) | `scootbar msg` and the scootbar daemon | Yes. A request whose protocol differs is refused. |
 | Looks `schema` | not landed yet | the looks a desktop profile reads | To be numbered and checked when it lands. |
@@ -169,7 +169,7 @@ SemVer build metadata: `<last tag>+<commits since it>.g<commit>`.
 
 ```console
 $ scoot --version
-scoot 0.2.1+14.g615608c (ipc protocol 10)
+scoot 0.2.1+14.g615608c (ipc protocol 11)
 ```
 
 The line keeps its shape (`scoot X (ipc protocol N)`). Only `X` grows the

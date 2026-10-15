@@ -869,14 +869,20 @@ pub fn reload_from_with_layer(
 /// (`layer_text`, `None` for no layer). A layer that fails the strict parse
 /// logs and runs without the layer: startup never fails over a look, and
 /// the user's own file still applies.
+///
+/// The merge builds from the user file this same call parsed (or
+/// [`FileConfig::default`] when no user file exists or it does not parse,
+/// logging the failure the same way `load` does): a single read, so a plain
+/// install with only a look still gets the look, an unparsable user file
+/// still gets the look on top of defaults, and no second read can race the
+/// first.
 pub fn load_with_layer(
     explicit: Option<&Path>,
     layer_text: Option<&str>,
 ) -> Result<LayeredStartup, ConfigFileError> {
-    let loaded = load(explicit)?;
     let Some(text) = layer_text else {
         return Ok(LayeredStartup {
-            loaded,
+            loaded: load(explicit)?,
             shadowed: Vec::new(),
             invalid: Vec::new(),
             layer_warning: None,
@@ -886,7 +892,7 @@ pub fn load_with_layer(
         Ok(layer) => layer,
         Err(reason) => {
             return Ok(LayeredStartup {
-                loaded,
+                loaded: load(explicit)?,
                 shadowed: Vec::new(),
                 invalid: Vec::new(),
                 layer_warning: Some(format!(
@@ -895,52 +901,72 @@ pub fn load_with_layer(
             });
         }
     };
-    // Re-parse the user's file and merge: `load` above already validated it
-    // parses, so this second parse only fails if the file changed under us,
-    // in which case startup keeps the unlayered load rather than defaults.
-    let path = match startup_path(
-        explicit,
-        std::env::var_os("XDG_CONFIG_HOME"),
-        std::env::var_os("HOME"),
-    ) {
-        Some(path) => path,
+    // One read of the user's file, shared with the merge below. The arms
+    // mirror `load_from`/`parse_or_defaults`' "never block startup" rule
+    // (an explicit path that cannot be read is a hard error; a missing
+    // default file is silent defaults; an unreadable one or a parse
+    // failure logs and falls back to defaults), but keep the parsed
+    // `FileConfig` so the merge never re-reads: no second read to race the
+    // first, and no fall-through that drops the layer.
+    let (file, path) = match explicit {
+        Some(path) => match fs::read_to_string(path) {
+            Err(source) => {
+                return Err(ConfigFileError {
+                    path: path.to_owned(),
+                    source,
+                });
+            }
+            Ok(text) => match toml::from_str::<FileConfig>(&text) {
+                Ok(file) => (file, path.to_owned()),
+                Err(error) => {
+                    tracing::error!(
+                        path = %path.display(), %error,
+                        "could not parse config file; using defaults"
+                    );
+                    (FileConfig::default(), path.to_owned())
+                }
+            },
+        },
         None => {
-            return Ok(LayeredStartup {
-                loaded,
-                shadowed: Vec::new(),
-                invalid: Vec::new(),
-                layer_warning: None,
-            });
+            match default_path(
+                std::env::var_os("XDG_CONFIG_HOME"),
+                std::env::var_os("HOME"),
+            ) {
+                // Neither XDG_CONFIG_HOME nor HOME is set: nowhere sensible
+                // to look, same as "the default file doesn't exist".
+                None => (FileConfig::default(), PathBuf::from("/config.toml")),
+                Some(path) => match fs::read_to_string(&path) {
+                    Ok(text) => match toml::from_str::<FileConfig>(&text) {
+                        Ok(file) => (file, path),
+                        Err(error) => {
+                            tracing::error!(
+                                path = %path.display(), %error,
+                                "could not parse config file; using defaults"
+                            );
+                            (FileConfig::default(), path)
+                        }
+                    },
+                    Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                        (FileConfig::default(), path)
+                    }
+                    Err(source) => {
+                        tracing::error!(
+                            path = %path.display(), %source,
+                            "could not read the default config file; using defaults"
+                        );
+                        (FileConfig::default(), path)
+                    }
+                },
+            }
         }
     };
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(_) => {
-            return Ok(LayeredStartup {
-                loaded,
-                shadowed: Vec::new(),
-                invalid: Vec::new(),
-                layer_warning: None,
-            });
-        }
-    };
-    match toml::from_str::<FileConfig>(&text) {
-        Ok(file) => {
-            let layered = LoadedConfig::from_file_with_layer(file, &path, false, Some(&layer));
-            Ok(LayeredStartup {
-                loaded: layered.loaded,
-                shadowed: layered.shadowed,
-                invalid: layered.invalid,
-                layer_warning: None,
-            })
-        }
-        Err(_) => Ok(LayeredStartup {
-            loaded,
-            shadowed: Vec::new(),
-            invalid: Vec::new(),
-            layer_warning: None,
-        }),
-    }
+    let layered = LoadedConfig::from_file_with_layer(file, &path, false, Some(&layer));
+    Ok(LayeredStartup {
+        loaded: layered.loaded,
+        shadowed: layered.shadowed,
+        invalid: layered.invalid,
+        layer_warning: None,
+    })
 }
 
 /// A [`load_with_layer`] result: the loaded config, the user keys that
@@ -1180,6 +1206,12 @@ fn merge_layer(mut user: FileConfig, layer: &LayerFile) -> (FileConfig, Vec<Stri
         let user_appearance = user
             .appearance
             .get_or_insert_with(AppearanceConfig::default);
+        // Rule 3 keys off what the user's file set, read before the per-key
+        // merge below fills unset keys from the look: after the merge an
+        // `is_some` on the active width cannot tell the user's own key from
+        // the look's, and the derived key would follow the wrong layer.
+        let user_set_width = user_appearance.focus_ring_width.is_some();
+        let user_set_inactive_width = user_appearance.focus_ring_inactive_width.is_some();
         merge_appearance_key(
             &mut user_appearance.focus_ring_width,
             layer_appearance.focus_ring_width,
@@ -1229,14 +1261,19 @@ fn merge_layer(mut user: FileConfig, layer: &LayerFile) -> (FileConfig, Vec<Stri
             &mut shadowed,
         );
         // Rule 3: the derived key follows the layer that supplied its base.
-        // The user's own inactive width always wins; else, when the user set
-        // the active width, the look's inactive width is dropped so the
-        // unset value follows the user's; else the look's stands.
-        if user_appearance.focus_ring_inactive_width.is_some() {
+        // The user's own inactive width always wins; else, when the user's
+        // file set the active width, the look's inactive width is dropped
+        // so the unset value follows the user's (reported shadowing the
+        // look's key, since the user's width is what decides it); else the
+        // look's stands.
+        if user_set_inactive_width {
             if layer_appearance.focus_ring_inactive_width.is_some() {
                 shadowed.push("appearance.focus_ring_inactive_width".to_owned());
             }
-        } else if user_appearance.focus_ring_width.is_some() {
+        } else if user_set_width {
+            if layer_appearance.focus_ring_inactive_width.is_some() {
+                shadowed.push("appearance.focus_ring_inactive_width".to_owned());
+            }
             user_appearance.focus_ring_inactive_width = None;
         } else {
             user_appearance.focus_ring_inactive_width = layer_appearance.focus_ring_inactive_width;
@@ -5359,6 +5396,11 @@ mod tests {
             "an unset user key takes the look's"
         );
         assert_eq!(
+            appearance.focus_ring_inactive_width,
+            Some(2),
+            "the look's inactive width stands when the user set neither key"
+        );
+        assert_eq!(
             shadowed,
             vec!["appearance.cursor_size"],
             "only the overridden key is shadowed"
@@ -5396,13 +5438,24 @@ mod tests {
     fn a_derived_inactive_width_follows_the_layer_that_supplied_its_base() {
         let layer = layer("[appearance]\nfocus_ring_width = 2\nfocus_ring_inactive_width = 1\n");
         // User active width alone: the look's inactive width is dropped so
-        // the unset value follows the user's width.
-        let (merged, _) = merge_layer(user_file("[appearance]\nfocus_ring_width = 5\n"), &layer);
+        // the unset value follows the user's width -- and the drop is
+        // reported shadowing the look's key, since the user's width is what
+        // decides it.
+        let (merged, shadowed) =
+            merge_layer(user_file("[appearance]\nfocus_ring_width = 5\n"), &layer);
         let appearance = merged.appearance.expect("merged appearance");
         assert_eq!(appearance.focus_ring_width, Some(5));
         assert_eq!(
             appearance.focus_ring_inactive_width, None,
             "the look's inactive width is dropped, not paired with the user's base"
+        );
+        assert_eq!(
+            shadowed,
+            vec![
+                "appearance.focus_ring_inactive_width",
+                "appearance.focus_ring_width"
+            ],
+            "the user's width shadows, and the dropped inactive width reports too"
         );
 
         // User inactive width alone: the look's active width stays.
@@ -5497,5 +5550,56 @@ mod tests {
         );
         assert!(layered.invalid.is_empty());
         assert!(layered.shadowed.is_empty());
+    }
+
+    #[test]
+    fn load_with_layer_applies_the_layer_over_an_unparsable_user_file() {
+        // The startup bug: `load` fell back to defaults over the bad file,
+        // then the second read failed to re-parse and the layer was dropped
+        // silently. The layer must still apply, on top of defaults, with the
+        // bad user file already logged by the single shared read.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "this is not valid toml [[[").expect("a bad user file");
+        let startup = load_with_layer(
+            Some(&path),
+            Some("[appearance]\nbackground_color = \"#2B3648\"\n"),
+        )
+        .expect("startup never fails over a look");
+        assert_eq!(startup.layer_warning, None);
+        assert_eq!(
+            hex(startup.loaded.appearance.background_color),
+            "#2b3648",
+            "the layer applies over defaults when the user file does not parse"
+        );
+    }
+
+    #[test]
+    fn load_with_layer_applies_the_layer_over_defaults_without_a_user_file() {
+        // A plain install with only a look: no user file at the explicit
+        // path is a hard error (unchanged), so this pins the merge the
+        // no-file path builds from -- defaults under the layer.
+        let layered = LoadedConfig::from_file_with_layer(
+            FileConfig::default(),
+            Path::new("/config.toml"),
+            false,
+            Some(&layer("[appearance]\nbackground_color = \"#2B3648\"\n")),
+        );
+        assert_eq!(
+            hex(layered.loaded.appearance.background_color),
+            "#2b3648",
+            "the layer supplies what defaults leave unset"
+        );
+        assert!(layered.shadowed.is_empty());
+        assert!(layered.invalid.is_empty());
+    }
+
+    #[test]
+    fn load_with_layer_without_a_layer_is_plain_load() {
+        let (_dir, path) = write_temp("[layout]\ngap = 20\n");
+        let startup = load_with_layer(Some(&path), None).expect("no layer loads like plain load");
+        assert_eq!(startup.loaded.config.gap, 20);
+        assert!(startup.shadowed.is_empty());
+        assert!(startup.layer_warning.is_none());
     }
 }

@@ -89,9 +89,11 @@ each applied field:
 
 `shadowed` lists every file key that overrides the active look (see
 [Appearance](./appearance.md#the-look-layer)); `invalid` lists file keys
-whose bad values fell back to the look's. `scoot msg reload
---wait-wallpaper` holds the reply until the wallpaper run finishes, up
-to a bound, instead of answering once handed over.
+whose bad values fell back to the look's. The reply answers once the
+wallpaper run is handed over, without waiting for it. The look itself
+lives at `$XDG_STATE_HOME/scoot/look/scoot.toml` (or
+`$SCOOT_LOOK_STATE/scoot.toml`); a reload with a dangling link or an
+unreadable fragment there is refused whole, keeping everything.
 
 **Refused, explicitly, pending a restart:** `[tty] gpu`, `[renderer]
 backend`, `[xwayland] enabled`, `[virtual_input] enabled` and

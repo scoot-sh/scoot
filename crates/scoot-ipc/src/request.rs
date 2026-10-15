@@ -6,12 +6,6 @@ use crate::action::Action;
 use crate::event::EventKind;
 use crate::key::KeyCombo;
 
-/// `skip_serializing_if` for a default-off flag: the default request keeps
-/// the old unit wire shape exactly.
-fn is_false(value: &bool) -> bool {
-    !*value
-}
-
 /// Whether a [`Request::Screenshot`] that does not say draws the pointer:
 /// yes. An agent reading a screenshot needs to see where the pointer is --
 /// and needs that not to depend on which backend or renderer the session
@@ -125,18 +119,7 @@ pub enum Request {
     /// this tag decodes exactly as before, so no `PROTOCOL_VERSION` bump for
     /// the request half. (The reply half is a new `Response` variant, which
     /// is why the version still moved -- see `Response::Reloaded`.)
-    ///
-    /// `wait_wallpaper` waits for the `scootbg apply-config` run this
-    /// reload hands over before answering, up to a bound, instead of
-    /// answering once handed over. Opt-in and off by default: waiting
-    /// blocks the loop while scootbg works. Added with a default, so no
-    /// `PROTOCOL_VERSION` move: the default serializes exactly as the old
-    /// unit shape, an older server ignores the field, and an older
-    /// client's shape decodes with it false (like `Screenshot::cursor`).
-    Reload {
-        #[serde(default, skip_serializing_if = "is_false")]
-        wait_wallpaper: bool,
-    },
+    Reload,
     /// Subscribe this connection to events of the named kinds, dedicating
     /// it to them: the reply is `Response::Subscribed`, and afterwards the
     /// connection carries events only (any other request on it is refused

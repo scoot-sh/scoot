@@ -624,9 +624,7 @@ fn a_runtime_scale_change_rescales_open_x_windows() {
 
     for scale in [2, 1] {
         fs::write(&path, format!("[output]\nscale = {scale}.0\n")).expect("a config file");
-        let response = live.fixture.state.handle_request(Request::Reload {
-            wait_wallpaper: false,
-        });
+        let response = live.fixture.state.handle_request(Request::Reload);
         assert!(
             format!("{response:?}").contains("output.scale"),
             "the reload did not apply the scale: {response:?}"
@@ -704,9 +702,7 @@ fn a_fractional_reload_moves_open_x_windows_between_sharp_and_light() {
             format!("[output]\nscale = 1.5\n\n[xwayland]\nfractional = \"{fractional}\"\n"),
         )
         .expect("a config file");
-        let response = live.fixture.state.handle_request(Request::Reload {
-            wait_wallpaper: false,
-        });
+        let response = live.fixture.state.handle_request(Request::Reload);
         assert!(
             format!("{response:?}").contains("xwayland.fractional"),
             "the reload did not apply the option: {response:?}"
@@ -794,9 +790,7 @@ fn an_integer_scale_is_unchanged_by_the_fractional_choice() {
         "[output]\nscale = 2.0\n\n[xwayland]\nfractional = \"light\"\n",
     )
     .expect("a config file");
-    let response = live.fixture.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let response = live.fixture.state.handle_request(Request::Reload);
     assert!(
         format!("{response:?}").contains("xwayland.fractional"),
         "the reload did not apply the option: {response:?}"
@@ -1006,9 +1000,7 @@ fn a_runtime_rescale_keeps_far_x_windows_in_x_range() {
     });
 
     fs::write(&path, "[output]\nscale = 2.0\n").expect("a config file");
-    let response = live.fixture.state.handle_request(Request::Reload {
-        wait_wallpaper: false,
-    });
+    let response = live.fixture.state.handle_request(Request::Reload);
     assert!(format!("{response:?}").contains("output.scale"));
     let mut x = 0;
     eventually(&mut live.fixture, "the rescaled configure landing", |_| {
