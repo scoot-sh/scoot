@@ -49,8 +49,8 @@ size, reads the file again. Images over 16384×16384 pixels are refused.
 An image is also not scaled along a side longer than 65536 pixels (the
 scaler's limit, far past any screen): a 20,000,000×1 strip set with
 `fit` or `stretch` is a drawing error, reported by `set` and by
-`query`'s `draw_error`, while `center` and `tile` show it, and `fill`
-(which crops the long side away first) usually does.
+`query`'s `draw_error`, while `fill` (which crops the long side away
+first), `center` and `tile` show it.
 
 
 
