@@ -11,7 +11,7 @@ nested in the host compositor with the same session script:
 
 ```sh
 #!/bin/sh
-# /defaults/startwm.sh (linuxserver webtop): the container's desktop init
+# /defaults/startwm.sh (a linuxserver convention, outside this repo): the container's desktop init
 # execs this with the session environment already set. Start scoot nested
 # in the host compositor, with the same session script:
 exec scoot --nested -- /path/to/session.sh

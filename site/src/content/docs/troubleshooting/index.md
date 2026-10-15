@@ -16,7 +16,7 @@ right one.
 
 ## Keys and pointer
 
-- *Key not working / Super does nothing nested* → [First session](../start/first-session.md#five-keys) and [Keybindings](../scoot/keybindings.md#change-one-binding): the host owns Super first inside a nested window.
+- *Key not working / Super does nothing nested* → [First session](../start/first-session.md#three-keys-and-a-way-out) and [Keybindings](../scoot/keybindings.md#change-one-binding): the host owns Super first inside a nested window.
 - *A Fn key does nothing* → [Desktop hardware keys](../desktop/index.md#hardware-keys-and-desktop-actions): check the tool first (`brightnessctl get`, `wpctl get-volume`), then the bind, then whether scoot saw the key.
 - *Volume keys die at the lock screen / holding volume steps once* → known gaps, [documented with the keymap](../desktop/index.md#hardware-keys-and-desktop-actions).
 - *Pointer frozen but clicks answer ok* → [Rules an agent needs](../msg/index.md#rules-an-agent-needs): a client holds a pointer lock; a session lock ends the freeze.
@@ -24,7 +24,7 @@ right one.
 ## Config and reload
 
 - *Scoot won't start after a config edit* → almost never the config: [failure semantics](../scoot/configure.md#failure-semantics) fall back to defaults and log, except `[tty] gpu` and `[renderer] backend = "gpu"`, which are deliberate startup errors.
-- *Reload changed nothing* → [Reloading](../scoot/configure.md#reloading-the-config): both lists empty means file and session agree; `tty.gpu`, `renderer.backend`, `xwayland.enabled` and output `mode` need a restart.
+- *Reload changed nothing* → [Reloading](../scoot/configure.md#reloading-the-config): both lists empty means file and session agree; `tty.gpu`, `renderer.backend`, `xwayland.enabled` and `[virtual_input] enabled` / `[virtual_input] binds` need a restart.
 - *A bind doesn't fire / two binds collide* → [Keybindings](../scoot/keybindings.md#the-bind-grammar): unparseable binds skip quietly; colliding combos both drop.
 
 ## Outputs and monitors
@@ -36,7 +36,7 @@ right one.
 
 ## Agents and IPC
 
-- *Socket not there / action refused / screenshot blank* → [IPC troubleshooting](../msg/troubleshooting.md): the nine bounds, what each costs, and the retry rules.
+- *Socket not there / action refused / screenshot blank* → [IPC troubleshooting](../msg/troubleshooting.md): the ten bounds, what each costs, and the retry rules.
 - *Typed text lands on the wrong window* → [Rules an agent needs](../msg/index.md#rules-an-agent-needs): window focus vs keyboard focus, and the `popup_grab` rule.
 - *No popups / popups under fullscreen / DND stuck* → [Desktop notifications](../desktop/index.md#notifications): unit, `layer=overlay`, `makoctl mode -r`.
 

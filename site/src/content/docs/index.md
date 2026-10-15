@@ -60,7 +60,7 @@ Pick one:
   notifications from your distro.
 - **[Agents, headless and webtop](./agents/index.md)** — drive scoot from
   code. The IPC socket, screenshots, `--help --json`, `llms.txt` sets for
-  every section, and the webtop image for containers.
+  every section, and the webtop recipe for containers.
 
 ## Start here, in order
 
