@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use super::{Config, Error, MAX_FILE, load_startup, reload};
+use super::{Config, Error, MAX_FILE, load_startup};
 #[cfg(all(feature = "clock", feature = "workspaces"))]
 use crate::bar::Edge;
 use crate::bar::Margin;
@@ -307,7 +307,12 @@ fn an_explicit_missing_file_is_a_refusal() {
 
 #[test]
 fn reload_without_a_file_is_a_refusal() {
-    assert!(reload(None).is_err());
+    // The same refusal through the look layer's plain reload: no usable
+    // config home means no reload, whatever the look state.
+    let look = crate::look::LookState::new(toml::from_str("").expect("empty parses"), false);
+    assert!(
+        crate::look::reload_user(None, &look, &crate::look::Features::compiled(), None).is_err()
+    );
 }
 
 #[test]

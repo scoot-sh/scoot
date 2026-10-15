@@ -12,7 +12,80 @@ fn presentation_passes() {
     assert!(allows("scootbar", "colors.accent"));
     assert!(allows("scootbar", "bar.radius"));
     assert!(allows("scootbar", "workspaces.inactive-color"));
+    assert!(allows("scootbar", "workspaces.pill-shape"));
+    assert!(allows("scootbar", "workspaces.pill-inset"));
+    assert!(allows("scootbar", "workspaces.disc"));
+    assert!(allows("scootbar", "clock.icon"));
+    assert!(allows("scootbar", "power.icon-poweroff"));
+    assert!(allows("scootbar", "battery.icon-charging"));
     assert!(allows("scootnotify", "colors.match"));
+}
+
+#[test]
+fn bar_visual_keys_take_their_values() {
+    // The look-layer-scootbar allowlist: shape enums, the disc boolean,
+    // and one glyph per icon key.
+    let err = check_app_value(
+        "scootbar",
+        "workspaces.pill-shape",
+        &toml::Value::String("circle".into()),
+    );
+    assert!(err.is_none(), "pill-shape refused: {err:?}");
+    let err = check_app_value(
+        "scootbar",
+        "workspaces.pill-shape",
+        &toml::Value::String("hexagon".into()),
+    );
+    assert!(err.is_some(), "bad pill-shape passes");
+    let err = check_app_value("scootbar", "workspaces.disc", &toml::Value::Boolean(true));
+    assert!(err.is_none(), "disc refused: {err:?}");
+    let err = check_app_value(
+        "scootbar",
+        "workspaces.disc",
+        &toml::Value::String("yes".into()),
+    );
+    assert!(err.is_some(), "string disc passes");
+    for key in [
+        "clock.icon",
+        "volume.icon",
+        "microphone.icon",
+        "network.icon",
+        "network.icon-ethernet",
+        "network.icon-vpn",
+        "network.icon-offline",
+        "media.icon",
+        "media.icon-playing",
+        "media.icon-paused",
+        "bluetooth.icon",
+        "bluetooth.icon-off",
+        "bluetooth.icon-on",
+        "bluetooth.icon-connected",
+        "power.icon",
+        "power.icon-lock",
+        "power.icon-logout",
+        "power.icon-suspend",
+        "power.icon-reboot",
+        "power.icon-poweroff",
+        "battery.icon-charging",
+        "battery.icon-full",
+        "window-title.icon",
+    ] {
+        let err = check_app_value("scootbar", key, &toml::Value::String("●".into()));
+        assert!(err.is_none(), "{key} refused: {err:?}");
+    }
+    // The array-valued icon levels are not glyph strings: not allowlisted.
+    for key in ["brightness.icon", "battery.icon", "network.icon-wifi"] {
+        assert!(!allows("scootbar", key), "allows {key}");
+    }
+    // Geometry and actions stay out, with the new keys beside them.
+    for key in [
+        "bar.edge",
+        "bar.height",
+        "bar.tooltip-delay",
+        "workspaces.pill-shape.foo",
+    ] {
+        assert!(!allows("scootbar", key), "allows {key}");
+    }
 }
 
 #[test]

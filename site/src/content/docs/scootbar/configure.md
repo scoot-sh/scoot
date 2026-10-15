@@ -154,6 +154,63 @@ Every token has a `[colors]` key; `bg` and `fg` are `--background` and
 
 
 
+## Look layer
+
+A look is a set of tokens rendered to `<state>/look/bar.toml`, which the
+bar merges under its own file, per key. Precedence, highest first, per
+key: daemon flags (`--background`, `--foreground`), the file, the look,
+the built-in defaults. A key set in `bar.toml` always wins over the
+look's value for that key; every other key follows the look.
+
+The state is `$SCOOT_LOOK_STATE` when a private session sets it, else
+`$XDG_STATE_HOME/scoot`, else `~/.local/state/scoot`. A missing or
+dangling link means no layer; a broken one is refused with the reason
+named, and a start never fails over it.
+
+- **What a look sets**: the six `[colors]` tokens; `[bar]` `radius`,
+  `popup-radius`, `opacity`, `font-size`, `padding`, `spacing`,
+  `separator` (plus the renderer's own `bar.font` file path); the
+  workspaces pill keys and the per-module glyph icons. It never sets
+  geometry or placement (`edge`, `height`, `margin`, `layer`,
+  `exclusive`), module lists, `exec`/`button`/`push` tables, `on-*`
+  actions or `tooltip-delay`: any of those in the layer refuses it whole,
+  so a look never recreates the bar's surface.
+- **One derived pair**: `hover` follows a custom `accent` when unset. A
+  file that sets only `accent` gets its hover derived from it (the
+  look's `hover` is dropped); a file that sets only `hover` keeps the
+  look's `accent`.
+- **A key whose feature is not built in** is dropped from the layer with
+  a note (`popup-radius` without the `popup` feature); the file itself
+  keeps refusing unknown keys loudly.
+
+`[look] layer` pins the layer to a file, for a bar that runs without
+scoot (which never has a state link). Type: a path to a `bar.toml`
+fragment. Default: unset, the state link. A relative path resolves
+against the config file's directory. Example:
+
+```toml
+[look]
+layer = "/run/current-system/sw/share/scoot/rendered/moonrise/bar.toml"
+```
+
+Reload: a plain `scootbar msg reload` re-reads the file and the layer;
+`--look` re-reads only the layer, under a snapshot of the file, so a
+look swap never applies pending edits. A `--look` reload with no layer
+is refused; an unknown scope is refused by name, never treated as a
+plain reload.
+
+> **Symptom:** a look applies and nothing changes. The file sets those
+> keys itself, and the file wins per key. Remove the file's own values
+> (or keep them on purpose) to let the look show through.
+
+> **Symptom:** a reload is refused naming `bar.radius`. The look's
+> radius does not fit the file's `height` (at most half of it). A layer
+> value that is invalid against the file refuses the whole layer at
+> startup (a note, the bar starts without it) and the whole reload on a
+> swap. Set the file's own `radius`, or raise `height`.
+
+
+
 ## What it does on the compositor
 
 - **One bar per selected output** ([Outputs](./configure.md#outputs)), a layer surface (`top` by default) with the namespace

@@ -84,6 +84,10 @@ icon-image = ["dep:png"]
 # none of the protocol reaches the binary: `src/scoot.rs` still writes its
 # request by hand, and a test checks it against scoot-ipc's encoding.)
 scoot-ipc.workspace = true
+# The look layer (`look.rs`): the per-app key allowlists and value checks
+# live in one place (`scoot-look`), so the validator and this loader cannot
+# disagree. Pure (no Wayland, no fontconfig), so no new package in the tree.
+scoot-look.workspace = true
 # The sealed-memfd `wl_shm` buffer, scootbg's, so scootbar has no `unsafe`
 # of its own (`#![forbid(unsafe_code)]` in `src/main.rs`).
 scootbg-mem.workspace = true

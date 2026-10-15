@@ -8,7 +8,7 @@ blocked: null
 
 # A style-only reload keeps every module running and repaints
 
-Filed 2026-10-12, split out of [`look-layer-scootbar`](look-layer-scootbar.md)
+Filed 2026-10-12, split out of [`look-layer-scootbar`](resolved/look-layer-scootbar-done.md)
 for the [`live-looks`](../../backlog/core/live-looks.md) epic, and useful on
 its own. Serves **daily-drive**.
 

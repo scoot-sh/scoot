@@ -16,6 +16,12 @@
 //! {"type":"error","message":"..."}
 //! ```
 //!
+//! A `reload` carries an optional `scope`: absent re-reads the config file
+//! and the look layer both, `"look"` re-reads only the look layer under a
+//! snapshot of the file, so a look swap never applies pending edits. Any
+//! other scope is refused by name, never silently treated as a plain
+//! reload (which would apply those edits).
+//!
 //! A request whose `protocol` differs from [`PROTOCOL_VERSION`] is refused
 //! with an error reply, so a client and a daemon from different builds
 //! disagree loudly rather than misread each other. Unknown fields are
@@ -50,6 +56,7 @@ pub const MAX_REQUEST_LINE: usize = 64 * 1024;
 /// ```text
 /// {"protocol":1,"type":"query"}
 /// {"protocol":1,"type":"reload"}
+/// {"protocol":1,"type":"reload","scope":"look"}
 /// {"protocol":1,"type":"hide"}
 /// {"protocol":1,"type":"show"}
 /// {"protocol":1,"type":"toggle"}
@@ -81,8 +88,10 @@ pub enum Request<'a> {
     },
     /// Dedicate this connection to events of these kinds.
     Subscribe { events: Vec<EventKind> },
-    /// Re-read the config file and live-apply it.
-    Reload,
+    /// Re-read the config file and live-apply it. Without a scope both
+    /// the file and the look layer are re-read; with `"look"` only the
+    /// look layer is, under a snapshot of the file.
+    Reload { scope: Option<ReloadScope> },
     /// Destroy every bar surface and buffer, releasing the exclusive zone.
     Hide,
     /// Make the bars again.
@@ -96,6 +105,31 @@ pub enum Request<'a> {
     /// A value for module `id` ([`crate::modules::Module::on_set`]): only a
     /// `push` module takes one; any other is refused loudly.
     Set { id: Cow<'a, str>, value: Value },
+}
+
+/// A `reload`'s scope: what it re-reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReloadScope {
+    /// Only the look layer, under a snapshot of the config file from the
+    /// last successful plain load: a look swap that never applies pending
+    /// edits.
+    Look,
+}
+
+impl ReloadScope {
+    /// The `scope` string on the wire.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Look => "look",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "look" => Some(Self::Look),
+            _ => None,
+        }
+    }
 }
 
 /// What a subscriber can ask to be told about.
@@ -130,7 +164,7 @@ impl Request<'_> {
             Self::Layout => "layout",
             Self::Invoke { .. } => "invoke",
             Self::Subscribe { .. } => "subscribe",
-            Self::Reload => "reload",
+            Self::Reload { .. } => "reload",
             Self::Hide => "hide",
             Self::Show => "show",
             Self::Toggle => "toggle",
@@ -159,6 +193,8 @@ impl Request<'_> {
             #[serde(skip_serializing_if = "Option::is_none")]
             output: Option<&'r str>,
             #[serde(skip_serializing_if = "Option::is_none")]
+            scope: Option<&'r str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             events: Option<Vec<&'static str>>,
         }
         let mut line = Line {
@@ -169,6 +205,7 @@ impl Request<'_> {
             action: None,
             arg: None,
             output: None,
+            scope: None,
             events: None,
         };
         match self {
@@ -191,13 +228,10 @@ impl Request<'_> {
             Self::Subscribe { events } => {
                 line.events = Some(events.iter().map(|kind| kind.name()).collect());
             }
-            Self::Layout
-            | Self::Reload
-            | Self::Hide
-            | Self::Show
-            | Self::Toggle
-            | Self::Kill
-            | Self::Version => {}
+            Self::Layout | Self::Hide | Self::Show | Self::Toggle | Self::Kill | Self::Version => {}
+            Self::Reload { scope } => {
+                line.scope = scope.map(|scope| scope.name());
+            }
         }
         // Serializing strings and numbers into a `String` cannot fail; if
         // it ever did, the empty line gets a "malformed" reply, not a panic.
@@ -230,6 +264,8 @@ pub enum RequestError {
     BadArg,
     /// `subscribe` names a kind that does not exist.
     UnknownEvent(String),
+    /// `reload` names a scope that does not exist.
+    UnknownScope(String),
 }
 
 impl fmt::Display for RequestError {
@@ -261,6 +297,11 @@ impl fmt::Display for RequestError {
                 "unknown event kind `{}` (they are: module, output)",
                 kind.escape_debug()
             ),
+            Self::UnknownScope(scope) => write!(
+                f,
+                "unknown reload scope `{}` (the scopes are: look)",
+                scope.escape_debug()
+            ),
         }
     }
 }
@@ -285,6 +326,9 @@ struct Envelope<'a> {
     arg: Option<Value>,
     #[serde(borrow)]
     output: Option<Cow<'a, str>>,
+    /// A `reload`'s scope, absent for a plain reload.
+    #[serde(borrow)]
+    scope: Option<Cow<'a, str>>,
     events: Option<Vec<String>>,
 }
 
@@ -358,7 +402,16 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
             }
             Ok(Request::Subscribe { events })
         }
-        "reload" => Ok(Request::Reload),
+        "reload" => {
+            let scope = match envelope.scope.as_deref() {
+                None => None,
+                Some(name) => Some(
+                    ReloadScope::parse(name)
+                        .ok_or_else(|| RequestError::UnknownScope(name.to_owned()))?,
+                ),
+            };
+            Ok(Request::Reload { scope })
+        }
         "hide" => Ok(Request::Hide),
         "show" => Ok(Request::Show),
         "toggle" => Ok(Request::Toggle),

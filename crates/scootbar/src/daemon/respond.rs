@@ -19,10 +19,11 @@ use super::Content;
 use super::agent;
 use super::wayland::State;
 use crate::cli::Given;
-use crate::config::{self, Config};
-use crate::control::protocol::{PROTOCOL_VERSION, Reply, Request, write_reply};
+use crate::config::Config;
+use crate::control::protocol::{PROTOCOL_VERSION, ReloadScope, Reply, Request, write_reply};
 use crate::control::{Handler, Kinds, MAX_SUBSCRIBERS};
 use crate::font;
+use crate::look::LookState;
 use crate::modules::{self, Placed, Update, View};
 use crate::policy::Placement;
 use crate::print::warn;
@@ -38,6 +39,9 @@ pub struct Responder<'a> {
     file: Option<&'a PathBuf>,
     /// The daemon flags, overlaid onto every reload as at start-up.
     given: &'a Given,
+    /// The look layer's snapshot: a plain reload refreshes it, a scoped
+    /// one merges under it.
+    look: &'a mut LookState,
     /// One view, reused for every module on every output a `query` asks
     /// about, so a query allocates nothing past the reply itself.
     view: View,
@@ -55,6 +59,7 @@ impl<'a> Responder<'a> {
         file: Option<&'a PathBuf>,
         given: &'a Given,
         subscribers: usize,
+        look: &'a mut LookState,
     ) -> Self {
         Self {
             stop: false,
@@ -63,6 +68,7 @@ impl<'a> Responder<'a> {
             qh,
             file,
             given,
+            look,
             view: View::default(),
             subscribers,
             subscription: None,
@@ -142,9 +148,15 @@ impl Handler for Responder<'_> {
                 };
                 write_reply(out, &reply);
             }
-            Request::Reload => match self.reload() {
-                Ok(()) => write_reply(out, &Reply::Ok),
-                Err(message) => write_reply(out, &Reply::Error { message: &message }),
+            Request::Reload { scope } => match scope {
+                None => match self.reload() {
+                    Ok(()) => write_reply(out, &Reply::Ok),
+                    Err(message) => write_reply(out, &Reply::Error { message: &message }),
+                },
+                Some(ReloadScope::Look) => match self.reload_scoped() {
+                    Ok(()) => write_reply(out, &Reply::Ok),
+                    Err(message) => write_reply(out, &Reply::Error { message: &message }),
+                },
             },
             Request::Hide | Request::Show | Request::Toggle => {
                 // Only the flag: the loop makes or destroys the surfaces
@@ -175,19 +187,60 @@ impl Handler for Responder<'_> {
 }
 
 impl Responder<'_> {
-    /// Re-reads the config file and live-applies it, with the daemon flags
-    /// overlaid as at start-up. `Err` is the reply, and the running bar
-    /// stands exactly as it was.
+    /// Re-reads the config file and the look layer, and live-applies
+    /// them, with the daemon flags overlaid as at start-up. `Err` is the
+    /// reply, and the running bar stands exactly as it was: the look
+    /// snapshot moves only after the apply succeeds.
     fn reload(&mut self) -> Result<(), String> {
-        let mut config =
-            config::reload(self.file.map(PathBuf::as_path)).map_err(|e| e.to_string())?;
+        let features = crate::look::Features::compiled();
+        let state = crate::look::state_dir();
+        let pending = crate::look::reload_user(
+            self.file.map(PathBuf::as_path),
+            self.look,
+            &features,
+            state.as_deref(),
+        )?;
         // The flags over the file, as at start-up: a clash between them
         // (a module the file and a flag place together) refuses the
         // reload with the running bar untouched, like a bad file.
+        let mut config = pending.config;
         self.given
             .overlay(&mut config)
             .map_err(|error| error.to_string())?;
-        self.apply(config)
+        self.apply(config)?;
+        // Committed only once the reload is known good: a refused reload
+        // (a flag clash above, a font that vanished in `stage`) leaves
+        // the snapshot holding the last applied file.
+        *self.look = pending.look;
+        for note in pending.notes {
+            warn(format_args!("scootbar: note: {note}"));
+        }
+        Ok(())
+    }
+
+    /// Merges the new look layer under the snapshot: the look-scoped
+    /// reload. The user file is never re-read, so pending edits wait for
+    /// a plain reload. `Err` is the reply, and the running bar stands
+    /// exactly as it was: `active` is set only after the apply succeeds.
+    fn reload_scoped(&mut self) -> Result<(), String> {
+        let features = crate::look::Features::compiled();
+        let state = crate::look::state_dir();
+        let pending = crate::look::reload_look(
+            self.file.map(PathBuf::as_path),
+            self.look,
+            &features,
+            state.as_deref(),
+        )?;
+        let mut config = pending.config;
+        self.given
+            .overlay(&mut config)
+            .map_err(|error| error.to_string())?;
+        self.apply(config)?;
+        *self.look = pending.look;
+        for note in pending.notes {
+            warn(format_args!("scootbar: note: {note}"));
+        }
+        Ok(())
     }
 
     fn apply(

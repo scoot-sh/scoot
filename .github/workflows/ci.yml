@@ -299,11 +299,12 @@ jobs:
                 crates/scootbar/*)
                   scootbar=true ;;
                 # The look format crate (crates/scoot-look): its own job
-                # below. Nothing depends on it yet, so its files fan out to
-                # nothing else; the workspace manifests catch it through the
-                # catch-all, which also sets look=true.
+                # below. scootbar reads its allowlists, so its files fan
+                # out to the scootbar job too; the workspace manifests
+                # catch it through the catch-all, which also sets look=true.
                 crates/scoot-look/*)
-                  look=true ;;
+                  look=true
+                  scootbar=true ;;
                 # The shipped looks (looks/): the scoot-look test over the
                 # directory validates and renders every look there, which
                 # is the gate behind the theming page's "a check renders

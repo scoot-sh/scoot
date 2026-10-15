@@ -44,6 +44,6 @@ load.
 
 ## Not in this ticket
 
-scootbar's scoped reload (in [`look-layer-scootbar`](../../scootbar/backlog/look-layer-scootbar.md)).
+scootbar's scoped reload (in [`look-layer-scootbar`](../../scootbar/backlog/resolved/look-layer-scootbar-done.md)).
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).

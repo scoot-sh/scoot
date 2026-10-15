@@ -636,7 +636,16 @@ fn msg_commands_parse() {
         Ok(Command::Msg(Msg::Query { id: None }))
     );
     assert_eq!(run(&["msg", "layout"]), Ok(Command::Msg(Msg::Layout)));
-    assert_eq!(run(&["msg", "reload"]), Ok(Command::Msg(Msg::Reload)));
+    assert_eq!(
+        run(&["msg", "reload"]),
+        Ok(Command::Msg(Msg::Reload { look: false }))
+    );
+    assert_eq!(
+        run(&["msg", "reload", "--look"]),
+        Ok(Command::Msg(Msg::Reload { look: true }))
+    );
+    assert!(run(&["msg", "reload", "--bogus"]).is_err());
+    assert!(run(&["msg", "reload", "--look", "extra"]).is_err());
     assert_eq!(run(&["msg", "version"]), Ok(Command::Msg(Msg::Version)));
     assert_eq!(run(&["msg", "kill"]), Ok(Command::Msg(Msg::Kill)));
     assert_eq!(run(&["msg", "--help"]), Ok(Command::Help(Topic::Msg)));
