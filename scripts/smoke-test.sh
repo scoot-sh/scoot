@@ -1068,11 +1068,13 @@ run_looks_test() {
     local log="$LOOKS_LOG"
     local dir="$LOOKS_DIR"
     rm -rf "$dir"
-    mkdir -p "$dir/state" "$dir/cache" "$dir/config"
+    mkdir -p "$dir/state" "$dir/cache" "$dir/config" "$dir/runtime"
+    chmod 700 "$dir/runtime"
     rm -f "$socket" "$log"
     export XDG_STATE_HOME="$dir/state"
     export XDG_CACHE_HOME="$dir/cache"
     export XDG_CONFIG_HOME="$dir/config"
+    export XDG_RUNTIME_DIR="$dir/runtime"
 
     local repo
     repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
@@ -1095,14 +1097,14 @@ run_looks_test() {
         tail -20 "$log"
         return 1
     fi
-    # The session's private look state: the one scoot-look-*/ dir beside
-    # the socket. --headless always keeps one; without it the CLI would
-    # act on the developer's real look.
+    # The session's private look state: the one scoot-look-*/ dir in its
+    # own runtime dir. --headless always keeps one; without it the CLI
+    # would act on the developer's real look.
     local runtime state
-    runtime="$(dirname "$socket")"
+    runtime="$dir/runtime"
     state=$(echo "$runtime"/scoot-look-*/)
     if [ ! -d "$state" ]; then
-        echo "BUG: no private look state beside $socket:"
+        echo "BUG: no private look state in $runtime:"
         ls -la "$runtime" || true
         return 1
     fi
