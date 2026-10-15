@@ -68,6 +68,9 @@ no step needs Nix.
 
 Only a private session sets `SCOOT_LOOK_STATE`, for its direct children.
 Systemd user units never see it, so they always act on the user state.
+The private dir is owner-only, wiped and re-seeded from your choice at
+every startup, and removed on a clean exit. A crash or a kill leaves it
+behind; the next session with that display name clears it.
 
 ## Which renderer draws the frames
 

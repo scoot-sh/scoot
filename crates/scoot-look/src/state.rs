@@ -1,27 +1,34 @@
 //! Per-session look state: `<state>/look.json` plus the `look` link.
 //!
 //! The record (`look.json`) is what a swap writes first; the link (`look`,
-//! pointing at one complete rendered look) is derived from it. Startup,
-//! `sync` and every `apply` compare the two and repair the link from the
-//! record, so a crash between the two renames heals the next time anything
-//! looks. Apps never read `look.json`: they read the link, which is always
-//! a complete rendered directory or absent.
+//! pointing at one complete rendered look) is derived from it. The
+//! compositor repairs the link from the record at startup ([`ensure_link`])
+//! on the session's state dir, so a crash between the two renames heals on
+//! the next start. Apps never read `look.json`: they read the link, which
+//! is always a complete rendered directory or absent.
 //!
-//! The state-dir rule lives here once, for scoot, scootbar and scootbg to
-//! share: an explicit dir (the future `--state` flag), then
-//! `$SCOOT_LOOK_STATE` (a private session's), then `$XDG_STATE_HOME/scoot`,
-//! then `~/.local/state/scoot`. Empty counts as unset. A private session's
-//! dir is `$XDG_RUNTIME_DIR/scoot-look-<display>/`, seeded at startup from
-//! the user's record; only a private session exports `SCOOT_LOOK_STATE`,
-//! to its direct children.
+//! The state-dir rule lives here once, for scoot and scootbar to share: an
+//! explicit dir (the future `--state` flag), then `$SCOOT_LOOK_STATE` (a
+//! private session's), then `$XDG_STATE_HOME/scoot`, then
+//! `~/.local/state/scoot`. Empty counts as unset. A private session's dir is
+//! `$XDG_RUNTIME_DIR/scoot-look-<display>/`, wiped and re-seeded at startup
+//! from the user's record; only a private session exports
+//! `SCOOT_LOOK_STATE`, to its direct children. The private dir is
+//! owner-only (0700, its files 0600) and removed on a clean exit; a crash
+//! or a kill leaves it behind until the next session with that display name
+//! wipes and reseeds it.
 //!
-//! Every writer takes the `<state>/look.lock` [`StateLock`] (a second writer
-//! waits a bounded time, then refuses) and writes through [`write_atomic`]
-//! (temp file plus `rename`), so a reader racing a swap sees the old or the
-//! new directory, never a half-written one. A missing record is "no choice
+//! [`acquire_lock`], [`write_atomic`] and [`write_record`] are the swap path
+//! the future `look-apply-cli` tool owns: every writer takes the
+//! `<state>/look.lock` [`StateLock`] (a second writer waits a bounded time,
+//! then refuses) and writes through [`write_atomic`] (a unique temp file,
+//! opened without following symlinks, plus `rename`), so a reader racing a
+//! swap sees the old or the new directory, never a half-written one.
+//! Nothing calls them yet outside tests. A missing record is "no choice
 //! recorded yet", not an error; a corrupt one (bad JSON, a name outside the
-//! `[a-z0-9-]{1,32}` grammar, an empty `rendered`) is a loud warning at the
-//! call site, and the link is left alone: startup never fails over a look.
+//! `[a-z0-9-]{1,32}` grammar, a `rendered` that is not an absolute path
+//! without `..`) is a loud warning at the call site,
+//! and the link is left alone: startup never fails over a look.
 //!
 //! Pure `std` plus the `serde_json` and `rustix` already in the tree: no
 //! Wayland, no fontconfig, no image decoder, no process spawning, and
@@ -31,7 +38,9 @@
 use std::ffi::OsStr;
 use std::fs::File;
 use std::os::unix::ffi::OsStrExt as _;
-use std::path::{Path, PathBuf};
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::grammar::{check_display_text, is_name};
@@ -199,8 +208,10 @@ pub fn read_record(dir: &Path) -> RecordRead {
 }
 
 /// Validates a parsed record against the value grammar: the name is a look
-/// name, `rendered` is a non-empty plain path, generation is present, and
-/// the text fields carry no control characters.
+/// name, `rendered` is an absolute path with no `..` component (a relative
+/// or parent-climbing path would resolve against whatever process reads the
+/// link, not the state dir), generation is present, and the text fields
+/// carry no control characters.
 fn validate_record(raw: RawRecord) -> Result<Record, String> {
     let Some(name) = raw.name else {
         return Err(format!("{RECORD_FILE}: missing `name`"));
@@ -221,6 +232,19 @@ fn validate_record(raw: RawRecord) -> Result<Record, String> {
     if rendered.contains('\0') || rendered.chars().any(|c| c.is_control()) {
         return Err(format!(
             "{RECORD_FILE}: `rendered` must not contain control characters"
+        ));
+    }
+    if !rendered.starts_with('/') {
+        return Err(format!(
+            "{RECORD_FILE}: `rendered` must be an absolute path, not `{rendered}`"
+        ));
+    }
+    if Path::new(&rendered)
+        .components()
+        .any(|component| component == Component::ParentDir)
+    {
+        return Err(format!(
+            "{RECORD_FILE}: `rendered` must not contain `..`: `{rendered}`"
         ));
     }
     let Some(generation) = raw.generation else {
@@ -287,22 +311,63 @@ pub fn write_record(dir: &Path, record: &Record) -> Result<(), String> {
     write_atomic(dir, RECORD_FILE, record_json(record).as_bytes())
 }
 
+/// The temp-name counter behind [`write_atomic`] and [`ensure_link`]: the
+/// process id plus this make every temp name unique, so two writers never
+/// share one and a planted symlink at a guessable name is never opened.
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn tmp_name(file: &str) -> String {
+    let id = TMP_COUNTER.fetch_add(1, Ordering::SeqCst);
+    format!(".{file}.tmp.{}-{id}", std::process::id())
+}
+
 /// Writes `bytes` to `<dir>/file` atomically (temp file, sync, `rename`,
-/// dir sync). Refuses a file name that could escape the dir.
+/// dir sync). Refuses a file name that could escape the dir. The temp file
+/// is unique per call and opened `O_CREAT|O_EXCL|O_NOFOLLOW` with mode 0600:
+/// a symlink planted at the temp path refuses rather than redirecting the
+/// write elsewhere, and the stored file is owner-only whatever the umask is
+/// (0600 has no group/other bits for the umask to mask, and is re-applied
+/// after the open anyway).
 pub fn write_atomic(dir: &Path, file: &str, bytes: &[u8]) -> Result<(), String> {
     if file.is_empty() || file.contains('/') || file.contains('\0') || file == "." || file == ".." {
         return Err(format!("refusing to write outside the state dir: `{file}`"));
     }
-    let tmp = dir.join(format!(".{file}.tmp"));
-    std::fs::write(&tmp, bytes)
-        .and_then(|()| {
-            let handle = File::open(&tmp)?;
+    for _ in 0..10 {
+        let tmp = dir.join(tmp_name(file));
+        let fd = match rustix::fs::open(
+            &tmp,
+            rustix::fs::OFlags::WRONLY
+                | rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOCTTY,
+            rustix::fs::Mode::from_bits_truncate(0o600),
+        ) {
+            Ok(fd) => fd,
+            Err(rustix::io::Errno::EXIST) => continue,
+            Err(errno) => return Err(format!("cannot write {file}: {errno}")),
+        };
+        let write = (|| {
+            rustix::fs::fchmod(&fd, rustix::fs::Mode::from_bits_truncate(0o600))
+                .map_err(std::io::Error::from)?;
+            let mut handle = File::from(fd);
+            use std::io::Write as _;
+            handle.write_all(bytes)?;
             handle.sync_all()?;
             drop(handle);
             std::fs::rename(&tmp, dir.join(file))?;
             sync_dir(dir)
-        })
-        .map_err(|error| format!("cannot write {file}: {error}"))
+        })();
+        if let Err(error) = write {
+            std::fs::remove_file(&tmp).ok();
+            return Err(format!("cannot write {file}: {error}"));
+        }
+        return Ok(());
+    }
+    Err(format!(
+        "cannot write {file}: no unique temp name after 10 tries"
+    ))
 }
 
 /// Syncs a directory after a rename, so the rename itself is durable.
@@ -397,17 +462,19 @@ pub fn ensure_link(dir: &Path) -> Result<LinkRepair, String> {
             Ok(LinkRepair::Consistent)
         }
         _ => {
-            let tmp = dir.join(format!(".{LINK_NAME}.tmp"));
-            std::fs::remove_file(&tmp).ok();
-            std::os::unix::fs::symlink(&record.rendered, &tmp)
-                .and_then(|()| std::fs::rename(&tmp, &link))
-                .map_err(|error| {
-                    format!(
-                        "cannot point {} at {}: {error}",
-                        link.display(),
-                        record.rendered
-                    )
-                })?;
+            let tmp = dir.join(tmp_name(LINK_NAME));
+            let pointed = std::os::unix::fs::symlink(&record.rendered, &tmp)
+                .and_then(|()| std::fs::rename(&tmp, &link));
+            if pointed.is_err() {
+                std::fs::remove_file(&tmp).ok();
+            }
+            pointed.map_err(|error| {
+                format!(
+                    "cannot point {} at {}: {error}",
+                    link.display(),
+                    record.rendered
+                )
+            })?;
             sync_dir(dir).map_err(|error| format!("cannot sync {}: {error}", dir.display()))?;
             Ok(LinkRepair::Healed(format!(
                 "repointed {} at {}",
@@ -418,15 +485,125 @@ pub fn ensure_link(dir: &Path) -> Result<LinkRepair, String> {
     }
 }
 
-/// Seeds a private state dir from the user's: copies `look.json` byte for
-/// byte and replicates the `look` link's target, so the session starts on
-/// exactly the user's choice. Never writes the user dir (a private session
-/// must not move the user's choice, not even to repair it); every problem
-/// on the user side becomes a note and a private state without that piece,
-/// never a failed startup.
+/// Makes `dir` a fresh owner-only private state dir: whatever a previous
+/// session with the same display name left behind is wiped, so the seed
+/// that follows is exactly the new session's state. Refuses a symlink or a
+/// non-directory at the path rather than wiping through one, and refuses a
+/// dir owned by someone else; creates with an explicit 0700 (never the
+/// umask's 0755) and re-applies it, so a reused dir a previous build left
+/// world-readable is sealed.
+pub fn prepare_private_dir(dir: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(dir) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(format!(
+                "refusing to seed {}: a symlink, not a directory",
+                dir.display()
+            ));
+        }
+        Ok(meta) if !meta.file_type().is_dir() => {
+            return Err(format!(
+                "refusing to seed {}: not a directory",
+                dir.display()
+            ));
+        }
+        Ok(meta) => {
+            use std::os::unix::fs::MetadataExt as _;
+            if meta.uid() != rustix::process::geteuid().as_raw() {
+                return Err(format!(
+                    "refusing to seed {}: owned by uid {}, not us",
+                    dir.display(),
+                    meta.uid()
+                ));
+            }
+            std::fs::remove_dir_all(dir)
+                .map_err(|error| format!("cannot clear {}: {error}", dir.display()))?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!("cannot inspect {}: {error}", dir.display()));
+        }
+    }
+    std::fs::create_dir_all(dir)
+        .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+    if !std::fs::symlink_metadata(dir)
+        .map(|meta| meta.file_type().is_dir() && !meta.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(format!(
+            "refusing to seed {}: not a directory after creating it",
+            dir.display()
+        ));
+    }
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("cannot seal {}: {error}", dir.display()))?;
+    Ok(())
+}
+
+/// Removes a private state dir on a clean exit. Only a leaf named
+/// `scoot-look-<display>` is ever removed, and never through a symlink: a
+/// programming error that hands this another path refuses instead of
+/// deleting it.
+pub fn remove_private_dir(dir: &Path) -> Result<(), String> {
+    let leaf = dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_owned();
+    if !leaf.starts_with(PRIVATE_PREFIX) {
+        return Err(format!(
+            "refusing to remove {}: not a private look dir",
+            dir.display()
+        ));
+    }
+    match std::fs::symlink_metadata(dir) {
+        Ok(meta) if meta.file_type().is_dir() && !meta.file_type().is_symlink() => {}
+        _ => {
+            return Err(format!(
+                "refusing to remove {}: not a directory",
+                dir.display()
+            ));
+        }
+    }
+    std::fs::remove_dir_all(dir)
+        .map_err(|error| format!("cannot remove {}: {error}", dir.display()))?;
+    Ok(())
+}
+
+/// Resolves a seeded link target against the user dir: an absolute target
+/// copies as is, a relative one (valid where the user's link lives, but
+/// dangling one dir over) becomes the absolute path it names. Lexical only:
+/// the target may dangle, so nothing is canonicalized through the
+/// filesystem.
+fn absolute_target(user_dir: &Path, target: &Path) -> PathBuf {
+    if target.is_absolute() {
+        return target.to_owned();
+    }
+    let mut resolved = user_dir.to_path_buf();
+    for component in target.components() {
+        match component {
+            Component::Prefix(prefix) => resolved.push(prefix.as_os_str()),
+            Component::RootDir => resolved = PathBuf::from("/"),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                resolved.pop();
+            }
+            Component::Normal(part) => resolved.push(part),
+        }
+    }
+    resolved
+}
+
+/// Seeds a private state dir from the user's: the dir is wiped and recreated
+/// owner-only first ([`prepare_private_dir`]), so a stale record or link
+/// from a previous session with the same display name cannot leak in; then
+/// `look.json` copies byte for byte and the `look` link's target is
+/// replicated (resolved to absolute when relative, so it still names the
+/// same directory from the private dir). Never writes the user dir (a
+/// private session must not move the user's choice, not even to repair
+/// it); every problem on the user side becomes a note and a private state
+/// without that piece, never a failed startup.
 pub fn seed_private(user_dir: &Path, private_dir: &Path) -> Result<Vec<String>, String> {
-    std::fs::create_dir_all(private_dir)
-        .map_err(|error| format!("cannot create {}: {error}", private_dir.display()))?;
+    prepare_private_dir(private_dir)?;
     let mut notes = Vec::new();
     let record_path = user_dir.join(RECORD_FILE);
     match read_capped(&record_path) {
@@ -455,7 +632,7 @@ pub fn seed_private(user_dir: &Path, private_dir: &Path) -> Result<Vec<String>, 
     match std::fs::read_link(&user_link) {
         Ok(target) => {
             let link = private_dir.join(LINK_NAME);
-            std::fs::remove_file(&link).ok();
+            let target = absolute_target(user_dir, &target);
             std::os::unix::fs::symlink(&target, &link)
                 .map_err(|error| format!("cannot seed {}: {error}", link.display()))?;
             sync_dir(private_dir)

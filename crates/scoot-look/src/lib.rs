@@ -41,9 +41,10 @@
 //! source of palettes, pure like the rest here.
 //!
 //! [`state`] is the per-session state (`<state>/look.json` plus the `look`
-//! link): the state-dir rule scoot, scootbar and scootbg share, the record,
-//! the link repair, the seed a private session copies at startup, and the
-//! lock every writer takes.
+//! link): the state-dir rule scoot and scootbar share (scootbg takes no
+//! look state), the record, the link repair the compositor runs at startup,
+//! the seed a private session copies at startup, and the lock every writer
+//! takes for the future `look-apply-cli` tool.
 //!
 //! The effectful checks live in the caller: fonts through their carrier,
 //! the wallpaper through `scootbg check-image`, the fragments through the

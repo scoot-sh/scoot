@@ -303,3 +303,38 @@ fn a_headless_session_seeds_exports_and_isolates_its_private_state() {
         "the session survives its own swap"
     );
 }
+
+#[test]
+fn a_clean_exit_removes_the_private_dir() {
+    let scratch = Scratch::new("exit-clean");
+    let mut session = Session::start(&scratch);
+    let private = session.private_dir();
+    assert!(
+        private.join("look.json").is_file(),
+        "the session seeds its private dir first"
+    );
+
+    let quit = session.msg(&["action", "quit"]);
+    assert!(
+        quit.status.success(),
+        "quit stops the loop cleanly: {}",
+        String::from_utf8_lossy(&quit.stderr)
+    );
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        if let Some(status) = session.child.try_wait().expect("waitable") {
+            assert!(status.success(), "a quit session exits zero, not {status}");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the session never exited after quit; log:\n{}",
+            session.log_tail()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        std::fs::symlink_metadata(&private).is_err(),
+        "a clean exit removes the private dir"
+    );
+}

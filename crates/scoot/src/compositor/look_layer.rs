@@ -14,7 +14,8 @@
 //! `<state>` resolution is an explicit dir (the future `--state` flag),
 //! then `$SCOOT_LOOK_STATE`, then `$XDG_STATE_HOME/scoot`, then
 //! `~/.local/state/scoot` (the one rule in `scoot-look`'s `state` module,
-//! shared with scootbar and scootbg). Only a private session exports
+//! shared with scootbar; scootbg takes no look state). Only a private
+//! session exports
 //! `SCOOT_LOOK_STATE` to its children; `--tty` and `--nested` use the user
 //! path so the choice persists, and `--headless` (or any backend with
 //! `--private-look`) seeds a per-display private state at startup.
@@ -103,8 +104,8 @@ pub struct LoadOutcome {
 /// Resolves the look state dir: an explicit dir (the future `--state` flag),
 /// then `$SCOOT_LOOK_STATE`, then `$XDG_STATE_HOME/scoot`, then
 /// `~/.local/state/scoot`. The rule lives once in `scoot-look`'s
-/// [`scoot_look::state`] (shared with scootbar and scootbg); this is the
-/// compositor's call site, not a second copy. Pure over its env vars like
+/// [`scoot_look::state`] (shared with scootbar; scootbg takes no look
+/// state); this is the compositor's call site, not a second copy. Pure over its env vars like
 /// [`crate::compositor::config::default_path`], for the same testability
 /// reason. `None` only when no home resolves at all.
 pub fn state_dir(

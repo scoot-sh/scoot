@@ -83,3 +83,25 @@ seed exporting and isolating, the user state byte-identical across a swap).
 A nested session's swap persisting across a restart and `--private-look` on
 nested are covered by the resolution unit tests, not live: no host
 compositor exists in CI or on the dev VM for a nested session to attach to.
+
+## Follow-up (PR #616 review, same branch)
+
+The review caught six issues, all fixed on this branch before merge:
+
+- The seed left a previous session's record and link in place when the
+  user state had neither. The private dir is now wiped and recreated
+  owner-only at every seed, so it holds exactly the seed.
+- The private dir was never removed and its modes were umask-dependent.
+  It is 0700 (files 0600) and removed on a clean exit; a crash or a kill
+  leaves it until the next session with that display name reseeds it.
+- The module doc claimed startup, sync and apply repair the link and
+  every writer takes the lock, but only tests called those helpers. The
+  compositor now repairs the session's state dir at startup (the user dir
+  for shared sessions, the private dir after the seed for private ones;
+  a private session still never writes the user dir), and the doc names
+  `look-apply-cli` as the lock/write path's owner.
+- The doc said the rule was shared with scootbg, which takes no look
+  state. Corrected everywhere it appeared.
+- `rendered` now requires an absolute path with no `..` component.
+- `write_atomic` uses a unique temp name opened `O_NOFOLLOW|O_EXCL`, and
+  the seed resolves a relative link target to absolute.

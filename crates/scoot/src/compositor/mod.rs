@@ -131,6 +131,18 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         std::env::var_os("XDG_STATE_HOME"),
         std::env::var_os("HOME"),
     );
+    let private_session =
+        scoot_look::state::wants_private_session(options.nested, options.tty, options.private_look);
+    if !private_session {
+        // A session on the user state repairs its link from its record
+        // before reading it, so a crash between the two renames heals here
+        // rather than loading a stale layer. A private session never touches
+        // the user dir, not even to repair it: its own repair runs on the
+        // private dir after the seed below.
+        if let Some(dir) = user_look_dir.as_deref() {
+            log_link_repair(scoot_look::state::ensure_link(dir));
+        }
+    }
     let look_outcome = user_look_dir.as_deref().map(look_layer::load);
     let (look_text, look_identity, mut look_warn) = match look_outcome {
         Some(look_layer::LoadOutcome { load, warn }) => match load {
@@ -279,12 +291,15 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // config load read above, byte for byte, which is why the load needs
     // no re-merge: the fragment it merged is the fragment the private dir
     // now holds.
-    state.private_look_dir = if scoot_look::state::wants_private_session(
-        options.nested,
-        options.tty,
-        options.private_look,
-    ) {
-        settle_private_look(&state.socket_name, user_look_dir.as_deref())
+    state.private_look_dir = if private_session {
+        let settled = settle_private_look(&state.socket_name, user_look_dir.as_deref());
+        // The seed copies the user's record and link; the repair heals what
+        // the user side could not supply (a record with no link reseeds as
+        // a record alone, and the link is recreated from it here).
+        if let Some(dir) = settled.as_deref() {
+            log_link_repair(scoot_look::state::ensure_link(dir));
+        }
+        settled
     } else {
         None
     };
@@ -624,7 +639,18 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         renderer = %state.renderer,
         "scoot is up"
     );
-    event_loop.run(None, &mut state, post_dispatch)?;
+    let loop_outcome = event_loop.run(None, &mut state, post_dispatch);
+    // A clean return removes the private state, so per-display dirs never
+    // accumulate: only a panic or a kill leaves one behind, and the next
+    // session with that display name wipes and reseeds it at startup. This
+    // runs whatever the loop reports, before the host-loss check below: a
+    // nested session that lost its host still owns no state worth keeping.
+    if let Some(dir) = state.private_look_dir.as_deref()
+        && let Err(error) = scoot_look::state::remove_private_dir(dir)
+    {
+        tracing::warn!("{error}");
+    }
+    loop_outcome?;
     // A host-driven stop is clean at the loop level but a failure of the
     // session: without the host nothing presents and no input arrives, so
     // answering `Ok` here would report success for a session that lost its
@@ -702,9 +728,10 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
 /// that degrades this way warns, because its swaps then touch the user's
 /// choice -- exactly what the private state exists to avoid.
 ///
-/// The seed copies `look.json` and the `look` link byte for byte and never
-/// writes the user dir, so a headless test session's later swaps leave the
-/// user's choice byte-identical.
+/// The seed copies `look.json` byte for byte and replicates the `look`
+/// link (resolved to absolute when relative, so it names the same directory
+/// from the private dir) and never writes the user dir, so a headless test
+/// session's later swaps leave the user's choice byte-identical.
 ///
 /// `socket_name` is the Wayland socket `State::new` bound (`wayland-1`
 /// onward), which is why the display -- and only the display -- can name a
@@ -726,9 +753,9 @@ fn settle_private_look(socket_name: &OsStr, user_dir: Option<&Path>) -> Option<P
     // No user dir at all (no home resolves): an empty private state still
     // isolates, so create it rather than sharing nothing in particular.
     let Some(user) = user_dir else {
-        return match std::fs::create_dir_all(&dir) {
+        return match scoot_look::state::prepare_private_dir(&dir) {
             Ok(()) => Some(dir),
-            Err(error) => degraded(&format!("cannot create {}: {error}", dir.display())),
+            Err(error) => degraded(&error),
         };
     };
     match scoot_look::state::seed_private(user, &dir) {
@@ -739,6 +766,18 @@ fn settle_private_look(socket_name: &OsStr, user_dir: Option<&Path>) -> Option<P
             Some(dir)
         }
         Err(error) => degraded(&error),
+    }
+}
+
+/// Logs a startup link repair: a heal names what moved (a crash recovered),
+/// a refusal names why, and the steady states stay silent (a missing record
+/// with no link is the default install, not news).
+fn log_link_repair(outcome: Result<scoot_look::state::LinkRepair, String>) {
+    match outcome {
+        Ok(scoot_look::state::LinkRepair::Consistent) => {}
+        Ok(scoot_look::state::LinkRepair::Healed(note)) => tracing::warn!("{note}"),
+        Ok(scoot_look::state::LinkRepair::Skipped(_)) => {}
+        Err(error) => tracing::warn!("{error}"),
     }
 }
 

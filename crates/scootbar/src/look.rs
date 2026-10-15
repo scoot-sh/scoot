@@ -134,7 +134,8 @@ pub struct Startup {
 /// else `$XDG_STATE_HOME/scoot`, else `~/.local/state/scoot`. `None` when
 /// no home is usable: there is then no state link, only a fixed layer.
 /// The rule lives once in `scoot-look`'s `state` module (shared with scoot
-/// and scootbg); this is the bar's call site, not a second copy.
+/// and the future `look-apply-cli`; scootbg takes no look state); this is
+/// the bar's call site, not a second copy.
 pub fn state_dir() -> Option<PathBuf> {
     state_dir_from(
         std::env::var_os(scoot_look::state::STATE_ENV).as_deref(),

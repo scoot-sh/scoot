@@ -8,6 +8,7 @@
 //! leaves the dir for the debugger, the way `main.rs`'s case dirs do.
 
 use std::ffi::OsStr;
+use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -51,9 +52,10 @@ fn write_json(dir: &Path, body: &str) {
     std::fs::write(dir.join(RECORD_FILE), body).expect("a record");
 }
 
-// The resolution rule, shared by scoot, scootbar and scootbg: explicit,
+// The resolution rule, shared by scoot and scootbar: explicit,
 // then the session var, then the XDG state home, then the home fallback.
-// Empty counts as unset.
+// Empty counts as unset. (scootbg takes no look state: it renders what the
+// compositor hands it.)
 
 #[test]
 fn an_explicit_dir_wins_over_every_env_var() {
@@ -565,4 +567,136 @@ fn an_unreadable_user_record_seeds_no_record_but_still_seeds_the_link() {
         std::fs::read_link(private.join(LINK_NAME)).expect("the link still seeds"),
         PathBuf::from("/cache/a")
     );
+}
+
+// Review findings on PR #616: each test below fails before its fix and
+// passes after. They run on the dev VM (Linux) under both runners.
+
+fn mode_of(path: &Path) -> u32 {
+    std::fs::metadata(path)
+        .expect("statable")
+        .permissions()
+        .mode()
+        & 0o777
+}
+
+// Finding 1 (blocking): a stale private dir leaks into a new session. A
+// previous session under the same display name leaves a record and a link
+// behind; with an empty user state the seed must leave neither, not note
+// and keep them.
+#[test]
+fn a_stale_private_state_does_not_survive_seeding() {
+    let user = scratch("stale-user");
+    let private = scratch("stale-private");
+    write_json(
+        &private,
+        r#"{"name":"stale","rendered":"/tmp/stale","generation":3}"#,
+    );
+    symlink("/tmp/stale", private.join(LINK_NAME)).expect("a stale link");
+    let notes = seed_private(&user, &private).expect("seeding works");
+    assert_eq!(notes.len(), 2, "record and link both noted: {notes:?}");
+    assert!(
+        !private.join(RECORD_FILE).exists(),
+        "the stale record is gone: the private dir is exactly the seed"
+    );
+    assert!(
+        std::fs::symlink_metadata(private.join(LINK_NAME)).is_err(),
+        "the stale link is gone: the private dir is exactly the seed"
+    );
+}
+
+// Finding 2: the private dir is owner-only, and re-seeding a dir a previous
+// build left world-readable seals it. The pre-existing 0755 below pins the
+// failure whatever the test runner's umask is.
+#[test]
+fn the_private_dir_is_owner_only_even_when_reused() {
+    let (user, _rendered) = user_state("perm-user");
+    let private = scratch("perm-private");
+    write_json(
+        &private,
+        r#"{"name":"stale","rendered":"/tmp/stale","generation":3}"#,
+    );
+    symlink("/tmp/stale", private.join(LINK_NAME)).expect("a stale link");
+    std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o755))
+        .expect("yesterday's umask-dependent mode");
+    seed_private(&user, &private).expect("seeding works");
+    assert_eq!(mode_of(&private), 0o700, "the private dir is owner-only");
+    assert_eq!(
+        mode_of(&private.join(RECORD_FILE)),
+        0o600,
+        "the seeded record is owner-only"
+    );
+    assert_eq!(
+        std::fs::read_link(private.join(LINK_NAME)).expect("the seeded link"),
+        PathBuf::from("/cache/moonrise-9f2c"),
+        "the seed still lands on the user's choice"
+    );
+}
+
+// Finding 4: `rendered` must be an absolute path with no `..` component
+// (control characters stay refused).
+#[test]
+fn a_non_absolute_or_parent_rendered_path_is_corrupt() {
+    let dir = scratch("rendered-path");
+    for (tag, rendered) in [
+        ("relative", "cache/moonrise"),
+        ("dot-relative", "./moonrise"),
+        ("parent", "/cache/../etc"),
+        ("bare parent", ".."),
+        ("root parent", "/.."),
+    ] {
+        write_json(
+            &dir,
+            &format!(r#"{{"name":"moonrise","rendered":"{rendered}","generation":1}}"#),
+        );
+        let RecordRead::Corrupt(reason) = read_record(&dir) else {
+            panic!("{tag} `{rendered}` must be corrupt, not readable");
+        };
+        assert!(
+            reason.contains(RECORD_FILE),
+            "{tag}: the reason names the file: {reason}"
+        );
+    }
+}
+
+// Finding 5: `write_atomic` must not follow a planted symlink at its temp
+// path. Before the fix the temp name is a fixed `.look.json.tmp` written
+// with `std::fs::write`, so the victim below receives the record bytes.
+#[test]
+fn write_atomic_does_not_follow_a_planted_tmp_symlink() {
+    let dir = scratch("tmp-evil");
+    let victim = dir.join("victim");
+    std::fs::write(&victim, b"untouched").expect("a victim");
+    symlink(&victim, dir.join(".look.json.tmp")).expect("a planted tmp symlink");
+    let want = record("moonrise", "/cache/a", 1);
+    write_record(&dir, &want).expect("the write still lands");
+    assert_eq!(
+        std::fs::read(&victim).expect("readable"),
+        b"untouched",
+        "the planted symlink is never followed"
+    );
+    let RecordRead::Present(got) = read_record(&dir) else {
+        panic!("the record lands despite the planted symlink");
+    };
+    assert_eq!(got, want);
+}
+
+// Finding 6: a relative user link copied literally dangles in the private
+// dir. The seed resolves it against the user dir, so the private link is
+// absolute and names the same directory.
+#[test]
+fn a_relative_user_link_seeds_as_an_absolute_target() {
+    let user = scratch("seed-rel");
+    let rendered = user.join("rendered-moonrise");
+    std::fs::create_dir(&rendered).expect("a rendered dir");
+    write_record(&user, &record("moonrise", "/cache/moonrise-9f2c", 1)).expect("a record");
+    symlink("rendered-moonrise", user.join(LINK_NAME)).expect("a relative link");
+    let private = scratch("seed-rel-private");
+    seed_private(&user, &private).expect("seeding works");
+    let seeded = std::fs::read_link(private.join(LINK_NAME)).expect("the seeded link");
+    assert!(
+        seeded.is_absolute(),
+        "the seeded link is absolute, not copied literally: {seeded:?}"
+    );
+    assert_eq!(seeded, rendered, "it names the same rendered directory");
 }

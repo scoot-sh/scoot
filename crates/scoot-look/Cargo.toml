@@ -18,11 +18,13 @@ publish = false
 serde.workspace = true
 serde_json.workspace = true
 toml = "1"
-# `main.rs` opens `look.toml` without blocking and checks the opened
-# handle, so a FIFO or device can never hang validation (round 2
-# finding 1): the same `rustix` the Wayland crates already pull in.
-# The library stays pure: only `main.rs` uses it.
-rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+# The state module's gated reads, lock and atomic writes use the same
+# `rustix` the Wayland crates already pull in (`fs` for those, `process`
+# for the euid behind the private-dir ownership refusal); `main.rs` uses
+# it to open `look.toml` without blocking, so a FIFO or device can never
+# hang validation. Still no Wayland, fontconfig, image decoder or process
+# spawning: the pure contract above holds.
+rustix = { version = "1", default-features = false, features = ["std", "fs", "process"] }
 
 [[bin]]
 name = "scoot-look"
