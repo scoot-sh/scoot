@@ -11,6 +11,7 @@
 //! The settings bus is neutralized for the CLI child, so the toolkit step
 //! can only note, never write outside the test.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -18,6 +19,141 @@ use std::time::{Duration, Instant};
 /// How long anything here waits: a debug `scoot` starts in well under a
 /// second, applies take milliseconds, so this only bounds a wedge.
 const PATIENCE: Duration = Duration::from_secs(60);
+
+/// A hermetic `fc-match` for the `scoot look` children: the CI runners have
+/// no JetBrains Mono (and the dev VM has no DejaVu Sans Mono), so the test
+/// looks must not depend on host font *names*. The stub answers the test
+/// look's families with a real font file and the same family name, and every
+/// other family the way real `fc-match` answers a missing one (a fallback
+/// file with a different family), so `ProdChecks`' family comparison still
+/// refuses unknown fonts. The answered file must really load: the bar's
+/// `daemon --check` opens it. It is found without fontconfig (first the
+/// real `fc-match`, then a filesystem scan of the usual font roots), so the
+/// suite also passes with an empty `FONTCONFIG_FILE`. Written into the
+/// scratch dir (removed on drop), prepended to `PATH` for every `scoot`
+/// child below.
+fn stub_fc_match_dir(scratch: &Scratch) -> PathBuf {
+    let font = real_font_file();
+    let dir = scratch.dir.join("bin");
+    std::fs::create_dir_all(&dir).expect("a stub bin dir");
+    let stub = dir.join("fc-match");
+    std::fs::write(
+        &stub,
+        format!(
+            r#"#!/bin/sh
+# $1 is --format=%{{file}} or --format=%{{family}} (with a trailing newline),
+# $2 is the family. Match on the field name, never the exact flag.
+fmt="$1"
+fam="$2"
+case "$fam" in
+  "DejaVu Sans"|"DejaVu Sans Mono"|"JetBrains Mono")
+    case "$fmt" in
+      *{{file}}*) printf '%s\n' "{font}" ;;
+      *) printf '%s\n' "$fam" ;;
+    esac
+    ;;
+  *)
+    case "$fmt" in
+      *{{file}}*) printf '%s\n' "{font}" ;;
+      *) printf 'DejaVu Sans\n' ;;
+    esac
+    ;;
+esac
+"#,
+            font = font.display(),
+        ),
+    )
+    .expect("a stub fc-match");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable stub");
+    }
+    dir
+}
+
+/// A real, loadable font file for the stub to answer, found without
+/// fontconfig: first the host `fc-match` (the normal case), then a direct
+/// scan of the usual font roots (an empty `FONTCONFIG_FILE` blinds the
+/// former but not the filesystem). Panics with the roots tried when neither
+/// finds one: a machine with no font file at all cannot run the bar check
+/// either way.
+fn real_font_file() -> PathBuf {
+    use std::process::Command;
+    for family in ["DejaVu Sans", "DejaVu Sans Mono", "sans-serif"] {
+        if let Ok(out) = Command::new("fc-match")
+            .arg("--format=%{file}\n")
+            .arg(family)
+            .output()
+            && out.status.success()
+        {
+            let path = String::from_utf8(out.stdout).unwrap_or_default();
+            let path = path.trim().to_owned();
+            if !path.is_empty() && std::path::Path::new(&path).is_file() {
+                return PathBuf::from(path);
+            }
+        }
+    }
+    let mut roots = vec![
+        PathBuf::from("/usr/share/fonts"),
+        PathBuf::from("/run/current-system/sw/share/fonts"),
+        PathBuf::from("/run/current-system/sw/share/X11/fonts"),
+    ];
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        roots.push(home.join(".local/share/fonts"));
+        roots.push(home.join(".fonts"));
+    }
+    let mut tried = Vec::new();
+    for root in &roots {
+        tried.push(root.display().to_string());
+        if let Some(found) = first_font_under(root, 4) {
+            return found;
+        }
+    }
+    panic!(
+        "no loadable font file: fc-match found nothing and no .ttf/.otf under {}",
+        tried.join(", ")
+    );
+}
+
+/// The first `.ttf`/`.otf` file under `root`, depth-first, at most `depth`
+/// levels down (symlinks followed; the depth cap bounds any loop).
+fn first_font_under(root: &std::path::Path, depth: usize) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(root).ok()?;
+    let mut dirs = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            dirs.push(path);
+        } else if path.is_file()
+            && let Some(ext) = path.extension().and_then(|ext| ext.to_str())
+            && (ext.eq_ignore_ascii_case("ttf") || ext.eq_ignore_ascii_case("otf"))
+        {
+            return Some(path);
+        }
+    }
+    if depth == 0 {
+        return None;
+    }
+    dirs.into_iter()
+        .find_map(|dir| first_font_under(&dir, depth - 1))
+}
+
+/// This process's `PATH` with `stub` first, so the `scoot look` children
+/// find the stub `fc-match` before any host one. `scootbg`/`scootbar` still
+/// resolve beside the binary, so only the font lookup is stubbed.
+fn path_with_stub(stub: &std::path::Path) -> OsString {
+    let mut out = stub.as_os_str().to_owned();
+    if let Some(path) = std::env::var_os("PATH")
+        && !path.is_empty()
+    {
+        out.push(":");
+        out.push(path);
+    }
+    out
+}
 
 fn scoot() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_scoot"))
@@ -107,10 +243,13 @@ struct Session {
     state_home: PathBuf,
     shipped: PathBuf,
     log: PathBuf,
+    path_env: OsString,
 }
 
 impl Session {
     fn start(scratch: &Scratch) -> Self {
+        let stub = stub_fc_match_dir(scratch);
+        let path_env = path_with_stub(&stub);
         let runtime = scratch.sub("runtime");
         let cache = scratch.sub("cache");
         let config = scratch.sub("config");
@@ -156,6 +295,7 @@ impl Session {
             state_home,
             shipped,
             log,
+            path_env,
         };
         session.wait_until_up();
         session
@@ -168,6 +308,7 @@ impl Session {
                 .arg("msg")
                 .arg("version")
                 .env("SCOOT_SOCKET", &self.socket)
+                .env("PATH", &self.path_env)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
@@ -217,6 +358,8 @@ impl Session {
     /// One `scoot look ...` invocation against this session: the catalog
     /// from `SCOOT_LOOKS_DIR`, the session's private state and socket, a
     /// neutralized settings bus (the toolkit step notes, never writes).
+    /// `PATH` carries the stub `fc-match` first, so the font check never
+    /// reaches host fonts.
     fn look(&self, args: &[&str]) -> Output {
         Command::new(scoot())
             .arg("look")
@@ -225,6 +368,7 @@ impl Session {
             .arg(self.private_dir())
             .arg("--socket")
             .arg(&self.socket)
+            .env("PATH", &self.path_env)
             .env("SCOOT_LOOKS_DIR", &self.shipped)
             .env("XDG_CACHE_HOME", &self.cache)
             .env("XDG_CONFIG_HOME", &self.config)
@@ -243,6 +387,7 @@ impl Session {
         Command::new(scoot())
             .arg("msg")
             .args(args)
+            .env("PATH", &self.path_env)
             .env("SCOOT_SOCKET", &self.socket)
             .output()
             .expect("scoot msg runs")
