@@ -746,8 +746,8 @@ has none of it.
   value (no round trip); an object whose signal only invalidates a shown
   property is read once (`GetAll`), no oftener than every 50 ms. With no
   system bus the module waits for it; a bus that goes away drops everything at once and dials once
-  more, and one that keeps dropping the bar is left alone for 30 seconds
-  (the [tray's](./modules.md#tray) rules).
+  more, and one that keeps dropping the bar is left alone for 30 seconds,
+  said once on stderr (the [tray's](./modules.md#tray) rules).
 - **Bounds, for a hostile or missing BlueZ.** Anything on the system bus
   can own `org.bluez` when BlueZ itself is absent and say anything. It
   cannot crash or hang the bar or grow it without
@@ -942,8 +942,8 @@ itself, so the tint lands there rather than over its text). Unset,
 **Cost.** The bar asks the seat for a pointer only while a placed module
 has a binding or a default of its own.
 A clock-only bar with no bindings never takes the pointer. A reload that adds or removes bindings
-takes or drops it. A motion event stores two numbers; no pointer event,
-hover repaint or module action allocates.
+takes or drops it. A motion event stores two numbers; no pointer event
+or hover repaint allocates.
 
 
 
