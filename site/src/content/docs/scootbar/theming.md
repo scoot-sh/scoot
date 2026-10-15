@@ -3,14 +3,34 @@ title: scootbar theming
 description: "Theme the bar from a look or Stylix — colors, fonts, and what wins per key."
 ---
 
-The bar follows the desktop: the profile's `look` writes its `colors`,
-and Stylix writes colors plus font when present. A value you set in
-`settings` always wins — per key, never wholesale.
+The bar reads a look layer under its own file: `<state>/look/bar.toml`
+merged per key, with the file winning every key it sets. A value set in
+`settings` (Nix) or `bar.toml` always wins — per key, never wholesale.
 
 ## From a look
 
-`look` renders the example palette into the bar config (each leaf
-yielding to a user value, and to Stylix where present):
+The layer carries the six `[colors]` tokens, the `[bar]` style keys
+(`radius`, `popup-radius`, `opacity`, `font-size`, `padding`, `spacing`,
+`separator`), the workspaces pill keys and the per-module glyph icons.
+It never carries geometry, placement, module lists, commands or
+actions. `hover` follows a custom `accent` when unset: a file that sets
+only `accent` derives its hover from it; a file that sets only `hover`
+keeps the look's `accent`.
+
+A bar without scoot has no state link. It pins a rendered fragment
+instead:
+
+```toml
+[look]
+layer = "/run/current-system/sw/share/scoot/rendered/moonrise/bar.toml"
+```
+
+Without Nix, render the fragment with `scoot-look build` and point
+`[look] layer` at it (or place it at the state link). See
+[Look layer](./configure.md#look-layer) for the full precedence, the
+fixed layer, and the reload scopes.
+
+The shipped looks, and what each gives the bar:
 
 | Look | Bar colors |
 |---|---|
@@ -40,13 +60,11 @@ the bar then gets the plain default font rather than a failed build.
 `programs.scootbar.stylix.enable = false` turns the defaults off with
 Stylix present.
 
-Precedence, highest first, per key: your `settings` value, then
-Stylix's, then the module's plain default (`bar.font` as DejaVu Sans —
-also what an unresolved Stylix font becomes). So
-`settings.colors.background = "#123456"` replaces that one token and
-keeps the other five. The bar's own unthemed defaults stay Catppuccin
-Mocha (`background #1e1e2e`, `accent #f9e2af`); only the Stylix default
-moved accent to base0D blue, matching the compositor's Stylix ring.
+Those values land in the file rung, so each shadows the look layer per
+key, exactly like a value written by hand. To let a look show through,
+unset the key (or turn the target off). Precedence, highest first, per
+key: daemon flags, the file (hand-written, Stylix-derived or
+look-derived alike), the look layer, the module's plain default.
 
 The six tokens, and how icons follow them (path icons tint from the
 theme; image icons keep their own colors), are in

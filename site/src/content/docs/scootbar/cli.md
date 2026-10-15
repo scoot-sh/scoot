@@ -239,7 +239,8 @@ scootbar daemon --check                         # the default file, as a start w
 ```
 
 Does what a start does before it connects to anything, and stops there: reads
-the config file, applies the other flags over it, starts the placed modules
+the config file, merges the look layer under it, applies the other flags
+over both, starts the placed modules
 and loads the font. It prints `ok` on stdout and exits 0, or prints the
 error a start would print (a bad key, a bad value, a font that cannot load,
 a missing `--config` file) on stderr and exits 1; a flag the file clashes
@@ -271,7 +272,7 @@ scootbar msg query [ID]             # every placed module's state as JSON (or on
 scootbar msg layout                 # each module's rectangle in global logical pixels
 scootbar msg invoke ID ACTION [N] [--output NAME]  # run an action as a click would
 scootbar msg subscribe [module] [output]           # stay connected, print events
-scootbar msg reload                 # re-read the file and live-apply it
+scootbar msg reload [--look]        # re-read the file and live-apply it (`--look`: the layer only)
 scootbar msg hide                   # destroy the bar's surfaces and buffers, release its space
 scootbar msg show                   # make them again
 scootbar msg toggle                 # hide if shown, show if hidden
@@ -323,6 +324,8 @@ not, and closed only where neither is possible. Anything else restarts the
 modules as at start-up: a module's own colors (like `workspaces`
 `active-color`) and its icon art take the full reload, and so does any
 reload while a module is left out as unavailable, which retries it.
+`reload --look` re-reads only the look layer, under a snapshot of the file,
+so a look swap never applies pending edits; with no layer it is refused.
 `hide`, `show` and `toggle` are
 [below](./configure.md#hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
 `toggle` print the reply; `kill`, `set` and `invoke` print nothing on success,

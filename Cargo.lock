@@ -904,6 +904,7 @@ version = "0.2.1"
 dependencies = [
  "rustix 1.1.4",
  "serde",
+ "serde_json",
  "toml",
 ]
 
@@ -916,6 +917,7 @@ dependencies = [
  "png",
  "rustix 1.1.4",
  "scoot-ipc",
+ "scoot-look",
  "scootbg-mem",
  "serde",
  "serde_json",

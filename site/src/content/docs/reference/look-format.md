@@ -231,6 +231,58 @@ sockets refuse. On Nix the same binary
 runs inside the render derivation with the look's font packages
 as build inputs. Exit nonzero names the field and the reason.
 
+## Import from base16
+
+```sh
+scoot-look import-base16 scheme.yaml --out ~/.local/share/scoot/user-looks/solarized-dark
+scoot-look import-base16 scheme.yaml --extends ginger-night --out ~/.local/share/scoot/user-looks/solarized-green
+scoot-look import-base16 scheme.yaml --name my-look --out /tmp/my-look
+```
+
+One mapping turns any base16 scheme (or the base24 superset) into a
+source look. It is what Stylix gives a Nix user, for a plain install:
+no Nix involved, plain files in and out. It reads base16 YAML and the
+JSON form the Nix side serializes, with or without a leading `#`, any
+case, `palette:`-nested or flat. A leading UTF-8 BOM strips first.
+The input caps at 64 KiB. The YAML subset refuses tabs for indent,
+lists, flow collections, aliases/anchors, block scalars and tags with
+a named error.
+
+| Token | Slot |
+|---|---|
+| `background`, `surface` | `base00` |
+| `foreground` | `base05` |
+| `dim`, `border` | `base03` |
+| `accent`, `hover`, `focus` | `base0D` |
+| `urgent` | `base08` |
+| `accent-fg` | `base00` |
+| `selection`, `selection-text` | `base02`, `base05` |
+| `match` | `base0A` |
+| `[terminal]` | ANSI 0-15 as `base00, base08, base0B, base0A, base0D, base0E, base0C, base05, base03, base08, base0B, base0A, base0D, base0E, base0C, base07` (base16's terminal order: foot `regular0-7` then `bright0-7`), only without `--extends` |
+
+This matches the Nix modules for the slots they use today. Companion
+data applies when present: `variant` (or `polarity`) sets dark or
+light, else `base00` against `base05` decides. `fonts` maps `sansSerif`
+to `sans` and `ui`, `monospace` to `mono`. `sizes` maps `desktop`,
+`popups`, `applications` and `terminal` to the four point sizes.
+`opacity` maps `popups` and `terminal`; the bar's stays unset. `cursor`
+maps `name` and `size`. Without `--extends` the output is complete
+(title, polarity, fonts, ring width, Mocu cursor, flat background
+wallpaper, terminal hues). With it the output is a child: palette plus
+companion fonts, sizes, opacity and cursor when given, inheriting
+terminal, shape and wallpaper from the base. `--extends` accepts any
+`[a-z0-9-]{1,32}` name and is never checked against a catalog here.
+Generated text (`title`, `description`, `license`, `credits`) sanitizes
+to the grammar and never refuses. The output always
+re-parses; a contrast shortfall warns (to stderr) and never refuses,
+since the look is the user's own choice, except a child skips the
+contrast check here (the base is unknown without the catalog).
+A missing or malformed slot refuses naming
+it. `--name` wins over the scheme's slug; `--origin` defaults to
+`user`. Without `--out` the `look.toml` goes to stdout (warnings still
+go to stderr, so stdout parses as TOML). With `--out DIR` the directory
+must match the look name or the command errors.
+
 > **Symptom:** `build` says an image wallpaper needs its resolved absolute path.
 >
 > Pass `--wallpaper-abs` with the image's absolute path. A color

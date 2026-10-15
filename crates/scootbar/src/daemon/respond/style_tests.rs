@@ -231,3 +231,33 @@ fn a_left_out_module_takes_the_full_path_even_for_a_style_only_file() {
     assert!(!takes_fast_path(&old, &new, false));
     assert!(!takes_fast_path(&old, &new, true));
 }
+
+/// The look interaction: a layer swap that changes only colors takes the
+/// fast path (what a `reload --look` of a recolored layer merges to), while
+/// a swap that stages a module-affecting key the allowlist permits — the
+/// workspaces module's own `active-color` — takes the full path, even
+/// though the layer is the only thing that moved.
+#[test]
+fn a_look_colors_only_swap_takes_the_fast_path() {
+    let (old, new) = changed(|new| {
+        new.theme.background = Color { r: 9, g: 9, b: 9 };
+        new.theme.accent = Color { r: 1, g: 2, b: 3 };
+    });
+    assert!(style_only(&old, &new), "colors alone are style");
+    assert!(takes_fast_path(&old, &new, false));
+}
+
+#[test]
+#[cfg(feature = "workspaces")]
+fn a_look_module_key_swap_takes_the_full_path() {
+    let (old, new) = changed(|new| {
+        new.theme.background = Color { r: 9, g: 9, b: 9 };
+        new.modules.workspaces.active_color = Some(Color { r: 1, g: 2, b: 3 });
+    });
+    assert_ne!(
+        old.modules.workspaces.active_color, new.modules.workspaces.active_color,
+        "the module key under test differs"
+    );
+    assert!(!style_only(&old, &new), "a module's own color is not style");
+    assert!(!takes_fast_path(&old, &new, false));
+}

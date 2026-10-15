@@ -1,9 +1,10 @@
 ---
 title: "scootbar reads a look layer under bar.toml, with a look-scoped reload"
-status: "open"
-area: "scootbar"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-15"
 ---
 
 # scootbar reads a look layer under bar.toml, with a look-scoped reload
@@ -64,3 +65,40 @@ Keeping modules across a style-only reload
 ([`scootbar-style-reload`](resolved/scootbar-style-reload-done.md)), the picker.
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
+
+## Resolution
+
+Resolved 2026-10-15 in #612 (`feat(scootbar,scoot-look): read a look
+layer under bar.toml, with a look-scoped reload`).
+
+What landed: `crates/scootbar/src/look.rs` (state resolution, raw-key
+merge with the hover/accent derived pair, the user-file snapshot, the
+fixed `[look] layer`, the feature drop, the startup font probe),
+`{"type":"reload","scope":"look"}` plus `scootbar msg reload --look`,
+and the `scoot-look` allowlist gains the workspaces pill keys, the disc
+flag and the single-glyph module icons. Docs in
+`site/src/content/docs/scootbar/` (`configure.md`, `theming.md`,
+`cli.md`). CI fans `crates/scoot-look` changes out to the scootbar job.
+
+Evidence: `cargo nextest run -p scootbar -p scoot-look` 1529 passed;
+`cargo test` all suites ok; clippy `-D warnings` clean on default,
+`--no-default-features` and each module alone; `fmt --check` clean; an
+end-to-end `scoot-look build` plus `scootbar daemon --check` over the
+state link on the dev VM. Deviations from the design (font as a
+fragment key only, array icon levels user-only, no protocol bump, the
+item-gap bound) are listed with reasons in the PR.
+
+Review follow-up (still #612): the look functions return the new
+snapshot and `active` for the daemon to commit after the apply
+succeeds, so a reload refused at apply (a flag clash, a font that
+vanished in `stage`) leaves the snapshot on the last applied file; a
+plain reload over a gone or dangling layer while it was active applies
+the user's edits with a loud note and clears `active` (only the
+look-scoped reload refuses a missing layer); merged-value refusals name
+the file once.
+
+A layer value that is valid on its own but invalid against the user's
+own file (user `bar.height = 24` with layer `bar.radius = 500`)
+refuses the whole layer at startup (a note, the bar starts without it)
+and refuses the whole reload on a swap. The `bar.radius` symptom box in
+`site/src/content/docs/scootbar/configure.md` says so.

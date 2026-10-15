@@ -228,6 +228,14 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// A TOML refusal at `path`: what look-layer merges report for the merged
+/// table, naming the key.
+impl Error {
+    pub(crate) fn parse_error(path: PathBuf, error: String) -> Error {
+        Error::Parse { path, error }
+    }
+}
+
 /// What starting (or reloading) with the config file gives: the file's
 /// config, and the path a reload re-reads (even when the file was absent:
 /// it may exist by then).
@@ -271,22 +279,16 @@ pub fn load_startup(explicit: Option<&Path>) -> Result<Startup, Error> {
     }
 }
 
-/// Re-reads the file a reload re-reads: it must exist and parse, else the
-/// running config stands and the error answers the reload.
-pub fn reload(file: Option<&Path>) -> Result<Config, Error> {
-    match file {
-        Some(path) => read_file(path),
-        None => Err(Error::Read {
-            path: PathBuf::from("bar.toml"),
-            error: "no config file to reload: no usable config home, \
-                    start with `--config PATH`"
-                .to_owned(),
-        }),
-    }
-}
-
 /// Reads and validates `path` in full before returning anything.
 fn read_file(path: &Path) -> Result<Config, Error> {
+    let buf = read_bytes(path)?;
+    parse_user(&buf, path)
+}
+
+/// The gated read both [`read_file`] and the look layer share: opened
+/// without blocking and required to be a regular file, as the font and
+/// the image icon are. A symlink is followed and judged by its target.
+pub(crate) fn read_bytes(path: &Path) -> Result<Vec<u8>, Error> {
     use std::io::Read;
     let read = |error: String| Error::Read {
         path: path.to_owned(),
@@ -320,7 +322,35 @@ fn read_file(path: &Path) -> Result<Config, Error> {
             path: path.to_owned(),
         });
     }
-    let parsed: File = toml::from_slice(&buf).map_err(|error| Error::Parse {
+    Ok(buf)
+}
+
+/// Parses read bytes as the config file: TOML with positions, then values.
+pub(crate) fn parse_user(buf: &[u8], path: &Path) -> Result<Config, Error> {
+    let parsed: File = toml::from_slice(buf).map_err(|error| Error::Parse {
+        path: path.to_owned(),
+        error: error.to_string(),
+    })?;
+    parsed.into_config(path)
+}
+
+/// Reads `path` as raw TOML: the look layer merges on raw keys, before any
+/// derivation, so it needs the table, not the config.
+pub(crate) fn read_value(path: &Path) -> Result<toml::Value, Error> {
+    let buf = read_bytes(path)?;
+    toml::from_slice(&buf).map_err(|error| Error::Parse {
+        path: path.to_owned(),
+        error: error.to_string(),
+    })
+}
+
+/// Validates a merged table (the user's file with the look layer under it)
+/// the way [`read_file`] validates the file alone. A merged table only
+/// fails where the layer changed it: the user's file already passed alone.
+/// Errors name the dotted key; positions are the file's own, since the
+/// layer is machine-rendered with one key per line.
+pub(crate) fn config_from_value(value: toml::Value, path: &Path) -> Result<Config, Error> {
+    let parsed: File = value.try_into().map_err(|error| Error::Parse {
         path: path.to_owned(),
         error: error.to_string(),
     })?;
@@ -383,6 +413,9 @@ struct File {
     outputs: Option<toml::Value>,
     /// `[output."NAME"]`: what differs on one output.
     output: std::collections::BTreeMap<String, outputs::OutputFile>,
+    /// `[look]`: the fixed look layer for a bar without scoot (see
+    /// `crate::look`). Read with the file, never from the layer.
+    look: LookFile,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -424,6 +457,14 @@ struct ColorsFile {
     hover: Option<String>,
     dim: Option<String>,
     urgent: Option<String>,
+}
+
+/// The `[look]` table: the fixed layer's path. Only the path is checked
+/// here (non-empty, no NUL); whether it reads is the layer's to say.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct LookFile {
+    pub(crate) layer: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1025,6 +1066,17 @@ impl File {
     /// dotted key and says what it takes.
     fn into_config(self, path: &Path) -> Result<Config, Error> {
         let defaults = Config::default();
+        // The fixed layer's path, statically: a path, not an empty string
+        // smuggling a missing one past the layer read.
+        if let Some(layer) = &self.look.layer
+            && (layer.is_empty() || layer.contains('\0'))
+        {
+            return Err(value(
+                path,
+                "look.layer",
+                format_args!("takes a path to a look layer file, not `{layer}`"),
+            ));
+        }
         let bar = &self.bar;
         let edge = match &bar.edge {
             None => defaults.bar.edge,

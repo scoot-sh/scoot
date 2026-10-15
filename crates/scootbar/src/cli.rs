@@ -746,7 +746,7 @@ USAGE:
     scootbar msg layout
     scootbar msg invoke ID ACTION [NUMBER] [--output NAME]
     scootbar msg subscribe [module] [output]
-    scootbar msg reload
+    scootbar msg reload [--look]
     scootbar msg hide
     scootbar msg show
     scootbar msg toggle
@@ -782,7 +782,9 @@ start-up and removes when it stops:
                too slow or stopped (its socket full) is closed with no line.
                After any end, subscribe again and then query
     reload     re-read the config file and live-apply it; a bad file is
-               refused and the running bar stands
+               refused and the running bar stands. With `--look` only the
+               look layer is re-read, under a snapshot of the file, so a
+               look swap never applies pending edits
     hide       take the bars away: every layer surface and buffer is
                destroyed and the exclusive zone released, so windows
                reclaim the space and the bar holds no memory but the process
@@ -878,7 +880,9 @@ pub enum Msg {
     Subscribe {
         events: Vec<crate::control::protocol::EventKind>,
     },
-    Reload,
+    Reload {
+        look: bool,
+    },
     Hide,
     Show,
     Toggle,
@@ -1517,9 +1521,29 @@ fn msg(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
             Ok(Command::Msg(Msg::Set { id, value }))
         }
         other => {
+            if other == "reload" {
+                // `reload [--look]`: a look-scoped reload merges the new
+                // layer under the file's snapshot, so a swap never applies
+                // pending edits.
+                match args.next() {
+                    None => return Ok(Command::Msg(Msg::Reload { look: false })),
+                    Some(raw) => {
+                        let flag = text(raw).map_err(|lossy| Error::Unexpected {
+                            command: "msg",
+                            argument: lossy,
+                        })?;
+                        if flag != "--look" {
+                            return Err(extra(OsString::from(flag)));
+                        }
+                        match args.next() {
+                            None => return Ok(Command::Msg(Msg::Reload { look: true })),
+                            Some(argument) => return Err(extra(argument)),
+                        }
+                    }
+                }
+            }
             let request = match other {
                 "layout" => Msg::Layout,
-                "reload" => Msg::Reload,
                 "hide" => Msg::Hide,
                 "show" => Msg::Show,
                 "toggle" => Msg::Toggle,
@@ -1735,6 +1759,40 @@ impl Given {
     /// rule, so a flag and the file together are still checked for a
     /// module placed twice.
     pub fn overlay(&self, base: &mut Config) -> Result<(), Error> {
+        self.overlay_rest(base)?;
+        if self.left.is_some() || self.center.is_some() || self.right.is_some() {
+            if let Some(left) = &self.left {
+                base.layout.left = left.clone();
+            }
+            if let Some(center) = &self.center {
+                base.layout.center = center.clone();
+            }
+            if let Some(right) = &self.right {
+                base.layout.right = right.clone();
+            }
+            check_layout(&base.layout)?;
+        }
+        Ok(())
+    }
+
+    /// Applies the given flags over `base` with the no-file whole-layout
+    /// rule: giving any of `--left`/`--center`/`--right` sets the whole
+    /// layout (a part not given is empty), as [`Given::into_config`]
+    /// does. The file branch ([`Given::overlay`]) replaces section by
+    /// section instead, so the file provides the rest.
+    pub fn overlay_whole(&self, base: &mut Config) -> Result<(), Error> {
+        self.overlay_rest(base)?;
+        if self.left.is_some() || self.center.is_some() || self.right.is_some() {
+            base.layout.left = self.left.clone().unwrap_or_default();
+            base.layout.center = self.center.clone().unwrap_or_default();
+            base.layout.right = self.right.clone().unwrap_or_default();
+            check_layout(&base.layout)?;
+        }
+        Ok(())
+    }
+
+    /// Every flag but the module lists, over `base`.
+    fn overlay_rest(&self, base: &mut Config) -> Result<(), Error> {
         if let Some(select) = &self.outputs {
             base.outputs.select = select.clone();
             // The list over the file's tables: one the list leaves out
@@ -1777,18 +1835,6 @@ impl Given {
         #[cfg(feature = "clock")]
         if let Some(format) = &self.clock_format {
             base.modules.clock.format = format.clone();
-        }
-        if self.left.is_some() || self.center.is_some() || self.right.is_some() {
-            if let Some(left) = &self.left {
-                base.layout.left = left.clone();
-            }
-            if let Some(center) = &self.center {
-                base.layout.center = center.clone();
-            }
-            if let Some(right) = &self.right {
-                base.layout.right = right.clone();
-            }
-            check_layout(&base.layout)?;
         }
         Ok(())
     }

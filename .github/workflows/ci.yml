@@ -299,10 +299,23 @@ jobs:
                 crates/scootbar/*)
                   scootbar=true ;;
                 # The look format crate (crates/scoot-look): its own job
-                # below. Nothing depends on it yet, so its files fan out to
-                # nothing else; the workspace manifests catch it through the
-                # catch-all, which also sets look=true.
+                # below. scootbar reads its allowlists, so its files fan
+                # out to the scootbar job too; the workspace manifests
+                # catch it through the catch-all, which also sets look=true.
                 crates/scoot-look/*)
+                  look=true
+                  scootbar=true ;;
+                # The shipped looks (looks/): the scoot-look test over the
+                # directory validates and renders every look there, which
+                # is the gate behind the theming page's "a check renders
+                # every look into every target and fails on a missing
+                # role". nix/looks-shipped-check.nix also reads these
+                # files and compares them to the Nix look registry; the
+                # Linux job's `nix flake check` evaluates it, so a looks/
+                # change runs that job too (scoot=true) as well as the
+                # look job.
+                looks/*)
+                  scoot=true
                   look=true ;;
                 # scootbar's benchmark harness; its unit tests run in the
                 # scootbar job. It imports scootbg's runner, whose own

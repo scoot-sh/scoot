@@ -1,0 +1,56 @@
+# Ginger Night: the default look. Tokens lifted from nix/modules/desktop.nix
+# (palette, fonts, nightTemp, wallpaper) and docs/examples/ginger-night/
+# (terminal hues, ring widths, bar style) per docs/backlog/core/look-shipped.md.
+schema = 1
+name = "ginger-night"
+title = "Ginger Night"
+description = "Near-black field, ginger ring, cat illustration."
+polarity = "dark"
+license = "MIT"
+
+[palette]
+background = "#0E0E0E"
+foreground = "#F5EAD6"
+dim = "#8F7A63"
+accent = "#E57F29"
+urgent = "#E05A4E"
+hover = "#FFB14B"
+focus = "#FF9A30"
+border = "#4E2913"
+
+[terminal]
+colors = ["#1a1512", "#c96a45", "#8fa07a", "#d08a3a", "#7e8aa0", "#9a7b6e", "#7e9b94", "#c9b8a3", "#5e4b3f", "#e05a4e", "#a9b98f", "#ffb14b", "#93a3b8", "#c08a7a", "#a8c4b8", "#f5ead6"]
+
+[fonts]
+ui = "DroidSansM Nerd Font Propo"
+sans = "DejaVu Sans"
+mono = "FiraCode Nerd Font"
+size = 10 # renders the example bar font-size 13
+
+[opacity]
+# 1.0 until look-layer-scoot's pixman benchmark passes; the example uses 0.82.
+bar = 1.0
+
+[shape]
+# 0 until look-layer-scoot's pixman benchmark passes; the example uses 14.
+radius = 0
+ring-width = 2
+ring-inactive-width = 2
+
+[cursor]
+theme = "Mocu"
+size = 24
+
+[wallpaper]
+image = "wallpaper.png"
+mode = "fit"
+fill = "#0E0E0E"
+
+[night]
+temperature = 3300
+
+[apps.scootbar]
+"bar.padding" = 10
+"bar.separator" = 1
+"bar.spacing" = 8
+"workspaces.inactive-color" = "#8F7A63"

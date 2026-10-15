@@ -1,9 +1,10 @@
 ---
 title: "scoot look import-base16: the one base16-to-token mapping"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-15"
 ---
 
 # scoot look import-base16: the one base16-to-token mapping
@@ -37,3 +38,21 @@ that the mapping equals today's Nix one for the slots it uses.
 Nix and Stylix wiring.
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
+
+## Resolution
+
+2026-10-15. `scoot-look import-base16 FILE [--name N] [--extends LOOK]
+[--out DIR] [--origin O]` in the `scoot-look` crate (`crates/scoot-look/src/import.rs`,
+pure library plus the CLI wiring in `src/main.rs`): the section 5.3
+mapping, base16 YAML (nested `palette:` or flat) and the base24
+superset plus the JSON form the Nix side serializes, companion
+fonts/sizes/opacity/cursor when given, a complete look without
+`--extends` and a palette-only child with it. The output re-parses;
+contrast warns, never refuses, for the default user origin. Evidence:
+round-trips over four published schemes (3024, Solarized Dark/Light,
+base24 3024 Day; MIT, authors in the test header) and a test pinning
+the mapping to today's Nix slots (`home.nix:571-573`,
+`scootbar.nix:482-487`); nextest 85/85 and `cargo test` green on macOS
+and Linux, clippy and fmt clean both. Site reference in
+`site/src/content/docs/reference/look-format.md`. PR:
+https://github.com/scoot-sh/scoot/pull/611 .
