@@ -41,7 +41,9 @@
 //!    [`render_foot`](render::render_foot) and
 //!    [`render_fontconfig`](render::render_fontconfig) emit the
 //!    first-party, toolkit and foot fragments from the resolved look
-//!    plus [`RenderInputs`](render::RenderInputs).
+//!    plus [`RenderInputs`](render::RenderInputs), and
+//!    [`leaves`] renders the third-party daemon leaves (mako, wob, the
+//!    fcitx5 classic UI theme, the night light).
 //!
 //! [`import_base16`](import::import_base16) maps a base16 or base24 scheme
 //! to a source look's `look.toml` (design section 5.3): the plain-install
@@ -62,6 +64,7 @@ pub mod allowlist;
 pub mod contrast;
 pub mod grammar;
 pub mod import;
+pub mod leaves;
 pub mod render;
 pub mod resolve;
 pub mod resolved;
@@ -75,6 +78,9 @@ pub use allowlist::{
 pub use contrast::{ContrastPair, ContrastReport, check as check_contrast};
 pub use grammar::GrammarError;
 pub use import::{ImportOptions, import_base16};
+pub use leaves::{
+    render_fcitx5_theme, render_leaf_files, render_mako, render_nightlight, render_wob,
+};
 pub use render::{
     BAR_RADIUS_LIMIT, RenderInputs, font_desc, gtk_theme_name, qt_argb, qt_argb_soft,
     qt_style_name, render_bar, render_fontconfig, render_foot, render_gtk_ini, render_gtk3_css,

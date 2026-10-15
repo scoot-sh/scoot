@@ -19,6 +19,7 @@
 
 pub mod apply;
 pub mod catalog;
+pub mod leaves;
 pub mod reload;
 pub mod toolkit;
 
@@ -28,6 +29,8 @@ use scoot_look::Origin;
 
 use crate::cli::Error;
 use crate::output;
+
+use leaves::CliLeaves;
 
 use apply::{
     ApplyOptions, BuildTarget, apply_with, build_to_out, resolve_state_dir, validate_dir,
@@ -254,7 +257,9 @@ COMMANDS:
     build       render a look into --out without applying it
     apply       render, validate, record, repoint, then reload each app's
                 look layer in order (the compositor, then every bar),
-                rolling back on a refusal; --no-toolkit skips the
+                signal the third-party daemons (mako, fcitx5, the OSD and
+                night-light units, best-effort), rolling back on a
+                refusal; --no-toolkit skips the
                 toolkit step (dconf keys and toolkit files, including
                 the color-scheme write) for this apply (the first apply
                 with no record adopts each key whatever it holds);
@@ -892,6 +897,7 @@ fn run_apply(
         .collect();
     let checks = apply::ProdChecks::new();
     let dconf = CliDconf::new();
+    let leaves = CliLeaves::new();
     match apply_with(
         name,
         &options,
@@ -903,6 +909,7 @@ fn run_apply(
         &bar_refs,
         &checks,
         &dconf,
+        &leaves,
     ) {
         Ok(report) => {
             let mut all_notes = notes;

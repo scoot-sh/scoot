@@ -33,61 +33,47 @@ let
   # standalone evals collect assertions without enforcing them.
   toolsReady = night.package != null;
 
-  # The daemon's flags, in its own spelling. Every value is validated
-  # by the assertions below, so the command line carries no quoting:
-  # systemd splits `ExecStart` on whitespace itself (no shell), and no
-  # value here contains any (times are `HH:MM`, the rest numbers and
-  # colons). A negative longitude rides as its own word (`-L -121.9`):
-  # getopt takes the next word verbatim for a flag needing an
-  # argument, whatever it starts with.
-  execArgs =
-    if night.daemon == "gammastep" then
-      [
-        "-m"
-        "wayland"
-        "-t"
-        "${toString night.dayTemp}:${toString night.nightTemp}"
-        "-l"
-        "${toString night.latitude}:${toString night.longitude}"
-        "-g"
-        "${toString night.gamma}:${toString night.gamma}:${toString night.gamma}"
-      ]
-    else if located then
-      [
-        "-T"
-        (toString night.dayTemp)
-        "-t"
-        (toString night.nightTemp)
-        "-l"
-        (toString night.latitude)
-        "-L"
-        (toString night.longitude)
-        "-g"
-        (toString night.gamma)
-      ]
-    else
-      [
-        "-T"
-        (toString night.dayTemp)
-        "-t"
-        (toString night.nightTemp)
-        "-S"
-        night.sunrise
-        "-s"
-        night.sunset
-        "-d"
-        (toString night.duration)
-        "-g"
-        (toString night.gamma)
-      ];
-
-  execStart = "${lib.getExe night.package} ${lib.concatStringsSep " " execArgs}";
+  # The night temperature comes from the live look at unit start: the
+  # wrapper reads `<state>/look/nightlight` (one `temperature=` line,
+  # rendered by `scoot look apply`) and falls back to the configured
+  # `nightTemp` when the link is missing, unreadable or out of range.
+  # `scoot look apply` restarts this unit on every swap, so the new
+  # temperature lands then. Every other option stays baked at
+  # evaluation (a unit rewrite still restarts the daemon, as before).
+  nightlightRun =
+    pkgs.writeShellScriptBin "scoot-nightlight-run" ''
+      look="''${XDG_STATE_HOME:-$HOME/.local/state}/scoot/look/nightlight"
+      temp="$(sed -n 's/^temperature=//p' "$look" 2>/dev/null | head -n 1)"
+      case "$temp" in
+        "" | *[!0-9]*) temp=${toString night.nightTemp} ;;
+      esac
+      if [ "$temp" -lt 1000 ] || [ "$temp" -gt 10000 ]; then
+        temp=${toString night.nightTemp}
+      fi
+      # The daemon is fixed at evaluation (a unit rewrite restarts the
+      # daemon on any option change), so only the taken branch renders:
+      # no dead flags, and a negative longitude rides as its own word
+      # (`-L -121.9`: getopt takes the next word verbatim).
+      ${
+        if night.daemon == "gammastep" then
+          ''exec ${lib.getExe night.package} -m wayland -t "${toString night.dayTemp}:$temp" -l "${toString night.latitude}:${toString night.longitude}" -g "${toString night.gamma}:${toString night.gamma}:${toString night.gamma}"''
+        else if located then
+          ''exec ${lib.getExe night.package} -T ${toString night.dayTemp} -t "$temp" -l ${toString night.latitude} -L ${toString night.longitude} -g ${toString night.gamma}''
+        else
+          ''exec ${lib.getExe night.package} -T ${toString night.dayTemp} -t "$temp" -S ${night.sunrise} -s ${night.sunset} -d ${toString night.duration} -g ${toString night.gamma}''
+      }
+    '';
 
   # `builtins.match` needs the whole value, so each pattern below is a
   # full `HH:MM` (00:00 to 23:59) and nothing else.
   isClock = value: builtins.match "^([01][0-9]|2[0-3]):[0-5][0-9]$" value != null;
 in
 {
+  # Seeds the live look link before the first daemon start (the
+  # leaf fragments below point at it; a dangling link refuses
+  # mako and wob at startup). One shared module: importing it
+  # four times evaluates once.
+  imports = [ ./look-leaves-seed.nix ];
   options.programs.scoot.desktop.nightlight = {
     # The tool below is Linux-only: its attributes refuse evaluation
     # when forced on Darwin, so `or null` alone does not save them (the
@@ -127,8 +113,9 @@ in
     # and would start this daemon inside someone else's session.
     # Retried like the bar's unit rather than conditioned (a skipped
     # start is never retried). No restart trigger: every option lands
-    # in `ExecStart` itself, so any change rewrites the unit and
-    # restarts it.
+    # in the wrapper below, so any change rewrites the unit and
+    # restarts it; a look swap restarts it through
+    # `systemctl --user try-restart` from `scoot look apply` instead.
     (lib.mkIf night.enable {
       assertions = [
         {
@@ -244,7 +231,7 @@ in
           StartLimitIntervalSec = 0;
         };
         Service = {
-          ExecStart = execStart;
+          ExecStart = "${nightlightRun}/bin/scoot-nightlight-run";
           Restart = "on-failure";
           RestartSec = 2;
         };

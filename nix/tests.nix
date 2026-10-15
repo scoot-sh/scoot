@@ -303,10 +303,22 @@ let
     # `config.lib` is an option in both real module systems. Declared so
     # the Stylix detection (`config.lib ? stylix`, as in
     # `nix/modules/scootbar.nix`) has something to ask: without Stylix
-    # it is empty and every Stylix default stays off.
+    # it is empty and every Stylix default stays off. It also carries
+    # home-manager's out-of-store symlink helper, as `modules/files.nix`
+    # defines it (a derivation symlinking out of the store): the leaf
+    # modules link the live look fragments this way, and the stub
+    # provides the same mechanism so those evaluations mean it.
     options.lib = lib.mkOption {
       type = lib.types.attrsOf lib.types.raw;
-      default = { };
+      default = {
+        file.mkOutOfStoreSymlink =
+          path:
+          let
+            pathStr = toString path;
+          in
+          pkgs.runCommandLocal "out-of-store-${baseNameOf pathStr}" { }
+            "ln -s ${lib.escapeShellArg pathStr} $out";
+      };
     };
   };
 
@@ -318,6 +330,19 @@ let
     options.home.packages = lib.mkOption {
       type = lib.types.listOf lib.types.package;
       default = [ ];
+    };
+    # The user's home, as home-manager computes it from the username:
+    # the leaf modules link the live look fragments at absolute paths
+    # under it. A stable fake, so link-target pins read clean.
+    options.home.homeDirectory = lib.mkOption {
+      type = lib.types.str;
+      default = "/home/testuser";
+    };
+    # Activation scripts, as home-manager orders them: plain data the
+    # pins read for presence. Activation itself never runs in an eval.
+    options.home.activation = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
     };
     options.xdg.configFile = lib.mkOption {
       type = lib.types.attrsOf (
@@ -3133,6 +3158,25 @@ let
     desktop.inputMethod.enable = true;
     desktop.inputMethod.addons = [ fakeImAddon ];
   };
+
+  # --- look-link seed (`nix/modules/look-leaves-seed.nix`) evaluations ---
+  #
+  # With a declared look and a binary, activation seeds the live choice
+  # once (the declared default, from the flake's own looks -- the
+  # daemons' `include=`/`-c`/theme links dangle otherwise, and mako and
+  # wob refuse to start). Without a look it seeds nothing.
+  hmSeed = evalHome {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.look = "music-desk";
+  };
+  hmSeedNoLook = evalHome {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.look = null;
+  };
   # Refusals: the slot with no engine to run (pinned by message in
   # `_inputMethodPins`)...
   hmInputMethodNoPkg = evalHome {
@@ -4465,8 +4509,8 @@ let
   audioBehaviorBrightness = slotScriptBin hmAudioBehavior "scoot-brightness";
   audioBehaviorSink = slotScriptBin hmAudioBehavior "scoot-audio-sink";
   audioBehaviorOsd = slotScriptBin hmAudioBehavior "scoot-osd";
-  # The retimed OSD config (what the unit runs the daemon with).
-  audioTimeoutIni = hmAudioTimeout.config.xdg.configFile."wob/wob.ini".source;
+  # The retimed OSD script (what the unit runs the daemon with).
+  audioTimeoutOsd = slotScriptBin hmAudioTimeout "scoot-osd";
 
   # Refusals: the profile without scoot, and a look without the profile
   # (both pinned by message in `_desktopPins`)...
@@ -6093,6 +6137,14 @@ let
   audioVolumeScript = slotScriptBin hmAudio "scoot-volume";
   audioBrightnessScript = slotScriptBin hmAudio "scoot-brightness";
   audioSinkScript = slotScriptBin hmAudio "scoot-audio-sink";
+  # The night-light wrappers: the unit's `ExecStart` itself, whose
+  # content carries the daemon's flags with the temperature resolved
+  # at unit start.
+  nightExec = hmNight.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
+  nightLocatedExec =
+    hmNightLocated.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
+  nightGammaExec =
+    hmNightGamma.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
   #
@@ -12148,21 +12200,24 @@ let
       assert allAssertionsHold hmNightNoLook.config;
       true
     )
-    # The unit runs the manual schedule by default (day 6500, night
-    # from the look, 07:00/19:00 over 15 min, gamma neutral)...
+    # The unit runs the wrapper, which reads the night temperature from
+    # the live look at start (day 6500 baked, the look's 4000 on music-desk
+    # as the fallback, 07:00/19:00 over 15 min, gamma neutral -- the flags
+    # themselves pinned by content below)...
     (
-      assert lib.hasInfix "wlsunset -T 6500 -t 4000 -S 07:00 -s 19:00 -d 900 -g 1.000000"
+      assert lib.hasInfix "scoot-nightlight-run"
         hmNight.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
       true
     )
-    # ...location mode instead with the pair set (the manual times and
-    # the duration unread: the sun computes the boundaries)...
+    # ...location mode instead with the pair set (the wrapper, again;
+    # the manual times and the duration unread: the sun computes the
+    # boundaries)...
     (
       assert allAssertionsHold hmNightLocated.config;
       true
     )
     (
-      assert lib.hasInfix "wlsunset -T 6500 -t 3500 -l 37.330000 -L -121.890000 -g 1.000000"
+      assert lib.hasInfix "scoot-nightlight-run"
         hmNightLocated.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
       true
     )
@@ -12171,8 +12226,9 @@ let
         !(lib.hasInfix "-S" hmNightLocated.config.systemd.user.services.scoot-nightlight.Service.ExecStart);
       true
     )
-    # ...and the gammastep daemon in its own spelling (Wayland method,
-    # day:night, location, per-channel gamma).
+    # ...and the gammastep daemon in its own spelling (the wrapper again;
+    # Wayland method, day:night, location, per-channel gamma pinned by
+    # content below).
     (
       assert allAssertionsHold hmNightGamma.config;
       true
@@ -12183,8 +12239,7 @@ let
       true
     )
     (
-      assert lib.hasInfix
-        "gammastep -m wayland -t 6500:3500 -l 37.330000:-121.890000 -g 1.000000:1.000000:1.000000"
+      assert lib.hasInfix "scoot-nightlight-run"
         hmNightGamma.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
       true
     )
@@ -12613,6 +12668,27 @@ let
     # ...and an unknown engine fails at the option type.
     (
       assert !hmInputMethodDaemonBogus.success;
+      true
+    )
+  ];
+
+  # --- look-link seed (activation, `nix/modules/look-leaves-seed.nix`) ---
+  #
+  # With a declared look and a binary the seed runs once (the declared
+  # default, from the flake's own looks); without a look it runs
+  # nothing. The seed only fires when no choice is recorded yet, so it
+  # never overrides a live choice.
+  _seedPins = lib.optionals isLinux [
+    (
+      assert allAssertionsHold hmSeed.config;
+      true
+    )
+    (
+      assert hmSeed.config.home.activation ? scootLookSeed;
+      true
+    )
+    (
+      assert !(hmSeedNoLook.config.home.activation ? scootLookSeed);
       true
     )
   ];
@@ -14294,6 +14370,7 @@ assert lib.all (x: x) _capturePins;
 assert lib.all (x: x) _audioPins;
 assert lib.all (x: x) _nightlightPins;
 assert lib.all (x: x) _inputMethodPins;
+assert lib.all (x: x) _seedPins;
 assert lib.all (x: x) _authPins;
 assert lib.all (x: x) _themePins;
 assert lib.all (x: x) _lookShippedPins;
@@ -14705,29 +14782,30 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
 
     # 13. Notification daemon, music-desk: the overlay layer (popups
     #     above fullscreen -- mako's own default is `top`, which the
-    #     compositor hides), the DND section hiding, the look's roles
-    #     as mako leaves (its `#rrggbb` colors kept verbatim), and the
-    #     critical ring in urgent.
-    grep -F -x "layer=overlay" ${notifConf}
+    #     compositor hides), the DND section hiding, and the live look
+    #     fragment included first (the look's roles render at apply time
+    #     through `scoot-look`'s mako renderer, pinned byte-exact by the
+    #     `shipped` Rust gate, music-desk included -- so the user config
+    #     carries no color itself). Keys after the include win.
+    grep -F -x "include=~/.local/state/scoot/look/mako" ${notifConf}
+    [ "$(sed -n '3p' ${notifConf})" = "include=~/.local/state/scoot/look/mako" ]
     grep -F -x "[mode=do-not-disturb]" ${notifConf}
     grep -F -x "invisible=1" ${notifConf}
-    grep -F -x "background-color=#FCFBFB" ${notifConf}
-    grep -F -x "text-color=#1A2032" ${notifConf}
-    grep -F -x "border-color=#3D579A" ${notifConf}
-    grep -F -x "progress-color=over #3D579A" ${notifConf}
-    grep -F -x "[urgency=critical]" ${notifConf}
-    grep -F -x "border-color=#EE6F5E" ${notifConf}
-    echo "ok: mako config carries the overlay layer, DND and the look"
+    if grep -q "^background-color=" ${notifConf}; then echo "eval-time color in the live config" >&2; exit 1; fi
+    if grep -q "urgency=critical" ${notifConf}; then echo "eval-time critical section in the live config" >&2; exit 1; fi
+    echo "ok: mako config includes the live look fragment, DND stays"
 
     # 13b. A daemon setting wins per key (verbatim, leading `#` kept),
-    #      a new key lands, and the generated sections stay.
+    #      a new key lands, and the DND section stays. The look's own
+    #      colors stay out (they render into the fragment, not here).
+    grep -F -x "include=~/.local/state/scoot/look/mako" ${notifSettingsConf}
     grep -F -x "layer=top" ${notifSettingsConf}
     if grep -q "^layer=overlay$" ${notifSettingsConf}; then echo "overridden default still present" >&2; exit 1; fi
     grep -F -x "anchor=bottom-right" ${notifSettingsConf}
     grep -F -x "background-color=#123456" ${notifSettingsConf}
     grep -F -x "[mode=do-not-disturb]" ${notifSettingsConf}
-    grep -F -x "[urgency=critical]" ${notifSettingsConf}
-    echo "ok: daemon settings win per key, generated sections stay"
+    if grep -q "urgency=critical" ${notifSettingsConf}; then echo "eval-time critical section beside settings" >&2; exit 1; fi
+    echo "ok: daemon settings win per key, the look stays in the fragment"
 
     # 13c. Opted out (or lookless): no themed leaf at all -- with the
     #      opt-out the settings still apply, so the daemon is theirs.
@@ -16003,24 +16081,21 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     if ${displaysWatcher} frobnicate 2>/dev/null; then echo "bogus verb accepted (21f)" >&2; exit 1; fi
     echo "ok: usage refuses unknown verbs and a missing session"
 
-    # 22. Audio slot content: the wob config -- geometry, the hide
-    #     timeout and the overflow clamp, the look's roles as wob
-    #     colors (opaque `RRGGBBAA`), a washed muted style and an
-    #     urgent overflow style.
-    grep -F -x "timeout = 1500" ${audioThemed}
-    grep -F -x "max = 100" ${audioThemed}
-    grep -F -x "width = 400" ${audioThemed}
-    grep -F -x "height = 40" ${audioThemed}
-    grep -F -x "anchor = bottom" ${audioThemed}
-    grep -F -x "margin = 48" ${audioThemed}
-    grep -F -x "overflow_mode = nowrap" ${audioThemed}
-    grep -F -x "background_color = FCFBFBff" ${audioThemed}
-    grep -F -x "bar_color = 3D579Aff" ${audioThemed}
-    grep -F -x "border_color = 3D579Aff" ${audioThemed}
-    grep -F -x "overflow_bar_color = EE6F5Eff" ${audioThemed}
-    grep -F -q -- "[style.muted]" ${audioThemed}
-    grep -F -x "bar_color = C9CBD0ff" ${audioThemed}
-    echo "ok: the OSD config carries the geometry, the timeout and the look"
+    # 22. Audio slot content, themed: the wob config is a link into the
+    #     live look state (the colors render at apply time through
+    #     `scoot-look`'s wob renderer, pinned byte-exact by the `shipped`
+    #     Rust gate, music-desk included). The daemon assembles its
+    #     runtime config from the fragment -- or the static file before
+    #     the first apply -- with the hide timeout prepended (never
+    #     appended: past a `[style.*]` header a bare key belongs to that
+    #     style).
+    [ "$(readlink ${audioThemed})" = "/home/testuser/.local/state/scoot/look/wob.ini" ]
+    grep -F -q "scoot/look/wob.ini" ${audioOsdScript}
+    grep -F -q "printf 'timeout = %s" ${audioOsdScript}
+    grep -F -q '"1500"' ${audioOsdScript}
+    grep -F -q 'else cat ' ${audioOsdScript}
+    grep -F -q -- '-c "$assembled"' ${audioOsdScript}
+    echo "ok: the OSD follows the live look fragment, timeout prepended"
 
     # 22b. Lookless (or opted out): geometry and the timeout stay, the
     #      look's colors leave (wob's own stand), the muted style still
@@ -16033,8 +16108,9 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "[style.muted]" ${audioTargetOff}
     echo "ok: opting out (or no look) leaves wob unthemed but mute-safe"
 
-    # 22c. Retimed: the override lands.
-    grep -F -x "timeout = 2500" ${audioTimeoutIni}
+    # 22c. Retimed: the override prepends onto whatever config the
+    #      daemon assembles.
+    grep -F -q '"2500"' ${audioTimeoutOsd}
     echo "ok: the retimed OSD renders its override"
 
     # 22d. The control scripts name the slot's tools by absolute store
@@ -16774,32 +16850,47 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     ''}
 
   ${lib.optionalString isLinux ''
-    # 24. Input-method slot content: the candidate theme carries the
-    # look's own roles (moonrise: cream text on slate, the amber
-    # accent selecting, its ring on the border) and the classic UI
-    # names it on both the light and the dark path. Build-time greps,
-    # not eval asserts: an eval-time read of these derivations builds
-    # them, which breaks evaluating this system's checks from another
-    # platform (the FlakeHub `--all-systems` gate).
-    grep -F -q "NormalColor=#F6EEDC" ${
+    # 24. Input-method slot content: the candidate theme is a link into
+    #     the live look state (the colors render at apply time through
+    #     `scoot-look`'s fcitx5 renderer, pinned byte-exact by the
+    #     `shipped` Rust gate, moonrise included) and the classic UI
+    #     names it on both the light and the dark path. Build-time
+    #     greps, not eval asserts: an eval-time read of these
+    #     derivations builds them, which breaks evaluating this
+    #     system's checks from another platform (the FlakeHub
+    #     `--all-systems` gate).
+    [ "$(readlink ${
       hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
-    }
-    grep -F -q "Color=#2B3648" ${
-      hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
-    }
-    grep -F -q "Color=#FFA45C" ${
-      hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
-    }
-    grep -F -q "BorderColor=#FF9A49" ${
-      hmInputMethodThemed.config.xdg.dataFile."fcitx5/themes/scoot-look/theme.conf".source
-    }
+    })" = "/home/testuser/.local/state/scoot/look/fcitx5/theme.conf" ]
     grep -F -x -q "Theme=scoot-look" ${
       hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source
     }
     grep -F -x -q "DarkTheme=scoot-look" ${
       hmInputMethodThemed.config.xdg.configFile."fcitx5/conf/classicui.conf".source
     }
-    echo "ok: candidate window wears the look, both classic UI paths name it"
+    echo "ok: candidate window follows the live look, both classic UI paths name it"
+
+    # 24b. Night-light wrappers: the temperature resolves at unit start
+    #      from the live look fragment, falling back to the configured
+    #      night temperature (music-desk's 4000, the plain 3500 without
+    #      a look) when the link is missing or out of range. The manual
+    #      schedule, the located mode and the gammastep spelling each
+    #      carry their own baked flags around that one live value.
+    grep -F -q "scoot/look/nightlight" ${nightExec}
+    grep -F -q -- "-T 6500" ${nightExec}
+    grep -F -q -- "-S 07:00 -s 19:00 -d 900" ${nightExec}
+    grep -F -q "temp=4000" ${nightExec}
+    grep -F -q "scoot/look/nightlight" ${nightLocatedExec}
+    grep -F -q -- "-l 37.33" ${nightLocatedExec}
+    grep -F -q -- "-L -121.89" ${nightLocatedExec}
+    grep -F -q "temp=3500" ${nightLocatedExec}
+    if grep -q -- "-S " ${nightLocatedExec}; then echo "manual schedule in located mode (24b)" >&2; exit 1; fi
+    grep -F -q -- "-m wayland" ${nightGammaExec}
+    grep -F -q -- "-t 6500:" ${nightGammaExec}
+    grep -F -q -- "-l 37.33:-121.89" ${nightGammaExec}
+    grep -F -q -- "-g 1.000000:1.000000:1.000000" ${nightGammaExec}
+    grep -F -q "temp=3500" ${nightGammaExec}
+    echo "ok: night-light wrappers read the live temperature, flags baked around it"
   ''}
 
   touch $out

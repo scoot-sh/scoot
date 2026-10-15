@@ -454,8 +454,9 @@ in
       # Free-form `key = value` lines merged over the generated config
       # (a value here wins per key). Rendered verbatim, so a `#rrggbb`
       # color keeps its leading `#` (mako's own format). The generated
-      # sections (`[mode=do-not-disturb]`, `[urgency=critical]`) always
-      # render; only global keys are overridable here.
+      # do-not-disturb section always renders; beside a look the
+      # critical section renders into the look fragment instead, so
+      # only global keys are overridable here.
       settings = lib.mkOption {
         type = lib.types.attrsOf lib.types.str;
         default = { };

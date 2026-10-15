@@ -170,6 +170,57 @@ fn every_shipped_look_validates_and_renders() {
             !table.contains_key("font") && !table.contains_key("fallback-fonts"),
             "{name}: default render emits no font path"
         );
+        // The daemon leaves render for every shipped look: the same
+        // mapping the Nix modules used to inline, now from the tokens.
+        // music-desk's pins below match the Nix content checks
+        // (`nix/tests.nix` "mako config carries the overlay layer"): the
+        // eval-time values and the renderer agree.
+        let leaves = scoot_look::render_leaf_files(&look)
+            .unwrap_or_else(|e| panic!("{name}: leaves do not render: {e}"));
+        let leaf = |file: &str| {
+            leaves
+                .iter()
+                .find(|(path, _)| path == file)
+                .unwrap_or_else(|| panic!("{name}: no {file} leaf"))
+                .1
+                .clone()
+        };
+        let mako = leaf("mako");
+        for line in [
+            "layer=overlay",
+            "[mode=do-not-disturb]",
+            "invisible=1",
+            "[urgency=critical]",
+        ] {
+            assert!(
+                mako.lines().any(|l| l == line),
+                "{name}: mako leaf misses `{line}`:\n{mako}"
+            );
+        }
+        let wob = leaf("wob.ini");
+        assert!(
+            wob.lines().any(|l| l == "[style.muted]"),
+            "{name}: wob leaf misses the muted style:\n{wob}"
+        );
+        let theme = leaf("fcitx5/theme.conf");
+        assert!(
+            theme.contains("[InputPanel/Background]"),
+            "{name}: fcitx5 leaf misses its sections:\n{theme}"
+        );
+        if *name == "music-desk" {
+            for line in [
+                "background-color=#FCFBFB",
+                "text-color=#1A2032",
+                "border-color=#3D579A",
+                "progress-color=over #3D579A",
+                "border-color=#EE6F5E",
+            ] {
+                assert!(
+                    mako.lines().any(|l| l == line),
+                    "music-desk: mako leaf misses `{line}`:\n{mako}"
+                );
+            }
+        }
     }
 }
 
