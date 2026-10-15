@@ -1076,6 +1076,73 @@ run_looks_test() {
     export XDG_CONFIG_HOME="$dir/config"
     export XDG_RUNTIME_DIR="$dir/runtime"
 
+    # Hermetic fonts: CI runners have no Nerd Fonts, so the shipped looks
+    # must not depend on host font names. A PATH-prepended stub fc-match
+    # answers the shipped families with a real font file and the same
+    # family name, and every other family the way real fc-match answers a
+    # missing one (a fallback file with a different family), so the
+    # production family comparison still refuses unknown fonts. The file
+    # must really load: the bar's daemon --check opens it. Resolved before
+    # the prepend (first the host fc-match, then a filesystem scan), so
+    # this section also passes with a restricted FONTCONFIG_FILE.
+    # Production font check untouched.
+    local stub_dir="$dir/stub-bin"
+    mkdir -p "$stub_dir"
+    local font_file="" fam root cand
+    for fam in "DejaVu Sans" "DejaVu Sans Mono" "sans-serif"; do
+        if command -v fc-match >/dev/null 2>&1; then
+            cand=""
+            cand=$(fc-match --format='%{file}\n' "$fam" 2>/dev/null | tr -d '\n' || true)
+            if [ -n "$cand" ] && [ -f "$cand" ]; then
+                font_file="$cand"
+                break
+            fi
+        fi
+    done
+    if [ -z "$font_file" ]; then
+        for root in /usr/share/fonts /run/current-system/sw/share/fonts \
+            /run/current-system/sw/share/X11/fonts \
+            "$HOME/.local/share/fonts" "$HOME/.fonts"; do
+            if [ -d "$root" ]; then
+                cand=""
+                cand=$(find "$root" -type f \( -iname '*.ttf' -o -iname '*.otf' \) 2>/dev/null | head -1 || true)
+                if [ -n "$cand" ] && [ -f "$cand" ]; then
+                    font_file="$cand"
+                    break
+                fi
+            fi
+        done
+    fi
+    if [ -z "$font_file" ]; then
+        echo "BUG: no loadable font file for the looks stub (tried fc-match and the usual font roots)"
+        return 1
+    fi
+    {
+        cat <<EOF
+#!/bin/sh
+# \$1 is --format=%{file} or --format=%{family} (with a trailing newline),
+# \$2 is the family. Match on the field name, never the exact flag.
+fmt="\${1:-}"
+fam="\${2:-}"
+case "\$fam" in
+  "DroidSansM Nerd Font Propo"|"DejaVu Sans"|"FiraCode Nerd Font"|"DejaVu Sans Mono")
+    case "\$fmt" in
+      *file*) printf '%s\n' "$font_file" ;;
+      *) printf '%s\n' "\$fam" ;;
+    esac
+    ;;
+  *)
+    case "\$fmt" in
+      *file*) printf '%s\n' "$font_file" ;;
+      *) printf 'DejaVu Sans\n' ;;
+    esac
+    ;;
+esac
+EOF
+    } >"$stub_dir/fc-match"
+    chmod +x "$stub_dir/fc-match"
+    export PATH="$stub_dir:$PATH"
+
     local repo
     repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
     export SCOOT_LOOKS_DIR="$repo/looks"

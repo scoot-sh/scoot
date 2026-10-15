@@ -31,7 +31,8 @@ shadowed.
 the state link, and reloads each running app's look layer in order: the
 compositor first, then every bar of the session. Apps that are not running
 are skipped, never an error. With nothing running, only the link moves,
-and the next session starts on the new look.
+and the next session starts on the new look. A shipped look needs its
+Nerd Fonts installed; without them `apply` refuses and changes nothing.
 
 A swap reports three lists: what reloaded, what was skipped, and every
 shadowed key — a key in your own files that overrides a look token. A
