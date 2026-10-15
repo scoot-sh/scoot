@@ -54,4 +54,5 @@ base24 3024 Day; MIT, authors in the test header) and a test pinning
 the mapping to today's Nix slots (`home.nix:571-573`,
 `scootbar.nix:482-487`); nextest 85/85 and `cargo test` green on macOS
 and Linux, clippy and fmt clean both. Site reference in
-`site/src/content/docs/reference/look-format.md`. PR: (link on open).
+`site/src/content/docs/reference/look-format.md`. PR:
+https://github.com/scoot-sh/scoot/pull/611 .
