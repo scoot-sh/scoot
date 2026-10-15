@@ -3,8 +3,6 @@ title: CLI reference
 description: "Every scootbg command, when it returns, apply-config, query, and exit statuses."
 ---
 
-Every command, what it waits for, and how it fails — plus `apply-config` (how scoot drives it) and `query` (what each output shows).
-
 Every `scootbg` command, what it waits for, and how it fails. What scootbg
 is and why it exists is in [Overview](./index.md); in scoot, a
 `[wallpaper]` section runs it for you

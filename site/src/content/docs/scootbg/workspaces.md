@@ -36,8 +36,7 @@ through the transition the mapping was set with (`--transition fade`
 beside `--workspace`, as [`set` takes them](./cli.md#commands)). `query`
 reports the switch the same way it does a `set`: `"shows"` is what is
 on screen, and `"workspace"` names the active one. A switch never waits
-for a client: there is no request in flight, so nothing answers — it
-just lands.
+for a client: there is no request in flight, so nothing answers.
 
 ```sh
 scootbg set ~/Pictures/calm.jpg --workspace 1 --transition fade --duration-ms 800

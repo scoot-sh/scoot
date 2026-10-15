@@ -3,8 +3,6 @@ title: Restore
 description: "The wallpaper comes back at the next start: profiles, state files, and what survives."
 ---
 
-**The wallpaper is restored at the next start.** Every `set` and `clear` is saved, per output, and shown again when the daemon starts.
-
 ## Restore
 
 **The wallpaper is restored at the next start.** Every `set` and `clear`

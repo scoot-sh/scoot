@@ -3,8 +3,6 @@ title: Wallpaper from a link
 description: "Point the wallpaper at a URL: download-once caching, sha256 pins, and every failure mode."
 ---
 
-Point `set` — or scoot's `[wallpaper]` image — at a link: downloaded once, cached, then shown like any other image.
-
 ## A wallpaper from a link
 
 Point `set` (or scoot's `[wallpaper] image`) at an `http://` or `https://`
