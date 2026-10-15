@@ -79,7 +79,9 @@ decide it: the maintainer does, in the release PR.
 titled `chore: release vX.Y.Z`. It:
 
 1. bumps `[workspace.package] version` (and the workspace entries in
-   `Cargo.lock`);
+   `Cargo.lock`), then commits `scripts/sync-fuzz-locks` to the branch so the
+   fuzz crates' own lockfiles (`crates/*/fuzz/Cargo.lock`, not in the
+   workspace) follow;
 2. inserts `## [X.Y.Z] - <date>` directly under `## Unreleased` in the root
    `CHANGELOG.md`, with a list generated from the commits since the last tag,
    grouped by scope (component) and labeled by kind. The hand-written notes

@@ -435,5 +435,30 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertIn("blob/v9.9.9/CHANGELOG.md", r.stdout)
 
 
+class SyncFuzzLocksTests(unittest.TestCase):
+    SCRIPT = Path(__file__).resolve().parent / "sync-fuzz-locks"
+
+    def test_workspace_crates_follow_the_version_and_others_stay(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "Cargo.toml").write_text('[workspace.package]\nversion = "0.2.1"\n')
+            crate = root / "crates" / "scootbg-mem"
+            (crate).mkdir(parents=True)
+            (crate / "Cargo.toml").write_text('[package]\nname = "scootbg-mem"\n')
+            fuzz = root / "crates" / "scootbg" / "fuzz"
+            fuzz.mkdir(parents=True)
+            lock = fuzz / "Cargo.lock"
+            lock.write_text('[[package]]\nname = "scootbg-mem"\nversion = "0.2.0"\n\n'
+                            '[[package]]\nname = "serde"\nversion = "0.2.0"\n\n'
+                            '[[package]]\nname = "scootbg-mem"\nversion = "9.0.0"\n'
+                            'source = "registry+https://github.com/rust-lang/crates.io-index"\n')
+            r = subprocess.run([str(self.SCRIPT), "--root", d], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn('name = "scootbg-mem"\nversion = "0.2.1"', lock.read_text())
+            self.assertIn('name = "serde"\nversion = "0.2.0"', lock.read_text())
+            # A registry crate sharing a workspace crate's name is not rewritten.
+            self.assertIn('name = "scootbg-mem"\nversion = "9.0.0"', lock.read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -154,6 +154,33 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # release-plz bumps the root manifest and lockfile only. The fuzz
+      # crates are workspaces of their own and lock the workspace crates at
+      # the old version, which `cargo check --locked` refuses on the PR.
+      # Commit the sync to the branch before its checks are dispatched.
+      - name: Sync the fuzz crates' lockfiles on the release branch
+        if: steps.gate.outputs.run == 'true' && steps.release-plz.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.release-plz.outputs.pr }}
+          REPO: ${{ github.repository }}
+        run: |
+          branch=$(printf '%s' "$PR" | jq -r '.head_branch // empty')
+          case "$branch" in
+            release-plz-*) ;;
+            *) echo "::error title=Unexpected branch::release-plz reported '$branch'"; exit 1 ;;
+          esac
+          git fetch --quiet origin "$branch"
+          git checkout --quiet -B "$branch" FETCH_HEAD
+          scripts/sync-fuzz-locks
+          if [ -n "$(git status --porcelain)" ]; then
+            git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+              commit --quiet -am "chore: sync the fuzz crates' lockfiles to the release version"
+            auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+              push --quiet origin "HEAD:$branch"
+          fi
+
       # The PR's own `pull_request` runs wait for a maintainer's approval
       # (GITHUB_TOKEN opened or updated it), so run CI on its branch head
       # now. `prs_created` is "true" whenever release-plz opened OR updated

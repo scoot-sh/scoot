@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Keep the fuzz crates' lockfiles at the workspace version.
+
+    scripts/sync-fuzz-locks [--root DIR]   # rewrite, print what changed
+
+The `crates/*/fuzz` crates are their own workspaces, so release-plz's bump of
+the root `Cargo.toml` and `Cargo.lock` never reaches their `Cargo.lock`. Each
+locks the workspace crates it depends on by path at the old version, and
+CI's `cargo check --locked` then refuses it on the release PR. This rewrites
+the `version` of every locked package named after a crate under `crates/`
+to the workspace version. Run by `release-plz.yml` on the release branch.
+
+Stdlib only; tests in `scripts/test_release_resolve.py`.
+"""
+
+import argparse
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+# A path dependency has no `source =` line; a registry crate that merely
+# shares a workspace crate's name does, and is left alone.
+PACKAGE = re.compile(r'(\[\[package\]\]\nname = "([^"]+)"\nversion = ")([^"]+)(")(?!\nsource = )')
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--root", default=str(ROOT))
+    root = Path(ap.parse_args(argv).root)
+    version = subprocess.run([str(Path(__file__).resolve().parent / "workspace-version"),
+                              "--root", str(root)],
+                             capture_output=True, text=True, check=True).stdout.strip()
+    names = set()
+    for manifest in (root / "crates").glob("*/Cargo.toml"):
+        m = re.search(r'(?ms)^\[package\].*?^name\s*=\s*"([^"]+)"', manifest.read_text())
+        if m:
+            names.add(m.group(1))
+    for lock in sorted((root / "crates").glob("*/fuzz/Cargo.lock")):
+        text = lock.read_text()
+        new = PACKAGE.sub(lambda m: m.group(1) + (version if m.group(2) in names else m.group(3))
+                          + m.group(4), text)
+        if new != text:
+            lock.write_text(new)
+            print(f"{lock.relative_to(root)}: workspace crates now {version}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
