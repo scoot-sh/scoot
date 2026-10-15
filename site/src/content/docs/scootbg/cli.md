@@ -49,6 +49,8 @@ The binary documents itself for agents: `scootbg help COMMAND` prints each
 command's page, and `scootbg --help --json` emits commands, `set`'s modes
 and filters, exit codes and environment — see
 [Generated CLI pages](../reference/cli.md) for the contract.
+`scootbg version` prints the running daemon's version and protocol as one
+JSON line (`{"type":"version","protocol":1,"version":"X.Y.Z"}`).
 
 
 
