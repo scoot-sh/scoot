@@ -254,7 +254,7 @@ jobs:
                 # The release tooling: release.yml's lint job owns it
                 # (actionlint over both release workflows, the tools'
                 # tests), so a change there alone runs nothing here.
-                .github/workflows/release.yml | .github/workflows/release-plz.yml | release-plz.toml | scripts/release-resolve | scripts/release-notes | scripts/workspace-version | scripts/test_release_resolve.py) ;;
+                .github/workflows/release.yml | .github/workflows/release-plz.yml | release-plz.toml | scripts/release-resolve | scripts/release-notes | scripts/workspace-version | scripts/sync-fuzz-locks | scripts/test_release_resolve.py) ;;
                 # The backlog tool and its tests: only their own job.
                 scripts/backlog | scripts/test_backlog.py)
                   backlog=true ;;
