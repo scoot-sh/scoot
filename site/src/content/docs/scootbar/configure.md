@@ -20,7 +20,7 @@ Shape the bar: where it sits, what it looks like, which outputs it covers, and t
   space, and an unstarted module beside one never moves the line.
 - Each module is as wide as its content plus `--padding` on both sides;
   `--spacing` separates neighbours, and a module's own `margin` adds room
-  on each side of it ([Spacing](./modules.md##spacing)). A module with nothing to show
+  on each side of it ([Spacing](./configure.md#spacing)). A module with nothing to show
   takes no space at all, padding, margin and spacing included.
 - **A rounded bar keeps its ends clear of the corners**: the first module
   on the left and the last on the right start `radius` less half a padding
@@ -32,7 +32,7 @@ Shape the bar: where it sits, what it looks like, which outputs it covers, and t
   text is clipped to its module's space.
 - Text is vertically centered on the bar. It is not shaped: one glyph per
   character, no ligatures, kerning or right-to-left runs (see
-  [Fonts](./modules.md##fonts) for what is out of scope). A character no font in the chain has
+  [Fonts](./configure.md#fonts) for what is out of scope). A character no font in the chain has
   draws the primary font's missing-glyph box. Control characters are
   not drawn.
 
@@ -62,7 +62,7 @@ placed draws no text and needs no font. On NixOS those directories are
 usually empty: give `--font` a store path (`nix build nixpkgs#dejavu_fonts`
 has `share/fonts/truetype/DejaVuSans.ttf`), or run the flake's
 `scootbar-demo`, which gives it DejaVu Sans by default
-([docs/nix.md](./index.md)).
+(see [Enable it](./index.md#enable-it)).
 
 **Replacing the font file while the bar runs cannot crash it**, unless a
 *root* process rewrites a mapped store file in place through a read-write view
@@ -131,7 +131,7 @@ Chinese together. A `.ttc` collection loads (its first face), and so does a
 variable CFF2 font (its default instance). A CJK font is 30 MB or more, so
 put it where it is mapped (a read-only `/nix/store`) or expect its size in the
 bar's memory, as for any font not on a read-only mount; see
-[icons.md](./configure.md#fonts-what-the-real-ones-do).
+[Fonts: what the real ones do](./configure.md#fonts-what-the-real-ones-do).
 
 
 
@@ -156,7 +156,7 @@ Every token has a `[colors]` key; `bg` and `fg` are `--background` and
 
 ## What it does on the compositor
 
-- **One bar per selected output** ([Outputs](./modules.md##outputs)), a layer surface (`top` by default) with the namespace
+- **One bar per selected output** ([Outputs](./configure.md#outputs)), a layer surface (`top` by default) with the namespace
   `scootbar` (for compositor rules that match on it), anchored to its edge
   and both sides. An output plugged in later gets a bar; an output
   unplugged takes its bar with it, and the others are untouched. With no
@@ -166,8 +166,8 @@ Every token has a `[colors]` key; `bg` and `fg` are `--background` and
   is drawn: on scoot, windows move out of the way once, when the bar
   connects, and do not jump again when it draws.
 - **It takes no keyboard focus** (but for the keys of an open
-  [popup](./modules.md##popups) — Escape, arrows, Enter — for as long as it is open). Pointer clicks on the workspaces
-  module's numbers switch to them ([above](./modules.md##workspaces)); anywhere else
+  [popup](./modules.md#popups) — Escape, arrows, Enter — for as long as it is open). Pointer clicks on the workspaces
+  module's numbers switch to them ([above](./modules.md#workspaces)); anywhere else
   clicks do nothing.
 - **It draws at each output's real device pixels**, fractional scales
   included (`wp_fractional_scale_v1` with `wp_viewporter`). A compositor
@@ -199,7 +199,7 @@ disappears while something is fullscreen, which is the right default for a
 bar. `overlay` stays over fullscreen windows; ask for it on purpose.
 Fullscreen and maximize are different on purpose: a window that should fill
 the screen *with* the bar visible wants scoot's
-[maximize](https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/backlog/resolved/maximize-done.md) (`Super+m`,
+maximize (`Super+m`,
 `toggle-maximize`). There is
 no `background` layer: that is the wallpaper's.
 
@@ -207,7 +207,7 @@ no `background` layer: that is the wallpaper's.
 the bar reserves nothing and windows go under it, and it also ignores any
 other bar's zone. It is the choice for a floating overlay-style bar. With
 the default `true` the zone is the bar's height, and the compositor adds the
-margin on the anchored edge (see [Margins](./modules.md##margins)). Whichever layer:
+margin on the anchored edge (see [Margins](./configure.md#margins)). Whichever layer:
 the bar never takes the keyboard, so clicking it never moves window focus.
 
 Each of the three layers on each of the two edges, with and without the
@@ -287,7 +287,7 @@ font-size = 20                  # 1 to 256, as [bar] font-size; absent is the sh
   second set of file descriptors (checked in `tests/outputs.rs`: the daemon
   holds 8 fds with one output and 8 with two). A module's change redraws
   only the outputs that show it. The workspaces module is shared too, and
-  each bar shows its own output's workspaces (see [Workspaces](./modules.md##workspaces)
+  each bar shows its own output's workspaces (see [Workspaces](./modules.md#workspaces)
   for the switching limit). There is no "primary" output: to put a module
   on one output only, name that output in its table.
 - **Scale.** Each bar is drawn at its own output's real device pixels
@@ -342,7 +342,7 @@ what is now the case: `{"type":"bar","visible":false}`.
 - Hidden is runtime state. A `reload` keeps it (a geometry change while
   hidden just waits for the `show`), and a restarted daemon starts shown.
 - An output plugged in while hidden gets no bar until `show` (and only if the
-  [list](./modules.md##outputs) selects it); one that was
+  [list](./configure.md#outputs) selects it); one that was
   unplugged and plugged in again is the same. `show` with no output is fine:
   each output's bar is made when it arrives.
 - A hide during a redraw needs no care: a draw is one synchronous step of
@@ -369,7 +369,7 @@ the daemon). It was **decided against for now, not measured**: the cost
 that matters (a sensing strip's pages and its pointer wakeups) would only
 be worth paying if the strip could beat a key bind that toggles the bar
 (above), which costs nothing when unused. Pointer input on the bar exists
-now ([Pointer input](./modules.md##pointer-input)), so the strip's cost could be
+now ([Pointer input](./modules.md#pointer-input)), so the strip's cost could be
 measured; it has not been, and the decision stands until it is.
 
 
@@ -505,7 +505,7 @@ opacity = 0.9
   the bar less height than asked, draws the corners as large as the bar
   holds.
 - **Text is kept out of the corners, not clipped to them**: the layout
-  clears the bar's ends by the radius (see [Layout](./modules.md##layout)), so no ink
+  clears the bar's ends by the radius (see [Layout](./configure.md#layout)), so no ink
   is near a corner whatever `padding` is. This costs the radius less half a
   padding of room at each end, and needs no per-pixel clipping in the
   paint; a bar whose radius is 0 loses nothing.
@@ -521,7 +521,7 @@ opacity = 0.9
   edge by a device pixel). A compositor that ignores input regions leaves
    the corners clickable, which is the protocol's fallback.
 - **Popups round separately**: `[bar] radius` never rounds a popup; that is
-  `[bar] popup-radius` ([Popups](./modules.md##popups)), which follows this radius when
+  `[bar] popup-radius` ([Popups](./modules.md#popups)), which follows this radius when
   unset.
 - Measured costs (release build, 1600x28 bar, radius 14): filling the whole
   bar takes 4.9 us square and 6.1 us rounded and translucent; 3200x56 (scale
@@ -532,7 +532,7 @@ opacity = 0.9
 
 ## Icons and fonts: mechanism and measurements
 
-The reference for the config keys is [the Icons section](./configure.md#icons); this is the
+The reference for the config keys is [the Icons section](./modules.md#icons); this is the
 mechanism and the measurements behind it, for the button, push, exec,
 volume,
 microphone, network, battery, brightness, bluetooth, media and
@@ -706,7 +706,7 @@ load or at the first draw of a size, never per frame. The cache holds one
 
 ## Fonts: what the real ones do
 
-The fallback chain is documented in (./cli.md#fallback-fonts-and-icons)
+The fallback chain is documented in [Fallback fonts and icons](./configure.md#fallback-fonts-and-icons)
 and was tested against the test font in code. To check it against real ones,
 the run on headless scoot (scale 1, a 32-pixel bar, 15 px) was:
 
@@ -777,7 +777,7 @@ depends on the choice: the rasterizer is one function, `Text::fill`.
 ## What was not built
 
 - **Icon-theme lookup** (`.desktop` files and named icons, option 4): only the
-  [tray](https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/backlog/tray.md) or window icons force it, and it is the heavy path
+  [tray](./modules.md#tray) or window icons force it, and it is the heavy path
   (loading and decoding files). It is not started.
 - **A libFuzzer target** for the path parser. The stable property tests (above)
   run on every `cargo test`; the clock's two parsers have `cargo fuzz` targets

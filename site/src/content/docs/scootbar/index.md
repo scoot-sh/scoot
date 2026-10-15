@@ -94,7 +94,7 @@ unknown key), naming it.
 ```sh
 scootbar msg query                         # every placed module's state as JSON
 scootbar msg layout                        # where each module is on screen, for a click
-scootbar msg invoke volume raise 5         # run a module's action, as its click would
+scootbar msg invoke volume set 50          # run a module's action, as its click would
 scootbar msg subscribe                     # stream changes, one JSON line each
 scootbar msg reload                        # re-read the file and live-apply it
 scootbar msg toggle                        # hide the bar (and release its space), or show it
