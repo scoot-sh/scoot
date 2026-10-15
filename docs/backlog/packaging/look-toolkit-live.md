@@ -3,7 +3,7 @@ title: "GTK, libadwaita, Qt, cursor and fonts follow a swap through dconf and th
 status: "open"
 area: "packaging"
 priority: "medium"
-blocked: "look-apply-cli"
+blocked: null
 ---
 
 # GTK, libadwaita, Qt, cursor and fonts follow a swap through dconf and the portal

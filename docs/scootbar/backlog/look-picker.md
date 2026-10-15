@@ -3,7 +3,7 @@ title: "A looks picker: a bar popup module and a launcher list"
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "look-apply-cli"
+blocked: null
 ---
 
 # A looks picker: a bar popup module and a launcher list

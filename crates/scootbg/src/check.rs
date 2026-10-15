@@ -77,11 +77,27 @@ pub fn check(path: &Path) -> Result<Report, String> {
     })
 }
 
-/// Sniffs the format from the first bytes, never the name.
+/// Sniffs the format from the first bytes, never the name. Opens
+/// `O_NONBLOCK | O_NOFOLLOW` and refuses unless the opened handle is a
+/// regular file, so a FIFO swapped in after `check`'s own stat refuses
+/// instead of hanging, and a planted symlink fails with `ELOOP`.
 fn sniff(path: &Path) -> Option<&'static str> {
     use std::io::Read as _;
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )
+    .ok()?;
+    let stat = rustix::fs::fstat(&fd).ok()?;
+    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile {
+        return None;
+    }
     let mut head = [0u8; 12];
-    let mut file = std::fs::File::open(path).ok()?;
+    let mut file = std::fs::File::from(fd);
     let n = file.read(&mut head).ok()?;
     if n >= 8 && head[..8] == [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'] {
         Some("PNG")

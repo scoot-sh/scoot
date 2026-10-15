@@ -59,7 +59,7 @@ stated rule.
 | [`look-session-state`](../resolved/look-session-state-done.md) | medium | computer use | `look-layer-scoot` |
 | [`look-layer-scootbar`](../../scootbar/backlog/resolved/look-layer-scootbar-done.md) | high | daily-drive | `look-format` |
 | [`scootbar-style-reload`](../../scootbar/backlog/resolved/scootbar-style-reload-done.md) | medium | daily-drive | |
-| [`look-apply-cli`](look-apply-cli.md) | high | both | `look-shipped`, `look-scoped-reload` |
+| [`look-apply-cli`](../resolved/look-apply-cli-done.md) | high | both | `look-shipped`, `look-scoped-reload` |
 | [`look-cycle-preview`](look-cycle-preview.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-ipc`](../ipc/look-ipc.md) | medium | computer use | `look-apply-cli` |
 | [`look-golden-screenshots`](../testing/look-golden-screenshots.md) | medium | computer use | `look-ipc` |

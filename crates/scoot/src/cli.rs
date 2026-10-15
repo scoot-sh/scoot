@@ -850,7 +850,10 @@ fn help_args(args: Vec<String>) -> Result<Command, Error> {
 fn look_alias(args: Vec<String>) -> Result<Command, Error> {
     match args.as_slice() {
         [] => Ok(Command::Help(HelpPage::Look)),
-        [only] if only == "--help" || only == "-h" || only == "help" => {
+        // Any help-first form shows the look help: there are no per-verb
+        // help pages (yet), so `look help apply` lands here too rather
+        // than parsing `help` as a verb.
+        [first, ..] if first == "--help" || first == "-h" || first == "help" => {
             Ok(Command::Help(HelpPage::Look))
         }
         _ => scootctl::look::parse_look(args).map(Command::Look),

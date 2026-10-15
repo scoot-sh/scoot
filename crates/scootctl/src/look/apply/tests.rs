@@ -102,12 +102,12 @@ impl CompositorReload for FakeCompositor {
 
 struct FakeBar {
     display: String,
-    script: RefCell<VecDeque<Result<(), String>>>,
+    script: RefCell<VecDeque<Result<bool, String>>>,
     calls: Cell<usize>,
 }
 
 impl FakeBar {
-    fn with_script(display: &str, script: Vec<Result<(), String>>) -> Self {
+    fn with_script(display: &str, script: Vec<Result<bool, String>>) -> Self {
         Self {
             display: display.to_owned(),
             script: RefCell::new(script.into()),
@@ -121,7 +121,7 @@ impl BarReload for FakeBar {
         &self.display
     }
 
-    fn reload_look(&self) -> Result<(), String> {
+    fn reload_look(&self) -> Result<bool, String> {
         self.calls.set(self.calls.get() + 1);
         self.script
             .borrow_mut()
@@ -558,7 +558,7 @@ fn a_rollback_that_also_refuses_reports_both_errors() {
     ]);
     let bar = FakeBar::with_script(
         "wayland-0",
-        vec![Err("the new layer is bad".to_owned()), Ok(())],
+        vec![Err("the new layer is bad".to_owned()), Ok(true)],
     );
     let bars: Vec<&dyn BarReload> = vec![&bar];
     let failure = apply_with(
@@ -633,6 +633,47 @@ fn a_failed_first_apply_removes_what_it_wrote() {
 }
 
 #[test]
+fn an_absent_bar_is_skipped_not_rolled_back() {
+    let fixture = fixture("absent-bar");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::ok(&["appearance.background_color"], &[]);
+    // A stale socket the bar already left: nothing listens, so the swap
+    // skips it with a note and completes without it.
+    let bar = FakeBar::with_script("wayland-9", vec![Ok(false)]);
+    let bars: Vec<&dyn BarReload> = vec![&bar];
+    let report = apply_with(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &bars,
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("an absent bar skips");
+    assert_eq!(report.reloaded, vec!["compositor".to_owned()]);
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|skipped| skipped.contains("wayland-9")),
+        "{:?}",
+        report.skipped
+    );
+    assert_eq!(
+        bar.calls.get(),
+        1,
+        "an absent bar runs once, never in a rollback"
+    );
+    assert_eq!(record_of(&fixture.state).name, "look-a");
+}
+
+#[test]
 fn a_bar_refusal_rolls_back_the_compositor_too() {
     let fixture = fixture("bar-rollback");
     let fonts = fixture._root.join("fonts");
@@ -654,8 +695,8 @@ fn a_bar_refusal_rolls_back_the_compositor_too() {
     .expect("the first apply succeeds");
     let mut compositor =
         FakeCompositor::with_script(vec![Ok(Reloaded::default()), Ok(Reloaded::default())]);
-    let bar0 = FakeBar::with_script("wayland-0", vec![Ok(()), Ok(())]);
-    let bar1 = FakeBar::with_script("wayland-1", vec![Err("bad layer".to_owned()), Ok(())]);
+    let bar0 = FakeBar::with_script("wayland-0", vec![Ok(true), Ok(true)]);
+    let bar1 = FakeBar::with_script("wayland-1", vec![Err("bad layer".to_owned()), Ok(true)]);
     let bars: Vec<&dyn BarReload> = vec![&bar0, &bar1];
     let failure = apply_with(
         "look-b",
@@ -1127,4 +1168,82 @@ fn a_font_refusal_refuses_before_anything_is_touched() {
         failure.message
     );
     assert!(!fixture.state.join("look.json").exists());
+}
+
+#[test]
+fn relative_dirs_resolve_absolute_before_anything_is_recorded() {
+    use super::absolutize;
+    // A relative cache must never reach the record: the next read would
+    // refuse it as corrupt, and the link would dangle.
+    let absolute = absolutize(Path::new("/already/absolute")).expect("absolute stays");
+    assert_eq!(absolute, PathBuf::from("/already/absolute"));
+    let joined = absolutize(Path::new("rel/dir")).expect("relative joins");
+    assert!(joined.is_absolute());
+    assert!(
+        !joined
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    );
+    let dotted = absolutize(Path::new("/a/b/../c")).expect("dot-dot normalizes");
+    assert_eq!(dotted, PathBuf::from("/a/c"));
+}
+
+#[test]
+fn a_directory_builds_itself_never_the_catalog_collision() {
+    // A tweaked copy under a colliding name builds the copy: the
+    // directory's entry wins over the catalog's.
+    let fixture = fixture("collision");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let copy = fixture._root.join("copy");
+    let tweaked = look_toml("look-a").replace("ring-width = 2", "ring-width = 9");
+    let copydir = copy.join("look-a");
+    std::fs::create_dir_all(&copydir).expect("a copy dir");
+    std::fs::write(copydir.join("look.toml"), tweaked).expect("a tweaked look.toml");
+    let out = fixture._root.join("out-collision");
+    let report = build_to_out(
+        &BuildTarget::Dir {
+            path: copydir,
+            origin: Origin::User,
+        },
+        &out,
+        &fixture.catalog,
+        &checks,
+    )
+    .expect("the copy builds");
+    assert_eq!(report.name, "look-a");
+    let scoot = std::fs::read_to_string(out.join("scoot.toml")).expect("a fragment");
+    assert!(
+        scoot.contains("focus_ring_width = 9"),
+        "the copy's ring width renders, not the catalog's:\n{scoot}"
+    );
+}
+
+#[test]
+fn effectful_refusals_are_structured_not_bare_errors() {
+    // `validate --json` always prints a document: effectful refusals land
+    // in `errors`, only catalog failures refuse the command.
+    let fixture = fixture("structured");
+    let checks = FakeChecks {
+        font_dir: None,
+        font_refuse: Some("font `DejaVu Sans` resolves to nothing".to_owned()),
+        bar_refuse: None,
+    };
+    let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
+    assert_eq!(validation.errors.len(), 3, "{:?}", validation.errors);
+    for error in &validation.errors {
+        assert!(error.contains("resolves to nothing"), "{error}");
+    }
+}
+
+#[test]
+fn helpers_run_with_a_timeout() {
+    use super::run_with_timeout;
+    let out = run_with_timeout(Path::new("/bin/echo"), &["hello"]).expect("echo runs");
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8(out.stdout).expect("UTF-8"), "hello\n");
+    let error =
+        run_with_timeout(Path::new("/nonexistent-helper-xyz"), &[]).expect_err("missing refuses");
+    assert!(error.contains("cannot run"), "{error}");
 }

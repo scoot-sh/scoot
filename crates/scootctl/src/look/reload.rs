@@ -8,13 +8,18 @@
 //! The bar client here is deliberately the wire and nothing else (one JSON
 //! line each way over the bar's socket): `scootbar` is a binary crate, so
 //! its control module cannot be imported, and the compositor half goes
-//! through `scoot-ipc`'s client. Both clients refuse an older peer loudly:
-//! an older compositor answers the unknown `reload_look` tag with an
-//! ordinary error, which is a refusal, never a plain reload (a plain reload
-//! would apply the pending edits the scope exists to skip).
+//! through `scoot-ipc`'s client. A compositor older than the look-scoped
+//! tag answers it with an ordinary error, which is a refusal, never a
+//! plain reload (a plain reload would apply the pending edits the scope
+//! exists to skip). A bar older than the look scope is a rollout skew the
+//! wire cannot detect: it ignores the unknown `scope` field and answers a
+//! plain reload's `ok`, applying pending edits. Swapping against a mixed
+//! build is an upgrade-window hazard, fixed once every bar carries the
+//! scope; the reply cannot tell the two apart, so the docs say so instead.
 
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::fs::FileTypeExt as _;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -79,11 +84,15 @@ impl IpcCompositor {
 
 impl CompositorReload for IpcCompositor {
     fn reload_look(&mut self) -> Result<Reloaded, ReloadError> {
-        let mut client = match &self.socket {
-            Some(path) => scoot_ipc::Client::connect(path),
-            None => scoot_ipc::Client::connect_default(),
-        }
-        .map_err(|error| {
+        let path = match &self.socket {
+            Some(path) => path.clone(),
+            None => scoot_ipc::socket_path().ok_or_else(|| {
+                ReloadError::NotRunning(
+                    "neither SCOOT_SOCKET nor XDG_RUNTIME_DIR is set".to_owned(),
+                )
+            })?,
+        };
+        let stream = std::os::unix::net::UnixStream::connect(&path).map_err(|error| {
             if matches!(
                 error.kind(),
                 std::io::ErrorKind::NotFound
@@ -95,6 +104,20 @@ impl CompositorReload for IpcCompositor {
                 ReloadError::Refused(format!("cannot reach the compositor: {error}"))
             }
         })?;
+        // Bound a peer that accepts and never answers: a hung compositor
+        // must refuse the swap, never wedge it with the lock held.
+        stream
+            .set_read_timeout(Some(TIMEOUT))
+            .and_then(|()| stream.set_write_timeout(Some(TIMEOUT)))
+            .map_err(|error| {
+                ReloadError::Refused(format!(
+                    "cannot set a timeout on {}: {error}",
+                    path.display()
+                ))
+            })?;
+        let mut client = scoot_ipc::Client::from_stream(stream).map_err(|error| {
+            ReloadError::Refused(format!("cannot reach the compositor: {error}"))
+        })?;
         match client
             .request(&scoot_ipc::Request::ReloadLook)
             .map_err(|error| {
@@ -105,8 +128,16 @@ impl CompositorReload for IpcCompositor {
                 refused,
                 shadowed,
                 invalid,
-                ..
+                scope,
             } => {
+                // The receipt must be for the scoped reload that was asked:
+                // a plain receipt answers a different request.
+                if scope != Some(scoot_ipc::ReloadScope::Look) {
+                    return Err(ReloadError::Refused(
+                        "the compositor answered the look reload with a plain receipt: refusing it"
+                            .to_owned(),
+                    ));
+                }
                 if refused.is_empty() {
                     Ok(Reloaded {
                         applied,
@@ -135,8 +166,10 @@ impl CompositorReload for IpcCompositor {
 pub trait BarReload {
     /// The display the bar serves, for notes.
     fn display(&self) -> &str;
-    /// Sends the look-scoped reload. A refused reply is `Err`.
-    fn reload_look(&self) -> Result<(), String>;
+    /// Sends the look-scoped reload: `Ok(true)` reloaded, `Ok(false)` the
+    /// socket names nothing listening (skipped with a note, never a
+    /// refusal), `Err` the daemon refused, which rolls the swap back.
+    fn reload_look(&self) -> Result<bool, String>;
 }
 
 /// A running bar over its control socket.
@@ -156,18 +189,35 @@ impl BarReload for SockBar {
         &self.display
     }
 
-    fn reload_look(&self) -> Result<(), String> {
-        send_bar_reload(&self.socket)
+    fn reload_look(&self) -> Result<bool, String> {
+        bar_reload_outcome(&self.socket)
     }
 }
 
-/// Sends one look-scoped reload to the bar at `socket`: the request line a
-/// current bar parses (`{"protocol":1,"type":"reload","scope":"look"}`),
-/// and exactly one reply line. An `error` reply is the refusal; anything
-/// unreadable names the socket and the reason.
-pub fn send_bar_reload(socket: &Path) -> Result<(), String> {
-    let mut stream = UnixStream::connect(socket)
-        .map_err(|error| format!("cannot reach the bar on {}: {error}", socket.display()))?;
+/// One look-scoped reload against the bar at `socket`: `Ok(true)` the
+/// daemon reloaded, `Ok(false)` nothing listens there (a stale socket from
+/// a crashed bar, or a path that never was one: skipped with a note). A
+/// refused reply, an unreadable reply and a peer that accepts and never
+/// answers are `Err`: the daemon is there and said no.
+pub fn bar_reload_outcome(socket: &Path) -> Result<bool, String> {
+    let mut stream = match UnixStream::connect(socket) {
+        Ok(stream) => stream,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            return Ok(false);
+        }
+        Err(error) => {
+            return Err(format!(
+                "cannot reach the bar on {}: {error}",
+                socket.display()
+            ));
+        }
+    };
+
     stream
         .set_read_timeout(Some(TIMEOUT))
         .and_then(|()| stream.set_write_timeout(Some(TIMEOUT)))
@@ -193,7 +243,7 @@ pub fn send_bar_reload(socket: &Path) -> Result<(), String> {
         )
     })?;
     match reply.get("type").and_then(|kind| kind.as_str()) {
-        Some("ok") | Some("bar") => Ok(()),
+        Some("ok") | Some("bar") => Ok(true),
         Some("error") => Err(format!(
             "the bar refused the look reload: {}",
             reply
@@ -205,6 +255,16 @@ pub fn send_bar_reload(socket: &Path) -> Result<(), String> {
             "the bar answered the look reload with an unexpected reply: {}",
             other.unwrap_or("(no type)")
         )),
+    }
+}
+
+/// Sends one look-scoped reload to the bar at `socket`, for the unit tests:
+/// an absent listener reads as a refusal here (production callers use
+/// [`bar_reload_outcome`] directly and skip it with a note instead).
+pub fn send_bar_reload(socket: &Path) -> Result<(), String> {
+    match bar_reload_outcome(socket)? {
+        true => Ok(()),
+        false => Err(format!("nothing listens on {}", socket.display())),
     }
 }
 
@@ -231,7 +291,7 @@ pub fn bar_targets() -> (Vec<SockBar>, Vec<String>) {
         (Some(display), Some(runtime)) => {
             let name = display_name(&display);
             let socket = runtime.join(format!("scootbar-{name}.sock"));
-            match socket_exists(&socket) {
+            match is_live_socket(&socket) {
                 true => (vec![SockBar::new(display, socket)], Vec::new()),
                 false => (Vec::new(), vec![format!("no bar on {display}: skipped")]),
             }
@@ -254,7 +314,7 @@ pub fn bar_targets() -> (Vec<SockBar>, Vec<String>) {
                             continue;
                         };
                         let socket = runtime.join(&name);
-                        if socket_exists(&socket) {
+                        if is_live_socket(&socket) {
                             bars.push(SockBar::new(display.to_owned(), socket));
                         }
                     }
@@ -301,11 +361,15 @@ pub fn display_name(display: &str) -> String {
         .collect()
 }
 
-/// Whether `socket` is a socket (or at least something to connect to):
-/// `symlink_metadata` never follows the path, so a dangling link is
-/// absent, not a peer.
-fn socket_exists(socket: &Path) -> bool {
-    std::fs::symlink_metadata(socket).is_ok()
+/// Whether `socket` is a live socket file: `symlink_metadata` never
+/// follows the path, so a dangling link is absent, and anything that is
+/// not a socket (a stale regular file, a directory) is absent too. Only a
+/// socket gets a reload attempt; anything else is a skip-with-note, never
+/// a refusal.
+fn is_live_socket(socket: &Path) -> bool {
+    std::fs::symlink_metadata(socket)
+        .map(|meta| meta.file_type().is_socket())
+        .unwrap_or(false)
 }
 
 fn current_uid() -> u32 {

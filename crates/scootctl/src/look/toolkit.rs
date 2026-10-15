@@ -81,11 +81,7 @@ impl Dconf for CliDconf {
 
     fn read(&self, key: &str) -> Option<String> {
         let program = self.program.as_ref()?;
-        let out = std::process::Command::new(program)
-            .arg("read")
-            .arg(key)
-            .output()
-            .ok()?;
+        let out = super::apply::run_with_timeout(program, &["read", key]).ok()?;
         if !out.status.success() {
             return None;
         }
@@ -104,13 +100,8 @@ impl Dconf for CliDconf {
             .program
             .as_ref()
             .ok_or_else(|| "no `dconf` on PATH".to_owned())?;
-        let status = std::process::Command::new(program)
-            .arg("write")
-            .arg(key)
-            .arg(value)
-            .status()
-            .map_err(|error| format!("cannot run `dconf write {key}`: {error}"))?;
-        if status.success() {
+        let out = super::apply::run_with_timeout(program, &["write", key, value])?;
+        if out.status.success() {
             Ok(())
         } else {
             Err(format!("`dconf write {key}` failed"))

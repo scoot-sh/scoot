@@ -70,6 +70,14 @@ fn validate_and_build_take_a_target_and_an_origin() {
         })
     );
     assert_eq!(
+        command(&["build", "moonrise", "--out=/tmp/out"]),
+        Ok(Command::Build {
+            target: "moonrise".to_owned(),
+            out: PathBuf::from("/tmp/out"),
+            origin: Origin::User,
+        })
+    );
+    assert_eq!(
         parse(&["build", "moonrise"]),
         Err(Error::Missing("a directory after --out"))
     );
@@ -133,6 +141,22 @@ fn unknown_verbs_teach_and_bad_names_refuse() {
         Err(Error::Invalid {
             what: "--origin",
             value: "nix".to_owned(),
+        })
+    );
+    // Slashless non-names refuse at parse, like `show` and `apply`.
+    assert_eq!(
+        command(&["validate", "LOUD"]),
+        Err(Error::Invalid {
+            what: "look name",
+            value: "LOUD".to_owned(),
+        })
+    );
+    assert_eq!(
+        command(&["build", "../evil", "--out", "/tmp/out"]),
+        Ok(Command::Build {
+            target: "../evil".to_owned(),
+            out: PathBuf::from("/tmp/out"),
+            origin: Origin::User,
         })
     );
     assert_eq!(

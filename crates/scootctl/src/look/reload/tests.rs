@@ -127,7 +127,12 @@ fn a_missing_socket_is_a_reachable_refusal() {
     let missing = std::env::temp_dir().join(format!("slt-absent-{}.sock", std::process::id()));
     let error = send_bar_reload(&missing).expect_err("nothing listens");
     assert!(
-        error.contains("cannot reach"),
+        error.contains("nothing listens"),
         "unexpected refusal: {error}"
+    );
+    // The production outcome skips an absent listener with a note instead.
+    assert_eq!(
+        super::bar_reload_outcome(&missing).expect("absent is not a refusal"),
+        false
     );
 }

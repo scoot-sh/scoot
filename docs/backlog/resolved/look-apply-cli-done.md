@@ -1,9 +1,10 @@
 ---
 title: "scoot look apply: the atomic swap, scoped reloads, rollback, list, current and validate"
-status: "open"
-area: "core"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-15"
 ---
 
 # scoot look apply: the atomic swap, scoped reloads, rollback, list, current and validate
@@ -90,3 +91,35 @@ box without private dirs would repoint the developer's real look. A
 third-party apps, authoring.
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
+
+## Resolution (2026-10-15)
+
+`PR` (opened, not merged): `scoot look list|current|show|validate|build|apply`
+lands as a subcommand of the existing CLI (`scootctl::look`, parsed and run
+through the client library like `msg`, so `scoot --help` and the JSON help
+document cannot drift from it), plus `scoot look toolkit [on|off]` and
+`scootbg check-image`. The catalog searches user, installed, home-manager,
+system and shipped sources in order with origin by directory; `apply` runs
+the section 4.5 transaction under one `flock` (render into a fresh cache
+dir and rename, validate pure and effectful, write `look.json` then the
+link, scoped reloads compositor-then-bars, rollback with rollback-errors,
+offline shadowed keys, prune active/previous/four-recent). The toolkit
+step writes `color-scheme` from polarity under the D11 rules with
+`--no-toolkit` per apply and a persisted `toolkit off`, recorded in
+`look.json` beside the choice. The dogfood settings and their cost are on
+the new [looks page](../../../site/src/content/docs/looks/index.md).
+
+Evidence: 45 scootctl look unit tests (catalog order/shadowing, parse,
+socket wire, D11 rules, atomicity race, refuse-and-keep, rollback,
+rollback-with-errors, first-apply rollback, lock, link repair, shadowed
+from reply and from files, toolkit record, cache prune); 2 scoot CLI
+parity tests; 3 headless integration tests against the real binary
+(offline commands, a two-look swap through the scoped reload, a pending
+bind surviving the swap and applying on the plain reload after); 9
+`check-image` tests; live headless screenshots across a moonrise to
+ginger-night swap with differing background pixels. Full matrices on the
+dev VM (Linux): nextest + cargo test for scoot/scoot-core/scoot-ipc/
+scootctl, scoot-look, scootbg; clippy `-D warnings` default, xwayland and
+no-default; `fmt --check`. Two unrelated stands: the xwayland
+`refused_cost` fd-budget failure (fails on pristine main too) and
+load-flaky scootbg scaler timing tests (623/623 serialized).

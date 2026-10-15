@@ -6,9 +6,16 @@
 //! `scoot msg` (0 applied, 1 the run failed, 2 the invocation was wrong).
 //!
 //! Offline commands (`list`, `show`, `validate`, `build`, `current`) work
-//! with no Nix, no home-manager and no compositor running. `apply` moves
-//! only the link when nothing runs, and drives each app's control-socket
-//! reload, scoped to the look, when they do.
+//! with no Nix, no home-manager and no compositor running. `apply` with
+//! nothing running records the choice and moves the link, and the next
+//! session starts on it; with apps running it drives each app's
+//! control-socket reload, scoped to the look, and rolls back on refusal.
+//!
+//! A crash between the repoint and the reloads leaves the apps on the old
+//! look with the link on the new one (the design's section 4.5 order: the
+//! apps read the link, so it moves before they reload). Re-running
+//! `apply`, or any app's next reload, heals it: each scoped reload reads
+//! the link fresh.
 
 pub mod apply;
 pub mod catalog;
@@ -101,11 +108,13 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
             continue;
         }
         if let Some(dir) = word.strip_prefix("--state=") {
-            state = Some(PathBuf::from(dir));
+            // Empty counts as unset, like the environment rule.
+            state = (!dir.is_empty()).then(|| PathBuf::from(dir));
             continue;
         }
         if let Some(path) = word.strip_prefix("--socket=") {
-            socket = Some(PathBuf::from(path));
+            // Empty counts as unset, like the environment rule.
+            socket = (!path.is_empty()).then(|| PathBuf::from(path));
             continue;
         }
         if word == "--state" {
@@ -234,7 +243,8 @@ COMMANDS:
     apply       render, validate, record, repoint, then reload each app's
                 look layer in order (the compositor, then every bar),
                 rolling back on a refusal; --no-toolkit skips the
-                color-scheme write for this apply
+                color-scheme write for this apply (the first apply with no
+                record adopts the color-scheme key whatever it holds)
     toolkit     show whether the color-scheme write is on, or persist
                 `toolkit on|off` in look.json
 
@@ -310,6 +320,13 @@ fn target_and_origin(positionals: &[String]) -> Result<(String, Origin), Error> 
         }
     }
     let target = target.ok_or(Error::Missing("a directory or a look name"))?;
+    // A slashless target that is not a valid name can never validate (a
+    // directory by that name fails the name-matches-directory check), so
+    // it refuses at parse (exit 2), like `show` and `apply` do. A target
+    // with a slash, `.` or `..` is directory-shaped and defers to the run.
+    if !target.contains('/') && target != "." && target != ".." {
+        check_name(&target)?;
+    }
     Ok((target, origin))
 }
 
@@ -343,6 +360,14 @@ fn build_args(positionals: &[String]) -> Result<(String, Origin, PathBuf), Error
                 return Err(Error::Unknown(word.clone()));
             }
             out = Some(PathBuf::from(value));
+        } else if let Some(value) = word.strip_prefix("--out=") {
+            if value.is_empty() {
+                return Err(Error::Missing("a directory after --out"));
+            }
+            if out.is_some() {
+                return Err(Error::Unknown(word.clone()));
+            }
+            out = Some(PathBuf::from(value));
         } else if target.is_none() {
             target = Some(word.clone());
         } else {
@@ -356,6 +381,10 @@ fn build_args(positionals: &[String]) -> Result<(String, Origin, PathBuf), Error
     }
     let target = target.ok_or(Error::Missing("a directory or a look name"))?;
     let out = out.ok_or(Error::Missing("a directory after --out"))?;
+    // Slashless non-names refuse at parse, as in `validate`.
+    if !target.contains('/') && target != "." && target != ".." {
+        check_name(&target)?;
+    }
     Ok((target, origin, out))
 }
 
@@ -717,9 +746,19 @@ fn run_validate(look: &Look, target: &str, origin: Origin) -> Result<(), String>
     let path = PathBuf::from(target);
     let validation = if path.is_dir() {
         validate_dir(&path, origin, &catalog, &checks)?
+    } else if path.exists() {
+        return Err(format!(
+            "`{target}` exists and is not a directory: validate takes a directory or a catalog name"
+        ));
     } else {
-        check_name(target).map_err(|error| error.to_string())?;
-        validate_entry(&catalog, target, &checks)?
+        let mut validation = validate_entry(&catalog, target, &checks)?;
+        if origin != Origin::User {
+            validation.notes.push(
+                "`--origin` ignored for catalog names: the origin comes from the directory"
+                    .to_owned(),
+            );
+        }
+        validation
     };
     let valid = validation.errors.is_empty();
     if look.json {
@@ -761,8 +800,16 @@ fn run_build(look: &Look, target: &str, out: &Path, origin: Origin) -> Result<()
     let path = PathBuf::from(target);
     let build_target = if path.is_dir() {
         BuildTarget::Dir { path, origin }
+    } else if path.exists() {
+        return Err(format!(
+            "`{target}` exists and is not a directory: build takes a directory or a catalog name"
+        ));
     } else {
-        check_name(target).map_err(|error| error.to_string())?;
+        if origin != Origin::User {
+            output::warn(format_args!(
+                "note: `--origin` ignored for catalog names: the origin comes from the directory"
+            ));
+        }
         BuildTarget::Name(target.to_owned())
     };
     let report = build_to_out(&build_target, out, &catalog, &checks)?;
@@ -876,6 +923,18 @@ fn run_apply(look: &Look, name: &str, no_toolkit: bool) -> Result<(), String> {
 
 fn run_toolkit(look: &Look, action: Option<bool>) -> Result<(), String> {
     let state_dir = resolve_state_dir(look.state.as_deref())?;
+    // A mutation holds the lock across its read and its write: a
+    // concurrent apply between the two would otherwise be overwritten
+    // with a stale record (a generation rewind plus a lost
+    // `color-scheme` ownership). A status read takes no lock.
+    use scoot_look::state::acquire_lock;
+    let _lock = match action {
+        Some(_) => Some(
+            acquire_lock(&state_dir, apply::LOCK_WAIT)
+                .map_err(|error| format!("cannot lock the state dir: {error}"))?,
+        ),
+        None => None,
+    };
     let mut record = match scoot_look::state::read_record(&state_dir) {
         scoot_look::state::RecordRead::Present(record) => record,
         scoot_look::state::RecordRead::Missing => {
@@ -886,9 +945,6 @@ fn run_toolkit(look: &Look, action: Option<bool>) -> Result<(), String> {
         }
     };
     if let Some(on) = action {
-        use scoot_look::state::acquire_lock;
-        let _lock = acquire_lock(&state_dir, apply::LOCK_WAIT)
-            .map_err(|error| format!("cannot lock the state dir: {error}"))?;
         record.toolkit = Some(on);
         scoot_look::state::write_record(&state_dir, &record)
             .map_err(|error| format!("cannot record the toolkit state: {error}"))?;

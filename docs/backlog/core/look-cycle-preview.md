@@ -3,7 +3,7 @@ title: "scoot look next, prev, random and timed previews"
 status: "open"
 area: "core"
 priority: "medium"
-blocked: "look-apply-cli"
+blocked: null
 ---
 
 # scoot look next, prev, random and timed previews

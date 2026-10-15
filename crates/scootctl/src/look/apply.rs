@@ -6,8 +6,17 @@
 //! compositor, then every bar of the session), skip what is not running,
 //! roll back on a refusal, and list shadowed keys. The render cache is
 //! pruned under the same lock (the active, the previous, the four most
-//! recent; never a directory named `look.json` or `look`). An unwritable
-//! state dir refuses loudly, before anything is touched.
+//! recent, plus any render another live session's link names; never a
+//! directory named `look.json`, `look`, `look.lock`, or a dotfile). An
+//! unwritable state dir refuses loudly, before any record, link or reload
+//! is touched (the lock file and cache dirs may already exist: creating
+//! them is not a swap).
+//!
+//! A crash between the repoint and the reloads leaves the apps on the old
+//! look with the link on the new one; re-running `apply`, or any app's
+//! next reload, heals it. Rollback covers refusals, not crashes: a failed
+//! render keeps the previous render until the next successful prune, and
+//! a failed first swap removes what it wrote.
 //!
 //! The reload and settings peers are traits ([`CompositorReload`],
 //! [`BarReload`], [`Dconf`], [`Checks`]), so the transaction unit-tests
@@ -15,8 +24,8 @@
 //! rollback-with-errors, the lock, link repair, a missing bar, shadowed
 //! keys, and a pending user edit never applied by a swap.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use scoot_look::grammar::is_name;
@@ -161,10 +170,10 @@ pub fn validate_entry(
             warning.name, warning.ratio, warning.threshold
         ));
     }
-    check_inputs(&chain, &merged, checks, &mut validation)?;
-    if !validation.errors.is_empty() {
-        return Ok(validation);
-    }
+    // Effectful refusals land in `errors`, not in `Err`, so `--json`
+    // always prints a document: only catalog and resolution failures
+    // (unknown names, unresolvable chains) refuse the command itself.
+    let _ = check_inputs(&chain, &merged, checks, &mut validation);
     Ok(validation)
 }
 
@@ -205,19 +214,7 @@ pub fn validate_dir(
     if !validation.errors.is_empty() {
         return Ok(validation);
     }
-    let merged = match &raw.extends {
-        Some(_) => {
-            let mut sources = catalog.sources();
-            sources.insert(raw.name.clone(), (raw.clone(), origin));
-            resolve(&sources, &raw.name)
-                .map_err(|error| format!("cannot resolve `{}`: {error}", raw.name))?
-        }
-        None => {
-            let sources = BTreeMap::from([(raw.name.clone(), (raw.clone(), origin))]);
-            resolve(&sources, &raw.name)
-                .map_err(|error| format!("cannot resolve `{}`: {error}", raw.name))?
-        }
-    };
+    let (chain, merged) = resolve_dir(raw, origin, bytes, canonical, catalog)?;
     let report = check_contrast(&merged, origin);
     for refusal in report.refusals() {
         validation.errors.push(format!(
@@ -231,28 +228,45 @@ pub fn validate_dir(
             warning.name, warning.ratio, warning.threshold
         ));
     }
-    // The effectful checks run against the directory as given (a catalog
-    // entry only when the name resolves to one).
-    let chain = match catalog.find(&raw.name) {
-        Some(entry) => collect_chain(catalog, &raw.name).unwrap_or_else(|_| {
-            vec![ChainEntry {
-                entry: entry.clone(),
-                bytes: bytes.clone(),
-            }]
-        }),
-        None => vec![ChainEntry {
-            entry: Entry {
-                name: raw.name.clone(),
-                dir: canonical,
-                origin,
-                raw: raw.clone(),
-                bytes: bytes.clone(),
-            },
-            bytes,
-        }],
-    };
-    check_inputs(&chain, &merged, checks, &mut validation)?;
+    if check_inputs(&chain, &merged, checks, &mut validation).is_err() {
+        return Ok(validation);
+    }
     Ok(validation)
+}
+
+/// Resolves a directory's own manifest: the directory's entry wins over
+/// any same-named catalog entry (a tweaked copy never silently builds the
+/// catalog's look), and its `extends` base resolves through the catalog.
+/// Returns the provenance chain (base first) with the merge.
+fn resolve_dir(
+    raw: RawLook,
+    origin: Origin,
+    bytes: Vec<u8>,
+    dir: PathBuf,
+    catalog: &Catalog,
+) -> Result<(Vec<ChainEntry>, scoot_look::ResolvedLook), String> {
+    let mut sources = catalog.sources();
+    sources.insert(raw.name.clone(), (raw.clone(), origin));
+    let merged = resolve(&sources, &raw.name)
+        .map_err(|error| format!("cannot resolve `{}`: {error}", raw.name))?;
+    // The resolution above already enforced the chain rules (unknown
+    // bases, cycles, depth, installed bases); the walk below only gathers
+    // the provenance it validated.
+    let mut chain = match &raw.extends {
+        Some(base) => collect_chain_from(catalog, base, false)?,
+        None => Vec::new(),
+    };
+    chain.push(ChainEntry {
+        entry: Entry {
+            name: raw.name.clone(),
+            dir,
+            origin,
+            raw,
+            bytes: bytes.clone(),
+        },
+        bytes,
+    });
+    Ok((chain, merged))
 }
 
 /// Reads one file, refusing anything but a regular file: symlinks (which
@@ -302,8 +316,16 @@ pub fn read_regular(path: &Path) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     use std::io::Read as _;
     std::fs::File::from(fd)
+        .take(scoot_look::state::MAX_FILE + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    if bytes.len() as u64 > scoot_look::state::MAX_FILE {
+        return Err(format!(
+            "refused: {} is larger than {} bytes",
+            path.display(),
+            scoot_look::state::MAX_FILE
+        ));
+    }
     Ok(bytes)
 }
 
@@ -320,9 +342,20 @@ struct ChainEntry {
 /// resolves against the directory of the look that names it, not the
 /// child that inherits it).
 fn collect_chain(catalog: &Catalog, name: &str) -> Result<Vec<ChainEntry>, String> {
+    collect_chain_from(catalog, name, true)
+}
+
+/// [`collect_chain`], with the root flag explicit: a directory resolving
+/// its own `extends` base walks the base as a non-root, so an installed
+/// base is refused the same way `resolve` refuses it.
+fn collect_chain_from(
+    catalog: &Catalog,
+    name: &str,
+    root: bool,
+) -> Result<Vec<ChainEntry>, String> {
     let mut chain: Vec<String> = Vec::new();
     let mut entries: Vec<ChainEntry> = Vec::new();
-    collect_into(catalog, name, true, &mut chain, &mut entries)?;
+    collect_into(catalog, name, root, &mut chain, &mut entries)?;
     Ok(entries)
 }
 
@@ -436,17 +469,10 @@ fn check_inputs(
             .cloned()
             .unwrap_or_else(|| "invalid look".to_owned()));
     }
-    // The bar's UI font and the wallpaper feed the cache key through the
-    // resolved files' paths and mtimes, so a font package update
-    // re-renders instead of leaving the bar pointing at a vanished file.
-    let mut key_files: Vec<String> = Vec::new();
-    if let Some(path) = &ui_font_file {
-        key_files.push(format!("{path}:{}", file_mtime(Path::new(path))?));
-    }
-    if let Some(path) = &wallpaper_abs {
-        key_files.push(format!("{path}:{}", file_mtime(Path::new(path))?));
-    }
-    let _ = key_files;
+    // The bar's UI font and the wallpaper feed the cache key through
+    // their resolved paths and mtimes (see `cache_key`), so a font
+    // package update re-renders instead of leaving the bar pointing at a
+    // vanished file.
     Ok(Inputs {
         inputs: RenderInputs {
             wallpaper_abs,
@@ -526,6 +552,41 @@ fn file_mtime(path: &Path) -> Result<String, String> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
     Ok(format!("{}.{}", age.as_secs(), age.subsec_nanos()))
+}
+
+/// Makes `path` absolute against the current directory, lexically (no
+/// symlink resolution, so it works for paths that do not exist yet).
+/// Records and links must never carry relative paths: a relative render
+/// path fails the next record read as corrupt, and a relative link target
+/// resolves against the state dir instead of the writer's directory.
+pub fn absolutize(path: &Path) -> Result<PathBuf, String> {
+    if path.is_absolute() {
+        return Ok(normalize(path));
+    }
+    let current = std::env::current_dir()
+        .map_err(|error| format!("cannot resolve the working directory: {error}"))?;
+    Ok(normalize(&current.join(path)))
+}
+
+/// Lexically normalizes an absolute path (`.` and `..` components only):
+/// the record's `rendered` must not contain `..`, and this keeps that
+/// promise for joined paths.
+fn normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    if out.as_os_str().is_empty() {
+        out.push("/");
+    }
+    out
 }
 
 /// The render cache: `$XDG_CACHE_HOME/scoot/rendered`.
@@ -619,9 +680,15 @@ fn render_cached(
     let rendered_json = render_json(name, &source_hash(target_bytes), inputs);
     std::fs::create_dir_all(cache)
         .map_err(|error| format!("cannot create {}: {error}", cache.display()))?;
+    // Unique across processes and threads of this process: two applies of
+    // different looks into one cache never share a temp name, and a
+    // planted symlink at a guessable name is never opened (`create_dir`
+    // refuses it instead of writing through one).
+    static RENDER_COUNTER: AtomicU64 = AtomicU64::new(0);
     let tmp = cache.join(format!(
-        ".{name}.tmp.{}-{}",
+        ".{name}.tmp.{}-{}-{}",
         std::process::id(),
+        RENDER_COUNTER.fetch_add(1, Ordering::SeqCst),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -672,11 +739,19 @@ fn prune_cache(cache: &Path, keep: &[PathBuf], notes: &mut Vec<String>) {
     let mut rendered: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
     for entry in entries.filter_map(|entry| entry.ok()) {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name == "look.json" || name == LINK_NAME || name == "look.lock" || name.starts_with('.')
-        {
+        let path = entry.path();
+        if name.starts_with('.') {
+            // Our own crashed temp dirs (`.<name>.tmp.<pid>-<ctr>-<nanos>`)
+            // are reaped a day later; anything else dot-named is left
+            // alone.
+            if path.is_dir() && is_render_tmp(&name) && dir_older_than(&path, 24 * 3600) {
+                std::fs::remove_dir_all(&path).ok();
+            }
             continue;
         }
-        let path = entry.path();
+        if name == "look.json" || name == LINK_NAME || name == "look.lock" {
+            continue;
+        }
         if !path.is_dir() || !is_render_name(&name) {
             continue;
         }
@@ -700,6 +775,64 @@ fn prune_cache(cache: &Path, keep: &[PathBuf], notes: &mut Vec<String>) {
     }
 }
 
+/// Whether a cache entry name is one of our render temp dirs
+/// (`.<name>.tmp.<pid>-<ctr>-<nanos>`).
+fn is_render_tmp(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix('.') else {
+        return false;
+    };
+    let Some((head, _)) = rest.rsplit_once(".tmp.") else {
+        return false;
+    };
+    is_name(head)
+}
+
+/// Whether a directory's mtime is older than `seconds`.
+fn dir_older_than(path: &Path, seconds: u64) -> bool {
+    let mtime = std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .unwrap_or(std::time::UNIX_EPOCH);
+    mtime
+        .elapsed()
+        .map(|age| age.as_secs() > seconds)
+        .unwrap_or(false)
+}
+
+/// Renders other sessions may point at: the user state's link target and
+/// every private session's (`$XDG_RUNTIME_DIR/scoot-look-*/look`), read
+/// best-effort. The cache is global across state dirs, but the keep-set of
+/// one apply is not: without these, churning one session could prune the
+/// render another live session's link names.
+fn live_render_targets() -> Vec<PathBuf> {
+    let mut targets = Vec::new();
+    let mut state_dirs = Vec::new();
+    if let Some(user) = state_dir_from_env(None) {
+        state_dirs.push(user);
+    }
+    let xdg = std::env::var_os("XDG_RUNTIME_DIR");
+    if let Some(runtime) = xdg.filter(|v| !v.is_empty()).map(PathBuf::from)
+        && let Ok(entries) = std::fs::read_dir(&runtime)
+    {
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(scoot_look::state::PRIVATE_PREFIX)
+            {
+                state_dirs.push(entry.path());
+            }
+        }
+    }
+    for dir in state_dirs {
+        if let Ok(target) = std::fs::read_link(dir.join(LINK_NAME))
+            && target.is_absolute()
+        {
+            targets.push(target);
+        }
+    }
+    targets
+}
+
 /// Whether a cache entry name is a render (`<name>-<16 hex>`).
 fn is_render_name(name: &str) -> bool {
     let Some((head, hash)) = name.rsplit_once('-') else {
@@ -718,7 +851,6 @@ fn point_link(dir: &Path, rendered: &str) -> Result<(), String> {
     let link = dir.join(LINK_NAME);
     // Unique temp names, so a planted symlink at a guessable name is never
     // opened: the counter lives in this process, the pid across them.
-    use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let id = COUNTER.fetch_add(1, Ordering::SeqCst);
     let tmp = dir.join(format!("{LINK_NAME}.tmp.{}-{id}", std::process::id()));
@@ -727,7 +859,24 @@ fn point_link(dir: &Path, rendered: &str) -> Result<(), String> {
     if pointed.is_err() {
         std::fs::remove_file(&tmp).ok();
     }
-    pointed.map_err(|error| format!("cannot point {} at {rendered}: {error}", link.display()))
+    pointed.map_err(|error| format!("cannot point {} at {rendered}: {error}", link.display()))?;
+    sync_dir(dir).map_err(|error| format!("cannot sync {}: {error}", dir.display()))?;
+    Ok(())
+}
+
+/// Syncs a directory after a rename, so the rename itself is durable.
+fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    let fd = rustix::fs::open(
+        dir,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    rustix::fs::fsync(fd).map_err(std::io::Error::from)?;
+    Ok(())
 }
 
 /// Applies `name`: the full transaction. Pure over its `catalog`, `cache`,
@@ -758,6 +907,13 @@ pub fn apply_with(
         rolled_back_to: None,
         rollback_errors: Vec::new(),
     };
+    // Work on absolute dirs throughout: a relative cache would record a
+    // relative render path (which the next read refuses as corrupt) and
+    // point the link at a target relative to the wrong directory.
+    let state_dir = absolutize(state_dir).map_err(refuse)?;
+    let state_dir = state_dir.as_path();
+    let cache = absolutize(cache).map_err(refuse)?;
+    let cache = cache.as_path();
     // An unwritable state dir refuses loudly, before anything is touched.
     std::fs::create_dir_all(state_dir).map_err(|error| {
         refuse(format!(
@@ -815,7 +971,15 @@ pub fn apply_with(
         ));
     }
     let mut validation = Validation::default();
-    let inputs = check_inputs(&chain, &merged, checks, &mut validation).map_err(refuse)?;
+    let inputs = match check_inputs(&chain, &merged, checks, &mut validation) {
+        Ok(inputs) => inputs,
+        Err(_) => {
+            return Err(refuse(format!(
+                "cannot apply `{name}`: {}",
+                validation.errors.join("; ")
+            )));
+        }
+    };
     report.notes.extend(validation.notes);
     report.notes.extend(inputs.details);
     let mut target = render_cached(
@@ -925,13 +1089,22 @@ pub fn apply_with(
     }
     for (index, bar) in bars.iter().enumerate() {
         // Sent is completed, answered or not: the rollback re-runs every
-        // reload that may hold the new layer.
-        completed_bars.push(index);
+        // reload that may hold the new layer. An absent listener never
+        // sends, so it is skipped with a note and completes nothing.
         match bar.reload_look() {
-            Ok(()) => {
+            Ok(true) => {
+                completed_bars.push(index);
                 report.reloaded.push(format!("bar {}", bar.display()));
             }
+            Ok(false) => {
+                report
+                    .skipped
+                    .push(format!("bar {}: nothing listens: skipped", bar.display()));
+            }
             Err(message) => {
+                // Sent but refused: the bar may hold the new layer, so the
+                // rollback re-runs this reload against the restored choice.
+                completed_bars.push(index);
                 let failure = ApplyFailure {
                     message: format!("bar {}: {message}", bar.display()),
                     rolled_back_to: None,
@@ -980,11 +1153,14 @@ pub fn apply_with(
     report.invalid.sort();
     report.invalid.dedup();
     // The previous render survives until the new one is confirmed: prune
-    // only on success, never before a rollback.
+    // only on success, never before a rollback. The keep-set spans every
+    // live session's link (the cache is global, the state dirs are not),
+    // or churning one session could prune another's render.
     let mut keep = vec![target.clone()];
     if let Some(previous) = &previous {
         keep.push(PathBuf::from(&previous.rendered));
     }
+    keep.extend(live_render_targets());
     prune_cache(cache, &keep, &mut report.notes);
     report.name = name.to_owned();
     report.rendered = record.rendered.clone();
@@ -1039,6 +1215,13 @@ fn rollback(
             None
         }
     };
+    if !failure.rollback_errors.is_empty() {
+        // The choice itself did not restore: re-running reloads against an
+        // undefined link would converge apps on the wrong look, so the
+        // restore failure is the report, not a prelude to one.
+        failure.rolled_back_to = None;
+        return Err(failure);
+    }
     failure.rolled_back_to = restored;
     if completed_compositor
         && let Err(error) = compositor.reload_look().and_then(|reloaded| {
@@ -1058,6 +1241,8 @@ fn rollback(
         });
     }
     for index in completed_bars {
+        // `Ok(false)` (absent at rollback) needs nothing: nothing there
+        // holds the new layer.
         if let Some(bar) = bars.get(*index)
             && let Err(message) = bar.reload_look()
         {
@@ -1220,35 +1405,22 @@ pub fn build_to_out(
             if !validation.errors.is_empty() {
                 return Err(validation.errors.join("; "));
             }
-            let raw_name = look_name_in(path)?;
-            let chain = match catalog.find(&raw_name) {
-                Some(_) => collect_chain(catalog, &raw_name)?,
-                None => {
-                    let bytes = read_regular(&path.join("look.toml"))?;
-                    let canonical = std::fs::canonicalize(path)
-                        .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?;
-                    let raw = scoot_look::parse_look_toml(&bytes).map_err(|errors| {
-                        errors
-                            .iter()
-                            .map(|error| error.to_string())
-                            .collect::<Vec<_>>()
-                            .join("; ")
-                    })?;
-                    vec![ChainEntry {
-                        entry: Entry {
-                            name: raw_name.clone(),
-                            dir: canonical,
-                            origin: *origin,
-                            raw,
-                            bytes: bytes.clone(),
-                        },
-                        bytes,
-                    }]
-                }
-            };
-            let merged = resolve(&build_sources(catalog, &chain), &raw_name)
-                .map_err(|error| format!("cannot resolve `{raw_name}`: {error}"))?;
-            (chain, merged, raw_name)
+            // Re-parse for the render (validate passed, so this reads the
+            // same manifest it checked): the directory's own entry wins
+            // over any same-named catalog entry.
+            let bytes = read_regular(&path.join("look.toml"))?;
+            let canonical = std::fs::canonicalize(path)
+                .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?;
+            let raw = scoot_look::parse_look_toml(&bytes).map_err(|errors| {
+                errors
+                    .iter()
+                    .map(|error| error.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })?;
+            let name = raw.name.clone();
+            let (chain, merged) = resolve_dir(raw, *origin, bytes, canonical, catalog)?;
+            (chain, merged, name)
         }
         BuildTarget::Name(name) => {
             let entry = catalog
@@ -1262,8 +1434,12 @@ pub fn build_to_out(
         }
     };
     let mut validation = Validation::default();
-    let inputs = check_inputs(&chain, &merged, checks, &mut validation)
-        .map_err(|error| validation.errors.first().cloned().unwrap_or(error))?;
+    let inputs = match check_inputs(&chain, &merged, checks, &mut validation) {
+        Ok(inputs) => inputs,
+        Err(_) => {
+            return Err(validation.errors.join("; "));
+        }
+    };
     let scoot = render_scoot(&merged, &inputs.inputs)
         .map_err(|error| format!("cannot render {name}: {error}"))?;
     let bar = render_bar(&merged, &inputs.inputs)
@@ -1277,13 +1453,39 @@ pub fn build_to_out(
         .map(|link| link.bytes.as_slice())
         .unwrap_or_default();
     let rendered_json = render_json(&name, &source_hash(target_bytes), &inputs.inputs);
+    // The bar's own parser runs before anything lands in `--out`: a
+    // refused fragment leaves no complete-looking output behind. The
+    // check needs a file, so the fragments stage in a temp dir beside
+    // the destination, then copy over file by file.
+    let stage = out.with_extension("build-tmp");
+    if stage.exists() {
+        std::fs::remove_dir_all(&stage)
+            .map_err(|error| format!("cannot clear {}: {error}", stage.display()))?;
+    }
+    std::fs::create_dir_all(&stage)
+        .map_err(|error| format!("cannot create {}: {error}", stage.display()))?;
+    let staged: Vec<(String, String)> = [
+        ("scoot.toml".to_owned(), scoot),
+        ("bar.toml".to_owned(), bar),
+        ("render.json".to_owned(), rendered_json),
+    ]
+    .into_iter()
+    .collect();
+    for (file, contents) in &staged {
+        std::fs::write(stage.join(file), contents)
+            .map_err(|error| format!("cannot write {}: {error}", stage.join(file).display()))?;
+    }
+    match checks.bar_fragment(&stage.join("bar.toml")) {
+        Ok(Availability::Available(())) => {}
+        Ok(Availability::Unavailable(note)) => validation.notes.push(note),
+        Err(message) => {
+            std::fs::remove_dir_all(&stage).ok();
+            return Err(message);
+        }
+    }
     std::fs::create_dir_all(out)
         .map_err(|error| format!("cannot create {}: {error}", out.display()))?;
-    for (file, contents) in [
-        ("scoot.toml", scoot.as_str()),
-        ("bar.toml", bar.as_str()),
-        ("render.json", rendered_json.as_str()),
-    ] {
+    for (file, contents) in &staged {
         let path = out.join(file);
         std::fs::write(&path, contents)
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
@@ -1291,11 +1493,7 @@ pub fn build_to_out(
             .and_then(|file| file.sync_all())
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     }
-    match checks.bar_fragment(&out.join("bar.toml")) {
-        Ok(Availability::Available(())) => {}
-        Ok(Availability::Unavailable(note)) => validation.notes.push(note),
-        Err(message) => return Err(message),
-    }
+    std::fs::remove_dir_all(&stage).ok();
     Ok(BuildReport {
         name,
         out: path_to_string(out)?,
@@ -1320,37 +1518,80 @@ pub struct BuildReport {
     pub notes: Vec<String>,
 }
 
-/// The `sources` map for a directory build: the catalog's winners plus the
-/// chain's own entries (a directory under another name still resolves).
-fn build_sources(catalog: &Catalog, chain: &[ChainEntry]) -> BTreeMap<String, (RawLook, Origin)> {
-    let mut sources = catalog.sources();
-    for link in chain {
-        sources.insert(
-            link.entry.name.clone(),
-            (link.entry.raw.clone(), link.entry.origin),
-        );
-    }
-    sources
-}
-
-/// The look name a directory's `look.toml` carries, parsed only.
-fn look_name_in(dir: &Path) -> Result<String, String> {
-    let bytes = read_regular(&dir.join("look.toml"))?;
-    let raw = scoot_look::parse_look_toml(&bytes).map_err(|errors| {
-        errors
-            .iter()
-            .map(|error| error.to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    })?;
-    Ok(raw.name)
-}
-
 /// Resolves the state dir for the tool: `--state`, then the shared rule.
 /// Refuses when no home resolves at all.
 pub fn resolve_state_dir(explicit: Option<&Path>) -> Result<PathBuf, String> {
     state_dir_from_env(explicit)
         .ok_or_else(|| "no state dir resolves: set --state, SCOOT_LOOK_STATE or HOME".to_owned())
+}
+
+/// How long an effectful helper (`fc-match`, `scootbg`, `scootbar`,
+/// `dconf`) may run before the swap stops waiting: a hung child must never
+/// wedge an apply with the lock held.
+pub const HELPER_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Runs a helper with a timeout, collecting its output. A child that
+/// outlives the timeout is killed and reported, never waited on forever.
+/// The helpers here answer in lines (`fc-match` one path, `check-image`
+/// one verdict, `--check` one word), so collecting after exit cannot
+/// deadlock on a full pipe.
+pub(crate) fn run_with_timeout(
+    program: &Path,
+    args: &[&str],
+) -> Result<std::process::Output, String> {
+    let mut child = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("cannot run `{}`: {error}", program.display()))?;
+    let deadline = std::time::Instant::now() + HELPER_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|error| format!("cannot run `{}`: {error}", program.display()));
+            }
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    child.kill().ok();
+                    child.wait().ok();
+                    return Err(format!(
+                        "`{}` timed out after {}s",
+                        program.display(),
+                        HELPER_TIMEOUT.as_secs()
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => {
+                return Err(format!("cannot run `{}`: {error}", program.display()));
+            }
+        }
+    }
+}
+
+/// Sniffs an image format from the first bytes, never the name: PNG, JPEG,
+/// GIF or WebP, the formats scootbg reads. The fallback wallpaper check
+/// (no `scootbg`) refuses anything else without decoding.
+fn sniff_image(path: &Path) -> Option<&'static str> {
+    use std::io::Read as _;
+    let mut head = [0u8; 12];
+    let mut file = std::fs::File::open(path).ok()?;
+    let n = file.read(&mut head).ok()?;
+    if n >= 8 && head[..8] == [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'] {
+        Some("PNG")
+    } else if n >= 3 && head[..3] == [0xFF, 0xD8, 0xFF] {
+        Some("JPEG")
+    } else if n >= 6 && (head[..6] == *b"GIF87a" || head[..6] == *b"GIF89a") {
+        Some("GIF")
+    } else if n >= 12 && head[..4] == *b"RIFF" && head[8..12] == *b"WEBP" {
+        Some("WebP")
+    } else {
+        None
+    }
 }
 
 /// The production effectful checks: the real binaries beside this one and
@@ -1407,11 +1648,7 @@ impl Checks for ProdChecks {
                 "no `fc-match` on PATH: font files unchecked".to_owned(),
             ));
         };
-        let out = std::process::Command::new(fc_match)
-            .arg("--format=%{file}\n")
-            .arg(family)
-            .output()
-            .map_err(|error| format!("cannot run `fc-match`: {error}"))?;
+        let out = run_with_timeout(fc_match, &["--format=%{file}\n", family])?;
         if !out.status.success() {
             return Err(format!(
                 "font `{family}` resolves to nothing (fc-match failed)"
@@ -1441,15 +1678,17 @@ impl Checks for ProdChecks {
                     MAX_IMAGE_BYTES
                 ));
             }
-            return Ok(Availability::Unavailable(
-                "no `scootbg` found: wallpaper bytes capped, decode unchecked".to_owned(),
-            ));
+            return match sniff_image(path) {
+                Some(format) => Ok(Availability::Unavailable(format!(
+                    "no `scootbg` found: {format} wallpaper bytes capped, decode unchecked"
+                ))),
+                None => Err(format!(
+                    "{} is not an image scootbg reads (PNG, JPEG, GIF or WebP)",
+                    path.display()
+                )),
+            };
         };
-        let out = std::process::Command::new(scootbg)
-            .arg("check-image")
-            .arg(path)
-            .output()
-            .map_err(|error| format!("cannot run `scootbg check-image`: {error}"))?;
+        let out = run_with_timeout(scootbg, &["check-image", &path.to_string_lossy()])?;
         if out.status.success() {
             Ok(Availability::Available(()))
         } else {
@@ -1478,13 +1717,10 @@ impl Checks for ProdChecks {
                 "no `scootbar` found: bar fragment unchecked".to_owned(),
             ));
         };
-        let out = std::process::Command::new(scootbar)
-            .arg("daemon")
-            .arg("--check")
-            .arg("--config")
-            .arg(fragment)
-            .output()
-            .map_err(|error| format!("cannot run `scootbar daemon --check`: {error}"))?;
+        let out = run_with_timeout(
+            scootbar,
+            &["daemon", "--check", "--config", &fragment.to_string_lossy()],
+        )?;
         if out.status.success() {
             Ok(Availability::Available(()))
         } else {
