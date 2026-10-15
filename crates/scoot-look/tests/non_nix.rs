@@ -9,7 +9,10 @@
 
 use std::collections::BTreeMap;
 
-use scoot_look::{Origin, RenderInputs, check_contrast, render_bar, render_scoot, resolve};
+use scoot_look::{
+    ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_scoot,
+    resolve,
+};
 
 const MINIMAL: &str = r##"
 schema = 1
@@ -84,5 +87,32 @@ fn validate_render_contrast_without_nix() {
                 "non-Nix default emits {key}"
             );
         }
+    });
+}
+
+/// A base16 scheme becomes a source look with plain files only: import,
+/// parse, resolve, contrast and render under an empty `PATH`, the way a
+/// plain binary install runs it (no Nix anywhere in the path).
+#[test]
+fn import_base16_without_nix() {
+    without_helpers_on_path(|| {
+        let scheme = "name: Plain\nbase00: 090300\nbase01: 3a3432\nbase02: 4a4543\nbase03: 5c5855\nbase04: 807d7c\nbase05: a5a2a2\nbase06: d6d5d4\nbase07: f7f7f7\nbase08: db2d20\nbase09: e8bbd0\nbase0A: fded02\nbase0B: 01a252\nbase0C: b5e4f4\nbase0D: 01a0e4\nbase0E: a16a94\nbase0F: cdab53\n";
+        let look = import_base16(scheme.as_bytes(), &ImportOptions::default()).expect("imports");
+        let raw = scoot_look::parse_look_toml(look.as_bytes()).expect("parses");
+        assert_eq!(raw.name, "plain");
+        assert!(scoot_look::validate_for_origin(&raw, Origin::User).is_empty());
+        let map = BTreeMap::from([("plain".to_string(), (raw, Origin::User))]);
+        let resolved = resolve(&map, "plain").expect("resolves");
+        assert_eq!(resolved.palette.accent, "#01a0e4");
+        assert!(
+            check_contrast(&resolved, Origin::User)
+                .refusals()
+                .is_empty()
+        );
+        let inputs = RenderInputs::default();
+        let _: toml::Value =
+            toml::from_str(&render_scoot(&resolved, &inputs).expect("renders")).expect("parses");
+        let _: toml::Value =
+            toml::from_str(&render_bar(&resolved, &inputs).expect("renders")).expect("parses");
     });
 }

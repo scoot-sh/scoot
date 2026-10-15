@@ -231,6 +231,48 @@ sockets refuse. On Nix the same binary
 runs inside the render derivation with the look's font packages
 as build inputs. Exit nonzero names the field and the reason.
 
+## Import from base16
+
+```sh
+scoot-look import-base16 scheme.yaml --out ~/.local/share/scoot/user-looks/solarized-dark
+scoot-look import-base16 scheme.yaml --extends ginger-night --out ~/.local/share/scoot/user-looks/solarized-green
+scoot-look import-base16 scheme.yaml --name my-look --out /tmp/my-look
+```
+
+One mapping turns any base16 scheme (or the base24 superset) into a
+source look. It is what Stylix gives a Nix user, for a plain install:
+no Nix involved, plain files in and out. It reads base16 YAML and the
+JSON form the Nix side serializes, with or without a leading `#`, any
+case, `palette:`-nested or flat.
+
+| Token | Slot |
+|---|---|
+| `background`, `surface` | `base00` |
+| `foreground` | `base05` |
+| `dim`, `border` | `base03` |
+| `accent`, `hover`, `focus` | `base0D` |
+| `urgent` | `base08` |
+| `accent-fg` | `base00` |
+| `selection`, `selection-text` | `base02`, `base05` |
+| `match` | `base0A` |
+| `[terminal]` | `base00` to `base0F` in order, only without `--extends` |
+
+This matches the Nix modules for the slots they use today. Companion
+data applies when present: `variant` (or `polarity`) sets dark or
+light, else `base00` against `base05` decides. `fonts` maps `sansSerif`
+to `sans` and `ui`, `monospace` to `mono`. `sizes` maps `desktop`,
+`popups`, `applications` and `terminal` to the four point sizes.
+`opacity` maps `popups` and `terminal`; the bar's stays unset. `cursor`
+maps `name` and `size`. Without `--extends` the output is complete
+(title, polarity, fonts, ring width, Mocu cursor, flat background
+wallpaper, terminal hues). With it the output is a child: palette plus
+companion fonts, sizes, opacity and cursor when given, inheriting
+terminal, shape and wallpaper from the base. The output always
+re-parses; a contrast shortfall warns and never refuses, since the look
+is the user's own choice. A missing or malformed slot refuses naming
+it. `--name` wins over the scheme's slug; `--origin` defaults to
+`user`.
+
 > **Symptom:** `build` says an image wallpaper needs its resolved absolute path.
 >
 > Pass `--wallpaper-abs` with the image's absolute path. A color
