@@ -28,6 +28,10 @@ binary beside scoot (the Nix package already has it on `PATH` via its
 wrapper) and turn the knob on (`--xwayland` or `[xwayland] enabled`).
 (More in [XWayland](../scoot/xwayland.md).)
 
+One visible side effect of the wrapper: it leaves the process name as
+`.scoot-wrapped`, not `scoot` — so `pgrep -x scoot` finds nothing there;
+use `pgrep -x .scoot-wrapped`.
+
 ### Do I have a GPU?
 
 You do not need to answer this to pick a build anymore — but `auto`

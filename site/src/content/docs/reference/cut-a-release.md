@@ -1,6 +1,6 @@
 ---
 title: Cut a release
-description: "Maintainer task: merge the release PR (or cut the first tag by hand), dry-run, and recover the tag-triggered release workflow."
+description: "Maintainer task: merge the release PR, dry-run, and recover the tag-triggered release workflow."
 ---
 
 A release is one tag, `vX.Y.Z`, that releases every binary at the
@@ -132,8 +132,7 @@ gh workflow run release --ref v0.2.0 -f tag=v0.2.0 -f dry_run=false
 
 A dry run exercises the whole artifact round trip (vendor, build,
 download, assemble, checksums) but **not** the attestation or the
-release creation: those first run for real on the first tag. Expect to
-watch that first run, and if it fails after the build, use the recovery
+release creation. If a real run fails after the build, use the recovery
 steps below before anyone downloads anything.
 
 ## When a run fails

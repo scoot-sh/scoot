@@ -17,7 +17,7 @@ binary's help meets one contract, pinned by tests — and `--help
 - **Example-led:** each command shows one or two real invocations with
   the output shape, the first thing an agent copies.
 - **Stable and plain:** to stdout, exit 0, no color and no pager,
-  the same section order in every binary.
+  wrapped under 100 columns, the same section order in every binary.
 - **Machine-readable:** `--help --json` (or `help --json`) emits the
   same content as JSON, versioned with `schema_version` (currently
   `1`; a script should refuse what it does not know). Text and JSON
