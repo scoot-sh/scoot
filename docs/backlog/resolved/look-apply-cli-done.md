@@ -94,7 +94,7 @@ The design this implements against: [live looks](../../../dev/research/live-look
 
 ## Resolution (2026-10-15)
 
-`PR` (opened, not merged): `scoot look list|current|show|validate|build|apply`
+PR https://github.com/scoot-sh/scoot/pull/628 (open, not merged): `scoot look list|current|show|validate|build|apply`
 lands as a subcommand of the existing CLI (`scootctl::look`, parsed and run
 through the client library like `msg`, so `scoot --help` and the JSON help
 document cannot drift from it), plus `scoot look toolkit [on|off]` and
