@@ -577,11 +577,19 @@ fn a_swap_renders_the_terminal_fragment_for_new_foot() {
         stderr.contains(&*link_path.to_string_lossy()),
         "no setup hint names the link path:\n{stderr}"
     );
-    // The rendered fragment holds the look's hues in foot's order.
+    // The rendered fragment holds the look's hues in foot's order, in
+    // both themes with the look's polarity selected: a light look (and a
+    // user's own opposite `initial-color-theme`) can no longer leave a new
+    // terminal on the wrong palette.
     let rendered = std::fs::read_link(session.private_dir().join("look")).expect("a link");
     let foot_ini = rendered.join("foot.ini");
     let foot = std::fs::read_to_string(&foot_ini).expect("a foot.ini");
     assert!(foot.contains("[colors-dark]"), "wrong section:\n{foot}");
+    assert!(foot.contains("[colors-light]"), "missing mirror:\n{foot}");
+    assert!(
+        foot.contains("initial-color-theme=dark"),
+        "wrong theme:\n{foot}"
+    );
     assert!(foot.contains("regular0=1a2230"), "ansi order lost:\n{foot}");
     assert!(foot.contains("bright7=f6eedc"), "bright hues lost:\n{foot}");
     match Command::new("foot")
@@ -597,6 +605,39 @@ fn a_swap_renders_the_terminal_fragment_for_new_foot() {
         ),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => panic!("cannot run foot: {error}"),
+    }
+    // A user `[main]` holding the opposite theme with the fragment
+    // included still parses: both themes carry the look's hues, so foot
+    // shows them whichever theme is in effect. Where foot is installed
+    // (the dev VM carries foot 1.28.0) its own parser is the judge; a box
+    // without one skips this half and keeps the fragment.
+    for user_first in [true, false] {
+        let user = "[main]\ninitial-color-theme=light\n".to_owned();
+        let include = format!("[main]\ninclude={}\n", link_path.display());
+        let (head, tail) = if user_first {
+            (user, include)
+        } else {
+            (include, user)
+        };
+        let adversarial = session.config.join(format!(
+            "adversarial-{}.ini",
+            if user_first { "first" } else { "last" }
+        ));
+        std::fs::write(&adversarial, format!("{head}{tail}")).expect("an adversarial ini");
+        match Command::new("foot")
+            .arg("--check-config")
+            .arg("--config")
+            .arg(&adversarial)
+            .output()
+        {
+            Ok(check) => assert!(
+                check.status.success(),
+                "foot refuses the opposite-theme include (user first: {user_first}):\n{}",
+                String::from_utf8_lossy(&check.stderr)
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("cannot run foot: {error}"),
+        }
     }
     // With the include in place, the reply says new terminals follow the
     // look instead of repeating the setup hint.

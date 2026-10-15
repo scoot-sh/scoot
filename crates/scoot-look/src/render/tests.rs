@@ -406,10 +406,18 @@ fn foot_dark_section_holds_the_terminal_hues_in_ansi_order() {
     let frag = render_foot(&terminal_look())
         .expect("renders")
         .expect("a terminal table renders a fragment");
-    assert!(frag.contains("[colors-dark]"), "wrong section:\n{frag}");
-    assert!(!frag.contains("[colors-light]"), "both sections:\n{frag}");
+    assert!(frag.contains("[main]"), "no [main]:\n{frag}");
+    assert!(
+        frag.contains("initial-color-theme=dark"),
+        "wrong theme:\n{frag}"
+    );
+    // Both palettes carry the same hues: whatever theme is in effect when
+    // a new terminal starts, the look's hues show.
+    for section in ["[colors-dark]", "[colors-light]"] {
+        assert!(frag.contains(section), "missing {section}:\n{frag}");
+    }
     assert!(!frag.contains("[colors]\n"), "bare colors section:\n{frag}");
-    // ANSI 0-7 then 8-15, foot's hex without `#`.
+    // ANSI 0-7 then 8-15, foot's hex without `#`, twice (once per theme).
     for (i, color) in TERMINAL_COLORS.iter().enumerate() {
         let (key, _) = if i < 8 {
             (format!("regular{i}"), i)
@@ -417,7 +425,11 @@ fn foot_dark_section_holds_the_terminal_hues_in_ansi_order() {
             (format!("bright{}", i - 8), i)
         };
         let line = format!("{key}={}", color.trim_start_matches('#'));
-        assert!(frag.lines().any(|l| l == line), "missing {line}:\n{frag}");
+        assert_eq!(
+            frag.lines().filter(|l| *l == line).count(),
+            2,
+            "missing a copy of {line}:\n{frag}"
+        );
     }
     assert!(
         frag.lines()
@@ -425,6 +437,52 @@ fn foot_dark_section_holds_the_terminal_hues_in_ansi_order() {
             .all(|l| !l.contains('#')),
         "a `#` escapes into foot.ini:\n{frag}"
     );
+}
+
+#[test]
+fn foot_initial_theme_follows_polarity() {
+    // The effective theme selection, both polarities: a dark look starts
+    // new terminals on `colors-dark`, a light look on `colors-light`.
+    // (Either theme still carries the look's hues, so a user's own
+    // `initial-color-theme` after the include cannot un-theme a terminal.)
+    let dark = render_foot(&terminal_look())
+        .expect("renders")
+        .expect("a terminal table renders a fragment");
+    assert_eq!(
+        dark.lines()
+            .filter(|l| *l == "initial-color-theme=dark")
+            .count(),
+        1,
+        "dark look selects no single theme:\n{dark}"
+    );
+    assert!(
+        !dark.contains("initial-color-theme=light"),
+        "dark look selects light:\n{dark}"
+    );
+    let text = terminal_toml().replacen("polarity = \"dark\"", "polarity = \"light\"", 1);
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("moonrise".to_string(), (raw, Origin::Shipped))]);
+    let look = resolve(&map, "moonrise").expect("resolves");
+    let light = render_foot(&look)
+        .expect("renders")
+        .expect("a terminal table renders a fragment");
+    assert_eq!(
+        light
+            .lines()
+            .filter(|l| *l == "initial-color-theme=light")
+            .count(),
+        1,
+        "light look selects no single theme:\n{light}"
+    );
+    assert!(
+        !light.contains("initial-color-theme=dark"),
+        "light look selects dark:\n{light}"
+    );
+    for frag in [&dark, &light] {
+        for section in ["[colors-dark]", "[colors-light]"] {
+            assert!(frag.contains(section), "missing {section}:\n{frag}");
+        }
+    }
 }
 
 #[test]
@@ -437,7 +495,11 @@ fn foot_light_look_uses_colors_light() {
         .expect("renders")
         .expect("a terminal table renders a fragment");
     assert!(frag.contains("[colors-light]"), "wrong section:\n{frag}");
-    assert!(!frag.contains("[colors-dark]"), "both sections:\n{frag}");
+    assert!(frag.contains("[colors-dark]"), "missing mirror:\n{frag}");
+    assert!(
+        frag.contains("initial-color-theme=light"),
+        "wrong theme:\n{frag}"
+    );
 }
 
 #[test]
@@ -455,12 +517,22 @@ fn foot_alpha_comes_from_opacity_terminal() {
         frag.lines().any(|l| l == "alpha=0.80"),
         "alpha missing:\n{frag}"
     );
+    assert_eq!(
+        frag.lines().filter(|l| *l == "alpha=0.80").count(),
+        2,
+        "alpha not in both themes:\n{frag}"
+    );
     let frag = render_foot(&terminal_look())
         .expect("renders")
         .expect("a terminal table renders a fragment");
     assert!(
         frag.lines().any(|l| l == "alpha=1.00"),
         "default alpha missing:\n{frag}"
+    );
+    assert_eq!(
+        frag.lines().filter(|l| *l == "alpha=1.00").count(),
+        2,
+        "default alpha not in both themes:\n{frag}"
     );
 }
 

@@ -115,8 +115,9 @@ note, not a refusal.
 ## Terminal (foot)
 
 `apply` renders the look's `[terminal]` hues into the rendered look's
-`foot.ini`: `[colors-dark]` for a dark look, `[colors-light]` for a
-light one, with `alpha` from `opacity.terminal`. A look without
+`foot.ini`: `[main]` selects the look's polarity as foot's initial
+theme, and both `[colors-dark]` and `[colors-light]` carry the same
+hues, with `alpha` from `opacity.terminal`. A look without
 `[terminal]` renders no fragment. New terminals follow the look once
 your `foot.ini` includes the fragment (one-time setup):
 
@@ -124,11 +125,14 @@ your `foot.ini` includes the fragment (one-time setup):
 include=~/.local/state/scoot/look/foot.ini
 ```
 
-Running terminals keep their palette until they restart: foot never
-re-reads its config, and its `SIGUSR1`/`SIGUSR2` switch only toggles
-the two palettes loaded at foot start, so a swap sends no signal.
-`validate` and `build` check the fragment against foot's own parser;
-`build --out` writes `foot.ini` beside the other fragments.
+Both palettes hold the look's hues, so new terminals match whatever
+theme is in effect, even with a user's own opposite
+`initial-color-theme`. Running terminals keep their palette until
+they restart: foot never re-reads its config, and its
+`SIGUSR1`/`SIGUSR2` switch only toggles the two palettes loaded at
+foot start, so a swap sends no signal. `validate` and `build` check
+the fragment against foot's own parser; `build --out` writes
+`foot.ini` beside the other fragments.
 
 ## Dogfooding on a home-manager machine
 

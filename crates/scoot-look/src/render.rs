@@ -307,11 +307,17 @@ pub fn render_bar(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, 
     Ok(out)
 }
 
-/// Render the foot fragment (`foot.ini`): `[colors-dark]` for a dark look,
-/// `[colors-light]` for a light one (foot 1.28 has no `[colors]`), with the
-/// look's 16 ANSI hues as `regular0-7` then `bright0-7` and `alpha` from
-/// `opacity.terminal`. `None` when the look has no `[terminal]` table: no
-/// fragment is ever synthesized from the palette.
+/// Render the foot fragment (`foot.ini`): `[main]` selects the look's
+/// polarity as foot's initial theme (`initial-color-theme`: foot starts on
+/// `colors-dark` unless it is set to `light`), and both `[colors-dark]`
+/// and `[colors-light]` carry the look's 16 ANSI hues as `regular0-7`
+/// then `bright0-7`, each with `alpha` from `opacity.terminal` (foot 1.28
+/// has no `[colors]`). Both palettes hold the same hues on purpose:
+/// whatever theme is in effect when a new terminal starts — the
+/// fragment's own `initial-color-theme`, or the user's own `foot.ini`
+/// setting when it comes after the include — the look's hues show.
+/// `None` when the look has no `[terminal]` table: no fragment is ever
+/// synthesized from the palette.
 ///
 /// Every hue is re-checked here, not only at parse: a library caller can
 /// hand-build a `ResolvedLook` past the gate, and a newline in a hue would
@@ -338,29 +344,32 @@ pub fn render_foot(look: &ResolvedLook) -> Result<Option<String>, GrammarError> 
     if !look.opacity.terminal.is_finite() || !(0.0..=1.0).contains(&look.opacity.terminal) {
         return Err(GrammarError::new("opacity.terminal", "must be 0.0 to 1.0"));
     }
-    let section = if look.polarity == Polarity::Dark {
-        "colors-dark"
+    let theme = if look.polarity == Polarity::Dark {
+        "dark"
     } else {
-        "colors-light"
+        "light"
     };
     // A hand-built `ResolvedLook` skips the name grammar, so the comment
     // quotes rather than interpolates: a newline in the name stays one line.
     let mut out = format!(
-        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n",
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n# Both themes carry the look's hues, so new terminals match whatever theme is in effect.\n",
         toml_str(&look.name)
     );
-    out.push_str(&format!(
-        "\n[{section}]\nalpha={:.2}\n",
-        look.opacity.terminal
-    ));
-    for (i, color) in colors.iter().enumerate() {
-        // Foot's hex carries no `#`; the check above makes the slice safe.
-        let key = if i < 8 {
-            format!("regular{i}")
-        } else {
-            format!("bright{}", i - 8)
-        };
-        out.push_str(&format!("{key}={}\n", &color[1..]));
+    out.push_str(&format!("\n[main]\ninitial-color-theme={theme}\n"));
+    for section in ["colors-dark", "colors-light"] {
+        out.push_str(&format!(
+            "\n[{section}]\nalpha={:.2}\n",
+            look.opacity.terminal
+        ));
+        for (i, color) in colors.iter().enumerate() {
+            // Foot's hex carries no `#`; the check above makes the slice safe.
+            let key = if i < 8 {
+                format!("regular{i}")
+            } else {
+                format!("bright{}", i - 8)
+            };
+            out.push_str(&format!("{key}={}\n", &color[1..]));
+        }
     }
     Ok(Some(out))
 }

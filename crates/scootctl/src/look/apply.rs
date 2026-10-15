@@ -1219,8 +1219,10 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 
 /// The render schema: bumped whenever the renderers' output changes shape,
 /// so an upgrade re-renders an unchanged look instead of reusing a stale
-/// cached directory. Part of the cache key. 3 adds foot's `foot.ini`.
-pub const RENDER_VERSION: u32 = 3;
+/// cached directory. Part of the cache key. 3 adds foot's `foot.ini`; 4
+/// selects the look's polarity as foot's initial theme and carries the
+/// hues in both `colors-dark` and `colors-light`.
+pub const RENDER_VERSION: u32 = 4;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup

@@ -2406,6 +2406,11 @@ fn build_writes_foot_ini_for_a_terminal_look() {
     .expect("a terminal look builds");
     let foot = std::fs::read_to_string(out.join("foot.ini")).expect("a foot.ini");
     assert!(foot.contains("[colors-dark]"), "wrong section:\n{foot}");
+    assert!(foot.contains("[colors-light]"), "missing mirror:\n{foot}");
+    assert!(
+        foot.contains("initial-color-theme=dark"),
+        "wrong theme:\n{foot}"
+    );
     assert!(foot.contains("regular0=1a2230"), "ansi order lost:\n{foot}");
     assert!(foot.contains("bright7=f6eedc"), "bright hues lost:\n{foot}");
     assert!(foot.contains("alpha=1.00"), "alpha lost:\n{foot}");
