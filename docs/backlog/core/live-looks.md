@@ -58,7 +58,7 @@ stated rule.
 | [`look-scoped-reload`](look-scoped-reload.md) | high | both | `look-layer-scoot` |
 | [`look-session-state`](look-session-state.md) | medium | computer use | `look-layer-scoot` |
 | [`look-layer-scootbar`](../../scootbar/backlog/look-layer-scootbar.md) | high | daily-drive | `look-format` |
-| [`scootbar-style-reload`](../../scootbar/backlog/scootbar-style-reload.md) | medium | daily-drive | |
+| [`scootbar-style-reload`](../../scootbar/backlog/resolved/scootbar-style-reload-done.md) | medium | daily-drive | |
 | [`look-apply-cli`](look-apply-cli.md) | high | both | `look-shipped`, `look-scoped-reload`, `look-layer-scootbar` |
 | [`look-cycle-preview`](look-cycle-preview.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-ipc`](../ipc/look-ipc.md) | medium | computer use | `look-apply-cli`, `look-session-state` |

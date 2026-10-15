@@ -316,7 +316,9 @@ font-size = 20                  # 1 to 256, as [bar] font-size; absent is the sh
   except an `exec` whose table is unchanged, which keeps its child (above)
   — unless the reload changed only style (`[colors]`, the `[bar]` style
   keys, the font), in which case every module keeps running with its
-  state, any open popup stays open, and the bar only repaints.
+  state and the bar only repaints; an open popup or tooltip is restyled
+  to the new style where it fits its surface, remade where it does not,
+  and closed only where neither is possible.
 - **`hide`/`show`** keep to the list: a shown bar is made only on a selected
   output. The two reasons a bar can be absent (hidden, not selected) are
   independent, so a `show` after a reload that changed the list makes the

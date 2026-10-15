@@ -673,6 +673,27 @@ fn a_reload_closes_it_and_the_new_delay_applies() {
 }
 
 #[test]
+fn a_style_only_reload_keeps_it_and_repaints_it() {
+    let Some(mut rig) = Rig::start("tip-style") else {
+        return;
+    };
+    rig.set(TIP);
+    rig.move_to(rig.tip);
+    rig.wait_tip(rig.tip.0, true, "shown");
+    // Colors only: the tooltip stays open and repaints at the new style.
+    const NEW: &str = "#ff0000";
+    fs::write(&rig.file, config(TABLES, "").replace(BAR, NEW)).unwrap();
+    assert!(rig.msg(&["reload"]).status.success());
+    let x = rig.tip.0;
+    rig.session
+        .wait_for(&mut rig.bar.0, "the tooltip repainted", |session| {
+            (session.scoot_screenshot(1).at(x, HEIGHT + 2) == rgb(NEW)).then_some(())
+        });
+    rig.alive();
+    rig.clean();
+}
+
+#[test]
 fn hiding_the_bar_or_a_bad_reload_takes_it_down_without_harm() {
     let Some(mut rig) = Rig::start("tip-hide") else {
         return;

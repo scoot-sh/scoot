@@ -61,6 +61,6 @@ and the fixed layer.
 ## Not in this ticket
 
 Keeping modules across a style-only reload
-([`scootbar-style-reload`](scootbar-style-reload.md)), the picker.
+([`scootbar-style-reload`](resolved/scootbar-style-reload-done.md)), the picker.
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).

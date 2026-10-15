@@ -511,9 +511,42 @@ fn the_popup_goes_with_its_module_the_bar_hiding_and_a_reload() {
     rig.click(MODULE);
     rig.wait_popup(true, "a popup on the bar made again");
 
-    // A reload with the popup open.
+    // A reload with the popup open: an unchanged file is style-only, so
+    // the popup stays open and the bar lives.
     assert!(rig.msg(&["reload"]).status.success());
-    rig.wait_popup(false, "the popup closed by a reload");
+    rig.wait_popup(true, "the popup kept across a style-only reload");
+    rig.alive();
+    // A structural change is still a full reload, and closes the popup.
+    fs::write(
+        &rig.file,
+        config(BINDING).replace(
+            &format!("height = {HEIGHT}"),
+            &format!("height = {}", HEIGHT + 1),
+        ),
+    )
+    .unwrap();
+    assert!(rig.msg(&["reload"]).status.success());
+    rig.wait_popup(false, "the popup closed by a full reload");
+    rig.alive();
+    rig.clean();
+}
+
+#[test]
+fn a_style_only_reload_keeps_the_popup_open_and_repaints_it() {
+    let Some(mut rig) = Rig::start("popup-style") else {
+        return;
+    };
+    rig.click(MODULE);
+    rig.wait_popup(true, "the popup shown");
+    // Colors only: the popup stays open and repaints at the new style,
+    // with new glyphs at fresh metrics rather than the old ones.
+    const NEW: &str = "#ff0000";
+    fs::write(&rig.file, config(BINDING).replace(BAR, NEW)).unwrap();
+    assert!(rig.msg(&["reload"]).status.success());
+    rig.session
+        .wait_for(&mut rig.bar.0, "the popup repainted", |session| {
+            (session.scoot_screenshot(1).at(MODULE.0, HEIGHT + 2) == rgb(NEW)).then_some(())
+        });
     rig.alive();
     rig.clean();
 }

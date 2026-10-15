@@ -42,7 +42,8 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
 use super::canvas::Canvas;
 use super::wayland::{Globals, State};
 use crate::bar::Bar;
-use crate::modules::Placed;
+use crate::density::Scale;
+use crate::modules::{OutputView, Placed};
 use crate::outputs::{Effect, Entry, OutputId, Rotation, Size};
 use crate::pointer::Pointer;
 use crate::policy::Placement;
@@ -311,14 +312,18 @@ impl State {
     }
 
     /// A style-only reload (the style, the font and the placement's gaps
-    /// already swapped in): every output is placed again, and nothing else
-    /// happens. Unlike [`Self::replace_placement`] the popup stays open,
-    /// the pointer stays armed and no input state is forgotten: the modules
-    /// are the same ones in the same order, so their indices — and whatever
-    /// popup hangs off them — are still valid. The rebuilt scenes and the
-    /// emptied buffers draw every output once more at the new style, and a
-    /// surface whose bar geometry changed (which the style-only check rules
-    /// out) would still be carried out rather than leaked.
+    /// already swapped in): every output is placed again and measured at
+    /// the new style, and an open popup or tooltip is brought onto it
+    /// ([`Self::restyle_popups`]). Unlike [`Self::replace_placement`] the
+    /// pointer stays armed and no input state is forgotten: the modules
+    /// are the same ones in the same order, so their indices — and
+    /// whatever popup hangs off them — are still valid. Measuring here
+    /// (rather than leaving it to the next draw) is what keeps that
+    /// promise: an open popup's live check reads spans, which a rebuilt
+    /// scene leaves at zero until measured. The rebuilt scenes and the
+    /// emptied buffers draw every output once more at the new style, and
+    /// a surface whose bar geometry changed (which the style-only check
+    /// rules out) would still be carried out rather than leaked.
     pub fn restyle(&mut self, placement: Placement, conn: &Connection, qh: &QueueHandle<Self>) {
         self.placement = placement;
         for entry in self.outputs.iter_mut() {
@@ -333,7 +338,40 @@ impl State {
                 conn,
                 qh,
             );
+            // Measuring now restores what `place` rebuilt: an open popup's
+            // live check (`pump_popup`, which runs before the next draw)
+            // reads spans, and a rebuilt scene leaves them at zero until
+            // measured — without this every style reload would read as
+            // "the module shows nothing" and close what it just kept.
+            if let Some(extent) = entry.output.surface_size(&entry.objects.bar) {
+                let drawn = entry.output.scale();
+                let scale = if entry
+                    .objects
+                    .layer
+                    .as_ref()
+                    .is_some_and(|layer| layer.viewport.is_some())
+                {
+                    drawn
+                } else {
+                    Scale::Integer(drawn.integer())
+                };
+                let style = crate::render::Style {
+                    font_size: entry.objects.font_size,
+                    ..self.content.style
+                };
+                let name = entry.output.info().name.as_deref();
+                entry.objects.scene.update(
+                    &self.content.modules,
+                    &OutputView { name },
+                    self.content.text.as_ref(),
+                    &style,
+                    scale,
+                    extent,
+                );
+            }
         }
+        #[cfg(feature = "popup")]
+        self.restyle_popups(qh);
     }
 
     /// Makes every output's bar as `self.hidden` says: destroys the layer

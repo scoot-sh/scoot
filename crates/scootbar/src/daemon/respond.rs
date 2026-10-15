@@ -9,7 +9,8 @@
 //!
 //! A reload whose only differences are style (the theme, the `[bar]` style
 //! keys, the font) takes a fast path: every module keeps running with its
-//! state, the popup stays open, and every output only repaints. Anything
+//! state, an open popup or tooltip is restyled to the new style (remade or
+//! closed where it cannot be), and every output only repaints. Anything
 //! else restarts the modules as at start-up.
 //!
 //! A refused `reload` changes nothing: the file is re-read and fully
@@ -192,15 +193,31 @@ impl Handler for Responder<'_> {
 /// tooltip delay. Everything else — the bar geometry, the module lists,
 /// the outputs policy, the module tables and their bindings — takes the
 /// full reload (fresh modules, and surfaces remade where geometry moved).
-/// A field added to [`Config`](crate::config::Config) later lands in the
-/// full reload unless it is deliberately left out here.
+///
+/// The check is fail-closed: every known style field of a scratch copy of
+/// `new` is reset to the running value, and the rest must then compare
+/// fully equal. A field added to [`Config`](crate::config::Config) or
+/// [`Layout`](crate::layout::Layout) later takes the full reload until it
+/// is deliberately listed here as style — a new field can never slip
+/// through as style-only, silently dropped while the reload answers ok.
 fn style_only(old: &Config, new: &Config) -> bool {
-    old.bar == new.bar
-        && old.modules == new.modules
-        && old.outputs == new.outputs
-        && old.layout.left == new.layout.left
-        && old.layout.center == new.layout.center
-        && old.layout.right == new.layout.right
+    let mut probe = new.clone();
+    probe.theme = old.theme;
+    probe.font.clone_from(&old.font);
+    probe.fallback_fonts.clone_from(&old.fallback_fonts);
+    probe.font_size = old.font_size;
+    probe.radius = old.radius;
+    #[cfg(feature = "popup")]
+    {
+        probe.popup_radius = old.popup_radius;
+        probe.tooltip_delay = old.tooltip_delay;
+    }
+    probe.opacity = old.opacity;
+    probe.layout.padding = old.layout.padding;
+    probe.layout.spacing = old.layout.spacing;
+    probe.layout.separator = old.layout.separator;
+    probe.layout.margins.clone_from(&old.layout.margins);
+    probe == *old
 }
 
 impl Responder<'_> {
@@ -246,12 +263,15 @@ impl Responder<'_> {
     /// A style-only reload: the theme, the `[bar]` style keys or the font
     /// moved and nothing else (see [`style_only`]). No module is started,
     /// so every one keeps running with its state — its D-Bus connections,
-    /// its child, its shown output — and the popup stays open with the
-    /// pointer armed as it was. Every output is placed again (new scenes,
-    /// emptied buffers) and draws once more at the new style; subscribers
-    /// hear nothing, since no module's revision moved. `Err` leaves the
-    /// running bar exactly as it was: the font is loaded before anything
-    /// is touched, as in [`Self::stage`].
+    /// its child, its shown output — and an open popup or tooltip is
+    /// restyled to the new style where it fits its surface, remade where
+    /// it does not, and closed where neither is possible
+    /// (`State::restyle_popups`), never left showing the old style. Every
+    /// output is placed again (new scenes, emptied buffers) and draws once
+    /// more at the new style; subscribers hear nothing, since no module's
+    /// revision moved. `Err` leaves the running bar exactly as it was:
+    /// the font is loaded before anything is touched, as in
+    /// [`Self::stage`].
     fn apply_style(&mut self, config: &Config) -> Result<(), String> {
         let placing = config.outputs.to_start(&config.layout);
         let text = if placing.placed().next().is_none() {
@@ -267,9 +287,14 @@ impl Responder<'_> {
         {
             self.state.content.tooltip_delay =
                 std::time::Duration::from_millis(config.tooltip_delay.into());
-            self.state
-                .popup
-                .reset_hover(self.state.content.tooltip_delay);
+            // A new delay re-arms the hover; an unchanged one leaves it
+            // alone, so a shown tooltip is not remade a delay later for
+            // a reload that changed nothing about it.
+            if self.last.tooltip_delay != config.tooltip_delay {
+                self.state
+                    .popup
+                    .reset_hover(self.state.content.tooltip_delay);
+            }
         }
         self.state.restyle(
             Placement {

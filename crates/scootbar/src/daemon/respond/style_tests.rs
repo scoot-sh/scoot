@@ -130,6 +130,59 @@ fn an_outputs_policy_change_is_not_style_only() {
         new.outputs.select = crate::policy::Select::Named(vec!["DP-1".to_owned()]);
     });
     assert!(!style_only(&old, &new));
+    // A per-output override is policy too: even a font-size override takes
+    // the full reload, fail-closed.
+    let (old, new) = changed(|new| {
+        new.outputs.overrides.push(crate::policy::Override {
+            name: "DP-1".to_owned(),
+            bar: crate::policy::BarOverride::default(),
+            font_size: Some(20),
+            modules: None,
+        });
+    });
+    assert!(!style_only(&old, &new));
+}
+
+/// Every style field at once is still style-only: this pins the reset
+/// list in [`super::style_only`] as complete. A new style field added to
+/// the config without listing it there fails this test once the test
+/// changes it too — and until then the new field takes the full reload,
+/// never the fast path.
+#[test]
+fn every_style_field_at_once_is_style_only() {
+    let (old, new) = changed(|new| {
+        new.theme.accent = Color { r: 1, g: 2, b: 3 };
+        new.theme.background = Color { r: 4, g: 5, b: 6 };
+        new.font = Some(std::path::PathBuf::from("/fonts/test.ttf"));
+        new.fallback_fonts = vec![std::path::PathBuf::from("/fonts/fallback.ttf")];
+        new.font_size += 1;
+        new.radius += 1;
+        #[cfg(feature = "popup")]
+        {
+            new.popup_radius += 1;
+            new.tooltip_delay += 1;
+        }
+        new.opacity = new.opacity.saturating_sub(1);
+        new.layout.padding += 1;
+        new.layout.spacing += 1;
+        new.layout.separator = 1;
+        new.layout.margins.push(("clock", 2));
+    });
+    assert_ne!(old.theme, new.theme, "the theme under test differs");
+    assert!(style_only(&old, &new));
+}
+
+/// Every non-style field at once takes the full reload: the bar, the
+/// module lists, the outputs policy and the module tables.
+#[test]
+fn every_non_style_field_at_once_is_not_style_only() {
+    let (old, new) = changed(|new| {
+        new.bar.height += 1;
+        new.layout.left.push("clock");
+        new.outputs.select = crate::policy::Select::Named(vec!["DP-1".to_owned()]);
+        new.modules.bindings.push(("clock", Bindings::default()));
+    });
+    assert!(!style_only(&old, &new));
 }
 
 #[test]

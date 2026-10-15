@@ -315,7 +315,9 @@ drawn from, so it cannot disagree with a screenshot.
 modules, the font — after fully validating it first; a bad file is
 refused and the running bar stands. A reload that changes only style
 (`[colors]`, the `[bar]` style keys, the font) keeps every module running
-with its state, leaves any open popup alone, and only repaints; anything
+with its state and only repaints; an open popup or tooltip is restyled to
+the new style where it fits its surface, remade where it does not, and
+closed only where neither is possible. Anything
 else restarts the modules as at start-up. This holds however the file got
 there — hand-written or rendered by Nix. `hide`, `show` and `toggle` are
 [below](./configure.md#hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
