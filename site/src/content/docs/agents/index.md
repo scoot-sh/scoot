@@ -18,8 +18,8 @@ scoot msg screenshot --out /tmp/shot.png
 `--headless` renders into a framebuffer with no display;
 `scoot msg` is the control client (it also builds on macOS, where `scoot`
 is client-only, to drive a compositor in a VM). `windows`
-answers every window's id, app id, title, output, workspace and
-rectangle — what you click. `screenshot` answers the output's own
+answers every window's id, app id, title, output, workspace,
+rectangle, and more (icon, focus, popup grab, adoption) — what you click. `screenshot` answers the output's own
 pixels. Then act: `scoot msg action focus-column left`, `scoot msg
 pointer click X Y`, `scoot msg type "hello"`, `scoot msg key
 super+Return`.
@@ -39,12 +39,15 @@ for `--quiet-ms` (default 200 ms) before screenshotting or typing.
 
 Every page ships as plain Markdown: the three bundles
 (`/llms.txt` index, `/llms-full.txt` everything, `/llms-small.txt`
-compact) plus one twin per page at `/<slug>.md`. Per-app
+compact) plus one twin per page at a stable `/<slug>.md` URL. Per-app
 sets (one per sidebar section) live under `/_llms-txt/`: the
-`scoot msg / IPC` set is the grammar reference in one file.
+`scoot msg / IPC` set is the grammar reference in one file. Commands in
+fenced blocks, nothing meaningful only in an image.
 
 `--help` prints the usage text, every request and every action, with
 topics (`scoot msg --help`, `help <verb>`) and `--help --json` for the
 machine-readable form — the [contract](../reference/cli.md) every
-binary meets. Until the generated per-CLI pages land,
-[Actions](../msg/actions.md) is the prose source.
+binary meets. Per-CLI pages generated from that JSON land in
+[Reference](../reference/cli.md) next; until then
+[Actions](../msg/actions.md) and the [generated CLI contract](../reference/cli.md)
+are the prose source.
