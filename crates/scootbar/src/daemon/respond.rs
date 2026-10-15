@@ -138,7 +138,7 @@ impl Handler for Responder<'_> {
                 #[cfg(feature = "popup")]
                 self.qh,
             ) {
-                Ok(()) => write_reply(out, &Reply::Ok),
+                Ok(()) => write_reply(out, &Reply::Ok { scope: None }),
                 Err(message) => write_reply(out, &Reply::Error { message: &message }),
             },
             Request::Subscribe { events } => {
@@ -171,11 +171,13 @@ impl Handler for Responder<'_> {
             }
             Request::Reload { scope } => match scope {
                 None => match self.reload() {
-                    Ok(()) => write_reply(out, &Reply::Ok),
+                    Ok(()) => write_reply(out, &Reply::Ok { scope: None }),
                     Err(message) => write_reply(out, &Reply::Error { message: &message }),
                 },
                 Some(ReloadScope::Look) => match self.reload_scoped() {
-                    Ok(()) => write_reply(out, &Reply::Ok),
+                    Ok(()) => write_reply(out, &Reply::Ok {
+                        scope: Some(ReloadScope::Look.name()),
+                    }),
                     Err(message) => write_reply(out, &Reply::Error { message: &message }),
                 },
             },
@@ -197,10 +199,10 @@ impl Handler for Responder<'_> {
             }
             Request::Kill => {
                 self.stop = true;
-                write_reply(out, &Reply::Ok);
+                write_reply(out, &Reply::Ok { scope: None });
             }
             Request::Set { id, value } => match self.set(&id, &value) {
-                Ok(()) => write_reply(out, &Reply::Ok),
+                Ok(()) => write_reply(out, &Reply::Ok { scope: None }),
                 Err(message) => write_reply(out, &Reply::Error { message: &message }),
             },
         }

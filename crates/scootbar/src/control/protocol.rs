@@ -518,7 +518,14 @@ pub fn write_event(out: &mut Vec<u8>, event: &Event<'_>) {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Reply<'a> {
-    Ok,
+    Ok {
+        /// The scoped-reload receipt: only a look-scoped reload carries
+        /// one (`"look"`), so the CLI can tell an old bar (plain `ok`)
+        /// from a scoped one. Plain reloads leave this absent, keeping
+        /// their reply byte-identical (`{"type":"ok"}`).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        scope: Option<&'a str>,
+    },
     /// Whether the bars are shown now, after a `hide`, `show` or `toggle`.
     Bar {
         visible: bool,

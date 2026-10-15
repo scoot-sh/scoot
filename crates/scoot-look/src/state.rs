@@ -163,6 +163,11 @@ pub struct Record {
     /// that is neither unset nor this one means someone else changed it,
     /// so the tool leaves it alone (design D11).
     pub color_scheme: Option<String>,
+    /// The live `color-scheme` before the tool's first write, if it has
+    /// written one: `Some("")` means it was unset. Saved once, never
+    /// overwritten, so `toolkit off` can restore it. Back-compatible:
+    /// absent means "not saved" (an older record).
+    pub color_scheme_orig: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -181,6 +186,8 @@ struct RawRecord {
     toolkit: Option<bool>,
     #[serde(default, rename = "color-scheme")]
     color_scheme: Option<String>,
+    #[serde(default, rename = "color-scheme-orig")]
+    color_scheme_orig: Option<String>,
 }
 
 /// How reading the record went.
@@ -284,6 +291,13 @@ fn validate_record(raw: RawRecord) -> Result<Record, String> {
             "{RECORD_FILE}: `color-scheme` must be plain text of at most 64 bytes"
         ));
     }
+    if let Some(orig) = &raw.color_scheme_orig
+        && check_display_text("color-scheme-orig", orig, 64).is_some()
+    {
+        return Err(format!(
+            "{RECORD_FILE}: `color-scheme-orig` must be plain text of at most 64 bytes"
+        ));
+    }
     Ok(Record {
         name,
         rendered,
@@ -292,6 +306,7 @@ fn validate_record(raw: RawRecord) -> Result<Record, String> {
         declared_default: raw.declared_default,
         toolkit: raw.toolkit,
         color_scheme: raw.color_scheme,
+        color_scheme_orig: raw.color_scheme_orig,
     })
 }
 
@@ -329,6 +344,12 @@ pub fn record_json(record: &Record) -> String {
         out.insert(
             "color-scheme".to_owned(),
             serde_json::Value::String(scheme.clone()),
+        );
+    }
+    if let Some(orig) = &record.color_scheme_orig {
+        out.insert(
+            "color-scheme-orig".to_owned(),
+            serde_json::Value::String(orig.clone()),
         );
     }
     serde_json::Value::Object(out).to_string()
@@ -417,9 +438,10 @@ fn sync_dir(dir: &Path) -> std::io::Result<()> {
 }
 
 /// The gated read the record (and the compositor's fragment loader) share:
-/// opened `O_NONBLOCK` and required to be a regular file by `fstat`, with a
-/// size cap. A symlink is followed and judged by its target; a loop in one
-/// is the kernel's `ELOOP`. A missing file surfaces as a `NotFound` io
+/// opened `O_NONBLOCK|O_NOFOLLOW` and required to be a regular file by
+/// `fstat`, with a
+/// size cap. A symlink refuses with `ELOOP` instead of being followed;
+/// a loop in one is the kernel's `ELOOP`. A missing file surfaces as a `NotFound` io
 /// error, so [`read_record`] can tell "no choice yet" from corruption.
 pub fn read_capped(path: &Path) -> Result<String, std::io::Error> {
     use std::io::Read as _;
@@ -427,6 +449,7 @@ pub fn read_capped(path: &Path) -> Result<String, std::io::Error> {
         path,
         rustix::fs::OFlags::RDONLY
             | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::NOFOLLOW
             | rustix::fs::OFlags::CLOEXEC
             | rustix::fs::OFlags::NOCTTY,
         rustix::fs::Mode::empty(),

@@ -197,7 +197,9 @@ pub fn validate_dir(
     })?;
     let canonical = std::fs::canonicalize(dir)
         .map_err(|error| format!("cannot resolve {}: {error}", dir.display()))?;
-    let dir_name = canonical
+    // The name matches the directory as named (a symlink's own name),
+    // never the store target's basename.
+    let dir_name = dir
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
@@ -329,6 +331,113 @@ pub fn read_regular(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+/// Writes `bytes` to `path` without following symlinks: a symlinked
+/// destination refuses instead of writing through it. A new file is
+/// created `O_EXCL|O_NOFOLLOW`; an existing regular file is replaced
+/// atomically (temp plus `rename`, which replaces a symlink rather than
+/// following it — but a symlink is still refused above, so a raced-in
+/// link can never be overwritten silently either).
+fn write_nofollow(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if let Ok(meta) = std::fs::symlink_metadata(path)
+        && meta.file_type().is_symlink()
+    {
+        return Err("it is a symlink: refusing to write through it".to_owned());
+    }
+    if !path.exists() {
+        let fd = rustix::fs::open(
+            path,
+            rustix::fs::OFlags::WRONLY
+                | rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::from_bits_truncate(0o644),
+        )
+        .map_err(|errno| format!("{errno}"))?;
+        use std::io::Write as _;
+        let mut handle = std::fs::File::from(fd);
+        handle
+            .write_all(bytes)
+            .map_err(|error| format!("{error}"))?;
+        handle.sync_all().map_err(|error| format!("{error}"))?;
+        return Ok(());
+    }
+    // Existing regular file: stage beside it and rename over it. The
+    // rename replaces whatever is there atomically; the symlink check
+    // above (plus `O_NOFOLLOW|O_EXCL` on the temp) means a raced-in link
+    // at the temp path refuses instead of redirecting the write.
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+    let tmp = match parent {
+        Some(dir) => dir.join(format!(
+            ".{}.tmp.{}-{}",
+            path.file_name().and_then(|n| n.to_str()).unwrap_or("out"),
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        )),
+        None => PathBuf::from(format!(
+            ".{}.tmp.{}-{}",
+            path.display(),
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        )),
+    };
+    let fd = rustix::fs::open(
+        &tmp,
+        rustix::fs::OFlags::WRONLY
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::EXCL
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::from_bits_truncate(0o644),
+    )
+    .map_err(|errno| format!("{errno}"))?;
+    use std::io::Write as _;
+    let mut handle = std::fs::File::from(fd);
+    let result: Result<(), String> = (|| {
+        handle
+            .write_all(bytes)
+            .map_err(|error| format!("{error}"))?;
+        handle.sync_all().map_err(|error| format!("{error}"))?;
+        drop(handle);
+        // Re-check the destination is still not a symlink before the
+        // rename: a link raced in between the first check and now refuses.
+        if let Ok(meta) = std::fs::symlink_metadata(path)
+            && meta.file_type().is_symlink()
+        {
+            std::fs::remove_file(&tmp).ok();
+            return Err("it became a symlink: refusing to write through it".to_owned());
+        }
+        std::fs::rename(&tmp, path).map_err(|error| format!("{error}"))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        std::fs::remove_file(&tmp).ok();
+    }
+    result
+}
+
+/// Whether a `bar_fragment` refusal is the missing-`popup` shape (a bar
+/// built `--no-default-features` refusing `popup-radius`): the caller
+/// re-renders with `bar_popup = false` instead of refusing every look.
+fn is_popup_refusal(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    lower.contains("popup-radius") || (lower.contains("popup") && lower.contains("unknown field"))
+}
+
+/// Whether a refusal is the older-peer shape (a compositor or bar that
+/// predates the look-scoped request): the peer never accepted the request,
+/// so the rollback skips re-running it rather than refusing twice.
+pub(crate) fn is_predates_error(message: &str) -> bool {
+    message.contains("predates scoot look")
+        || (message.contains("unknown variant") && message.contains("reload"))
+}
+
 /// One link of an `extends` chain, base first.
 struct ChainEntry {
     entry: Entry,
@@ -424,11 +533,19 @@ fn check_inputs(
         ("mono", merged.fonts.mono.as_str()),
     ] {
         if let Some((dir, rel)) = carrier_file(chain, key) {
-            let path = contained_file(&dir, &rel)
-                .map_err(|error| format!("font `{family}` ({key}): {error}"))?;
-            details.push(format!("font {key} `{family}`: {}", path.display()));
-            if key == "ui" {
-                ui_font_file = Some(path_to_string(&path)?);
+            match contained_file(&dir, &rel) {
+                Ok(path) => {
+                    details.push(format!("font {key} `{family}`: {}", path.display()));
+                    if key == "ui" {
+                        match path_to_string(&path) {
+                            Ok(text) => ui_font_file = Some(text),
+                            Err(error) => validation.errors.push(format!(
+                                "font `{family}` ({key}): {error}"
+                            )),
+                        }
+                    }
+                }
+                Err(error) => validation.errors.push(format!("font `{family}` ({key}): {error}")),
             }
             continue;
         }
@@ -448,19 +565,27 @@ fn check_inputs(
     // last entry with a `[wallpaper]` table); a color needs no path.
     let mut wallpaper_abs: Option<String> = None;
     if let Some((dir, image)) = wallpaper_image(chain) {
-        let path = contained_file(&dir, &image)
-            .map_err(|error| format!("wallpaper `{image}`: {error}"))?;
-        match checks.wallpaper(&path) {
-            Ok(Availability::Available(())) => {
-                details.push(format!("wallpaper: {}", path.display()));
+        match contained_file(&dir, &image) {
+            Ok(path) => {
+                match checks.wallpaper(&path) {
+                    Ok(Availability::Available(())) => {
+                        details.push(format!("wallpaper: {}", path.display()));
+                    }
+                    Ok(Availability::Unavailable(note)) => {
+                        validation.notes.push(note);
+                        details.push(format!("wallpaper: {}", path.display()));
+                    }
+                    Err(refusal) => validation.errors.push(refusal),
+                }
+                match path_to_string(&path) {
+                    Ok(text) => wallpaper_abs = Some(text),
+                    Err(error) => {
+                        validation.errors.push(format!("wallpaper `{image}`: {error}"))
+                    }
+                }
             }
-            Ok(Availability::Unavailable(note)) => {
-                validation.notes.push(note);
-                details.push(format!("wallpaper: {}", path.display()));
-            }
-            Err(refusal) => validation.errors.push(refusal),
+            Err(error) => validation.errors.push(format!("wallpaper `{image}`: {error}")),
         }
-        wallpaper_abs = Some(path_to_string(&path)?);
     }
     if !validation.errors.is_empty() {
         return Err(validation
@@ -598,12 +723,19 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "no home resolves: set XDG_CACHE_HOME or HOME".to_owned())
 }
 
+/// The render schema: bumped whenever the renderers' output changes shape,
+/// so an upgrade re-renders an unchanged look instead of reusing a stale
+/// cached directory. Part of the cache key.
+pub const RENDER_VERSION: u32 = 1;
+
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
 /// feature), hashed like `source_hash`. A font package update or an edited
 /// source re-renders instead of reusing a stale directory.
 fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
     let mut buffer = Vec::new();
+    buffer.extend_from_slice(&RENDER_VERSION.to_le_bytes());
+    buffer.push(0);
     for link in chain {
         buffer.extend_from_slice(link.entry.name.as_bytes());
         buffer.push(0);
@@ -974,28 +1106,51 @@ pub fn apply_with(
     let inputs = match check_inputs(&chain, &merged, checks, &mut validation) {
         Ok(inputs) => inputs,
         Err(_) => {
-            return Err(refuse(format!(
-                "cannot apply `{name}`: {}",
-                validation.errors.join("; ")
-            )));
+            let detail = validation.errors.join("; ");
+            // `check_inputs` pushes every refusal into `errors`, so this
+            // is never blank; the fallback is a backstop, not a message.
+            let detail = if detail.trim().is_empty() {
+                "invalid look (no detail)".to_owned()
+            } else {
+                detail
+            };
+            return Err(refuse(format!("cannot apply `{name}`: {detail}")));
         }
     };
     report.notes.extend(validation.notes);
-    report.notes.extend(inputs.details);
+    let mut render_inputs = inputs.inputs;
+    let details = inputs.details;
+    report.notes.extend(details);
     let mut target = render_cached(
         name,
         &chain,
         &merged,
-        &inputs.inputs,
+        &render_inputs,
         cache,
         &mut report.notes,
     )
     .map_err(refuse)?;
     // The bar's own parser over the rendered fragment, against the
-    // installed binary's features.
+    // installed binary's features. A bar built `--no-default-features`
+    // (no `popup`) refuses `popup-radius`: re-render without it rather
+    // than refusing every look.
     match checks.bar_fragment(&target.join("bar.toml")) {
         Ok(Availability::Available(())) => {}
         Ok(Availability::Unavailable(note)) => report.notes.push(note),
+        Err(message) if render_inputs.bar_popup && is_popup_refusal(&message) => {
+            render_inputs.bar_popup = false;
+            target = render_cached(name, &chain, &merged, &render_inputs, cache, &mut report.notes)
+                .map_err(refuse)?;
+            match checks.bar_fragment(&target.join("bar.toml")) {
+                Ok(Availability::Available(())) => {
+                    report.notes.push(
+                        "bar without `popup`: rendered without popup-radius".to_owned(),
+                    );
+                }
+                Ok(Availability::Unavailable(note)) => report.notes.push(note),
+                Err(retry) => return Err(refuse(retry)),
+            }
+        }
         Err(message) => return Err(refuse(message)),
     }
     let generation = previous
@@ -1014,6 +1169,9 @@ pub fn apply_with(
         color_scheme: previous
             .as_ref()
             .and_then(|record| record.color_scheme.clone()),
+        color_scheme_orig: previous
+            .as_ref()
+            .and_then(|record| record.color_scheme_orig.clone()),
     };
     write_record(state_dir, &record)
         .map_err(|error| refuse(format!("cannot record the choice: {error}")))?;
@@ -1066,10 +1224,14 @@ pub fn apply_with(
             report.skipped.push(format!("compositor: {note}"));
         }
         Err(ReloadError::Refused(message)) => {
-            // Sent but refused: the app may hold the new layer (or nothing
-            // at all, when the peer is older than the tag), so the
+            // Sent but refused: the app may hold the new layer, so the
             // rollback re-runs this reload against the restored choice.
-            completed_compositor = true;
+            // The one exception is a peer older than the request tag,
+            // which never accepted it: re-running would refuse again with
+            // the same wall, so the rollback skips it.
+            if !is_predates_error(&message) {
+                completed_compositor = true;
+            }
             let failure = ApplyFailure {
                 message,
                 rolled_back_to: None,
@@ -1131,7 +1293,7 @@ pub fn apply_with(
             .notes
             .push("toolkit writes off for this apply (--no-toolkit)".to_owned());
     } else {
-        report.notes.extend(apply_toolkit(&mut record, dark, dconf));
+        report.notes.extend(apply_toolkit(state_dir, &mut record, dark, dconf));
         if let Err(error) = write_record(state_dir, &record) {
             report.notes.push(format!(
                 "cannot record the toolkit state: {error}: the look applied, the record lags"
@@ -1194,6 +1356,7 @@ fn rollback(
                 declared_default: previous.declared_default.clone(),
                 toolkit: previous.toolkit,
                 color_scheme: previous.color_scheme.clone(),
+                color_scheme_orig: previous.color_scheme_orig.clone(),
             };
             if let Err(error) = write_record(state_dir, &restored) {
                 failure
@@ -1209,10 +1372,21 @@ fn rollback(
         }
         None => {
             // The first choice never recorded one: remove what the failed
-            // swap wrote, so no dangling choice survives it.
+            // swap wrote, so no dangling choice survives it. There is no
+            // previous layer to reload back to, so the apps that already
+            // reloaded still show the new look while `current` says none:
+            // say so plainly instead of re-running reloads that would
+            // refuse with "no look layer is configured".
             std::fs::remove_file(state_dir.join("look.json")).ok();
             std::fs::remove_file(state_dir.join(LINK_NAME)).ok();
-            None
+            if completed_compositor || !completed_bars.is_empty() {
+                failure.rollback_errors.push(
+                    "no previous look exists to roll back to: the compositor and any reloaded bars still show the new look, while no look is recorded"
+                        .to_owned(),
+                );
+            }
+            failure.rolled_back_to = None;
+            return Err(failure);
         }
     };
     if !failure.rollback_errors.is_empty() {
@@ -1391,6 +1565,9 @@ fn flatten_keys(table: &toml::Table, prefix: String) -> Vec<String> {
     keys
 }
 
+/// Our three output files, the only ones `build --out` may write.
+const BUILD_FILES: [&str; 3] = ["scoot.toml", "bar.toml", "render.json"];
+
 /// Renders a source (a directory, or a catalog name) into `out` without
 /// touching state, the cache, or any app: `build` without `apply`.
 pub fn build_to_out(
@@ -1437,34 +1614,74 @@ pub fn build_to_out(
     let inputs = match check_inputs(&chain, &merged, checks, &mut validation) {
         Ok(inputs) => inputs,
         Err(_) => {
-            return Err(validation.errors.join("; "));
+            let detail = validation.errors.join("; ");
+            if detail.trim().is_empty() {
+                return Err(format!("cannot build {name}: invalid look (no detail)"));
+            }
+            return Err(detail);
         }
     };
-    let scoot = render_scoot(&merged, &inputs.inputs)
-        .map_err(|error| format!("cannot render {name}: {error}"))?;
-    let bar = render_bar(&merged, &inputs.inputs)
-        .map_err(|error| format!("cannot render {name}: {error}"))?;
-    for (file, text) in [("scoot.toml", &scoot), ("bar.toml", &bar)] {
-        text.parse::<toml::Table>()
-            .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
-    }
-    let target_bytes = chain
-        .last()
-        .map(|link| link.bytes.as_slice())
-        .unwrap_or_default();
-    let rendered_json = render_json(&name, &source_hash(target_bytes), &inputs.inputs);
+    let mut render_inputs = inputs.inputs;
+    let render_details = inputs.details;
+    let render_once = |render_inputs: &RenderInputs| -> Result<(String, String, String), String> {
+        let scoot = render_scoot(&merged, render_inputs)
+            .map_err(|error| format!("cannot render {name}: {error}"))?;
+        let bar = render_bar(&merged, render_inputs)
+            .map_err(|error| format!("cannot render {name}: {error}"))?;
+        for (file, text) in [("scoot.toml", &scoot), ("bar.toml", &bar)] {
+            text.parse::<toml::Table>()
+                .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
+        }
+        let target_bytes = chain
+            .last()
+            .map(|link| link.bytes.as_slice())
+            .unwrap_or_default();
+        let rendered_json = render_json(&name, &source_hash(target_bytes), render_inputs);
+        Ok((scoot, bar, rendered_json))
+    };
+    let (mut scoot, mut bar, mut rendered_json) = render_once(&render_inputs)?;
     // The bar's own parser runs before anything lands in `--out`: a
     // refused fragment leaves no complete-looking output behind. The
-    // check needs a file, so the fragments stage in a temp dir beside
-    // the destination, then copy over file by file.
-    let stage = out.with_extension("build-tmp");
-    if stage.exists() {
-        std::fs::remove_dir_all(&stage)
-            .map_err(|error| format!("cannot clear {}: {error}", stage.display()))?;
+    // check needs a file, so the fragments stage in a unique temp dir
+    // beside the destination (never a guessable `out.build-tmp` that an
+    // existing dir could collide with, and never `remove_dir_all` on a
+    // caller-derived path), then copy over file by file with
+    // symlink-safe atomic writes.
+    //
+    // `out` itself is never followed through a symlink, and a non-empty
+    // foreign dir is refused: only an absent dir, an empty dir, or one
+    // holding only our own three files is written into. That keeps
+    // `--out .` from wiping the cwd and `--out dist` from deleting a
+    // pre-existing `dist.build-tmp`.
+    static BUILD_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let parent = out.parent().filter(|p| !p.as_os_str().is_empty());
+    let stage_parent: PathBuf = match parent {
+        Some(p) => p.to_path_buf(),
+        None => std::env::current_dir()
+            .map_err(|error| format!("cannot resolve the working directory: {error}"))?,
+    };
+    // Ensure the stage parent exists (for `--out newdir/sub`, the parent
+    // `newdir` may not exist yet — but never create `out` itself here).
+    if !stage_parent.exists() {
+        std::fs::create_dir_all(&stage_parent)
+            .map_err(|error| format!("cannot create {}: {error}", stage_parent.display()))?;
     }
-    std::fs::create_dir_all(&stage)
+    let stage_name = format!(
+        ".{}.build-tmp.{}-{}-{}",
+        out.file_name().and_then(|n| n.to_str()).unwrap_or("out"),
+        std::process::id(),
+        BUILD_COUNTER.fetch_add(1, Ordering::SeqCst),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos()
+    );
+    let stage = stage_parent.join(stage_name);
+    // `create_dir` (not `create_dir_all`) refuses a planted symlink at the
+    // unique temp path instead of writing through one.
+    std::fs::create_dir(&stage)
         .map_err(|error| format!("cannot create {}: {error}", stage.display()))?;
-    let staged: Vec<(String, String)> = [
+    let mut staged: Vec<(String, String)> = [
         ("scoot.toml".to_owned(), scoot),
         ("bar.toml".to_owned(), bar),
         ("render.json".to_owned(), rendered_json),
@@ -1475,30 +1692,114 @@ pub fn build_to_out(
         std::fs::write(stage.join(file), contents)
             .map_err(|error| format!("cannot write {}: {error}", stage.join(file).display()))?;
     }
+    let stage_cleanup = |stage: &Path| {
+        std::fs::remove_dir_all(stage).ok();
+    };
     match checks.bar_fragment(&stage.join("bar.toml")) {
         Ok(Availability::Available(())) => {}
         Ok(Availability::Unavailable(note)) => validation.notes.push(note),
+        Err(message) if render_inputs.bar_popup && is_popup_refusal(&message) => {
+            // A bar built `--no-default-features` refuses `popup-radius`:
+            // re-render without it rather than refusing every look.
+            render_inputs.bar_popup = false;
+            (scoot, bar, rendered_json) = render_once(&render_inputs)?;
+            std::fs::write(stage.join("scoot.toml"), &scoot)
+                .map_err(|error| format!("cannot write {}: {error}", stage.join("scoot.toml").display()))?;
+            std::fs::write(stage.join("bar.toml"), &bar)
+                .map_err(|error| format!("cannot write {}: {error}", stage.join("bar.toml").display()))?;
+            std::fs::write(stage.join("render.json"), &rendered_json)
+                .map_err(|error| format!("cannot write {}: {error}", stage.join("render.json").display()))?;
+            // Rebuild the staged list to match the re-render.
+            staged = vec![
+                ("scoot.toml".to_owned(), scoot.clone()),
+                ("bar.toml".to_owned(), bar.clone()),
+                ("render.json".to_owned(), rendered_json.clone()),
+            ];
+            match checks.bar_fragment(&stage.join("bar.toml")) {
+                Ok(Availability::Available(())) => {
+                    validation.notes.push(
+                        "bar without `popup`: rendered without popup-radius".to_owned(),
+                    );
+                }
+                Ok(Availability::Unavailable(note)) => validation.notes.push(note),
+                Err(retry) => {
+                    stage_cleanup(&stage);
+                    return Err(retry);
+                }
+            }
+        }
         Err(message) => {
-            std::fs::remove_dir_all(&stage).ok();
+            stage_cleanup(&stage);
             return Err(message);
         }
     }
-    std::fs::create_dir_all(out)
-        .map_err(|error| format!("cannot create {}: {error}", out.display()))?;
+    // Refuse a symlinked `out`: writing through it would land outside the
+    // named directory.
+    if let Ok(meta) = std::fs::symlink_metadata(out)
+        && meta.file_type().is_symlink()
+    {
+        stage_cleanup(&stage);
+        return Err(format!(
+            "refusing to build into {}: it is a symlink",
+            out.display()
+        ));
+    }
+    if out.exists() && !out.is_dir() {
+        stage_cleanup(&stage);
+        return Err(format!(
+            "refusing to build into {}: not a directory",
+            out.display()
+        ));
+    }
+    if out.is_dir() {
+        let entries = std::fs::read_dir(out)
+            .map_err(|error| format!("cannot list {}: {error}", out.display()))?;
+        let mut foreign: Vec<String> = Vec::new();
+        for entry in entries.filter_map(|e| e.ok()) {
+            let entry_name = entry.file_name().to_string_lossy().into_owned();
+            if !BUILD_FILES.contains(&entry_name.as_str()) {
+                foreign.push(entry_name.clone());
+            }
+            // A symlinked output file would be written through: refuse it.
+            let fp = out.join(&entry_name);
+            if BUILD_FILES.contains(&entry_name.as_str())
+                && let Ok(meta) = std::fs::symlink_metadata(&fp)
+                && meta.file_type().is_symlink()
+            {
+                stage_cleanup(&stage);
+                return Err(format!(
+                    "refusing to build into {}: {} is a symlink",
+                    out.display(),
+                    fp.display()
+                ));
+            }
+        }
+        if !foreign.is_empty() {
+            foreign.sort();
+            stage_cleanup(&stage);
+            return Err(format!(
+                "refusing to build into {}: it holds files this build did not write ({})",
+                out.display(),
+                foreign.join(", ")
+            ));
+        }
+    } else {
+        std::fs::create_dir_all(out)
+            .map_err(|error| format!("cannot create {}: {error}", out.display()))?;
+    }
     for (file, contents) in &staged {
         let path = out.join(file);
-        std::fs::write(&path, contents)
-            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-        std::fs::File::open(&path)
-            .and_then(|file| file.sync_all())
-            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+        if let Err(error) = write_nofollow(&path, contents.as_bytes()) {
+            stage_cleanup(&stage);
+            return Err(format!("cannot write {}: {error}", path.display()));
+        }
     }
-    std::fs::remove_dir_all(&stage).ok();
+    stage_cleanup(&stage);
     Ok(BuildReport {
         name,
         out: path_to_string(out)?,
         warnings: validation.warnings,
-        notes: validation.notes.into_iter().chain(inputs.details).collect(),
+        notes: validation.notes.into_iter().chain(render_details).collect(),
     })
 }
 
@@ -1511,6 +1812,7 @@ pub enum BuildTarget {
 }
 
 /// What one `build` wrote.
+#[derive(Debug)]
 pub struct BuildReport {
     pub name: String,
     pub out: String,
@@ -1660,6 +1962,28 @@ impl Checks for ProdChecks {
         if path.is_empty() {
             return Err(format!(
                 "font `{family}` resolves to nothing (fc-match answered empty)"
+            ));
+        }
+        // `fc-match` always answers with a fallback file, so a missing
+        // family would otherwise apply with exit 0. Compare the matched
+        // family name: only an installed family passes.
+        let out = run_with_timeout(fc_match, &["--format=%{family}\n", family])?;
+        if !out.status.success() {
+            return Err(format!(
+                "font `{family}` resolves to nothing (fc-match failed)"
+            ));
+        }
+        let matched = String::from_utf8(out.stdout)
+            .map_err(|_| format!("font `{family}`: fc-match answered non-UTF-8"))?;
+        let want = family.trim().to_lowercase();
+        let installed = matched
+            .split(',')
+            .map(|part| part.trim().to_lowercase())
+            .any(|part| part == want);
+        if !installed {
+            return Err(format!(
+                "font `{family}` is not installed (fc-match resolves it to `{}`)",
+                matched.trim()
             ));
         }
         Ok(Availability::Available(path))

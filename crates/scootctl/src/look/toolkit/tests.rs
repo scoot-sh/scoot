@@ -16,7 +16,15 @@ fn record(toolkit: Option<bool>, color_scheme: Option<&str>) -> Record {
         declared_default: None,
         toolkit,
         color_scheme: color_scheme.map(str::to_owned),
+        color_scheme_orig: None,
     }
+}
+
+fn state_dir() -> std::path::PathBuf {
+    // A non-private scratch dir: the leaf must not start with the private
+    // prefix (`scoot-look-`), and SCOOT_LOOK_STATE is not pointed at it by
+    // the tests.
+    std::env::temp_dir().join(format!("scoot-toolkit-state-{}", std::process::id()))
 }
 
 #[derive(Default)]
@@ -51,6 +59,13 @@ impl Dconf for FakeDconf {
             .push((key.to_owned(), value.to_owned()));
         Ok(())
     }
+
+    fn reset(&self, key: &str) -> Result<(), String> {
+        self.writes
+            .borrow_mut()
+            .push((format!("reset {key}"), String::new()));
+        Ok(())
+    }
 }
 
 #[test]
@@ -64,7 +79,7 @@ fn toolkit_defaults_on_and_off_is_explicit() {
 fn an_unset_key_is_written_and_recorded() {
     let dconf = FakeDconf::default();
     let mut state = record(None, None);
-    let notes = apply_toolkit(&mut state, true, &dconf);
+    let notes = apply_toolkit(&state_dir(), &mut state, true, &dconf);
     assert_eq!(
         dconf.wrote(),
         vec![(COLOR_SCHEME_KEY.to_owned(), PREFER_DARK.to_owned())]
@@ -80,7 +95,7 @@ fn an_unset_key_is_written_and_recorded() {
 fn a_light_look_writes_prefer_light() {
     let dconf = FakeDconf::default();
     let mut state = record(None, None);
-    apply_toolkit(&mut state, false, &dconf);
+    apply_toolkit(&state_dir(), &mut state, false, &dconf);
     assert_eq!(
         dconf.wrote(),
         vec![(COLOR_SCHEME_KEY.to_owned(), PREFER_LIGHT.to_owned())]
@@ -94,7 +109,7 @@ fn what_the_tool_wrote_is_owned_and_rewritten() {
         ..FakeDconf::default()
     };
     let mut state = record(None, Some(PREFER_DARK));
-    let notes = apply_toolkit(&mut state, true, &dconf);
+    let notes = apply_toolkit(&state_dir(), &mut state, true, &dconf);
     assert_eq!(dconf.wrote().len(), 1);
     assert!(
         notes.iter().any(|note| note.contains("set to")),
@@ -109,7 +124,7 @@ fn a_key_someone_else_changed_is_left_alone_and_named() {
         ..FakeDconf::default()
     };
     let mut state = record(None, Some(PREFER_DARK));
-    let notes = apply_toolkit(&mut state, true, &dconf);
+    let notes = apply_toolkit(&state_dir(), &mut state, true, &dconf);
     assert!(dconf.wrote().is_empty());
     assert_eq!(state.color_scheme.as_deref(), Some(PREFER_DARK));
     assert!(
@@ -128,7 +143,7 @@ fn the_first_write_adopts_whatever_is_there() {
         ..FakeDconf::default()
     };
     let mut state = record(None, None);
-    let notes = apply_toolkit(&mut state, true, &dconf);
+    let notes = apply_toolkit(&state_dir(), &mut state, true, &dconf);
     assert_eq!(dconf.wrote().len(), 1);
     assert_eq!(state.color_scheme.as_deref(), Some(PREFER_DARK));
     assert!(
@@ -141,7 +156,7 @@ fn the_first_write_adopts_whatever_is_there() {
 fn toolkit_off_writes_nothing() {
     let dconf = FakeDconf::default();
     let mut state = record(Some(false), None);
-    let notes = apply_toolkit(&mut state, true, &dconf);
+    let notes = apply_toolkit(&state_dir(), &mut state, true, &dconf);
     assert!(dconf.wrote().is_empty());
     assert!(state.color_scheme.is_none());
     assert!(notes.iter().any(|note| note.contains("off")), "{notes:?}");
@@ -154,7 +169,7 @@ fn a_missing_dconf_is_a_note_not_a_refusal() {
         ..FakeDconf::default()
     };
     let mut state = record(None, None);
-    let notes = apply_toolkit(&mut state, true, &dconf);
+    let notes = apply_toolkit(&state_dir(), &mut state, true, &dconf);
     assert!(dconf.wrote().is_empty());
     assert!(
         notes.iter().any(|note| note.contains("no `dconf`")),
@@ -169,7 +184,7 @@ fn a_failed_write_is_a_note_and_keeps_no_record() {
         ..FakeDconf::default()
     };
     let mut state = record(None, None);
-    let notes = apply_toolkit(&mut state, true, &dconf);
+    let notes = apply_toolkit(&state_dir(), &mut state, true, &dconf);
     assert!(state.color_scheme.is_none());
     assert!(
         notes.iter().any(|note| note.contains("not written")),

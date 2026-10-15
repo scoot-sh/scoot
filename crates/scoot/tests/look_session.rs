@@ -7,8 +7,8 @@
 //! `msg_broken_pipe.rs` does) with scratch `XDG_STATE_HOME`,
 //! `XDG_RUNTIME_DIR`, `XDG_CONFIG_HOME` and `HOME`, so no developer's real
 //! look is ever in reach. A swap is simulated by writing the private
-//! `look.json` and repointing the private link directly (the `apply` tool
-//! that will own that write lands in `look-apply-cli`); what this pins is
+//! `look.json` and repointing the private link directly (what `scoot look
+//! apply` owns); what this pins is
 //! the isolation the tool will rely on: the seed, the export, and the user
 //! state staying byte-identical across a reload of a changed private link.
 //!
@@ -266,7 +266,7 @@ fn a_headless_session_seeds_exports_and_isolates_its_private_state() {
     );
 
     // A swap inside the session: a new rendered look, a new record, the
-    // link repointed -- the write `apply` will own (in `look-apply-cli`).
+    // link repointed -- the write `scoot look apply` owns.
     let rendered = scratch.dir.join("rendered-ginger");
     std::fs::create_dir(&rendered).expect("a second rendered dir");
     std::fs::write(rendered.join("scoot.toml"), "[appearance]\n").expect("a fragment");

@@ -241,9 +241,9 @@ the protocol are in
 
 **`scootbg check-image PATH`** validates one image file without showing
 it: what `scoot look apply` runs over a look's wallpaper before a swap.
-The byte cap from the file's size, then the pixel cap from the header,
-then a full decode — the same gates a swap-time `apply-config` would
-hit. Prints `ok: <format> <WxH>, <bytes> bytes` and exits 0. A symlink,
+The byte cap (32 MiB) from the file's size, then the pixel cap from the
+header, then a full decode. The byte cap is a `check-image` gate: a
+swap-time apply enforces the pixel cap and the decode. Prints `ok: <format> <WxH>, <bytes> bytes` and exits 0. A symlink,
 a directory, a FIFO, a device, a missing file, an unknown format and a
 corrupt or oversize image refuse with exit 1, naming the reason. Opening
 cannot hang: the file is opened without blocking and refused unless it is

@@ -163,6 +163,27 @@ fn an_invalid_manifest_is_a_note_not_a_missing_catalog() {
 }
 
 #[test]
+fn a_symlinked_look_uses_the_entry_name_not_the_target() {
+    // Home-manager/Nix-style catalogs symlink each look into the store:
+    // `user-looks/moonrise -> /store/<hash>-moonrise-look`. The name is
+    // the entry's own name, never the target's basename.
+    let root = scratch("symlink-look");
+    let looks = root.join("looks");
+    std::fs::create_dir_all(&looks).expect("a looks dir");
+    let store = root.join("store");
+    let target = store.join("abc123-moonrise-look");
+    std::fs::create_dir_all(&target).expect("a store dir");
+    std::fs::write(target.join("look.toml"), look_toml("moonrise")).expect("a manifest");
+    std::os::unix::fs::symlink(&target, looks.join("moonrise")).expect("a look link");
+    let catalog = discover_ordered(&[(looks, Origin::User)]);
+    assert!(
+        catalog.find("moonrise").is_some(),
+        "notes: {:?}",
+        catalog.notes
+    );
+}
+
+#[test]
 fn a_missing_source_dir_is_skipped_quietly() {
     let catalog: Catalog =
         discover_ordered(&[(PathBuf::from("/nonexistent-scoot-looks"), Origin::User)]);

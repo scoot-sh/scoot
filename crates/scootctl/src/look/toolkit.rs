@@ -22,6 +22,8 @@
 //! A box without `dconf` gets a note, not a refusal. Every step here is
 //! best-effort and reported; a toolkit failure never refuses a swap.
 
+use std::path::Path;
+
 use scoot_look::state::Record;
 
 /// The dconf key the tool owns one value of.
@@ -51,6 +53,8 @@ pub trait Dconf {
     fn read(&self, key: &str) -> Option<String>;
     /// Writes `value`, exactly as given.
     fn write(&self, key: &str, value: &str) -> Result<(), String>;
+    /// Resets `key` to unset (what it was before the tool's first write).
+    fn reset(&self, key: &str) -> Result<(), String>;
     /// Whether the backend exists at all. A missing `dconf` is a note.
     fn available(&self) -> bool;
 }
@@ -107,6 +111,19 @@ impl Dconf for CliDconf {
             Err(format!("`dconf write {key}` failed"))
         }
     }
+
+    fn reset(&self, key: &str) -> Result<(), String> {
+        let program = self
+            .program
+            .as_ref()
+            .ok_or_else(|| "no `dconf` on PATH".to_owned())?;
+        let out = super::apply::run_with_timeout(program, &["reset", key])?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(format!("`dconf reset {key}` failed"))
+        }
+    }
 }
 
 /// Finds `name` on `PATH`: each directory joined with the name, first
@@ -124,15 +141,54 @@ pub fn find_on_path(name: &str) -> Option<std::path::PathBuf> {
     })
 }
 
+/// Whether `state_dir` is a private look state (a headless or
+/// `--private-look` session's): its leaf is `scoot-look-<display>`, or it
+/// is the `$SCOOT_LOOK_STATE` dir. Toolkit writes never touch the user's
+/// real dconf from one unless explicitly asked (an explicit `--state`
+/// pointing at the user state).
+pub fn is_private_state(state_dir: &Path) -> bool {
+    use std::path::Path as P;
+    let leaf = state_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    if leaf.starts_with(scoot_look::state::PRIVATE_PREFIX) {
+        return true;
+    }
+    if let Some(session) = std::env::var_os(scoot_look::state::STATE_ENV)
+        && !session.is_empty()
+        && P::new(&session) == state_dir
+    {
+        return true;
+    }
+    false
+}
+
 /// Applies the toolkit step for a swap: writes the look's `color-scheme`
 /// under the D11 rules, recording what was written in `record`. Returns the
 /// notes for the reply. Never fails the swap: a missing backend or a failed
 /// write is a note.
-pub fn apply_toolkit(record: &mut Record, dark: bool, dconf: &dyn Dconf) -> Vec<String> {
+/// The original live value is saved once (before the first write) into
+/// `record.color_scheme_orig` (`Some("")` means it was unset), so
+/// `toolkit off` can restore it. A private session never writes: its swaps
+/// must not move the user's real desktop.
+pub fn apply_toolkit(
+    state_dir: &Path,
+    record: &mut Record,
+    dark: bool,
+    dconf: &dyn Dconf,
+) -> Vec<String> {
     let mut notes = Vec::new();
     if !toolkit_on(record) {
         notes.push(
             "toolkit writes off (`scoot look toolkit off`): color-scheme left alone".to_owned(),
+        );
+        return notes;
+    }
+    if is_private_state(state_dir) {
+        notes.push(
+            "private look state (headless or --private-look): color-scheme left alone"
+                .to_owned(),
         );
         return notes;
     }
@@ -141,6 +197,12 @@ pub fn apply_toolkit(record: &mut Record, dark: bool, dconf: &dyn Dconf) -> Vec<
         return notes;
     }
     let want = want_for_polarity(dark);
+    // Save the original once, before the first write, so `toolkit off`
+    // can restore it. `Some("")` means it was unset.
+    if record.color_scheme_orig.is_none() && record.color_scheme.is_none() {
+        let orig = dconf.read(COLOR_SCHEME_KEY).unwrap_or_default();
+        record.color_scheme_orig = Some(orig);
+    }
     match dconf.read(COLOR_SCHEME_KEY) {
         // Unset, or what the tool last wrote: the tool owns the key.
         None => write_and_record(record, want, dconf, &mut notes),
@@ -148,7 +210,8 @@ pub fn apply_toolkit(record: &mut Record, dark: bool, dconf: &dyn Dconf) -> Vec<
             write_and_record(record, want, dconf, &mut notes)
         }
         // No record yet: adopt the key (the documented first-apply
-        // exception), whatever the live value is.
+        // exception), whatever the live value is. The original is saved
+        // above, so `toolkit off` restores it.
         Some(_) if record.color_scheme.is_none() => {
             notes.push(
                 "color-scheme had no scoot record: adopting it (use `apply --no-toolkit` to opt out)".to_owned(),

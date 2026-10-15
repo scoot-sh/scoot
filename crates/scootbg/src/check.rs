@@ -1,8 +1,10 @@
 //! `scootbg check-image`: validate one wallpaper file without showing it.
 //!
 //! What `scoot look apply` runs over a look's wallpaper before a swap: the
-//! byte cap from the file's size, then the pixel cap from the header, then
-//! a full decode — the same gates a swap-time `apply-config` would hit,
+//! byte cap (32 MiB) from the file's size, then the pixel cap from the
+//! header, then
+//! a full decode (the byte cap is a `check-image` gate; a swap-time apply
+//! enforces the pixel cap and the decode),
 //! answered before anything is repointed. Prints `ok: <format> <WxH>,
 //! <bytes> bytes` and exits 0; anything else exits 1 naming the reason.
 //! Opening cannot hang (the file is opened `O_NONBLOCK` and refused unless

@@ -43,7 +43,9 @@ is touched. A refused reload rolls the swap back: the record and the link
 go back to the previous look, the reloads that already ran run again, and
 the reply names the refusal. If a rollback reload also refuses, the reply
 says `ROLLED BACK WITH ERRORS` with both reasons; each app is on its old
-or its new look, never between.
+or its new look, never between — except a first-ever apply with no
+previous look: there is nothing to reload back to, so reloaded apps still
+show the new look while no look is recorded, and the reply says so.
 
 Every command takes `--json` (the reply as JSON on stdout, notes on
 stderr). Exit status: 0 applied, 1 the run failed, 2 the invocation was
@@ -93,8 +95,11 @@ no record adopts the key whatever it holds. A box without `dconf` gets a
 note, not a refusal.
 
 - `scoot look apply --no-toolkit` skips the write for one apply.
-- `scoot look toolkit off` persists the skip in `look.json`;
+- `scoot look toolkit off` persists the skip in `look.json` and restores
+  the `color-scheme` from before the tool's first write;
   `scoot look toolkit` shows the state.
+- A private look state (a headless or `--private-look` session) never
+  writes `color-scheme`: its swaps must not move the real desktop.
 
 ## Dogfooding on a home-manager machine
 
@@ -118,7 +123,8 @@ the Nix catalog.
 Write a directory with a `look.toml` (see the
 [format](../reference/look-format.md)), then `scoot look validate DIR`
 and `scoot look build DIR --out OUT`. `validate` resolves, contrast-checks
-and runs the effectful checks: fonts through fontconfig, the wallpaper
+and runs the effectful checks: fonts through fontconfig (the family must
+be installed; a `[fonts.files]` path must exist), the wallpaper
 through `scootbg check-image`, the bar fragment through the installed
 bar's own parser. Your own looks live in
 `~/.local/share/scoot/user-looks/<name>/`.
@@ -127,6 +133,14 @@ bar's own parser. Your own looks live in
 > A key in your own files shadows the look. `scoot look current` names
 > every shadowing key; remove or change yours to let the look through.
 
-> **Symptom:** `apply` refuses with an unknown-request error.
-> The compositor is older than the look-scoped reload. Update scoot; the
-> swap rolled back and nothing retried as a plain reload.
+> **Symptom:** `apply` refuses with `the compositor predates scoot look:
+> update scoot and restart the session`.
+> The compositor is older than the look-scoped reload. Update scoot and
+> restart the session; the swap rolled back and nothing retried as a plain
+> reload.
+
+> **Symptom:** `apply` refuses with `the running bar predates the
+> look-scoped reload: restart it`.
+> The bar is older than the look-scoped reload (it answered a plain `ok`
+> without the scope receipt, applying pending edits). Restart the bar and
+> re-apply; the swap never retries as a plain reload.

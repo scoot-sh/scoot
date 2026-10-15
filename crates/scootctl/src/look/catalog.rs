@@ -216,9 +216,12 @@ fn scan_dir(dir: &Path, origin: Origin, catalog: &mut Catalog) {
         if !canonical.is_dir() {
             continue;
         }
-        let dir_name = canonical
+        // Home-manager/Nix-style catalogs symlink each look: the name is
+        // the entry's own name, never the store target's basename (which
+        // carries a hash prefix like `<hash>-moonrise-look`).
+        let dir_name = entry
             .file_name()
-            .and_then(|name| name.to_str())
+            .to_str()
             .unwrap_or_default()
             .to_owned();
         let file = canonical.join("look.toml");

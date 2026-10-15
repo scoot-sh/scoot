@@ -11,11 +11,10 @@
 //! through `scoot-ipc`'s client. A compositor older than the look-scoped
 //! tag answers it with an ordinary error, which is a refusal, never a
 //! plain reload (a plain reload would apply the pending edits the scope
-//! exists to skip). A bar older than the look scope is a rollout skew the
-//! wire cannot detect: it ignores the unknown `scope` field and answers a
-//! plain reload's `ok`, applying pending edits. Swapping against a mixed
-//! build is an upgrade-window hazard, fixed once every bar carries the
-//! scope; the reply cannot tell the two apart, so the docs say so instead.
+//! exists to skip). A bar older than the look scope answers a plain `ok`
+//! without the `"scope":"look"` receipt: the CLI refuses it with one
+//! clear line ("the running bar predates the look-scoped reload: restart
+//! it"), never retrying as a plain reload.
 
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -121,7 +120,14 @@ impl CompositorReload for IpcCompositor {
         match client
             .request(&scoot_ipc::Request::ReloadLook)
             .map_err(|error| {
-                ReloadError::Refused(format!("the compositor did not answer: {error}"))
+                let text = error.to_string();
+                if text.contains("unknown variant") {
+                    return ReloadError::Refused(
+                        "the compositor predates scoot look: update scoot and restart the session"
+                            .to_owned(),
+                    );
+                }
+                ReloadError::Refused(format!("the compositor did not answer: {text}"))
             })? {
             scoot_ipc::Response::Reloaded {
                 applied,
@@ -152,9 +158,19 @@ impl CompositorReload for IpcCompositor {
                     )))
                 }
             }
-            scoot_ipc::Response::Error { message } => Err(ReloadError::Refused(format!(
-                "the compositor refused the look reload: {message}"
-            ))),
+            scoot_ipc::Response::Error { message } => {
+                // An older compositor answers the unknown `ReloadLook` tag
+                // with a serde wall: map it to one line.
+                if message.contains("unknown variant") && message.contains("reload") {
+                    return Err(ReloadError::Refused(
+                        "the compositor predates scoot look: update scoot and restart the session"
+                            .to_owned(),
+                    ));
+                }
+                Err(ReloadError::Refused(format!(
+                    "the compositor refused the look reload: {message}"
+                )))
+            }
             other => Err(ReloadError::Refused(format!(
                 "the compositor answered the look reload with an unexpected reply: {other:?}"
             ))),
@@ -243,7 +259,18 @@ pub fn bar_reload_outcome(socket: &Path) -> Result<bool, String> {
         )
     })?;
     match reply.get("type").and_then(|kind| kind.as_str()) {
-        Some("ok") | Some("bar") => Ok(true),
+        Some("ok") => {
+            // The scoped reload must carry its scope receipt: a plain
+            // `ok` answers a different request (an older bar that ignores
+            // the unknown `scope` field and runs a plain reload, applying
+            // pending edits). Refuse it loudly, never retry as plain.
+            match reply.get("scope").and_then(|scope| scope.as_str()) {
+                Some("look") => Ok(true),
+                _ => Err("the running bar predates the look-scoped reload: restart it"
+                    .to_owned()),
+            }
+        }
+        Some("bar") => Ok(true),
         Some("error") => Err(format!(
             "the bar refused the look reload: {}",
             reply

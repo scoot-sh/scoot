@@ -211,6 +211,13 @@ impl Dconf for FakeDconf {
             .push((key.to_owned(), value.to_owned()));
         Ok(())
     }
+
+    fn reset(&self, key: &str) -> Result<(), String> {
+        self.writes
+            .borrow_mut()
+            .push((format!("reset {key}"), String::new()));
+        Ok(())
+    }
 }
 
 fn record_of(state: &Path) -> scoot_look::state::Record {
@@ -480,7 +487,8 @@ fn an_older_compositor_is_a_refusal_never_a_plain_retry() {
     // The wire shape an older compositor answers to the unknown
     // `reload_look` tag: an ordinary error, which refuses the swap rather
     // than retrying as a plain reload (a plain reload would apply the
-    // pending edits the scope exists to skip).
+    // pending edits the scope exists to skip). The peer never accepted the
+    // request, so the rollback skips re-running it (one call, not two).
     let fixture = fixture("older");
     let fonts = fixture._root.join("fonts");
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
@@ -499,12 +507,9 @@ fn an_older_compositor_is_a_refusal_never_a_plain_retry() {
         &FakeDconf::absent(),
     )
     .expect("the first apply succeeds");
-    let mut compositor = FakeCompositor::with_script(vec![
-        Err(ReloadError::Refused(
-            "unknown variant `reload_look`, expected `reload`".to_owned(),
-        )),
-        Ok(Reloaded::default()),
-    ]);
+    let mut compositor = FakeCompositor::with_script(vec![Err(ReloadError::Refused(
+        "unknown variant `reload_look`, expected `reload`".to_owned(),
+    ))]);
     let failure = apply_with(
         "look-b",
         &options(),
@@ -524,9 +529,9 @@ fn an_older_compositor_is_a_refusal_never_a_plain_retry() {
         "{}",
         failure.message
     );
-    // The swap and its rollback are the only two calls: an ordinary
-    // error refuses, and nothing retries as a plain reload.
-    assert_eq!(compositor.calls.get(), 2);
+    // Only the swap runs: the peer never accepted the request, so the
+    // rollback skips re-running it, and nothing retries as a plain reload.
+    assert_eq!(compositor.calls.get(), 1);
 }
 
 #[test]
@@ -606,12 +611,12 @@ fn a_failed_first_apply_removes_what_it_wrote() {
     let fonts = fixture._root.join("fonts");
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
-    // Nothing to restore to, so what the failed swap wrote is removed;
-    // the rollback reload still runs (and refuses: no layer is no layer).
-    let mut compositor = FakeCompositor::with_script(vec![
-        Err(ReloadError::Refused("nope".to_owned())),
-        Err(ReloadError::Refused("nothing to roll back to".to_owned())),
-    ]);
+    // Nothing to restore to, so what the failed swap wrote is removed and
+    // no rollback reload runs (it would refuse with "no look layer is
+    // configured"): the message says plainly the apps still show the new
+    // look while nothing is recorded.
+    let mut compositor =
+        FakeCompositor::with_script(vec![Err(ReloadError::Refused("nope".to_owned()))]);
     let failure = apply_with(
         "look-a",
         &options(),
@@ -627,7 +632,12 @@ fn a_failed_first_apply_removes_what_it_wrote() {
     .expect_err("the first apply fails");
     assert!(failure.rolled_back_to.is_none());
     assert!(failure.to_string().contains("ROLLED BACK WITH ERRORS"));
-    assert_eq!(compositor.calls.get(), 2);
+    assert!(
+        failure.to_string().contains("still show the new look"),
+        "{}",
+        failure
+    );
+    assert_eq!(compositor.calls.get(), 1);
     assert!(!fixture.state.join("look.json").exists());
     assert!(!fixture.state.join(LINK_NAME).exists());
 }
@@ -1109,6 +1119,197 @@ fn pruning_never_touches_state_names() {
     assert!(fixture.cache.join("look").is_dir());
     assert!(fixture.cache.join("look.json").is_file());
     assert!(fixture.cache.join("look.lock").is_file());
+}
+
+#[test]
+fn build_refuses_a_foreign_nonempty_out() {
+    let fixture = fixture("build-foreign");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let out = fixture._root.join("foreign-out");
+    std::fs::create_dir_all(&out).expect("an out dir");
+    std::fs::write(out.join("notes.txt"), b"mine").expect("a foreign file");
+    let error = build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+    )
+    .expect_err("a foreign out refuses");
+    assert!(error.contains("holds files"), "{error}");
+    assert!(out.join("notes.txt").is_file(), "the foreign file survives");
+    assert!(!out.join("scoot.toml").exists());
+}
+
+#[test]
+fn build_refuses_a_symlinked_out_and_a_symlinked_fragment() {
+    let fixture = fixture("build-symlink");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    // A symlinked `out` itself refuses.
+    let target = fixture._root.join("real-out");
+    std::fs::create_dir_all(&target).expect("a target");
+    let link = fixture._root.join("link-out");
+    std::os::unix::fs::symlink(&target, &link).expect("a link");
+    let error = build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &link,
+        &fixture.catalog,
+        &checks,
+    )
+    .expect_err("a symlinked out refuses");
+    assert!(error.contains("symlink"), "{error}");
+    // A symlinked fragment inside an otherwise-ours out refuses instead
+    // of writing through it.
+    let out = fixture._root.join("out-symfrag");
+    std::fs::create_dir_all(&out).expect("an out");
+    std::os::unix::fs::symlink("/etc/hostname", out.join("scoot.toml")).expect("a link");
+    let error = build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+    )
+    .expect_err("a symlinked fragment refuses");
+    assert!(error.contains("symlink"), "{error}");
+}
+
+#[test]
+fn build_into_an_out_holding_only_our_files_overwrites() {
+    let fixture = fixture("build-ours");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let out = fixture._root.join("ours-out");
+    build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+    )
+    .expect("the first build succeeds");
+    // A second build into the same dir (only our three files) succeeds.
+    build_to_out(
+        &BuildTarget::Name("look-b".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+    )
+    .expect("rebuilding over our own files succeeds");
+}
+
+#[test]
+fn build_leaves_a_sibling_build_tmp_alone() {
+    // `--out dist` with a pre-existing `dist.build-tmp` (or any sibling)
+    // must not delete it: the stage is uniquely named.
+    let fixture = fixture("build-sibling");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let out = fixture._root.join("dist");
+    let sibling = fixture._root.join("dist.build-tmp");
+    std::fs::create_dir_all(&sibling).expect("a sibling");
+    std::fs::write(sibling.join("keep.txt"), b"mine").expect("a file");
+    build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+    )
+    .expect("the build succeeds");
+    assert!(sibling.join("keep.txt").is_file(), "the sibling survives");
+}
+
+#[test]
+fn validate_names_a_bad_wallpaper_instead_of_blank() {
+    use super::super::catalog::tests::write_look;
+    // A wallpaper symlink escaping the look, a FIFO, and a missing file
+    // all land in `errors` (never a blank refusal), and `validate_entry`
+    // reports invalid (not valid:true).
+    for (tag, setup) in [
+        ("symlink", "symlink"),
+        ("fifo", "fifo"),
+        ("missing", "missing"),
+    ] {
+        let root = super::super::catalog::tests::scratch(&format!("badwall-{tag}"));
+        let sources = root.join("looks");
+        std::fs::create_dir_all(sources.join("badlook")).expect("a look dir");
+        let base = super::super::catalog::tests::look_toml("badlook");
+        // Swap the color wallpaper for an image one pointing at
+        // `wallpaper.png`.
+        let with_wall = base.replace(
+            "color = \"#2B3648\"",
+            "image = \"wallpaper.png\"",
+        );
+        assert_ne!(with_wall, base, "the fixture carries a wallpaper color");
+        std::fs::write(sources.join("badlook").join("look.toml"), with_wall)
+            .expect("a manifest");
+        let wall = sources.join("badlook").join("wallpaper.png");
+        match setup {
+            "symlink" => {
+                std::os::unix::fs::symlink("/etc/passwd", &wall).expect("a link");
+            }
+            "fifo" => {
+                let rc = std::process::Command::new("mkfifo")
+                    .arg(&wall)
+                    .status()
+                    .expect("mkfifo runs");
+                assert!(rc.success());
+            }
+            _ => {
+                // Missing: nothing created.
+            }
+        }
+        let catalog =
+            super::super::catalog::discover_ordered(&[(sources, Origin::User)]);
+        let checks = FakeChecks::default();
+        // The look may be skipped from the catalog (invalid); validate the
+        // dir directly so the wallpaper check runs.
+        let dir = root.join("looks").join("badlook");
+        // `validate_dir` reads look.toml first; the wallpaper failure must
+        // appear in errors, never as an empty command error.
+        match validate_dir(&dir, Origin::User, &catalog, &checks) {
+            Ok(validation) => {
+                assert!(
+                    !validation.errors.is_empty(),
+                    "{tag}: expected errors, got {validation:?}"
+                );
+                for error in &validation.errors {
+                    assert!(!error.trim().is_empty(), "{tag}: blank error");
+                }
+            }
+            Err(message) => {
+                assert!(!message.trim().is_empty(), "{tag}: blank refusal");
+            }
+        }
+        // And an apply never prints an empty message either.
+        if catalog.find("badlook").is_some() {
+            let cache = root.join("cache");
+            let state = root.join("state");
+            let mut compositor = FakeCompositor::not_running();
+            let failure = apply_with(
+                "badlook",
+                &options(),
+                &catalog,
+                &cache,
+                &state,
+                None,
+                &mut compositor,
+                &[],
+                &checks,
+                &FakeDconf::absent(),
+            )
+            .expect_err("a bad wallpaper refuses the apply");
+            assert!(!failure.message.trim().is_empty(), "blank apply message");
+            assert!(
+                !failure.message.ends_with("`badlook`: "),
+                "blank detail: {}",
+                failure.message
+            );
+        }
+    }
 }
 
 #[test]

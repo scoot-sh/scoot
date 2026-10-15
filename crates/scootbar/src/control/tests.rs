@@ -247,7 +247,7 @@ struct OkHandler;
 
 impl Handler for OkHandler {
     fn handle(&mut self, _line: &[u8], out: &mut Vec<u8>) {
-        protocol::write_reply(out, &protocol::Reply::Ok);
+        protocol::write_reply(out, &protocol::Reply::Ok { scope: None });
     }
 }
 
@@ -300,6 +300,21 @@ fn a_connection_answers_every_line() {
         ],
     );
     assert_eq!(replies, ["{\"type\":\"ok\"}\n", "{\"type\":\"ok\"}\n"]);
+}
+
+#[test]
+fn a_scoped_ok_carries_its_scope_while_plain_stays_byte_identical() {
+    let mut out = Vec::new();
+    protocol::write_reply(out, &protocol::Reply::Ok { scope: None });
+    assert_eq!(out, b"{\"type\":\"ok\"}\n");
+    out.clear();
+    protocol::write_reply(
+        out,
+        &protocol::Reply::Ok {
+            scope: Some("look"),
+        },
+    );
+    assert_eq!(out, b"{\"type\":\"ok\",\"scope\":\"look\"}\n");
 }
 
 #[test]

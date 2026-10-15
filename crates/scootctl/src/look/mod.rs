@@ -35,7 +35,7 @@ use apply::{
 };
 use catalog::{Catalog, discover, origin_name};
 use reload::{CompositorReload, IpcCompositor, bar_targets};
-use toolkit::{CliDconf, toolkit_on};
+use toolkit::{CliDconf, Dconf, toolkit_on};
 
 /// One `scoot look` invocation: the command, the state/socket selection,
 /// and whether the reply renders as JSON.
@@ -743,13 +743,19 @@ fn unknown_look_here(name: &str, catalog: &Catalog) -> String {
 fn run_validate(look: &Look, target: &str, origin: Origin) -> Result<(), String> {
     let catalog = discover();
     let checks = apply::ProdChecks::new();
+    // A bare name is always a catalog look; a path needs a slash (use
+    // `./name` for a directory in the cwd), so a cwd directory named like
+    // a look never shadows the catalog.
+    let is_path = target.contains('/') || target == "." || target == "..";
     let path = PathBuf::from(target);
-    let validation = if path.is_dir() {
-        validate_dir(&path, origin, &catalog, &checks)?
-    } else if path.exists() {
-        return Err(format!(
-            "`{target}` exists and is not a directory: validate takes a directory or a catalog name"
-        ));
+    let validation = if is_path {
+        if path.is_dir() {
+            validate_dir(&path, origin, &catalog, &checks)?
+        } else {
+            return Err(format!(
+                "`{target}` is not a directory: validate takes a directory or a catalog name (`./{target}` for a cwd directory)"
+            ));
+        }
     } else {
         let mut validation = validate_entry(&catalog, target, &checks)?;
         if origin != Origin::User {
@@ -797,13 +803,17 @@ fn run_validate(look: &Look, target: &str, origin: Origin) -> Result<(), String>
 fn run_build(look: &Look, target: &str, out: &Path, origin: Origin) -> Result<(), String> {
     let catalog = discover();
     let checks = apply::ProdChecks::new();
+    // Bare names are catalog looks; paths need a slash (`./name` for cwd).
+    let is_path = target.contains('/') || target == "." || target == "..";
     let path = PathBuf::from(target);
-    let build_target = if path.is_dir() {
-        BuildTarget::Dir { path, origin }
-    } else if path.exists() {
-        return Err(format!(
-            "`{target}` exists and is not a directory: build takes a directory or a catalog name"
-        ));
+    let build_target = if is_path {
+        if path.is_dir() {
+            BuildTarget::Dir { path, origin }
+        } else {
+            return Err(format!(
+                "`{target}` is not a directory: build takes a directory or a catalog name"
+            ));
+        }
     } else {
         if origin != Origin::User {
             output::warn(format_args!(
@@ -946,6 +956,24 @@ fn run_toolkit(look: &Look, action: Option<bool>) -> Result<(), String> {
     };
     if let Some(on) = action {
         record.toolkit = Some(on);
+        // Turning off restores the live value from before the tool's
+        // first write (saved as `color-scheme-orig`; empty means it was
+        // unset, restored with `reset`). Best-effort: a failed restore is
+        // reported, never a refusal.
+        if !on {
+            let dconf = CliDconf::new();
+            if dconf.available() {
+                let restored = match record.color_scheme_orig.as_deref() {
+                    Some("") | None => dconf.reset(crate::look::toolkit::COLOR_SCHEME_KEY),
+                    Some(orig) => {
+                        dconf.write(crate::look::toolkit::COLOR_SCHEME_KEY, orig)
+                    }
+                };
+                if let Err(error) = restored {
+                    output::warn(format_args!("note: color-scheme not restored: {error}"));
+                }
+            }
+        }
         scoot_look::state::write_record(&state_dir, &record)
             .map_err(|error| format!("cannot record the toolkit state: {error}"))?;
     }
