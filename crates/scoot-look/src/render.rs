@@ -41,6 +41,13 @@ pub struct RenderInputs {
     /// (`crates/scootbar/src/config.rs:396-401`): `popup-radius` is only
     /// emitted then, because the file denies unknown keys.
     pub bar_popup: bool,
+    /// Override sections (the first dotted segment of an `[apps.scootbar]`
+    /// key: `workspaces`, `clock`, ...) the target scootbar binary lacks:
+    /// a build without that module's feature denies the whole table
+    /// (`unknown field inactive-color, there are no fields` on a minimal
+    /// bar), so those tokens are not rendered at all. Sorted, deduplicated
+    /// by the tool; the renderer skips them defensively.
+    pub bar_drop_sections: Vec<String>,
 }
 
 /// Quote one TOML string value. Every input is already grammar-checked, so
@@ -268,6 +275,17 @@ pub fn render_bar(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, 
         pt_to_px(look.fonts.size).to_string(),
     );
     for (section, keys) in override_sections("scootbar", &look.apps)? {
+        // Tokens for modules the installed bar lacks never render: the
+        // tool drops those sections against the binary's own parser (the
+        // way `popup-radius` is dropped for a bar without `popup`), so a
+        // shipped look still applies on the lightest bar.
+        if inputs
+            .bar_drop_sections
+            .iter()
+            .any(|dropped| dropped.as_str() == section)
+        {
+            continue;
+        }
         sections.entry(section).or_default().extend(keys);
     }
     // Clamp `bar.radius` — derived and override alike — to what scootbar
@@ -310,8 +328,16 @@ fn json_str(s: &str) -> String {
 pub fn render_json(name: &str, hash: &str, inputs: &RenderInputs) -> String {
     let wallpaper = inputs.wallpaper_abs.as_deref().unwrap_or("");
     let font = inputs.ui_font_file.as_deref().unwrap_or("");
+    let mut dropped = inputs.bar_drop_sections.clone();
+    dropped.sort();
+    dropped.dedup();
+    let dropped = dropped
+        .iter()
+        .map(|section| json_str(section))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"name\":{},\"source_hash\":{},\"wallpaper\":{},\"ui_font\":{},\"bar_popup\":{}}}",
+        "{{\"name\":{},\"source_hash\":{},\"wallpaper\":{},\"ui_font\":{},\"bar_popup\":{},\"bar_dropped\":[{dropped}]}}",
         json_str(name),
         json_str(hash),
         json_str(wallpaper),

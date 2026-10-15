@@ -26,13 +26,17 @@ struct Fixture {
     cache: PathBuf,
     state: PathBuf,
     config: PathBuf,
+    _scratch: tempfile::TempDir,
     _root: PathBuf,
 }
 
 /// Two looks (`look-a` ring width 2, `look-b` ring width 3), a cache, a
-/// state dir and a config home, all scratch.
+/// state dir and a config home, all scratch. The `TempDir` guard removes
+/// the tree on drop, so the suite leaves no `/tmp/scoot-look-catalog-*`
+/// dirs behind.
 fn fixture(tag: &str) -> Fixture {
-    let root = scratch(tag);
+    let scratch = scratch(tag);
+    let root: PathBuf = scratch.path().to_owned();
     let sources = root.join("looks");
     write_look(&sources, "look-a", "");
     let b = look_toml("look-b").replace("ring-width = 2", "ring-width = 3");
@@ -49,6 +53,7 @@ fn fixture(tag: &str) -> Fixture {
         cache,
         state,
         config,
+        _scratch: scratch,
         _root: root,
     }
 }
@@ -138,6 +143,10 @@ struct FakeChecks {
     /// Models a bar built `--no-default-features`: refuses only fragments
     /// carrying `popup-radius`, recording every fragment seen.
     popup_only: bool,
+    /// Models a minimal bar (no `popup`, no `workspaces` module): refuses
+    /// fragments carrying `popup-radius` or a `[workspaces]` table, with
+    /// the whole-stderr shapes a real minimal binary answers with.
+    minimal_bar: bool,
     bar_seen: RefCell<Vec<String>>,
 }
 
@@ -151,6 +160,7 @@ impl FakeChecks {
             font_refuse: None,
             bar_refuse: None,
             popup_only: false,
+            minimal_bar: false,
             bar_seen: RefCell::new(Vec::new()),
         }
     }
@@ -186,6 +196,20 @@ impl Checks for FakeChecks {
             // popup-less re-render off that name in the whole stderr).
             if text.contains("popup-radius") {
                 return Err("scootbar: bar.toml: TOML parse error at line 8, column 1\nunknown field `popup-radius`, expected `radius`".to_owned());
+            }
+            return Ok(Availability::Available(()));
+        }
+        if self.minimal_bar {
+            // The shapes a real minimal bar answers with: the popup refusal
+            // above, plus the module-table refusal (an empty
+            // `WorkspacesFile` denies every key: `there are no fields`).
+            // Captured from a real `--no-default-features` binary; the CLI
+            // keys its section drop off the named field.
+            if text.contains("popup-radius") {
+                return Err("scootbar: bar.toml: TOML parse error at line 8, column 1\nunknown field `popup-radius`, expected `radius`".to_owned());
+            }
+            if text.contains("[workspaces]") {
+                return Err("scootbar: bar.toml: TOML parse error at line 10, column 1\nunknown field `inactive-color`, there are no fields".to_owned());
             }
             return Ok(Availability::Available(()));
         }
@@ -701,6 +725,121 @@ fn a_failed_first_apply_names_only_what_actually_reloaded() {
     assert_eq!(bar.calls.get(), 1, "a refusing bar is never re-run");
     assert!(!fixture.state.join("look.json").exists());
     assert!(!fixture.state.join(LINK_NAME).exists());
+}
+
+#[test]
+fn a_partially_applied_compositor_is_re_run_on_rollback() {
+    // A `Reloaded` reply with a non-empty `refused` is partially applied,
+    // not never-sent: per-field refusals do not hold back the applied
+    // fields, so the peer may hold the new layer and the rollback re-runs
+    // it (two calls: the swap and its rollback), restoring the previous
+    // look. (Regression: one round never re-ran any refused peer; the
+    // round before treated every refusal as may-hold.)
+    let fixture = fixture("partial-rerun");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::ok(&[], &[]);
+    apply_with(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("the first apply succeeds");
+    let mut compositor = FakeCompositor::with_script(vec![
+        Ok(Reloaded {
+            applied: vec!["appearance.background_color".to_owned()],
+            refused: vec!["output:scale".to_owned()],
+            shadowed: Vec::new(),
+            invalid: Vec::new(),
+        }),
+        Ok(Reloaded::default()),
+    ]);
+    let failure = apply_with(
+        "look-b",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect_err("a partial apply refuses the swap");
+    assert_eq!(failure.rolled_back_to.as_deref(), Some("look-a"));
+    assert!(
+        failure.message.contains("output:scale"),
+        "{}",
+        failure.message
+    );
+    assert_eq!(
+        compositor.calls.get(),
+        2,
+        "the swap and its rollback both reload"
+    );
+    assert_eq!(record_of(&fixture.state).name, "look-a");
+}
+
+#[test]
+fn a_sent_but_unanswered_compositor_is_re_run_on_rollback() {
+    // A 30 s timeout (or a connection closed after the write) is
+    // sent-but-unanswered: it may have applied before hanging or dying,
+    // so the rollback re-runs it (two calls), like a positive receipt.
+    // Only an explicit error reply, the "predates" wall or a never-sent
+    // request means "never accepted" (one call: no re-run).
+    let fixture = fixture("unanswered-rerun");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::ok(&[], &[]);
+    apply_with(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("the first apply succeeds");
+    let mut compositor = FakeCompositor::with_script(vec![
+        Err(ReloadError::Unanswered(
+            "the compositor did not answer: timed out".to_owned(),
+        )),
+        Ok(Reloaded::default()),
+    ]);
+    let failure = apply_with(
+        "look-b",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect_err("an unanswered apply refuses the swap");
+    assert_eq!(failure.rolled_back_to.as_deref(), Some("look-a"));
+    assert_eq!(
+        compositor.calls.get(),
+        2,
+        "the swap and its rollback both reload"
+    );
+    assert_eq!(record_of(&fixture.state).name, "look-a");
 }
 
 #[test]
@@ -1296,7 +1435,8 @@ fn validate_names_a_bad_wallpaper_instead_of_blank() {
         ("fifo", "fifo"),
         ("missing", "missing"),
     ] {
-        let root = super::super::catalog::tests::scratch(&format!("badwall-{tag}"));
+        let _scratch = super::super::catalog::tests::scratch(&format!("badwall-{tag}"));
+        let root = _scratch.path();
         let sources = root.join("looks");
         std::fs::create_dir_all(sources.join("badlook")).expect("a look dir");
         let base = super::super::catalog::tests::look_toml("badlook");
@@ -1438,6 +1578,7 @@ fn a_font_refusal_refuses_before_anything_is_touched() {
         font_refuse: Some("font `DejaVu Sans` resolves to nothing".to_owned()),
         bar_refuse: None,
         popup_only: false,
+        minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
     };
     let mut compositor = FakeCompositor::not_running();
@@ -1522,6 +1663,7 @@ fn effectful_refusals_are_structured_not_bare_errors() {
         font_refuse: Some("font `DejaVu Sans` resolves to nothing".to_owned()),
         bar_refuse: None,
         popup_only: false,
+        minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
     };
     let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
@@ -1554,7 +1696,8 @@ fn validate_accepts_a_nameless_dir_path() {
     // Rust ignores the trailing dot — so the probe below ends in `..`,
     // the same `None` case.) A symlink's own entry name still wins (see
     // the catalog's entry-name test); this is only the no-name case.
-    let root = scratch("dotdir");
+    let _scratch = scratch("dotdir");
+    let root = _scratch.path();
     // `<root>/wd/look.toml`, manifest name `wd`: the probe path
     // `<root>/wd/inner/..` has no file name, reads `<root>/wd/look.toml`,
     // and canonicalizes to `<root>/wd`.
@@ -1576,6 +1719,45 @@ fn validate_accepts_a_nameless_dir_path() {
 }
 
 #[test]
+fn validate_inside_a_symlinked_look_prefers_the_entry_name() {
+    // `scoot look validate .` inside `user-looks/linked -> abc-mine-src`:
+    // the probe path has no file name, and the canonical basename is the
+    // store target's (`abc-mine-src`), but `$PWD`'s basename (`linked`)
+    // names the catalog entry resolving here, so the manifest name
+    // (`linked`) matches. A `$PWD` naming nothing, or naming an entry
+    // elsewhere, falls back to the canonical basename.
+    let _scratch = scratch("pwdlink");
+    let root = _scratch.path();
+    let looks = root.join("user-looks");
+    std::fs::create_dir_all(&looks).expect("a looks dir");
+    let target = root.join("abc-mine-src");
+    std::fs::create_dir_all(&target).expect("a store dir");
+    std::fs::write(target.join("look.toml"), look_toml("linked")).expect("a look.toml");
+    std::os::unix::fs::symlink(&target, looks.join("linked")).expect("a look link");
+    let catalog = discover_ordered(&[(looks.clone(), Origin::User)]);
+    assert!(catalog.find("linked").is_some(), "{:?}", catalog.notes);
+    let canonical = std::fs::canonicalize(looks.join("linked")).expect("a canonical dir");
+    let pwd = looks.join("linked");
+    assert_eq!(
+        super::pwd_basename_for(Some(pwd.as_os_str()), &canonical, &catalog).as_deref(),
+        Some("linked")
+    );
+    // A `$PWD` naming nothing falls back.
+    assert!(
+        super::pwd_basename_for(
+            Some(std::ffi::OsStr::new("/elsewhere/nosuch")),
+            &canonical,
+            &catalog
+        )
+        .is_none()
+    );
+    // A `$PWD` naming an entry that resolves elsewhere falls back too.
+    let elsewhere = std::fs::canonicalize(&looks).expect("a canonical looks dir");
+    assert_ne!(elsewhere, canonical);
+    assert!(super::pwd_basename_for(Some(pwd.as_os_str()), &elsewhere, &catalog).is_none());
+}
+
+#[test]
 fn validate_and_apply_agree_on_the_bar_fragment() {
     // A bar fragment its own bar refuses must not validate: `validate`
     // runs the same bar-fragment check `apply` does (against the installed
@@ -1592,6 +1774,7 @@ fn validate_and_apply_agree_on_the_bar_fragment() {
         font_refuse: None,
         bar_refuse: Some("bar fragment refused by scootbar daemon --check: bad radius".to_owned()),
         popup_only: false,
+        minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
     };
     let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
@@ -1641,6 +1824,7 @@ fn validate_retries_a_popup_refusal_without_popup_keys() {
         font_refuse: None,
         bar_refuse: None,
         popup_only: true,
+        minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
     };
     let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
@@ -1670,11 +1854,175 @@ fn validate_retries_a_popup_refusal_without_popup_keys() {
 }
 
 #[test]
+fn a_minimal_bar_drops_module_tokens_with_a_note() {
+    // A `--no-default-features` bar refuses most shipped looks outright:
+    // ginger-night, music-desk, moonrise and vinyl-sunset carry
+    // `[apps.scootbar] "workspaces.inactive-color"`, which renders a
+    // `[workspaces]` table the minimal bar answers `unknown field
+    // inactive-color, there are no fields` to. Like the popup keys, those
+    // tokens are dropped (with a note saying what was dropped), so the
+    // shipped looks apply on the lightest bar. The fake models that bar
+    // faithfully: it refuses `popup-radius` and any `[workspaces]` table.
+    let _scratch = scratch("bar-minimal");
+    let root = _scratch.path();
+    let sources = root.join("looks");
+    write_look(
+        &sources,
+        "look-ws",
+        "[apps.scootbar]\n\"workspaces.inactive-color\" = \"#B595AD\"\n",
+    );
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    assert!(catalog.find("look-ws").is_some(), "{:?}", catalog.notes);
+    let fonts = root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let new_checks = || FakeChecks {
+        font_dir: Some({
+            for family in ["DejaVu Sans", "DejaVu Sans Mono"] {
+                std::fs::write(fonts.join(format!("{family}.otf")), b"font").expect("a font file");
+            }
+            fonts.clone()
+        }),
+        font_refuse: None,
+        bar_refuse: None,
+        popup_only: false,
+        minimal_bar: true,
+        bar_seen: RefCell::new(Vec::new()),
+    };
+    // Validate drops both and says so.
+    let checks = new_checks();
+    let validation = validate_entry(&catalog, "look-ws", &checks).expect("validatable");
+    assert!(validation.errors.is_empty(), "{:?}", validation.errors);
+    let seen = checks.bar_seen.borrow();
+    assert!(
+        seen.len() >= 3,
+        "popup, then workspaces, then clean: {seen:?}"
+    );
+    assert!(seen[0].contains("popup-radius"), "{seen:?}");
+    assert!(seen[0].contains("[workspaces]"), "{seen:?}");
+    assert!(
+        !seen.last().expect("a last check").contains("[workspaces]"),
+        "{seen:?}"
+    );
+    assert!(
+        validation
+            .notes
+            .iter()
+            .any(|note| note.contains("without popup-radius")),
+        "{:?}",
+        validation.notes
+    );
+    assert!(
+        validation
+            .notes
+            .iter()
+            .any(|note| note.contains("without `workspaces`") && note.contains("inactive-color")),
+        "{:?}",
+        validation.notes
+    );
+    // Apply agrees: the look applies, and the fragment carries no
+    // `[workspaces]` table.
+    let checks = new_checks();
+    let cache = root.join("cache");
+    let state = root.join("state");
+    let config = root.join("config");
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with(
+        "look-ws",
+        &options(),
+        &catalog,
+        &cache,
+        &state,
+        Some(&config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("a minimal bar applies a shipped-shaped look");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("without `workspaces`")),
+        "{:?}",
+        report.notes
+    );
+    let rendered_bar = std::path::Path::new(&report.rendered).join("bar.toml");
+    let bar = std::fs::read_to_string(&rendered_bar).expect("a rendered bar fragment");
+    assert!(!bar.contains("[workspaces]"), "{bar}");
+    assert!(!bar.contains("popup-radius"), "{bar}");
+    // Build agrees too: the `--out` fragment parses and carries no
+    // `[workspaces]` table.
+    let checks = new_checks();
+    let out = root.join("out");
+    std::fs::create_dir_all(&out).expect("an out dir");
+    let _ = build_to_out(
+        &BuildTarget::Name("look-ws".to_owned()),
+        &out,
+        &catalog,
+        &checks,
+    )
+    .expect("a minimal bar builds a shipped-shaped look");
+    let bar = std::fs::read_to_string(out.join("bar.toml")).expect("a bar fragment");
+    assert!(!bar.contains("[workspaces]"), "{bar}");
+    assert!(!bar.contains("popup-radius"), "{bar}");
+}
+
+#[test]
+fn bar_downgrade_names_what_the_refusal_names() {
+    // The popup shape first, even past the summary line.
+    assert_eq!(
+        super::bar_downgrade(
+            "bar fragment refused: TOML parse error at line 8, column 1\nunknown field `popup-radius`, expected `radius`",
+            "[bar]\nradius = 14\npopup-radius = 14\n"
+        ),
+        Some(super::BarDrop::Popup)
+    );
+    // A module table refusal names its section through the field.
+    assert_eq!(
+        super::bar_downgrade(
+            "bar fragment refused: TOML parse error at line 10, column 1\nunknown field `inactive-color`, there are no fields",
+            "[colors]\nbackground = \"#000000\"\n\n[workspaces]\ninactive-color = \"#111111\"\n"
+        ),
+        Some(super::BarDrop::Section {
+            section: "workspaces".to_owned(),
+            field: "inactive-color".to_owned(),
+        })
+    );
+    // A refusal naming a table the build lacks drops the table itself.
+    assert_eq!(
+        super::bar_downgrade(
+            "unknown field `volume`, expected `bar`",
+            "[colors]\nbackground = \"#000000\"\n\n[volume]\nicon = \"x\"\n"
+        ),
+        Some(super::BarDrop::Section {
+            section: "volume".to_owned(),
+            field: "volume".to_owned(),
+        })
+    );
+    // `[colors]` and `[bar]` are never dropped: a refusal naming one of
+    // their keys is genuine.
+    assert_eq!(
+        super::bar_downgrade(
+            "unknown field `radius`, expected `height`",
+            "[bar]\nradius = 99999\n"
+        ),
+        None
+    );
+    // A refusal naming nothing in the fragment is genuine too.
+    assert_eq!(
+        super::bar_downgrade("the bar is on fire", "[bar]\nradius = 14\n"),
+        None
+    );
+}
+
+#[test]
 fn symlinked_user_configs_still_report_shadowed_keys() {
     // Home-manager/stow link the user's own config files into the store:
     // following those links for the offline shadow detection is correct
     // (the no-follow policy is for look-dir inputs, not the user's files).
-    let root = scratch("shadow-link");
+    let _scratch = scratch("shadow-link");
+    let root = _scratch.path();
     let render = root.join("render");
     std::fs::create_dir_all(&render).expect("a render dir");
     std::fs::write(
@@ -1737,6 +2085,47 @@ fn build_into_an_empty_out_writes_three_files_and_leaves_no_litter() {
     )
     .expect_err("a foreign out refuses");
     assert_no_build_litter(&fixture._root);
+}
+
+#[test]
+fn the_stage_is_private_and_dead_stages_are_swept() {
+    // A signal (SIGTERM/SIGINT) never runs `Drop`, so a killed run leaks
+    // its stage: `ScratchDir::new` sweeps other dead pids' stages at
+    // start, and every stage is created 0700.
+    use super::ScratchDir;
+    let stage = ScratchDir::new("sweep-test").expect("a stage dir");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(
+            std::fs::metadata(stage.path())
+                .expect("a stage")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700,
+            "the stage is private"
+        );
+    }
+    // A dead pid's stage is swept by the next staging; a live pid's (and
+    // this process's own) never is.
+    let tmp = std::env::temp_dir();
+    let dead = tmp.join("scoot-look-sweep-test.999999999-0-0");
+    let _ = std::fs::remove_dir_all(&dead);
+    std::fs::create_dir(&dead).expect("a dead stage");
+    let live = tmp.join(format!("scoot-look-sweep-test.{}-0-0", std::process::id()));
+    let live_existed = live.exists();
+    if !live_existed {
+        std::fs::create_dir(&live).expect("a live stage");
+    }
+    let _next = ScratchDir::new("sweep-test").expect("a second stage");
+    #[cfg(target_os = "linux")]
+    assert!(!dead.exists(), "a dead pid's stage is swept");
+    assert!(live.exists(), "a live pid's stage is kept");
+    if !live_existed {
+        std::fs::remove_dir_all(&live).ok();
+    }
+    let _ = std::fs::remove_dir_all(&dead);
 }
 
 /// No `.X.build-tmp.*` stage dir survives anywhere under `root`.

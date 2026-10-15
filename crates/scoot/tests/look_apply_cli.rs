@@ -324,7 +324,10 @@ fn json_failure_shapes_are_documents_on_stdout() {
     assert_eq!(doc["applied"], false);
     assert_eq!(doc["target"], "nosuchlook");
     assert!(
-        doc["error"].as_str().unwrap_or_default().contains("unknown look"),
+        doc["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("unknown look"),
         "{doc}"
     );
 }

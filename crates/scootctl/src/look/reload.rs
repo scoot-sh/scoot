@@ -52,8 +52,16 @@ pub enum ReloadError {
     /// The app answered with a refusal (an older compositor's
     /// unknown-request error included: it is an ordinary error on the
     /// wire, and it refuses the swap rather than retrying as a plain
-    /// reload).
+    /// reload). The request never took effect, so the rollback skips
+    /// re-running this peer. A write failure (never sent) lands here too.
     Refused(String),
+    /// The request was sent but no definitive answer arrived: the 30 s
+    /// read timed out, or the peer closed the connection after the write.
+    /// The new layer may hold (it may have applied before hanging or
+    /// dying), so the rollback re-runs this peer, like a positive
+    /// receipt. Only an explicit error reply, the "predates" wall or a
+    /// never-sent request means "never accepted" ([`ReloadError::Refused`]).
+    Unanswered(String),
 }
 
 /// One scoped reload against the compositor, so tests script the peer.
@@ -64,19 +72,35 @@ pub trait CompositorReload {
 /// The live compositor over its IPC socket.
 pub struct IpcCompositor {
     socket: Option<PathBuf>,
+    timeout: Duration,
 }
 
 impl IpcCompositor {
     /// Reloads the session on the default socket (`$SCOOT_SOCKET` else
     /// `$XDG_RUNTIME_DIR/scoot.sock`).
     pub fn default_socket() -> Self {
-        Self { socket: None }
+        Self {
+            socket: None,
+            timeout: TIMEOUT,
+        }
     }
 
     /// Reloads the session on an explicit socket (`--socket`).
     pub fn explicit(socket: PathBuf) -> Self {
         Self {
             socket: Some(socket),
+            timeout: TIMEOUT,
+        }
+    }
+
+    /// An explicit socket with an explicit wait bound (the tests' short
+    /// timeout fake: a peer that accepts and never answers must read as
+    /// sent-but-unanswered, never wedge the swap past the bound).
+    #[cfg(test)]
+    pub fn with_timeout(socket: PathBuf, timeout: Duration) -> Self {
+        Self {
+            socket: Some(socket),
+            timeout,
         }
     }
 }
@@ -106,8 +130,8 @@ impl CompositorReload for IpcCompositor {
         // Bound a peer that accepts and never answers: a hung compositor
         // must refuse the swap, never wedge it with the lock held.
         stream
-            .set_read_timeout(Some(TIMEOUT))
-            .and_then(|()| stream.set_write_timeout(Some(TIMEOUT)))
+            .set_read_timeout(Some(self.timeout))
+            .and_then(|()| stream.set_write_timeout(Some(self.timeout)))
             .map_err(|error| {
                 ReloadError::Refused(format!(
                     "cannot set a timeout on {}: {error}",
@@ -117,18 +141,44 @@ impl CompositorReload for IpcCompositor {
         let mut client = scoot_ipc::Client::from_stream(stream).map_err(|error| {
             ReloadError::Refused(format!("cannot reach the compositor: {error}"))
         })?;
-        match client
-            .request(&scoot_ipc::Request::ReloadLook)
-            .map_err(|error| {
+        // The write and the read blame separately: a write failure never
+        // sent the request (never accepted), while a read failure afterward
+        // is sent-but-unanswered (it may hold the new layer, so the
+        // rollback re-runs it).
+        if let Err(error) = client.send(&scoot_ipc::Request::ReloadLook) {
+            let text = error.to_string();
+            if text.contains("unknown variant") {
+                return Err(ReloadError::Refused(
+                    "the compositor predates scoot look: update scoot and restart the session"
+                        .to_owned(),
+                ));
+            }
+            return Err(ReloadError::Refused(format!(
+                "the compositor was never sent the look reload: {text}"
+            )));
+        }
+        let reply = match client.next_message() {
+            Ok(Some(reply)) => reply,
+            Ok(None) => {
+                return Err(ReloadError::Unanswered(
+                    "the compositor closed the connection without replying: it may hold the new look"
+                        .to_owned(),
+                ));
+            }
+            Err(error) => {
                 let text = error.to_string();
                 if text.contains("unknown variant") {
-                    return ReloadError::Refused(
+                    return Err(ReloadError::Refused(
                         "the compositor predates scoot look: update scoot and restart the session"
                             .to_owned(),
-                    );
+                    ));
                 }
-                ReloadError::Refused(format!("the compositor did not answer: {text}"))
-            })? {
+                return Err(ReloadError::Unanswered(format!(
+                    "the compositor did not answer: {text}"
+                )));
+            }
+        };
+        match reply {
             scoot_ipc::Response::Reloaded {
                 applied,
                 refused,
@@ -144,19 +194,18 @@ impl CompositorReload for IpcCompositor {
                             .to_owned(),
                     ));
                 }
-                if refused.is_empty() {
-                    Ok(Reloaded {
-                        applied,
-                        refused,
-                        shadowed,
-                        invalid,
-                    })
-                } else {
-                    Err(ReloadError::Refused(format!(
-                        "the compositor refused the look reload: {}",
-                        refused.join("; ")
-                    )))
-                }
+                // A non-empty `refused` is a partial apply, not a never-sent
+                // one: per-field refusals do not hold back the applied
+                // fields (the compositor commits its layer identity after
+                // the apply), so the peer may hold the new layer and the
+                // rollback re-runs it. `apply` turns the non-empty list
+                // into the swap failure.
+                Ok(Reloaded {
+                    applied,
+                    refused,
+                    shadowed,
+                    invalid,
+                })
             }
             scoot_ipc::Response::Error { message } => {
                 // An older compositor answers the unknown `ReloadLook` tag

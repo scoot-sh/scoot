@@ -20,6 +20,7 @@ fn inputs() -> RenderInputs {
         wallpaper_abs: Some("/cache/wallpaper.png".to_string()),
         ui_font_file: None,
         bar_popup: true,
+        bar_drop_sections: Vec::new(),
     }
 }
 
@@ -194,6 +195,34 @@ fn overrides_merge_into_base_tables() {
         parsed["workspaces"]["inactive-color"].as_str(),
         Some("#111111")
     );
+}
+
+#[test]
+fn dropped_module_sections_never_render() {
+    // Tokens for modules the installed bar lacks are dropped at render:
+    // the `[workspaces]` table vanishes while `[colors]` and `[bar]`
+    // survive, and the fragment still reparses.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[apps.scootbar]\n\"workspaces.inactive-color\" = \"#111111\"\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let mut without = inputs();
+    without.bar_drop_sections = vec!["workspaces".to_owned()];
+    let frag = render_bar(&look, &without).expect("renders");
+    assert!(
+        !frag.contains("[workspaces]"),
+        "dropped section renders:\n{frag}"
+    );
+    assert!(
+        !frag.contains("inactive-color"),
+        "dropped token renders:\n{frag}"
+    );
+    assert!(frag.contains("[colors]"), "base table lost:\n{frag}");
+    let _: toml::Table = toml::from_str(&frag).expect("bar fragment reparses");
 }
 
 #[test]

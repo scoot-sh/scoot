@@ -45,10 +45,18 @@ impl Client {
     }
 
     pub fn request(&mut self, request: &Request) -> io::Result<Response> {
-        write_message(&mut self.writer, request)?;
+        self.send(request)?;
         self.next_message()?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::UnexpectedEof, "server closed the connection")
         })
+    }
+
+    /// Writes one request without waiting for the reply, so a caller can
+    /// blame a write failure (never sent) separately from a read one
+    /// (sent, but unanswered): see `scootctl`'s scoped reload, where only
+    /// the latter may hold the new layer.
+    pub fn send(&mut self, request: &Request) -> io::Result<()> {
+        write_message(&mut self.writer, request)
     }
 
     /// Reads the next message from the server: the reply to a request, or --

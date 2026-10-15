@@ -227,18 +227,25 @@ fn scan_dir(dir: &Path, origin: Origin, catalog: &mut Catalog) {
         // the entry's own name, never the store target's basename (which
         // carries a hash prefix like `<hash>-moonrise-look`).
         let dir_name = entry.file_name().to_str().unwrap_or_default().to_owned();
+        // One canonicalize for both the read and the manifest dir: the
+        // manifest itself may be a store link (a per-file farm), so resolve
+        // the file once, read through the resolved path, and take its
+        // parent as the manifest dir. Falls back to the entry dir when the
+        // target has no parent (unreachable: it names `look.toml`) or does
+        // not resolve (the read below notes it).
         let file = canonical.join("look.toml");
         // Home-manager `recursive` farms link each file into the store, so
         // the manifest itself may be a symlink: follow it here (the trust
         // boundary is the catalog directory, and the manifest is parsed and
         // validated, never executed). Untrusted directory inputs under
         // `validate`/`build` keep the no-follow read.
-        let bytes = match read_capped_follow(&file) {
+        let manifest_file = std::fs::canonicalize(&file).unwrap_or_else(|_| file.clone());
+        let bytes = match read_capped_follow(&manifest_file) {
             Ok(text) => text.into_bytes(),
             Err(error) => {
                 catalog.notes.push(format!(
                     "skipping {dir_name}: cannot read {}: {error}",
-                    file.display()
+                    manifest_file.display()
                 ));
                 continue;
             }
@@ -291,11 +298,11 @@ fn scan_dir(dir: &Path, origin: Origin, catalog: &mut Catalog) {
         }
         // The manifest's own directory: the file read above may itself be
         // a store link, and the files it names sit beside the target, not
-        // the entry. Falls back to the entry dir when the target has no
-        // parent (unreachable: it names `look.toml`).
-        let manifest_dir = std::fs::canonicalize(&file)
-            .ok()
-            .and_then(|target| target.parent().map(Path::to_path_buf))
+        // the entry (`manifest_file` above already resolved it once, so no
+        // second canonicalize here).
+        let manifest_dir = manifest_file
+            .parent()
+            .map(Path::to_path_buf)
             .unwrap_or_else(|| canonical.clone());
         catalog.entries.push(Entry {
             name: raw.name.clone(),

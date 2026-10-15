@@ -964,6 +964,7 @@ dependencies = [
  "scoot-ipc",
  "scoot-look",
  "serde_json",
+ "tempfile",
  "toml",
 ]
 

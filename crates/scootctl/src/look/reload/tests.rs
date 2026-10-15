@@ -13,6 +13,8 @@ use std::time::Duration;
 
 #[cfg(target_os = "linux")]
 use super::send_bar_reload;
+#[cfg(target_os = "linux")]
+use super::{CompositorReload, IpcCompositor};
 use super::{display_name, runtime_dir};
 
 #[test]
@@ -185,4 +187,162 @@ fn a_missing_socket_is_a_reachable_refusal() {
     );
     // The production outcome skips an absent listener with a note instead.
     assert!(!super::bar_reload_outcome(&missing).expect("absent is not a refusal"));
+}
+
+/// The compositor wire below needs the same socket-timeout syscalls as the
+/// bar's, so it shares the Linux gate (see above).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_partially_applied_reloaded_reply_is_ok_with_refused() {
+    // The faithful fake of the real `Reloaded` wire: the real `type` tag
+    // (`reloaded`), the real field names (`applied`, `refused`,
+    // `shadowed`, `invalid`, `scope`) and the real scope value (`look`).
+    // A non-empty `refused` is partially applied (the applied fields
+    // landed: the compositor commits its layer identity after the apply),
+    // so it reads as `Ok` — `apply` turns the list into the swap failure
+    // and re-runs this peer on rollback, rather than skipping it as never
+    // accepted.
+    let socket = socket_path("partial");
+    let peer = serve_once(
+        socket.clone(),
+        "{\"type\":\"reloaded\",\"applied\":[\"appearance.background_color\"],\"refused\":[\"output:scale\"],\"shadowed\":[],\"invalid\":[],\"scope\":\"look\"}\n",
+    );
+    let mut compositor = IpcCompositor::explicit(socket);
+    let reloaded = compositor.reload_look().expect("a partial reply is Ok");
+    assert_eq!(reloaded.applied, vec!["appearance.background_color"]);
+    assert_eq!(reloaded.refused, vec!["output:scale"]);
+    let request = peer.join().expect("the peer answered");
+    let wire: serde_json::Value = serde_json::from_str(&request).expect("JSON on the wire");
+    assert_eq!(wire["type"], "reload_look");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_clean_reloaded_reply_is_ok() {
+    let socket = socket_path("clean");
+    let peer = serve_once(
+        socket.clone(),
+        "{\"type\":\"reloaded\",\"applied\":[\"appearance.background_color\"],\"refused\":[],\"shadowed\":[],\"invalid\":[],\"scope\":\"look\"}\n",
+    );
+    let mut compositor = IpcCompositor::explicit(socket);
+    let reloaded = compositor.reload_look().expect("a clean reply is Ok");
+    assert_eq!(reloaded.applied, vec!["appearance.background_color"]);
+    assert!(reloaded.refused.is_empty());
+    peer.join().expect("the peer answered");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn an_explicit_error_reply_is_a_never_accepted_refusal() {
+    // An explicit error reply never applied anything: `Refused`, never
+    // `Unanswered` (the rollback skips re-running it).
+    let socket = socket_path("comperror");
+    let peer = serve_once(
+        socket.clone(),
+        "{\"type\":\"error\",\"message\":\"bad layer\"}\n",
+    );
+    let mut compositor = IpcCompositor::explicit(socket);
+    let error = compositor
+        .reload_look()
+        .expect_err("an error reply refuses");
+    assert!(
+        format!("{error:?}").contains("bad layer"),
+        "unexpected refusal: {error:?}"
+    );
+    assert!(
+        matches!(error, super::ReloadError::Refused(_)),
+        "never accepted: {error:?}"
+    );
+    peer.join().expect("the peer answered");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_predates_wall_is_a_never_accepted_refusal() {
+    // An older compositor answers the unknown `ReloadLook` tag with a
+    // serde wall: an ordinary error, which refuses without a re-run.
+    let socket = socket_path("comppredates");
+    let peer = serve_once(
+        socket.clone(),
+        "{\"type\":\"error\",\"message\":\"unknown variant `reload_look`, expected `reload`\"}\n",
+    );
+    let mut compositor = IpcCompositor::explicit(socket);
+    let error = compositor
+        .reload_look()
+        .expect_err("a predates wall refuses");
+    assert!(
+        matches!(error, super::ReloadError::Refused(_)),
+        "never accepted: {error:?}"
+    );
+    assert!(
+        format!("{error:?}").contains("predates"),
+        "unexpected refusal: {error:?}"
+    );
+    peer.join().expect("the peer answered");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_close_after_the_write_is_sent_but_unanswered() {
+    // The peer reads the request, then closes cleanly: sent, but no
+    // definitive answer — it may have applied first, so `Unanswered` (the
+    // rollback re-runs it), never a never-accepted `Refused`.
+    let socket = socket_path("compclosed");
+    let _ = std::fs::remove_file(&socket);
+    let listener = UnixListener::bind(&socket).expect("a scratch socket");
+    let peer = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("one connection");
+        let mut reader = BufReader::new(&stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("one request line");
+        drop(reader);
+        stream.shutdown(std::net::Shutdown::Both).ok();
+    });
+    let mut compositor = IpcCompositor::explicit(socket);
+    let error = compositor.reload_look().expect_err("a close is unanswered");
+    assert!(
+        matches!(error, super::ReloadError::Unanswered(_)),
+        "sent-but-unanswered: {error:?}"
+    );
+    peer.join().expect("the peer ran");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_hung_peer_is_sent_but_unanswered_within_the_bound() {
+    // The timeout fake: the peer reads the request and never answers. The
+    // reload must refuse as `Unanswered` within the bound, never wedge the
+    // swap (production waits 30 s; the test binds 300 ms and asserts well
+    // under it).
+    use std::time::Instant;
+    let socket = socket_path("comphung");
+    let _ = std::fs::remove_file(&socket);
+    let listener = UnixListener::bind(&socket).expect("a scratch socket");
+    let peer = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("one connection");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("a timeout");
+        let mut reader = BufReader::new(&stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("one request line");
+        std::thread::sleep(Duration::from_secs(30));
+    });
+    let start = Instant::now();
+    let mut compositor = IpcCompositor::with_timeout(socket, Duration::from_millis(300));
+    let error = compositor
+        .reload_look()
+        .expect_err("a hung peer is unanswered");
+    assert!(
+        matches!(error, super::ReloadError::Unanswered(_)),
+        "sent-but-unanswered: {error:?}"
+    );
+    assert!(
+        start.elapsed() < Duration::from_secs(10),
+        "the wait is bounded: {:?}",
+        start.elapsed()
+    );
+    // Detached, not joined: the peer sleeps past the test (joining would
+    // wait out its 30 s sleep for no reason).
+    drop(peer);
 }

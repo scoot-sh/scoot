@@ -10,15 +10,19 @@ use super::{Catalog, cache_home, config_home, data_home, discover_ordered, origi
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// A scratch dir unique to this test process and call.
-pub(crate) fn scratch(tag: &str) -> PathBuf {
+/// A scratch dir unique to this test process and call, removed on drop: a
+/// `TempDir` guard, so the 80-odd look tests leave no
+/// `/tmp/scoot-look-catalog-*` dirs behind. Callers hold the guard and work
+/// through `.path()` (which derefs to the directory).
+pub(crate) fn scratch(tag: &str) -> tempfile::TempDir {
     let id = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!(
-        "scoot-look-catalog-{tag}-{}-{id}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("a scratch dir");
-    dir
+    tempfile::Builder::new()
+        .prefix(&format!(
+            "scoot-look-catalog-{tag}-{}-{id}-",
+            std::process::id()
+        ))
+        .tempdir()
+        .expect("a scratch dir")
 }
 
 /// A minimal valid look: the moonrise palette (which clears the contrast
@@ -102,7 +106,8 @@ fn home_resolution_prefers_xdg_and_falls_back() {
 
 #[test]
 fn the_first_name_in_search_order_wins_and_the_rest_shadow() {
-    let root = scratch("order");
+    let _scratch = scratch("order");
+    let root = _scratch.path();
     let first = root.join("first");
     let second = root.join("second");
     write_look(&first, "same", "");
@@ -125,7 +130,8 @@ fn the_first_name_in_search_order_wins_and_the_rest_shadow() {
 
 #[test]
 fn origins_come_from_directories() {
-    let root = scratch("origins");
+    let _scratch = scratch("origins");
+    let root = _scratch.path();
     let user = root.join("user");
     let shipped = root.join("shipped");
     write_look(&user, "mine", "");
@@ -145,7 +151,8 @@ fn origins_come_from_directories() {
 
 #[test]
 fn an_invalid_manifest_is_a_note_not_a_missing_catalog() {
-    let root = scratch("invalid");
+    let _scratch = scratch("invalid");
+    let root = _scratch.path();
     let dir = root.join("looks");
     write_look(&dir, "good", "");
     let broken = dir.join("broken");
@@ -167,7 +174,8 @@ fn a_symlinked_look_uses_the_entry_name_not_the_target() {
     // Home-manager/Nix-style catalogs symlink each look into the store:
     // `user-looks/moonrise -> /store/<hash>-moonrise-look`. The name is
     // the entry's own name, never the target's basename.
-    let root = scratch("symlink-look");
+    let _scratch = scratch("symlink-look");
+    let root = _scratch.path();
     let looks = root.join("looks");
     std::fs::create_dir_all(&looks).expect("a looks dir");
     let store = root.join("store");
@@ -189,7 +197,8 @@ fn a_per_file_symlink_farm_catalogs_with_store_files() {
     // look dir is real, but `look.toml` is a symlink. The manifest
     // follows it, and the entry's files resolve beside the manifest's
     // target, not the entry.
-    let root = scratch("file-farm");
+    let _scratch = scratch("file-farm");
+    let root = _scratch.path();
     let looks = root.join("looks");
     std::fs::create_dir_all(&looks).expect("a looks dir");
     let store = root.join("store").join("moonrise");
@@ -217,7 +226,8 @@ fn a_missing_source_dir_is_skipped_quietly() {
 
 #[test]
 fn the_same_directory_twice_scans_once() {
-    let root = scratch("twice");
+    let _scratch = scratch("twice");
+    let root = _scratch.path();
     let dir = root.join("looks");
     write_look(&dir, "same", "");
     let catalog = discover_ordered(&[(dir.clone(), Origin::User), (dir, Origin::Shipped)]);

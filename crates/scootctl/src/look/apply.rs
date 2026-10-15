@@ -186,6 +186,38 @@ pub fn validate_entry(
 /// Validates a source directory without touching anything. A directory with
 /// `extends` resolves its base through the catalog; without one it resolves
 /// alone, like `scoot-look build`.
+///
+/// When `dir` has no file name (`.`, `./`, a trailing `/.`), `$PWD`'s
+/// basename wins if it names a catalog entry resolving to this same
+/// directory: inside a symlinked look dir (`user-looks/linked ->
+/// abc-mine-src`) the entry name (`linked`) is what the manifest must
+/// match, not the store target's basename. Pure (no I/O past the catalog
+/// it is handed), so tests pin `$PWD` explicitly.
+fn pwd_entry_name(canonical: &Path, catalog: &Catalog) -> Option<String> {
+    pwd_basename_for(std::env::var_os("PWD").as_deref(), canonical, catalog)
+}
+
+fn pwd_basename_for(
+    pwd: Option<&std::ffi::OsStr>,
+    canonical: &Path,
+    catalog: &Catalog,
+) -> Option<String> {
+    let pwd = pwd?;
+    let base = Path::new(pwd).file_name().and_then(|name| name.to_str())?;
+    if base.is_empty() {
+        return None;
+    }
+    let entry = catalog.find(base)?;
+    if entry.dir == canonical {
+        Some(base.to_owned())
+    } else {
+        None
+    }
+}
+
+/// Validates a source directory without touching anything. A directory with
+/// `extends` resolves its base through the catalog; without one it resolves
+/// alone, like `scoot-look build`.
 pub fn validate_dir(
     dir: &Path,
     origin: Origin,
@@ -205,12 +237,16 @@ pub fn validate_dir(
         .map_err(|error| format!("cannot resolve {}: {error}", dir.display()))?;
     // The name matches the directory as named (a symlink's own name),
     // never the store target's basename. `.`, `./` and paths ending in
-    // `/.` have no file name, so those fall back to the canonical
-    // basename (the cwd's name for `.`).
+    // `/.` have no file name: prefer `$PWD`'s basename when it names a
+    // catalog entry resolving to this same directory (a symlinked look
+    // dir, e.g. `user-looks/linked -> abc-mine-src`, validated from
+    // inside), else fall back to the canonical basename (the cwd's name
+    // for `.`).
     let dir_name = dir
         .file_name()
         .and_then(|name| name.to_str())
         .map(str::to_owned)
+        .or_else(|| pwd_entry_name(&canonical, catalog))
         .or_else(|| {
             canonical
                 .file_name()
@@ -472,6 +508,10 @@ struct ScratchDir {
 impl ScratchDir {
     fn new(tag: &str) -> Result<Self, String> {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
+        // A SIGTERM/SIGINT never runs `Drop`, so a killed apply leaves its
+        // stage behind: sweep other dead pids' stages at start (cheap: one
+        // temp-dir listing per staging, and only `scoot-look-*` names).
+        cleanup_stale_stages();
         // pid plus a per-process counter plus nanos: two applies (or two
         // threads) never share a temp name, and a planted symlink at a
         // guessable name is never opened (`create_dir` refuses it instead
@@ -487,11 +527,63 @@ impl ScratchDir {
         ));
         std::fs::create_dir(&dir)
             .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+        // The stage holds rendered fragments: private from the start, never
+        // relying on the umask.
+        #[cfg(unix)]
+        std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .map_err(|error| format!("cannot secure {}: {error}", dir.display()))?;
         Ok(Self { path: dir })
     }
 
     fn path(&self) -> &Path {
         &self.path
+    }
+}
+
+/// Removes `scoot-look-<tag>.<pid>-*` stage dirs whose owner pid is dead:
+/// a signal-killed run never reaches `Drop`, so without this sweep every
+/// SIGTERM/SIGINT leaks one stage dir. Only dead pids (never the current
+/// one, never a live one: pid reuse errs toward keeping), only
+/// directories, failures ignored. Linux probes `/proc`; elsewhere there is
+/// no cheap dead-pid check without a new dependency, so the sweep keeps
+/// (rather than deletes) there.
+fn cleanup_stale_stages() {
+    let entries = match std::fs::read_dir(std::env::temp_dir()) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+    let mine = std::process::id();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(rest) = name.strip_prefix("scoot-look-") else {
+            continue;
+        };
+        let Some(dot) = rest.find('.') else { continue };
+        let pid: u32 = match rest[dot + 1..].split('-').next().unwrap_or("").parse() {
+            Ok(pid) => pid,
+            Err(_) => continue,
+        };
+        if pid == mine || !pid_dead(pid) {
+            continue;
+        }
+        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            std::fs::remove_dir_all(entry.path()).ok();
+        }
+    }
+}
+
+/// Whether `pid` no longer exists (a reused pid reads as live: the sweep
+/// keeps its dir, which is the safe direction).
+fn pid_dead(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        !std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        false
     }
 }
 
@@ -503,9 +595,11 @@ impl Drop for ScratchDir {
 
 /// Renders the bar fragment and runs the installed binary's own parser over
 /// it — the same check `apply` and `build` run, so `validate` and `apply`
-/// agree on the bar. A missing binary is a note. On a missing-`popup`
-/// refusal the fragment re-renders without the popup keys and checks again,
-/// as `apply` does. Refusals land in `errors`.
+/// agree on the bar. A missing binary is a note. On a missing-feature
+/// refusal the fragment re-renders without what the installed bar lacks
+/// and checks again, as `apply` does: first the `popup` keys, then whole
+/// module sections (a minimal bar answers `unknown field inactive-color,
+/// there are no fields` for `[workspaces]`). Refusals land in `errors`.
 fn check_bar_fragment(
     name: &str,
     merged: &scoot_look::ResolvedLook,
@@ -520,19 +614,20 @@ fn check_bar_fragment(
             return;
         }
     };
+    let path = scratch.path().join("bar.toml");
     let mut render_inputs = inputs.clone();
-    for attempt in 0..2 {
-        let bar = match render_bar(merged, &render_inputs) {
-            Ok(bar) => bar,
-            Err(error) => {
-                validation
-                    .errors
-                    .push(format!("cannot render {name}: {error}"));
-                return;
-            }
-        };
-        let path = scratch.path().join("bar.toml");
-        if let Err(error) = std::fs::write(&path, &bar) {
+    let mut fragment = match render_bar(merged, &render_inputs) {
+        Ok(bar) => bar,
+        Err(error) => {
+            validation
+                .errors
+                .push(format!("cannot render {name}: {error}"));
+            return;
+        }
+    };
+    let mut drops: Vec<BarDrop> = Vec::new();
+    loop {
+        if let Err(error) = std::fs::write(&path, &fragment) {
             validation.errors.push(format!(
                 "cannot stage the bar fragment {}: {error}",
                 path.display()
@@ -541,10 +636,8 @@ fn check_bar_fragment(
         }
         match checks.bar_fragment(&path) {
             Ok(Availability::Available(())) => {
-                if attempt == 1 {
-                    validation
-                        .notes
-                        .push("bar without `popup`: validated without popup-radius".to_owned());
+                for drop_ in &drops {
+                    validation.notes.push(drop_.validated_note());
                 }
                 return;
             }
@@ -552,14 +645,82 @@ fn check_bar_fragment(
                 validation.notes.push(note);
                 return;
             }
-            Err(message)
-                if attempt == 0 && render_inputs.bar_popup && is_popup_refusal(&message) =>
-            {
-                render_inputs.bar_popup = false;
-            }
             Err(message) => {
-                validation.errors.push(message);
-                return;
+                let Some(drop_) = bar_downgrade(&message, &fragment) else {
+                    validation.errors.push(message);
+                    return;
+                };
+                if !drop_.apply_to(&mut render_inputs) {
+                    validation.errors.push(message);
+                    return;
+                }
+                match render_bar(merged, &render_inputs) {
+                    Ok(next) => {
+                        drops.push(drop_);
+                        fragment = next;
+                    }
+                    Err(error) => {
+                        validation
+                            .errors
+                            .push(format!("cannot render {name}: {error}"));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// What the installed bar lacks, dropped from the re-render the way the
+/// `popup` keys are: `popup-radius` for a bar built without `popup`, or a
+/// whole module section (the `[workspaces]` table on a minimal bar) for a
+/// build without that module's feature.
+#[derive(Debug, Clone, PartialEq)]
+enum BarDrop {
+    /// A bar without `popup`: re-render with `bar_popup = false`.
+    Popup,
+    /// A build without the module behind `section`: skip that override
+    /// section. `field` is the refused key the re-render drops with it,
+    /// for the note.
+    Section { section: String, field: String },
+}
+
+impl BarDrop {
+    /// Drops this from `inputs`: false when already dropped (the refusal
+    /// repeats: a genuine error, not a downgrade).
+    fn apply_to(&self, inputs: &mut RenderInputs) -> bool {
+        match self {
+            BarDrop::Popup => {
+                if !inputs.bar_popup {
+                    return false;
+                }
+                inputs.bar_popup = false;
+                true
+            }
+            BarDrop::Section { section, .. } => {
+                if inputs.bar_drop_sections.contains(section) {
+                    return false;
+                }
+                inputs.bar_drop_sections.push(section.clone());
+                true
+            }
+        }
+    }
+
+    fn validated_note(&self) -> String {
+        match self {
+            BarDrop::Popup => "bar without `popup`: validated without popup-radius".to_owned(),
+            BarDrop::Section { section, field } => {
+                format!("bar without `{section}`: validated without {section} tokens ({field})")
+            }
+        }
+    }
+
+    fn rendered_note(&self) -> String {
+        match self {
+            BarDrop::Popup => "bar without `popup`: rendered without popup-radius".to_owned(),
+            BarDrop::Section { section, field } => {
+                format!("bar without `{section}`: rendered without {section} tokens ({field})")
             }
         }
     }
@@ -571,6 +732,71 @@ fn check_bar_fragment(
 fn is_popup_refusal(message: &str) -> bool {
     let lower = message.to_lowercase();
     lower.contains("popup-radius") || (lower.contains("popup") && lower.contains("unknown field"))
+}
+
+/// The `unknown field \`name\`` a deny-unknown-fields parser names, if the
+/// refusal carries one (the whole stderr, not just its first line: the key
+/// sits past the `TOML parse error at ...` summary).
+fn unknown_field(message: &str) -> Option<String> {
+    let at = message.find("unknown field")?;
+    let rest = &message[at..];
+    let open = rest.find('`')?;
+    let close = rest[open + 1..].find('`')?;
+    let field = &rest[open + 1..open + 1 + close];
+    if field.is_empty() {
+        return None;
+    }
+    Some(field.to_owned())
+}
+
+/// Whether `table` holds `field` at any depth (rendered override keys are
+/// flat, but a dotted key nests one level in the parsed fragment).
+fn table_holds(table: &toml::Table, field: &str) -> bool {
+    for value in table.values() {
+        if let toml::Value::Table(inner) = value
+            && (inner.contains_key(field) || table_holds(inner, field))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// The downgrade a `bar_fragment` refusal asks for, if it names something
+/// droppable: the missing-`popup` shape first, else the override section
+/// holding the refused field. `[colors]` and `[bar]` are never dropped
+/// (a refusal naming one of their keys is genuine); anything else the
+/// fragment carries is an override section for a module the installed bar
+/// may lack, and dropping it is what lets a shipped look apply on the
+/// lightest bar.
+fn bar_downgrade(message: &str, fragment: &str) -> Option<BarDrop> {
+    if is_popup_refusal(message) {
+        return Some(BarDrop::Popup);
+    }
+    let field = unknown_field(message)?;
+    let table: toml::Table = fragment.parse().ok()?;
+    if field == "colors" || field == "bar" {
+        return None;
+    }
+    if table.contains_key(&field) {
+        return Some(BarDrop::Section {
+            section: field.clone(),
+            field,
+        });
+    }
+    for (section, value) in &table {
+        if section == "colors" || section == "bar" {
+            continue;
+        }
+        let holds = matches!(value, toml::Value::Table(inner) if inner.contains_key(&field) || table_holds(inner, &field));
+        if holds {
+            return Some(BarDrop::Section {
+                section: section.clone(),
+                field,
+            });
+        }
+    }
+    None
 }
 
 /// One link of an `extends` chain, base first.
@@ -742,6 +968,7 @@ fn check_inputs(
             wallpaper_abs,
             ui_font_file,
             bar_popup: true,
+            bar_drop_sections: Vec::new(),
         },
         details,
     })
@@ -865,12 +1092,13 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// The render schema: bumped whenever the renderers' output changes shape,
 /// so an upgrade re-renders an unchanged look instead of reusing a stale
 /// cached directory. Part of the cache key.
-pub const RENDER_VERSION: u32 = 1;
+pub const RENDER_VERSION: u32 = 2;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
-/// feature), hashed like `source_hash`. A font package update or an edited
-/// source re-renders instead of reusing a stale directory.
+/// feature and dropped module sections), hashed like `source_hash`. A font
+/// package update or an edited source re-renders instead of reusing a stale
+/// directory.
 fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
     let mut buffer = Vec::new();
     buffer.extend_from_slice(&RENDER_VERSION.to_le_bytes());
@@ -889,6 +1117,13 @@ fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
         buffer.push(0);
     }
     buffer.push(if inputs.bar_popup { 1 } else { 0 });
+    let mut dropped = inputs.bar_drop_sections.clone();
+    dropped.sort();
+    for section in &dropped {
+        buffer.extend_from_slice(section.as_bytes());
+        buffer.push(0);
+    }
+    buffer.push(0);
     // Mtimes ride beside the paths (see `check_inputs`): the key below
     // carries them by re-reading the resolved files' mtimes.
     for path in [
@@ -1271,33 +1506,46 @@ pub fn apply_with(
     .map_err(refuse)?;
     // The bar's own parser over the rendered fragment, against the
     // installed binary's features. A bar built `--no-default-features`
-    // (no `popup`) refuses `popup-radius`: re-render without it rather
-    // than refusing every look.
-    match checks.bar_fragment(&target.join("bar.toml")) {
-        Ok(Availability::Available(())) => {}
-        Ok(Availability::Unavailable(note)) => report.notes.push(note),
-        Err(message) if render_inputs.bar_popup && is_popup_refusal(&message) => {
-            render_inputs.bar_popup = false;
-            target = render_cached(
-                name,
-                &chain,
-                &merged,
-                &render_inputs,
-                cache,
-                &mut report.notes,
-            )
-            .map_err(refuse)?;
-            match checks.bar_fragment(&target.join("bar.toml")) {
-                Ok(Availability::Available(())) => {
-                    report
-                        .notes
-                        .push("bar without `popup`: rendered without popup-radius".to_owned());
+    // (no `popup`) refuses `popup-radius`, and a minimal bar refuses whole
+    // module tables (`unknown field inactive-color, there are no fields`
+    // for `[workspaces]`): re-render without what the installed bar lacks
+    // rather than refusing every look, and say what was dropped.
+    let mut drops: Vec<BarDrop> = Vec::new();
+    loop {
+        match checks.bar_fragment(&target.join("bar.toml")) {
+            Ok(Availability::Available(())) => {
+                for drop_ in &drops {
+                    report.notes.push(drop_.rendered_note());
                 }
-                Ok(Availability::Unavailable(note)) => report.notes.push(note),
-                Err(retry) => return Err(refuse(retry)),
+                break;
+            }
+            Ok(Availability::Unavailable(note)) => {
+                report.notes.push(note);
+                break;
+            }
+            Err(message) => {
+                let fragment = match std::fs::read_to_string(target.join("bar.toml")) {
+                    Ok(fragment) => fragment,
+                    Err(_) => return Err(refuse(message)),
+                };
+                let Some(drop_) = bar_downgrade(&message, &fragment) else {
+                    return Err(refuse(message));
+                };
+                if !drop_.apply_to(&mut render_inputs) {
+                    return Err(refuse(message));
+                }
+                drops.push(drop_);
+                target = render_cached(
+                    name,
+                    &chain,
+                    &merged,
+                    &render_inputs,
+                    cache,
+                    &mut report.notes,
+                )
+                .map_err(refuse)?;
             }
         }
-        Err(message) => return Err(refuse(message)),
     }
     let generation = previous
         .as_ref()
@@ -1328,13 +1576,17 @@ pub fn apply_with(
         .map_err(|error| refuse(format!("cannot repoint the look link: {error}")))?;
     // Reloads, in order: the compositor, then every bar. Each refusal
     // rolls the swap back; a skipped app is a note. A peer joins the
-    // completed sets only on a positive receipt (it read the new link and
-    // may hold the new layer, so the rollback re-runs it against the
-    // restored choice). A peer that refused or was never reached never
-    // accepted the new layer: re-running it would only refuse twice (an
-    // old peer answers the rollback with the same wall), so the rollback
-    // skips it. A scoped reload only reads the link, so re-running one
-    // converges on the restored choice.
+    // completed sets on a positive receipt (it read the new link and may
+    // hold the new layer, so the rollback re-runs it against the restored
+    // choice), on a partial one (a `Reloaded` reply with a non-empty
+    // `refused`: per-field refusals do not hold back the applied fields),
+    // and on a sent-but-unanswered one (a 30 s timeout, a connection
+    // closed after the write: it may have applied before hanging or
+    // dying). Only an explicit error reply, the "predates" wall or a
+    // never-sent request means "never accepted": re-running one of those
+    // would only refuse twice (an old peer answers the rollback with the
+    // same wall), so the rollback skips it. A scoped reload only reads
+    // the link, so re-running one converges on the restored choice.
     let mut completed_compositor = false;
     let mut completed_bars: Vec<usize> = Vec::new();
     match compositor.reload_look() {
@@ -1374,9 +1626,31 @@ pub fn apply_with(
             report.skipped.push(format!("compositor: {note}"));
         }
         Err(ReloadError::Refused(message)) => {
-            // Refused (an old compositor's unknown-tag wall included): the
-            // peer never accepted the new layer, so the rollback skips
-            // re-running it rather than refusing twice.
+            // Refused (an explicit error reply, an old compositor's
+            // unknown-tag wall, or a never-sent request): the peer never
+            // accepted the new layer, so the rollback skips re-running it
+            // rather than refusing twice.
+            let failure = ApplyFailure {
+                message,
+                rolled_back_to: None,
+                rollback_errors: Vec::new(),
+            };
+            return rollback(
+                state_dir,
+                previous.as_ref(),
+                &record,
+                completed_compositor,
+                &completed_bars,
+                compositor,
+                bars,
+                failure,
+            );
+        }
+        Err(ReloadError::Unanswered(message)) => {
+            // Sent but unanswered (a timeout, a connection closed after the
+            // write): it may hold the new layer, so the rollback re-runs
+            // it against the restored choice, like a positive receipt.
+            completed_compositor = true;
             let failure = ApplyFailure {
                 message,
                 rolled_back_to: None,
@@ -1558,7 +1832,7 @@ fn rollback(
     {
         failure.rollback_errors.push(match error {
             ReloadError::NotRunning(note) => format!("compositor rollback skipped: {note}"),
-            ReloadError::Refused(message) => message,
+            ReloadError::Refused(message) | ReloadError::Unanswered(message) => message,
         });
     }
     for index in completed_bars {
@@ -1575,11 +1849,14 @@ fn rollback(
     Err(failure)
 }
 
-/// Names the peers that positively reloaded the new look, for the
-/// first-apply rollback note (`None` when nothing reloaded: with no
-/// compositor and a bar that merely refused, nothing reloaded and the note
-/// says nothing). Only positive receipts count: a peer that refused never
-/// left its old layer. The verb agrees with the holder count.
+/// Names the peers that may hold the new look, for the first-apply
+/// rollback note (`None` when nothing may: with no compositor and a bar
+/// that merely refused, nothing reloaded and the note says nothing). A
+/// positive receipt counts, and so do a partial one (a `Reloaded` reply
+/// with a non-empty `refused`: the applied fields landed) and a
+/// sent-but-unanswered one (a timeout, a close after the write): each may
+/// hold the new layer. A peer that refused never left its old layer. The
+/// verb agrees with the holder count.
 fn holders_text(
     completed_compositor: bool,
     completed_bars: &[usize],
@@ -1597,7 +1874,10 @@ fn holders_text(
     match holders.len() {
         0 => None,
         1 => Some(format!("{} still shows the new look,", holders[0])),
-        _ => Some(format!("{} still show the new look,", holders.join(" and "))),
+        _ => Some(format!(
+            "{} still show the new look,",
+            holders.join(" and ")
+        )),
     }
 }
 
@@ -1843,50 +2123,56 @@ pub fn build_to_out(
             .map_err(|error| format!("cannot write {}: {error}", stage.join(file).display()))?;
     }
     // Every `return Err` below (and every `?` above) drops `scratch`,
-    // removing the stage: no exit path leaks it.
-    match checks.bar_fragment(&stage.join("bar.toml")) {
-        Ok(Availability::Available(())) => {}
-        Ok(Availability::Unavailable(note)) => validation.notes.push(note),
-        Err(message) if render_inputs.bar_popup && is_popup_refusal(&message) => {
-            // A bar built `--no-default-features` refuses `popup-radius`:
-            // re-render without it rather than refusing every look.
-            render_inputs.bar_popup = false;
-            (scoot, bar, rendered_json) = render_once(&render_inputs)?;
-            std::fs::write(stage.join("scoot.toml"), &scoot).map_err(|error| {
-                format!(
-                    "cannot write {}: {error}",
-                    stage.join("scoot.toml").display()
-                )
-            })?;
-            std::fs::write(stage.join("bar.toml"), &bar).map_err(|error| {
-                format!("cannot write {}: {error}", stage.join("bar.toml").display())
-            })?;
-            std::fs::write(stage.join("render.json"), &rendered_json).map_err(|error| {
-                format!(
-                    "cannot write {}: {error}",
-                    stage.join("render.json").display()
-                )
-            })?;
-            // Rebuild the staged list to match the re-render.
-            staged = vec![
-                ("scoot.toml".to_owned(), scoot.clone()),
-                ("bar.toml".to_owned(), bar.clone()),
-                ("render.json".to_owned(), rendered_json.clone()),
-            ];
-            match checks.bar_fragment(&stage.join("bar.toml")) {
-                Ok(Availability::Available(())) => {
-                    validation
-                        .notes
-                        .push("bar without `popup`: rendered without popup-radius".to_owned());
+    // removing the stage: no exit path leaks it. A bar built
+    // `--no-default-features` refuses `popup-radius`, and a minimal bar
+    // refuses whole module tables: re-render without what the installed
+    // bar lacks rather than refusing every look, and say what was dropped.
+    let mut drops: Vec<BarDrop> = Vec::new();
+    loop {
+        match checks.bar_fragment(&stage.join("bar.toml")) {
+            Ok(Availability::Available(())) => {
+                for drop_ in &drops {
+                    validation.notes.push(drop_.rendered_note());
                 }
-                Ok(Availability::Unavailable(note)) => validation.notes.push(note),
-                Err(retry) => {
-                    return Err(retry);
-                }
+                break;
             }
-        }
-        Err(message) => {
-            return Err(message);
+            Ok(Availability::Unavailable(note)) => {
+                validation.notes.push(note);
+                break;
+            }
+            Err(message) => {
+                let fragment = match staged
+                    .iter()
+                    .find(|(file, _)| file == "bar.toml")
+                    .map(|(_, contents)| contents.clone())
+                {
+                    Some(fragment) => fragment,
+                    None => return Err(message),
+                };
+                let Some(drop_) = bar_downgrade(&message, &fragment) else {
+                    return Err(message);
+                };
+                if !drop_.apply_to(&mut render_inputs) {
+                    return Err(message);
+                }
+                drops.push(drop_);
+                (scoot, bar, rendered_json) = render_once(&render_inputs)?;
+                for (file, contents) in [
+                    ("scoot.toml", &scoot),
+                    ("bar.toml", &bar),
+                    ("render.json", &rendered_json),
+                ] {
+                    std::fs::write(stage.join(file), contents).map_err(|error| {
+                        format!("cannot write {}: {error}", stage.join(file).display())
+                    })?;
+                }
+                // Rebuild the staged list to match the re-render.
+                staged = vec![
+                    ("scoot.toml".to_owned(), scoot.clone()),
+                    ("bar.toml".to_owned(), bar.clone()),
+                    ("render.json".to_owned(), rendered_json.clone()),
+                ];
+            }
         }
     }
     // Refuse a symlinked `out`: writing through it would land outside the
