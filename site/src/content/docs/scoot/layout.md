@@ -3,8 +3,7 @@ title: Layout
 description: "Gaps, column widths, and the default new-column width."
 ---
 
-Widen the gaps, narrow the columns. `[layout]` is three fields, all
-re-applied live by `scoot msg reload`:
+`[layout]` has three fields, all re-applied live by `scoot msg reload`:
 
 | Field | Type | Default | Reload | Meaning |
 |---|---|---|---|---|

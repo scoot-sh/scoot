@@ -3,12 +3,10 @@ title: Protocols
 description: "Which Wayland protocols work and what each means for your apps."
 ---
 
-Porting a bar, a launcher, a locker or a shell to scoot? This is the
-user half of every protocol: what works, what each choice means for
-your apps, and where the edges are. (Measurement prose and review
-history live in the repo's backlogs and commit messages, not here.)
+Porting a bar, launcher, locker or shell to scoot? This page covers
+the user half of every protocol: what works, what each choice means for
+your apps, and where the edges are.
 
-Written for someone porting a bar, a launcher, a locker or a shell to scoot.
 Every global listed here is available to every client — scoot has no
 security-context support to distinguish a privileged client from any other,
 so an allow-list would be theatre. **A same-uid process is inside the trust
@@ -69,24 +67,19 @@ read your files anyway.
 The rest of this list *is* deliberate:
 
 - **`wlr-screencopy-v1`.** The clients that motivated capture already speak
-  the `ext-` protocol: `grim` 1.5.0 carries `ext_image_copy_capture_v1` and
-  nothing else, and stock quickshell 0.3.1 — the build both DMS and Noctalia
-  run on — carries the `ext-` manager and both `ext-` source managers.
+  the `ext-` protocol (`grim`, stock quickshell).
 - **`ext_foreign_toplevel_image_capture_source_manager_v1`.** A single window
   cannot be captured on its own; the global is not advertised, so a client
-  takes its fallback path immediately instead of discovering a refusal at
-  runtime.
-- **`hyprland-toplevel-export-v1`.** The other interface a per-window
-  thumbnail is commonly requested through, and also not advertised. Stock
-  quickshell routes per-window thumbnails here, so it falls back cleanly
-  rather than failing.
+  takes its fallback path immediately.
+- **`hyprland-toplevel-export-v1`.** The other interface per-window
+  thumbnails are commonly requested through, also not advertised, so
+  stock quickshell falls back cleanly rather than failing.
 - **Minimized window state.** scoot has no concept of it, so the state bit
   is never sent and the matching requests do nothing — a taskbar's minimise
   button is inert rather than lying. (Fullscreen and maximized are both
   real: see [Fullscreen](#fullscreen) and [Maximized](#maximized).) The
-  `xdg_toplevel` `wm_capabilities` event still lists `minimize` — Smithay's
-  default set, unchanged here — so a version 5+ client may show that button;
-  pressing it does nothing.
+  `xdg_toplevel` `wm_capabilities` event still lists `minimize`, so a
+  version 5+ client may show that button; pressing it does nothing.
 
 ## Per-client limits on what scoot keeps
 
@@ -95,16 +88,13 @@ A client can make scoot keep file descriptors on its behalf: every
 hands over one per dma-buf plane, and every
 `wp_linux_drm_syncobj_manager_v1.import_timeline` one more. scoot counts
 those **per client, for as long as each fd is really open** — not for as
-long as the object it arrived on exists. That difference matters: a
+long as the object it arrived on exists. A
 buffer a surface still shows keeps its pool's (or its planes') fds after
 the client has destroyed both the `wl_buffer` and the pool, and a sync
 point keeps its timeline's fd after the timeline object is destroyed.
 Where the GLES renderer keeps a copy of each imported dma-buf plane's fd,
 the copy counts too, against the client whose buffer it is, from the
-moment the plane is added. Mesa's software renderer keeps one, and so does
-Apple's AGX driver: one extra fd per plane, the same dma-buf, measured on
-an Apple M2 (`Asahi.md`, Test 10). Hardware drivers were expected not to
-keep one; AGX shows that expectation cannot be assumed.
+moment the plane is added.
 
 - **512 fds per client**, every kind together. The request that would take
   the client past 512 is refused; a plane's renderer copy is charged when
@@ -119,9 +109,8 @@ keep one; AGX shows that expectation cannot be assumed.
 - **128 fds per client while the compositor's fd table is nearly full**
   (fewer than 128 of its fds free). Past that, the client's next pool,
   plane or timeline is refused the same way. A client under 128 is never
-  refused for someone else's use. scoot looks at a client at most once per
-  16 new fds, so one it last looked at while the table was calm can go up
-  to 16 past where it was then before it is refused.
+  refused for someone else's use. scoot re-checks at most every 16 new
+  fds, so a client can run up to 16 past its last check before refusal.
 - **1024 fds a client sent but no request used yet** (128 on a machine
   whose hard fd limit is 1024; see below). Every fd travels attached to a
   request, and one attached to a request that takes no fd is never used. A
@@ -129,11 +118,8 @@ keep one; AGX shows that expectation cannot be assumed.
   `wl_display.error` `invalid_method` ("too many file descriptors queued
   (more than N)"), and the fds are closed. The count includes fds sent
   ahead of the requests that will use them, which any client does when one
-  flush carries more than 28 fds (a client on `wayland-client`'s pure-Rust
-  backend for every such flush; a libwayland client once its socket filled
-  while the compositor was busy). 1024 is libwayland-server's default
-  limit, the one compositors built on it (mutter, KWin, sway, weston) apply
-  unless they raise it. This
+  flush carries more than 28 fds. 1024 is libwayland-server's default
+  limit. This
   limit lives in scoot's fork of wayland-backend ([forks.md](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md)).
 - **Object limits on top**, unchanged: 512 live `wl_buffer`s, 128 live
   `wl_shm_pool`s, 32 planes added to params objects not yet made into a
@@ -149,20 +135,18 @@ keep one; AGX shows that expectation cannot be assumed.
   128 that maps one more is refused the map: the window never appears — not
   in the layout, not in `windows`, not in either toplevel list — while
   everything the client had stays mapped. X has no channel for an error,
-  so unlike every bound above nothing is disconnected and no message is
+  so nothing is disconnected and no message is
   sent; the refusal is logged. Unmapping or losing its windows frees the
   count, and one X client at its bound never stops another X client — or
   any Wayland client — from mapping. "One X client" is one X connection,
-  as the server sees it (a window id's client bits, nothing a client can
-  forge). Override-redirect menus hold the bound below instead — neither
+  as the server sees it. Override-redirect menus hold the bound below instead — neither
   count ever sees the other's windows.
 - **128 live override-redirect X windows (menus, tooltips) per X client.**
   An X client already holding 128 that maps one more has it refused the
   same silent way: the menu is never drawn, never hit-tested and never
   sent frame callbacks, while everything the client had stays mapped and
   other X clients' menus still draw. Unmapping or losing its menus frees
-  the count, and the X server's death drains it whole. Same identity as
-  the managed bound above, its own counting.
+  the count, and the X server's death drains it whole.
 - **The XWayland server has bigger limits than any one app.** With
   `--xwayland`, every X application's windows reach scoot through one
   Wayland connection, the X server's, and each mapped X window costs it 2
@@ -170,29 +154,23 @@ keep one; AGX shows that expectation cannot be assumed.
   separate 128) and its live-buffer limit are a sixteenth of scoot's fd
   table instead of an app's 512: **4096** with the fd limit scoot normally runs with (65536), 512 on
   a machine whose hard fd limit is 1024, in between otherwise (1250 on a
-  20000-fd table). Before, the 257th mapped X window — menus, tooltips and
-  ordinary windows alike, across every X application — got the X server
-  disconnected, closing every X window in the session at once. Past its
+  20000-fd table). Past its
   limit (about 2048 X windows with shared-memory buffers; about 1024 on
   the `--tty` GPU tier with explicit sync, where each X window drawing with
-  the GPU holds about 4 fds) it still is: scoot logs `Xwayland
+  the GPU holds about 4 fds) the server is disconnected: scoot logs `Xwayland
   disconnected` with the reason, and X comes back only with a restart.
   Where explicit sync is offered (the `--tty` GPU tier), its limit on
   commits waiting for the GPU is scaled the same way: **512** with the
   usual fd limit, 64 (an app's) where the hard fd limit is 1024, 156 on a
-  20000-fd table. It holds about one such commit per X window drawing
-  with the GPU, so before, about 64 X windows drawing at once could
-  disconnect every X app. A managed X window refused under the
+  20000-fd table — about one such commit per X window drawing
+  with the GPU. A managed X window refused under the
   per-X-client limit above costs the X server nothing. A refused
   override-redirect window costs it what a drawn one does -- up to 64
   refused menus past the limit, which scoot tolerates (never drawn, never
   hit-tested, never sent frame callbacks). Past that scoot kills the
-  runaway client's X connection, so one X app mapping menus far past its
-  limit cannot use up the server on its own: its windows go with it and
-  it maps no more, while every other X client stays served. Killing a
-  client for its 193rd menu is a last resort: the client loses everything
-  it had, so the kill fires only past the tolerance, when the alternative
-  is disconnecting the server and losing every X window in the session.
+  runaway client's X connection — its windows go with it and it maps no
+  more, while every other X client stays served — since the alternative is
+  disconnecting the server and losing every X window in the session.
 
   > **Symptom:** one X app's windows all vanish at once and it exits,
   > while other X apps stay up. scoot logs `killed a runaway X11 client
@@ -228,7 +206,7 @@ back**: apps spawned by a keybinding, IPC
 `spawn`, `[autostart]` or the session command see the limit scoot was
 started with, so a program that uses `select()` is not handed fds it
 cannot watch. (The XWayland server raises its own limit to the hard limit
-whatever it inherits; that is upstream Xwayland's choice.) Where the hard
+whatever it inherits.) Where the hard
 limit is 1024 (some containers), nothing is raised, the log says so, and
 the smaller figures apply: 128 unused fds per client, about 710 fds per
 client at every limit against a line of 896, and a libwayland client that
@@ -242,42 +220,35 @@ Every window in the scrolling layout is sent all four `xdg_toplevel` tiled
 states (`tiled_left`, `tiled_right`, `tiled_top`, `tiled_bottom`) in the same
 configure as its size, from its first configure on. That includes the
 configure that answers a re-map: a window that unmaps (a null buffer)
-loses all its toplevel state, as xdg-shell says it must. The configure
+loses all its toplevel state. The configure
 answering its next map is rebuilt from the layout: its column's size (if
 it is visible; a hidden window is sized when it next shows), the tiled
 states, `activated` if it has focus, and `ServerSide` decorations
 under `prefer_no_csd`. A fullscreen window is sent `fullscreen` instead,
 never both, and gets the four back when it leaves. A [floating
-window](#floating-windows) is sent neither — it sizes itself, and is told
-so. A client bound
+window](#floating-windows) is sent neither — it sizes itself. A client bound
 to `xdg_wm_base` below version 2 is sent none of the tiled states (they do
 not exist at its version). One client may hold at most 128 live
 `xdg_toplevel`s; the 129th disconnects it — see
 [Per-client limits](#per-client-limits-on-what-scoot-keeps).
 
-Being told it is tiled is what makes a client fill its slot exactly. A
-client that believes it floats may size itself: `foot`'s default
-`resize-by-cells` rounds a floating window down to whole character cells,
-which left a sliver of background along its right and bottom edges. GTK
-also trims the shadow it draws around a tiled window's edges.
+A client told it is tiled fills its slot exactly. One that sizes itself
+may not: `foot`'s default `resize-by-cells` rounds down to whole
+character cells, leaving a sliver of background along its right and
+bottom edges. GTK trims the shadow it draws around a tiled window's edges.
 
-Some clients still draw less than their slot, tiled or not. On the dev VM a
-GTK 4 dialog (`zenity --info`) kept its own 300x223 size in a 966x1083 slot,
-and `mpv` kept its video's size. scoot rounds the corners and draws the focus
-ring around what such a window actually draws, and reports that area as its
-`rect` over IPC ([ipc.md](../msg/requests.md#what-the-replies-carry)). It does not use the whole slot.
+Some clients draw less than their slot, tiled or not (`zenity --info`
+keeps its own size, as does `mpv` with its video's). scoot rounds the
+corners and draws the focus ring around what such a window actually
+draws, and reports that area — not the whole slot — as its
+`rect` over IPC ([ipc.md](../msg/requests.md#what-the-replies-carry)).
 
-One case needed its own fix. libadwaita dialogs (`zenity --info` above)
-round their own corners, with a larger radius than scoot's. With
-`corner_radius` set, a crescent of background showed at each corner,
-between the dialog's own curve and scoot's tighter ring. Such dialogs now
-[float](#floating-windows) (they carry `xdg_dialog_v1`), so the ring hugs a
-window drawn at its own size rather than a short client in a tall column,
-and a window that never negotiated server-side decorations (GTK never
-creates a `zxdg_toplevel_decoration_v1` object) gets a ring-colored
-backdrop under its drawn rect, so its own corners read as the ring hugging
-its curve. Tracked in
-[`resolved/client-rounded-corners-vs-ring-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/client-rounded-corners-vs-ring-done.md).
+libadwaita dialogs (`zenity --info` above) round their own corners, with
+a larger radius than scoot's, so they [float](#floating-windows) (they
+carry `xdg_dialog_v1`): the ring hugs a window drawn at its own size,
+and a window that never negotiated server-side decorations gets a
+ring-colored backdrop under its drawn rect, so its own corners read as
+the ring hugging its curve.
 
 ## Floating windows
 
@@ -287,17 +258,16 @@ floating means for the layout — placement, stacking, focus, what the toggle
 puts back — is in [configuration.md](./windows.md); this is
 the protocol side.
 
-**What floats, decided once, at the window's first commit.** By then a
-client has sent its app id, title, parent and size limits. In order:
+**What floats, decided once, at the window's first commit.** In order:
 
 1. a modal `xdg_dialog_v1` object (`xdg_wm_dialog_v1.get_xdg_dialog` +
    `set_modal`), or a dialog object on a window that also names a parent —
    GTK 4 attaches a non-modal object to every toplevel, so an unparented,
-   non-modal one is an ordinary main window and tiles. GTK 4's dialogs:
-   `zenity --info`, `--question` and `--file-selection` (GTK 4.22) all float
+   non-modal one is an ordinary main window and tiles. GTK 4's dialogs
+   (`zenity --info`, `--question` and `--file-selection`) all float
    this way;
 2. a parent (`xdg_toplevel.set_parent`) — GTK 3's dialogs (the About dialog
-   of `gtk3-widget-factory` 3.24.52) float this way;
+   of `gtk3-widget-factory`) float this way;
 3. a fixed size — equal, non-zero `set_min_size` and `set_max_size` on both
    axes;
 
@@ -312,13 +282,10 @@ is created (before its first commit), so its first configure is the tiled
 one. The first commit's answer adds a second configure: size `0x0` (the
 client chooses) — or a rule's `size` — and no `tiled_*` state. Both arrive
 in the same flush, and a client acks the newest before drawing, so its
-first frame is at the size it chose: on the dev VM `zenity --info` drew its
-300x223 dialog, and `foot --app-id` matched by a rule its 693x500 default,
-rounded to whole cells as a floating `foot` does. From then on it is sent no
+first frame is at the size it chose. From then on it is sent no
 size unless it draws itself larger than the output's usable area, which asks
 it to fit. Floating a tiled window sends `0x0` with the tiled states
-cleared, and the client picks its floating size again (`foot` went back to
-its 693x500 default on the dev VM). Un-floating sends its column's size with the tiled states back.
+cleared, and the client picks its floating size again. Un-floating sends its column's size with the tiled states back.
 
 **Drawn above the strip, below the `top` layer.** A floating window is drawn
 over every tiled window on its output, with its focus ring drawn over them
@@ -328,17 +295,14 @@ and `overlay` layer surfaces. The pointer and clicks follow the same order.
 A lock screen covers it like everything else. It is drawn and clickable only
 on its own output. When a floating window appears, moves or is raised under
 a pointer that is not moving, the pointer is re-entered on whatever is now
-under it, so the next click goes to the dialog, not the window beneath —
-what is drawn under the pointer is what a click reaches, the same rule a
-fullscreen window appearing follows. A click meant for the window beneath,
-made in the instant a dialog appears there, lands on the dialog; for a
-window the user is looking at that is the right target.
+under it, so the next click goes to the dialog, not the window beneath.
+A click meant for the window beneath,
+made in the instant a dialog appears there, lands on the dialog.
 
 **Popups** of a floating window are fitted into its output's usable area
 like any window's (see [Popup menus](#popup-menus-xdg_popup)). A popup is
 drawn with its own window, so a menu opened from a *tiled* window draws
-below any floating window it runs under; open floating windows are above the
-strip, its menus included, by design.
+below any floating window it runs under.
 
 **Output changes.** A floating window keeps its place relative to its
 output. When the output changes size (a scale change, a `--nested` window
@@ -377,9 +341,8 @@ client. During a resize the window is sent configures carrying the
 `min_size`/`max_size`, re-read when the drag starts, and to the room to the
 usable area's edge, which wins over a minimum that does not fit), paced
 to the client: the drag sends a new size only once the client has acked the
-last, so a 1000Hz mouse does not queue sizes a 60Hz client has to skip.
-Best effort, not a guarantee of one outstanding configure: any other
-relayout meanwhile (the client's own resized frame, say) also sends the
+last. Best effort, not a guarantee of one outstanding configure: any other
+relayout meanwhile also sends the
 newest size. The edge not being dragged stays put whatever size the client settles
 on (a terminal rounding to whole cells, say). The drag's last configure
 drops `resizing` and keeps the size. An X11 window's own titlebar and
@@ -389,20 +352,20 @@ floating X window like any other.
 
 ## Fullscreen
 
-A client's fullscreen button works: `xdg_toplevel.set_fullscreen` puts the
-window into scoot's fullscreen state, and `unset_fullscreen` takes it out.
+`xdg_toplevel.set_fullscreen` enters scoot's fullscreen state, and
+`unset_fullscreen` leaves it.
 The same state is reachable three more ways — a taskbar's
 `wlr-foreign-toplevel` `set_fullscreen`, the `Super+f` bind, and IPC
 `toggle-fullscreen` / `set-fullscreen ID on|off` ([ipc.md](../msg/actions.md#actions)).
 
-**What the window is told.** Every request is answered with a configure, as
-the protocol requires, even one that changed nothing. Entering sends the
+**What the window is told.** Every request is answered with a configure,
+even one that changed nothing. Entering sends the
 `fullscreen` state bit with the output's whole size; leaving sends the bit
 cleared with its column's current tiled size — the size it had before, unless
-the layout changed around it meanwhile (a config reload, a resized output). A request made before the
+the layout changed around it meanwhile. A request made before the
 window's first commit (`foot --fullscreen` does this) is what its first
 configure carries, so its first frame is already fullscreen. Unmapping (a
-null buffer) discards the state, as xdg-shell says it must: a window that
+null buffer) discards the state: a window that
 maps again comes back tiled.
 
 **What it covers.** While its column is the focused one of its output's
@@ -421,9 +384,7 @@ it covers:
   unless it is configured with `layer=overlay`;
 - **focus goes to the fullscreen window when it starts covering.** A
   launcher or other `exclusive` surface on the `top` layer that held the
-  keyboard loses it to the window at that moment — the focused window going
-  fullscreen hides the launcher, and a hidden surface cannot hold the
-  keyboard. It gets it back as soon as the output is uncovered, if it is
+  keyboard loses it to the window at that moment. It gets it back as soon as the output is uncovered, if it is
   still mapped. `overlay` surfaces keep the keyboard;
 - the **`overlay` layer stays above it** — notifications and OSDs that draw
   there still show, and still take clicks and an `exclusive` keyboard;
@@ -441,19 +402,18 @@ menu, a cursor no plane can carry -- scoot's own pointer rides the
 cursor plane, or an overlay where there is none), a translucent
 window (`wp_alpha_modifier_v1`), a lock screen, or a client capturing the
 screen makes those frames composite instead; nothing changes on screen
-either way. Mechanics and where it has been seen: [tty.md](./backends.md).
+either way. See [tty.md](./backends.md).
 
 **What it keeps.** The window keeps its column: focus another column and the
-view scrolls there the usual way. Focused away, the fullscreen window keeps
+view scrolls there. Focused away, the fullscreen window keeps
 its fullscreen size and sits in the strip exactly where a column that wide
-would, one ordinary gap from its neighbours on either side — so it can
-still show, partly, beside the focused window, but never over it, and never
-on another output: the part of it past its own output's edge is neither drawn
+would, one ordinary gap from its neighbours on either side — never over the focused window,
+and never on another output: the part of it past its own output's edge is neither drawn
 nor clickable (see [More than one
 output](./outputs.md)). Nothing
 covers the output then, so `top`-layer surfaces are drawn again (a bar on
-`top` is drawn over the fullscreen window where they meet; one on `bottom`,
-waybar's default, stays under it). Focus back and it covers the screen
+`top` over the fullscreen window where they meet; one on `bottom`,
+waybar's default, under it). Focus back and it covers the screen
 again; switching workspaces works the same.
 Leaving restores the layout exactly. Other windows stacked in its column are
 hidden while it holds; focusing one of them ends the fullscreen, as does
@@ -464,10 +424,9 @@ its column is answered with a configure that leaves it tiled.
 
 **The output hint.** `set_fullscreen(output)` is honoured when the
 requesting window is the focused one and the session is unlocked: the window
-moves to that output (focus follows, as with `move-window-to-output`) and
+moves to that output (focus follows) and
 goes fullscreen there. Otherwise the hint is ignored and the window goes
-fullscreen on the output it is on — a client cannot move a window the user is
-not looking at to another screen.
+fullscreen on the output it is on.
 
 **While locked.** A window's own request is honoured (it is not drawn, and
 the session is as the client left it at unlock); requests on the user's
@@ -480,12 +439,8 @@ same for a fullscreen window in either layer:
 - **While it has focus it covers the output**, and the other floating
   windows on that workspace are hidden — except its own dialogs (windows
   whose parent chain reaches it), which stay up and are drawn and clicked
-  above it. Clicking a fullscreen app does not hide the dialog it opened: a
-  modal dialog blocks input to its app, and one hidden under it would make
-  the app look hung. With a dialog above it the frame stays eligible for
-  direct scanout: Smithay composites only when the dialog cannot be given a
-  plane of its own (on hardware with a free overlay plane the fullscreen
-  window can still go direct, the dialog on the overlay).
+  above it. With a dialog above it the frame stays eligible for
+  direct scanout where the dialog gets a plane of its own.
 - **While a floating window above it has focus** (typically that dialog),
   it stays in place, full size, under the floating layer; nothing counts as
   covering the output then (so the `top` layer is drawn again, and direct
@@ -497,18 +452,18 @@ same for a fullscreen window in either layer:
 
 ## Maximized
 
-A client's maximize button works: `xdg_toplevel.set_maximized` puts the
-window into scoot's maximized state, and `unset_maximized` takes it out.
+`xdg_toplevel.set_maximized` enters scoot's maximized state, and
+`unset_maximized` leaves it.
 The same state is reachable three more ways — a taskbar's
 `wlr-foreign-toplevel` `set_maximized`, the `Super+m` bind, and IPC
 `toggle-maximize` / `set-maximized ID on|off` ([ipc.md](../msg/actions.md#actions)).
 
-**What the window is told.** Every request is answered with a configure, as
-the protocol requires, even one that changed nothing. Entering sends the
+**What the window is told.** Every request is answered with a configure,
+even one that changed nothing. Entering sends the
 `maximized` state bit with the output's usable size (the whole output minus
 a bar's exclusive zones, minus the layout gap); leaving sends the bit
 cleared with its column's current tiled size. Unmapping (a null buffer)
-discards the state, as xdg-shell says it must: a window that maps again
+discards the state: a window that maps again
 comes back tiled.
 
 **What it fills.** While its column is the focused one of its output's
@@ -545,19 +500,18 @@ behalf — a taskbar, the bind, IPC — are refused like every other action.
 
 ## XWayland (opt-in)
 
-`--xwayland` (or `[xwayland] enabled` in the config file — either one turns
-it on) starts an XWayland server inside the session, and `DISPLAY` is
+`--xwayland` (or `[xwayland] enabled` in the config file) starts an
+XWayland server inside the session, and `DISPLAY` is
 exported to everything the session spawns, so X11-only applications run.
 Off by default at runtime, and compiled in by default at build time (only
-`--no-default-features` minimal builds lack the `xwayland` Cargo feature):
-without one the knob warns and the session runs Wayland-only, and a missing
-`Xwayland` binary at startup is the same shape (a loud log line, then a
-Wayland-only session — the session never fails to start over X).
+`--no-default-features` minimal builds lack the `xwayland` Cargo feature).
+Without the feature the knob warns and the session runs Wayland-only; a
+missing `Xwayland` binary at startup falls back the same way — the session
+never fails to start over X.
 
 **Trust model: running one X client extends full trust to it.** The
 same-uid boundary above bites harder here than anywhere else in this file:
-X11 clients can keylog and snoop on each other *by design* — no exploit,
-no bug, the protocol works that way. Any X client can read what is typed
+X11 clients can keylog and snoop on each other *by design*. Any X client can read what is typed
 into another X client while one of them has the keyboard, capture any X
 window's contents, and synthesize input into them. Starting the server is
 harmless on its own; connecting your first X client is the trust decision.
@@ -566,23 +520,20 @@ harmless on its own; connecting your first X client is the trust decision.
 session spawns is told it -- a background *Wayland* app included. Any such
 process can connect and read the clipboard (below) whenever an X window
 has the keyboard, which a Wayland client could never do in the background.
-That is the same line wlroots -- and so sway -- draws for XWayland's
-clipboard (reads and new selections refused unless an X surface is focused,
-checked against its `xwayland/selection/` source), not a stricter one.
+That matches the line wlroots (and so sway) draws for XWayland's
+clipboard, not a stricter one.
 
 It reaches past X windows, too. An X menu or tooltip (an override-redirect
 window) is drawn where its client puts it, above **every** window --
-fullscreen Wayland ones included -- and takes the pointer there, because
-that is what X menus are. So any X client can cover the screen with a
+fullscreen Wayland ones included -- and takes the pointer there. So any X client can cover the screen with a
 transparent override-redirect window and swallow or log the clicks meant
 for the Wayland apps beneath it, or draw a convincing fake prompt over
-them. That is inside X11's trust model, not a bug to be fixed here: treat
+them. Treat
 an X client like a program with your whole desktop in reach.
 
 What X clients do not get: keystrokes aimed at Wayland windows (keys go to
 an X window only while scoot has focused one, and the X server's own input
-focus is set by scoot, never left to "whatever is under the pointer"),
-anything drawn under the session lock, the Wayland clipboard or primary
+focus is set by scoot), anything drawn under the session lock, the Wayland clipboard or primary
 selection while no X window is focused (below), and -- through the focus gate below
 -- the keyboard focus of a Wayland window by asking. (Two exceptions: an X
 app a *Wayland launcher* started, and one whose launched process exits
@@ -633,8 +584,7 @@ its startup id by another X client, below.)
   [relative pointer](#relative-pointer-and-pointer-constraints) for the
   XWayland behavior scoot works around).
 - **Decorations.** X windows get the focus ring and rounded corners like any
-  window. Motif decoration hints are ignored: scoot draws no titlebar for a
-  client to opt out of. X has no equivalent of xdg's tiled states: a plain
+  window. Motif decoration hints are ignored: scoot draws no titlebar. X has no equivalent of xdg's tiled states: a plain
   tiled column sets neither `_NET_WM_STATE_FULLSCREEN` nor
   `_NET_WM_STATE_MAXIMIZED_*` (which would make clients change their chrome
   for a state they are not in); a maximized X window sets the pair, like a
@@ -648,12 +598,10 @@ its startup id by another X client, below.)
   honoured only while a button press is held -- the pointer's grab is the
   plain press grab, not a menu's, a drag-and-drop's or another drag's --
   and that press went to a window of the requesting window's own X client
-  (the client bits of the window ids, which the X server allocates). A
-  button the request names must be the held one (`0` names none). Nothing
-  while the session is locked. So a background X client cannot capture the
-  pointer: with no press held, or one on a Wayland window or another X
+  (the client bits of the window ids). A button the request names must be the held one (`0` names none). Nothing
+  while the session is locked. With no press held, or one on a Wayland window or another X
   client's window, the request is refused (logged at debug). The drag ends
-  on the release, so a drag never sticks: a request handled once no button
+  on the release: a request handled once no button
   is held is refused. (A request carries no serial, so one still queued
   when the user releases and presses again in the same app within a stalled
   frame could ride the new press; the release still ends it.) An X window
@@ -664,8 +612,7 @@ its startup id by another X client, below.)
   scoot's libinput config instead. **Not honoured:**
   keyboard moves and resizes (a window menu's "Move"; scoot has no keyboard
   move mode -- move a floating window with the bindings or `scoot msg`),
-  and `_NET_WM_MOVERESIZE_CANCEL` (Smithay's X11 side drops both, so
-  a client cannot end a drag early; the release does). **Known limit:** any
+  and `_NET_WM_MOVERESIZE_CANCEL` (a client cannot end a drag early; the release does). **Known limit:** any
   X client can send the request naming any window, so another X client
   naming any window of the X client the press is held on (that window or
   another of the same app's) drags it until the release, as with
@@ -676,15 +623,14 @@ its startup id by another X client, below.)
   window and refuses them the keyboard and pointer; the X server itself
   keeps running (lock is not logout). An X menu open at lock is hidden and
   inert, not closed: nothing can unmap an override-redirect
-  window, and toolkits keep their menus through the focus release (a GTK 3
-  context menu measured still open 5 s after locking), so it reappears at
-  unlock.
+  window, and toolkits keep their menus through the focus release,
+  so it reappears at unlock.
 - **Screenshots and screen capture see X windows** like any other: `scoot
   msg screenshot` and [`ext-image-copy-capture-v1`](#screen-capture-ext-image-copy-capture-v1)
   (`grim`) both read an output's composited frame, so an X window -- and an
   open X menu -- is in the capture of the output it is on and no other's,
   and under the session lock neither capture holds any X pixel. There is no
-  X-side capture to opt out of, either: an X *client* can still read other X
+  X-side capture: an X *client* can still read other X
   windows' contents through the X server (the trust model above), but never
   a Wayland window's.
 - **Scaled outputs.** At an `[output] scale` above 1 the X server draws at
@@ -707,21 +653,19 @@ its startup id by another X client, below.)
   everything below re-told when it moves. Toolkits are told the scale
   over XSETTINGS (the settings a GNOME session publishes:
   `Gdk/WindowScalingFactor`,
-  `Xft/DPI`, `Gdk/UnscaledDPI`). GTK 3 is measured to draw at the right
-  size and follow a reload live. Qt 6 and Java document reading these
-  settings (Qt 6 takes `Xft/DPI` and its default high-DPI scaling turns
-  that into a device pixel ratio of 2 at scale 2) but neither is measured
-  here; Qt 5 gets scaled fonts only, unless the app turns on high-DPI
+  `Xft/DPI`, `Gdk/UnscaledDPI`). GTK 3 draws at the right
+  size and follows a reload live. Qt 6 and Java read these
+  settings (Qt 6 takes `Xft/DPI`, which its default high-DPI scaling turns
+  into a device pixel ratio of 2 at scale 2); Qt 5 gets scaled fonts only, unless the app turns on high-DPI
   scaling itself. scoot's X11 side owns the `_XSETTINGS_S0`
-  selection these are published on (it always has); an XSETTINGS daemon
+  selection these are published on; an XSETTINGS daemon
   the user runs (`xsettingsd`, `gsd-xsettings`) that takes the selection
   over replaces them, and scoot's scale no longer reaches X apps -- set
   the scale in that daemon instead. An X app that
   reads none of them (bare Xlib: `xterm`'s default bitmap fonts, `xclock`,
   Wine, Steam's own UI) draws at scale 1 in X pixels and comes out
   that scale times smaller (`ceil(scale)`; with `fractional = "light"`
-  the X scale is 1, so it comes out full-size but blurry): sharp but small,
-  the trade-off every compositor that draws X natively makes. The `Xft.dpi` X resource is not
+  the X scale is 1, so it comes out full-size but blurry). The `Xft.dpi` X resource is not
   written; an app that reads only that takes `xrdb -merge` (`Xft.dpi:
   192` at scale 2). Coordinates stay logical everywhere scoot speaks them
   -- `scoot msg windows`, `pointer click`, window rules, floating positions
@@ -741,9 +685,7 @@ its startup id by another X client, below.)
   is raw pixels, never a name, and IPC carries names only, so an X window
   reads as having no icon: exactly what a pixel-only xdg client gets (see
   [Window icons](#window-icons-xdg-toplevel-icon-v1)). Bars show X icons
-  from the app id (`WM_CLASS` class) through `.desktop` files. XIM is not
-  provided (see
-  [Clipboard, drag-and-drop and input methods](#clipboard-drag-and-drop-and-input-methods)).
+  from the app id (`WM_CLASS` class) through `.desktop` files.
 
 ### Focus: X windows ask, scoot decides
 
@@ -755,65 +697,55 @@ sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
 1. **no window has focus**; or
 2. **the focused window is an X window of the same process**, as the X
    server reports it (below) -- any window of that process, not only a
-   dialog: an app opening its file chooser must be able to type into it
-   without a click, and GTK sends nothing when it maps one.
+   dialog, since GTK sends nothing when it maps one.
    `WM_TRANSIENT_FOR` does not count: any X client can name any window as
    its parent; or
 3. **scoot started it, and the start's activation token is still unspent.**
    `State::spawn` hands every child a token (see
    [focus handoff](#focus-handoff-xdg-activation-v1)); while XWayland is
    live the child also gets it as `DESKTOP_STARTUP_ID`, which GTK turns
-   into `_NET_STARTUP_ID` on its *client leader* window (Qt is believed to
-   do the same; unverified) -- scoot reads it from the mapping window, or
+   into `_NET_STARTUP_ID` on its *client leader* window -- scoot reads it from the mapping window, or
    else from its leader (its `WM_HINTS` window group, and only a leader the
    same X client created). **A startup id redeems only for the process it
    was handed to:** the X server reports each client's process id (the
    X-Resource extension, from the socket's credentials — never the
    forgeable `_NET_WM_PID`), and the window's process must be the child
-   scoot spawned (still running, so its pid cannot have been reused) or
+   scoot spawned or
    descend from it within 8 parent links. So a GTK app launched through a
-   wrapper (`sh -c`, measured) or a launcher shim still redeems it;
-   `flatpak run` should too, unverified. Any other X client that copies the
+   wrapper (`sh -c`) or a launcher shim still redeems it.
+   Any other X client that copies the
    id -- it is readable by every X client from the moment a toolkit sets
    it, before the app's first window maps -- is refused and the token left
    for the app. When the server cannot say which process a window belongs
    to, the startup id is refused. **Once the process scoot started has
    exited** without its token being redeemed, the startup id redeems for
    any X window that asks (maps, or sends `_NET_ACTIVE_WINDOW`) naming it,
-   once, within the token's 30 seconds -- the rule from before the
-   binding. That is where two ordinary launches end up: a
+   once, within the token's 30 seconds. That is where two ordinary launches end up: a
    single-instance app whose second launch hands over to the running
    instance and exits (GApplication, `KDBusService`), and an app that forks
    itself into the background and lets the process scoot started exit
-   (`gvim` does by default, per its documentation; unmeasured here). Their
-   window comes from a process that is not a descendant of the one scoot
-   started, so binding them would open it without focus behind whatever you
-   were typing into. A window that asked with the id while that process
-   still ran, and was refused, takes focus when it exits (a forwarder was
-   measured to exit a few milliseconds after the running instance's window
-   mapped) -- if it asked less than a second before the exit and focus has
+   (`gvim` does by default). A window that asked with the id while that process
+   still ran, and was refused, takes focus when it exits
+   -- if it asked less than a second before the exit and focus has
    not moved since; of several, the first to ask. A window that only
    carries the id and never asked gets nothing from the exit, and no other
    process's exit hands anyone focus. For these launches the race stays
    open to an X client that copies the id and *asks* with it before the
-   app's window does, as it always was; and a window whose launched
+   app's window does; and a window whose launched
    process lingers more than a second after the window asked, or whose
    focus moved first, opens unfocused -- and the launch's token is spent
    then, so no window that asks later (a copier) can take the focus
    either. A client that sets no startup id
    (`xterm`) is matched by process alone: a process scoot spawned whose
    token is still live counts. **A live token a mapping window may redeem
-   is spent whichever rule grants it focus** -- so a token cannot be left
-   lying around for another X client to copy and redeem later -- and every
+   is spent whichever rule grants it focus**, and every
    token expires after 30 seconds.
 
    A token a **Wayland launcher** minted (from a real click; see
    [focus handoff](#focus-handoff-xdg-activation-v1)) and handed an X app
    as its startup id -- GLib-based launchers set `DESKTOP_STARTUP_ID` too --
-   redeems for any X window naming it, as before: scoot never learns which
-   process the launcher started (it typically exits straight after,
-   reparenting the app away from it), and refusing these would open every
-   such X app behind the window it was launched from. A token scoot minted
+   redeems for any X window naming it: scoot never learns which
+   process the launcher started. A token scoot minted
    with no spawn recorded is refused for X windows outright.
 
 `_NET_ACTIVE_WINDOW` goes through the same three rules, and is never
@@ -826,21 +758,17 @@ taskbar and in `scoot msg windows` — and a click, a keybinding, a taskbar's
 clients cannot be told apart by anything they send, and inside the X server
 one can move the other's focus directly (`XSetInputFocus`) anyway. The gate
 is about the Wayland keyboard — which window scoot gives the keys to — and
-that is the one no X client can take by asking -- with the one exception
+no X client can take it by asking -- with the one exception
 above: a Wayland launcher's token, which an X client watching for new
 windows can copy off the launched app's leader and redeem first, taking
-focus once while the token is live (up to 30 seconds after the launch).
-Tokens scoot minted for its own spawns are bound to the spawned process and
-cannot be raced. (Any process of your own user can also read a spawned
-child's token from `/proc/<pid>/environ`; that is the same-user trust
-boundary every activation token lives inside.)
+focus once while the token is live. Tokens scoot minted for its own spawns are bound to the spawned process and
+cannot be raced.
 
 ### Clipboard, drag-and-drop and input methods
 
 **The clipboard and the primary selection cross both ways.** Copy in an X
 app and paste in a Wayland app, or the reverse; `xclip`/`xsel` and
-`wl-copy`/`wl-paste` see each other's selections (measured live, both
-selections, both directions, including a 2.9 MB payload). A clipboard
+`wl-copy`/`wl-paste` see each other's selections. A clipboard
 manager on `zwlr_data_control` or `ext_data_control` is told about an X
 selection like any other, and one setting the clipboard reaches X clients
 too.
@@ -852,14 +780,12 @@ source only while the X reader keeps up (X's `INCR` chunks, each waiting for
 the reader's delete). So a transfer holds at most one 64 KiB slice (two
 chunks for a Wayland source feeding an X reader) however large the
 selection, and a slow or stuck reader on either side stops the transfer, not
-the compositor. The property itself lives in XWayland's memory, not the
-compositor's. How many can be in flight is bounded too: per selection, 8
+the compositor. How many can be in flight is bounded too: per selection, 8
 pastes waiting on their X owner and 8 under way -- no more than 4 of those
 from one X app, so an app trickling its data a byte at a time cannot keep a
 different app's paste out -- and 4 transfers out to any one X client with
-16 in all. (The per-app counts go by X window ids, and an app can name
-another app's window; that moves whose share it uses, and the totals still
-hold.) **A paste past a bound is refused -- it reads nothing, at once --
+16 in all. (The per-app counts go by X window ids, which an app can
+spoof; the totals still hold.) **A paste past a bound is refused -- it reads nothing, at once --
 not queued.** Transfers that will not finish are ended, checked every
 second while any are in flight: one whose reader has gone, one that has not
 moved for 30 seconds, and, once the selection has changed hands or its X
@@ -880,8 +806,7 @@ client can read the Wayland clipboard or put a new selection on it;
 `xclip -o` fails with `target STRING not available`. The rule cannot tell X
 clients apart, and does not try to: a read names no requester, a clipboard
 tool like `xclip` has no window of its own, and inside the X server any X
-client can read or replace another's selection by design (the trust model
-above). An X client's selection set while a Wayland window is focused stays
+client can read or replace another's selection by design. An X client's selection set while a Wayland window is focused stays
 X-side -- other X apps paste it, Wayland apps keep theirs -- until the next
 copy on either side.
 
@@ -902,21 +827,20 @@ at most 255 bytes, at most 64 of them), so a hostile atom name cannot reach
 a Wayland client.
 
 **Drag-and-drop works in every direction: X to Wayland, Wayland to X,
-X to X, and within one X app.** A drag that starts in an X app drops into Wayland apps (text from `mousepad` over X into a
-Wayland `mousepad`, measured). It starts only where a Wayland drag would:
+X to X, and within one X app.** A drag that starts in an X app drops into Wayland apps.
+It starts only where a Wayland drag would:
 from a real, recent button press delivered to an X window whose X client is
 that of the window taking the drag's selection -- never while locked, and
 **never from touch** (X touch drags are refused, as Wayland ones are).
-Without that check (upstream's behaviour, and scoot's before this), any X
+Without that check, any X
 client could turn a press you were holding on a Wayland window into a drag
 of its own data and drop it wherever you released; **presses on Wayland
-windows are now protected. Presses on X windows are not:** X accepts any
+windows are protected. Presses on X windows are not:** X accepts any
 window as the owner of the drag's selection, so a stranger naming the X
 window you pressed on still takes the press over, and the X server
 cannot tell who asked.
 
-A drag from a Wayland app drops onto an X window (text from a Wayland
-`mousepad` into one over X, measured): over one, scoot speaks
+A drag from a Wayland app drops onto an X window: over one, scoot speaks
 XDND -- X's drag-and-drop protocol -- to it on the Wayland app's behalf,
 and the X app reads the dropped data from scoot as it would
 from any X source. The X window has to take drops (`XdndAware`,
@@ -929,8 +853,7 @@ target's window goes, or when an X app starts a new drag that scoot lets
 start (from a pointer press held on an X window). An X app that takes the
 drag's selection with no such drag behind it is refused -- scoot
 takes the selection back and the drop stands -- so no X app can
-end a drop in flight (scoot's Smithay fork, `7388af13`, `9515d7e5` and
-`d3a4cd73`).
+end a drop in flight.
 
 A drag from an X app onto an X window -- another X app's, or inside one X
 app, like moving selected text within an X editor -- lands too, and X does
@@ -938,22 +861,14 @@ it itself: while an X drag is over an X window, scoot hides
 the full-screen window it relays X drags to Wayland through, so the X app
 finds the real window under the pointer and speaks XDND to it directly;
 when the drag moves on, that window is shown again, so the same drag can
-still drop on a Wayland app. Upstream Smithay queues the requests that
-show it again but never flushes them to the X server, so they sat unsent
-until some unrelated request went out, and an X drag that had crossed an X
-window could not drop on a Wayland one; scoot's Smithay fork flushes them
-(`6e6fe896`, [forks.md](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md))
-([`backlog/resolved/xwayland-pointer-focus-x11-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/xwayland-pointer-focus-x11-done.md)).
+still drop on a Wayland app.
 
 A quick drag straight from one X app onto another lands too, released on
 the first motion that reaches the other window. GTK and Qt start an X drag
-without telling anyone what they are dragging, and upstream Smithay's drag
-enters no window until it knows, so the full-screen window stayed over the
-target and such a drop went nowhere (GTK `mousepad` over X: 0 of 20
-landed). scoot's Smithay fork lets an X drag enter another client's X
-window at once, and go from one X window to the next without showing the
-full-screen window in between (`b1ac3ca7`; 20 of 20)
-([`backlog/resolved/xwayland-x-drag-first-motion-race-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/xwayland-x-drag-first-motion-race-done.md)).
+without telling anyone what they are dragging, so scoot's Smithay fork lets
+an X drag enter another client's X window at once, and go from one X
+window to the next without showing the
+full-screen window in between.
 One limit is GTK's own, on any X server: a release that arrives together
 with the motion that brings the pointer onto the target (an agent sending
 `pointer move` and the button release back to back, with no pause) is
@@ -961,12 +876,10 @@ decided on the window the pointer was over *before* that motion, so it
 drops nothing. Let the move settle before the release. The same holds
 between two windows of one app instance (most GTK apps run every window in
 one process): the drag waits for the app to say what it is dragging only
-over the window it started on (`b16cd6a2`,
-[`backlog/resolved/xwayland-same-client-quick-drag-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/xwayland-same-client-quick-drag-done.md)).
+over the window it started on.
 
-**Input methods: XIM is not provided.** X clients compose text through XIM
-(an X-side protocol an input-method daemon speaks as an X client); XWayland
-does not bind `text-input-v3` (its binary links no such interface), so a
+**Input methods: XIM is not provided.** XWayland
+does not bind `text-input-v3`, so a
 Wayland input method (`input-method-v2`, fcitx5, an on-screen keyboard)
 cannot compose into an X window. An input-method daemon running its own
 XIM server under XWayland (fcitx5's X frontend, for instance) is untested.
@@ -974,13 +887,7 @@ An input method's keyboard grab does pre-empt an X window's keyboard like
 any other: while it holds the grab, keys go to it, not to the X window.
 
 **Most of the bounds above, and the hooks the rules need, live in scoot's
-Smithay fork**, each measured first and listed in [forks.md](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md):
-upstream, large transfers were cut to 64 KiB both ways, a stuck reader made
-the compositor buffer a whole selection, an owner appending without waiting
-was re-read on every append, transfers of either direction piled up without
-bound or stalled for good, and a new Wayland selection could sit unsent to
-the X server; `X11Wm::selection_owner`, `X11Wm::selection_generation` and
-`XwmHandler::allow_drag` are fork additions.
+Smithay fork**, listed in [forks.md](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md).
 
 ## Layer shell (bars, wallpapers, launchers)
 
@@ -1013,8 +920,7 @@ fuzzel                    # a launcher, on the overlay layer
 Each output keeps its own layer surfaces, its own exclusive zones and its
 own keyboard derivation:
 
-- A bar reserves the edge of the output it is mapped on, and no other's. A
-  bar on the second screen never shrinks the first screen's tiling area.
+- A bar reserves the edge of the output it is mapped on, and no other's.
 - A surface that names an output (`get_layer_surface` with a `wl_output`)
   appears on that output. A surface that names none appears on the first
   output — the compositor's choice. New windows, by contrast, open on the
@@ -1024,8 +930,7 @@ own keyboard derivation:
   click on a second-screen bar focuses that bar, and an `exclusive`
   launcher mapped where the pointer is takes the keyboard there. If
   `exclusive` surfaces are mapped on two screens at once, the pointer's
-  screen wins; any screen's `exclusive` surface still outranks every window,
-  so a launcher stays usable with the pointer on the other screen.
+  screen wins; any screen's `exclusive` surface still outranks every window.
 
 ### Keyboard focus
 
@@ -1041,11 +946,10 @@ fullscreen window, where the `top` layer is hidden and holds no keyboard
   down when it goes away.
 - `on_demand` is click-to-focus, exactly like a window: click the surface to
   give it the keyboard, click a window, a bar or bare desktop to take it
-  back. `exclusive` on `bottom` or `background` is treated the same way — the
-  spec allows normal focus semantics there, and nothing should be typing into
-  a wallpaper unasked. **A keybinding does not release an `on_demand`
-  surface**: a hotkey pressed while you are typing in a panel's search field
-  keeps typing in that panel, which is where the keyboard visibly is. A
+  back. `exclusive` on `bottom` or `background` is treated the same way —
+  the spec allows normal focus semantics there. **A keybinding does not release an `on_demand`
+  surface**: a hotkey pressed while typing in a panel's search field
+  keeps typing in that panel. A
   *request* to move focus does release it — an IPC focus action, a
   `wlr-foreign-toplevel` `activate`, an `ext-workspace-v1` `activate` or an
   `xdg-activation-v1` token all hand the keyboard on to the window.
@@ -1054,16 +958,15 @@ fullscreen window, where the `top` layer is hidden and holds no keyboard
 - A click-focused surface can hand the keyboard back itself, by committing
   `keyboard_interactivity: none` or by unmapping — and the click that focused
   it is spent when it does. Asking for `on_demand` again, or mapping again,
-  gets it drawn again but not focused again: it waits for a fresh click. So a
-  bar that collapses and re-opens a search field never gets the keyboard back
-  without the user actually clicking it. (An `exclusive` surface on
+  gets it drawn again but not focused again: it waits for a fresh click.
+  (An `exclusive` surface on
   `top`/`overlay` is the exception: it takes the keyboard whenever it is
   mapped, clicked or not.)
 
 **Keybindings always win.** They are matched before anything is forwarded to
 the focused client, so `Super+Shift+E` (quit) and, on `--tty`,
 `Ctrl+Alt+F1`..`F12` (VT switch) still work while a full-screen layer surface
-is holding every keystroke. That is the escape hatch if one wedges.
+is holding every keystroke.
 
 **A layer-shell "lock screen" is not a security boundary** — use a real
 `ext-session-lock-v1` locker. An `exclusive` layer surface will receive what
@@ -1087,20 +990,20 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   over, and closing it unwinds to the parent menu rather than closing the
   whole chain.
 - **A bar's own dropdowns work too** — a popup parented to a *layer* surface
-  (`zwlr_layer_surface_v1.get_popup`), not just to a window. As the
-  protocol says, the popup must be created with a null parent and handed
+  (`zwlr_layer_surface_v1.get_popup`), not just to a window. The
+  popup must be created with a null parent and handed
   to the bar before it is first configured; anything else is refused (see
   below).
 - **A menu is kept on its screen.** A popup that lets the compositor adjust
-  it (`xdg_positioner.set_constraint_adjustment`: flip, slide, resize —
-  GTK3's context menus ask for all six) is flipped, slid or resized, in the
+  it (`xdg_positioner.set_constraint_adjustment`: flip, slide, resize)
+  is flipped, slid or resized, in the
   protocol's order, to fit inside the screen its window is on, instead of
   being cut at the edge. The edge between two screens counts like an outer
   one: a menu is moved back onto its own window's screen, never drawn over
   the neighbour. The area it is fitted into:
   - a window's menu: the screen minus any bar's exclusive zone — the same
-    area windows tile into — because a window's menus draw *under* a
-    `top`-layer bar, and a menu slid under the bar would be hidden by it;
+    area windows tile into — since a window's menus draw *under* a
+    `top`-layer bar;
   - the menu of the window covering its screen fullscreen: the whole
     screen, since the bar is not drawn then;
   - a bar's own dropdown: the whole screen, bar zone included.
@@ -1111,21 +1014,18 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   `xdg_popup.reposition`, and redone afterwards for a `reactive` popup: when
   its window scrolls, its output is resized, or a bar's exclusive zone
   changes, it is re-fitted and told with a fresh configure pair (a
-  non-reactive popup is never re-configured — the protocol forbids it; see
-  [`docs/backlog/resolved/popup-reactive-reconstrain-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/popup-reactive-reconstrain-done.md)).
+  non-reactive popup is never re-configured — the protocol forbids it).
 - **Popups nest at most 64 deep, and cannot loop.** A menu, its submenu,
-  that submenu's submenu and so on may go 64 levels deep — real menus stop
-  at a handful — and a 65th is refused. That holds for how scoot itself
+  that submenu's submenu and so on may go 64 levels deep,
+  and a 65th is refused. That holds for how scoot itself
   stores and draws them, not just for each popup's parent chain: no
   application popup ever sits more than 64 levels down, however the client
   got it there (an input method's candidate window over the deepest one
   can add a 65th level; it is never anyone's parent). So is a popup that
-  is its own ancestor (its own `xdg_surface` named as its parent). Before, a chain a
-  few thousand deep crashed the compositor, and a loop froze it, taking
-  every other client down too. A refused popup's client is disconnected
+  is its own ancestor (its own `xdg_surface` named as its parent).
+  A refused popup's client is disconnected
   with a protocol error, and so is a client that breaks one of the
-  protocol's rules that keep an open chain from growing afterwards, which
-  scoot enforces where the pinned Smithay does not:
+  protocol's rules that keep an open chain from growing afterwards:
 
   | What the client did | Protocol error | Posted on |
   |---|---|---|
@@ -1135,23 +1035,17 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   | Destroyed a popup that still has child popups open | `xdg_wm_base.not_the_topmost_popup` | the destroyed popup's `xdg_surface` |
   | Handed a bar (`zwlr_layer_surface_v1.get_popup`) a popup that was created with a parent, or was already configured | `xdg_wm_base.invalid_popup_parent` | the `xdg_popup` |
 
-  The `xdg_wm_base` errors are posted on another object because the pinned
-  Smithay keeps the client's `xdg_wm_base` private: the code is
+  The `xdg_wm_base` errors are posted on another object: the code is
   `xdg_wm_base`'s, and the message starts with the error's name — read
   that, since on `xdg_surface` the same number means something else. Each
   refusal also logs a `warn` naming the client and the reason. Closing
-  menus innermost first, as GTK 3 does (and as wlroots and mutter also
-  require), is unaffected, and so is a client disconnecting with menus
+  menus innermost first, as GTK 3 does, is unaffected, and so is a client disconnecting with menus
   open. An input method's candidate window over a menu's text field does
   not count as the menu's child: the menu can close under it.
 - **One client may hold at most 128 live popups.** Side by side counts as
   much as nested: a client already holding 128 popups that opens one more
   is disconnected with `wl_display.error` `no_memory` — see
-  [Per-client limits](#per-client-limits-on-what-scoot-keeps). Thousands of
-  popups in one burst used to stall the compositor for seconds (every
-  popup's tracking searched the whole tree for its parent, and every first
-  commit walked every tree again); now the burst is cut off in
-  milliseconds.
+  [Per-client limits](#per-client-limits-on-what-scoot-keeps).
 - **The grab's serial has to name a real interaction.** A grab is refused —
   dismissed, with a warning in the compositor log naming the client and
   serial, since the protocol posts no error — unless its serial is a recent
@@ -1161,8 +1055,7 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   replacing the one just closed) is not refused for reusing its opening
   serial past that window.
 - **Keyboard focus does not move onto a popup that did not grab.** A tooltip
-  is an ordinary `xdg_popup` too, and handing one the keyboard would take it
-  away from the window you are typing into.
+  is an ordinary `xdg_popup` too.
 
 **A grab loses to the compositor's own focus rules**, in this order:
 
@@ -1172,12 +1065,9 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
    opened over a menu is typeable, and the menu is dismissed rather than left
    on screen holding input it can no longer use.
 3. **An input method holding the keyboard wins.** While an IME (fcitx5, or
-   any `zwp_input_method_v2` client holding its keyboard grab, which a real
-   IME does for its whole active span) has the seat, a grab asked for is
+   any `zwp_input_method_v2` client holding its keyboard grab) has the seat, a grab asked for is
    refused, and a grab already held is dismissed when the IME takes the
-   keyboard. Letting a menu pre-empt an IME mid-compose would interrupt
-   composition in an unrelated text field; leaving the menu mapped with no
-   keyboard would leave one Escape cannot close.
+   keyboard.
 4. **The menu wins over everything else**: over the focused window, over a
    layer surface that got the keyboard from a click, and over the `exclusive`
    surface the menu itself hangs off — so a bar's own dropdown is not
@@ -1185,8 +1075,7 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
    still wins per rule 2.
 
 Losing is always spelled `popup_done`, never "leave it up but take its input
-away". Keybindings still win over a grab, so a client cannot wedge the
-session by holding a menu open.
+away". Keybindings still win over a grab.
 
 For what a grab means to an agent driving the socket, see
 [ipc.md](../msg/index.md#rules-an-agent-needs).
@@ -1198,20 +1087,18 @@ client-drawn titlebar: `wl_subcompositor.get_subsurface` works as the core
 protocol says, with one limit.
 
 - **Subsurfaces nest at most 64 levels below a surface tree's root.** The
-  root is the surface at the top of the tree, the one with no parent: a
+  root is the surface with no parent: a
   window, a popup, a layer surface, a cursor, a plain surface with no role
   yet -- or a subsurface cut loose from its parent, by
   `wl_subsurface.destroy` or by its parent `wl_surface` being destroyed,
   which keeps its role and its own subsurfaces but is a root until it is
   attached again. Its own subsurface is level 1, a subsurface of that is level 2,
-  and so on; real clients use a level or two. That holds for every tree,
-  however it was built. A `get_subsurface` is refused if it would put *any*
+  and so on. A `get_subsurface` is refused if it would put *any*
   surface deeper than level 64, and that includes the subsurfaces already
   hanging below the surface being attached, so a tree built bottom-up,
   re-attached after `wl_subsurface.destroy`, or re-attached after its
   parent `wl_surface` was destroyed is held to the same limit as one built
-  a level at a time. Before, a tree a few thousand levels deep crashed the
-  compositor, taking every other client down too.
+  a level at a time.
 
   | What the client did | Protocol error | Posted on |
   |---|---|---|
@@ -1223,24 +1110,21 @@ protocol says, with one limit.
   linked.
 
   What hangs below a surface is judged by a recorded height that is never
-  lowered, which keeps the check cheap however wide a client's trees are.
-  It can be higher than anything really there, in two ways: a surface
+  lowered. It can be higher than anything really there, in two ways: a surface
   keeps the height of subsurfaces it has since lost, and it passes that
   height on to every surface it is later attached below. So a surface that
-  once had, say, 60 levels of subsurfaces below it and lost them, then
+  once had 60 levels of subsurfaces below it and lost them, then
   attached below a plain surface, makes that plain surface count as 61
   levels high too -- and attaching *that* one 3 levels deep is refused,
   though the real tree would be 5 deep. The error only ever goes that way:
-  a tree that really is too deep is always refused. No real client comes
-  near it: the deepest measured is 2 levels.
+  a tree that really is too deep is always refused.
 
   A parent that is the surface itself, or one of its own subsurfaces, is
-  still refused as before, with `wl_subcompositor.bad_surface`.
+  refused with `wl_subcompositor.bad_surface`.
 
 ## Workspaces (`ext-workspace-v1`)
 
-Version 1, the compositor-agnostic successor to the one-off wlr workspace
-protocols, so a panel's workspace module, a workspace switcher or an
+Version 1. A panel's workspace module, a workspace switcher or an
 indicator can list workspaces, follow which one is active and switch between
 them. The global is `ext_workspace_manager_v1`.
 
@@ -1267,8 +1151,6 @@ To switch a workspace, send `activate` on its handle **and then `commit` on
 the manager** — the protocol batches requests, so an `activate` with no
 `commit` after it does nothing.
 
-Worth knowing before you write against it:
-
 - **Workspaces are positions, not identities, and scoot sends no `id`
   event.** The list grows as you use the trailing empty workspace and shrinks
   when a workspace empties out, which renumbers everything after it: handle 2
@@ -1280,29 +1162,24 @@ Worth knowing before you write against it:
   active workspace, workspaces are created and dropped by the layout itself
   rather than by the user, and a workspace belongs to the output whose group
   announced it.
-- **`activate` is a request, not a guarantee** (as the protocol says): one
+- **`activate` is a request, not a guarantee**: one
   naming a workspace that vanished between the client reading the list and
   the `commit` arriving is dropped, and one for the workspace that is already
   active on the focused output does nothing. An `activate` on any other
   output's group switches that output's workspaces, and moves keyboard focus
-  there -- the way a click on a bar is an interaction with that monitor.
+  there.
 - **An agent switches by number too.** `scoot msg action
   focus-workspace-index N` drives the same core action `activate` does, on
   the focused output; `focus-workspace-index N --output ID` names the
-  output, the way a bar's click on another monitor does.
-- **With one output the wire is exactly what it always was** — one group,
-  one `done` per batch. A second output adds a second group block before
+  output.
+- **With one output the wire is one group, one `done` per batch.** A second output adds a second group block before
   that `done`, nothing else.
 - **A group never changes outputs, so `output_leave` never fires on one.**
   Each group is announced with its own output and keeps it: moving a window
-  across outputs changes workspace membership, not group assignment (the
-  protocol's `output_leave` is for an output *removed* from a group, which
-  only runtime output add/remove could produce — out of scope, outputs are
-  fixed for the session). The `ext-foreign-toplevel-list-v1` next door has
-  no output events at all, so a move changes nothing on it either.
+  across outputs changes workspace membership, not group assignment.
 - **One client may hold at most 8 binds** across this manager, both
   window-list globals and the display manager combined; a ninth is answered
-  `done` then `finished` rather than announced. A bar binds this global once.
+  `done` then `finished` rather than announced.
 
 ## Window lists (two protocols)
 
@@ -1315,13 +1192,12 @@ scoot publishes its window list through **two** protocols at once:
 - **`wlr-foreign-toplevel-management-unstable-v1`** (version 3, global
   `zwlr_foreign_toplevel_manager_v1`) — the older protocol, which is what
   every Quickshell-based shell (DMS, Noctalia) actually binds today. Stock
-  quickshell 0.3.1 is offered the `ext-` list and never binds it, because its
+  quickshell is offered the `ext-` list and never binds it, because its
   `ToplevelManager` is a wlr client; without the wlr protocol both shells'
   window sections render empty. It enumerates *and* controls.
 
 Both are the protocol-side twin of `scoot msg windows`: the same windows, the
-same lifetime, live rather than polled — and, because they are driven from
-the same three window-lifecycle events inside the compositor, a client bound
+same lifetime, live rather than polled — a client bound
 to both sees one window list described twice rather than two lists that can
 drift.
 
@@ -1338,29 +1214,24 @@ drift.
   handle.
 - **`stop` is answered with `finished`**, and means "no more *new* windows":
   handles the client already has keep reporting title and app id changes
-  until it destroys them, which is what the protocol's own teardown sequence
-  requires.
+  until it destroys them.
 - **Binding counts against the same 8-bind per-client budget** as the
   workspace manager; a ninth bind is answered `finished` rather than
   announced.
 
 **The identifier is `<generation>-<window id>`** — e.g. `a3e689a2-1`: eight
-hex digits of per-session randomness (the "opaque generation value" the
-protocol recommends, so identifiers from two scoot sessions never collide)
+hex digits of per-session randomness, so identifiers from two scoot sessions never collide,
 and, after the last dash, the window id `scoot msg windows` reports. That
 suffix is the bridge between the two: this protocol has no requests at all,
 so a client that finds a window here and wants to *act* on it sends `scoot
 msg action focus-window-id N` with the number after the dash.
 
-Worth knowing before you write against it:
-
 - **There is no control half, by design.** No `activate`, `close`,
-  `minimize`, `fullscreen`, geometry or per-output state — those are meant
-  for extension protocols that don't exist yet. Use the wlr protocol below,
+  `minimize`, `fullscreen`, geometry or per-output state. Use the wlr protocol below,
   or scoot's IPC.
 - **A handle covers a window's whole life, not the time it is mapped.** The
   protocol talks about "mapped" toplevels, but scoot has no map/unmap
-  boundary at all — a window is in the layout, the focus order and `scoot msg
+  boundary — a window is in the layout, the focus order and `scoot msg
   windows` from the moment its `xdg_toplevel` exists.
 - **An identifier is never reused.** Close a window and open another and it
   gets a new one, even from the same client.
@@ -1374,9 +1245,8 @@ Per window, on a `zwlr_foreign_toplevel_handle_v1`:
   on. Binding the global announces every window that already exists, oldest
   first — and a client that binds `wl_output` *after* the manager is sent the
   `output_enter` it missed as soon as it does.
-- **`state`, carrying `activated` and `fullscreen`** — scoot's real window
-  focus, the same one `scoot msg windows` reports as `focused`, and whether
-  the window is fullscreen, the same flag `scoot msg windows` reports.
+- **`state`, carrying `activated` and `fullscreen`** — the same focus and
+  fullscreen flag `scoot msg windows` reports.
   `fullscreen` only exists from version 2 of the protocol, so a client that
   bound version 1 is never sent it (a change to it alone sends such a client
   nothing).
@@ -1392,9 +1262,7 @@ Per window, on a `zwlr_foreign_toplevel_handle_v1`:
 What a client can ask for:
 
 - **`activate`** focuses that window, with the same effect on the keyboard as
-  a click on the window itself: if your panel is a layer surface that took
-  the keyboard when the user clicked it, `activate` hands the keyboard on to
-  the window. It does that whether or not the window was already focused.
+  a click on the window itself, whether or not it was already focused.
   `scoot msg action focus-window-id N` behaves the same way — see
   [ipc.md](../msg/index.md#rules-an-agent-needs).
 - **`close`** sends the window's `xdg_toplevel.close`. Whether the window
@@ -1413,12 +1281,9 @@ What a client can ask for:
   exists from version 1). Refused while the session is locked, like
   `set_fullscreen`.
 - **`set_minimized`, `unset_minimized`
-  and `set_rectangle` are accepted and do nothing.** `set_rectangle` is a minimise-animation hint scoot reads
-  nothing from; unlike wlroots, an invalid rectangle is ignored rather than
-  answered with a protocol error, because disconnecting a shell over a number
-  nothing looks at would be worse.
-
-Worth knowing before you write against it:
+  and `set_rectangle` are accepted and do nothing.** `set_rectangle` is a minimise-animation hint scoot
+  ignores; unlike wlroots, an invalid rectangle is ignored rather than
+  answered with a protocol error.
 
 - **`activate` needs a seat, and a headless shell may not have one.**
   quickshell sources the `wl_seat` argument from Qt's last input device, so a
@@ -1437,25 +1302,21 @@ Worth knowing before you write against it:
 - **`parent` is never sent** (the version 3 event). scoot's layout has no
   parent/child relation; every `xdg_toplevel` is an independent column entry,
   dialogs included.
-- **The list stays live while the session is locked, but the two requests are
-  refused** — a window you cannot see must not be focused or closed from
-  behind the lock screen.
+- **The list stays live while the session is locked, but `activate` and
+  `close` are refused while locked.**
 
 ## Display information (`wlr-output-management-v1`)
 
 `zwlr_output_manager_v1` version 4, which is what `wlr-randr`, `kanshi` and a
-shell's Settings → Display page read the screen's modes, position, scale and
-transform from. `wl_output` says what the screen *is*; this is the management
-protocol on top of it. This is the wlr protocol rather than an `ext-` one
-only because no `ext-` successor exists yet.
+shell's Settings → Display page read modes, position, scale and
+transform from.
 
 **It is read-only. `apply` and `test` always answer `failed`.** scoot's
 outputs are never moved, disabled, rescaled or re-moded by a client; each
 output's scale and mode come from the config file
 ([`[[outputs]]`](./outputs.md)), whose scales a `scoot msg
-reload` re-applies -- so there is nothing a configuration could change; a
-configuration that reported `succeeded` and changed nothing would give you
-a Display page whose buttons appear to work. `wlr-randr --output <name>
+reload` re-applies -- so there is nothing a configuration could change.
+`wlr-randr --output <name>
 --pos 100,100` (or `--scale 2`) prints `failed to apply configuration` and
 exits non-zero. The heads do report each output's own scale and mode, so a
 config file with per-output entries reads back correctly through
@@ -1478,8 +1339,7 @@ config file with per-output entries reads back correctly through
 Worth knowing before you write against it:
 
 - **The refresh rate is always 60 Hz**, including under `--tty` on a faster
-  panel. `wl_output` reports the same thing; this mirrors it rather than
-  adding a second, differently-wrong number.
+  panel. `wl_output` reports the same thing.
 - **No `physical_size` and no `serial_number`.** scoot knows neither (its
   physical size is `0x0` on `wl_output` too, and its serial is a
   placeholder), and the protocol allows omitting both. A client that keys a
@@ -1487,11 +1347,8 @@ Worth knowing before you write against it:
   session on every machine.
 - **The mode list only grows, never shrinks.** A new mode is added rather
   than replacing the old one, matching what `wl_output` does. Under `--tty`
-  that happens once per mode the display actually changes to, so a VM window
-  moved between a 2x and a 1x screen a few times leaves a mode for each
-  distinct size. Under `--nested` it happens once per size the host
-  configures scoot's window to, which for a window dragged to resize is once
-  per distinct size that drag passed through. Both are bounded by *distinct
+  that happens once per mode the display actually changes to. Under `--nested` it happens once per size the host
+  configures scoot's window to. Both are bounded by *distinct
   sizes*, not by how many events arrived: a configure or a hotplug that lands
   on a size already in the list adds nothing, and a `--nested` configure at
   the size scoot is already at does not even resize the output.
@@ -1529,26 +1386,19 @@ This is separate from `scoot msg screenshot`, which goes over the privileged,
 owner-only IPC socket and is what an agent uses. This is the
 standard-protocol path, for tools that will never speak scoot's own IPC.
 
-What to know before pointing a client at it:
-
 - **Each output is captured from its own framebuffer.** A source made from
   the second output (`grim -o headless-2`) is accepted and reads that
   output's own pixels — never the first output's. A source naming no output
   of this compositor is answered `stopped`.
 - **Output capture only.** A source can be made from a `wl_output`; there is
   no toplevel capture source manager, so a *single window* cannot be captured
-  on its own. The global is not advertised at all, so a client takes its
-  fallback path immediately instead of discovering a refusal at runtime. The
-  remaining thumbnail fallback (region crop out of the output) needs no
-  compositor work — a screen-source `ScreencopyView` in a clipped container
-  at the window's rect — but DMS's `TileItem.qml` hard-requires a `Toplevel`
-  source, so the shells must change.
+  on its own (see above). The remaining thumbnail fallback is a region crop
+  out of the output — but DMS's `TileItem.qml` hard-requires a `Toplevel`
+  source.
 - **`wl_shm` buffers only, `Xrgb8888` or `Argb8888`.** A capture session
-  never offers to write into a dma-buf — capture is the direction where scoot
-  does the writing, and `wl_shm` already works everywhere at no extra cost to
-  a CPU renderer. This is unchanged by the renderer-derived import formats
-  below: importing a client's buffer and *rendering into* one are different
-  capabilities, and the second has no code path here.
+  never offers to write into a dma-buf: importing a client's buffer and
+  *rendering into* one are different capabilities, and the second has no
+  code path here.
 
   `Xrgb8888` is offered first: if `[appearance]
   background_color` has an alpha below 1.0 then the framebuffer really is
@@ -1564,9 +1414,8 @@ What to know before pointing a client at it:
   shrank) succeeds into the oversized buffer, with the client's own margin
   pixels left untouched outside the captured region.
 - **A session's first capture is served on the next frame; later ones wait
-  for the screen to change.** The protocol allows exactly this, and it is
-  what keeps a live-preview client from costing a full-screen copy every
-  frame on a desktop that is not moving. A capture parked this way is served
+  for the screen to change.** That keeps a live-preview client from costing
+  a full-screen copy every frame on a desktop that is not moving. A capture parked this way is served
   the moment anything redraws.
 - **Captures show rounded corners.** `screenshot` and `screencopy` read the
   composited frame, so a non-zero `[appearance] corner_radius` appears in
@@ -1578,9 +1427,7 @@ What to know before pointing a client at it:
   And at most sixteen live frame *objects* per client, across all of its
   sessions: a further `create_frame` is refused with the protocol's own
   `duplicate_frame` error, which disconnects the client that overflowed. The
-  protocol's own rule is stricter still (one frame object per *session*),
-  which the pinned Smithay rev never enforces and exposes no hook to enforce
-  per session.
+  protocol's own rule is stricter still (one frame object per *session*).
 - **While the session is locked, a capture sees the lock screen** — never the
   windows behind it, and never a half-drawn transition.
 - **On the GPU scanout tier a capture never sees a stale screen, including
@@ -1592,27 +1439,20 @@ What to know before pointing a client at it:
   the last capture.
 - **`paint_cursors` is honoured, on every backend and renderer.** A session
   that asked for it (`grim -c`) gets the pointer composited into every
-  capture, exactly as the screen draws it — image, hotspot, scale, over
-  whatever is under it; a session that did not (plain `grim`) never does,
+  capture, as the screen draws it; a session that did not (plain `grim`) never does,
   whichever the frame it was read from held. That includes `--headless` and
   `--nested`, which draw no cursor on screen, and the `--tty` GPU scanout
-  tier, whose cursor rides a hardware plane. It is done by re-rendering
-  just the cursor's region for the capture where the frame does not
-  already match the request; mechanics and measured cost per tier in
-  [tty.md](./backends.md#captures-and-the-pointer) (nothing measurable on
-  pixman; a 0.4-0.9 ms region render per capture on the dev VM's
-  software-rendered GPU tier). Where the cursor rode an overlay plane that
+  tier, whose cursor rides a hardware plane (see
+  [tty.md](./backends.md#captures-and-the-pointer)). Where the cursor rode an overlay plane that
   may be an underlay — which leaves a transparent hole in the frame a
   capture reads — that place is re-rendered whether or not the pointer was
   asked for, so no capture shows the hole. A session that asked for the
   pointer is also served a new frame when only the pointer moves — nothing
   else has to redraw — while one that did not keeps waiting for the scene
-  itself to change, including under `--tty`, where moving the pointer
-  redraws the frame. The pointer is only in the capture of the output it is
+  itself to change. The pointer is only in the capture of the output it is
   on.
 - **Cursor capture sessions are refused.** `create_pointer_cursor_session`
-  itself gets no event — the cursor-session object has no `stopped` of its
-  own — but the `ext_image_copy_capture_session_v1` a client gets back from
+  gets no event, but the `ext_image_copy_capture_session_v1` a client gets back from
   its `get_capture_session` is answered `stopped` immediately.
 
 ### GPU-rendering clients (`zwp_linux_dmabuf_v1`)
@@ -1627,15 +1467,13 @@ session. No `LIBGL_ALWAYS_SOFTWARE=1` needed. Under `--renderer gpu` the
 buffer goes to the GPU driver instead, as a texture.
 
 What is advertised is **what the renderer this session is actually running
-can import**, because a format in the table that could not then be imported
+can import**: a format in the table that could not then be imported
 would kill the client that believed it
 (`zwp_linux_buffer_params_v1.create_immed` has no soft refusal). The table
-is derived from that renderer rather than fixed, and pinned over the wire by
-test:
+is derived from that renderer rather than fixed:
 
-- **CPU (`--renderer cpu`):** `Xrgb8888` then `Argb8888`, `LINEAR` only, single-plane only —
-  the only layout a CPU mapping can read — minus either one the CPU renderer cannot
-  import.
+- **CPU (`--renderer cpu`):** `Xrgb8888` then `Argb8888`, `LINEAR` only, single-plane only,
+  minus either one the CPU renderer cannot import.
 - **GPU (`--renderer gpu`, on every backend, including the `--tty` GPU
   scanout tier):** every format and modifier the GPU driver says it
   imports. On real hardware that means GPU clients get their **native
@@ -1652,40 +1490,32 @@ test:
   modifier** (`DRM_FORMAT_MOD_INVALID`, "the driver's default layout") is
   never offered for a format the driver named explicit layouts for: a YUV
   buffer imported that way is sampled as if it were RGB and shows the wrong
-  colors (measured, not assumed). And a format the driver lists without
+  colors. And a format the driver lists without
   naming *any* layout — a display without
   `EGL_EXT_image_dma_buf_import_modifiers`, or a driver that refuses the
   modifier query for it — is offered only if it is `Xrgb8888`/`Argb8888`,
-  at `LINEAR`, which such a driver is known to import; anything else there
+  at `LINEAR`; anything else there
   would be a guess.
 
 A client too old for feedback (protocol version 1 or 2) is told only
 fourccs, with no layout, and allocates implicitly; for a YUV format under
-GLES that is the wrong-colors path below — a wrong picture rather than a
-disconnect on the drivers measured (llvmpipe only; a driver that refuses
-implicit YUV imports would refuse it instead).
+GLES that is the wrong-colors path — a wrong picture rather than a
+disconnect.
 
 A client that ignores the feedback and offers a layout the table never
 named gets whatever the renderer says: `failed` on the asynchronous
 `create`, which it survives, and a protocol error on `create_immed`, which
-the protocol prescribes. (Under GLES a client that allocates an implicit
-YUV buffer anyway is not killed — it just draws the wrong colors.)
+the protocol prescribes.
 
-On the dev VM's software GL (Mesa llvmpipe) the GLES table is 57 formats,
-all at `LINEAR` — Mesa lists no other layout there. On an Apple M2 (Mesa's
-`asahi` driver) it is 162 pairs: 54 formats, each at
-`APPLE_GPU_TILED_COMPRESSED`, `APPLE_GPU_TILED` and `LINEAR`, and Mesa's GL
-and Vulkan clients allocate the compressed layout (`Asahi.md`, Test 6).
-Other hardware is recorded per machine, not promised here. The line to
+The exact table varies by driver. The line to
 look for is logged once at startup:
 `dmabuf feedback: advertising the renderer's importable formats pairs=… fourccs=…`
 (and the whole table at `RUST_LOG=scoot=debug`).
 
-Two edges of that derivation are worth knowing before you debug one of
-them. If the active renderer can import *nothing* this compositor can
+If the active renderer can import *nothing* this compositor can
 vouch for — an EGL display with no dma-buf import capability at all —
 **no dmabuf global is advertised**. That steers GL clients onto `wl_shm`
-rather than killing them, but it is not free: they then render in
+rather than killing them, but they then render in
 software, and a shell that waits for dmabuf feedback before capturing
 (below) waits forever. scoot logs `reported no dma-buf format it can be
 trusted to import` when it happens, and `--renderer cpu` is the working
@@ -1694,10 +1524,8 @@ nothing here for the same reason.
 
 `main_device` names a **render node**: the active renderer's own, where it
 can name one, else `/dev/dri/renderD128`, else `card0`, else `0`. The
-renderer's own device leads because that is the device an import can
-actually succeed against — on a two-GPU machine a client that allocated
-against the other node would hand over a buffer this renderer cannot
-import. Which rung answered is logged once at startup
+renderer's own device leads, since that is the device an import can
+actually succeed against. Which rung answered is logged once at startup
 (`dmabuf feedback main device device=… source=…`).
 
 The global also gates screen capture for some shells: quickshell's buffer
@@ -1706,7 +1534,7 @@ manager instantiates no capture context at all — not even the `wl_shm` one
 every quickshell `ScreencopyView` stays blank despite the capture protocol
 working.
 
-**This follows `--renderer`**, and no longer asks you to avoid one: the
+**This follows `--renderer`**: the
 table is the active renderer's, so `gpu` advertises what the GPU driver
 can import and `cpu` advertises what the CPU renderer can. See
 [tty.md](./backends.md#which-renderer-draws-the-frames).
@@ -1716,31 +1544,22 @@ can import and `cpu` advertises what the CPU renderer can. See
 while it sits in a params object, while it is part of a buffer, and after
 the client destroys that `wl_buffer` if a surface still shows it. A
 four-plane buffer is four. Under a GLES renderer that keeps its own copy
-of each imported plane (Mesa's software renderer, measured on the dev VM:
-a three-plane `YU12` buffer costs scoot six fds; Apple's AGX driver too,
-`Asahi.md` Test 10) the copies count too,
-from the `add`; scoot measures this once per session, on the first import
-it can measure cleanly, and logs it
-(`dmabuf: learned how many fds the renderer keeps of each imported
-plane`). A dma-buf `wl_buffer` also counts against the same 512 live
+of each imported plane (Mesa's software renderer, Apple's AGX driver) the copies count too,
+from the `add`. A dma-buf `wl_buffer` also counts against the same 512 live
 buffers per client as every other buffer, and both `create` and
 `create_immed` claim. Planes that have been `add`ed to a
 `zwp_linux_buffer_params_v1` object which has not yet been turned into a
 buffer are also bounded on their own: without that, a client could add
-planes and never create anything; review measured 220 params objects x 4
-planes holding 927 fds. A client may have **32** such planes at once,
-across all its params objects. (Under fd pressure there is no separate
-grace for them any more; the client's whole fd count is what the
+planes and never create anything. A client may have **32** such planes at once,
+across all its params objects. (Under fd pressure the client's whole fd count is what the
 [pressure limit](#per-client-limits-on-what-scoot-keeps) reads.) A plane
 stops counting as pending when its params object is consumed by
 `create`/`create_immed` (whatever the import's outcome) or destroyed, and
 when the client disconnects. An `add` past the bound
 disconnects the client with `wl_display.error` `no_memory`; the params
 interface has no error for "too many". A client that adds one buffer's
-planes (at most four) and creates it straight away, which is how the
-protocol is meant to be used, stays far below; that is reasoned from the
-protocol, not checked against each GPU client, since none makes a dma-buf
-on the dev VM.
+planes (at most four) and creates it straight away
+stays far below.
 
 #### Per-surface feedback: the scanout tranche
 
@@ -1769,8 +1588,7 @@ then be shown straight from its own memory instead of being composited.
   background with no wallpaper under it (a black single-pixel-buffer
   wallpaper counts as black background). Otherwise -- a transparent window
   over the default background, or over a wallpaper -- the display is never
-  offered the window's buffer, and steering the client would cost it a
-  reallocation for nothing (the rules in [tty.md](./backends.md)). One known cost:
+  offered the window's buffer (the rules in [tty.md](./backends.md)). One known cost:
   the scanout feedback reaches a window only after it has redrawn at the
   fullscreen size (before that it does not span the output), so a client
   that acts on it reallocates its buffers twice on entering fullscreen --
@@ -1783,32 +1601,21 @@ then be shown straight from its own memory instead of being composited.
   the same window still covers the output but a lock, a capture stream or a
   translucent moment stops it going direct, it keeps the scanout feedback,
   and gets the default back on the first frame drawn two seconds or more
-  later if it still cannot — so a shell refreshing a thumbnail, which counts
-  as streaming for a second, never makes the game reallocate. (The check
-  rides on drawn frames: a screen that draws nothing, like a still lock
-  screen, keeps the scanout feedback until it next draws, which is harmless —
-  every pair in it imports.) A notification or popup drawn over the window changes
+  later if it still cannot — so a shell refreshing a thumbnail never makes
+  the game reallocate. A notification or popup drawn over the window changes
   nothing: it is transient, and the window goes direct again the moment it is
   gone.
 - **What the plane accepts.** Explicit tiled or compressed modifiers only
   where the plane names them (`IN_FORMATS`), `LINEAR` where the plane names
-  it, or — on a plane that names no modifiers at all, like the dev VM's
-  virtio-gpu — `LINEAR` for single-plane formats the plane lists. An
+  it, or — on a plane that names no modifiers at all — `LINEAR` for single-plane formats the plane lists. An
   alpha format counts as its opaque twin (the display ignores alpha on the
   bottom plane). Never an implicit modifier. A modifier the display's buffer
-  manager has been seen to lose on import is dropped from the tranche and the
+  manager loses on import is dropped from the tranche and the
   window re-sent, because such a buffer can only ever composite.
 - **Logged once per plane set:** `dmabuf feedback: scanout tranche for
   fullscreen windows pairs=… lost=… device=…`, or `the primary plane takes
   none of the advertised formats; no scanout tranche` when there is nothing to
-  offer (then nothing is ever sent). On the dev VM it is `XR24` and `AR24` at
-  `LINEAR`. On an Apple M2 it is 10 formats at `LINEAR` and names the
-  display card, not the render node. Mesa's GL clients (es2gears, mpv) move
-  from their compressed layout to `LINEAR` when it arrives and back when it
-  is withdrawn, and mpv then goes direct. Vulkan's `vkcube` rebuilt its
-  swapchain for the fullscreen size about 7 ms before the tranche arrived,
-  and did not rebuild again, so whether it would act on the tranche is
-  open (`Asahi.md`, Tests 5 and 6).
+  offer (then nothing is ever sent).
 
 No other backend or tier sends per-surface feedback that differs from the
 default.
@@ -1822,7 +1629,7 @@ when it is done reading the buffer. NVIDIA's driver effectively requires
 it, and Mesa's Vulkan WSI uses it where the compositor offers it and the
 driver supports it; without it a GPU
 client depends on implicit fencing, which not every driver provides.
-It has been verified with Mesa drivers only, not yet on NVIDIA.
+Verified with Mesa drivers only so far, not yet on NVIDIA.
 
 **Where it is offered.** Only on the GPU scanout tier (`--tty --renderer
 gles` in a `gpu-scanout` build), and only when a DRM device passes
@@ -1834,15 +1641,12 @@ display controller is not its GPU, like Apple Silicon -- the render nodes
 any DRM device that supports them, whichever GPU made it). The startup log says which:
 `drm: explicit sync (wp_linux_drm_syncobj_manager_v1) offered device=…`,
 or `drm: no device here has syncobj timeline eventfd support; explicit
-sync … is not offered`. The dev VM's virtio-gpu passes on the display
-device.
+sync … is not offered`.
 
-**Where it is not, and why.** Not on the CPU renderer (`--renderer cpu`,
+**Where it is not.** Not on the CPU renderer (`--renderer cpu`,
 or `auto` on `--headless`, `--nested`, and dumb-buffer `--tty`), and not
-under `--renderer gpu` on `--headless`/`--nested`. Honouring the points needs a way to wait on an
-acquire point without blocking the compositor and a render fence to wait
-out before signalling a release point, and only the scanout tier has both
-wired. A client that binds the global and then has its points ignored is
+under `--renderer gpu` on `--headless`/`--nested`. Only the scanout tier has the waits and fences
+honouring the points needs. A client that binds the global and then has its points ignored is
 worse off than one that never saw it (it would scan out or composite
 unfinished buffers), so everywhere else the global does not exist and the
 client falls back to implicit sync, as it would on any compositor without
@@ -1854,11 +1658,8 @@ What scoot does with the points:
   it does. The surface keeps showing its previous buffer in the meantime,
   and later commits to the same surface queue behind it in order. Other
   surfaces, including the same client's, and every other client carry on:
-  a client whose GPU never signals stalls only its own surface. A point
-  already signalled when the commit arrives costs one query and nothing
-  else. A surface destroyed while it waits, or a client that disconnects
-  mid-wait, takes its waits with it at once rather than when (or if) the
-  point signals. Waits keep running while the session is VT-switched away.
+  a client whose GPU never signals stalls only its own surface. A surface destroyed while it waits, or a client that disconnects
+  mid-wait, takes its waits with it at once. Waits keep running while the session is VT-switched away.
 - **Release.** A buffer's release point is signalled when scoot is done
   reading it. For a composited frame, that means once the frame's GPU work
   has finished and it has flipped, not merely when the client commits its
@@ -1887,62 +1688,24 @@ What scoot does with the points:
   keeps its timeline's fd open after the object is destroyed (the protocol
   says destroying a timeline does not unset its points), until the point
   itself goes -- replaced, the surface destroyed, or its buffer released.
-  Those count too. Before this, the bound counted objects, and review
-  measured 440 surfaces with points on destroyed timelines holding 927 fds
-  with nothing counted. An import that finds the client at 128 first checks
+  An import that finds the client at 128 first checks
   which of them are really still open, so timelines a client destroyed and
   that nothing references cost it nothing however many it churns. The
   import is refused, with `invalid_timeline`, only if more than 112 are
-  still open (fewer than 16 could be reclaimed); below that, the check buys
-  the next 16 imports without another one. Under fd pressure the same kind
+  still open (fewer than 16 could be reclaimed). Under fd pressure the same kind
   of check decides, on the client's whole fd count. Past the wait bound the client is disconnected
-  with `wl_display.error` `no_memory`. A real client stays far below both:
-  Mesa's Vulkan WSI imports two timelines per swapchain image, and a
-  swapchain cannot run more than its image count ahead.
-
-**A leak fixed by forking Smithay.** Upstream Smithay, at the revision scoot
-pinned and on its `master`, never destroys the kernel handle an
-`import_timeline` creates. So each import would leave one syncobj handle on
-scoot's DRM file until scoot exits, about 80 bytes of kernel memory each,
-together with any wait scoot abandoned on that syncobj when a surface was
-destroyed mid-wait (about 200 bytes each). A hostile client could drive
-that at wire speed (review measured about 24 MB/s), and no per-client bound
-stops it, because every iteration ends with nothing live. scoot therefore
-builds against a scoot-sh fork of Smithay that adds the one missing `Drop`.
-Measured with it, both loops stay flat. Details are in
-[`backlog/resolved/syncobj-handle-leak-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/syncobj-handle-leak-done.md).
-Returning to upstream once it has the fix is
-[`backlog/core/smithay-fork-repin.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/core/smithay-fork-repin.md).
-
-**What has been verified.** On the dev VM's GPU tier (virtio-gpu), with a
-test client that renders into card0 dumb buffers and signals its own syncobj
-timelines standing in for a GPU: a held commit shown only after its signal,
-also across a VT switch; a client that never signals stalling only itself,
-while another client's frame pacing and IPC latency stay unchanged; the fds
-of a client killed mid-wait all returned; both bounds disconnecting only
-the offender; a fullscreen explicit client going direct on every frame, its
-replaced buffers released when the replacement's flip completed; no change
-in compositor CPU. On the dev VM no real explicit-sync client could be
-run against it: Mesa's `vkcube` (lavapipe) and `es2gears_wayland` (llvmpipe)
-both draw through `wl_shm` and never bind the global. On an Apple M2
-([`Asahi.md`](https://github.com/scoot-sh/scoot/tree/main/Asahi.md)'s Test 7) the global is offered on the display
-device itself (`apple,dcp` supports timelines), and Mesa's Vulkan driver
-uses it: `vkcube` imported 40 timelines and set 827 acquire and 827
-release points in about 14 s, with no stall or protocol error. `--nested` was not run live; the global
-cannot appear there, since the only code that offers it runs in `--tty`'s
-startup.
+  with `wl_display.error` `no_memory`. Mesa's Vulkan WSI imports two
+  timelines per swapchain image, so a real client stays far below both.
 
 ## Screen locking (`ext-session-lock-v1`)
 
 Version 1, so a real locker (`swaylock` 1.7+, `gtklock`, `hyprlock`,
-`waylock`) can lock the session with the compositor enforcing it, rather than
-a layer surface asking politely. The global is
+`waylock`) can lock the session with the compositor enforcing it. The global is
 `ext_session_lock_manager_v1`.
 
 **What is guaranteed while the session is locked:**
 
-- **Nothing but the lock client's own surfaces is drawn.** Not "drawn behind
-  an opaque backdrop" — windows, layer surfaces (on every layer including
+- **Nothing but the lock client's own surfaces is drawn.** Windows, layer surfaces (on every layer including
   `overlay`) and the focus ring are not gathered into the frame at all. The
   screen is the lock surface, an opaque backdrop where it doesn't cover, and
   the pointer cursor. A `scoot msg screenshot` reads that same framebuffer
@@ -1955,14 +1718,11 @@ a layer surface asking politely. The global is
   it without the mouse having to move first. Any grab in flight is dropped as
   well — not only when the lock is taken, but at every transition that
   changes which lock surfaces count (a lock surface destroyed, a lock given
-  up, a locker that died), because a grab outlives focus changes by design.
+  up, a locker that died).
   That covers an open popup menu, whose grab holds the *keyboard* and would
   otherwise receive the password.
-- **"The lock surface" means the *current* lock's.** A lock object can be
-  destroyed while the client that made it stays connected and keeps the
-  `wl_surface` underneath alive, so "is this surface alive" is not the same
-  question as "does this surface still belong to the lock that owns the
-  session". A surface from a lock that was given up, or replaced, stops being
+- **"The lock surface" means the *current* lock's.** A surface from a lock
+  that was given up, or replaced, stops being
   drawn and stops receiving input immediately.
 - **A destroyed lock surface falls back to the backdrop straight away** — the
   protocol's own rule, and "straight away" means without waiting for anything
@@ -1976,46 +1736,39 @@ a layer surface asking politely. The global is
   way in — the VT it switches to has its own login, and this session stays
   locked behind it. And a `spawn` bind flagged `allow_when_locked`
   ([binds](./keybindings.md#the-bind-grammar)) fires: volume, brightness and media keys
-  from the lock screen, which a daily-driven laptop needs. The rule is
-  narrow on purpose — only `spawn`, only when flagged, only its
+  from the lock screen. The rule is
+  narrow — only `spawn`, only when flagged, only its
   config-pinned command, and only through a keypress, real
   or IPC-injected.
 - **`scoot msg action ...` is refused**, with an error saying why — even a
   `spawn` naming a command some bind allows. An IPC request carries an
   arbitrary command from whoever sent it, while a bind can only run its
-  config-pinned command, so allowing IPC spawns while locked would turn
-  "volume keys work on the lock screen" into "anything with socket access
-  runs anything while locked". Injected keyboard and pointer input still
+  config-pinned command. Injected keyboard and pointer input still
   works, and reaches only the lock screen. So is an `ext-workspace-v1`
   client's `activate` refused.
 - **Ordinary clients stop drawing.** They get no frame callbacks while
-  locked, which is what the protocol asks for and also what keeps them from
-  burning CPU behind a lock screen.
+  locked.
 
-**If the lock client dies, the session stays locked.** That is the protocol's
-rule and the point of it. The recovery story:
+**If the lock client dies, the session stays locked.** The recovery story:
 
 - the screen turns **solid red**, so you can tell "my locker crashed" from
-  "my locker is showing a black screen" — including when the locker had a
-  surface up and drawing at the moment it went;
+  "my locker is showing a black screen";
 - **run a lock client again and it takes over** — it puts its own surface up
   and can unlock once you authenticate. It is told `locked` immediately when
   the lock it replaces had already blanked the screen; if that lock went in
   the window *before* its first blanked frame, the replacement waits for one
-  exactly like a fresh lock does, because until then your actual desktop is
-  still what's on the display.
+  exactly like a fresh lock does.
 
 The same applies to a lock client that gives up without dying: destroying an
 `ext_session_lock_v1` before `locked` arrives is legal (only
-`unlock_and_destroy` is forbidden that early), and a locker that times out
-waiting may well do it. The session stays locked and reads as abandoned, and
+`unlock_and_destroy` is forbidden that early). The session stays locked and reads as abandoned, and
 the surfaces that client had up stop being drawn and stop receiving input at
 that moment, even though its connection and its `wl_surface`s are still
 alive.
 
-**What is *not* guaranteed — read this before trusting it:**
+**What is *not* guaranteed:**
 
-- **A same-uid process is inside the boundary, and always was.** Anything
+- **A same-uid process is inside the boundary.** Anything
   that can reach scoot's Wayland socket can take over a lock whose client has
   died and then unlock the session; anything that can reach its IPC socket
   can screenshot the lock screen and inject keystrokes into it (that is how
@@ -2025,41 +1778,32 @@ alive.
   included, and `scoot msg outputs` still answers. Nothing is drawn from
   them, but the IPC surface is not blanked.
 - **So do both foreign-toplevel protocols**: handles stay, titles keep
-  updating, and a window opened behind the lock screen is still announced.
-  Sending `closed` for windows that did not close would be a lie a taskbar
-  could not recover from, since the `ext-` protocol forbids reusing their
-  identifiers afterwards. The wlr protocol's two *requests* are refused.
+  updating, and a window opened behind the lock screen is still announced,
+  since the `ext-` protocol forbids reusing identifiers afterwards. The wlr protocol's two *requests* are refused.
 - **The `locked` event is sent once a blanked frame is confirmed on screen,
   not merely rendered.** Under `--headless`/`--nested` the render is the
   confirmation. Under `--tty` the render hands the frame to the presenter and
-  `locked` waits for the vblank confirming the page flip that carries it, so
-  the previous, possibly unlocked, frame can no longer outstay the event by a
-  vblank. That costs up to one vblank of lock latency under contention. If no
+  `locked` waits for the vblank confirming the page flip that carries it. If no
   vblank can arrive at all — you switched VT away, a modeset discarded the
   flip — the lock is confirmed anyway after one second (logged as a warning)
   rather than hanging the locker forever.
 - **Up to one frame of the unlocked screen can still be on the display**
-  between the lock request and the first blanked frame. That is inherent —
-  the protocol's `locked` ordering exists precisely because of it. Input is
+  between the lock request and the first blanked frame. Input is
   already captured during that frame, so nothing typed in that window reaches
   the unlocked session.
 - **scoot blanks immediately rather than waiting for the lock client to
-  draw.** Some compositors wait up to a second for lock surfaces so the
-  transition doesn't flash black; waiting means rendering the unlocked
-  session for that whole second.
+  draw** — waiting would render the unlocked session meanwhile.
 - **One lock surface per output.** A lock surface is configured to the size
   of the `wl_output` it names, and each output's frame shows that output's
   own surface over the opaque backdrop -- never another output's. The
   keyboard goes to the surface on the output under the pointer (falling back
   to the first surface when the pointer is over no output, or its output has
-  none), and pointer input is hit-tested per output the same way, so exactly
-  one surface holds each at a time. `locked` is sent only once *every*
+  none), and pointer input is hit-tested per output the same way.
+  `locked` is sent only once *every*
   output has shown its blanked frame: an output with no surface counts on
   its backdrop frame, but (with more than one output) one whose surface is
-  admitted and not yet drawn holds the confirmation open, because its screen
-  is still showing a placeholder rather than the locker's blank. If that
-  surface never draws, `locked` never fires — that wedge is the secure
-  default (confirming would show an unblanked screen as locked); kill the
+  admitted and not yet drawn holds the confirmation open. If that
+  surface never draws, `locked` never fires; kill the
   locker and the abandoned path takes every screen red. A surface admitted after the
   lock already confirmed is sized and shown with no second confirmation. A
   second `get_lock_surface` for an already-covered output is refused with
@@ -2073,10 +1817,8 @@ alive.
 the seat has been quiet N milliseconds and dim the screen, lock it or suspend
 the machine. Every input source resets the timers: real devices under
 `--tty`, host-forwarded input under `--nested`, and IPC-injected input
-(`scoot msg type`/`key`/`pointer` count as a user at the machine, which is
-what keeps an agent's own activity from looking like idleness). What does
-*not* reset them is the compositor re-running its own hit test on a lock
-transition — that is not input.
+(`scoot msg type`/`key`/`pointer` count as a user at the machine). The compositor's own hit-test
+re-run on a lock transition does not reset them.
 
 `zwp_idle_inhibit_manager_v1` (version 1) is the reverse: a video player or
 presentation app creates an inhibitor on one of its surfaces and `idled`
@@ -2085,8 +1827,8 @@ implicitly when the surface dies or the client disconnects. The
 input-specific watch (`get_input_idle_notification`, for daemons with their
 own inhibit policy) ignores inhibitors by design.
 
-Two things to know: there is no built-in auto-locker — the timeouts and
-commands are the daemon's config, not scoot's, the swayidle way — and an
+There is no built-in auto-locker — the timeouts and
+commands are the daemon's config, not scoot's — and an
 inhibitor counts while its surface is *alive*, whether or not it is visible.
 
 ## Screen power
@@ -2095,8 +1837,7 @@ inhibitor counts while its surface is *alive*, whether or not it is visible.
 panels off and back on: the standard `swayidle timeout 900 'wlopm --off *'
 resume 'wlopm --on *'` setup (see
 [configuration.md](./configure.md#idle-locking-and-screen-power)). Any
-client may bind it — unrestricted like every other global (see the trust
-note at the top of this file) — and any number of clients may hold a power
+client may bind it, and any number of clients may hold a power
 object for one output: the last `set_mode` wins, with no exclusivity
 transfer. Anything but `off` (0) or `on` (1) is `invalid_mode`.
 
@@ -2114,9 +1855,8 @@ Only `--tty` touches hardware (the connector's DPMS property). Under
 tracked and reported honestly, the render work is still skipped, and an IPC
 screenshot of a powered-off output is refused rather than answered from its
 stale framebuffer. A parked `ext-image-copy-capture-v1` frame due on a
-powered-off output fails with `unknown` for the same reason — the client
-may retry once the screen is back on — so neither capture path serves the
-stale frame. Locking blanks the screens that are on and leaves the
+powered-off output fails with `unknown` — the client
+may retry once the screen is back on. Locking blanks the screens that are on and leaves the
 dark ones dark (a powered-off output counts as blanked for lock
 confirmation); unplugging an output fails its power objects, and the
 replugged monitor comes back on under a fresh id; a VT switch back
@@ -2130,7 +1870,7 @@ All three selection globals, on every backend:
   (`cliphist`, `clipman`). Set the clipboard without needing focus, read
   anything any client copies.
 - **`ext_data_control_manager_v1`** (version 1): the successor protocol. Both
-  generations are exposed side by side, as current compositors do, so a
+  generations are exposed side by side, so a
   manager speaks whichever one it was written for.
 - **`zwp_primary_selection_device_manager_v1`** (version 1): middle-click
   paste. Unlike the clipboard, this one is focus-gated — the compositor only
@@ -2150,14 +1890,13 @@ default linear ramp.
 - **Under `--tty`**, the ramp is pushed to the CRTC gamma LUT where one
   exists, so the screen really warms. Where the CRTC has no LUT but a
   `CTM` color-matrix property (Apple DCP on Asahi), the ramp's white
-  endpoints go out as a diagonal matrix instead — exact at the daemons'
-  default gamma, and equally invisible to screenshots (both transforms
+  endpoints go out as a diagonal matrix instead — invisible to screenshots
+  either way (both transforms
   sit after the framebuffer). The advertised `gamma_size` is the CRTC's
-  own LUT length (256 on the hardware measured so far), or 256 synthetic
+  own LUT length, or 256 synthetic
   on a LUT-less CRTC, re-read whenever a hotplug moves the session to a
   different CRTC; a live control hears `failed` over that move either way,
-  so it re-reads `gamma_size` and re-pushes (a modeset moves planes, not
-  LUT or matrix contents). Anything the DRM device refuses retires the
+  so it re-reads `gamma_size` and re-pushes. Anything the DRM device refuses retires the
   control with `failed` and the session keeps running.
 - **Under `--headless`/`--nested`** there is no color hardware, so the ramp is
   accepted but changes nothing on screen — and a `scoot msg screenshot` reads
@@ -2173,16 +1912,13 @@ output's color temperature.
 ## Cursor shapes (`wp-cursor-shape-v1`)
 
 `wp_cursor_shape_manager_v1` (version 2), so a client can *name* the cursor
-it wants — `text`, `ew-resize`, `not-allowed` — instead of loading an xcursor
-theme and uploading a surface of its own. Modern GTK4/Qt6 toolkits and `foot`
+it wants — `text`, `ew-resize`, `not-allowed`. Modern GTK4/Qt6 toolkits and `foot`
 prefer this when it exists; without it `foot` logs "compositor does not
 implement server-side cursors".
 
 A named shape is answered from **the cursor theme already installed on the
 machine**: scoot resolves `[appearance] cursor_theme`, else `$XCURSOR_THEME`,
-else `default`, and draws that theme's own artwork — the same pixels the
-client would have loaded for itself. Parsing is the MIT-licensed `xcursor`
-crate.
+else `default`, and draws that theme's own artwork.
 
 **When no theme is installed** — a linuxserver webtop or any minimal
 container — named shapes fall back to scoot's built-in cursors: the CC0
@@ -2194,13 +1930,11 @@ Mocu aliases them; any newer name draws `default`). See
 
 The drawn shapes use the `[appearance]` `cursor_size`/`cursor_color` settings
 and are built once at startup. Theme images are loaded when a client first
-asks for that shape and cached from then on, including a negative cache so a
-theme missing `zoom-in` is not re-searched on every hover.
+asks for that shape and cached from then on.
 
 A client that uploads its own cursor *surface* still gets its own pixels
 drawn. scoot also exports `XCURSOR_THEME`/`XCURSOR_SIZE` to everything it
-spawns, so a client that loads a theme itself (GTK3, and anything predating
-this protocol) picks the same one the compositor draws.
+spawns, so a client that loads a theme itself picks the same one the compositor draws.
 
 Cursors are only drawn under `--tty`; `--headless` has no display and
 `--nested` shows the host compositor's own cursor.
@@ -2209,9 +1943,7 @@ Cursors are only drawn under `--tty`; `--headless` has no display and
 
 `xdg_activation_v1` (version 1), so a launcher can hand focus to the app it
 started and a notification daemon can focus the app its popup came from.
-
-Honoring every such request unconditionally would be a focus-stealing
-primitive, so scoot checks the token three ways:
+Scoot checks the token three ways:
 
 - **The token must name a real, recent input event that went to the client
   asking.** `set_serial(serial, seat)` is how a client says which click or
@@ -2221,31 +1953,20 @@ primitive, so scoot checks the token three ways:
   button event (press *or* release; pointer motion never counts, and neither
   does a *focus* event, which every newly mapped window gets for free) within
   the last few input events **and the last 10 seconds**, **and that was
-  delivered to that same client**. Both bounds are needed: an idle session —
-  an agent driving scoot over IPC makes one, since injected actions are not
-  input events — never rotates the event history, so without the clock a
-  click from this morning would still be spendable tonight. Wayland serials
-  come from one process-wide counter shared with non-input events, so a
-  number alone is cheap to observe and guess; pairing it with who actually
-  received the event is what makes this a check on interaction.
-- **A token is valid for 30 seconds.** Long enough for a cold-starting app to
-  redeem the token its launcher gave it; short enough that a token is still a
-  receipt for something the user just did.
+  delivered to that same client**.
+- **A token is valid for 30 seconds.**
 - **At most 64 unredeemed tokens exist at once**, across all clients, with
   expired ones swept first. `get_activation_token` is unauthenticated and
-  unlimited, and nothing upstream prunes what it hands out.
+  unlimited.
 
 The serial is checked when the token is *created*, never when it is redeemed:
-a launcher hands its token to a process that may take seconds to start, by
-which point plenty of newer input has happened, and re-checking then would
-break the one case this protocol exists for.
+a launcher hands its token to a process that may take seconds to start.
 
 An app scoot itself started — a keybinding or `msg action spawn` — gets its
 token a different way: the compositor mints one and hands it to the child in
 `$XDG_ACTIVATION_TOKEN` (and, while XWayland is live, `$DESKTOP_STARTUP_ID`
 for X toolkits — see [XWayland](#xwayland-opt-in)), so the child can
-activate its own window when it maps one. That covers the slow cold start, where focus has moved elsewhere
-before the window appears. The token lives under the same two bounds; a spawn
+activate its own window when it maps one. The token lives under the same two bounds; a spawn
 past a full table simply gets no token, and the window is still focused on
 map.
 
@@ -2254,13 +1975,12 @@ spawn** it is invisible: the app maps a window, and mapping focuses it. For
 **something already running** — a single-instance app (Firefox, Chromium,
 anything on `GApplication`) re-invoked from a launcher, or the notification
 daemon case — nothing maps, so nothing else focuses it and the activation
-simply does not happen. Worth knowing because of the one case scoot refuses
+simply does not happen. One case scoot refuses
 that the protocol would allow: a launcher that mints its token from a *focus*
 serial rather than a key or button one (fuzzel does this when an entry is
 picked with the mouse) gets no activation.
 
-A redeemed token is removed whether or not it was honored, so one user action
-cannot be replayed into focus later. Activation goes through the same action
+A redeemed token is removed whether or not it was honored. Activation goes through the same action
 path a keybinding does, so it is refused while the session is locked and it
 scrolls the activated column into view rather than only marking it focused. A
 refused activation does nothing visible: scoot has no per-window urgency
@@ -2269,20 +1989,18 @@ state to raise instead.
 ## Window icons (`xdg-toplevel-icon-v1`)
 
 `xdg_toplevel_icon_manager_v1` (version 1), so a client can say which icon
-belongs to its window. scoot draws no icons itself — it has no titlebars,
-taskbar or window switcher — so this exists for the two consumers outside it:
+belongs to its window. scoot draws no icons itself, so this exists for the two consumers outside it:
 a bar or dock showing a window list, and an agent driving the session, which
 reads the name off `scoot msg windows`' `icon` field.
 
 Two limits: no *preferred icon sizes* are advertised, since nothing in scoot
-draws an icon and so it has no size to prefer; and a client that supplies raw
-pixel buffers instead of a name reads as having no icon, since handing those
-over IPC would mean re-encoding shm buffers to PNG per query. An X window's
+draws an icon; and a client that supplies raw
+pixel buffers instead of a name reads as having no icon. An X window's
 icon (`_NET_WM_ICON`) is raw pixels too, never a name, so X windows always
-read as having no icon — the same parity; bars show their icons from the
+read as having no icon — bars show their icons from the
 app id (`WM_CLASS` class) through `.desktop` files.
 
-The buffer half, for the toolkit author: pixel buffers must be square and
+The buffer half: pixel buffers must be square and
 `wl_shm`-backed (anything else is refused with `invalid_buffer`), and they
 are ordinary live `wl_buffer`s under the 512-per-client bound, so a client
 already at its budget is refused further creations. There is no `release` for
@@ -2295,8 +2013,7 @@ carries the name only.
 ## Input methods (`text-input-v3`, `input-method-v2`)
 
 `zwp_text_input_manager_v3` (version 1) and `zwp_input_method_manager_v2`
-(version 1) — the two halves of IME support, neither of which is useful
-alone. An application binds the first to say "there is a text field here"; an
+(version 1) — the two halves of IME support. An application binds the first to say "there is a text field here"; an
 input method (fcitx5, ibus, an on-screen keyboard) binds the second to
 compose into it. Without the first, `foot` logs "text input interface not
 implemented by compositor; IME will be disabled".
@@ -2314,14 +2031,13 @@ unlock.
 
 An input method is more privileged than a clipboard manager — it can grab the
 keyboard and inject text into the focused client — and there is still no
-client filter, for the trust-model reason at the top of this page. That grab
+client filter, as with every other global. That grab
 outranks an `xdg_popup.grab` in both orders, so no context menu opens in a
 text field while an IME is active there.
 
 ## Output scaling
 
-A HiDPI panel needs the compositor to tell clients to render at a scale
-greater than 1, or everything comes out physically tiny. `[output] scale`
+`[output] scale`
 sets that scale for every output, and an
 [`[[outputs]]`](./outputs.md) entry sets one output's own (a
 HiDPI laptop panel beside an ordinary monitor); see
@@ -2330,8 +2046,7 @@ advertised three ways, matching what clients actually support:
 
 - **`wl_output.scale`** — the integer `ceil(scale)`. Every client that binds
   an output gets it automatically (re-sent on bind and whenever the output's
-  state changes). A scale of `1.5` is advertised as `2` here, which is what a
-  client that only understands integer scaling should draw at.
+  state changes).
 - **`wp_fractional_scale_v1`** — the configured value resolved to the
   nearest 1/120th, the finest the protocol can express (`preferred_scale`
   is a count of 120ths, so `1.33` arrives as 160). A client that
@@ -2339,18 +2054,14 @@ advertised three ways, matching what clients actually support:
   that `preferred_scale` (`1.5`, not `2`), and can render a larger buffer and let
   the compositor scale it down. The `wp_viewporter` global is advertised
   alongside it, because that is the protocol a client uses to submit such a
-  buffer — without it, a fractional client has no way to render. Rendering
+  buffer. Rendering
   uses the same resolved value, so a buffer sized for the announced scale
   lands one to one.
 - **`wl_surface.preferred_buffer_scale`** (needs client `wl_compositor` v6) —
   the integer preference that accompanies the fractional value, sent with the
-  default `preferred_buffer_transform` (`normal`). It is a separate event on
-  a separate object, so a client that opts into fractional scaling receives
-  **both**: the exact `1.5` *and* the integer `2`. This is protocol
-  completeness (it is what wlroots sends). A client below `wl_compositor` v6
+  default `preferred_buffer_transform` (`normal`). A client that opts into fractional scaling receives
+  **both**: the exact `1.5` *and* the integer `2`. A client below `wl_compositor` v6
   is not sent the event and keeps the implicit default of 1.
-
-Real limits rather than polish:
 
 - **Per output, one answer per surface.** `scoot msg reload` re-applies
   every output's scale live (re-advertised on every output's `wl_output`, moved or not,
@@ -2388,13 +2099,10 @@ renders as a solid fill; a client that wants it bigger scales it through
 
 - **No shm, no pool budget — but inside the buffer bound.** These buffers
   allocate nothing, so the per-client `wl_shm` pool count and fd count never
-  move for them. They still count against the 512-live-`wl_buffer` bound (uniform
-  accounting — the hook can't observe buffer kind, and excluding them would
-  let cheap destroys drain retaining units).
-- **Destroying the manager leaves its buffers working.** The spec says the
-  child objects are unaffected, and they are.
-- **Destroying an attached buffer is legal and safe.** Wayland lets a client
-  destroy a `wl_buffer` its surface still names; nothing panics and nobody is
+  move for them. They still count against the 512-live-`wl_buffer` bound.
+- **Destroying the manager leaves its buffers working.** Child objects are
+  unaffected.
+- **Destroying an attached buffer is legal and safe.** Nobody is
   disconnected for it.
 
 ## Pointer scrolling
@@ -2404,8 +2112,7 @@ touchpad arrives as `axis_source` finger with continuous values and the
 `axis_stop` that ends the gesture, a wheel as `axis_source` wheel with its
 detents in `axis_value120` (and `axis_discrete` for pre-v8 clients), and
 the natural-scroll setting as `axis_relative_direction`. Clients that key
-wheel-vs-finger behavior off those events (Chrome does) see the same
-scroll a bare compositor would send.
+wheel-vs-finger behavior off those events see the same scroll.
 
 - **Sources are forwarded, never rebuilt.** A `--tty` touchpad, mouse
   wheel, or continuous device keeps the source libinput reported; a
@@ -2432,12 +2139,9 @@ relative motion deltas off its relative-pointer object.
   own rule. A motion that moves focus from one surface to another is
   reported to the surface it left.
 - **Except a motion off an X window, which reports no relative motion.**
-  XWayland (24.1.13) keeps a delta that arrives in the same frame as its
-  pointer leaving an X window and applies it after the pointer next enters
-  one, on top of the position the enter set. The X pointer then sat off the
-  window entered until the next motion, so a click right after the move --
-  every `scoot msg pointer click` onto the other of two X apps -- reached
-  some other window or none. X apps reading raw motion miss that one
+  XWayland applies a delta that arrives with the pointer leaving an X window
+  after the pointer next enters one, on top of the position the enter set,
+  so the X pointer sits off the entered window until the next motion. X apps reading raw motion miss that one
   crossing delta.
 - **Unaccelerated means pre-libinput-acceleration on `--tty`.** A `--tty`
   mouse reports both an accelerated and a raw device delta, and the relative
@@ -2466,8 +2170,7 @@ with a frozen cursor — see [ipc.md](../msg/index.md#rules-an-agent-needs).
 
 ## Drawing tablets (`tablet-v2`)
 
-`zwp_tablet_manager_v2` version 1 — the most Smithay carries at the pinned
-revision; the protocol's own version 2 only adds a tablet bustype event and
+`zwp_tablet_manager_v2` version 1 — version 2 only adds a tablet bustype event and
 pad dials, neither of which scoot mints. libinput tool events reach
 tablet-aware clients (Krita, Xournal++) on `--tty` hardware, and every other
 client gets a pen that moves the cursor and clicks.
@@ -2482,8 +2185,7 @@ client gets a pen that moves the cursor and clicks.
 - **Stylus barrel buttons are tool-only.** The tool sees the exact button
   number; nothing is synthesized onto the pointer, because no mapping from a
   stylus button onto a mouse button exists to honour.
-- **Pads, strips, rings and dials are not supported.** Smithay carries no pad
-  objects at the pinned revision, so `pad_added` never fires.
+- **Pads, strips, rings and dials are not supported.** `pad_added` never fires.
 - **A tool cursor is the cursor.** A shape or surface a client names for its
   tool lands in the same cursor the pointer uses.
 - **A tap on the lock screen reaches the locker**, through both the tool and
@@ -2498,12 +2200,11 @@ flags) or that the update was superseded before it ever got there
 (`discarded`).
 
 - **The timestamp is the frame handoff, and each backend hands off somewhere
-  else.** With no presenter (`--headless` under IPC-only control) the
+  else.** With no presenter the
   framebuffer is the final image, so the timestamp is when the frame finished
   rendering. Under `--nested` it is when the frame was committed to the host
-  compositor. Under `--tty` it is when the page flip was issued to DRM, up to
-  one vblank before the photons — and the `vsync` flag is set there, because
-  the flip is vblank-synchronized; the other backends report no flags.
+  compositor. Under `--tty` it is when the page flip was issued to DRM —
+  and the `vsync` flag is set there; the other backends report no flags.
 - **`zero_copy` means the buffer went to the display directly.** Only on the
   GPU scanout tier (`--tty --renderer gpu`, `gpu-scanout` build), and only
   for the surface whose buffer was scanned out on the primary plane that
@@ -2516,9 +2217,8 @@ flags) or that the update was superseded before it ever got there
 - **`refresh` is the mode scoot advertises, not the panel's.** Always 60 Hz,
   including under `--tty` on a faster panel. A client pacing frames should
   trust the timestamps, not `refresh` plus arithmetic.
-- **`seq` is zero except on `--tty`.** Headless has no vertical retrace to
-  count and nested output is self-refreshing with no queryable count, so the
-  protocol requires zero there; `--tty` reports the issued flip's number (a
+- **`seq` is zero except on `--tty`.** Headless and nested report zero, as the
+  protocol requires; `--tty` reports the issued flip's number (a
   per-flip counter, not the kernel's refresh count).
 - **Only displayed surfaces are stamped.** Mapped windows, layer surfaces,
   popups and the client cursor get feedback for a frame that showed them;
@@ -2532,7 +2232,7 @@ flags) or that the update was superseded before it ever got there
 ## Rendering hints
 
 `wp_alpha_modifier_v1` (version 1) and `wp_content_type_manager_v1` (version
-1). One of them works, and the other is stored and honestly ignored.
+1). One works; the other is stored and ignored.
 
 - **Alpha does what it says.** A client names a `u32` multiplier on its
   surface (`0` transparent, `u32::MAX` opaque) and the compositor blends it —
@@ -2542,7 +2242,6 @@ flags) or that the update was superseded before it ever got there
   leaves existing modifier objects working.
 - **Content type is accepted and has no effect.** A client can label a
   surface `photo`, `video`, `game` or `none`; the compositor stores the label
-  and changes no pixel for it — a CPU renderer with no adaptive-sync story
-  has no consumer for the hint.
+  and changes no pixel for it.
 - **Neither touches any bound.** No pool, buffer or fd is created anywhere on
   either path.

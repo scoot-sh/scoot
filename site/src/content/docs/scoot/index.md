@@ -6,8 +6,8 @@ description: "What the compositor does, how scrolling columns work, and how to l
 scoot is the compositor: the process that draws every window, takes
 every input, and arranges windows in sideways-scrolling columns. The
 bar, the wallpaper daemon and the desktop profile are separate pieces
-that talk to it — this section is the compositor itself: launching it,
-configuring it, driving it. Nothing here sits still for long.
+that talk to it — this section covers the compositor itself: launching it,
+configuring it, driving it.
 
 ## How scrolling columns work
 
@@ -41,7 +41,7 @@ around it in the layout's own gap ([Appearance](./appearance.md)).
 ## Launch it three ways
 
 The backend flag chooses how scoot *presents* what it drew (the
-*renderer* flag — pixman or GLES — chooses what draws it; see
+*renderer* flag chooses what draws it; see
 [Backends and rendering](./backends.md)):
 
 | Flag | What happens | Use it to |
@@ -79,13 +79,12 @@ default shown); `--write` places it directly, refusing to overwrite.
 
 ### Starting a session
 
-scoot starts the programs inside the session two ways, which compose
-rather than compete:
+scoot starts the programs inside the session two ways:
 
 **The session script** is the `-- COMMAND...` flag: everything after
 `--` is one program and its arguments, run once the session is up with
 `WAYLAND_DISPLAY`, `SCOOT_SOCKET` and the session environment already
-set. It is the 20% route — the one with ordering, conditionals, and
+set. It handles ordering, conditionals, and
 `wait`:
 
 ```sh
@@ -102,12 +101,11 @@ scoot --tty -- ~/bin/session.sh
 ```
 
 scoot does not wait on the script and does not exit when it exits —
-fire and forget — and it restarts nothing that dies. Supervision is
-explicitly out of scope: restarting a crashed bar is a service
-manager's job. Exited children are reaped, so nothing lingers as a
+fire and forget — and it restarts nothing that dies. Restarting a
+crashed bar is a service manager's job, not scoot's. Exited children are reaped, so nothing lingers as a
 zombie.
 
-**`[autostart]`** is the 80% route — the programs with no ordering or
+**`[autostart]`** covers the programs with no ordering or
 conditionals, as action strings in the config file. Entries run first,
 in file order, then the `--` command: the config declares the session
 baseline, the script carries the behavior. Spawning the same bar in
@@ -120,15 +118,15 @@ one a crash left behind, imports the login environment into the user manager
 and the D-Bus activation environment, waits for the compositor to answer
 IPC, imports the session's own `WAYLAND_DISPLAY`, and only then reaches
 `graphical-session.target` — so display-gated units start with the display
-already set. While the session runs it blocks in the bus waiting for
+already set. While the session runs it waits for
 `scoot.service` to leave the active state: an idle session costs no wakeups,
 and logging out ends the session at once. A user-manager re-exec mid-session
-(a NixOS switch) rides through without ending the session — and a switch
+(a NixOS switch) does not end the session — and a switch
 that changes the compositor build leaves the running one alone: the new
 build takes over at the next login, while session-bound units whose own
-files changed restart against the still-running compositor (the display
-socket never moves, so they reattach). When scoot itself exits, for any
-reason, the service starts `scoot-shutdown.target` on the way down, so
+files changed restart against the still-running compositor). When scoot itself
+exits,
+the service starts `scoot-shutdown.target` on the way down, so
 the session targets stop with it instead of looping on a missing display —
 and the display variables are restored.
 
@@ -179,8 +177,8 @@ dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
 dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
 ```
 
-`resources/scoot-portals.conf` names which backend serves what once
-the lookup can find it: everything falls through to `gtk`, while
+`resources/scoot-portals.conf` names which backend serves what:
+everything falls through to `gtk`, while
 `ScreenCast`/`Screenshot` go to `wlr`. Install it as
 `scoot-portals.conf` in the first of `~/.config/xdg-desktop-portal/`,
 `/etc/xdg-desktop-portal/`, `/usr/share/xdg-desktop-portal/` that your
@@ -188,9 +186,8 @@ setup provides (xdg-desktop-portal 1.17+ does the rest).
 
 ### More than one output
 
-`--headless --outputs N` gives a session N virtual outputs with no
-second monitor in the building — so per-output behavior is testable.
-Each output is real: its own `wl_output` global, its own workspaces
+`--headless --outputs N` gives a session N virtual outputs, so per-output
+behavior is testable without extra monitors. Each output is real: its own `wl_output` global, its own workspaces
 and scrolling strip (a window is on exactly one output; nothing
 scrolls across a boundary), its own exclusive zones (a bar on one
 output shrinks only that output's tiling area), its own scale, its own
@@ -199,13 +196,12 @@ second output's own pixels). Under `--tty` every connected monitor is
 an output like these, named after its connector, placed left to right,
 added and removed as monitors plug and unplug.
 
-What it is not yet: outputs place themselves left to right unless a
+Outputs place themselves left to right unless a
 `position` pins one (positions, scale and mode are set per output in
 the file, not from `wlr-randr`); new windows open on the output under the pointer.
 Stepping across outputs is bound by default (`Super+comma` /
 `Super+period`, wrapping left and right — see [Outputs](./outputs.md)).
-A returning monitor gets its windows back: when an output is removed
-its workspaces are adopted by the remaining output, and when a monitor
-with a matching identity returns, the still-open ones move back.
+A returning monitor gets its windows back
+(see [Outputs](./outputs.md)).
 
 Next: [Configure](./configure.md) — the config file, reload, and what happens when the file is wrong.
