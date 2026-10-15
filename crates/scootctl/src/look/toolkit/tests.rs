@@ -9,7 +9,8 @@ use scoot_look::{Origin, ResolvedLook};
 
 use super::{
     COLOR_SCHEME_KEY, Dconf, MANAGED_MARK, PREFER_DARK, PREFER_LIGHT, TOOL_KEYS, apply_toolkit,
-    apply_toolkit_files, toolkit_off, toolkit_on, wanted_dconf, wanted_files,
+    apply_toolkit_files, apply_toolkit_with_claims, toolkit_off, toolkit_off_with_claims,
+    toolkit_on, wanted_dconf, wanted_files,
 };
 
 fn look() -> ResolvedLook {
@@ -753,5 +754,77 @@ fn files_off_and_private_and_homeless_all_skip() {
             .map(|mut entries| entries.next().is_none())
             .unwrap_or(true),
         "a gated run wrote files"
+    );
+}
+
+#[test]
+fn a_claimed_key_is_left_alone_and_records_nothing() {
+    // The Nix claims file owns color-scheme: that key is skipped
+    // however the live value reads, and no ownership is recorded for
+    // it — while the other five keys still write.
+    let dir = state_dir("claims");
+    let claims = vec![COLOR_SCHEME_KEY.to_owned()];
+    for live in [None, Some(PREFER_LIGHT.to_owned())] {
+        let mut live_map = HashMap::new();
+        if let Some(live) = live {
+            live_map.insert(COLOR_SCHEME_KEY.to_owned(), live);
+        }
+        let mut record = record(None, &[], &[]);
+        let dconf = FakeDconf {
+            live: live_map,
+            ..FakeDconf::default()
+        };
+        let notes = apply_toolkit_with_claims(&dir, &mut record, &look(), &dconf, &claims);
+        assert!(
+            dconf.wrote_to(COLOR_SCHEME_KEY).is_empty(),
+            "claimed: never written"
+        );
+        assert_eq!(
+            dconf.wrote().len(),
+            TOOL_KEYS.len() - 1,
+            "the rest still write: {notes:?}"
+        );
+        assert!(
+            !record.dconf_wrote.contains_key("color-scheme"),
+            "claimed: never recorded"
+        );
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.contains("owned by the Nix configuration")),
+            "says so: {notes:?}"
+        );
+    }
+}
+
+#[test]
+fn off_leaves_a_claimed_key_alone() {
+    // `toolkit off` on a Nix-owned key restores nothing (home-manager
+    // owns it) but still stops owning it; the unclaimed keys are
+    // untouched here because this record wrote only the claimed one.
+    let dir = state_dir("claims-off");
+    let claims = vec![COLOR_SCHEME_KEY.to_owned()];
+    let mut live = HashMap::new();
+    live.insert(COLOR_SCHEME_KEY.to_owned(), PREFER_DARK.to_owned());
+    let mut record = record(
+        None,
+        &[("color-scheme", PREFER_DARK)],
+        &[("color-scheme", "")],
+    );
+    let dconf = FakeDconf {
+        live,
+        ..FakeDconf::default()
+    };
+    let notes = toolkit_off_with_claims(&dir, &mut record, &dconf, &claims);
+    assert!(dconf.wrote().is_empty(), "claimed: nothing is restored");
+    assert!(
+        record.dconf_wrote.is_empty() && record.dconf_orig.is_empty(),
+        "the record clears"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("owned by the Nix configuration")),
+        "says so: {notes:?}"
     );
 }

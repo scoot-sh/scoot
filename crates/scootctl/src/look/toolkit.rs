@@ -243,11 +243,28 @@ pub fn is_private_state(state_dir: &Path) -> bool {
 /// into `record.dconf_orig` (`""` means it was unset), so
 /// `toolkit off` can restore it. A private session never writes: its swaps
 /// must not move the user's real desktop.
+///
+/// `nix_claims` carries the dconf key paths home-manager owns (the
+/// `look-nix-claims` file beside the declared default, written from the
+/// merged `dconf.settings`): a claimed key is home-manager's, so the tool
+/// leaves it alone however the live value reads. Without it the tool
+/// would fight the next activation over the same leaf.
 pub fn apply_toolkit(
     state_dir: &Path,
     record: &mut Record,
     look: &ResolvedLook,
     dconf: &dyn Dconf,
+) -> Vec<String> {
+    apply_toolkit_with_claims(state_dir, record, look, dconf, &[])
+}
+
+/// [`apply_toolkit`] with the Nix-claimed key paths skipped.
+pub fn apply_toolkit_with_claims(
+    state_dir: &Path,
+    record: &mut Record,
+    look: &ResolvedLook,
+    dconf: &dyn Dconf,
+    nix_claims: &[String],
 ) -> Vec<String> {
     let mut notes = Vec::new();
     if !toolkit_on(record) {
@@ -281,6 +298,12 @@ pub fn apply_toolkit(
         else {
             continue;
         };
+        if nix_claims.iter().any(|key| key == path) {
+            notes.push(format!(
+                "{name} is owned by the Nix configuration: left alone"
+            ));
+            continue;
+        }
         apply_one_key(record, name, path, want, dconf, &mut notes);
     }
     notes
@@ -366,6 +389,16 @@ fn write_and_record(
 /// reporting "set outside `scoot look`" over a stale write. Returns the
 /// notes for the reply; a failed restore is a note, never a refusal.
 pub fn toolkit_off(state_dir: &Path, record: &mut Record, dconf: &dyn Dconf) -> Vec<String> {
+    toolkit_off_with_claims(state_dir, record, dconf, &[])
+}
+
+/// [`toolkit_off`] with the Nix-claimed key paths skipped.
+pub fn toolkit_off_with_claims(
+    state_dir: &Path,
+    record: &mut Record,
+    dconf: &dyn Dconf,
+    nix_claims: &[String],
+) -> Vec<String> {
     let mut notes = Vec::new();
     if is_private_state(state_dir) {
         notes.push(
@@ -384,6 +417,12 @@ pub fn toolkit_off(state_dir: &Path, record: &mut Record, dconf: &dyn Dconf) -> 
             else {
                 continue;
             };
+            if nix_claims.iter().any(|key| key == path) {
+                notes.push(format!(
+                    "{name} is owned by the Nix configuration: left alone"
+                ));
+                continue;
+            }
             let written = record.dconf_wrote.get(&name).cloned().unwrap_or_default();
             match dconf.read(path) {
                 Ok(Some(live)) if live == written => {

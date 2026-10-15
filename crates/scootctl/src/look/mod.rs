@@ -24,6 +24,7 @@ pub mod cycle;
 pub mod foot;
 pub mod leaves;
 pub mod reload;
+pub mod sync;
 pub mod toolkit;
 
 use std::path::{Path, PathBuf};
@@ -42,7 +43,7 @@ use apply::{
 use catalog::{Catalog, discover, origin_name};
 use reload::{CompositorReload, IpcCompositor, bar_targets};
 use scoot_look::state::Record;
-use toolkit::{CliDconf, Dconf, toolkit_off, toolkit_on};
+use toolkit::{CliDconf, Dconf, toolkit_on};
 
 /// One `scoot look` invocation: the command, the state/socket selection,
 /// and whether the reply renders as JSON.
@@ -86,6 +87,9 @@ pub enum Command {
     /// never typed). Sleeps out the delay, then reverts only while the
     /// generation still matches.
     PreviewRevert { from: u64, after: u64 },
+    /// The home-manager rule: follow the declared default, keep a live
+    /// choice, remove the layer for null.
+    Sync { no_toolkit: bool },
     /// Show or persist the toolkit writes (`on` or `off`).
     Toolkit { action: Option<bool> },
 }
@@ -101,7 +105,8 @@ pub enum CycleStep {
 /// Every look command, for the JSON document and `did you mean` guesses.
 /// `_preview-revert` stays out: it is spawned, never typed.
 pub const COMMANDS: &[&str] = &[
-    "list", "current", "show", "validate", "build", "apply", "next", "prev", "random", "toolkit",
+    "list", "current", "show", "validate", "build", "apply", "next", "prev", "random", "sync",
+    "toolkit",
 ];
 
 /// The usage line, shared by `scoot look --help` and the top-level help.
@@ -113,6 +118,7 @@ pub const LOOK_USAGE: &str = "\
     look build DIR|NAME --out DIR [--origin shipped|declared|user|installed] [--json]
     look apply [NAME] [--for SECONDS] [--keep] [--no-toolkit] [--from-compositor] [--only-if-generation N] [--json]
     look next|prev|random [--json]
+    look sync [--no-toolkit] [--json]
     look toolkit [on|off] [--json]
 
     --state DIR takes the look state (default: $SCOOT_LOOK_STATE, then
@@ -239,13 +245,24 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
             };
             Command::Toolkit { action }
         }
+        "sync" => {
+            let mut no_toolkit = false;
+            for word in positionals {
+                if word == "--no-toolkit" {
+                    no_toolkit = true;
+                } else {
+                    return Err(Error::Unknown(word));
+                }
+            }
+            Command::Sync { no_toolkit }
+        }
         other => {
             return Err(hinted(
                 "look command",
                 other.to_owned(),
                 &[
                     "list", "current", "show", "validate", "build", "apply", "next", "prev",
-                    "random", "toolkit",
+                    "random", "sync", "toolkit",
                 ],
                 "scoot look --help",
             ));
@@ -297,16 +314,20 @@ COMMANDS:
     next        the next catalog look after the active one, wrapping
     prev        the previous catalog look before the active one, wrapping
     random      a random catalog look other than the active one
+    sync        the home-manager rule: start on the declared default with
+                no state, switch when it changed, fall back when the live
+                choice left the catalog, else keep the live choice and
+                re-resolve it; a null default removes the layer
     toolkit     show whether the toolkit step is on, or persist
                 `toolkit on|off` in look.json
 
 A look is presentation only (colors, fonts, opacity, shape, cursor, the
 wallpaper): a swap never applies pending edits to your own files, and a
-refusal keeps the running look. On a home-manager machine before
-look-nix-catalog, set `programs.scoot.desktop.look = null`,
-`programs.scoot.stylix.enable = false` and
-`programs.scootbar.stylix.enable = false`, or the Nix-written values in
-your own files shadow every look (`current` lists them).
+refusal keeps the running look. On a home-manager machine the catalog is
+`~/.local/share/scoot/looks` (sources) and
+`~/.local/share/scoot/rendered` (renders), the declared default is
+`~/.config/scoot/look-default`, and each activation runs `scoot look
+sync` after the links and dconf land.
 
 EXIT CODES:
     0  success: the reply is on stdout (help counts)
@@ -607,6 +628,7 @@ pub fn run(look: &Look) -> Result<(), String> {
         ),
         Command::Cycle { step } => run_cycle(look, *step),
         Command::PreviewRevert { from, after } => run_preview_revert(look, *from, *after),
+        Command::Sync { no_toolkit } => run_sync(look, *no_toolkit),
         Command::Toolkit { action } => run_toolkit(look, *action),
     }
 }
@@ -1062,6 +1084,7 @@ fn run_apply(
         from_compositor,
         preview: for_secs.is_some(),
         only_if_generation,
+        nix_claims: sync::read_nix_claims(),
     };
     let armed = apply_and_print(look, name, &options, for_secs)?;
     if keep && had_preview {
@@ -1103,6 +1126,7 @@ fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
         from_compositor: false,
         preview: false,
         only_if_generation: None,
+        nix_claims: sync::read_nix_claims(),
     };
     apply_and_print(look, &target, &options, None).map(|_| ())
 }
@@ -1248,10 +1272,7 @@ fn apply_and_print(
     let catalog = discover();
     let cache = apply::render_cache_dir()?;
     let state_dir = resolve_state_dir(look.state.as_deref())?;
-    let mut compositor: Box<dyn CompositorReload> = match &look.socket {
-        Some(path) => Box::new(IpcCompositor::explicit(path.clone())),
-        None => Box::new(IpcCompositor::default_socket()),
-    };
+    let mut compositor = default_compositor(look);
     let (bars, notes) = bar_targets();
     let bar_refs: Vec<&dyn reload::BarReload> = bars
         .iter()
@@ -1359,13 +1380,161 @@ fn apply_and_print(
     }
 }
 
+fn run_sync(look: &Look, no_toolkit: bool) -> Result<(), String> {
+    // A present but unreadable declared default refuses loudly: sync's
+    // whole job is that file. A missing one is unmanaged, never an
+    // error: the live choice is left alone.
+    let (declared, nix_claims) = match sync::read_declared() {
+        Ok(None) => (None, Vec::new()),
+        Ok(Some(declared)) => (Some(declared.default), declared.claims),
+        Err(error) => return Err(error),
+    };
+    let catalog = discover();
+    let cache = apply::render_cache_dir()?;
+    let roots = sync::rendered_roots();
+    let state_dir = resolve_state_dir(look.state.as_deref())?;
+    let options = sync::SyncOptions {
+        lock_wait: apply::LOCK_WAIT,
+        no_toolkit,
+    };
+    let mut compositor = default_compositor(look);
+    let (bars, notes) = bar_targets();
+    let bar_refs: Vec<&dyn reload::BarReload> = bars
+        .iter()
+        .map(|bar| bar as &dyn reload::BarReload)
+        .collect();
+    let checks = apply::ProdChecks::new();
+    let dconf = CliDconf::new();
+    let target = declared
+        .clone()
+        .flatten()
+        .unwrap_or_else(|| "(no declared default)".to_owned());
+    match sync::sync_with(
+        declared,
+        nix_claims,
+        &options,
+        &catalog,
+        &cache,
+        &roots,
+        &state_dir,
+        None,
+        compositor.as_mut(),
+        &bar_refs,
+        &checks,
+        &dconf,
+    ) {
+        Ok(report) => print_swap_report(look, &target, &report, &notes),
+        Err(failure) => print_swap_failure(look, &target, &failure),
+    }
+}
+
+/// The compositor peer for one invocation: an explicit `--socket`, else
+/// the default socket.
+fn default_compositor(look: &Look) -> Box<dyn CompositorReload> {
+    match &look.socket {
+        Some(path) => Box::new(IpcCompositor::explicit(path.clone())),
+        None => Box::new(IpcCompositor::default_socket()),
+    }
+}
+
+/// Prints one swap reply (`apply` or `sync`): the report on stdout, skips
+/// and notes on stderr in human mode, the document in `--json`.
+fn print_swap_report(
+    look: &Look,
+    target: &str,
+    report: &apply::ApplyReport,
+    extra: &[String],
+) -> Result<(), String> {
+    let mut all_notes = extra.to_vec();
+    all_notes.extend(report.notes.iter().cloned());
+    if look.json {
+        output::print_line(
+            &serde_json::to_string_pretty(&serde_json::json!({
+                "target": target,
+                "applied": report.name,
+                "removed": report.removed,
+                "rendered": report.rendered,
+                "generation": report.generation,
+                "reloaded": report.reloaded,
+                "skipped": report.skipped,
+                "shadowed": report.shadowed,
+                "invalid": report.invalid,
+                "notes": all_notes,
+            }))
+            .unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+    } else if report.removed {
+        output::print_line(&format!("removed: {}", report.name))
+            .map_err(|error| error.to_string())?;
+        for skipped in &report.skipped {
+            output::warn(format_args!("skipped: {skipped}"));
+        }
+        for note in &all_notes {
+            output::warn(format_args!("note: {note}"));
+        }
+    } else {
+        output::print_line(&format!("applied: {}", report.name))
+            .map_err(|error| error.to_string())?;
+        if !report.reloaded.is_empty() {
+            output::print_line(&format!("reloaded: {}", report.reloaded.join(", ")))
+                .map_err(|error| error.to_string())?;
+        }
+        if report.shadowed.is_empty() {
+            output::print_line("shadowed keys: none").map_err(|error| error.to_string())?;
+        } else {
+            output::print_line(&format!("shadowed keys: {}", report.shadowed.join(", ")))
+                .map_err(|error| error.to_string())?;
+        }
+        if !report.invalid.is_empty() {
+            output::print_line(&format!("invalid user keys: {}", report.invalid.join(", ")))
+                .map_err(|error| error.to_string())?;
+        }
+        // Skips and notes go to stderr in human mode: stdout stays
+        // the reply.
+        for skipped in &report.skipped {
+            output::warn(format_args!("skipped: {skipped}"));
+        }
+        for note in &all_notes {
+            output::warn(format_args!("note: {note}"));
+        }
+    }
+    Ok(())
+}
+
+/// Prints one swap refusal: `--json` still prints a document on stdout
+/// (the failure shape is `{"target", "applied": false, "error",
+/// "rolled_back_to", "rollback_errors"}`), the text error still goes to
+/// stderr and exits 1.
+fn print_swap_failure(
+    look: &Look,
+    target: &str,
+    failure: &apply::ApplyFailure,
+) -> Result<(), String> {
+    if look.json {
+        output::print_line(
+            &serde_json::to_string_pretty(&serde_json::json!({
+                "target": target,
+                "applied": false,
+                "error": failure.message,
+                "rolled_back_to": failure.rolled_back_to,
+                "rollback_errors": failure.rollback_errors,
+            }))
+            .unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    Err(failure.to_string())
+}
+
 /// `toolkit off`: stop owning `color-scheme`. Restores the live value
 /// from before the tool's first write (see [`toolkit_off`]). Either way
 /// the record clears, so after `off` then `on` the next apply adopts
 /// fresh instead of reporting "set outside `scoot look`" over a stale
 /// write.
 fn run_toolkit_off(state_dir: &Path, record: &mut Record, dconf: &dyn Dconf) {
-    for note in toolkit_off(state_dir, record, dconf) {
+    for note in toolkit::toolkit_off_with_claims(state_dir, record, dconf, &sync::read_nix_claims())
+    {
         output::warn(format_args!("note: {note}"));
     }
 }

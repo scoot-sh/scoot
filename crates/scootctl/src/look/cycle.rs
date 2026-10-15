@@ -20,6 +20,7 @@ use scoot_look::state::{self, PREVIEW_FILE};
 use super::apply::{ApplyOptions, PREVIEW_SUPERSEDED, apply_with};
 use super::catalog::Catalog;
 use super::reload::{BarReload, CompositorReload};
+use super::sync::read_nix_claims;
 
 /// How many times the detached reverter waits out a concurrent swap's
 /// lock past each attempt's own wait before giving up loudly: twelve
@@ -320,6 +321,7 @@ pub fn revert_if_current(
                 // the pre-check above and this swap refuses here instead
                 // of undoing that newer choice.
                 only_if_generation: Some(from_generation),
+                nix_claims: read_nix_claims(),
             };
             match apply_with(
                 name, &options, catalog, cache, state_dir, config, compositor, bars, checks, dconf,

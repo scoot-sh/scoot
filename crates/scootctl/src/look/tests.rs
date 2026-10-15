@@ -58,6 +58,19 @@ fn verbs_parse_bare() {
         command(&["toolkit", "on"]),
         Ok(Command::Toolkit { action: Some(true) })
     );
+    assert_eq!(command(&["sync"]), Ok(Command::Sync { no_toolkit: false }));
+    assert_eq!(
+        command(&["sync", "--no-toolkit"]),
+        Ok(Command::Sync { no_toolkit: true })
+    );
+}
+
+#[test]
+fn sync_takes_no_name() {
+    assert_eq!(
+        command(&["sync", "moonrise"]),
+        Err(Error::Unknown("moonrise".to_owned()))
+    );
 }
 
 #[test]
