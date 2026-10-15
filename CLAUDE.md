@@ -162,6 +162,12 @@ let the config file and keybinding reference go stale across several
 merged PRs before anyone noticed; `scoot-implementer` and `scoot-reviewer`
 both call this out explicitly so it doesn't recur.
 
+**Docs style** (user, 2026-10-14): standard technical English, plain and
+direct, no fluff. If a passage does not help an end user do or understand
+something, or is wordier than it needs to be, trim or delete it. History,
+how a decision was reached and internals that do not change what a user does
+belong in `dev/` or the PR, not in `site/` or `README.md`.
+
 **Independent review is mandatory, and it's a real gate, not a formality.**
 Use the `scoot-reviewer` subagent (`.claude/agents/scoot-reviewer.md`) — or,
 if it doesn't exist in this checkout, an equivalently-instructed pass —
