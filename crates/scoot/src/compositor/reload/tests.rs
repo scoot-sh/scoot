@@ -2813,7 +2813,7 @@ fn look_fragment(text: &str, name: &str, hash: &str) -> Fragment {
     }
 }
 
-const LOOK_APPEARANCE: &str = r#"
+const LOOK_APPEARANCE: &str = r##"
 [appearance]
 focus_ring_width = 2
 focus_ring_inactive_width = 2
@@ -2824,7 +2824,7 @@ corner_radius = 14
 cursor_size = 24
 cursor_color = "#FF9A49"
 cursor_theme = "Mocu"
-"#;
+"##;
 
 fn reload_with_look(fixture: &mut Fixture, text: &str) -> Response {
     fixture.state.reload_with_state(

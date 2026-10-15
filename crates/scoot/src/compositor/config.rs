@@ -5307,7 +5307,7 @@ mod tests {
     #[test]
     fn a_user_cursor_size_alone_keeps_the_look_theme_and_accent() {
         let layer = layer(
-            r#"
+            r##"
             [appearance]
             focus_ring_width = 2
             focus_ring_inactive_width = 2
@@ -5318,7 +5318,7 @@ mod tests {
             cursor_size = 24
             cursor_color = "#FF9A49"
             cursor_theme = "Mocu"
-            "#,
+            "##,
         );
         let (merged, shadowed) = merge_layer(user_file("[appearance]\ncursor_size = 32\n"), &layer);
         let appearance = merged.appearance.expect("the layer supplies appearance");
