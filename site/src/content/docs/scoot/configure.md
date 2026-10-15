@@ -13,11 +13,11 @@ re-applies live with `scoot msg reload`. No config file yet?
 `--config PATH` loads a TOML file explicitly. Without it, scoot looks
 for `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml`, and runs on built-in defaults if
-neither exists. Twelve tables: `[layout]`, `[appearance]`,
+neither exists. Twelve optional tables: `[layout]`, `[appearance]`,
 `[output]`, `[[outputs]]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
 `[autostart]`, `[floating]`, `[wallpaper]`, `[binds]` — plus any number of
-`[[window_rule]]` entries. Every field is optional and defaults
-independently, so a config that only sets `gap`
+`[[window_rule]]` entries. Every field in every table is itself
+optional and defaults independently, so a config that only sets `gap`
 leaves everything else at its built-in default.
 
 ```sh
@@ -25,36 +25,40 @@ scoot --print-default-config > ~/.config/scoot/config.toml
 ```
 
 writes a starting file to stdout (never to a path, so it cannot clobber
-anything). Every key is present, commented out with its default as the
-value, so the file as-is equals the defaults. `--write` writes that same
-emission to the default location directly, private to you (`0o600`),
-and refuses rather than overwriting anything already there.
-(On a machine with no `scoot` binary, copy the
-[example below](#example-configtoml) instead.)
+anything), generated from the same defaults this section documents —
+every key present and commented out with its default as the value, so
+the file as-is is exactly the defaults. `--write` places that same
+emission at the default location directly, private to you (`0o600`),
+and refuses loudly rather than overwriting anything already there.
+(On a machine with no `scoot` binary — an older install without it —
+copy the [example below](#example-configtoml) instead.)
 
 ### Failure semantics
 
 An explicit `--config PATH` that doesn't exist or can't be read is a
-hard startup error. Every other problem
+hard startup error — you pointed at it on purpose. Every other problem
 falls back to defaults and logs instead of blocking startup, with two
 exceptions (both cases where guessing would be worse than refusing):
 
-- No file at the *default* path: silent, not even a log line.
+- No file at the *default* path: silent, not even a log line (a fresh
+  install, not a mistake).
 - Malformed TOML, an unknown field, or a wrong-typed field **anywhere
   in the file**: logged as an error, and the *entire* file is discarded
-  for full built-in defaults.
+  for full built-in defaults — a single bad field in `[layout]` also
+  throws away an otherwise-valid `[binds]` table.
 - One bad `[appearance]` color, one bad `[binds]` entry, one bad
   `[autostart]` entry, or one unusable `[[window_rule]]`: logged as a
-  warning, and only that field/bind/entry/rule falls back.
+  warning, and only that field/bind/entry/rule falls back — everything
+  else still applies.
 - Anything wrong inside `[wallpaper]`: logged as an error, and only the
   wallpaper is skipped — the rest of the file applies.
 - A set-but-unusable `[tty] gpu`: a hard startup error naming the key,
   not a silent fallback to the automatic pick. The same for
   `[renderer] backend = "gpu"` with no working EGL.
 
-The reason for the general rule: on `--tty` scoot *is* the session,
-so it always starts with something usable and logs what's wrong
-instead.
+The reason for the general rule: on `--tty` scoot *is* the session —
+there is no other compositor to fall back to, so it always starts with
+something usable and says what's wrong in the log instead.
 
 ## Reloading the config
 
@@ -65,11 +69,12 @@ Two triggers re-read the startup file and re-apply what can go live:
 - `kill -HUP <compositor pid>`, which drives the same path with no
   reply channel (the summary goes to the compositor log instead).
 
-No file watching: both triggers say exactly when.
+No file watching: a live-edited config would fire mid-keystroke, while
+both triggers above say exactly when.
 
 **Applied live:** layout (gap, column widths, default width), output
-scales and positions, `[[outputs]]` modes (a live resize per backend;
-`--nested` refuses them), appearance (ring, background, corners, cursor), the whole
+scales and positions, `[[outputs]]` modes (a live resize per backend —
+`--nested` refuses them, the host owns the size), appearance (ring, background, corners, cursor), the whole
 `[binds]` table, new `[autostart]` spawn entries, `[floating]` and the
 `[[window_rule]]`s (for windows that map after the reload), `[wallpaper]`
 (handed to scootbg again), `[xwayland] fractional`. The reply names
@@ -112,10 +117,11 @@ half-applied session, never an exit.
 
 Two guarantees hold across every reload: a key held across a `[binds]`
 rebuild neither wedges nor drops; and under `--tty` a reload cannot
-strip the `Ctrl+Alt+F1..F12` VT-switch recovery bindings — they
-override any colliding file bind with a
+strip the `Ctrl+Alt+F1..F12` VT-switch recovery bindings — they are
+layered back on last, overriding any colliding file bind with a
 warning. A reload applies while the session is locked, except new
-autostart entries (those wait for the first unlocked reload).
+autostart entries (a spawned program at lock time could disclose onto
+the locked session, so those wait for the first unlocked reload).
 
 A successful reload drops every live `scoot msg output-scale`
 scale: the outputs go back to the file's scales (see
@@ -149,8 +155,8 @@ commands = [
 ```
 
 Fail-open per entry: a malformed entry is skipped with a warning
-naming that entry; every other entry still runs. No supervision: an
-entry that exits instantly is
+naming that entry; every other entry still runs, and the session
+always starts. No supervision: an entry that exits instantly is
 reaped, not restarted. A reload runs the spawn delta (entries the
 session has not seen yet run once each; a reloaded non-`spawn` —
 `quit` included — is refused by name, so a reloaded `quit` cannot end
@@ -158,9 +164,9 @@ the session).
 
 ### Idle: locking and screen power
 
-scoot provides the protocols; the policy ships with [the desktop
+(The manual recipe for sessions outside the flake.) scoot provides the protocols; the policy ships with [the desktop
 profile](../desktop/index.md#idle-and-lock). Outside the flake, the
-same policy is a swayidle setup — `spawn` splits on
+same policy is a hand-written swayidle setup — `spawn` splits on
 whitespace with no shell, so a swayidle line lives in a small script
 the session starts:
 
@@ -170,9 +176,10 @@ the session starts:
 exec swayidle timeout 600 'swaylock' timeout 900 'wlopm --off \*' resume 'wlopm --on \*'
 ```
 
-(The `\*` matters: swayidle runs each command through `sh -c`,
+(The `\*` is load-bearing: swayidle runs each command through `sh -c`,
 which would glob a bare `*` against its working directory — the
-backslash leaves `wlopm` a literal `*`, its "every output".)
+backslash reaches `sh` intact inside the single quotes and leaves
+`wlopm` a literal `*`, its "every output".)
 
 ```toml
 [autostart]

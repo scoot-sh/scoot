@@ -3,8 +3,9 @@ title: Outputs
 description: "Scales, per-output modes, moving across monitors, and hotplug."
 ---
 
-`[output]` holds the default; `[[outputs]]` entries override per connector,
-matched by the name `scoot msg outputs` lists (`eDP-1`, `DP-1` under `--tty`;
+One scale for everywhere, or one per monitor. `[output]` holds the
+default; `[[outputs]]` entries override per connector (matched by the
+name `scoot msg outputs` lists: `eDP-1`, `DP-1` under `--tty`;
 `headless`, `headless-2` under `--headless`).
 
 ```toml
@@ -35,12 +36,13 @@ A scale can also change without touching the file:
 id), and `scoot msg output-scale DP-1 reset` drops it again. That is
 runtime state, like `output-power`: it beats the file's scale for that
 connector (a replugged monitor comes back at it), and a successful
-reload or a restart goes back to the file's scales. It takes the same
+reload (which lists each scale it moved in its `applied`) or a restart
+goes back to the file's scales. It takes the same
 range, refusing a value outside it instead of clamping. The
 [display profiles](../desktop/index.md#displays) watcher drives scale
 this way. See [requests](../msg/requests.md).
 
-A window uses the scale of the output it is placed on, and updates
+A window is told the scale of the output it is placed on, and re-told
 when it moves; popups, subsurfaces, bars and lock surfaces follow their
 own output. At a fractional scale X apps cost memory (see
 [XWayland](./xwayland.md)): each X window's buffers quadruple against
@@ -48,9 +50,9 @@ drawing at 1.
 
 ## Moving across outputs
 
-Three pairs of actions reach across screens: stepping to the neighbour,
-naming a screen by position, or naming one by id. The relative pair has
-the default binds:
+Three pairs of actions reach across screens — stepping relatively, and
+naming a screen by position or by id. The relative pair has the default
+binds:
 
 ```toml
 [binds]
@@ -64,10 +66,10 @@ Each steps to the neighbouring output in geometry order, wrapping
 around — with two monitors either key names the other. Positions
 (`focus-output-index N`, 0-based in creation order) and ids
 (`focus-output ID`, from `scoot msg outputs`) name fixed screens
-instead. Output ids are never reused: a replugged monitor comes back
-under a *new* id, so the default stepping binds keep reaching every
-monitor across a replug, while an explicit id bind names the output
-that went away.
+instead. The stability rule: output ids are never reused, so a monitor
+that is unplugged and plugged back in comes back under a *new* id —
+the default stepping binds keep reaching every monitor across a
+replug, while an explicit id bind names the output that went away.
 
 A returning monitor gets its windows back: when an output is removed
 its workspaces are adopted by the remaining output, and when a monitor
@@ -83,19 +85,23 @@ workspaces announce themselves to bars with their monitor's name
 ## Arranging monitors
 
 Without a `position`, outputs pack left to right in creation order from
-the origin. A `position` pins one monitor's origin in logical pixels
-(what `scoot msg outputs` shows as `x` and `y`), so one stacked above
-the primary goes at `[0, -1080]`. Outputs without a `position` pack past
-the placed ones, so the primary stays at the origin and a replugged
-monitor lands back on its entry while its neighbours stay put.
+the origin — the second monitor lands immediately right of the first, the
+third right of the second. A `position` pins one monitor's origin in
+logical pixels (what `scoot msg outputs` shows as `x` and `y`), so a
+monitor standing left of the laptop goes at `[-1920, 0]` and one stacked
+above it at `[0, -1080]`. Outputs without a `position` pack past the
+placed ones: a placed monitor never shoves an earlier output aside, so
+the primary stays at the origin and a replugged monitor lands back on its
+entry while its neighbours stay put.
 
-Three things to know before spreading monitors around:
+Three consequences to know before spreading monitors around:
 
 - **Overlaps are allowed.** Two outputs on the same origin each render
   their own strip; the left/right stepping binds still ring them in
   `x`-then-`y` order. scoot will not refuse or nudge them apart.
 - **Gaps are allowed too.** The pointer roams the bounding box of every
-  output, so it can rest in a gap where no output is. Windows never strand there: each one
+  output, so it can rest in a gap where no output is — exactly as it
+  already can over uneven heights. Windows never strand there: each one
   sits on exactly one output.
 - **A mistyped `position` costs only the position.** `position = "left"`
   or `position = [0]` warns naming the entry and packs that output,

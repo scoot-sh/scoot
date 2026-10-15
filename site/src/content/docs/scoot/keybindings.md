@@ -105,7 +105,7 @@ scoot msg binds
 scoot msg binds --json
 ```
 
-The table is the default view;
+The table is the default view, grouped the way this page groups it;
 `--json` is the same reply as JSON, for agents and scripts. Config rows
 sort by combo, so the JSON order is stable from run to run. Either way it
 is the live merged result — defaults, your `[binds]`, and `--tty`'s VT
@@ -116,7 +116,7 @@ Which terminal opens follows your setup, in this order: `xdg-terminal-exec`
 when it is on `PATH` (the desktop-preferred terminal); otherwise the
 `Super+Return` bind's terminal when that bind is a `spawn` — rebind
 `Super+Return` to `ghostty` and the keymap opens in ghostty too, with its
-own arguments; otherwise `foot`. Inside, the
+own arguments; otherwise `foot`, the default terminal. Inside, the
 keymap pages through `less` when it is installed, and prints plainly and
 waits for Enter when it is not. With no terminal to open,
 the compositor logs one warning naming what it tried and does nothing.
@@ -154,7 +154,7 @@ writes it once (and refuses rather than overwriting).
 A `[binds]` entry is `"combo" = "action string"`. A combo is
 `modifier+modifier+...+key` (`super+shift+h`), or a bare key with no
 modifier (`"Return" = "close"` — legal, intercepting every press of that
-key). Whitespace around `+` is ignored. Modifier
+key with no modifier held). Whitespace around `+` is ignored. Modifier
 names are case-insensitive: `ctrl`/`control`, `shift`, `alt`,
 `super`/`logo`/`meta`/`cmd`. The key is an xkb keysym name, tried
 exactly then case-insensitively — and binds match a key's *unshifted*
@@ -175,18 +175,19 @@ To remove a default outright instead of rebinding its combo, unbind it:
 "super+h" = "none"
 ```
 
-`none` is not an action, so the spelling cannot collide with a real
-bind — in the string form or the table form
+`none` is not an action — no such verb exists, so the spelling cannot
+collide with a real bind — in the string form or the table form
 (`{ action = "none" }`; flags beside one are ignored). The combo goes
-unbound: the key forwards to the client, and
-the bind stops firing. Removing the line falls back to the default.
-`scoot msg binds` shows the removal as
+unbound: the key forwards to the client like any other unbound key, and
+the bind stops firing. Removing the line falls back to the default, as
+before. `scoot msg binds` shows the removal as
 `config (unbinds default: <old action>)`; an unbind with nothing to remove
 warns and is listed as skipped. Unbinding is purely additive — no existing
 config changes meaning.
 
 A bind can also be a table with the action under `action` plus two
-opt-ins — one entry carrying everything about one combo:
+opt-ins — one entry carrying everything about one combo, rather than
+a second list of combos elsewhere that could disagree with the action:
 
 ```toml
 [binds]
@@ -198,19 +199,19 @@ the key work on the lock screen too: `allow_when_locked = true` beside it.
 
 - **`repeat` re-fires the bind while its key is held** — after a 200 ms
   delay, then 25 times a second (the seat keyboard's own rate, so
-  binds step exactly the way a held key repeats in a terminal).
-  `quit` and `close`
+  binds step exactly the way a held key repeats in a terminal). The
+  timer exists only while such a key is held. `quit` and `close`
   never repeat, even when flagged — holding quit must never end the
   session. Flagging either warns and runs the bind once.
 - **`allow_when_locked` lets a `spawn` bind fire while the session is
   locked** — volume, brightness and media keys from the lock screen.
-  Anything else stays refused even when flagged, and `scoot
+  Anything else keeps today's refusal even when flagged, and `scoot
   msg action ...` stays refused while locked too: an IPC request
   carries an arbitrary command from whoever sent it, while a bind can
   only run its config-pinned command.
 
-Both default off, so a plain `"combo" = "action"` string fires once
-and never while locked. A table entry missing its `action`,
+Both default off, so a plain `"combo" = "action"` string behaves exactly
+as before: fire once, never locked. A table entry missing its `action`,
 or a non-boolean flag, warns and falls back; an unknown field warns
 and is ignored, while the rest of the entry applies.
 

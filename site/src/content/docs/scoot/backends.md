@@ -4,8 +4,9 @@ description: "Headless, nested and TTY backends; the pixman and GLES tiers; whic
 ---
 
 The backend flag chooses how scoot *presents* what it drew; the
-renderer flag chooses what *draws* it. Any renderer runs on any
-backend. (Deciding which *package* to install is the [install
+renderer flag chooses what *draws* it. They are independent axes —
+any renderer runs on any backend — but only some combinations buy
+anything. (Deciding which *package* to install is the [install
 page's](../start/install.md#which-build-do-i-need) one-command check;
 this page is what happens underneath.)
 
@@ -17,14 +18,15 @@ this page is what happens underneath.)
 | `--nested` | a window in the host compositor | one window; follows the host's size live | the host owns it (a set scale is ignored with a warning) |
 | `--tty` | real DRM/KMS hardware on a console | every connected monitor, by connector name | from the config, per output |
 
-Under `--nested` the session follows the host window's size; if a
-size cannot be allocated scoot logs it, stays where it was, and the host letterboxes
+Under `--nested` the session follows the host window's size for life:
+resize it and the desktop inside resizes with it; if a size cannot be
+allocated scoot logs it, stays where it was, and the host letterboxes
 the difference. Under `--tty` monitors plug and unplug live (below).
 
 Under `--nested` scoot is a client of the host as well as a server to
 its own windows. If the host connection breaks — the host exits or
-restarts — the session can neither present nor take input,
-so scoot stops cleanly instead of lingering displayless: the log
+restarts — the session cannot present anything and no input can reach
+it, so scoot stops cleanly instead of lingering displayless: the log
 names the loss (`lost the connection to the host compositor`) and the
 process exits 1 with the same message. A supervisor (s6, systemd)
 restarts it into a fresh session once the host is back.
@@ -32,9 +34,12 @@ restarts it into a fresh session once the host is back.
 Starting up waits at most 10 seconds for the host to answer each
 handshake step: the registry, and, in a `gpu-scanout` build with a GPU
 renderer, the dma-buf feedback too, so up to 20 seconds there. A host that accepts the connection but never answers — a
-restart that came back listening without dispatching — is named in the
-log (`could not reach the host compositor during startup`) and the
-process exits 1, so the supervisor retries. There is no knob for the wait.
+restart that came back listening without dispatching — used to wedge
+the session before `scoot is up`, with no IPC socket and nothing for a
+supervisor to act on. Now the log names it (`could not reach the host
+compositor during startup`) and the process exits 1, so the supervisor
+retries. There is no knob for the wait: ten seconds is ~170x a healthy
+startup, and one bound every host meets beats a tunable nobody asked for.
 
 > **Symptom:** `scoot msg` says `Connection refused` right after the
 > host went away. The nested session is gone — check its log for the
@@ -70,12 +75,14 @@ behind; the next session with that display name clears it.
 ## Which renderer draws the frames
 
 scoot composites every frame with either the CPU renderer or the GPU
-renderer. `gpu` means the GLES renderer (scanout on `--tty`).
+renderer, and you can always override the choice. `gpu` means the GLES
+renderer (scanout on `--tty`).
 
 `--renderer cpu|gpu|auto` (config: `[renderer] backend`, env:
 `SCOOT_RENDERER`) picks what composites each frame. **The default is
 `auto`: it picks the best tier for the session and never fails
-startup.** An explicit `--renderer cpu` or
+startup.** CPU and GPU are equal tiers — `auto` simply resolves to the
+one that fits the session — and an explicit `--renderer cpu` or
 `--renderer gpu` always wins over it. Running with no GPU at all always
 works: wherever there is no GPU hardware stack, `auto` resolves to the
 CPU renderer.
@@ -91,9 +98,9 @@ The request comes from the flag first, then `SCOOT_RENDERER`, then the
 config file, then the `auto` default — an explicit `--renderer cpu` beats
 `SCOOT_RENDERER=gpu` and `backend = "gpu"`. The variable is inherited by
 child processes, including a nested `scoot` you start inside the session.
-Every session logs one line with what was decided and why — grep for
-`renderer chosen` (`requested=… source=… tier=… reason=… driver=…
-gl_renderer=…`). When the tier is not what you expected, read
+Every session logs one line saying what was decided and why —
+`requested=… source=… tier=… reason=… driver=… gl_renderer=…` with
+`renderer chosen` on it. When the tier is not what you expected, read
 `reason=` there first. `[renderer] backend` takes effect on restart; a
 reload refuses a changed value and `SCOOT_RENDERER` is never re-read on
 reload.
@@ -128,11 +135,11 @@ never probes at all.
 > the CPU renderer is usually faster there. `--renderer gpu` overrides it.
 
 Forcing a tier — an explicit `--renderer cpu` or `--renderer gpu`
-(equivalently `[renderer] backend`) — pins the session to that tier
+( equivalently `[renderer] backend`) — pins the session to that tier
 instead of letting `auto` decide:
 
-- **What it buys.** Correctness parity with the CPU renderer,
-  and the groundwork for scanning a GPU buffer out directly
+- **What it buys.** Correctness parity with the CPU renderer on a second
+  renderer, and the groundwork for scanning a GPU buffer out directly
   under `--tty`. Every pixel-readback test passes byte-identically
   under either renderer.
 - **What it does not buy (yet).** No speed, except on the scanout
@@ -142,21 +149,22 @@ instead of letting `auto` decide:
   "GPU" is a software rasteriser it is several times *slower* than
   the CPU renderer.
 - **Under `--tty`, `gpu` scans out from the GPU** — in a
-  `gpu-scanout` build: the frame goes directly to the display instead of
+  `gpu-scanout` build. The frame is scanned out directly instead of
   being read back and memcpy'd into a dumb buffer. Without that
-  feature `--tty` warns and keeps the CPU renderer. With the feature, a device
+  feature `--tty` warns and keeps the CPU renderer, because the read-back shape
+  would be strictly worse than the CPU. With the feature, a device
   that cannot drive the scanout tier warns and falls back the same
   way — CPU renderer and dumb buffers — instead of refusing to start:
   on `--tty` scoot *is* the session, so a refusal would be a lockout.
   `--headless` is read-back in every build.
 - **Under `--nested`, a `gpu-scanout` build hands each frame to the
   host as a dma-buf** — no CPU copy on scoot's side, nothing for the
-  host to upload — when it is safe (the host offers dma-buf
+  host to upload — but only when it is safe (the host offers dma-buf
   feedback naming the same DRM device, a common format, and a startup
   test buffer allocates, renders and copies). Anything else keeps the
   read-back, and the startup log says which and why, once.
-- **Hardware first.** The EGL device prefers a real
-  device over a software one, taking the first that yields a
+- **Hardware first.** The EGL device is chosen by preferring a real
+  device over a software one and taking the first that yields a
   working renderer. The chosen device is logged at startup (`the GLES
   renderer is up device=/dev/dri/renderD128 software=false`) — trust
   that line over the flag name.
@@ -165,10 +173,10 @@ instead of letting `auto` decide:
   can drive it scoot says so and names each failure rather than quietly
   compositing with the other renderer. There is no automatic fallback
   on that path: drop the flag (stay on the CPU renderer) or fix the cause. (The
-  exception is `--tty` GPU scanout above: there scoot warns
+  deliberate exception is `--tty` GPU scanout above: there scoot warns
   and keeps the CPU renderer instead of refusing to start.)
 
-Measured on Apple M2 under Asahi Linux: 4–5x less
+Measured where it pays (Apple M2 under Asahi Linux): 4–5x less
 compositor CPU under damage than the CPU tier, ~0.2 W less power,
 7–16 MB more RSS, no idle difference. A fullscreen window covering its
 output goes primary-direct (zero-copy), decided per frame; GPU clients
@@ -181,7 +189,10 @@ cursor plane but a free overlay plane (Apple Silicon's DCP has two)
 gets scoot's own pointer shapes as small `LINEAR` buffers on the topmost
 overlay instead of compositing them. So a visible pointer no longer stops
 the fullscreen window under it from going direct, and moving the pointer
-only moves the plane, with nothing redrawn. It falls back to compositing wherever the
+only moves the plane, with nothing redrawn. On the M2, fullscreen mpv
+with the pointer visible and still went from 22–33 to 13–15 jiffies per
+10 s, and pointer motion over a desktop from 17–19 to 11 (`Asahi.md`,
+Test 17). It falls back to compositing, frame by frame, wherever the
 plane cannot take it: a pointer so near a screen edge (in practice the
 right or bottom one) that under 32 pixels of its plane would stay on
 screen (DCP refuses planes that small), a client's own cursor
@@ -197,9 +208,9 @@ where the panel does.
 
 ## Which DRM device `--tty` drives
 
-Normally scoot drives the seat's primary GPU,
+Normally: whichever one works. scoot asks for the seat's primary GPU,
 and if that device cannot drive a display it tries every other DRM
-device on the seat in turn. The log line is `drm:
+device on the seat in turn. The log line worth grepping is `drm:
 driving this device`, with the device path on it (a rejected device
 gets a `drm: device unusable` warning naming it and what it said).
 
@@ -231,37 +242,43 @@ Prefer a stable `/dev/dri/by-path/...` alias over a `cardN` number.
 ## Hotplug, VT switching, captures
 
 **Hotplug.** `--tty` watches udev and re-runs the device choice
-when displays change: a plugged monitor gets an output of its
-own, placed right of the others, leaving existing outputs alone; pulling one adopts its workspaces elsewhere (and
+whenever the display moves: a plugged monitor gets an output of its
+own, placed right of the others, without moving the session off
+already-lit screens; pulling one adopts its workspaces elsewhere (and
 a matching monitor's return moves them back). With nothing connected
-scoot holds the last frame and keeps running. One tier for the
-whole session, decided by the first monitor — if it falls back
+at all scoot holds the last frame and keeps running. One tier for the
+whole session: the first monitor decides it — if the first falls back
 to dumb buffers, every monitor uses dumb buffers, and a later monitor
 that cannot join the GPU tier stays dark rather than mixing tiers.
 
 **VT switching.** `--tty` binds `Ctrl+Alt+F1`…`F12`, layered on *after*
 the config loads and always winning over a colliding file bind (with a
 warning naming what they displaced) — on real hardware that is the one
-recovery path. They keep working
+recovery path, so it cannot silently lose to a typo. They keep working
 under fullscreen grabs and the session lock, and a reload cannot strip
 them. Switching back re-acquires DRM master and re-modesets every
 output before the next frame: if the seat daemon lost the re-acquire
 race with the previous VT's owner (a login greeter holding master
-through logind), scoot probes master itself
--- which also recovers root-run sessions outright -- and
+through logind), scoot probes master itself with one explicit
+`SET_MASTER` -- which also recovers root-run sessions outright -- and
 names the outcome: master genuinely held elsewhere, or master vacant
 with only the seat daemon able to re-acquire it. On the vacant
 diagnosis an unprivileged session tries once per switch back to
-reconnect the seat itself, then rebuilds the display, re-initialises
-input, and proves master with a synchronous modeset before the outputs
-report `live: true` again. The rebuild covers both the CPU and the GPU
-tiers without mixing them. When master genuinely cannot be had, the session
+reconnect the seat itself -- a fresh seat client whose open is
+first-to-open, so the seat daemon takes master while handing the fd
+over -- then rebuilds the display on the new fd, re-initialises input,
+and proves master with a synchronous modeset before the outputs report
+`live: true` again. The rebuild covers both the CPU and the GPU tiers:
+on the GPU tier each fresh renderer joins its output's existing render
+backend, and a fresh device that lands on the other tier restores the
+old one instead of mixing tiers. When master genuinely cannot be had, the session
 stays alive (keyboard and `scoot msg` keep answering) and every output
 reports `live: false` in `scoot msg outputs` until a later switch back
 succeeds -- check that field before trusting a screenshot, which goes
 stale while the display is dead. Each switch back is a new race the
-seat daemon may win; if it never recovers, restart the
-session -- a fresh start re-acquires master through the seat daemon.
+seat daemon may win this time; if it never recovers, restart the
+session -- a fresh start re-acquires master through the seat daemon,
+which is how every session gets its display in the first place.
 
 > **Symptom:** `--tty` display stays dark after switching back to it.
 > The compositor is usually alive underneath -- `scoot msg outputs`
@@ -277,8 +294,10 @@ session -- a fresh start re-acquires master through the seat daemon.
 > shows who holds `master` while your VT is displayed.
 
 **Losing the seat.** If the seat daemon dies under a running session
-(seatd killed, logind restarted), the session can neither present nor
-take input, and no resume is possible, so scoot stops cleanly: the log names the loss (`Lost the seat connection`) and the
+(seatd killed, logind restarted — both reach scoot through libseat), the
+session can neither present nor take input, and no resume is possible
+(the seat cannot reconnect), so scoot stops cleanly instead of
+panicking: the log names the loss (`Lost the seat connection`) and the
 process exits 1 with the same message. A supervisor (s6, systemd)
 restarts it into a fresh session once the seat is back.
 
@@ -291,7 +310,7 @@ restarts it into a fresh session once the seat is back.
 ### Captures and the pointer
 
 Screenshots and screen capture read the
-same composited frame the outputs show, so `scoot msg
+same composited frame the outputs show — which is why `scoot msg
 screenshot` works on every backend, including `--headless` with no
 display at all. See [Screenshots](../msg/screenshots.md). A VNC
 server like wayvnc reads the same frame over the capture protocol and

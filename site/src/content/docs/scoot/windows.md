@@ -27,7 +27,7 @@ can go fullscreen and comes back floating.
 Each rule is its own `[[window_rule]]` table. Rules apply in file order
 (a later matching rule overrides an earlier one per field it sets) and
 are checked when a window first maps, after `[floating] auto` — so a rule
-always has the last word. `scoot msg reload` re-applies them for
+always has the last word. `scoot msg reload` re-applies them live for
 windows that map after it.
 
 | Field | Type | Meaning |
@@ -42,7 +42,8 @@ both; with both matchers, both must match. Matchers are **globs over
 the whole string**, case-sensitive: `"foot"` matches only `foot`
 (`"*foot*"` for anything containing it), `?` matches exactly one
 character. An unusable rule (no matcher, a non-positive size) is
-skipped with a warning; a reload refuses it by name.
+skipped with a warning; a reload refuses it by name on every reload
+that finds it.
 
 ```toml
 [[window_rule]]
