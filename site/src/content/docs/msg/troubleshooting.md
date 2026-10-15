@@ -65,7 +65,8 @@ and the other shortens a wait rather than refusing it.
   as whoever is holding fds lets go` and closed immediately — no slot
   taken, living connections untouched. Ordinary use (an idle
   compositor holds 14 fds, a `foot` window 17) never comes near either
-  line. At the boundary, 64 fd-heavy requests landing together can still
+  line. That 16 is headroom for what one served request transiently opens
+  past its socket. At the boundary, 64 fd-heavy requests landing together can still
   see EOF, like a full table.
 - **A connection whose peer stops reading is dropped**, ten to twenty seconds
   after the last byte it took. Nothing is sent when this happens — there is nobody reading to send it to;

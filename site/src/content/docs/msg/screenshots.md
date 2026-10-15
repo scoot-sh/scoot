@@ -27,7 +27,7 @@ returns once the change is on screen.
 while `windows` and `outputs` report logical rectangles. Convert with
 `physical = logical * scale`, rounded down where an edge lands
 mid-pixel — and per output: convert with the scale of the output the
-window is on (its `output`). (Full rule in
+window is on (its `output`), never the first output's. (Full rule in
 [Rules an agent needs](./index.md#rules-an-agent-needs).)
 
 ## Pre-LUT: captures show the unmodified frame

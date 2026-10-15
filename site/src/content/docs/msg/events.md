@@ -127,8 +127,8 @@ nothing, and one group switch sends exactly one event. Rapid successive
 switches each send their own — every event names the layout in effect when
 it was sent, so a reader that processes them in order ends where the
 keyboard is. As with the query, this is read-only: nothing over IPC
-switches the layout — the
-group moves only through the keymap's own mechanics. Layout switching UI and
+switches the layout, and scoot has no layout-switch bind or action — the
+group moves only through the keymap's own mechanics (a toggle key from the `XKB_DEFAULT_OPTIONS` the session started with). Layout switching UI and
 per-window layouts are out of scope.
 
 A subscriber that stops reading is disconnected rather than buffered
@@ -141,7 +141,7 @@ leaves no record behind.
 workspaces hold windows, as a full snapshot rather than a delta, so a
 subscriber that missed one is never wrong. What a bar's workspace module
 draws without polling `windows`. No standard Wayland
-protocol reports the "holds windows" bit to an unfocused client,
+protocol reports the "holds windows" bit to an unfocused client — `ext-workspace-v1` carries the list, positions and the one `active` bit but not that bit —
 and no other standard protocol maps a toplevel to a workspace.
 
 | Field | Meaning |
@@ -158,7 +158,8 @@ added (a removed output sends nothing: its removal is already an
 at most one event per output per frame tick, however fast windows churn. A fresh subscription starts silent, like
 `keyboard` — read `windows` once for the baseline (the counts are the
 histogram of each window's `workspace` on its `output`) and apply snapshots
-after it.
+after it — so subscribing never replays the unsubscribed interval as one
+change.
 
 **`lock_changed`** — the session locked or unlocked: the same `locked`
 flag the `locked` query answers with,
@@ -170,7 +171,8 @@ It fires once per transition, never per request: a refused lock
 changes nothing and sends nothing, and
 a takeover of an already-locked session is no transition either. A fresh
 subscription starts silent — read
-`locked` once for the baseline and apply changes after it. As
+`locked` once for the baseline and apply changes after it — so
+subscribing never replays the unsubscribed interval as one change. As
 with the query, this is read-only: nothing over IPC locks or unlocks the
 session.
 

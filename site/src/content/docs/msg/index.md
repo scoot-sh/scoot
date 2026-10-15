@@ -21,13 +21,14 @@ no separate client to install.
 
 The socket can inject any keystroke, so it is privileged: it lives
 in `$XDG_RUNTIME_DIR/scoot.sock`, is created `0600`, and serves only
-connections from the same user as the compositor.
+connections from the same user as the compositor. A missing
+`$XDG_RUNTIME_DIR` is a one-line startup error.
 
 Override the path with `$SCOOT_SOCKET` (read by the compositor and
 `scoot msg`) or with `--socket PATH` on the compositor. Running two
 compositors at once means giving each its own socket.
 
-`scoot msg` opens one connection per invocation and closes it for its
+`scoot msg` opens one connection per invocation and closes it once it has its
 answer. A client that sends many requests should pipeline them on
 *one* connection — the per-connection bounds below keep the socket fair, and reconnecting
 resets them.

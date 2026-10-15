@@ -15,8 +15,8 @@ Every request, `type` vs `key`, and what the replies carry. All of these work as
 | `keyboard` | The active keyboard layout's name and index — what a layout indicator shows, and which layout the next `type` will produce. |
 | `locked` | Whether the session is locked — the side-effect-free lock probe, answered locked or not (`{"type":"locked","locked":false}`). What tells an agent whether injected input would reach the lock screen instead of the desktop. |
 | `binds [--json]` | The live keymap: every combo in canonical spelling, its action string, where it came from, its `repeat`/`allow_when_locked` flags, plus skipped config binds with reasons — see [`binds`](#binds). The human view is an aligned table grouped like the [keybindings page](../scoot/keybindings.md); `--json` is the same reply as JSON. Answered locked or not. |
-| `output-power ID\|all on\|off` | Switch an output's panel off or on — the IPC half of `zwlr_output_power_v1` (see [protocols.md](../scoot/protocols.md#screen-power)). `all` powers every output at once; an unknown id is refused. Session-level like `outputs`, not an action: it applies while locked. On the wire an additive request tag (`{"type":"output_power","output":1,"powered":false}`, `output` omitted for `all`); `PROTOCOL_VERSION` did not change. |
-| `output-scale ID\|NAME SCALE\|reset` | Set an output's scale live, by id or connector name (`DP-1`), or `reset` it to the config file's. Range 0.5 to 4 (resolved to 1/120 like the file's); a value outside it, or not a number, is refused instead of clamped; an unknown id or name is refused too. Runtime state, like `output-power`: it beats the file's scale for that connector (a replugged monitor comes back at it), and a successful `reload` or restart returns to the file's scales. A repeat set, or a reset with nothing to reset, changes nothing. Applies while locked; refused under `--nested`. What the [display profiles](../desktop/index.md#displays) watcher drives. On the wire an additive request tag: `output` is a number (id) or a string (name), `scale` a number or `null` for reset (`{"type":"output_scale","output":"DP-1","scale":1.5}`); answered with the existing `ok`, so no newer protocol is needed (an older server refuses the unknown tag with an `error`). |
+| `output-power ID\|all on\|off` | Switch an output's panel off or on — the IPC half of `zwlr_output_power_v1` (see [protocols.md](../scoot/protocols.md#screen-power)). `all` powers every output at once; an unknown id is refused. Session-level like `outputs`, not an action: it applies while locked (the idle cycle is off-after-lock, on-at-resume). On the wire an additive request tag (`{"type":"output_power","output":1,"powered":false}`, `output` omitted for `all`); `PROTOCOL_VERSION` did not change. |
+| `output-scale ID\|NAME SCALE\|reset` | Set an output's scale live, by id or connector name (`DP-1`), or `reset` it to the config file's. Range 0.5 to 4 (resolved to 1/120 like the file's); a value outside it, or not a number, is refused instead of clamped; an unknown id or name is refused too. Runtime state, like `output-power`: it beats the file's scale for that connector (a replugged monitor comes back at it), and a successful `reload` or restart returns to the file's scales. A repeat set, or a reset with nothing to reset, changes nothing. Applies while locked; refused under `--nested`. What the [display profiles](../desktop/index.md#displays) watcher drives. On the wire an additive request tag: `output` is a number (id) or a string (name), `scale` a number or `null` for reset, required either way (`{"type":"output_scale","output":"DP-1","scale":1.5}`); answered with the existing `ok`, so no newer protocol is needed (an older server refuses the unknown tag with an `error`). |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
 | `reload [--look]` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale -- the default and each `[[outputs]]` entry's, `[[outputs]]` mode (a live resize per backend, refused under `--nested`), appearance, keybindings, new autostart spawn entries) — see [configuration.md](../scoot/configure.md#reloading-the-config). A successful reload also drops every live `output-scale` scale, and each one the file disagrees with is listed in `applied` as `outputs.<name>.scale`. Answers `reloaded` with applied-vs-refused field lists plus the `shadowed` file keys that override the active look (and the `invalid` ones whose bad values fell back to it), or `error` (running config untouched, live scales kept) when the file cannot load or validate. With `--look` only the look layer is re-read, under a snapshot of the file from the last successful plain load: appearance and wallpaper swap, pending edits wait, no autostart entry spawns and no bind swaps. The reply carries the scope that ran (`"scope":"look"` on a scoped reload, absent on a plain one). |
 | `screenshot [--output ID] [--out FILE] [--no-cursor]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it means the primary output. The pointer is drawn in unless `--no-cursor` — see [The pointer in a screenshot](#the-pointer-in-a-screenshot). |
@@ -58,7 +58,7 @@ the same key *and* modifier events as from a real keyboard.
 A character no single keypress produces goes through a second path: the
 two-key dead-led sequence from the session-locale compose table (`dead_acute`
 then `e` for `é` on a German layout), pressed as the two keypresses a person
-would type. All 95 printable ASCII
+would type, each with its own level's modifiers. All 95 printable ASCII
 characters type on every one of the fourteen swept Latin layouts (`us`,
 `us(intl)`, `gb`, `de`, `de(neo)`, `fr`, `fr(oss)`, `es`, `it`, `pt`, `se`,
 `no`, `dk`, `pl`).
@@ -76,9 +76,10 @@ characters type on every one of the fourteen swept Latin layouts (`us`,
   Sequences come from your own XCompose file if you have one
   (`$XCOMPOSEFILE`, then `$XDG_CONFIG_HOME/XCompose`, then `~/.XCompose`),
   otherwise from the session locale's table (`LC_ALL`, then `LC_CTYPE`,
-  then `LANG`, else `C`, as the compositor process sees them). In
+  then `LANG`, else `C`, as the compositor process sees them — like `setlocale`, an empty variable counts as unset). In
   every case the characters *before* the failure are already typed:
-  the request stops at the first character it can't type.
+  the request stops at the first character it can't type rather than
+  rolling back.
 - Keybindings apply to what it types, exactly as they would to a real
   keypress. That only matters for a bind with no modifiers, or one on Shift
   plus a key; if a character does hit a bind, the compositor logs a warning
@@ -93,7 +94,9 @@ the `1` key and deliver `1`. Some characters can't be named as a combination
 at all (`@` on a German layout needs AltGr, which `key` has no name for);
 `type` works the modifiers out from the layout, and is the one
 to reach for text rather than a chord. Modifiers resolve
-from the active layout too — so a combo is refused
+from the active layout too — whichever key actually holds
+Shift/Control/Alt/Super is what gets held (either hand's key, or the one a
+layout option like `grp:lshift_toggle` left in place) — so a combo is refused
 for its modifier only when no key on the layout can hold it.
 
 ## What the replies carry
@@ -126,7 +129,7 @@ for its modifier only when no key on the layout can hold it.
 | `visible` | `false` when the window is scrolled out of view, on an inactive workspace, or hidden behind a fullscreen window (every other window on an output a fullscreen window covers, including windows stacked in its own column, and every floating window on it). A floating window is also `false` before its first frame, and while it is fullscreen without focus. |
 | `focused` | Compositor *window* focus — not necessarily where keystrokes go; see below. |
 | `popup_grab` | Whether this window's own popup tree holds the keyboard — see below. |
-| `fullscreen` | Whether the window is fullscreen. While its column is focused it covers its output: `rect` equals that output's `rect`, and every other window on the output reports `visible: false`. Focused away, it keeps that size and sits in the strip where a column that wide would, one ordinary gap from its neighbours — it may still be partly `visible` beside the focused window, never overlapping it, and like any window is drawn and clickable only within its own output. |
+| `fullscreen` | Whether the window is fullscreen. While its column is focused it covers its output: `rect` equals that output's `rect` (for a window that draws its whole frame, as fullscreen windows do; see `rect`), and every other window on the output reports `visible: false`. Focused away, it keeps that size and sits in the strip where a column that wide would, one ordinary gap from its neighbours — it may still be partly `visible` beside the focused window, never overlapping it, and like any window is drawn and clickable only within its own output, however far its `rect` reaches past that output's edge. |
 | `maximized` | Whether the window is maximized. While its column is focused (and no fullscreen window covers the output) it fills the output's usable area: `rect` equals that usable area minus the layout gap, and every other tiled window on the output reports `visible: false` (floating windows stay above it). Focused away, it keeps that size and sits in the strip where a column that wide would, one ordinary gap from its neighbours. Fullscreen wins while both hold. |
 | `floating` | Whether the window floats above its workspace's strip: a dialog, transient or fixed-size window floated as it mapped, a `[[window_rule]]` match, or `toggle-floating`/`set-floating`. Its `rect` is where it really is: where last moved (by a drag or `move-floating`), else centred on its parent (when visible on the same workspace) or its output, inside the output's `usable` area, at the size it drew. Drawn above, and taking clicks before, every tiled window on its output. A floating window with no first frame yet is `visible: false`, as is one on an inactive workspace or under a covering fullscreen window. |
 
@@ -137,7 +140,7 @@ for its modifier only when no key on the layout can hold it.
 | `index` | The active group, 0-based — the same numbering `type` resolves each character in, so an agent reads off which layout its next `type` will produce. |
 | `name` | The keymap's own name for that group (`us` reads as `"English (US)"`, `ru` as `"Russian"`) — what a bar shows. |
 
-Read live off the compositor's keymap on every request. Read-only — nothing over IPC switches the
+Read live off the compositor's keymap on every request. Read-only — scoot has no layout-switch bind, option or action, so nothing over IPC switches the
 layout; the group moves only through the keymap's own mechanics (a toggle
 key from the `XKB_DEFAULT_OPTIONS` the session started with, e.g.
 `grp:caps_toggle`).
@@ -200,10 +203,12 @@ $ scoot msg binds --json
 ```
 
 Derived by diffing the live table against the defaults on every request,
-so it is always the merged result. Like
+so it is always the merged result — never a re-read of the file. Like
 `locked`, this answers locked or not: listing keys is not a
-window-management operation. A new reply variant, so this moved `PROTOCOL_VERSION`
-8 → 9: an older client handed one would fail its decode; a `binds` sent to an older
+window-management operation (the `Super+Shift+/` bind itself never fires
+while locked). A new reply variant, so this moved `PROTOCOL_VERSION`
+8 → 9: an older client handed one would fail its decode, which can only
+happen to a client new enough to have asked; a `binds` sent to an older
 server answers an ordinary `error`.
 
 Every `ok` reply also carries a **`locked` field**: the session-lock state it was
