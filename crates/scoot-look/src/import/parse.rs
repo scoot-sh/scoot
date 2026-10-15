@@ -2,7 +2,9 @@
 //! workspace dependency) and the flat YAML subset scheme files use
 //! (`key: value` mappings, `#` comments, quotes, one nested-map level by
 //! indentation). YAML scalars stay strings: a hue like `090300` must not
-//! become a number and lose its leading zero.
+//! become a number and lose its leading zero. The subset refuses tabs for
+//! indent, lists, flow collections (`{...}`/`[...]`), aliases (`*`),
+//! anchors (`&`), block scalars (`|`/`>`) and tags (`!`).
 
 use std::collections::BTreeMap;
 
@@ -171,7 +173,48 @@ fn yaml_scalar(rest: &str, line_no: usize) -> Result<Option<String>, GrammarErro
         let end = rest
             .find(" #")
             .or_else(|| rest.find('\t').filter(|i| rest[i + 1..].starts_with('#')));
-        rest[..end.unwrap_or(rest.len())].trim().to_string()
+        let token = rest[..end.unwrap_or(rest.len())].trim().to_string();
+        // Precise errors for YAML the subset never accepts: without them
+        // a flow collection reads as a plain string and fails later as a
+        // bad hex or a missing slot.
+        if token.starts_with('{') || token.starts_with('[') {
+            return Err(GrammarError::new(
+                "scheme",
+                format!("line {line_no}: flow collections are not accepted"),
+            ));
+        }
+        if token.starts_with('*') {
+            return Err(GrammarError::new(
+                "scheme",
+                format!("line {line_no}: aliases are not accepted"),
+            ));
+        }
+        if token.starts_with('&') {
+            return Err(GrammarError::new(
+                "scheme",
+                format!("line {line_no}: anchors are not accepted"),
+            ));
+        }
+        if token.starts_with('!') {
+            return Err(GrammarError::new(
+                "scheme",
+                format!("line {line_no}: tags are not accepted"),
+            ));
+        }
+        if token == "|"
+            || token == ">"
+            || token.starts_with(['|', '>'])
+                && token[1..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c == ' ' || c == '+' || c == '-')
+        {
+            return Err(GrammarError::new(
+                "scheme",
+                format!("line {line_no}: block scalars are not accepted"),
+            ));
+        }
+        token
     };
     if token.is_empty() {
         return Ok(None);

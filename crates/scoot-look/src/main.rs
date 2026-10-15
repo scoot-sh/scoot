@@ -264,14 +264,16 @@ fn validate_dir(dir: &Path, origin: Origin, explicit_name: Option<&str>) {
         failed = true;
     }
     // Contrast needs a resolved look; without a catalog only single-file
-    // (extends-free) looks resolve here.
+    // (extends-free) looks resolve here. Warnings go to stderr: stdout
+    // stays machine-readable (import without `--out` prints `look.toml`
+    // there).
     if raw.extends.is_none() {
         let map = BTreeMap::from([(raw.name.clone(), (raw.clone(), origin))]);
         match resolve(&map, &raw.name) {
             Ok(look) => {
                 let report = check_contrast(&look, origin);
                 for w in report.warnings() {
-                    println!("warning: {} is {} (bar {})", w.name, w.ratio, w.threshold);
+                    eprintln!("warning: {} is {} (bar {})", w.name, w.ratio, w.threshold);
                 }
                 for r in report.refusals() {
                     eprintln!("error: {} is {} (bar {})", r.name, r.ratio, r.threshold);
@@ -360,9 +362,14 @@ fn build_dir(
 /// `scoot-look import-base16 FILE`: map one scheme to a source look.
 /// The emitted `look.toml` is verified through the same pipeline as
 /// `validate` before anything is written; a contrast shortfall in a look
-/// the user's own configuration produced warns and never refuses. With
-/// `--out DIR` the text lands in `DIR/look.toml` (the caller places that
-/// under `user-looks/`); without it the text goes to stdout.
+/// the user's own configuration produced warns (to stderr) and never
+/// refuses, except a child (`--extends`) skips the contrast check here:
+/// the base is unknown without the catalog. `--extends` is never checked
+/// against a catalog here. With `--out DIR` the text lands in
+/// `DIR/look.toml` (the caller places that under `user-looks/`); the
+/// directory must match the look name or the command errors. Without
+/// `--out` the text goes to stdout (warnings still go to stderr, so the
+/// stdout parses as TOML). `--origin` defaults to `user`.
 fn import_scheme(
     file: &Path,
     name: Option<&str>,
@@ -413,14 +420,17 @@ fn import_scheme(
         failed = true;
     }
     // Contrast needs a resolved look; without a catalog only single-file
-    // (extends-free) imports resolve here, as in `validate`.
+    // (extends-free) imports resolve here, as in `validate`. A child
+    // (`--extends`) skips the check here: the base is unknown without the
+    // catalog, so the catalog owner reports the resolved contrast.
+    // Warnings go to stderr so stdout without `--out` stays pure TOML.
     if raw.extends.is_none() {
         let map = BTreeMap::from([(raw.name.clone(), (raw.clone(), origin))]);
         match resolve(&map, &raw.name) {
             Ok(look) => {
                 let report = check_contrast(&look, origin);
                 for w in report.warnings() {
-                    println!("warning: {} is {} (bar {})", w.name, w.ratio, w.threshold);
+                    eprintln!("warning: {} is {} (bar {})", w.name, w.ratio, w.threshold);
                 }
                 for r in report.refusals() {
                     eprintln!("error: {} is {} (bar {})", r.name, r.ratio, r.threshold);
@@ -438,13 +448,17 @@ fn import_scheme(
     }
     match out {
         Some(dir) => {
+            // A mismatched directory fails `validate` (name must match
+            // the directory), so refuse here with a nonzero exit instead
+            // of writing a look that cannot validate.
             if let Some(base) = dir.file_name().and_then(|n| n.to_str())
                 && base != raw.name
             {
                 eprintln!(
-                    "warning: writing look `{}` into directory `{base}`: the name check expects them to match",
+                    "error: look `{}` does not match directory `{base}`: the name check expects them to match",
                     raw.name
                 );
+                std::process::exit(1);
             }
             if let Err(e) = std::fs::create_dir_all(dir) {
                 eprintln!("cannot create {}: {e}", dir.display());

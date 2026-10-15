@@ -149,9 +149,13 @@ fn mapping_matches_todays_nix() {
             "{token} maps to {slot}:\n{look}"
         );
     }
-    // The terminal hues run base00..base0F in base16's terminal order.
+    // The terminal hues run in base16's terminal order (ANSI 0-15:
+    // base00, base08, base0B, base0A, base0D, base0E, base0C, base05,
+    // base03, base08, base0B, base0A, base0D, base0E, base0C, base07),
+    // so foot regular0-7 then bright0-7 lands red/green/yellow/blue at
+    // ANSI 1-4.
     assert!(look.contains(
-        "colors = [\"#090300\", \"#3a3432\", \"#4a4543\", \"#5c5855\", \"#807d7c\", \"#a5a2a2\", \"#d6d5d4\", \"#f7f7f7\", \"#db2d20\", \"#e8bbd0\", \"#fded02\", \"#01a252\", \"#b5e4f4\", \"#01a0e4\", \"#a16a94\", \"#cdab53\"]"
+        "colors = [\"#090300\", \"#db2d20\", \"#01a252\", \"#fded02\", \"#01a0e4\", \"#a16a94\", \"#b5e4f4\", \"#a5a2a2\", \"#5c5855\", \"#db2d20\", \"#01a252\", \"#fded02\", \"#01a0e4\", \"#a16a94\", \"#b5e4f4\", \"#f7f7f7\"]"
     ));
     // Names slugify: `3024` stays `3024`.
     assert!(look.contains("name = \"3024\""));
@@ -388,4 +392,99 @@ fn author_punctuation_sanitizes() {
     let look = import_base16(tricky.as_bytes(), &opts()).expect("imports");
     crate::parse_look_toml(look.as_bytes()).expect("re-parses");
     assert!(!look.contains("\"quoted\""));
+}
+
+/// Finding 1: `[terminal]` is ANSI order (foot regular0-7 then bright0-7),
+/// which is base16's terminal order, not numeric base00..base0F. Red
+/// (base08) lands at ANSI 1, green (base0B) at 2, yellow (base0A) at 3,
+/// blue (base0D) at 4.
+#[test]
+fn terminal_is_ansi_order() {
+    let look = import_base16(DARK_3024.as_bytes(), &opts()).expect("imports");
+    // 3024: base08 red #db2d20, base0B green #01a252, base0A yellow #fded02,
+    // base0D blue #01a0e4.
+    let line = look
+        .lines()
+        .find(|l| l.starts_with("colors = "))
+        .expect("terminal colors");
+    assert!(
+        line.contains("\"#090300\", \"#db2d20\", \"#01a252\", \"#fded02\", \"#01a0e4\""),
+        "ANSI 0-4 red/green/yellow/blue:\n{line}"
+    );
+    assert!(
+        line.contains(
+            "colors = [\"#090300\", \"#db2d20\", \"#01a252\", \"#fded02\", \"#01a0e4\", \"#a16a94\", \"#b5e4f4\", \"#a5a2a2\", \"#5c5855\", \"#db2d20\", \"#01a252\", \"#fded02\", \"#01a0e4\", \"#a16a94\", \"#b5e4f4\", \"#f7f7f7\"]"
+        ),
+        "full ANSI order:\n{line}"
+    );
+}
+
+/// Finding 3: a leading UTF-8 BOM strips before dispatch, in both YAML
+/// and JSON (JSON-after-BOM must not fall to the YAML branch).
+#[test]
+fn bom_strips_yaml_and_json() {
+    let mut yaml = vec![0xEF, 0xBB, 0xBF];
+    yaml.extend_from_slice(DARK_3024.as_bytes());
+    let look = import_base16(&yaml, &opts()).expect("BOM YAML imports");
+    assert!(look.contains("name = \"3024\""), "BOM keeps slug:\n{look}");
+    let json = r##"{"scheme": "Bom", "author": "t", "base00": "#090300", "base01": "#3a3432", "base02": "#4a4543", "base03": "#5c5855", "base04": "#807d7c", "base05": "#a5a2a2", "base06": "#d6d5d4", "base07": "#f7f7f7", "base08": "#db2d20", "base09": "#e8bbd0", "base0A": "#fded02", "base0B": "#01a252", "base0C": "#b5e4f4", "base0D": "#01a0e4", "base0E": "#a16a94", "base0F": "#cdab53"}"##;
+    let mut bom_json = vec![0xEF, 0xBB, 0xBF];
+    bom_json.extend_from_slice(json.as_bytes());
+    let look = import_base16(&bom_json, &opts()).expect("BOM JSON imports");
+    assert!(
+        look.contains("name = \"bom\""),
+        "BOM JSON keeps slug:\n{look}"
+    );
+}
+
+/// Finding 5: explicit `title:`/`license:` sanitize like name/author do;
+/// generated text never refuses.
+#[test]
+fn title_license_sanitize_never_refuse() {
+    let with_title = DARK_3024.replace(
+        "author: \"Jan T. Sott (http://github.com/idleberg)\"",
+        "author: \"t\"\ntitle: \"bad\x01title\"",
+    );
+    let look = import_base16(with_title.as_bytes(), &opts()).expect("title control sanitizes");
+    crate::parse_look_toml(look.as_bytes()).expect("re-parses");
+    let with_license = DARK_3024.replace(
+        "author: \"Jan T. Sott (http://github.com/idleberg)\"",
+        "author: \"t\"\nlicense: \"a=b[c]\"",
+    );
+    let look =
+        import_base16(with_license.as_bytes(), &opts()).expect("license punctuation sanitizes");
+    crate::parse_look_toml(look.as_bytes()).expect("re-parses");
+    assert!(!look.contains("a=b[c]"), "license sanitized:\n{look}");
+}
+
+/// Finding 6: bidi controls and line/paragraph separators strip out of
+/// description/credits.
+#[test]
+fn bidi_and_separators_strip() {
+    let tricky = DARK_3024.replace(
+        "author: \"Jan T. Sott (http://github.com/idleberg)\"",
+        "author: \"evil\u{202e} test\"",
+    );
+    let look = import_base16(tricky.as_bytes(), &opts()).expect("imports");
+    assert!(!look.contains('\u{202e}'), "bidi stripped:\n{look}");
+    let tricky = DARK_3024.replace(
+        "author: \"Jan T. Sott (http://github.com/idleberg)\"",
+        "author: \"t\"\ndescription: \"a\u{2028}b\u{2029}c\"",
+    );
+    let look = import_base16(tricky.as_bytes(), &opts()).expect("imports");
+    assert!(!look.contains('\u{2028}'), "line sep stripped:\n{look}");
+    assert!(!look.contains('\u{2029}'), "para sep stripped:\n{look}");
+    crate::parse_look_toml(look.as_bytes()).expect("re-parses");
+}
+
+/// Finding 7: flow collections refuse with a precise error, not a generic
+/// hex complaint.
+#[test]
+fn flow_collection_precise_error() {
+    let flow = DARK_3024.replace("base00: \"#090300\"", "base00: {foo: bar}");
+    let err = import_base16(flow.as_bytes(), &opts()).expect_err("flow refuses");
+    assert!(
+        err.reason.contains("flow"),
+        "names flow collections, got: {err:?}"
+    );
 }

@@ -9,11 +9,13 @@
 //!
 //! A base16 scheme file or the base24 superset, as YAML, or the JSON form
 //! the Nix side serializes Stylix into (what `look-stylix-source` feeds
-//! this same function). JSON when the first non-whitespace byte is `{`,
-//! otherwise YAML. The YAML read is the flat subset scheme files use:
-//! `key: value` mappings with `#` comments, single or double quotes, one
-//! nested-map level by indentation (the spec-0.11 `palette:` map, the
-//! companion maps below). Tabs, lists and flow collections refuse.
+//! this same function). A leading UTF-8 BOM strips first. JSON when the
+//! first non-whitespace byte is `{`, otherwise YAML. The YAML read is the
+//! flat subset scheme files use: `key: value` mappings with `#` comments,
+//! single or double quotes, one nested-map level by indentation (the
+//! spec-0.11 `palette:` map, the companion maps below). The input caps at
+//! 64 KiB. Tabs for indent, lists, flow collections, aliases/anchors,
+//! block scalars and tags refuse with a named error.
 //!
 //! Slot sources (design section 5.3):
 //!
@@ -28,7 +30,7 @@
 //! | `accent-fg` | `base00` (the look default) |
 //! | `selection`, `selection-text` | `base02`, `base05` |
 //! | `match` | `base0A` |
-//! | `[terminal]` | `base00..base0F` in order, only without `extends` |
+//! | `[terminal]` | ANSI 0-15 as `base00, base08, base0B, base0A, base0D, base0E, base0C, base05, base03, base08, base0B, base0A, base0D, base0E, base0C, base07` (base16's terminal order: foot `regular0-7` then `bright0-7`), only without `extends` |
 //!
 //! Slots read with or without a leading `#`, any case; anything else
 //! refuses naming the slot. `base10..base17` (base24) must be well-formed
@@ -54,15 +56,26 @@
 //!
 //! `look.toml` text for a source look of `Origin::User`: a look the user
 //! chose, so a contrast shortfall warns and never refuses (the caller
-//! measures it, as `validate` does). With `--extends` the output is a
+//! measures it, as `validate` does; with `--extends` the child alone does
+//! not resolve, so no contrast check runs here and the base catalog owner
+//! reports it). `--extends` names a base look but is never checked against
+//! a catalog here: any `[a-z0-9-]{1,32}` name is accepted. With `--extends`
+//! the output is a
 //! child: palette, companion fonts/sizes/opacity/cursor when given, and
 //! nothing else (terminal, shape and wallpaper inherit the base, design
 //! section 5.4). Without it the output is complete: title, polarity,
 //! fonts, `ring-width`, cursor, a flat `background` wallpaper and the
-//! sixteen terminal hues. The generated display text is sanitized to the
-//! grammar (never refused: the scheme author's punctuation must not fail
+//! sixteen terminal hues. The generated display text (`title`,
+//! `description`, `license`, `credits`) is sanitized to the grammar
+//! (never refused: the scheme author's punctuation must not fail
 //! an import), and every name, identifier, size and color is checked, so
 //! the output always re-parses.
+//!
+//! # Limits
+//!
+//! The input caps at 64 KiB (`MAX_FILE_BYTES`). The YAML read refuses
+//! tabs for indent, lists, flow collections, aliases/anchors, block
+//! scalars and tags; see `parse` for the exact errors.
 
 use std::collections::BTreeMap;
 
@@ -92,7 +105,14 @@ pub struct ImportOptions {
 /// JSON/YAML, a missing or malformed `base00..base0F` slot, a malformed
 /// present `base10..base17`, a bad `polarity`/`variant`, companion values
 /// outside the grammar, a name that is no `[a-z0-9-]{1,32}`, or a bad
-/// `extends`. Never panics on malformed input: every index is checked.
+/// `extends`. A leading UTF-8 BOM strips before dispatch, so BOM-prefixed
+/// YAML and JSON both import. Display text (`title`, `description`,
+/// `license`) never refuses: it sanitizes. Never panics on malformed
+/// input: every index is checked.
+///
+/// The ANSI terminal order (`TERMINAL_ORDER`): `base00, base08, base0B,
+/// base0A, base0D, base0E, base0C, base05, base03, base08, base0B, base0A,
+/// base0D, base0E, base0C, base07`.
 pub fn import_base16(bytes: &[u8], opts: &ImportOptions) -> Result<String, GrammarError> {
     if bytes.len() > MAX_FILE_BYTES {
         return Err(GrammarError::new(
@@ -102,6 +122,7 @@ pub fn import_base16(bytes: &[u8], opts: &ImportOptions) -> Result<String, Gramm
     }
     let text = std::str::from_utf8(bytes)
         .map_err(|_| GrammarError::new("scheme", "file is not valid UTF-8"))?;
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     if text.chars().any(|c| c == '\0') {
         return Err(GrammarError::new("scheme", "NUL is refused everywhere"));
     }
@@ -124,6 +145,14 @@ pub fn import_base16(bytes: &[u8], opts: &ImportOptions) -> Result<String, Gramm
     }
     Ok(emit(&scheme, &name, opts.extends.as_deref()))
 }
+
+/// ANSI 0-15 in base16 slots: foot `regular0-7` then `bright0-7`.
+/// This is base16's terminal order (the styling guide's shell/foot
+/// templates): normal black/red/green/yellow/blue/magenta/cyan/white,
+/// then bright black (base03) and the hues again, ending in base07.
+const TERMINAL_ORDER: [u8; 16] = [
+    0x00, 0x08, 0x0B, 0x0A, 0x0D, 0x0E, 0x0C, 0x05, 0x03, 0x08, 0x0B, 0x0A, 0x0D, 0x0E, 0x0C, 0x07,
+];
 
 fn is_hex6(s: &str) -> bool {
     s.len() == 6 && s.bytes().all(|c| c.is_ascii_hexdigit())
@@ -281,17 +310,9 @@ impl Scheme {
             }
             None => (None, None),
         };
-        for (field, value, max) in [
-            ("title", str_key("title"), 64),
-            ("description", str_key("description"), 200),
-            ("license", str_key("license"), 200),
-        ] {
-            if let Some(v) = value
-                && let Some(e) = crate::grammar::check_display_text(field, &v, max)
-            {
-                return Err(e);
-            }
-        }
+        // Display text never refuses: `emit` sanitizes `title`,
+        // `description` and `license` to the grammar (bidi controls,
+        // separators, `=[]{}\` and overlong text included).
         Ok(Scheme {
             slots,
             display_name: str_key("name").or_else(|| str_key("scheme")),
@@ -386,12 +407,27 @@ fn slugify(s: &str) -> String {
 
 /// Display text the grammar refuses is sanitized, never refused: the
 /// scheme author's punctuation must not fail an import. Forbidden
-/// characters become `-`, controls become a space, truncated to the
-/// byte cap on a char boundary.
+/// characters become `-`, controls, bidi controls and line/paragraph
+/// separators become a space, truncated to the byte cap on a char
+/// boundary.
 fn sanitize_display(s: &str, max_bytes: usize) -> String {
     let mut out = String::with_capacity(s.len().min(max_bytes));
     for c in s.chars() {
-        if c == '\0' || c.is_control() || c == '\u{7f}' || ('\u{80}'..='\u{9f}').contains(&c) {
+        if c == '\0'
+            || c.is_control()
+            || c == '\u{7f}'
+            || ('\u{80}'..='\u{9f}').contains(&c)
+            || matches!(
+                c,
+                '\u{200b}'..='\u{200f}'
+                    | '\u{202a}'..='\u{202e}'
+                    | '\u{2066}'..='\u{2069}'
+                    | '\u{feff}'
+                    | '\u{061c}'
+                    | '\u{2028}'
+                    | '\u{2029}'
+            )
+        {
             out.push(' ');
         } else if matches!(c, '=' | '[' | ']' | '"' | '\\') {
             out.push('-');
@@ -470,7 +506,10 @@ fn emit(scheme: &Scheme, name: &str, extends: Option<&str>) -> String {
         out.push_str(&format!("extends = {}\n", toml_str(base)));
     }
     if let Some(license) = &scheme.license {
-        out.push_str(&format!("license = {}\n", toml_str(license)));
+        out.push_str(&format!(
+            "license = {}\n",
+            toml_str(&sanitize_display(license, 200))
+        ));
     }
     if let Some(author) = &scheme.author {
         let credit = sanitize_display(
@@ -499,7 +538,7 @@ fn emit(scheme: &Scheme, name: &str, extends: Option<&str>) -> String {
     out.push_str(&format!("match = {}\n", toml_str(&s("base0A"))));
     if extends.is_none() {
         out.push_str("\n[terminal]\ncolors = [");
-        for (i, n) in (0..16).enumerate() {
+        for (i, n) in TERMINAL_ORDER.iter().enumerate() {
             if i > 0 {
                 out.push_str(", ");
             }

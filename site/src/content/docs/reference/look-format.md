@@ -243,7 +243,10 @@ One mapping turns any base16 scheme (or the base24 superset) into a
 source look. It is what Stylix gives a Nix user, for a plain install:
 no Nix involved, plain files in and out. It reads base16 YAML and the
 JSON form the Nix side serializes, with or without a leading `#`, any
-case, `palette:`-nested or flat.
+case, `palette:`-nested or flat. A leading UTF-8 BOM strips first.
+The input caps at 64 KiB. The YAML subset refuses tabs for indent,
+lists, flow collections, aliases/anchors, block scalars and tags with
+a named error.
 
 | Token | Slot |
 |---|---|
@@ -255,7 +258,7 @@ case, `palette:`-nested or flat.
 | `accent-fg` | `base00` |
 | `selection`, `selection-text` | `base02`, `base05` |
 | `match` | `base0A` |
-| `[terminal]` | `base00` to `base0F` in order, only without `--extends` |
+| `[terminal]` | ANSI 0-15 as `base00, base08, base0B, base0A, base0D, base0E, base0C, base05, base03, base08, base0B, base0A, base0D, base0E, base0C, base07` (base16's terminal order: foot `regular0-7` then `bright0-7`), only without `--extends` |
 
 This matches the Nix modules for the slots they use today. Companion
 data applies when present: `variant` (or `polarity`) sets dark or
@@ -267,11 +270,18 @@ maps `name` and `size`. Without `--extends` the output is complete
 (title, polarity, fonts, ring width, Mocu cursor, flat background
 wallpaper, terminal hues). With it the output is a child: palette plus
 companion fonts, sizes, opacity and cursor when given, inheriting
-terminal, shape and wallpaper from the base. The output always
-re-parses; a contrast shortfall warns and never refuses, since the look
-is the user's own choice. A missing or malformed slot refuses naming
+terminal, shape and wallpaper from the base. `--extends` accepts any
+`[a-z0-9-]{1,32}` name and is never checked against a catalog here.
+Generated text (`title`, `description`, `license`, `credits`) sanitizes
+to the grammar and never refuses. The output always
+re-parses; a contrast shortfall warns (to stderr) and never refuses,
+since the look is the user's own choice, except a child skips the
+contrast check here (the base is unknown without the catalog).
+A missing or malformed slot refuses naming
 it. `--name` wins over the scheme's slug; `--origin` defaults to
-`user`.
+`user`. Without `--out` the `look.toml` goes to stdout (warnings still
+go to stderr, so stdout parses as TOML). With `--out DIR` the directory
+must match the look name or the command errors.
 
 > **Symptom:** `build` says an image wallpaper needs its resolved absolute path.
 >
