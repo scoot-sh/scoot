@@ -11,15 +11,15 @@ composable shell.
 > (`--left workspaces`: each output's numbers with the active one
 > marked, click to switch). Every module answers the pointer: clicks,
 > scrolls and hover run a module action, a command or a request to scoot
-> that the config binds ([pointer input](https://www.scoot.sh/scootbar/cli.md#pointer-input), M4's
+> that the config binds ([pointer input](https://www.scoot.sh/scootbar/modules/#pointer-input), M4's
 > [first step](backlog/resolved/pointer-and-interactions-done.md)), and
 > the config can define a `button`, a `push` target for `scootbar msg set`
 > and an `exec` module that streams a command's output, with no Rust
-> ([how](https://www.scoot.sh/scootbar/cli.md#button-push-and-exec-modules)). A module can open a popup
+> ([how](https://www.scoot.sh/scootbar/modules/#button-push-and-exec-modules)). A module can open a popup
 > under itself, drawn from its own state: the volume slider is the first
 > and the network list the second
-> ([popups](https://www.scoot.sh/scootbar/cli.md#popups)), and a module's tooltip is shown under it after
-> a hover delay ([tooltips](https://www.scoot.sh/scootbar/cli.md#tooltips)). That is M1's
+> ([popups](https://www.scoot.sh/scootbar/modules/#popups)), and a module's tooltip is shown under it after
+> a hover delay ([tooltips](https://www.scoot.sh/scootbar/modules/#tooltips)). That is M1's
 > [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its
 > [module API and clock](backlog/resolved/module-api-and-clock-done.md),
 > and its [Nix package](backlog/resolved/nix-package-done.md), which
@@ -29,13 +29,13 @@ composable shell.
 > benchmark script ([testing.md](../../dev/research/scootbar-testing.md)). M0, the
 > measuring milestone, is done: the competitor baselines below, and the
 > font rasterizer and clock choices, recorded in
-> [the dependency record](backlog/resolved/dependencies-done.md). M6's
-> first step is a system tray (the StatusNotifierItem watcher and host, on
-> a hand-rolled D-Bus client: [the module](https://www.scoot.sh/scootbar/cli.md#tray), menus included), its second the media module (what the MPRIS players
+> [the dependency record](backlog/resolved/dependencies-done.md). M6
+> shipped a system tray (the StatusNotifierItem watcher and host, on
+> a hand-rolled D-Bus client: [the module](https://www.scoot.sh/scootbar/modules/#tray), menus included), the media module (what the MPRIS players
 > are playing, with play/pause, next and previous:
-> [the module](https://www.scoot.sh/scootbar/cli.md#media)), and its third the bluetooth module (the
+> [the module](https://www.scoot.sh/scootbar/modules/#media)), and the bluetooth module (the
 > adapter's power and the connected devices over BlueZ, on the system bus:
-> [the module](https://www.scoot.sh/scootbar/cli.md#bluetooth)). The plan, milestone by milestone, is the
+> [the module](https://www.scoot.sh/scootbar/modules/#bluetooth)). The plan, milestone by milestone, is the
 > [backlog](backlog/README.md).
 
 ```sh
@@ -184,7 +184,7 @@ shows no workspaces yet, so the switching row is a bystander's:
   mounted read-only, so the main column is the read one, and the mapped
   figures come from a root-owned `0444` copy on a read-only bind mount,
   measured again at `de27775` after review tightened the rule
-  ([cli.md](https://www.scoot.sh/scootbar/cli.md#fonts) says why).
+  ([configure](https://www.scoot.sh/scootbar/configure/#fonts) says why).
 - **The binary** is 246 KB over the skeleton's: the rasterizer and font
   parser about 103 KB (M0 predicted 115), scootbar's own clock, text,
   layout and render code about 52 KB, generic code from `core`, `std` and

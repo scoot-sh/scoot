@@ -13,7 +13,7 @@ every reload.
 
 **Early days:** the bar shows a clock in the center, and workspaces wherever
 they are placed (`--left workspaces`). Modules answer the pointer
-([click, scroll and hover](./modules.md##pointer-input)).
+([click, scroll and hover](./modules.md#pointer-input)).
 
 
 
@@ -34,7 +34,7 @@ scootbar daemon --outputs DP-1,eDP-1        # a bar only on those two outputs
 scootbar daemon --config ~/alt-bar.toml    # another file than the default
 scootbar msg query                         # every placed module's state as JSON
 scootbar msg layout                        # where each module is on screen, for a click
-scootbar msg invoke volume raise 5         # run a module's action, as its click would
+scootbar msg invoke volume set 50         # run a module's action, as its click would
 scootbar msg invoke volume popup           # open (or close) the volume slider popup
 scootbar msg subscribe                     # stream changes, one JSON line each
 scootbar msg reload                        # re-read the file and live-apply it
@@ -64,22 +64,22 @@ Each flag at most once, as `--flag VALUE` or `--flag=VALUE`.
 
 | Flag | Takes | Default | What it does |
 | --- | --- | --- | --- |
-| `--outputs` | `all`, or connector names, comma-separated | `all` | Which outputs get a bar (`DP-1,eDP-1`). See [Outputs](./modules.md##outputs). |
+| `--outputs` | `all`, or connector names, comma-separated | `all` | Which outputs get a bar (`DP-1,eDP-1`). See [Outputs](./configure.md#outputs). |
 | `--edge` | `top` or `bottom` | `top` | The output edge the bar runs along. Vertical bars (left and right) are a deliberate omission: the layout is horizontal, and the modules, the hit-testing and the text all assume it. |
-| `--layer` | `bottom`, `top` or `overlay` | `top` | The layer-shell layer. See [Layers and the zone](./modules.md##layers-and-the-zone). |
+| `--layer` | `bottom`, `top` or `overlay` | `top` | The layer-shell layer. See [Layers and the zone](./configure.md#layers-and-the-zone). |
 | `--exclusive` | `true` or `false` | `true` | Whether the bar reserves its height, so windows are arranged beside it, or floats over them, reserving nothing. |
 | `--height` | 1 to 1024 | 28 | The bar's height in logical pixels. On a scaled output it is drawn at the output's real pixels: 28 at scale 1.5 is 42 device pixels. |
-| `--margin` | one to four of 0 to 1024, comma-separated | `0` | Space between the bar and the output's edges, in logical pixels, in CSS order: `ALL`, `VERTICAL,HORIZONTAL`, `TOP,HORIZONTAL,BOTTOM` or `TOP,RIGHT,BOTTOM,LEFT`. See [Margins](./modules.md##margins). |
-| `--background` | `'#rrggbb'` | `'#1e1e2e'` | The bar's color, six hex digits in either case. Quote it: the shell reads `#` as a comment. Its opacity is the file's `[bar] opacity`: see [Shape and opacity](./modules.md##shape-and-opacity). |
-| `--foreground` | `'#rrggbb'` | `'#cdd6f4'` | The text's color (the theme's `fg` token: see [Colors](./modules.md##colors)). |
-| `--font` | a path | the first [well-known font](./modules.md##fonts) found | The font file, TrueType or OpenType (`.ttf`, `.otf`; a collection's first face). Any bytes: a path need not be UTF-8. |
+| `--margin` | one to four of 0 to 1024, comma-separated | `0` | Space between the bar and the output's edges, in logical pixels, in CSS order: `ALL`, `VERTICAL,HORIZONTAL`, `TOP,HORIZONTAL,BOTTOM` or `TOP,RIGHT,BOTTOM,LEFT`. See [Margins](./configure.md#margins). |
+| `--background` | `'#rrggbb'` | `'#1e1e2e'` | The bar's color, six hex digits in either case. Quote it: the shell reads `#` as a comment. Its opacity is the file's `[bar] opacity`: see [Shape and opacity](./configure.md#shape-and-opacity). |
+| `--foreground` | `'#rrggbb'` | `'#cdd6f4'` | The text's color (the theme's `fg` token: see [Colors](./configure.md#colors)). |
+| `--font` | a path | the first [well-known font](./configure.md#fonts) found | The font file, TrueType or OpenType (`.ttf`, `.otf`; a collection's first face). Any bytes: a path need not be UTF-8. |
 | `--font-size` | 1 to 256 | 14 | The text's size, the em, in logical pixels; drawn at the output's real pixels like the bar. An `[output."NAME"]` table's `font-size` overrides it for that output only. |
-| `--left`, `--center`, `--right` | module ids, comma-separated, or empty | the clock in the center | The modules along each part of the bar, in order. Giving any of the three sets the whole layout: a part not given is empty, so `--right clock` moves the clock rather than adding a second one. `--center ''` places nothing: a plain bar that needs no font. See [Layout](./modules.md##layout). |
+| `--left`, `--center`, `--right` | module ids, comma-separated, or empty | the clock in the center | The modules along each part of the bar, in order. Giving any of the three sets the whole layout: a part not given is empty, so `--right clock` moves the clock rather than adding a second one. `--center ''` places nothing: a plain bar that needs no font. See [Layout](./configure.md#layout). |
 | `--padding` | 0 to 1024 | 8 | Logical pixels either side of each module's content. |
 | `--spacing` | 0 to 1024 | 0 | Logical pixels between neighbouring modules. |
-| `--clock-format` | a format, at most 256 bytes | `'%-I:%M %P'` | What the clock shows; see [The clock](./modules.md##the-clock). |
-| `--config` | a path | `$XDG_CONFIG_HOME/scoot/bar.toml` (`~/.config/scoot/bar.toml` without it) | The config file to read instead of the default; see [below](./modules.md##the-config-file). |
-| `--check` | nothing (a switch) | off | Validate and exit instead of running: see [`--check`](./modules.md##--check-validate-without-running). |
+| `--clock-format` | a format, at most 256 bytes | `'%-I:%M %P'` | What the clock shows; see [The clock](./modules.md#the-clock). |
+| `--config` | a path | `$XDG_CONFIG_HOME/scoot/bar.toml` (`~/.config/scoot/bar.toml` without it) | The config file to read instead of the default; see [below](./cli.md#the-config-file). |
+| `--check` | nothing (a switch) | off | Validate and exit instead of running: see [`--check`](./cli.md#--check-validate-without-running). |
 
 A malformed or out-of-range value, an unknown flag or a flag given twice is
 a usage error (exit status 2), and nothing starts; so is an unknown module
@@ -216,13 +216,13 @@ right = ["clock"]
 `margin` takes an integer (every side) or the `--margin` shorthand
 string. `radius`, `popup-radius`, `opacity`, `separator`, the modules' `margin` and the
 pill's keys are file-only: they have no flags (see
-[Shape and opacity](./modules.md##shape-and-opacity), [Spacing](./modules.md##spacing) and
-[the pill](./modules.md##the-active-workspaces-pill)). The module lists take the ids in [Modules](./modules.md##modules), with `"|"`
-entries marking where a separator goes (see [Spacing](./modules.md##spacing)); giving any
+[Shape and opacity](./configure.md#shape-and-opacity), [Spacing](./configure.md#spacing) and
+[the pill](./modules.md#the-active-workspaces-pill)). The module lists take the ids in [Modules](./modules.md#modules), with `"|"`
+entries marking where a separator goes (see [Spacing](./configure.md#spacing)); giving any
 of the three sets the whole layout, as the flags do. An `[output."NAME"]`
 table takes `edge`, `layer`, `exclusive`, `height`, `margin`,
 `font-size` (1 to 256, as `[bar] font-size`; absent is the shared value)
-and the three module lists — see [Outputs](./modules.md##outputs). An unknown key
+and the three module lists — see [Outputs](./configure.md#outputs). An unknown key
 anywhere is a loud error naming it, as is a bad value, which names its
 dotted key (`bar.height`, `colors.background`, `left`, `clock.format`;
 `output."eDP-1".height` in an output table).
@@ -248,7 +248,7 @@ compositor and never claims the control socket, so it needs no
 `WAYLAND_DISPLAY` and no runtime directory, and it runs beside a live bar
 without touching it. Its use is a build step or a pre-flight over a file about
 to be installed: the Nix module's check runs it over every rendered file
-(`checks.<system>.scootbar-modules`, [docs/nix.md](./index.md)).
+(`checks.<system>.scootbar-modules`).
 Modules that report themselves unavailable at start (the clock without a
 time zone database, say) print their note as a start does and are left out;
 that is not a failure. What the flag costs (aarch64, release, stripped): +2.4 KB of text (code and
@@ -281,7 +281,7 @@ scootbar msg set ID JSON            # write a push module's text, class, tooltip
 ```
 
 `query` prints one JSON object: one entry per placed module per output
-that shows it (an output with no bar, or one whose [table](./modules.md##outputs) leaves
+that shows it (an output with no bar, or one whose [table](./configure.md#outputs) leaves
 the module out, has none),
 with its `id`, `section` (`left`, `center` or `right`), `output` (the
 compositor's `wl_output.name`, `null` where it never sent one), the `text`
@@ -314,13 +314,13 @@ drawn from, so it cannot disagree with a screenshot.
 `reload` re-reads the file and live-applies it — geometry, style, layout,
 modules, the font — after fully validating it first; a bad file is
 refused and the running bar stands. `hide`, `show` and `toggle` are
-[below](./modules.md##hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
+[below](./configure.md#hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
 `toggle` print the reply; `kill`, `set` and `invoke` print nothing on success,
 and `subscribe` prints what the daemon sends until it closes (below). A request
 peer that stops reading is dropped past 30 seconds with nothing delivered:
 while its reply is queued the daemon answers nothing more on that connection,
 and past the deadline the connection just ends. `set`
-writes to a [`push` module](./modules.md##button-push-and-exec-modules): an id that is not
+writes to a [`push` module](./modules.md#button-push-and-exec-modules): an id that is not
 placed, a module that takes no value (every one but `push`) and a value it
 refuses are each a loud error naming why, never a silent ok. Without a
 daemon, every command fails saying so (exit status 1).

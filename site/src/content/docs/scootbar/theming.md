@@ -50,4 +50,4 @@ moved accent to base0D blue, matching the compositor's Stylix ring.
 
 The six tokens, and how icons follow them (path icons tint from the
 theme; image icons keep their own colors), are in
-[Colors](./configure.md#colors) and [Icons](./configure.md#icons).
+[Colors](./configure.md#colors) and [Icons](./modules.md#icons).

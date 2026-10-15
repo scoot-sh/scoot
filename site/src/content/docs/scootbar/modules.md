@@ -9,30 +9,30 @@ One page per module family would be thirteen pages; instead every module lives h
 
 | Id | Shows | Wakes |
 | --- | --- | --- |
-| `clock` | The local time ([below](./modules.md##the-clock)) | its timer: once a minute, or once a second with seconds shown (each redraw adds the compositor's release, below) |
-| `workspaces` | Each output's workspace numbers, the active one marked ([below](./modules.md##workspaces)) | on the compositor's workspace changes: one redraw per batch, however many events it held |
-| `window-title` | The focused window's title on the bar's own output ([below](./modules.md##window-title)) | on the compositor's toplevel changes: focus at once, retitles at most ten times a second |
-| `volume` | The default sink's level and mute ([below](./modules.md##volume)) | on the sound server's sink events, and the server's own: one redraw per batch |
-| `microphone` | The default source's level and mute ([below](./modules.md##volume)) | as `volume`, for sources |
-| `battery` | The batteries' charge and state ([below](./modules.md##battery)) | on the kernel's power-supply events, and once a minute while discharging |
-| `network` | The shown interface's state: name, SSID, VPN or offline ([below](./modules.md##network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held; plus the WiFi signal re-read every 10 s while WiFi is shown (two wakes a tick, a redraw only when the shown level moves) |
-| `brightness` | The panel backlight's level ([below](./modules.md##brightness)) | on the kernel's backlight events: one redraw per batch, however many events it held |
-| `tray` | The applications' tray icons, StatusNotifierItem ([below](./modules.md##tray)) | on the session bus's traffic: item registrations, icon changes, owners vanishing |
-| `media` | What the players on the session bus are playing, and their controls, over MPRIS ([below](./modules.md##media)) | on the bus's MPRIS traffic only: a player appearing or vanishing, its track or state changing |
-| `bluetooth` | The adapter's power and the connected devices over BlueZ, on the system bus ([below](./modules.md##bluetooth)) | on the bus's BlueZ traffic only: BlueZ appearing or leaving, an adapter or device coming or going, power, connection, name or charge changing |
-| `power` | Lock, log out, suspend, reboot and shut down from a popup menu with a confirm step ([below](./modules.md##power)) | on nothing while closed: the popup's `Can*` round trips and its own replies only |
+| `clock` | The local time ([below](./modules.md#the-clock)) | its timer: once a minute, or once a second with seconds shown (each redraw adds the compositor's release, below) |
+| `workspaces` | Each output's workspace numbers, the active one marked ([below](./modules.md#workspaces)) | on the compositor's workspace changes: one redraw per batch, however many events it held |
+| `window-title` | The focused window's title on the bar's own output ([below](./modules.md#window-title)) | on the compositor's toplevel changes: focus at once, retitles at most ten times a second |
+| `volume` | The default sink's level and mute ([below](./modules.md#volume)) | on the sound server's sink events, and the server's own: one redraw per batch |
+| `microphone` | The default source's level and mute ([below](./modules.md#volume)) | as `volume`, for sources |
+| `battery` | The batteries' charge and state ([below](./modules.md#battery)) | on the kernel's power-supply events, and once a minute while discharging |
+| `network` | The shown interface's state: name, SSID, VPN or offline ([below](./modules.md#network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held; plus the WiFi signal re-read every 10 s while WiFi is shown (two wakes a tick, a redraw only when the shown level moves) |
+| `brightness` | The panel backlight's level ([below](./modules.md#brightness)) | on the kernel's backlight events: one redraw per batch, however many events it held |
+| `tray` | The applications' tray icons, StatusNotifierItem ([below](./modules.md#tray)) | on the session bus's traffic: item registrations, icon changes, owners vanishing |
+| `media` | What the players on the session bus are playing, and their controls, over MPRIS ([below](./modules.md#media)) | on the bus's MPRIS traffic only: a player appearing or vanishing, its track or state changing |
+| `bluetooth` | The adapter's power and the connected devices over BlueZ, on the system bus ([below](./modules.md#bluetooth)) | on the bus's BlueZ traffic only: BlueZ appearing or leaving, an adapter or device coming or going, power, connection, name or charge changing |
+| `power` | Lock, log out, suspend, reboot and shut down from a popup menu with a confirm step ([below](./modules.md#power)) | on nothing while closed: the popup's `Can*` round trips and its own replies only |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
 lists those that are. Every module takes the five
-[interaction keys](./modules.md##pointer-input). Besides these two, the config can define
+[interaction keys](./modules.md#pointer-input). Besides these two, the config can define
 modules of its own by name, a [`button`, a `push` and an `exec`
-module](./modules.md##button-push-and-exec-modules), each a Cargo feature (`button`,
+module](./modules.md#button-push-and-exec-modules), each a Cargo feature (`button`,
 `push`, `exec`) on by default. The `popup` feature is not a module either:
-it is the [popup](./modules.md##popups) code the volume and microphone modules use, on
+it is the [popup](./modules.md#popups) code the volume and microphone modules use, on
 by default, and a build without it has none of it and does not bind
 `xdg_wm_base`. The `icon-image` feature adds the PNG
-decoder for [image icons](./modules.md##icons), and is off by default.
+decoder for [image icons](./modules.md#icons), and is off by default.
 
 
 
@@ -70,7 +70,7 @@ subset. The default, `%-I:%M %P`, is a 12-hour clock with no leading zero:
   when the format shows seconds (`%S`, `%T`): no polling. Each tick that
   changes the text is one frame, and the compositor answers each frame
   with one `wl_buffer.release`, so an idle minute clock wakes the bar twice
-  a minute ([What it does on the compositor](./modules.md##what-it-does-on-the-compositor)).
+  a minute ([What it does on the compositor](./configure.md#what-it-does-on-the-compositor)).
 - **The time zone** is read as glibc reads it: `$TZ` if set (a zone name
   such as `Europe/London`, looked up under `$TZDIR` or
   `/usr/share/zoneinfo`; an absolute path, with or without a leading `:`;
@@ -114,7 +114,7 @@ gains it: the click is the same `activate`.
   lifted 6 off the bar's top and bottom, its span grown to the tile,
   three spaces between the numbers — the circle looks' composition with
   a square instead of a disc); its shape is
-  [configurable](./modules.md##the-active-workspaces-pill): square, rect,
+  [configurable](./modules.md#the-active-workspaces-pill): square, rect,
   a pill, or a circle.
 - **The protocol is bound only while the module is placed.** A bar with no
   workspaces module never binds `ext_workspace_manager_v1` or `wl_seat`, so
@@ -129,7 +129,7 @@ gains it: the click is the same `activate`.
   rebound until a reload removes and re-adds the module.
 - **Without `ext-workspace-v1`** the module shows nothing (one stderr note
   at start-up says the protocol is missing) and takes no space.
-  **Without `wl_seat`** clicks do nothing (said too: see [Pointer input](./modules.md##pointer-input)). The bar still starts;
+  **Without `wl_seat`** clicks do nothing (said too: see [Pointer input](./modules.md#pointer-input)). The bar still starts;
   the clock is unaffected.
 - **The list grows and shrinks with the trailing empty workspace**,
   renumbering what follows; only the `active` state bit is shown so far
@@ -241,7 +241,7 @@ window activated on it; with none focused the module shows its
   `window-title.icon` stands before the title whenever a window is focused
   (never for the placeholder; `window-title.show-text = false` draws only
   the icon — see [Per-state and per-level
-  icons](./modules.md##per-state-and-per-level-icons)). The full title
+  icons](./modules.md#per-state-and-per-level-icons)). The full title
   is the tooltip (and the `query` value's `title`), uncut by the span.
 - **Width.** The span never grows past `window-title.max-width` (default
   480 logical pixels, 1 to 4096), so the title yields the bar to the other
@@ -280,7 +280,7 @@ by default.
 
 - **What it shows** is `49%` with the level's icon (muted, low, medium,
   high; a static `icon`, `icon-path` or `icon-image` in the table replaces
-  all four — see [Icons](./modules.md##icons)), in the `muted` class while muted. The tooltip names the
+  all four — see [Icons](./modules.md#icons)), in the `muted` class while muted. The tooltip names the
   device: `Built-in Audio: 49%`, with `(muted)` after it. While no server
   answers it shows nothing and takes no space.
 - **A click toggles mute, a scroll raises or lowers**, with no binding at
@@ -288,7 +288,7 @@ by default.
   own actions are `raise`, `lower` and `toggle-mute`, none taking a number
   (`scootbar msg invoke volume raise` raises one step), `set N`, which sets
   the level to `N` percent (held to 0 and `max-volume`, whatever number is
-  given), and `popup`, which opens the [slider popup](./modules.md##popups)
+  given), and `popup`, which opens the [slider popup](./modules.md#popups)
   (`on-click = "popup"`). A scroll's steps
   arrive through the scroll itself, one step each. There is no default for
   a right click: point `on-right-click` at a mixer (`pavucontrol`, or
@@ -327,9 +327,9 @@ no daemon and no child process: two netlink sockets on the bar's own
   signal (`Wimbly · −54 dBm on wlan0`). Before the first event it shows
   nothing and takes no space. An icon can stand before the text, or
    alone: `icon`, `icon-path` with `icon-viewbox`, or `icon-image` (at
-   most one, as the [clock's](./modules.md##icons)) for every state, or one glyph each
+   most one, as the [clock's](./modules.md#icons)) for every state, or one glyph each
    in `icon-ethernet`, `icon-wifi`, `icon-vpn` and `icon-offline` — see
-   [Per-state and per-level icons](./modules.md##per-state-and-per-level-icons). The
+   [Per-state and per-level icons](./modules.md#per-state-and-per-level-icons). The
    WiFi level is four at −55 dBm and better, one at −78 and worse, as
    `query`'s `bars` counts it.
 - **At idle on WiFi the bar wakes about twice every 10 seconds**: the
@@ -355,7 +355,7 @@ no daemon and no child process: two netlink sockets on the bar's own
   left open never blocks the next; only a menu that will open ends the
   old one.
 - **A native list**, opt-in as the volume popup is: `on-click = "popup"`
-  opens the scan as a [popup](./modules.md##popups) list instead of the dmenu picker
+  opens the scan as a [popup](./modules.md#popups) list instead of the dmenu picker
   (the click binding wins over the picker's default). Each row names a
   network, starting with its strength glyph where `icon-wifi` names four
   glyphs and the scan carries a signal (a row with no signal carries
@@ -428,7 +428,7 @@ and woken by the kernel's uevents on a netlink socket filtered to the
   M2 Air), with an icon per level when configured (`brightness.icon`
   takes one glyph, or 4 for the levels; `brightness.show-text = false`
   draws only the icon — see [Per-state and per-level
-  icons](./modules.md##per-state-and-per-level-icons)). The tooltip names the device: `apple-panel-bl: 49%`. Where
+  icons](./modules.md#per-state-and-per-level-icons)). The tooltip names the device: `apple-panel-bl: 49%`. Where
   there is no backlight at all (a desktop, a VM) it shows nothing and
   takes no space, owning no fd.
 - **A scroll raises or lowers**, with no binding at all; a binding you set
@@ -476,7 +476,7 @@ and drops those that are not `power_supply`. A Cargo feature (`battery`), on by 
   (`battery.icon` takes one glyph, or 5 for the charge levels, with
   `battery.icon-charging` and `battery.icon-full` for those states;
   `battery.show-text = false` draws only the icon — see [Per-state and
-  per-level icons](./modules.md##per-state-and-per-level-icons)). Where there is no battery at all (a desktop, a VM) it
+  per-level icons](./modules.md#per-state-and-per-level-icons)). Where there is no battery at all (a desktop, a VM) it
   shows nothing and takes no space, owning no fd.
 - **Several batteries** are combined by default (`batteries =
   "combine"`: the mean capacity, discharging winning the state), or the
@@ -635,7 +635,7 @@ socket is one more source in the `poll` loop), which is the
   > the notch count of the scroll itself is what is sent, scaled the same
   > way.
 - **Menus.** An item's menu (`ContextMenu`, the DBusMenu protocol) opens
-  in a [popup](./modules.md##popups): the bar reads it with its DBusMenu client
+  in a [popup](./modules.md#popups): the bar reads it with its DBusMenu client
   (`GetLayout`, `Event`, `AboutToShow`, the `LayoutUpdated` and
   `ItemsPropertiesUpdated` signals, bounded like the rest of the client)
   and draws one row per item. A row click sends `Event(id, "clicked",
@@ -678,7 +678,7 @@ socket is one more source in the `poll` loop), which is the
 - **Margin, convention and keys.** `[tray]` takes `margin`,
   `scroll-convention` (`"gtk"` by default, `"qt"` for KDE items like
   kmix: see Clicks above for what each sends) and the five
-  [interaction keys](./modules.md##pointer-input) (`on-click`, `on-right-click`,
+  [interaction keys](./modules.md#pointer-input) (`on-click`, `on-right-click`,
   `on-middle-click`, `on-scroll-up`, `on-scroll-down`). A binding replaces the default for its trigger, as
   on every module.
 - **Bounds, for a hostile or broken item.** Everything an item says is
@@ -747,7 +747,7 @@ socket is one more source in the `poll` loop), which is the
 What the players on the session bus are playing, and play/pause, next and
 previous, spoken over MPRIS (`org.mpris.MediaPlayer2.*`: mpv, VLC,
 Spotify, Firefox, Chromium and most others) through the bar's own D-Bus
-client (see [Tray](./modules.md##tray)): no `zbus`, no libdbus, no thread, no polling. A
+client (see [Tray](./modules.md#tray)): no `zbus`, no libdbus, no thread, no polling. A
 Cargo feature (`media`), on by default; the smallest build
 (`--no-default-features`) has none of it.
 
@@ -757,9 +757,9 @@ Cargo feature (`media`), on by default; the smallest build
   `media.icon-paused` when configured (falling back to `media.icon`;
   `media.show-text = false` draws only the icon: a stopped player shows
   nothing, so there is no third key — see [Per-state and per-level
-  icons](./modules.md##per-state-and-per-level-icons)) — cut to `max-width` with an ellipsis measured in
+  icons](./modules.md#per-state-and-per-level-icons)) — cut to `max-width` with an ellipsis measured in
   pixels, in the `muted` class while paused. The tooltip over the module (after the bar's
-  `tooltip-delay`, as every module's; see [Tooltips](./modules.md##tooltips)) is the uncut
+  `tooltip-delay`, as every module's; see [Tooltips](./modules.md#tooltips)) is the uncut
   line with the player's name: `mpv (playing): Ada - Song`. Several artists are joined with a
   comma. **A stopped player shows nothing**, and with no player the module
   takes no space; start playback from the player.
@@ -793,7 +793,7 @@ Cargo feature (`media`), on by default; the smallest build
   and nothing while none is.
 - **Options.** `[media]` takes `player` (a name as it is on the bus:
   letters, digits, `_`, `-` and `.`), `max-width` (default 320 logical
-  pixels, 1 to 4096), `margin` and the five [interaction keys](./modules.md##pointer-input).
+  pixels, 1 to 4096), `margin` and the five [interaction keys](./modules.md#pointer-input).
   The playback position and the volume are never shown (the position has no
   change signal, so showing it would need a timer), and the art URL a player
   names is never fetched.
@@ -821,7 +821,7 @@ Cargo feature (`media`), on by default; the smallest build
   once and dials
   once more, and one that keeps dropping the bar is left alone for 30
   seconds, said once on stderr and again at each 30 s retry that dies the
-  same way (the [tray's](./modules.md##tray) rules, in `src/dbus/link.rs`).
+  same way (the [tray's](./modules.md#tray) rules, in `src/dbus/link.rs`).
 - **Bounds, for a hostile or broken player.** Anything on the session bus
   can claim a player name and say anything. What the code guarantees: it
   cannot crash or hang the bar or another player, or grow the bar without
@@ -904,7 +904,7 @@ Cargo feature (`media`), on by default; the smallest build
 
 The adapter's power and the connected devices, spoken over BlueZ
 (`org.bluez`) on the **system bus** through the bar's own D-Bus client
-(see [Tray](./modules.md##tray)): no `zbus`, no libdbus, no thread, no polling. The
+(see [Tray](./modules.md#tray)): no `zbus`, no libdbus, no thread, no polling. The
 system bus is `DBUS_SYSTEM_BUS_ADDRESS` when it names a filesystem path,
 else `/run/dbus/system_bus_socket` (`src/dbus/conn.rs`); the client
 authenticates the same `EXTERNAL` way on both. A Cargo feature
@@ -918,7 +918,7 @@ has none of it.
   configured (`bluetooth.icon-off`, `bluetooth.icon-on` and
   `bluetooth.icon-connected`, falling back to `bluetooth.icon`;
   `bluetooth.show-text = false` draws only the icon — see [Per-state and
-  per-level icons](./modules.md##per-state-and-per-level-icons)). Adapter power dominates a device that
+  per-level icons](./modules.md#per-state-and-per-level-icons)). Adapter power dominates a device that
   still claims to be connected (its disconnect is on its way). With no
   adapter, or no BlueZ at all, the module shows nothing and takes no
   space. The tooltip lists every connected device with its charge.
@@ -945,7 +945,7 @@ has none of it.
   `off`, `on` or `connected`; `device` is the device shown; `battery`
   only when BlueZ reports one), and nothing while there is no adapter.
 - **Options.** `[bluetooth]` takes `menu-command` (no empty argument),
-  `margin` and the five [interaction keys](./modules.md##pointer-input). The charge is
+  `margin` and the five [interaction keys](./modules.md#pointer-input). The charge is
   shown only when BlueZ reports it (`Battery1`); it is never polled.
 - **A run of changes is drawn ten times a second at most**, as the media
   module's: the first change after a quiet spell is drawn in the turn it
@@ -962,7 +962,7 @@ has none of it.
   system bus the module waits on the socket's directory (one inotify
   watch); a bus that goes away drops everything at once and dials once
   more, and one that keeps dropping the bar is left alone for 30 seconds
-  (the [tray's](./modules.md##tray) rules, in `src/dbus/link.rs`).
+  (the [tray's](./modules.md#tray) rules, in `src/dbus/link.rs`).
 - **Bounds, for a hostile or missing BlueZ.** Anything on the system bus
   can own `org.bluez` when BlueZ itself is absent and say anything. What
   the code guarantees: it cannot crash or hang the bar or grow it without
@@ -1093,7 +1093,7 @@ on-click = "popup"
 - **Options.** `[power]` takes `icon` (plus `icon-path`, `icon-viewbox`
   and `icon-image`, at most one, as the clock's), the five per-row
   glyphs, `rows`, the five `*-command` lists, `margin` and the five
-  [interaction keys](./modules.md##pointer-input).
+  [interaction keys](./modules.md#pointer-input).
 - **Idle cost: nothing while closed.** The system-bus connection is made
   when the popup first opens (or an invoke first needs logind), never at
   start: a bar whose menu is never opened holds no bus fd and makes no
@@ -1115,7 +1115,7 @@ on-click = "popup"
 ## Pointer input
 
 Clicks, scrolls and hover, on every module. The bar never takes the keyboard
-outside a [popup](./modules.md##popups)'s lifetime (its layer surface asks for no
+outside a [popup](./modules.md#popups)'s lifetime (its layer surface asks for no
 keyboard interactivity, so it cannot disturb focus; a popup that grabbed
 takes it, for Escape, arrows and Enter, while it is open), and **touch is ignored**: the bar binds the seat's pointer only, so
 a touch screen's taps reach nothing here (until a touch design exists,
@@ -1176,7 +1176,7 @@ on-click = { exec = ["foot", "-e", "btop"] }     # a command, run directly
 - **A key you do not set keeps the module's default**: the workspaces
   module's left click on a number switches to it (as it always did), and
   other modules have defaults of their own, which their sections list (the
-  [media module's](./modules.md##media), for one). A binding replaces the default.
+  [media module's](./modules.md#media), for one). A binding replaces the default.
 - **A failing action** (a program that is not there, a full table) is one
   line on stderr, at most one a second, with a count of the ones held back.
   The bar carries on.
@@ -1246,7 +1246,7 @@ until invoked again, or any of the endings below, and takes no keyboard.
 The network module's picker is unchanged by default (`menu-command` and
 the dmenu-style launcher are still how a click connects); `on-click =
 "popup"` on the network module opens its native list instead (see
-[Network](./modules.md##network)).
+[Network](./modules.md#network)).
 
 - **What the volume popup shows**: the device's name and level (`Built-in
   Audio  49%`), a slider from 0 to `max-volume`, and a Mute (Unmute) button.
@@ -1286,7 +1286,7 @@ the dmenu-style launcher are still how a click connects); `on-click =
   a grab (an agent's `invoke`-opened popup) there is no keyboard: the
   list is pointer-only there.
 - **Opened on the press, not the release.** The one exception to "clicks
-  fire on release" ([pointer input](./modules.md##pointer-input)): a compositor may refuse
+  fire on release" ([pointer input](./modules.md#pointer-input)): a compositor may refuse
   a popup grab whose serial is not a button still held (the protocol allows
   it, and some compositors check), and a refused grab never sees a click
   outside or Escape. The release after it does nothing. scoot and sway were
@@ -1323,7 +1323,7 @@ the dmenu-style launcher are still how a click connects); `on-click =
   matched directly, so the bar needs no xkb). Without a grab (an agent's
   `invoke`-opened popup) there is no keyboard at all. Keybindings of the
   compositor still win.
-- **Limits.** One popup at a time (a [tooltip](./modules.md##tooltips) is not one: it closes
+- **Limits.** One popup at a time (a [tooltip](./modules.md#tooltips) is not one: it closes
   when a popup opens, and none shows while one is open). A drag ends when the pointer leaves the
   popup (the compositor's popup grab moves the pointer's focus off it, so
   nothing more of the drag arrives); past the slider's ends but still over the
@@ -1356,7 +1356,7 @@ the dmenu-style launcher are still how a click connects); `on-click =
 A module's `tooltip` (the line a module's view carries beside its text) is
 shown in a small panel under the module after the pointer has rested on it for
 `bar.tooltip-delay` milliseconds, and gone when the pointer leaves. It is the
-[popup](./modules.md##popups) machinery without a grab, so the `popup` Cargo feature (on by
+[popup](./modules.md#popups) machinery without a grab, so the `popup` Cargo feature (on by
 default) is also the code of tooltips, and a build without it has no
 tooltips and refuses the `tooltip-delay` key.
 
@@ -1372,7 +1372,7 @@ There is no flag for it: the config file only.
   uncut by the span; the network's interface, SSID and signal; the battery's
   `Charging 80%`; the volume and microphone's device and level; the
   brightness's device; the tray's item titles; the media module's player and line; a `push` or `exec` module's
-  `tooltip` key, [the update payload](./modules.md##the-update-payload)). A module with no
+  `tooltip` key, [the update payload](./modules.md#the-update-payload)). A module with no
   tooltip, or whose tooltip is empty right now, shows none and arms nothing:
   the clock, workspaces and `button` modules have none. A new module's tooltip
   is `tooltip_mut` in its `view` and `Module::tooltips` saying so.
@@ -1382,7 +1382,7 @@ There is no flag for it: the config file only.
   tooltip and starts that module's delay over.
 - **It goes** on: the pointer leaving the module or the bar, **any press**
   (the press then acts as it always does: a tooltip is not a popup, and a
-  click is never spent closing one), **any scroll**, a [popup](./modules.md##popups)
+  click is never spent closing one), **any scroll**, a [popup](./modules.md#popups)
   opening, the module's tooltip going empty, its module leaving the bar, its
   output being unplugged, the bar hidden or made again, a
   `reload`, and the session locking (the compositor takes it, and it is never
@@ -1454,7 +1454,7 @@ placeholder = ""
 A name is 1 to 32 letters, digits, `-` or `_` starting with a letter or digit,
 is not a built-in module's id (`clock`, `workspaces`) and is unique across the
 three kinds; at most 32 modules are defined. Every table also takes `margin`
-(as the clock's) and the five [interaction keys](./modules.md##pointer-input), so any of
+(as the clock's) and the five [interaction keys](./modules.md#pointer-input), so any of
 them can run a command or send `{ scoot = "quit" }` on a click or a scroll.
 A table no list names is never started and costs nothing. These modules are
 named in the config file's lists only: `--left`, `--center` and `--right`
@@ -1479,7 +1479,7 @@ that is the whole of them.
 
 A place anything can write to with `scootbar msg set ID VALUE`, costing
 nothing until it is: no fd of its own beyond the control socket, no timer, no
-thread. `VALUE` is JSON, the [payload](./modules.md##the-update-payload) below:
+thread. `VALUE` is JSON, the [payload](./modules.md#the-update-payload) below:
 
 ```sh
 scootbar msg set status '{"text": "build ok", "class": "normal"}'
@@ -1494,9 +1494,9 @@ answered by name. Several `set`s that arrive in one turn of the loop are
 drawn once; one that changes nothing is not drawn.
 
 A static `icon` (one glyph, or `icon-path` with `icon-viewbox`, or
-`icon-image`, at most one, as the [clock's](./modules.md##icons)) stands before the
+`icon-image`, at most one, as the [clock's](./modules.md#icons)) stands before the
 text, and `show-text = false` draws only the icon
-(see [Per-state and per-level icons](./modules.md##per-state-and-per-level-icons)).
+(see [Per-state and per-level icons](./modules.md#per-state-and-per-level-icons)).
 An update's own `icon` is drawn instead of the static one while set, so a
 script can change it per update (a VPN that drops); with neither the
 module shows text alone, as before.
@@ -1519,9 +1519,9 @@ run through a shell** (write `["sh", "-c", "..."]` to use one), at most 32
 arguments of at most 4096 bytes. `format` says how a line is read: `text`
 (the line is the text, the default) or `json` (one object per line, below).
 A static `icon` (one glyph, or `icon-path` with `icon-viewbox`, or
-`icon-image`, at most one, as the [clock's](./modules.md##icons)) stands before the
+`icon-image`, at most one, as the [clock's](./modules.md#icons)) stands before the
 text, and `show-text = false` draws only the icon
-(see [Per-state and per-level icons](./modules.md##per-state-and-per-level-icons)).
+(see [Per-state and per-level icons](./modules.md#per-state-and-per-level-icons)).
 A JSON line's own `icon` is drawn instead of the static one while set; a
 text line carries none, so it shows the static one. With neither the
 module shows text alone, as before.
@@ -1742,8 +1742,8 @@ placeholder = "..."
 dozen bytes, no control characters), far inside what the bar takes: a line
 past 4096 bytes is dropped whole, text and tooltip are cut at 256 bytes on
 a character boundary, and every control character becomes a space
-([above](./modules.md##exec)). A `format = "json"` recipe gets the same
-treatment per line ([below](./modules.md##the-update-payload)).
+([above](./modules.md#exec)). A `format = "json"` recipe gets the same
+treatment per line ([below](./modules.md#the-update-payload)).
 
 
 
@@ -1770,7 +1770,7 @@ ignored and the text shows as before. Text and tooltip are cut at 256 bytes on a
 every control character (a tab, a carriage return, an escape) becomes a
 space, so nothing but printable text reaches the bar. A line or value
 past 4096 bytes, or JSON nested more than 8 deep, is refused. The tooltip is
-shown as a [tooltip](./modules.md##tooltips) where the module has one.
+shown as a [tooltip](./modules.md#tooltips) where the module has one.
 
 
 
@@ -1783,14 +1783,14 @@ give one, at most one of them per module; the clock, `button`, `push`,
 `exec`, volume,
 microphone, network, battery, brightness, bluetooth, media, window-title
 and power modules take them, and most of those take one glyph per state
-or level besides ([below](./modules.md##per-state-and-per-level-icons)). The workspaces
+or level besides ([below](./modules.md#per-state-and-per-level-icons)). The workspaces
 module takes none: its numbers and pill are the content, and an icon would
 say nothing (per-workspace icons would need the compositor to name one,
 and no protocol carries any).
 
 | Key | Takes | Drawn |
 | --- | --- | --- |
-| `icon` | exactly one character: a glyph from a symbol font in the [font chain](./modules.md##fallback-fonts-and-icons) | as text, in the state's color |
+| `icon` | exactly one character: a glyph from a symbol font in the [font chain](./configure.md#fallback-fonts-and-icons) | as text, in the state's color |
 | `icon-path` | SVG path data, a `d` string: `M m L l H h V v C c S s Q q T t A a Z z`, up to 16 KiB and 1024 commands | filled by the bar itself, anti-aliased, **tinted from the theme token** of the module's state (`normal` `fg`, `warn` `accent`, `urgent` `urgent`, `muted` `dim`), so it follows Stylix |
 | `icon-viewbox` | `"min-x min-y width height"`, only with `icon-path`; default `"0 0 24 24"` | which part of the path's plane is the icon, fitted into the square and centered |
 | `icon-image` | an absolute path to a PNG file (a build with `--features icon-image`) | scaled to the size, in its own colors (not tinted) |
@@ -1823,13 +1823,13 @@ Without the `icon-image` feature `icon-image` is an unknown key, and the config
 error says so. **SVG files are not read** (a renderer is a large dependency and
 an untrusted-markup parser): put the `d` string of a one-color icon in
 `icon-path`, or convert a full-color SVG to PNG ahead of time. How it works, the
-costs and the decisions are in [icons.md](./configure.md#icons).
+costs and the decisions are in [Icons and fonts](./configure.md#icons-and-fonts-mechanism-and-measurements).
 
 #### Per-state and per-level icons
 
 Where one glyph cannot say it — a charge, a signal, a state — the key takes
 one glyph, or one glyph per level picked by the value, the shape the
-[network module](./modules.md##network) establishes. Each entry takes exactly one
+[network module](./modules.md#network) establishes. Each entry takes exactly one
 character, as `icon` does; an array takes exactly the count named, each one
 glyph; anything else is a config error naming the dotted key. A per-state
 glyph wins over the static icon for its own state (any other state shows
@@ -1859,7 +1859,7 @@ module shows text alone, as before.
 
 #### Example: Nerd Font icons for every module
 
-Glyphs from a symbol font in the [font chain](./modules.md##fallback-fonts-and-icons)
+Glyphs from a symbol font in the [font chain](./configure.md#fallback-fonts-and-icons)
 (Nerd Font's Material Design set; each codepoint verified against
 [Pictogrammers/MDI](https://pictogrammers.com/library/mdi/)):
 
