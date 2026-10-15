@@ -105,7 +105,7 @@ impl Fixture {
     /// bound passes): cursor bitmaps arrive asynchronously since the build
     /// moved off the loop thread, so a test that asserts on rebuilt pixels
     /// settles first and a test that asserts on stored values needs nothing.
-    fn settle_cursor(&mut self, theme: &str, size: i32) {
+    fn settle_cursor(&mut self, theme: &str, size: u32) {
         let deadline = Instant::now() + Duration::from_secs(30);
         while self.state.cursor.theme().name() != theme
             || self.state.cursor.theme().size() != size
