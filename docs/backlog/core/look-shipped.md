@@ -23,8 +23,8 @@ and fails on a missing role"; no such check exists. And a change under
 ## What to do
 
 - Lift each look into `looks/<name>/look.toml` (D1), with no invented color:
-  the registry's values, foot's 16 hues into `[terminal]`, and (if the
-  maintainer confirms D15) the examples' style values: ring widths,
+  the registry's values, foot's 16 hues into `[terminal]`, and (D15 is
+  decided yes, 2026-10-14) the examples' style values: ring widths,
   padding, spacing, separator. **Not yet radius or bar opacity** (D15's
   ordering, R3): this ticket runs before `look-layer-scoot`'s pixman
   benchmark, so it lifts `[shape] radius = 0` and `[opacity] bar = 1.0` with
