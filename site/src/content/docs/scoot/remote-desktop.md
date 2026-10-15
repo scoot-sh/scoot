@@ -3,8 +3,7 @@ title: Remote desktop (VNC)
 description: "Reach the session over VNC with wayvnc — the switch, the security model, and the lock rule."
 ---
 
-Reach the session from another machine over VNC: run scoot
-[headless](./backends.md#the-three-backends), attach
+Run scoot [headless](./backends.md#the-three-backends), attach
 [wayvnc](https://github.com/any1/wayvnc) (0.9.0 or newer, for
 `ext-image-copy-capture-v1`), and connect any VNC client. Capture comes
 through [screen capture](./protocols.md#screen-capture-ext-image-copy-capture-v1);
@@ -36,8 +35,8 @@ binds = true
 then restart the session (`scoot msg reload` refuses both keys with
 "takes effect on restart"). Without `binds`, remote `Super` moves no
 windows; with it, a remote chord runs the same bind the local keyboard
-would. Keep it off unless the remote user owns the session — see the
-trust note below.
+would. Keep `binds` off unless the remote user
+owns the session — see the trust note below.
 
 Then connect a viewer (`vncviewer 127.0.0.1:5900`, or macOS Screen Sharing
 for the DES-auth fallback) — or tunnel it over SSH and keep wayvnc on

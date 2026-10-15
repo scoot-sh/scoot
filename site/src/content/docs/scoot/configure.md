@@ -3,10 +3,10 @@ title: Configure
 description: "The config file, live reload, autostart, and what happens when the file is wrong."
 ---
 
-Make scoot yours. One TOML file holds everything — layout, appearance,
+One TOML file holds everything — layout, appearance,
 outputs, binds, floating rules, autostart, wallpaper — and most of it
 re-applies live with `scoot msg reload`. No config file yet?
-`--print-default-config` writes you a starting one (below).
+`--print-default-config` writes a starting one (below).
 
 ## The config file
 
@@ -62,8 +62,7 @@ something usable and says what's wrong in the log instead.
 
 ## Reloading the config
 
-Two triggers re-read the same file startup used and re-apply what can
-be re-applied live:
+Two triggers re-read the startup file and re-apply what can go live:
 
 - `scoot msg reload` (and `scoot msg reload`), which answers with an
   applied-vs-refused report;
@@ -108,15 +107,15 @@ is involved on either path: the snapshot is the plain file, the layer is
 plain rendered output, and both reloads work the same on a Nix install
 and a plain binary install.
 
-**Refused, explicitly, pending a restart:** `[tty] gpu`, `[renderer]
+**Refused, pending a restart:** `[tty] gpu`, `[renderer]
 backend`, `[xwayland] enabled`, `[virtual_input] enabled` and
 `[virtual_input] binds` — all five take effect on restart, and each
 refusal says so. A reload
-that cannot load the file at all answers an `error` instead, keeps the
+that cannot load the file answers an `error` instead, keeps the
 running config untouched, and logs — never defaults, never a
 half-applied session, never an exit.
 
-Two guarantees the applied set pins: a key held across a `[binds]`
+Two guarantees hold across every reload: a key held across a `[binds]`
 rebuild neither wedges nor drops; and under `--tty` a reload cannot
 strip the `Ctrl+Alt+F1..F12` VT-switch recovery bindings — they are
 layered back on last, overriding any colliding file bind with a
@@ -124,7 +123,7 @@ warning. A reload applies while the session is locked, except new
 autostart entries (a spawned program at lock time could disclose onto
 the locked session, so those wait for the first unlocked reload).
 
-A successful reload also drops every live `scoot msg output-scale`
+A successful reload drops every live `scoot msg output-scale`
 scale: the outputs go back to the file's scales (see
 [Outputs](./outputs.md)), whether or not the file changed. Each dropped
 scale the file disagrees with is listed in `applied` as
@@ -145,8 +144,7 @@ keeps them.
 | `commands` | array of strings | `[]` | new `spawn` entries run once each | Action strings to run once each, in file order, at session startup — before the `--` command. |
 
 Each entry is an action string — something `scoot msg action` would
-accept and a `[binds]` value could contain, which is what keeps the
-config agent-legible:
+accept and a `[binds]` value could contain:
 
 ```toml
 [autostart]
@@ -157,7 +155,7 @@ commands = [
 ```
 
 Fail-open per entry: a malformed entry is skipped with a warning
-naming just that entry; every other entry still runs, and the session
+naming that entry; every other entry still runs, and the session
 always starts. No supervision: an entry that exits instantly is
 reaped, not restarted. A reload runs the spawn delta (entries the
 session has not seen yet run once each; a reloaded non-`spawn` —
@@ -191,7 +189,7 @@ commands = [
 ```
 
 Lock after ten minutes, panels off after fifteen, back on at the first
-input. The same state is drivable over IPC for agents and scripts
+input. The same state is drivable over IPC
 (`scoot msg output-power 1 off`, `scoot msg outputs` reporting it).
 
 ## Example config.toml
@@ -282,4 +280,4 @@ mode = "fill"
 color = "#101014"
 ```
 
-Next: [Layout](./layout.md) and [Appearance](./appearance.md) — every field of the two tables you will touch most.
+Next: [Layout](./layout.md) and [Appearance](./appearance.md) cover every field of both tables.

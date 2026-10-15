@@ -6,12 +6,11 @@ description: "Every default keybinding, grouped by what you want to do, plus how
 Every default binding, grouped by intent. `Super` is scoot's own modifier
 throughout; directions are vim's <kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd>.
 The rightmost column is the action string — the same grammar `scoot msg action`
-takes and `[binds]` uses, so each row is also its own rebind recipe.
+takes and `[binds]` uses, so each row doubles as a rebind recipe.
 
 ## Cheat sheet
 
-The whole map on one card — print it, or keep it on a second screen
-until your fingers learn it:
+The whole map on one card:
 
 | | <kbd>h</kbd> | <kbd>j</kbd> / <kbd>k</kbd> | <kbd>l</kbd> |
 |---|---|---|---|
@@ -42,8 +41,8 @@ until your fingers learn it:
 | <kbd>Super</kbd>+<kbd>Space</kbd> | Move focus between floating windows and the strip | `toggle-floating-focus` |
 
 Targeting a workspace that doesn't exist yet does nothing — it neither
-creates one nor falls back. (Empty workspaces are dropped, so an index only
-means something against the list it was read from.)
+creates one nor falls back. (Empty workspaces are dropped, so an index
+is only valid against the list it was read from.)
 
 ## Move windows
 
@@ -75,7 +74,7 @@ means something against the list it was read from.)
 | <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>e</kbd> | Quit scoot | `quit` |
 | <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> | Show the live keymap in a terminal pager | `show-keymap` |
 
-Quit is deliberately <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>e</kbd>, not
+Quit is <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>e</kbd> rather than
 <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>q</kbd>: one slipped Shift away from
 "close window", and a slip shouldn't end the whole session.
 
@@ -96,8 +95,8 @@ path survives a bad config.
 
 ## Show the keymap
 
-Forgot a chord? <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> opens the
-live keymap in a terminal — every combo the running session binds, where
+<kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> opens the
+live keymap in a terminal: every combo the running session binds, where
 each came from, and the config binds that were skipped with their reasons.
 It is the same answer `scoot msg binds` prints:
 
@@ -114,13 +113,13 @@ switches — never a re-read of the file. The bind itself never fires while
 the session is locked, like any other non-hardware bind.
 
 Which terminal opens follows your setup, in this order: `xdg-terminal-exec`
-when it is on `PATH` (the desktop-level preferred terminal); otherwise the
+when it is on `PATH` (the desktop-preferred terminal); otherwise the
 `Super+Return` bind's terminal when that bind is a `spawn` — rebind
-`Super+Return` to `ghostty` and the keymap opens in ghostty too, own
-arguments and all; otherwise `foot`, the default terminal. Inside, the
+`Super+Return` to `ghostty` and the keymap opens in ghostty too, with its
+own arguments; otherwise `foot`, the default terminal. Inside, the
 keymap pages through `less` when it is installed, and prints plainly and
-waits for Enter when it is not. With no terminal to open at all, the
-compositor logs one warning naming what it tried and does nothing.
+waits for Enter when it is not. With no terminal to open,
+the compositor logs one warning naming what it tried and does nothing.
 
 ## Change one binding
 
@@ -144,10 +143,10 @@ scoot msg reload
 Keybindings reload live — like the layout, outputs, appearance, floating
 rules and autostart. Only `[tty] gpu`, `[renderer] backend`,
 `[xwayland] enabled` and `[virtual_input]` need a restart, and a reload
-says so by name instead of silently ignoring them. A mistake never stops
+names them instead of silently ignoring them. A mistake never stops
 scoot from starting: it logs the problem and uses the default.
 
-Want the whole file, commented? `scoot --print-default-config --write`
+Want the whole commented file? `scoot --print-default-config --write`
 writes it once (and refuses rather than overwriting).
 
 ## The bind grammar
@@ -162,7 +161,7 @@ exactly then case-insensitively — and binds match a key's *unshifted*
 symbol, so `"A"` means plain `a`, exactly like `"a"`: write
 `"shift+a"` for the Shift chord.
 
-Two failure behaviors worth knowing, since both degrade rather than fail
+Two failure behaviors, both degrading rather than failing
 startup: a bind that doesn't parse is skipped with a warning naming just
 that bind (everything else still loads — and `scoot msg binds` lists it
 with its reason); and two combo strings resolving to the same combination
@@ -195,9 +194,8 @@ a second list of combos elsewhere that could disagree with the action:
 "XF86AudioRaiseVolume" = { action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+", repeat = true, allow_when_locked = true }
 ```
 
-To hold volume-up and have it keep stepping, that is the whole recipe:
-`repeat = true`. To have the key work on the lock screen too,
-`allow_when_locked = true` beside it.
+To hold volume-up and have it keep stepping: `repeat = true`. To have
+the key work on the lock screen too: `allow_when_locked = true` beside it.
 
 - **`repeat` re-fires the bind while its key is held** — after a 200 ms
   delay, then 25 times a second (the seat keyboard's own rate, so
@@ -217,7 +215,7 @@ as before: fire once, never locked. A table entry missing its `action`,
 or a non-boolean flag, warns and falls back; an unknown field warns
 and is ignored, while the rest of the entry applies.
 
-Fullscreen and maximize, spelled out: `Super+f` covers the whole output
+`Super+f` covers the whole output
 while its column is focused — gaps, ring and a bar's reserved strip
 included — keeping its place in the strip (focus away and the view
 scrolls on; focus back and it covers again). Surfaces on the `top`
