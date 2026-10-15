@@ -150,7 +150,7 @@ pair can never skew.
 
 ## The signed apt repository (designed, not yet live)
 
-Decision: `reprepro` (reversible -- the repo is
+Decision: `reprepro` (maintainer-away, reversible -- the repo is
 static files either way). It is in the Debian archive (no third-party
 binary to trust), handles several distributions in one repository
 (`conf/distributions`), and signs with an ordinary GPG key at export

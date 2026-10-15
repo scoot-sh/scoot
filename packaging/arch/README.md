@@ -93,7 +93,7 @@ namcap requires them) while their docs follow the provided name
 ## Architectures
 
 `arch=('x86_64' 'aarch64')`: Arch Linux ARM carries the same package
-names for every dependency above, so the ARM
+names for every dependency above (`seatd` verified against its package index), so the ARM
 build is the same compile. CI builds `x86_64` only (the `archlinux`
 container image ships no ARM variant).
 
