@@ -1,0 +1,56 @@
+# Vinyl Sunset: espresso background, sunset-orange ring. Tokens lifted from
+# nix/modules/desktop.nix (palette, fonts, nightTemp) and
+# docs/examples/vinyl-sunset/ (terminal hues, ring widths, bar style) per
+# docs/backlog/core/look-shipped.md. The illustration cannot be committed
+# under its license, so the wallpaper is the flat background color.
+schema = 1
+name = "vinyl-sunset"
+title = "Vinyl Sunset"
+description = "Espresso background, sunset-orange ring."
+polarity = "dark"
+license = "MIT"
+
+[palette]
+background = "#271A1F"
+foreground = "#F1E3C6"
+dim = "#604F50"
+accent = "#E59560"
+urgent = "#C76B47"
+hover = "#FDC58B"
+focus = "#E59560"
+border = "#423F51"
+
+[terminal]
+colors = ["#3a2a2e", "#c76b47", "#8a9a5b", "#e59560", "#6f7cb3", "#b47a8c", "#7fa3a0", "#ddb590", "#604f50", "#e0866a", "#a6b67a", "#fdc58b", "#8f9bd0", "#d097a8", "#9cc0bc", "#f6ead2"]
+
+[fonts]
+ui = "DroidSansM Nerd Font Propo"
+sans = "DejaVu Sans"
+mono = "FiraCode Nerd Font"
+size = 10 # renders the example bar font-size 13
+
+[opacity]
+# 1.0 until look-layer-scoot's pixman benchmark passes; the example uses 0.78.
+bar = 1.0
+
+[shape]
+# 0 until look-layer-scoot's pixman benchmark passes; the example uses 12.
+radius = 0
+ring-width = 2
+ring-inactive-width = 2
+
+[cursor]
+theme = "Mocu"
+size = 24
+
+[wallpaper]
+color = "#271A1F"
+
+[night]
+temperature = 3200
+
+[apps.scootbar]
+"bar.padding" = 10
+"bar.separator" = 1
+"bar.spacing" = 8
+"workspaces.inactive-color" = "#A08C7A"

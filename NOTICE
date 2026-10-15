@@ -31,8 +31,9 @@ SOFTWARE.
 
 ----------------------------------------------------------------------------
 
-docs/assets/wallpapers/radial-burst.png is not part of scoot's MIT-licensed
-code and is not covered by its license. It is "Colorful radial lines exploding
+docs/assets/wallpapers/radial-burst.png and the identical
+looks/radial-burst/wallpaper.png are not part of scoot's MIT-licensed
+code and are not covered by its license. It is "Colorful radial lines exploding
 on a dark background" by Sufyan pir, published on Unsplash on June 18, 2026:
 
   https://unsplash.com/illustrations/colorful-radial-lines-exploding-on-a-dark-background-ETTtKnva9MM
@@ -40,17 +41,19 @@ on a dark background" by Sufyan pir, published on Unsplash on June 18, 2026:
 Its page (checked 2026-09-30) says "Free to use under the Unsplash License"
 (https://unsplash.com/license), which allows downloading, copying, modifying and
 distributing it, including commercially and without attribution, but not
-compiling images to build a similar or competing service. It is used only by the
-optional example in docs/examples/radial-burst; scoot, scootbar and scootbg do
+compiling images to build a similar or competing service. It is used by the
+optional example in docs/examples/radial-burst and the shipped look in
+looks/radial-burst; scoot, scootbar and scootbg do
 not embed it. It stays under the Unsplash License wherever scoot is
-redistributed; remove the file to drop it. The preview
+redistributed; remove both files to drop it. The preview
 docs/assets/radial-burst-preview.png is a screenshot of that example and shows
 the image, so the same applies to it.
 
 ----------------------------------------------------------------------------
 
-docs/assets/wallpapers/music-desk.png is not part of scoot's MIT-licensed
-code and is not covered by its license. It is the illustration "Musical
+docs/assets/wallpapers/music-desk.png and the identical
+looks/music-desk/wallpaper.png are not part of scoot's MIT-licensed
+code and are not covered by its license. It is the illustration "Musical
 instruments and audio equipment on a white surface" by Alghozy (@artgho),
 published on Unsplash:
 
@@ -59,10 +62,11 @@ published on Unsplash:
 It is free to use under the Unsplash License (https://unsplash.com/license),
 which allows downloading, copying, modifying and distributing it, including
 commercially and without attribution, but not compiling images to build a
-similar or competing service. It is used only by the optional example in
-docs/examples/music-desk; scoot, scootbar and scootbg do not embed it. It
-stays under the Unsplash License wherever scoot is redistributed; remove the
-file (and the `[wallpaper]` table in the example) to drop it. The preview
+similar or competing service. It is used by the optional example in
+docs/examples/music-desk and the shipped look in looks/music-desk; scoot,
+scootbar and scootbg do not embed it. It
+stays under the Unsplash License wherever scoot is redistributed; remove both
+files (and the `[wallpaper]` table in the example) to drop it. The preview
 docs/assets/music-desk-preview.png is a screenshot of that example and shows
 the image, so the same applies to it.
 
@@ -92,8 +96,9 @@ scoot's own looks, each under its look's terms in this file.
 
 ----------------------------------------------------------------------------
 
-docs/assets/wallpapers/moonrise.png is not part of scoot's MIT-licensed
-code and is not covered by its license. It is "Silhouetted trees under moon
+docs/assets/wallpapers/moonrise.png and the identical
+looks/moonrise/wallpaper.png are not part of scoot's MIT-licensed
+code and are not covered by its license. It is "Silhouetted trees under moon
 and stars" by saatvik 5554 (@saatvik_reddy_suravaram), published on Unsplash:
 
   https://unsplash.com/illustrations/silhouetted-trees-under-moon-and-stars-jwBJOj6gakI
@@ -101,10 +106,11 @@ and stars" by saatvik 5554 (@saatvik_reddy_suravaram), published on Unsplash:
 Its page (checked 2026-10-04) says "Free to use under the Unsplash License"
 (https://unsplash.com/license), which allows downloading, copying, modifying and
 distributing it, including commercially and without attribution, but not
-compiling images to build a similar or competing service. It is used only by the
-optional example in docs/examples/moonrise; scoot, scootbar and scootbg do
+compiling images to build a similar or competing service. It is used by the
+optional example in docs/examples/moonrise and the shipped look in
+looks/moonrise; scoot, scootbar and scootbg do
 not embed it. It stays under the Unsplash License wherever scoot is
-redistributed; remove the file (and the `[wallpaper]` table in the example) to
+redistributed; remove both files (and the `[wallpaper]` table in the example) to
 drop it. The preview docs/assets/moonrise-preview.png is a screenshot of that
 example and shows the image, so the same applies to it.
 

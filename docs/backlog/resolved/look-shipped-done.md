@@ -1,9 +1,10 @@
 ---
 title: "The five shipped looks as look.toml under looks/, validated in CI"
-status: "open"
-area: "core"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-15"
 ---
 
 # The five shipped looks as look.toml under looks/, validated in CI
@@ -49,6 +50,30 @@ and fails on a missing role"; no such check exists. And a change under
 
 The five files, the CI job running on a look-only change (and a deliberately
 broken look failing it), and the registry-equality check.
+
+## Resolution
+
+`looks/<name>/look.toml` for all five looks, from the registry's values,
+foot's 16 hues, and the examples' ring widths, padding, spacing and
+separator, with `[shape] radius = 0` and `[opacity] bar = 1.0` held and the
+examples' values beside them as comments (R3). Each look carries its
+wallpaper as `wallpaper.png` beside the manifest (byte-identical copies;
+vinyl-sunset keeps the flat background color since its illustration cannot
+be committed). The `scoot-look` test over `looks/`
+(`crates/scoot-look/tests/shipped.rs`) validates and renders every look
+there and locks the R3 hold plus the known dim/urgent warnings (music-desk
+dim 1.6 and urgent 2.9, vinyl-sunset dim 2.2; design table 1.57, 2.88,
+2.18, ratios round to one decimal: reported, never refused;
+retune or accept is the maintainer's call). The classify job gains a
+`looks/` path filter running only the look job. `nix/looks-shipped-check.nix`
+pins each manifest against the registry through the theme helper's own
+import (plus cursor/icon theme, wallpaper bytes by hash, and the style
+tokens against the example files); `nix/tests.nix` forces it at eval on
+every platform. The theming page's look table points at `looks/`, naming
+both the Nix and the non-Nix path. The examples keep their own copies of
+the values until the look layer lands (stripping them now would break
+`install.sh --look` with no working layer to point at), and music-desk's
+`popup-radius` plus the foot terminal sizes stay in the examples with them.
 
 ## Not in this ticket
 

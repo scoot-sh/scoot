@@ -1,0 +1,55 @@
+# Radial Burst: plum field, poster colors. Tokens lifted from
+# nix/modules/desktop.nix (palette, fonts, nightTemp, wallpaper) and
+# docs/examples/radial-burst/ (terminal hues, ring widths, bar style) per
+# docs/backlog/core/look-shipped.md. The registry names no hover: it defaults
+# to accent. The image stays under the Unsplash License (see NOTICE); the
+# tokens are MIT.
+schema = 1
+name = "radial-burst"
+title = "Radial Burst"
+description = "Plum field, blue and orange rings."
+polarity = "dark"
+license = "MIT AND LicenseRef-Unsplash"
+
+[palette]
+background = "#241721"
+foreground = "#fdef1d"
+dim = "#99911d"
+accent = "#31a9e5"
+urgent = "#bf128d"
+focus = "#31a9e5"
+border = "#e36e38"
+
+[terminal]
+colors = ["#241721", "#bf128d", "#99911d", "#fdef1d", "#31a9e5", "#6d1d98", "#fa9233", "#fdef1d", "#31a9e5", "#bf128d", "#99911d", "#fdef1d", "#31a9e5", "#bf128d", "#fa9233", "#fdef1d"]
+
+[fonts]
+ui = "DroidSansM Nerd Font Propo"
+sans = "DejaVu Sans"
+mono = "DejaVu Sans Mono"
+size = 12.5 # renders the example bar font-size 17
+
+[opacity]
+# 1.0 until look-layer-scoot's pixman benchmark passes; the example uses 0.88.
+bar = 1.0
+
+[shape]
+# 0 until look-layer-scoot's pixman benchmark passes; the example uses 16.
+radius = 0
+ring-width = 2
+ring-inactive-width = 2
+
+[cursor]
+theme = "Mocu"
+size = 24
+
+[wallpaper]
+image = "wallpaper.png"
+mode = "fill"
+
+[night]
+temperature = 3500
+
+[apps.scootbar]
+"bar.padding" = 12
+"bar.spacing" = 14

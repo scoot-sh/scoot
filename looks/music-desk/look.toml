@@ -1,0 +1,56 @@
+# Music Desk: the light look. Tokens lifted from nix/modules/desktop.nix
+# (palette, fonts, nightTemp, wallpaper) and docs/examples/music-desk/
+# (terminal hues, ring widths, bar style) per docs/backlog/core/look-shipped.md.
+# The image stays under the Unsplash License (see NOTICE); the tokens are MIT.
+schema = 1
+name = "music-desk"
+title = "Music Desk"
+description = "Paper background, blue ring, light."
+polarity = "light"
+license = "MIT AND LicenseRef-Unsplash"
+
+[palette]
+background = "#FCFBFB"
+foreground = "#1A2032"
+dim = "#C9CBD0"
+accent = "#3D579A"
+urgent = "#EE6F5E"
+hover = "#5D7AB0"
+focus = "#3D579A"
+border = "#D5D7DD"
+
+[terminal]
+colors = ["#1a2032", "#e0574a", "#5f7d3f", "#c9962a", "#3d579a", "#8a73c4", "#3f8a9a", "#a2a4a8", "#4d5463", "#ee6f5e", "#7a9a55", "#e6b440", "#5d7ab0", "#a493d6", "#5aa6b5", "#ebebea"]
+
+[fonts]
+ui = "DroidSansM Nerd Font Propo"
+sans = "DejaVu Sans"
+mono = "FiraCode Nerd Font"
+size = 10 # renders the example bar font-size 13
+
+[opacity]
+# 1.0 until look-layer-scoot's pixman benchmark passes; the example uses 0.7.
+bar = 1.0
+
+[shape]
+# 0 until look-layer-scoot's pixman benchmark passes; the example uses 14.
+radius = 0
+ring-width = 2
+ring-inactive-width = 2
+
+[cursor]
+theme = "Mocu"
+size = 24
+
+[wallpaper]
+image = "wallpaper.png"
+mode = "fill"
+
+[night]
+temperature = 4000
+
+[apps.scootbar]
+"bar.padding" = 10
+"bar.separator" = 1
+"bar.spacing" = 8
+"workspaces.inactive-color" = "#9AA0B0"
