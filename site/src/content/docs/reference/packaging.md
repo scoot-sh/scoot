@@ -6,10 +6,10 @@ description: "Build scoot from vendored sources with no network: toolchain, syst
 Build scoot the way a distro builder does: from a source tree that
 needs no network, with a toolchain and system libraries you provide.
 Start here if you maintain the Arch, deb or rpm package. The Arch
-PKGBUILDs (release and `-git`) have landed in
-[`packaging/arch/`][arch-pkg] and build on this page; the deb
-(`packaging/deb`, `deb.yml`) and rpm recipes have landed too --
-contributor history in [deb][deb-pkg], [rpm][rpm-pkg]. All three
+PKGBUILDs (release and `-git`) build on this page
+([`packaging/arch/`][arch-pkg]); the deb
+(`packaging/deb`, `deb.yml`) and rpm recipes have landed too
+([deb][deb-pkg], [rpm][rpm-pkg]). All three
 workflows are manual-only and no packages are shipped yet.
 
 [arch-pkg]: https://github.com/scoot-sh/scoot/blob/main/packaging/arch/README.md
@@ -40,11 +40,9 @@ cargo build --workspace --locked --offline
 ```
 
 `--locked` is not optional: `Cargo.lock` is committed, and every build
-here and in CI uses it, so the tree you audit is the tree that builds.
-The two git dependencies — the Smithay fork and the `wayland-backend`
+here and in CI uses it. The two git dependencies — the Smithay fork and the `wayland-backend`
 fork — resolve out of `vendor/` through this snippet (already in the
-tarball's `.cargo/config.toml`; the part most likely to break, and the
-part CI's vendor job re-proves on every dependency change):
+tarball's `.cargo/config.toml`, and re-proved by CI's vendor job on every dependency change):
 
 ```toml
 [source.crates-io]
@@ -68,8 +66,7 @@ directory = "vendor"
 
 A Rust toolchain at or past the workspace floor, and the system
 libraries below. Versions are what `ldd` reported on a release build
-(`cargo build --release -p scoot`, aarch64, 2026-10-07); sonames are
-what your package depends on, store paths are NixOS's and not yours.
+(aarch64); sonames are what your package depends on, store paths are NixOS's and not yours.
 
 | Feature set | Links (sonames) | Release `scoot` |
 |---|---|---|
@@ -77,14 +74,9 @@ what your package depends on, store paths are NixOS's and not yours.
 | `--no-default-features` (CPU-only minimal) | as default, minus nothing linked (there is neither GBM nor X11 code to link) | 6.7 MB |
 
 Notes on the table: sizes are `cargo build --release -p scoot` on
-aarch64, re-measured for this change (previously 6.8 MB default without
-the tier, 7.4 MB with `--features gpu-scanout`; the 8.3 MB default now
-includes `xwayland`, measured as the `+xwayland` delta before the fold).
-The single default build deliberately links no GPU stack even though it
+aarch64; the 8.3 MB default includes `xwayland`. The single default build deliberately links no GPU stack even though it
 compiles the scanout tier — it must run on a box with no GPU libraries
-installed, and CI fails a default build that references `libgbm` (with a
-positive control: the default binary must carry the stub's `libgbm.so.1`
-`dlopen` literal, or the negative check is vacuous). `libEGL`/`libGLESv2`
+installed, and CI fails a default build that references `libgbm`. `libEGL`/`libGLESv2`
 never appear in `ldd` for any build:
 the GLES renderer reaches them through `dlopen`. What the scanout tier
 buys is the [GBM scanout tier](../scoot/backends.md#which-renderer-draws-the-frames):
@@ -117,8 +109,7 @@ metadata — verify again at packaging time, toolchains move):
 | Nix / NixOS | the flake's pinned toolchain | Yes (never the distro's) |
 
 Debian stable and Ubuntu up to 25.10 cannot build scoot from their own
-toolchain today: that is a rustup (or newer distro) requirement, not a
-place to relax the floor.
+toolchain: use rustup or a newer distro.
 
 ## Forks: what is pinned and why
 

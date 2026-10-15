@@ -47,8 +47,7 @@ nixpkgs.overlays = [ inputs.scoot.overlays.default ];
 ```
 
 They are the flake's own builds, the same derivations as
-`packages.<system>.*`, not rebuilt against your nixpkgs — nothing is
-built twice. With the overlay applied, the modules' `package` and
+`packages.<system>.*`, not rebuilt against your nixpkgs. With the overlay applied, the modules' `package` and
 `wallpaper.package` default to these, which is what makes the pure
 modules usable without the flake's wrappers. On macOS the overlay adds
 the client-only `scoot` and no `scootbg` or `scootbar`. It never adds

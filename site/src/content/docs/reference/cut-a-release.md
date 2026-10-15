@@ -7,15 +7,14 @@ A release is one tag, `vX.Y.Z`, that releases every binary at the
 repository's one version. You choose the version in a release pull request
 and merge it. release-plz then creates the tag and starts the
 [release workflow](https://github.com/scoot-sh/scoot/blob/main/.github/workflows/release.yml)
-on it, which builds and publishes everything. What a version means, and how
+on it. What a version means, and how
 bumps are proposed, is on the [versions](./versions.md) page and in
 `docs/versioning.md`.
 
 ## Set up once: let workflows open the release PR
 
 There is no token or secret to create: release-plz runs on the workflow's
-own `GITHUB_TOKEN`, and starts the release and the release PR's CI by
-dispatching them (`docs/versioning.md` says why that works). The one
+own `GITHUB_TOKEN`. The one
 switch it needs is a repository setting, off by default:
 
 **Settings > Actions > General > Workflow permissions > Allow GitHub
@@ -34,26 +33,12 @@ merged release PR does not need it.
 ## Cut the first release (v0.2.0) by hand (historical)
 
 The first tag was **v0.2.0**, never a 0.1.x: FlakeHub already published
-rolling `0.1.*` versions, and a 0.1 tag would sort below them. The
-workspace read `0.2.0` at the time. release-plz waited for this first tag, so
-it was cut by hand, once. (Both `v0.2.0` and `v0.2.1` exist now; what
-follows is the record, kept so the next project bootstrapping release-plz
-has the steps.)
+rolling `0.1.*` versions, and a 0.1 tag would sort below them.
+release-plz waited for this first tag, so
+it was cut by hand, once. (Kept as the record.)
 
-First, a small PR that gives the release its changelog heading. In
-`CHANGELOG.md`, add the version heading, dated the day you tag
-(`YYYY-MM-DD`), directly under the Unreleased heading, so everything
-written so far becomes v0.2.0's notes:
-
-```text
-## Unreleased
-
-## [0.2.0] - YYYY-MM-DD
-
-### The built-in cursors are Mocu (behavior change)
-...
-```
-
+First, a small PR that adds the version heading to `CHANGELOG.md`,
+dated the day you tag (`YYYY-MM-DD`), directly under the Unreleased heading.
 Merge it, then tag that merge commit on an up-to-date `main` and push the
 tag:
 
@@ -66,9 +51,7 @@ git push origin v0.2.0
 ```
 
 `release-resolve` refuses a tag whose version is not the workspace
-version, or that is not on main. The push starts the release workflow;
-watch its first run (the next sections say what it does and how to
-recover).
+version, or that is not on main. The push starts the release workflow.
 
 ## Every release after that
 
@@ -132,8 +115,7 @@ gh workflow run release --ref v0.2.0 -f tag=v0.2.0 -f dry_run=false
 
 A dry run exercises the whole artifact round trip (vendor, build,
 download, assemble, checksums) but **not** the attestation or the
-release creation. If a real run fails after the build, use the recovery
-steps below before anyone downloads anything.
+release creation.
 
 ## When a run fails
 
@@ -187,9 +169,8 @@ GitHub-hosted runners with Docker (the arch builders), and third-party
 actions allowed (every action is pinned by commit SHA). The two pins a
 human bumps over time are the distro base (`debian:bookworm-slim`: the
 glibc floor) and the rustup toolchain (`1.97.0` in
-`.github/workflows/release.yml`: the portable binaries are built with
-Rust 1.97.0) — the toolchain must stay new enough to compile the tree
-(the workspace floor predates the let-chains in it), and the workflow
+`.github/workflows/release.yml`) — the toolchain must stay new enough to compile the tree,
+and the workflow
 asserts the toolchain and the glibc it produces on every run. Verify
 downloads with `gh attestation verify <file> --owner scoot-sh
 --signer-workflow scoot-sh/scoot/.github/workflows/release.yml` (see the

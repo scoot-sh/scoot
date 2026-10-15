@@ -5,7 +5,7 @@ description: "The help contract every binary meets, and where the generated page
 
 An agent learns scoot from `--help` before anything else, so every
 binary's help meets one contract, pinned by tests — and `--help
---json` carries the same content machine-readably. People read it too.
+--json` carries the same content machine-readably.
 
 ## The contract
 
@@ -15,7 +15,7 @@ binary's help meets one contract, pinned by tests — and `--help
   keys, environment variables and exit codes. Nothing load-bearing
   lives only in the docs.
 - **Example-led:** each command shows one or two real invocations with
-  the output shape, the first thing an agent copies.
+  the output shape.
 - **Stable and plain:** to stdout, exit 0, no color and no pager,
   wrapped under 100 columns, the same section order in every binary.
 - **Machine-readable:** `--help --json` (or `help --json`) emits the

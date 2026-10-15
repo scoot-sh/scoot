@@ -24,7 +24,7 @@ theme nothing.
 | [`wallpaper.png`](wallpaper.png) | the session wallpaper: a byte-identical copy of `docs/assets/CatPeeking.png` (the source PNG already beats a max-compression re-encode, so the copy is the optimization) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
-modules install it when the settings have a `[wallpaper]` table, from source
+modules install it when the settings have a `[wallpaper]` table, otherwise
 `cargo install --path crates/scootbg`), a font file
 for scootbar (see the comment in [`bar.toml`](bar.toml)), and `load.sh` and
 `cpu.sh` somewhere on your `PATH` (see the comment in [`bar.toml`](bar.toml)).
@@ -84,21 +84,20 @@ one-screen default and the other knobs.
 ## The palette
 
 Role-named, so the look registry absorbs this look without rework.
-Every hex below was sampled from `docs/assets/CatPeeking.png`
-(1672x941) with a stdlib PNG decoder (zlib + unfilter, no image
-library), not eyedroppered:
+Every hex below was sampled from `docs/assets/CatPeeking.png`,
+not eyedroppered:
 
 | Role | Color | Sampled from |
 | --- | --- | --- |
-| `surface` | near-black `#0E0E0E` | the field's center pixel (800,470); the 15 most common colors all sit in `#0C0C0C`–`#0F0E0E` |
-| `ink` | warm cream `#F5EAD6` | the two eye-catchlights (`#FFFFFF` at ~(1605,361) and ~(1506,418)), softened warm so body text does not glare on black |
-| `accent` | ginger `#E57F29` | the median of all 14,026 glyph pixels with R>150, 90≤G≤190, B<120 (mean `#DF8145`, median `#E57F29`) |
-| `ring` | bright ginger `#FF9A30` | the most common glyph-stroke colors (`#FFA230`, `#FF972A`, …): the stroke peaks the ring is drawn in |
-| `glow` | amber `#FFB14B` | a bright stroke variant from the same top-12 list: hover, prompt success, highlights |
-| `hush` | dark umber `#4E2913` | the shadowed fur at (1500,470): the inactive ring, entry fields |
+| `surface` | near-black `#0E0E0E` | the field's center |
+| `ink` | warm cream `#F5EAD6` | the two eye-catchlights, softened warm so body text does not glare on black |
+| `accent` | ginger `#E57F29` | the median of the glyph pixels |
+| `ring` | bright ginger `#FF9A30` | the most common glyph-stroke colors |
+| `glow` | amber `#FFB14B` | a bright stroke variant: hover, prompt success, highlights |
+| `hush` | dark umber `#4E2913` | shadowed fur: the inactive ring, entry fields |
 | `mist` | ginger taupe `#8F7A63` | dimmed ginger for separators, dimmed numbers, line numbers |
 | `ember` | ember red `#E05A4E` | hand-placed away from ginger so urgent never reads as accent: errors, deletions |
-| `sand` | dusty sand `#C9A87A` | git branch, graph text: the pale-glyph mid-tones warmed |
+| `sand` | dusty sand `#C9A87A` | git branch, graph text |
 | `ridge` | slate taupe `#7E8AA0` | ANSI blue/cyan family (kept cool so code keeps a second temperature) |
 | `moss` | muted sage `#8FA07A` | ANSI green family (kept desaturated to stay calm) |
 
@@ -110,8 +109,7 @@ role moonrise's mauve ring plays.
 
 ## What it costs
 
-The defaults stay light on purpose; this look spends some of that, so each piece is
-opt-in and you can drop any of them:
+Each piece is opt-in — drop any of them:
 
 - **The wallpaper** makes scootbg hold the decoded image: about 8 MB RSS at 1920x1080
   (1672x941 RGBA, output-sized buffer, not file-sized;
@@ -134,10 +132,8 @@ opt-in and you can drop any of them:
 
 ## Image credit and license
 
-`wallpaper.png` is a byte-identical copy of `docs/assets/CatPeeking.png`
-(926,588 bytes both; re-encoding the pixels at zlib level 9 with
-sub/up/adaptive filtering all came out larger: 927,754 / 985,838 /
-933,955 bytes, so the source is already optimal). The image is the
+`wallpaper.png` is a byte-identical copy of `docs/assets/CatPeeking.png`.
+The image is the
 maintainer's own asset, already committed in this repository, so it
 ships with the look under the repository's MIT license — unlike the
 Unsplash/Pixabay illustrations behind the other looks, which stay

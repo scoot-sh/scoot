@@ -20,7 +20,7 @@ scootbar or scootbg changes unless you use these files.
 | [`regreet.css`](regreet.css) | ReGreet: the login screen in paper, ink and headphone blue (NixOS greeter) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
-modules install it when the settings have a `[wallpaper]` table, from source
+modules install it when the settings have a `[wallpaper]` table, otherwise
 `cargo install --path crates/scootbg`), a font file
 for scootbar (see the comment in [`bar.toml`](bar.toml)), and `load.sh` and
 `cpu.sh` somewhere on your `PATH` (see the comment in [`bar.toml`](bar.toml)).
@@ -86,8 +86,7 @@ foot, starship, Helix, btop and lazygit are all themed from these hues.
 
 ## What it costs
 
-The defaults stay light on purpose; this look spends some of that, so each piece is
-opt-in and you can drop any of them:
+Each piece is opt-in — drop any of them:
 
 - **The wallpaper** makes scootbg hold the decoded image: about 12 MB RSS at 1920x1080
   and about 37 MB on two 4K outputs, against about 4 MB for a solid color (measured with
