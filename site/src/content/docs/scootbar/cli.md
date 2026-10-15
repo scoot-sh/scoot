@@ -325,8 +325,9 @@ On the wire the scoped reload is its own `reload-look` request (never a
 fields and would run a plain reload on the field form, applying pending
 edits before any refusal). A scoped success answers
 `{"type":"ok","scope":"look"}`; an old bar answers the `reload-look`
-request with an ordinary `{"type":"error","message":"unknown request
-'reload-look'"}` and applies nothing.
+request with an ordinary
+`{"type":"error","message":"unknown request \`reload-look\`"}` and applies
+nothing.
 `hide`, `show` and `toggle` are
 [below](./configure.md#hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
 `toggle` print the reply; `kill`, `set` and `invoke` print nothing on success,

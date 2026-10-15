@@ -40,15 +40,18 @@ swap that changes nothing it was asked to still answers applied; check
 
 On refusal nothing half-applies. An invalid look refuses before anything
 is touched. A refused reload rolls the swap back: the record and the link
-go back to the previous look, the reloads with a positive receipt run
-again against the restored choice, and the reply names the refusal. A
-peer that refused — an old compositor or bar included — never accepted
-the new layer, so it is never re-run and nothing ever retries as a plain
-reload. If a rollback reload also refuses, the reply
+go back to the previous look, the reloads that may hold the new layer run
+again against the restored choice, and the reply names the refusal. That
+is a positive receipt, a partial one (the compositor applied some fields
+and refused others), and a sent-but-unanswered one (a timeout, a
+connection closed after the write). A peer that refused outright — an old
+compositor or bar included — never accepted the new layer, so it is never
+re-run and nothing ever retries as a plain reload. If a rollback reload
+also refuses, the reply
 says `ROLLED BACK WITH ERRORS` with both reasons; each app is on its old
 or its new look, never between — except a first-ever apply with no
-previous look: there is nothing to reload back to, so whatever positively
-reloaded still shows the new look while no look is recorded, and the
+previous look: there is nothing to reload back to, so whatever may hold
+the new look still shows it while no look is recorded, and the
 reply names exactly that.
 
 Every command takes `--json` (the reply as JSON on stdout, notes on

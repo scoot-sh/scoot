@@ -94,7 +94,7 @@ The design this implements against: [live looks](../../../dev/research/live-look
 
 ## Resolution (2026-10-15)
 
-PR https://github.com/scoot-sh/scoot/pull/628 (open, not merged): `scoot look list|current|show|validate|build|apply`
+PR #628: `scoot look list|current|show|validate|build|apply`
 lands as a subcommand of the existing CLI (`scootctl::look`, parsed and run
 through the client library like `msg`, so `scoot --help` and the JSON help
 document cannot drift from it), plus `scoot look toolkit [on|off]` and
@@ -109,51 +109,80 @@ step writes `color-scheme` from polarity under the D11 rules with
 `look.json` beside the choice. The dogfood settings and their cost are on
 the new [looks page](../../../site/src/content/docs/looks/index.md).
 
-Second fix round (pushed as `53bff9e73`, same PR): ten review findings,
-each reproduced with a failing test against the real binary or a byte-exact
-wire fake before fixing — the scoped bar reload as a distinct `reload-look`
-verb (a real pre-scope bar applied a pending `height 28 -> 90` on the old
-bytes and answers `unknown request` with nothing applied on the new ones),
-rollback only re-running positive receipts, whole-stderr bar checks with a
-popup-less re-render (real `--no-default-features` binary beside `scoot`:
-`apply` and `build` exit 0), conditional `toolkit off` with tri-state dconf
-reads, `validate .`, the bar check in `validate`, an honest first-apply
-note, followed symlinks for user configs and farm manifests, and guarded
-`build --out` staging. Details and per-finding evidence:
-`scratchpad/fix628b-report.md` (unpublished working notes, not in this PR).
+Third fix round (same PR): nine review findings, each reproduced with a
+failing test against the real binary or a byte-exact wire fake before
+fixing — `cargo fmt` clean, rollback re-running partially-applied and
+sent-but-unanswered compositor reloads (a `Reloaded` reply with a
+non-empty `refused` holds the applied fields; a 30 s timeout or a close
+after the write may hold the new layer; only an explicit error reply, the
+"predates" wall or a never-sent request skips the re-run), shipped looks
+applying on a `--no-default-features` bar (module tokens the installed
+bar lacks are dropped with a note, the way popup keys are), the stage dir
+created 0700 with dead-pid stages swept at start, `validate .` inside a
+symlinked look dir preferring `$PWD`'s entry name, no `/tmp` litter from
+the look tests, and one canonicalize in the catalog scan.
 
-Evidence (dev VM, Linux, both at `53bff9e73` unless noted):
+Evidence (dev VM, Linux, at the pushed head unless noted):
 
-- `cargo build --workspace`: clean.
-- `cargo nextest run --workspace --no-fail-fast`: 5479 run, 5477 passed,
-  50 skipped, 2 failed — the pre-existing xwayland `refused_cost` fd-budget
-  failure (fails on main too) and one new test in pre-hardened form (fixed
-  the same day; the rerun over `scootctl`/`scoot-look`/`scootbar`/`scoot`
-  is 4456 run, 4455 passed, 46 skipped, 1 failed: only the xwayland one).
-- `cargo test -p scootctl -p scoot-look -p scootbg -p scootbar`: every suite
-  ok, 0 failed (incl. 80 `scootctl` look unit tests and the 4
-  `look_apply_cli` headless integration tests against the real binary:
-  offline commands, two-look swap, pending-bind scope, JSON failure shapes).
-- `cargo clippy -p scoot -p scootctl -p scoot-look -p scootbg -p scootbar -p scoot-ipc --all-targets -D warnings`: clean; the `scootbar`
-  per-feature matrix (default, none, each module alone, `popup` with each)
-  clean; `scootbg`/`scootbg-mem` clippy clean with no `libc` dependency.
-- `cargo fmt --check`: clean. `scripts/backlog check`: 0 problems.
-- `scripts/smoke-test.sh` with `SMOKE_REQUIRE_SCOOTBG=1`: passes.
-- `nix build .#docs-site`: passes (llms, page-link, asset, snippet and
-  mdx-twin gates with the new pages).
+- `cargo build -p scoot -p scootbg -p scootbar`: clean (debug and
+  release). Full-workspace clippy:
+  `cargo clippy -p scoot -p scootctl -p scoot-look -p scootbg -p scootbar -p scoot-ipc --all-targets -- -D warnings`:
+  clean; the `scootbar` per-feature matrix (default, none, each module
+  alone, `popup` with each) clean.
+- `cargo nextest run -p scootctl -p scoot-look -p scootbar -p scootbg
+  --no-fail-fast`: 2380 run, 2380 passed, 7 skipped, 0 failed (incl. the
+  new partial/unanswered rollback tests, the byte-exact `Reloaded` wire
+  tests with the real field names, the timeout fake, and the minimal-bar
+  drop tests), plus `cargo nextest run -p scoot --test look_apply_cli`:
+  4 passed, 0 failed (the headless integration tests against the real
+  binary: offline commands, two-look swap, pending-bind scope, JSON
+  failure shapes).
+- `cargo fmt --all --check`: clean. `scripts/backlog check`: 0 problems
+  (run on macOS: the VM has no `python3`).
+- `scripts/smoke-test.sh` with `SMOKE_REQUIRE_SCOOTBG=1`: exit 0, 45
+  `ok:` lines (incl. the looks section: unknown-look refusal plus
+  vinyl-sunset to ginger-night with pixel checks).
+- Minimal bar, real binaries: `cargo build -p scootbar
+  --no-default-features` beside `scoot`, then `scoot look build` and
+  `scoot look apply` of a look carrying `[apps.scootbar]
+  "workspaces.inactive-color"`: exit 0 with
+  `bar without 'popup': rendered without popup-radius` and
+  `bar without 'workspaces': rendered without workspaces tokens
+  (inactive-color)`. The un-downgraded fragment against the minimal
+  binary answers exactly
+  `unknown field 'inactive-color', there are no fields` (and
+  `unknown field 'popup-radius', expected one of ...` with the popup
+  keys present); against the default binary the same fragment answers
+  `ok` and no token is dropped.
 - Live headless screenshots across a moonrise to ginger-night swap with
   differing background pixels (prior round, unchanged).
 
-Swap cost (dev VM, `53bff9e73` debug build, headless, 1 output, no bar,
-dconf disabled, alternating two color-only looks, cache warm after 3
-warmups; wall time per `scoot look apply`, frame proxy per `scoot msg
-screenshot` round trip):
+Swap cost, color-only case (dev VM, debug build, headless, 1 output, no
+bar, dconf disabled, alternating `look-color-a` / `look-color-b`: two
+color-only looks with color wallpapers `#2B3648` / `#3B4A5C`, no
+wallpaper image, cache warm after 3 warmups; wall time per
+`scoot look apply LOOK --state STATE --socket SOCK`, `scoot msg
+screenshot` round trip per `--no-cursor --out shot.png`):
 
-| run | apply wall ms | shot at rest ms | shot post-swap ms |
+| run | apply wall ms | shot post-swap ms | shot at rest ms |
 |---|---|---|---|
-| 1–20 | 372, 369, 369, 373, 371, 375, 370, 373, 371, 378, 374, 374, 377, 373, 376, 370, 375, 373, 375, 374 | 219, 189, 179, 185, 186, 184, 185, 184, 172, 177, 180, 174, 181, 173, 173, 176, 181, 179, 185, 185 | 176, 200, 182, 183, 178, 188, 179, 179, 184, 187, 188, 188, 186, 187, 191, 183, 188, 184, 185, 188 |
+| 1–20 | 375, 373, 369, 376, 373, 394, 370, 372, 369, 368, 380, 366, 377, 369, 370, 373, 395, 373, 372, 370 | 73, 62, 59, 74, 55, 60, 67, 54, 60, 59, 66, 55, 74, 54, 56, 63, 54, 66, 57, 55 | 53, 51, 51, 51, 51, 51, 51, 51, 51, 51, 51, 51, 50, 50, 51, 50, 51, 51 |
 
-Supplement: screenshots taken concurrently *during* six further swaps
-(36 samples): 169–179 ms, indistinguishable from rest. The swap adds no
-frame debt on this path; per-frame allocation audit after a swap is still
-open (no instrumentation landed for it).
+Commands (with `SCOOT_LOOKS_DIR=/tmp/looks-628c`,
+`XDG_*_HOME`/`HOME` under `/tmp/swapA-628c`, `DBUS_SESSION_BUS_ADDRESS=disabled:`,
+session `scoot --headless --width 800 --height 600 --socket SOCK --config empty.toml`).
+
+Swap cost, realistic case (dev VM, release build
+`cargo build --release -p scoot -p scootbar -p scootbg`, headless, 1
+output, live default bar on the session display, `scootbg` on `PATH`,
+dconf disabled, alternating `look-img-a` / `look-img-b`: image
+wallpapers from ginger-night / moonrise, cache warm after 3 warmups,
+N=20, same commands with the release binary):
+
+| run | apply wall ms | shot post-swap ms | shot at rest ms |
+|---|---|---|---|
+| 1–20 | 468, 424, 473, 421, 474, 422, 475, 424, 421, 423, 471, 423, 466, 420, 472, 425, 472, 420, 471, 422 | 5, 9, 31, 8, 29, 7, 44, 7, 29, 5, 29, 6, 32, 5, 15, 6, 30, 6, 32, 5 | 24, 24, 24, 41, 41, 42, 41, 25, 24, 41, 25, 24, 41, 41, 42, 42, 25, 25, 41, 26 |
+
+Post-swap `scoot msg screenshot` round trips sit with at-rest ones in
+both cases; per-frame allocation audit after a swap is still open (no
+instrumentation landed for it).
