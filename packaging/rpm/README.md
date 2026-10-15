@@ -35,8 +35,10 @@ compositor links `libinput.so.10`, `libseat.so.1`, `libudev.so.1`,
 `libpixman-1.so.0`, `libxkbcommon.so.0`, and the wallpaper daemon and the
 bar link nothing past the C library. Runtime requirements for those
 sonames are auto-generated from the binaries at build time, so only the
-`-devel` names below are written in the specs. Re-run the two
-provider queries at packaging time, names move:
+`-devel` names below are written in the specs. Verified 2026-10-08
+against each distro's own metadata (`dnf repoquery --whatprovides` on
+Fedora 43, `zypper what-provides` on Tumbleweed); re-run those two
+commands at packaging time, names move:
 
 | Soname | Fedora 43 (dnf) | openSUSE Tumbleweed (zypper) |
 |---|---|---|
@@ -56,7 +58,9 @@ Notes:
   local `rpmbuild` edit, not a separate spec.
 - Toolchain floor: both distros clear the workspace floor
   (`rust-version = "1.88"`), so no rustup is needed in the build
-  containers (toolchains move, so re-check at build time).
+  containers — Fedora 43 resolves rust 1.98.1, Tumbleweed ships rust
+  1.98.1 (both re-measured 2026-10-08 with the same queries;
+  toolchains move, so re-check at build time).
 - `cargo-deny` exists on Fedora but has no openSUSE package, so no spec
   runs it: `THIRD-PARTY-LICENSES` arrives inside the vendored tarball
   (staged by `scripts/vendor-release.sh`) and the specs only install it.
@@ -118,8 +122,13 @@ Notes:
   the `--check` on the installed example would test a file the package
   owns but the container never wrote.
 - No `-debuginfo`/`-debugsource` subpackages (`debug_package %{nil}`):
-  the vendored crate sources carry their upstream modes, which fails
-  `brp-mangle-shebangs` over `/usr/src/debug`.
+  the vendored crate sources carry their upstream modes (executable
+  `.rs` files plus a `#!` attribute line in one crate that is not a
+  shebang), which fails `brp-mangle-shebangs` over `/usr/src/debug`.
+  The revisit, if distro-grade inclusion ever wants debuginfo, is a
+  mode-normalizing `find vendor -type f -exec chmod a-x {} +` in `%prep`
+  (cargo checks content hashes, not modes, so the build is unaffected)
+  — not yet proven, so not yet shipped.
 
 ## Architectures
 
@@ -148,9 +157,11 @@ and what stays manual:
 - **Not done here, on purpose.** No COPR account was touched, no project
   created, nothing uploaded, no token in any file: creating the project
   and the first build is a manual maintainer step (the COPR new-project
-  flow plus `copr-cli buildscm`).
-  The `Source0` name is the release asset's real
-  name, `scoot-<version>-vendored.tar.gz`; the `.copr/Makefile` is written at setup, against that
+  flow plus `copr-cli buildscm`), exactly like the AUR push stays manual
+  for the Arch packages. The `Source0` name is the release asset's real
+  name, `scoot-<version>-vendored.tar.gz` (release.yml passes the version
+  to `scripts/vendor-release.sh --label`; see the comment at the top of
+  `scoot.spec`); the `.copr/Makefile` is written at setup, against that
   name.
 
 ## Cutting a release (maintainer)
@@ -179,7 +190,10 @@ with `rpmlint`, installs the trio, and runs `scoot --version`,
 the shipped example, and — in the Fedora container only — the headless smoke test
 (`scripts/smoke-test.sh`) against the installed binaries. The
 `desktop-file-validate` gate on the session entry also runs in the
-Fedora container only. The one thing CI cannot prove yet: the `Source0` URLs, which
+Fedora container only: the file is identical in both jobs, and
+`rpm-build` itself requires `gawk`, which conflicts with the Tumbleweed
+image's `busybox-gawk` (removed first in CI; `desktop-file-utils` stays
+out for the same reason). The one thing CI cannot prove yet: the `Source0` URLs, which
 404 until the first release is cut; until then the staged tarball is
 placed under that same name, and only the URL part is
 substitution.

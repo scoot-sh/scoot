@@ -23,7 +23,8 @@ compositor package at all (standard Wayland protocols only).
 ## Why `dpkg-deb`, not `cargo-deb`
 
 This tree builds the `.deb`s with `cargo` plus
-`dpkg-deb` instead of `cargo-deb`:
+`dpkg-deb` instead (a maintainer-away decision, trivially reversible:
+`build-deb.sh` is one script and the manifests are untouched):
 
 - It mirrors the Arch shape (`packaging/arch` builds with `cargo` and
   stages files; no manifest metadata).
@@ -65,7 +66,8 @@ probes, `crates/scootbar/src/font.rs`).
 ## Toolchain: the distro's rustc is too old, so the container pins one
 
 The workspace floor is `rust-version = "1.88"`. Bookworm ships 1.63,
-noble 1.75, trixie 1.85.1 -- none builds the tree.
+noble 1.75, trixie 1.85.1 -- none builds the tree (the site packaging
+page's table, checked 2026-10-07).
 The build container installs a newer toolchain instead:
 the same rustup pin the
 release builds use (`RUST_TOOLCHAIN: 1.97.0` in `release.yml` and
@@ -152,7 +154,9 @@ Decision: `reprepro` (reversible -- the repo is
 static files either way). It is in the Debian archive (no third-party
 binary to trust), handles several distributions in one repository
 (`conf/distributions`), and signs with an ordinary GPG key at export
-time.
+time. `aptly` would do the same job with its own database and more
+moving parts; if it ever fits better, only the publisher side
+changes -- the `.deb`s and the client setup below do not.
 
 What ships here (needs no secret): `make-repo-index.sh` builds the
 unsigned metadata (`Packages`, `Packages.gz`, `Release`) from a
@@ -178,7 +182,8 @@ What the maintainer must provide before the repository goes live
    CI secret, or a maintainer-side sign-and-upload -- decided then;
    no secret name or value is pre-created here).
 
-Publishing then looks like this (maintainer runs it, not CI):
+Publishing then looks like this (maintainer runs it, not CI, until
+item 5 is decided):
 
 ```sh
 reprepro -b /srv/apt/scoot includedeb bookworm scoot_0.2.1-1_amd64.deb
