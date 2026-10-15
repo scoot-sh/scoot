@@ -42,9 +42,10 @@
 //!
 //! [`state`] is the per-session state (`<state>/look.json` plus the `look`
 //! link): the state-dir rule scoot and scootbar share (scootbg takes no
-//! look state), the record, the link repair the compositor runs at startup,
-//! the seed a private session copies at startup, and the lock every writer
-//! takes for the future `look-apply-cli` tool.
+//! look state), the record (with the toolkit half: `toolkit` and the last
+//! `color-scheme` the tool wrote), the link repair the compositor runs at
+//! startup, the seed a private session copies at startup, and the lock
+//! every writer takes for the `scoot look apply` tool.
 //!
 //! The effectful checks live in the caller: fonts through their carrier,
 //! the wallpaper through `scootbg check-image`, the fragments through the

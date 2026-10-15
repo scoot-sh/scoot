@@ -45,6 +45,8 @@ fn record(name: &str, rendered: &str, generation: u64) -> Record {
         generation,
         chosen_by: Some("apply".to_owned()),
         declared_default: Some("ginger-night".to_owned()),
+        toolkit: None,
+        color_scheme: None,
     }
 }
 

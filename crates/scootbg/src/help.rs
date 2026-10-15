@@ -63,6 +63,11 @@ pub const COMMANDS: &[CommandDoc] = &[
         usage: "apply-config [--profile NAME] JSON",
         description: "apply scoot's [wallpaper] section (what scoot runs)",
     },
+    CommandDoc {
+        name: "check-image",
+        usage: "check-image PATH",
+        description: "validate an image file without showing it",
+    },
 ];
 
 /// Exit codes the binary uses: 0 for success (help included), 1 when the
@@ -238,6 +243,7 @@ mod tests {
             ("version", crate::cli::VERSION_HELP.to_owned()),
             ("kill", crate::cli::KILL_HELP.to_owned()),
             ("apply-config", crate::cli::APPLY_CONFIG_HELP.to_owned()),
+            ("check-image", crate::cli::CHECK_IMAGE_HELP.to_owned()),
         ];
         for (name, page) in pages {
             let row = COMMANDS

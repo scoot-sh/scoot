@@ -15,6 +15,7 @@ pub const BACKEND_USAGE: &str = "\
     scoot --tty [OPTIONS] [-- COMMAND...]
     scoot --print-default-config [--write]
     scoot --version
+    scoot look COMMAND [--json]
     scoot msg REQUEST
     scoot msg --help [--json]
     scoot msg help [TOPIC|VERB|--json]
@@ -87,6 +88,8 @@ pub enum HelpPage {
     ClientVerb { verb: String },
     /// The client document (`scoot msg --help --json`).
     ClientJson,
+    /// The look surface (`scoot look --help`): list, inspect and swap looks.
+    Look,
 }
 
 impl HelpPage {
@@ -107,6 +110,7 @@ impl HelpPage {
                 scootctl::help::verb_text(verb, "scoot msg").unwrap_or_else(usage)
             }
             Self::ClientJson => scootctl::help::json("scoot msg", false),
+            Self::Look => scootctl::look::usage(),
         }
     }
 }
@@ -129,6 +133,8 @@ pub fn usage() -> String {
         \x20   scoot msg windows\n\
         \x20   scoot msg action focus-workspace-index 2\n\
         \x20   scoot msg screenshot --out /tmp/shot.png\n\
+        \x20   scoot look list\n\
+        \x20   scoot look apply moonrise\n\
         ",
     );
     text.push_str("\nEXIT CODES:\n");
@@ -141,7 +147,7 @@ pub fn usage() -> String {
     }
     text.push_str(&format!(
         "\nSEE ALSO:\n\
-        \x20   `scoot help config`, `scoot msg help requests`, `scoot msg help actions`\n\
+        \x20   `scoot help config`, `scoot look --help`, `scoot msg help requests`, `scoot msg help actions`\n\
         \x20   docs: {0}/scoot/configure.md and {0}/msg/\n\
         \x20   agents start at {0}/llms.txt\n",
         scoot_ipc::DOCS_URL
@@ -371,6 +377,15 @@ fn json_value() -> serde_json::Value {
     root.insert(
         "client".into(),
         scootctl::help::json_value("scoot msg", false),
+    );
+    root.insert(
+        "look".into(),
+        serde_json::Value::from(
+            scootctl::look::COMMANDS
+                .iter()
+                .map(|command| serde_json::Value::from(*command))
+                .collect::<Vec<_>>(),
+        ),
     );
     root.insert(
         "config_sections".into(),
@@ -628,6 +643,10 @@ pub enum Command {
         write: bool,
     },
     Compositor(CompositorOptions),
+    /// `scoot look ...`: list, inspect and atomically swap looks. Parsed
+    /// through the `scootctl` library crate's `look` module, never
+    /// reimplemented here, so there is exactly one grammar -- like `msg`.
+    Look(scootctl::look::Look),
     Msg {
         request: Request,
         out: Option<PathBuf>,
@@ -773,6 +792,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> 
         Some("--nested") => compositor(args, true, false).map(Command::Compositor),
         Some("--tty") => compositor(args, false, true).map(Command::Compositor),
         Some("msg") => msg_alias(args.collect()),
+        Some("look") => look_alias(args.collect()),
         Some(other) => Err(hinted(
             "argument",
             other.to_owned(),
@@ -783,6 +803,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> 
                 "--version",
                 "--print-default-config",
                 "msg",
+                "look",
                 "--help",
                 "help",
             ],
@@ -799,6 +820,7 @@ fn help_args(args: Vec<String>) -> Result<Command, Error> {
         [] => Ok(Command::Help(HelpPage::Main)),
         [only] if only == "--json" => Ok(Command::Help(HelpPage::Json)),
         [only] if only == "config" => Ok(Command::Help(HelpPage::Config)),
+        [only] if only == "look" => Ok(Command::Help(HelpPage::Look)),
         [only] if only == "help" => Ok(Command::Help(HelpPage::Main)),
         [only] => {
             if let Some(topic) = scootctl::help::Topic::parse(only) {
@@ -818,6 +840,20 @@ fn help_args(args: Vec<String>) -> Result<Command, Error> {
             ))
         }
         [_, extra, ..] => Err(Error::Unknown(extra.clone())),
+    }
+}
+
+/// `scoot look ...`: the look alias. `--help` (or `help`) right after
+/// `look` asks for the look help instead of a command -- every other word
+/// parses through the client library's `look` module, so `look` cannot
+/// drift.
+fn look_alias(args: Vec<String>) -> Result<Command, Error> {
+    match args.as_slice() {
+        [] => Ok(Command::Help(HelpPage::Look)),
+        [only] if only == "--help" || only == "-h" || only == "help" => {
+            Ok(Command::Help(HelpPage::Look))
+        }
+        _ => scootctl::look::parse_look(args).map(Command::Look),
     }
 }
 
@@ -1902,6 +1938,86 @@ mod tests {
                 (Err(left), Err(right)) => assert_eq!(left, right, "{case:?}"),
                 (left, right) => panic!("msg/library diverged on {case:?}: {left:?} vs {right:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn the_look_command_parses_through_the_client_library() {
+        // The structural pin behind "look cannot drift": every one of
+        // these arg vectors must parse to the same command (or the same
+        // error) through `scoot look ...` as through the client library's
+        // own parser directly.
+        let cases: &[&[&str]] = &[
+            &["list"],
+            &["list", "--json"],
+            &["current"],
+            &["show", "moonrise"],
+            &["show", "moonrise", "--json"],
+            &["validate", "looks/moonrise"],
+            &["validate", "moonrise", "--origin", "shipped"],
+            &["build", "looks/moonrise", "--out", "/tmp/out"],
+            &["apply", "moonrise"],
+            &["apply", "moonrise", "--no-toolkit", "--json"],
+            &["toolkit"],
+            &["toolkit", "off"],
+            &["apply", "moonrise", "--state", "/s", "--socket", "/sock"],
+            &["frobnicate"],
+            &["show"],
+            &["show", "../evil"],
+            &["apply"],
+            &["build", "moonrise"],
+            &["validate", "moonrise", "--origin", "nix"],
+            &["toolkit", "maybe"],
+        ];
+        for case in cases {
+            let mut aliased: Vec<&str> = vec!["look"];
+            aliased.extend(case.iter());
+            let through_alias = parse_args(&aliased);
+            let direct = scootctl::look::parse_look(case.iter().map(|a| (*a).to_owned()));
+            match (through_alias, direct) {
+                (Ok(Command::Look(left)), Ok(right)) => {
+                    assert_eq!(left, right, "{case:?}");
+                }
+                (Err(left), Err(right)) => assert_eq!(left, right, "{case:?}"),
+                (left, right) => panic!("look/library diverged on {case:?}: {left:?} vs {right:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn look_help_routes_and_usage_names_it() {
+        assert_eq!(parse_args(&["look"]), Ok(Command::Help(HelpPage::Look)));
+        assert_eq!(
+            parse_args(&["look", "--help"]),
+            Ok(Command::Help(HelpPage::Look))
+        );
+        assert_eq!(
+            parse_args(&["look", "help"]),
+            Ok(Command::Help(HelpPage::Look))
+        );
+        assert_eq!(
+            parse_args(&["help", "look"]),
+            Ok(Command::Help(HelpPage::Look))
+        );
+        assert!(
+            usage()
+                .lines()
+                .any(|line| line.trim() == "scoot look COMMAND [--json]"),
+            "--help hides the look subcommand"
+        );
+        assert!(
+            HelpPage::Look.text().contains("look apply NAME"),
+            "look help hides apply"
+        );
+        let document: serde_json::Value = serde_json::from_str(&json()).unwrap();
+        let commands: Vec<&str> = document["look"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|command| command.as_str().unwrap())
+            .collect();
+        for verb in scootctl::look::COMMANDS {
+            assert!(commands.contains(verb), "look JSON hides `{verb}`");
         }
     }
 }

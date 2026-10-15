@@ -85,6 +85,9 @@ fn run() -> Result<(), Failure> {
         }
         cli::Command::Msg { request, out, json } => scootctl::run(&request, out.as_deref(), json)
             .map_err(|error| Failure::Runtime(error.to_string())),
+        cli::Command::Look(look) => {
+            scootctl::look::run(&look).map_err(|error| Failure::Runtime(error.to_string()))
+        }
         cli::Command::PrintDefaultConfig { write } => {
             print_default_config(write).map_err(|error| Failure::Runtime(error.to_string()))
         }

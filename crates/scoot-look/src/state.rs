@@ -19,13 +19,12 @@
 //! wipes and reseeds it.
 //!
 //! [`acquire_lock`], [`write_atomic`] and [`write_record`] are the swap path
-//! the future `look-apply-cli` tool owns: every writer takes the
+//! `scoot look apply` owns: every writer takes the
 //! `<state>/look.lock` [`StateLock`] (a second writer waits a bounded time,
 //! then refuses) and writes through [`write_atomic`] (a unique temp file,
 //! opened without following symlinks, plus `rename`), so a reader racing a
 //! swap sees the old or the new directory, never a half-written one.
-//! Nothing calls them yet outside tests. A missing record is "no choice
-//! recorded yet", not an error; a corrupt one (bad JSON, a name outside the
+//! A missing record is "no choice recorded yet", not an error; a corrupt one (bad JSON, a name outside the
 //! `[a-z0-9-]{1,32}` grammar, a `rendered` that is not an absolute path
 //! without `..`) is a loud warning at the call site,
 //! and the link is left alone: startup never fails over a look.
@@ -154,6 +153,16 @@ pub struct Record {
     /// The declared default in force when the choice was made (`sync`'s
     /// rule 2 compares against it); `None` for no declared default.
     pub declared_default: Option<String>,
+    /// Whether `apply` writes the toolkit keys (today only
+    /// `org.gnome.desktop.interface color-scheme`, from the look's
+    /// polarity). `None` and `Some(true)` both mean on; only an explicit
+    /// `Some(false)` (`scoot look toolkit off`) skips every dconf write.
+    pub toolkit: Option<bool>,
+    /// The `color-scheme` value the tool last wrote, if it wrote one:
+    /// before writing again the tool reads the live value, and a value
+    /// that is neither unset nor this one means someone else changed it,
+    /// so the tool leaves it alone (design D11).
+    pub color_scheme: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -168,6 +177,10 @@ struct RawRecord {
     chosen_by: Option<String>,
     #[serde(default, rename = "declared-default")]
     declared_default: Option<String>,
+    #[serde(default)]
+    toolkit: Option<bool>,
+    #[serde(default, rename = "color-scheme")]
+    color_scheme: Option<String>,
 }
 
 /// How reading the record went.
@@ -264,12 +277,21 @@ fn validate_record(raw: RawRecord) -> Result<Record, String> {
             "{RECORD_FILE}: `declared-default` must match [a-z0-9-]{{1,32}}, not `{declared}`"
         ));
     }
+    if let Some(scheme) = &raw.color_scheme
+        && check_display_text("color-scheme", scheme, 64).is_some()
+    {
+        return Err(format!(
+            "{RECORD_FILE}: `color-scheme` must be plain text of at most 64 bytes"
+        ));
+    }
     Ok(Record {
         name,
         rendered,
         generation,
         chosen_by: raw.chosen_by,
         declared_default: raw.declared_default,
+        toolkit: raw.toolkit,
+        color_scheme: raw.color_scheme,
     })
 }
 
@@ -298,6 +320,15 @@ pub fn record_json(record: &Record) -> String {
         out.insert(
             "declared-default".to_owned(),
             serde_json::Value::String(declared.clone()),
+        );
+    }
+    if let Some(toolkit) = record.toolkit {
+        out.insert("toolkit".to_owned(), serde_json::Value::Bool(toolkit));
+    }
+    if let Some(scheme) = &record.color_scheme {
+        out.insert(
+            "color-scheme".to_owned(),
+            serde_json::Value::String(scheme.clone()),
         );
     }
     serde_json::Value::Object(out).to_string()

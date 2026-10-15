@@ -10,6 +10,7 @@
 use std::borrow::Cow;
 use std::ffi::OsString;
 use std::fmt;
+use std::path::PathBuf;
 
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
@@ -49,6 +50,9 @@ COMMANDS:
     apply-config
                apply scoot's [wallpaper] section, starting the daemon if
                none runs (what scoot runs; see `scootbg apply-config --help`)
+    check-image
+               validate an image file without showing it (what `scoot look`
+               runs over a look's wallpaper; see `scootbg check-image --help`)
 
 The daemon listens on $XDG_RUNTIME_DIR/scootbg-NAME.sock, where NAME is the
 last component of $WAYLAND_DISPLAY (wayland-0 when unset); every other
@@ -480,6 +484,29 @@ SEE ALSO:
     is the machine-readable form
 ";
 
+/// `scootbg check-image`'s help page.
+pub const CHECK_IMAGE_HELP: &str = "\
+scootbg check-image -- validate an image file without showing it
+
+USAGE:
+    scootbg check-image PATH
+
+What `scoot look apply` runs over a look's wallpaper before a swap: the
+byte cap from the file's size, then the pixel cap from the header, then a
+full decode -- the same gates a swap-time `apply-config` would hit,
+answered before anything is repointed. Prints `ok: <format> <WxH>,
+<bytes> bytes` and exits 0; anything else exits 1 naming the reason. A
+symlink, a directory, a FIFO, a device, a missing file, an unknown format
+and a corrupt or oversize image all refuse. Opening cannot hang: the file
+is opened without blocking and refused unless it is a regular file.
+
+Exit status: 0 the image validates; 1 it does not; 2 for a usage error.
+
+SEE ALSO:
+    `scootbg help check-image` prints this page; `scootbg --help --json`
+    is the machine-readable form
+";
+
 /// Which help text to print.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Topic {
@@ -491,6 +518,7 @@ pub enum Topic {
     Version,
     Kill,
     ApplyConfig,
+    CheckImage,
     /// `--help --json` (or `help --json`): the same content as JSON,
     /// versioned (see [`crate::help::SCHEMA_VERSION`]).
     Json,
@@ -507,6 +535,7 @@ impl Topic {
             Self::Version => Cow::Borrowed(VERSION_HELP),
             Self::Kill => Cow::Borrowed(KILL_HELP),
             Self::ApplyConfig => Cow::Borrowed(APPLY_CONFIG_HELP),
+            Self::CheckImage => Cow::Borrowed(CHECK_IMAGE_HELP),
             Self::Json => Cow::Owned(crate::help::json()),
         }
     }
@@ -522,6 +551,8 @@ pub enum Command {
     Client(Request<'static>),
     /// `apply-config` (`crate::apply`).
     ApplyConfig(ApplyOptions),
+    /// `check-image` (`crate::check`): validate a file, show nothing.
+    CheckImage(PathBuf),
 }
 
 /// `scootbg apply-config`'s arguments.
@@ -636,6 +667,8 @@ pub enum Error {
     Profile(ProfileError),
     /// `apply-config` without its JSON.
     MissingSection,
+    /// `check-image` without its path.
+    MissingPath,
     /// `apply-config` with JSON that is not UTF-8.
     SectionNotUtf8,
     /// `apply-config` with a section that is refused.
@@ -760,6 +793,10 @@ impl fmt::Display for Error {
                 "`apply-config` needs the [wallpaper] section as JSON, '{{}}' for none \
                  (try `scootbg apply-config --help`)"
             ),
+            Self::MissingPath => write!(
+                f,
+                "`check-image` needs an image path (try `scootbg check-image --help`)"
+            ),
             Self::SectionNotUtf8 => write!(f, "`apply-config`: the JSON is not valid UTF-8"),
             Self::Section(error) => write!(
                 f,
@@ -817,6 +854,7 @@ const COMMAND_NAMES: &[&str] = &[
     "version",
     "kill",
     "apply-config",
+    "check-image",
 ];
 
 /// `COMMAND --help --json`: the full document, or the refusal when more
@@ -864,6 +902,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
         "version" => (Command::Client(Request::Version), Topic::Version),
         "kill" => (Command::Client(Request::Kill), Topic::Kill),
         "apply-config" => return apply_config(args),
+        "check-image" => return check_image(args),
         _ => {
             return Err(hinted(
                 "scootbg",
@@ -876,6 +915,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
                     "version",
                     "kill",
                     "apply-config",
+                    "check-image",
                     "--version",
                     "-V",
                     "--help",
@@ -893,6 +933,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
         Command::Client(request) => request.name(),
         Command::Help(_) => "help",
         Command::ApplyConfig(_) => "apply-config",
+        Command::CheckImage(_) => "check-image",
     };
     match args.next() {
         None => Ok(command),
@@ -928,6 +969,7 @@ fn help<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Comma
             "version" => Topic::Version,
             "kill" => Topic::Kill,
             "apply-config" => Topic::ApplyConfig,
+            "check-image" => Topic::CheckImage,
             _ => {
                 return Err(hinted(
                     "scootbg help",
@@ -1094,6 +1136,35 @@ fn apply_config<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Resu
         section: Box::new(section),
         serve,
     }))
+}
+
+/// `check-image PATH`; `--help` alone asks for help. The path may be any
+/// encoding: `PathBuf` carries it exactly, and `check` reports what is
+/// wrong with it (a non-UTF-8 path fails there, not here).
+fn check_image<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Command, Error> {
+    const COMMAND: &str = "check-image";
+    let mut path: Option<OsString> = None;
+    let mut first = true;
+    while let Some(arg) = args.next() {
+        // `parse` hands non-UTF-8 arguments over as `Err(lossy)`: a file
+        // can be named anything, so they are still the path here.
+        let word = arg.unwrap_or_else(|lossy| lossy);
+        if is_help(&word) && first {
+            return help_or_json(COMMAND, Topic::CheckImage, args);
+        }
+        first = false;
+        if path.is_some() {
+            return Err(Error::Unexpected {
+                command: COMMAND,
+                argument: word,
+            });
+        }
+        path = Some(OsString::from(word));
+    }
+    match path {
+        Some(path) => Ok(Command::CheckImage(PathBuf::from(path))),
+        None => Err(Error::MissingPath),
+    }
 }
 
 const OUTPUT: &str = "--output";

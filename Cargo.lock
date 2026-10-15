@@ -960,8 +960,11 @@ dependencies = [
 name = "scootctl"
 version = "0.2.1"
 dependencies = [
+ "rustix 1.1.4",
  "scoot-ipc",
+ "scoot-look",
  "serde_json",
+ "toml",
 ]
 
 [[package]]
