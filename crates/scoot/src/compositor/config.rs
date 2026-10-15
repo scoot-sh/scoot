@@ -826,6 +826,10 @@ pub fn startup_path(
 ///   a file that validates, the same isolation startup has.
 /// - `vt` is whether this session drives `--tty` (see
 ///   [`LoadedConfig::from_file_with_vt`](LoadedConfig::from_file_with_vt)).
+///
+/// Test-only: live code reloads through [`reload_from_with_layer`] (with no
+/// layer when none is in force), so both run the one implementation.
+#[cfg(test)]
 pub fn reload_from(path: &Path, vt: bool) -> Result<LoadedConfig, ReloadError> {
     reload_from_with_layer(path, vt, None).map(|layered| layered.loaded)
 }
