@@ -83,8 +83,15 @@ each applied field:
 
 ```json
 { "type": "reloaded", "applied": ["layout.gap", "binds"],
-  "refused": ["tty.gpu (takes effect on restart: the session already drives its device)"] }
+  "refused": ["tty.gpu (takes effect on restart: the session already drives its device)"],
+  "shadowed": ["appearance.background_color"], "invalid": [] }
 ```
+
+`shadowed` lists every file key that overrides the active look (see
+[Appearance](./appearance.md#the-look-layer)); `invalid` lists file keys
+whose bad values fell back to the look's. `scoot msg reload
+--wait-wallpaper` holds the reply until the wallpaper run finishes, up
+to a bound, instead of answering once handed over.
 
 **Refused, explicitly, pending a restart:** `[tty] gpu`, `[renderer]
 backend`, `[xwayland] enabled`, `[virtual_input] enabled` and

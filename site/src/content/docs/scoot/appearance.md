@@ -46,6 +46,28 @@ The look you picked in [the desktop profile](../desktop/index.md#pick-a-look)
 writes these same keys — `settings.appearance.background_color =
 "#123456"` beside a look replaces that one color and keeps the rest.
 
+## The look layer
+
+A look can supply any key in this table except `cursor_hide_after_ms`
+and `prefer_no_csd`, plus the `[wallpaper]` section. The compositor
+reads the active look's fragment and merges it under this file, key by
+key, before anything is derived. A key set here always wins. An unset
+key takes the look's value. Anything neither sets falls back to the
+Default column above.
+
+Two exceptions. `[wallpaper]` merges as one unit: any `[wallpaper]` key
+set here keeps the whole section yours, otherwise the look's whole
+section applies. And `focus_ring_inactive_width` follows the layer that
+set `focus_ring_width`: setting only the active width drops the look's
+inactive width, so the ring follows yours.
+
+The reload reply lists every key of yours that overrides the look
+(`shadowed`). A bad color value here falls back to the look's value for
+that key, and is listed as `invalid` (and shadowing). A look fragment
+with a forbidden key or a bad value is refused whole: startup runs
+without it and logs, and a reload answers an error and keeps everything.
+With no look active, this file behaves as before.
+
 ## The built-in cursors
 
 Where no cursor theme is installed (a webtop or minimal container),
