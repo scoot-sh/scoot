@@ -3,11 +3,11 @@ title: IPC troubleshooting
 description: "What the socket refuses, the resource bounds behind it, and the symptom for each."
 ---
 
-The socket says no in known ways: the nine bounds an agent can actually hit, the resource limits behind them, and what to do about each.
+The socket says no in known ways: the ten bounds an agent can actually hit, the resource limits behind them, and what to do about each.
 
 ## What the socket refuses
 
-Nine bounds an agent can actually hit. The first seven are refusals with a
+Ten bounds an agent can actually hit. The first eight are refusals with a
 reason — an ordinary `error` response — rather than a silent drop or a delay.
 The last two can't be: one drops a peer that is by definition not reading its
 socket, and the other shortens a wait rather than refusing it.
