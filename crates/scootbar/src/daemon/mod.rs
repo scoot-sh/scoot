@@ -244,6 +244,10 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         ));
     }
     let mut wants_write = false;
+    // What the running bar was started with, post-flags: every `reload`
+    // compares against it to find the style-only fast path, and a
+    // successful one replaces it (`respond::Responder`).
+    let mut last = config;
     loop {
         wayland
             .queue
@@ -377,6 +381,7 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
                 file.as_ref(),
                 &given,
                 server.subscribers(),
+                &mut last,
             );
             let mut index = 0;
             while index < server.conns().len() {

@@ -310,6 +310,32 @@ impl State {
         }
     }
 
+    /// A style-only reload (the style, the font and the placement's gaps
+    /// already swapped in): every output is placed again, and nothing else
+    /// happens. Unlike [`Self::replace_placement`] the popup stays open,
+    /// the pointer stays armed and no input state is forgotten: the modules
+    /// are the same ones in the same order, so their indices — and whatever
+    /// popup hangs off them — are still valid. The rebuilt scenes and the
+    /// emptied buffers draw every output once more at the new style, and a
+    /// surface whose bar geometry changed (which the style-only check rules
+    /// out) would still be carried out rather than leaked.
+    pub fn restyle(&mut self, placement: Placement, conn: &Connection, qh: &QueueHandle<Self>) {
+        self.placement = placement;
+        for entry in self.outputs.iter_mut() {
+            let effect = Self::place(&self.placement, &self.content.modules, entry);
+            Self::apply(
+                &self.globals,
+                &mut self.input,
+                #[cfg(feature = "popup")]
+                &mut self.popup,
+                entry,
+                effect,
+                conn,
+                qh,
+            );
+        }
+    }
+
     /// Makes every output's bar as `self.hidden` says: destroys the layer
     /// surface and its buffers on a hide (the exclusive zone goes with the
     /// surface, so windows reclaim the space), makes them again on a show.

@@ -313,7 +313,11 @@ each capped at 256 bytes), and is written from the very state the screen is
 drawn from, so it cannot disagree with a screenshot.
 `reload` re-reads the file and live-applies it — geometry, style, layout,
 modules, the font — after fully validating it first; a bad file is
-refused and the running bar stands. `hide`, `show` and `toggle` are
+refused and the running bar stands. A reload that changes only style
+(`[colors]`, the `[bar]` style keys, the font) keeps every module running
+with its state, leaves any open popup alone, and only repaints; anything
+else restarts the modules as at start-up. This holds however the file got
+there — hand-written or rendered by Nix. `hide`, `show` and `toggle` are
 [below](./configure.md#hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
 `toggle` print the reply; `kill`, `set` and `invoke` print nothing on success,
 and `subscribe` prints what the daemon sends until it closes (below). A request

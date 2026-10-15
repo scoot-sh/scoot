@@ -313,7 +313,10 @@ font-size = 20                  # 1 to 256, as [bar] font-size; absent is the sh
 - **A reload** re-places every output: one the list now leaves out loses
   its bar (and its zone), one it now includes gets one, and a bar whose
   geometry changed is made again. Modules are restarted as at any reload,
-  except an `exec` whose table is unchanged, which keeps its child (above).
+  except an `exec` whose table is unchanged, which keeps its child (above)
+  — unless the reload changed only style (`[colors]`, the `[bar]` style
+  keys, the font), in which case every module keeps running with its
+  state, any open popup stays open, and the bar only repaints.
 - **`hide`/`show`** keep to the list: a shown bar is made only on a selected
   output. The two reasons a bar can be absent (hidden, not selected) are
   independent, so a `show` after a reload that changed the list makes the
