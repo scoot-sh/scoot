@@ -1,6 +1,6 @@
 # Agent-friendly help: the contract every binary meets
 
-An agent learns scoot from `--help` before anything else, so every binary's
+Agents learn scoot from `--help`, so every binary's
 help meets one contract, pinned by tests. People read it too.
 
 ## The contract
@@ -11,7 +11,7 @@ help meets one contract, pinned by tests. People read it too.
   command list, the action grammar, config keys, environment variables and
   exit codes. Nothing load-bearing lives only in the docs.
 - **Example-led:** each command shows one or two real invocations with the
-  output shape, the first thing an agent copies.
+  output shape.
 - **Stable and plain:** to stdout, exit 0, no color and no pager, wrapped
   under 100 columns, the same section order in every binary: usage,
   description, commands, options, examples, exit codes, environment
@@ -40,7 +40,7 @@ help meets one contract, pinned by tests. People read it too.
 | `scootbar` | `daemon`, `msg` | commands, daemon flags (types and defaults), msg commands, the modules in this build with their actions, exit codes, environment |
 | `scootbg` | one per command (`daemon`, `set`, `clear`, `query`, `version`, `kill`, `apply-config`) | commands, `set`'s modes and filters, exit codes, environment |
 
-One spelling note: a client verb's own row is `scoot msg help <verb>`,
+One spelling note: a client verb's row is `scoot msg help <verb>`,
 not `scoot msg <verb> --help` -- `--help` after a verb would be ambiguous
 with what the verb itself takes (`scoot msg type --help` types the text
 `--help`; `action spawn --help` runs the command

@@ -23,7 +23,7 @@ and the control protocols below. A change that makes a user or an
 integrating agent do something different is a bump for the whole suite,
 whichever binary it touched.
 
-Inside one release the rule is simple: **same version**. Install, upgrade
+Inside one release: **same version**. Install, upgrade
 and run every binary at one version. Across versions, compatibility is
 carried by protocol numbers, never by crate versions.
 
@@ -65,8 +65,8 @@ no `!` marker.
 
 ## How a version moves
 
-Conventional Commits feed the changelog and propose the bump. They do not
-decide it: the maintainer does, in the release PR.
+Conventional Commits feed the changelog and propose the bump; the maintainer
+decides it in the release PR.
 
 - **Pre-1.0 (today)**: if any commit since the last tag is breaking (`!`
   after the type or scope, or a `BREAKING CHANGE:` footer), the next version
@@ -192,7 +192,7 @@ $ scoot --version
 scoot 0.2.1+14.g615608c (ipc protocol 11)
 ```
 
-The line keeps its shape (`scoot X (ipc protocol N)`). Only `X` grows the
+The line keeps its shape (`scoot X (ipc protocol N)`); only `X` grows the
 suffix, and the IPC `version` reply carries the same string. Each binary's
 build script works it out from `git describe` (`crates/scoot-ipc/build_label.rs`):
 
