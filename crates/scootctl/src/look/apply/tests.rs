@@ -1240,7 +1240,11 @@ fn effectful_refusals_are_structured_not_bare_errors() {
 #[test]
 fn helpers_run_with_a_timeout() {
     use super::run_with_timeout;
-    let out = run_with_timeout(Path::new("/bin/echo"), &["hello"]).expect("echo runs");
+    let echo = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|dir| dir.join("echo"))
+        .find(|candidate| candidate.is_file())
+        .expect("echo on PATH");
+    let out = run_with_timeout(&echo, &["hello"]).expect("echo runs");
     assert!(out.status.success());
     assert_eq!(String::from_utf8(out.stdout).expect("UTF-8"), "hello\n");
     let error =
