@@ -9,8 +9,10 @@ scoot has one version. `[workspace.package] version` in the root
 at that version. There are no per-package versions or tags, and nothing is
 published to crates.io (`publish = false` stays where it is).
 
-This replaced per-package versions before any of them were released,
-so nothing has to migrate.
+This replaced per-package versions (a lockstep scoot/scootctl/scootbg trio,
+an independent scootbar, `scoot-vX`/`scootbar-vX` tags and the
+`scripts/version` tool) before any of them were released. Those tags never
+existed, so nothing has to migrate.
 
 ## What a version means
 
@@ -39,14 +41,15 @@ compatibility; these numbers do.
 | Looks `schema` | not landed yet | the looks a desktop profile reads | To be numbered and checked when it lands. |
 
 scootbar talks to the compositor through standard Wayland protocols. Its only
-scoot-specific call is the `{ scoot = "quit" }` action, one fixed IPC line.
+scoot-specific call is the `{ scoot = "quit" }` action, one fixed IPC line
+pinned by a test against `scoot-ipc`.
 
 New request types and fields can stay inside a protocol number when an older
 peer answers them safely. For example, an old scootbg answers
 `set-workspace` with `unknown request`. Config-schema strictness is what makes
 this safe: scootbg refuses unknown section keys (`deny_unknown_fields`), so a
 newer scoot sending a key an older scootbg does not know fails loudly (exit 2,
-the session keeps its background color).
+the session keeps its background color) instead of silently dropping it.
 
 The look-scoped reload follows the same rule, with the tag doing the work.
 `reload_look` (`scoot msg reload --look`) is a distinct request tag, not a
@@ -69,7 +72,7 @@ decides it in the release PR.
   after the type or scope, or a `BREAKING CHANGE:` footer), the next version
   bumps the minor (`0.2.3` -> `0.3.0`). Otherwise it bumps the patch
   (`0.2.3` -> `0.2.4`), `feat` included.
-- **1.0** comes once the IPC protocol and the
+- **1.0** is the maintainer's call. It comes once the IPC protocol and the
   config schemas have a written support promise. After that the usual SemVer
   rules apply: breaking bumps the major, `feat` the minor, everything else
   the patch.
@@ -99,7 +102,8 @@ titled `chore: release vX.Y.Z`. It:
 A new crate under `crates/` needs a `[[package]]` entry in `release-plz.toml`
 with its own `git_tag_name` (for example `<crate>-v{{ version }}`) the first
 release after it lands. All packages share the `v{{ version }}` tag, so
-without a crate-specific entry the release PR job fails. `scoot-look` is the
+without it release-plz looks for the crate in the previous release's checkout,
+where it does not exist, and the release PR job fails. `scoot-look` is the
 worked example; the crate also goes in the `scoot` package's
 `changelog_include`.
 
@@ -114,22 +118,45 @@ architectures, an SBOM, checksums, provenance, and the version's
 
 **No secret is involved.** release-plz runs on the workflow's own
 `GITHUB_TOKEN`. GitHub starts no workflow for an event that token causes,
-so `release-plz.yml` dispatches the next step itself:
+so neither the tag nor the PR would start anything on their own. The one
+documented exception is that "workflow_dispatch and repository_dispatch
+events always create workflow runs" ([Triggering a workflow from a
+workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)).
+So `release-plz.yml` dispatches the next step itself:
 
-- After creating the tag, it runs `release.yml` on it.
+- After creating the tag, it runs `release.yml` on it (`--ref vX.Y.Z`,
+  `dry_run=false`).
 - After opening or updating the release PR, it runs the PR's checks on
-  the PR's branch (`ci.yml`, `packaging.yml`, and `release.yml`'s lint
-  job). Approving the held runs is optional; they repeat the same jobs.
+  the PR's branch: `ci.yml`, `packaging.yml` (vendoring, licenses,
+  advisories) and `release.yml` with no `tag`, which runs only its lint job
+  (actionlint, the guards, the release tool tests). A dispatched run's
+  check suite attaches to the branch's head commit, which is the PR's head,
+  and GitHub associates it with the PR.
+  This was measured on #586: the run's `pull_requests` listed the PR. The
+  PR's own `pull_request` runs still appear, held until a maintainer presses
+  "Approve workflows to run".
+  - **One caveat, also measured on #586.** When a `pull_request` run of
+    `ci.yml` exists for the same commit, the PR's check list (the merge box,
+    `gh pr checks`) shows one entry per check name, and it shows the
+    `pull_request` one. The dispatched results are then only on the commit's
+    checks and in the Actions tab.
+  - **On a release PR, the held runs have not started, so they have no check
+    runs of those names.** The dispatched ones should then fill the list.
+    That has not been observed yet: the first release PR will show it.
+  - Approving the held runs is optional; they repeat the same jobs.
 
 One repository setting is needed for GITHUB_TOKEN to open the PR at all:
 Settings > Actions > General > Workflow permissions > "Allow GitHub Actions to
-create and approve pull requests".
+create and approve pull requests". It also lets workflows approve pull
+requests. Nothing here approves one, and main has no required reviews.
 
-A maintainer can still push a `v*` tag by hand. Both paths share one
-concurrency group per tag, so a tag pushed by hand and dispatched by
-release-plz releases once. A dispatch that would publish must run on the
-tag itself: from a branch it is refused before anything builds, and only
-a dry run is allowed there.
+A maintainer can still push a `v*` tag by hand, which starts `release.yml`
+through its `push` trigger. Both paths share one concurrency group per tag,
+and `release-resolve --complete-ok` turns an already-complete release into a
+green no-op. A tag pushed by hand and dispatched by release-plz therefore
+releases once. A dispatch that would publish must run on the tag itself:
+from a branch it is refused before anything builds, and only a dry run is
+allowed there.
 
 The release PR is also where the distro packaging moves: bump `pkgver`
 in the Arch release PKGBUILDs (with `.SRCINFO`) and `Version` in the RPM
@@ -143,10 +170,17 @@ steps.
 
 ## The first tag was v0.2.0, cut by hand
 
-The first tag was **v0.2.0**, cut by hand on 2026-10-14: a `v0.1.x` tag
-would have sorted below FlakeHub's `0.1.<commit count>` rolling releases.
-The site's cut-a-release page has the commands. From then on release-plz
-proposes every release.
+FlakeHub already carries rolling releases numbered `0.1.<commit count>`
+(`0.1.1861` and up). A `v0.1.x` tag would have sorted below them, so the first tag
+was **v0.2.0**, cut by hand on 2026-10-14, and the workspace now reads `0.2.1`
+(`CHANGELOG.md` shows `[0.2.0]` and `[0.2.1]`, both dated 2026-10-14).
+
+release-plz waits for a first `v*` tag. With none it would treat the whole
+history as one first release, so the workflow skipped until that tag existed. The
+maintainer cut v0.2.0 by hand (the cut-a-release page has the commands): a
+small PR that added `## [0.2.0] - <date>` under the Unreleased heading, then
+an annotated `v0.2.0` tag on its merge commit, pushed. From then on
+release-plz proposes every release.
 
 ## What a build that is not a release calls itself
 
@@ -164,12 +198,18 @@ build script works it out from `git describe` (`crates/scoot-ipc/build_label.rs`
 
 - At a `vX.Y.Z` tag, or from a tree with no `.git` (the release tarball, a
   Nix build), the plain version: `0.2.1`.
+- Before the first tag exists: the workspace version and every commit,
+  `0.2.0+1863.g5159f75`.
 - A tree unpacked inside some other repository (an AUR clone) gets the plain
   version, never that repository's history.
-- Uncommitted changes are not marked.
+- Uncommitted changes are not marked. Cargo cannot cheaply tell a build
+  script that the work tree changed, so a `.dirty` suffix would go stale.
 
-Nix builds deliberately print the plain version. FlakeHub's version already
-names the commit (below).
+Nix builds deliberately print the plain version. Putting `self.rev` into a
+derivation would change it on every commit, so every merge (docs-only ones
+included) would rebuild every package, and a `github:` user at a docs-only
+commit would miss Cachix and build locally. FlakeHub's version already names
+the commit (below).
 
 Packages built from main use the same numbers in their own spelling:
 
@@ -183,7 +223,8 @@ Packages built from main use the same numbers in their own spelling:
 
 Every push to main publishes the flake to FlakeHub as a rolling release
 numbered `<major>.<minor + 1>.<commits on main>`, from the workspace version
-(`scripts/workspace-version --rolling`). While the workspace reads 0.2.x, main publishes
+(`scripts/workspace-version --rolling`, passed as `rolling-major` and
+`rolling-minor` in `.github/workflows/nix-build.yml`). While the workspace reads 0.2.x, main publishes
 `0.3.<count>`. That sorts above every `v0.2.x` tag and above the `0.1.<count>`
 releases published before this scheme, so a FlakeHub constraint never prefers
 an older main.
@@ -198,4 +239,6 @@ scripts/release-resolve v0.2.1 --no-github   # the release gate, run locally
 scripts/release-notes 0.2.1          # that version's CHANGELOG.md section
 ```
 
-All are stdlib Python with tests in `scripts/test_release_resolve.py`.
+All are stdlib Python with tests in `scripts/test_release_resolve.py`, which
+`release.yml`'s lint job runs on every pull request that touches the release
+tooling.

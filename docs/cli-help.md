@@ -1,7 +1,7 @@
 # Agent-friendly help: the contract every binary meets
 
 Agents learn scoot from `--help`, so every binary's
-help meets one contract, pinned by tests.
+help meets one contract, pinned by tests. People read it too.
 
 ## The contract
 
@@ -20,16 +20,16 @@ help meets one contract, pinned by tests.
 - **Machine-readable:** `--help --json` (or `help --json`) emits the same
   content as JSON, versioned with `schema_version` (currently `1`; a script
   should refuse what it does not know). Text and JSON render from the same
-  tables: every tabulated name appears in both.
+  tables, and a test diffs them: every tabulated name appears in both.
 - **Errors that teach:** a usage error names what was wrong, the nearest
   valid choice ("did you mean"), and the help topic to read, on stderr with
   exit code `2`. Garbage that is close to nothing stays a bare refusal.
 - **Single source:** the request/action grammar, the flag lists and the
   module registry each have one owner; help renders them, never a second
   copy. The typo guesser and the docs URL live once in `scoot-ipc`, which
-  every binary renders from. No new
-  dependencies beyond that (hand-rolled parsers, `serde_json`
-  and `scoot-ipc`).
+  every binary renders from, so a domain move is one edit. No new
+  dependencies for any of it beyond that (hand-rolled parsers, `serde_json`
+  and `scoot-ipc`, all already in the tree).
 
 ## Topics and JSON per binary
 

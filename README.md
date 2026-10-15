@@ -5,7 +5,7 @@ trailing motion lines](docs/assets/logo.png)
 
 [![CI](https://github.com/scoot-sh/scoot/actions/workflows/ci.yml/badge.svg)](https://github.com/scoot-sh/scoot/actions/workflows/ci.yml)
 
-**scoot knocks your windows sideways.** It is a Wayland compositor
+**scoot knocks your windows sideways.** It is a light Wayland compositor
 that puts windows in columns on a strip that scrolls left and right. A
 new window never squeezes the others; the strip just gets longer.
 
@@ -20,7 +20,7 @@ No install. Start the desktop in your browser with
 docker run --rm -p 127.0.0.1:6080:6080 ghcr.io/scoot-sh/try-scoot
 ```
 
-Open `http://127.0.0.1:6080`. Press `Alt+Return`
+Open `http://127.0.0.1:6080` and click the desktop. Press `Alt+Return`
 for a second terminal. The port stays on loopback because VNC has no
 password. To stop, press `Ctrl+C` where you started the container.
 
@@ -47,15 +47,15 @@ trust the cache yet: [add it](https://www.scoot.sh/start/install/#or-in-a-window
 
 ## Why scoot
 
-- **CPU or GPU.** scoot draws with the CPU or the GPU.
-  It runs on real hardware, in a VM with no
+- **No GPU? No problem.** scoot draws with the CPU or the GPU, and both
+  renderers are first-class. It runs on real hardware, in a VM with no
   3D, in a container, or inside another desktop. The default
   (`--renderer auto`) picks the right renderer for the session, and
   `--renderer cpu` or `--renderer gpu` always overrides it.
   ([Builds and renderers](https://www.scoot.sh/reference/builds/).)
 - **Agents can drive it.** One socket types, clicks, takes screenshots,
   lists windows, and waits for the
-  screen to settle.
+  screen to settle. scoot's own tests drive it this way.
 - **It stays out of the way.** An idle scoot does not wake up, nor do the
   bar and the wallpaper daemon.
   ([Benchmarks](dev/benches/benchmarks.md).)
@@ -107,8 +107,8 @@ X11 apps (with the XWayland build). [Full list](https://www.scoot.sh/scoot/proto
 
 ## Not yet
 
-- **Changing display modes from `wlr-randr` or Settings.** Read-only.
-  Set modes in the config file.
+- **Changing display modes from `wlr-randr` or Settings.** Read-only for
+  now. Set modes in the config file.
 - **Some X11 extras.** X input methods (XIM) and X window icons.
 - **A macOS compositor.** On a Mac, `scoot msg` drives scoot in a Linux VM.
 
