@@ -3,7 +3,7 @@ title: "scoot look apply: the atomic swap, scoped reloads, rollback, list, curre
 status: "open"
 area: "core"
 priority: "high"
-blocked: "look-scoped-reload"
+blocked: null
 ---
 
 # scoot look apply: the atomic swap, scoped reloads, rollback, list, current and validate
