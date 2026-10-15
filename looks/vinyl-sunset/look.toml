@@ -30,12 +30,11 @@ mono = "FiraCode Nerd Font"
 size = 10 # renders the example bar font-size 13
 
 [opacity]
-# 1.0 until look-layer-scoot's pixman benchmark passes; the example uses 0.78.
+# 1.0 until the bar-opacity pixman benchmark passes; the example uses 0.78.
 bar = 1.0
 
 [shape]
-# 0 until look-layer-scoot's pixman benchmark passes; the example uses 12.
-radius = 0
+radius = 12
 ring-width = 2
 ring-inactive-width = 2
 

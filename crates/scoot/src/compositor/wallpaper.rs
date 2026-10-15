@@ -54,7 +54,7 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 
 pub use queue::Waited;
 use queue::{Ended, Exit, Queue};
-pub use section::{Section, WallpaperConfig, WallpaperSetting};
+pub use section::{Section, Table, WallpaperConfig, WallpaperSetting};
 
 use super::State;
 
@@ -113,6 +113,14 @@ impl Wallpaper {
     #[cfg(test)]
     pub(super) fn queue_mut(&mut self) -> &mut Queue {
         &mut self.queue
+    }
+
+    /// The section last handed over, for the look layer's unit test: what a
+    /// reload with a user `[wallpaper]` section runs when a look layer is in
+    /// force.
+    #[cfg(test)]
+    pub(super) fn live_section(&self) -> Option<&Section> {
+        self.live.as_ref()
     }
 }
 

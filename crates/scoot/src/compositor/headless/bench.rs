@@ -679,3 +679,120 @@ fn rounded_resize_churn_cost() {
         paired[paired.len() - 1] * 100.0,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Look layer (live-looks wave 2): the reload without `apply()`, and the D15
+// rounded-corner verdict at 1, 10 and 50 windows
+// ---------------------------------------------------------------------------
+
+/// What a ring-only reload costs with the old path (`apply()`, which
+/// re-arranges and reconfigures every window) against the new one (a redraw:
+/// every ring/background reader takes `State::appearance` live). Times the
+/// compositor-side work only -- no client round trips, since no client is
+/// mapped here (see the module doc) -- plus the frame that draws the new
+/// ring. Run by hand like the rest of this file:
+///
+/// ```text
+/// cargo test --release -p scoot --bin scoot look_reload_ring_cost -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "prints reload timings for a human; asserts nothing"]
+fn look_reload_ring_cost() {
+    use crate::compositor::reload::LookLayerState;
+
+    let renderer = test_renderer();
+    for windows in [1u64, 10, 50] {
+        let mut with_apply: Vec<Duration> = Vec::new();
+        let mut with_redraw: Vec<Duration> = Vec::new();
+        for _ in 0..RUNS {
+            // The old path: mutate the ring, then `apply()` and draw.
+            let mut fixture = scene(windows);
+            render_frames(&mut fixture, WARMUP);
+            let started = Instant::now();
+            fixture.state.appearance.focus_ring_active_color =
+                crate::compositor::decorations::Color::new(1.0, 0.0, 0.0, 1.0);
+            fixture.state.apply();
+            render_frames(&mut fixture, 1);
+            with_apply.push(started.elapsed());
+
+            // The new path: the same mutation through a real reload, which
+            // redraws without `apply()`.
+            let mut fixture = scene(windows);
+            render_frames(&mut fixture, WARMUP);
+            let layer = crate::compositor::look_layer::Fragment {
+                text: "[appearance]\nfocus_ring_active_color = \"#FF0000\"\n".to_owned(),
+                identity: crate::compositor::look_layer::LookIdentity {
+                    name: Some("bench".to_owned()),
+                    source_hash: "bench".to_owned(),
+                },
+            };
+            let started = Instant::now();
+            let response = fixture
+                .state
+                .reload_with_state(LookLayerState::Present(layer));
+            render_frames(&mut fixture, 1);
+            with_redraw.push(started.elapsed());
+            debug_assert!(
+                matches!(response, scoot_ipc::Response::Reloaded { .. }),
+                "the bench reload applied: {response:?}"
+            );
+        }
+        with_apply.sort();
+        with_redraw.sort();
+        let median = |v: &[Duration]| v[v.len() / 2];
+        println!(
+            "look reload [{renderer}], {windows} windows: ring change + apply + frame \
+             min/median {:?}/{:?} vs reload (redraw, no apply) + frame {:?}/{:?} \
+             ({RUNS} runs, {CANVAS}x{CANVAS})",
+            with_apply[0],
+            median(&with_apply),
+            with_redraw[0],
+            median(&with_redraw),
+        );
+    }
+}
+
+/// D15's condition: the per-frame cost of rounded corners on the default CPU
+/// (pixman) renderer at 1, 10 and 50 windows, with real client content (see
+/// [`rounded_corners_cost`] for the scene shapes and the alternating-tier
+/// method). The shipped looks carry a nonzero radius only if this is
+/// acceptable.
+#[test]
+#[ignore = "prints per-frame render timings for a human; asserts nothing"]
+fn look_rounded_corners_cost_windows() {
+    let renderer = test_renderer();
+    for windows in [1usize, 10, 50] {
+        let mut fixture = rounded_scene(windows, 1);
+        let mut square: Vec<Duration> = Vec::with_capacity(ROUNDED_RUNS as usize);
+        let mut rounded: Vec<Duration> = Vec::with_capacity(ROUNDED_RUNS as usize);
+        let mut paired: Vec<f64> = Vec::with_capacity(ROUNDED_RUNS as usize);
+        for _ in 0..ROUNDED_RUNS {
+            let square_total = time_rounded_tier(&mut fixture, 0, ROUNDED_ROUNDS);
+            let rounded_total = time_rounded_tier(&mut fixture, ROUNDED_RADIUS, ROUNDED_ROUNDS);
+            paired.push(rounded_total.as_nanos() as f64 / square_total.as_nanos() as f64 - 1.0);
+            square.push(square_total);
+            rounded.push(rounded_total);
+        }
+        let summarize = |samples: &mut Vec<Duration>| {
+            samples.sort();
+            (
+                samples[0] / ROUNDED_ROUNDS,
+                samples[samples.len() / 2] / ROUNDED_ROUNDS,
+                samples[samples.len() - 1] / ROUNDED_ROUNDS,
+            )
+        };
+        let (square_min, square_med, square_max) = summarize(&mut square);
+        let (round_min, round_med, round_max) = summarize(&mut rounded);
+        paired.sort_by(|a, b| a.total_cmp(b));
+        println!(
+            "look rounded [{renderer}], {windows} windows: square min/median/max \
+             {square_min:?}/{square_med:?}/{square_max:?} vs radius {ROUNDED_RADIUS} \
+             {round_min:?}/{round_med:?}/{round_max:?} per frame ({ROUNDED_ROUNDS} frames x \
+             {ROUNDED_RUNS} alternating runs, {CANVAS}x{CANVAS}); paired min/median/max \
+             {:+.1}%/{:+.1}%/{:+.1}%",
+            paired[0] * 100.0,
+            paired[paired.len() / 2] * 100.0,
+            paired[paired.len() - 1] * 100.0,
+        );
+    }
+}

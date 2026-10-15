@@ -27,8 +27,8 @@ the shape this ticket must rule out, not discover mid-PR.
 
 ## What to do
 
-IPC first (`scoot-ipc` protocol 10 → 11, under the existing bump rule in
-`crates/scoot-ipc/src/lib.rs:70-100`): `Request::Renderer` →
+IPC first (`scoot-ipc` protocol 11 → 12, under the existing bump rule in
+`crates/scoot-ipc/src/lib.rs:70-100` -- the look layer took 10 → 11): `Request::Renderer` →
 `Response::Renderer { requested, source, active, reason }` (read-only;
 could ship first as a tiny PR after `renderer-auto-policy`), then
 `Request::SetRenderer { request }` → the same response or an `Error`

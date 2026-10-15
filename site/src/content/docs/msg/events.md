@@ -1,15 +1,15 @@
 ---
 title: Events
-description: "Subscribe to output, keyboard, workspace and lock events over IPC."
+description: "Subscribe to output, keyboard, workspace, lock and look events over IPC."
 ---
 
-Subscribe instead of polling: dedicate a connection to the event stream and learn about outputs, layouts, workspaces and the session lock as they change.
+Subscribe instead of polling: dedicate a connection to the event stream and learn about outputs, layouts, workspaces, the session lock and the active look as they change.
 
 ## Events
 
 A connection that wants push notifications subscribes instead of polling.
 `subscribe` names the event kinds it wants (`output`, `keyboard`,
-`workspace`, `lock` — the four
+`workspace`, `lock`, `look` — the five
 kinds; `scoot msg subscribe` with no names sends `output`; an empty
 `events` list on the raw socket is refused); the reply echoes the subscription; and
 afterwards that connection carries events until the session ends:
@@ -30,6 +30,9 @@ $ scoot msg subscribe workspace
 $ scoot msg subscribe lock
 {"type":"subscribed","events":["lock"]}
 {"type":"lock_changed","locked":true}
+$ scoot msg subscribe look
+{"type":"subscribed","events":["look"]}
+{"type":"look_changed","name":"moonrise","source_hash":"9f2c"}
 ```
 
 `scoot msg subscribe` prints the answer, then one compact JSON object per
@@ -189,6 +192,13 @@ subscribing never replays the unsubscribed interval as one change. As
 with the query, this is read-only: nothing over IPC locks or unlocks the
 session.
 
+**`look_changed`** — the active look layer changed: the rendered look's
+`name` (`null` when the layer went away) and its `source_hash` from the
+render's `render.json`. Fires once per identity change, as seen by a
+reload; a reload that changes nothing emits nothing. A fresh
+subscription starts silent — the current look is whatever the last
+`look_changed` said, or no look if none arrived yet.
+
 Versioning: the subscription is IPC protocol 5 — the `subscribed`,
 `output_removed` and `output_restored` tags under the 3 → 4 bump, plus the
 `output_changed` tag under 4 → 5 — the keyboard half is protocol 6: the
@@ -198,7 +208,8 @@ and event are protocol 8: the `locked` reply and the `lock_changed` tag —
 and the output-added event is protocol 10: the `output_added` tag, on
 the existing `output` kind, so an `output` subscriber built against
 protocol 9 or older fails to decode it (rebuild it; `scoot msg` from the
-same build as the session is always in step). A client that
+same build as the session is always in step) — and the look-layer event
+is protocol 11: the `look_changed` tag on the new `look` kind. A client that
 never sends `subscribe` (or `keyboard`, or `locked`) never receives any of them. An unknown event kind
 in a `subscribe` is answered with an ordinary `error` like any unknown
 request tag, so an older server meets a newer subscriber with an error,

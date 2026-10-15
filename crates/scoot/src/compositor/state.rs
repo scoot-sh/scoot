@@ -53,7 +53,7 @@ use crate::cli::RendererKind;
 
 use super::bind_budget::BindBudget;
 use super::bind_repeat::BindRepeat;
-use super::cursor::Cursor;
+use super::cursor::{Cursor, CursorSink};
 use super::decorations::{Appearance, Decorations};
 use super::ext_workspace::ExtWorkspaceState;
 use super::foreign_toplevel::ForeignToplevels;
@@ -533,6 +533,12 @@ pub struct State {
     /// and written only by a config reload (see `reload.rs`), which is what
     /// keeps a second reload diffing against the first one's results.
     pub appearance: Appearance,
+    /// The active look layer's identity (the rendered look's name and hash
+    /// from its `render.json`), or `None` when no look layer is in force. A
+    /// reload that sees this change emits `EventKind::Look`; startup sets
+    /// the initial value without emitting. Written only by the config load
+    /// paths (see `reload.rs` and `compositor::run`).
+    pub look_identity: Option<super::look_layer::LookIdentity>,
     /// Per-window persistent ring buffers -- see `decorations.rs`'s module
     /// doc for why these live here rather than being rebuilt every frame.
     pub decorations: Decorations,
@@ -1180,6 +1186,19 @@ pub struct State {
     /// When a client last committed, which is what `wait-idle` waits on.
     pub last_commit: Instant,
     pub pending_idle: Vec<PendingIdle>,
+    /// The cursor rebuild worker's completion channel. Created once,
+    /// alongside its event source, on the first cursor-changing reload --
+    /// a session that never changes its cursor pays for no thread and no
+    /// event source. Each rebuild spawns one short-lived thread answering
+    /// through this same source, so an abandoned source can never
+    /// accumulate. `None` until the first cursor rebuild, like the
+    /// screenshot worker above.
+    pub(crate) cursor_sink: Option<CursorSink>,
+    /// Which cursor rebuild is newest: incremented on every cursor-changing
+    /// reload, carried by the worker's answer, and checked on install, so
+    /// two quick swaps cannot land out of order (the older answer is
+    /// dropped, the cursor keeps the newest).
+    pub(crate) cursor_generation: u64,
     /// The screenshot encode worker, if one has been needed yet. `None`
     /// until the first capture spawns it lazily (see `screenshot.rs`):
     /// a session that never screenshots pays for no thread and no event
@@ -1367,6 +1386,7 @@ impl State {
             host_loss: None,
             tty: None,
             appearance,
+            look_identity: None,
             decorations: Decorations::default(),
             cursor,
             compositor_state,
@@ -1483,6 +1503,8 @@ impl State {
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),
+            cursor_sink: None,
+            cursor_generation: 0,
             screenshot_encoder: None,
             screenshot_sink: None,
             pending_shots: Vec::new(),

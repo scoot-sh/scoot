@@ -3,7 +3,7 @@ title: "A look-scoped reload in scoot: the user file's raw snapshot, only the la
 status: "open"
 area: "core"
 priority: "high"
-blocked: "look-layer-scoot"
+blocked: null
 ---
 
 # A look-scoped reload in scoot: the user file's raw snapshot, only the layer swapped

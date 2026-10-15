@@ -184,9 +184,41 @@ use scoot_ipc::Response;
 
 use super::State;
 use super::config::{self, LoadedConfig};
+use super::look_layer::{self, Fragment, FragmentAbsent, FragmentLoad};
 use super::output_config::EntriesDiff;
 use super::tty::Tty;
 use super::wallpaper::Reloaded;
+
+/// The look layer as a reload sees it: absent, broken (refuse whole), or
+/// present with the fragment bytes to strictly validate.
+#[derive(Debug)]
+pub(crate) enum LookLayerState {
+    Absent,
+    Broken(String),
+    Present(Fragment),
+}
+
+/// Resolves the look state dir from the live environment and loads the
+/// active rendered look's fragment. A dangling link or an unreadable
+/// fragment refuses the reload whole; a missing link is no layer.
+fn look_layer_state() -> LookLayerState {
+    let Some(dir) = look_layer::state_dir(
+        None,
+        std::env::var_os("SCOOT_LOOK_STATE"),
+        std::env::var_os("XDG_STATE_HOME"),
+        std::env::var_os("HOME"),
+    ) else {
+        return LookLayerState::Absent;
+    };
+    let look_layer::LoadOutcome { load, warn } = look_layer::load(&dir);
+    match load {
+        FragmentLoad::Absent(FragmentAbsent::Missing) => LookLayerState::Absent,
+        FragmentLoad::Absent(FragmentAbsent::Broken) => LookLayerState::Broken(
+            warn.unwrap_or_else(|| "the look layer cannot be read".to_owned()),
+        ),
+        FragmentLoad::Present(fragment) => LookLayerState::Present(fragment),
+    }
+}
 
 #[cfg(test)]
 mod tests;
@@ -237,7 +269,23 @@ impl State {
     /// Serves `Request::Reload`: re-reads [`State::config_path`] and
     /// re-applies what can be re-applied live. See the module doc for the
     /// field list, the failure semantics, and the while-locked decision.
+    ///
+    /// The active look layer (`<state>/look/scoot.toml`) merges under the
+    /// user's file on raw keys before derivation (see `look_layer.rs` and
+    /// `config::merge_layer`). A layer that fails the strict parse refuses
+    /// the whole reload -- everything kept. A reload that sees the layer's
+    /// identity change emits `EventKind::Look`.
     pub fn reload(&mut self) -> Response {
+        self.reload_with_state(look_layer_state())
+    }
+
+    /// Serves a reload against an explicit look layer state. The live edge
+    /// ([`State::reload`], SIGHUP) resolves the state through
+    /// [`look_layer_state`]; tests pass their layer (or its absence)
+    /// directly, so no test depends on ambient `SCOOT_LOOK_STATE` /
+    /// `XDG_STATE_HOME` and no layer test can leak into another test
+    /// through process-global environment state.
+    pub(crate) fn reload_with_state(&mut self, layer: LookLayerState) -> Response {
         let Some(path) = self.config_path.clone() else {
             // Logged as well as answered: over IPC the client sees the
             // error, but a SIGHUP trigger has no reply channel, so without
@@ -251,14 +299,46 @@ impl State {
                  file to reload; keeping the running config",
             );
         };
-        let fresh = match config::reload_from(&path, self.tty.is_some()) {
+        let layer_text = match layer {
+            LookLayerState::Absent => None,
+            LookLayerState::Broken(reason) => {
+                tracing::error!(%reason, "config reload failed");
+                return Response::error(format!(
+                    "refused: the look layer is refused ({reason}); keeping the running config"
+                ));
+            }
+            LookLayerState::Present(fragment) => Some(fragment),
+        };
+        let identity = layer_text
+            .as_ref()
+            .map(|fragment| fragment.identity.clone());
+        let fresh = match config::reload_from_with_layer(
+            &path,
+            self.tty.is_some(),
+            layer_text.as_ref().map(|fragment| fragment.text.as_str()),
+        ) {
             Ok(fresh) => fresh,
             Err(error) => {
                 tracing::error!(%error, "config reload failed");
                 return Response::error(error.to_string());
             }
         };
-        let report = self.apply_reload(&fresh);
+        let report = self.apply_reload(&fresh.loaded);
+        // The identity commits after the apply, never before: a reload that
+        // fails to load returns above without touching either, so a broken
+        // layer or file can never advance the identity past what applied.
+        // Per-field refusals in the report do not hold it back -- the layer
+        // was seen and its applicable fields applied, and the next reload
+        // diffs against what this one did -- which is the same
+        // commit-after-apply ordering scootbar's look reload uses.
+        if identity != self.look_identity {
+            self.look_identity = identity.clone();
+            let (name, source_hash) = match &identity {
+                Some(identity) => (identity.name.clone(), identity.source_hash.clone()),
+                None => (None, String::new()),
+            };
+            self.emit_look_changed(name, source_hash);
+        }
         tracing::info!(
             applied = ?report.applied,
             refused = ?report.refused,
@@ -267,6 +347,8 @@ impl State {
         Response::Reloaded {
             applied: report.applied,
             refused: report.refused,
+            shadowed: fresh.shadowed,
+            invalid: fresh.invalid,
         }
     }
 
@@ -300,24 +382,30 @@ impl State {
         self.apply_binds_reload(fresh, &mut report);
         self.apply_wallpaper_reload(fresh, &mut report);
 
-        // Recompute the arrangement and request a render when anything
-        // visible moved. A binds-only reload skips it: no placement changed,
-        // so there is nothing to configure and nothing dirty. A cursor-only
-        // reload redraws without re-arranging: cursor pixels are not
-        // placement, so `apply()` would reconfigure every window for nothing.
+        // Recompute the arrangement and request a render when placement
+        // moved. A binds-only reload skips it: no placement changed, so
+        // there is nothing to configure and nothing dirty. Ring, background
+        // and corner changes request a redraw without `apply()`: every
+        // reader takes those values live from `State::appearance`, so
+        // re-arranging (and reconfiguring every window) buys nothing but
+        // client re-renders. A cursor-only reload redraws without
+        // re-arranging for the same reason: cursor pixels are not placement.
         if report.applied.iter().any(|name| {
             name == field::GAP
                 || name == field::COLUMN_WIDTHS
                 || name == field::DEFAULT_COLUMN_WIDTH
-                || name == field::RING_WIDTH
+        }) || report.relayout
+        {
+            self.apply();
+        } else if report.applied.iter().any(|name| {
+            name == field::RING_WIDTH
                 || name == field::RING_INACTIVE_WIDTH
                 || name == field::RING_ACTIVE
                 || name == field::RING_INACTIVE
                 || name == field::BACKGROUND
                 || name == field::CORNER_RADIUS
-        }) || report.relayout
-        {
-            self.apply();
+        }) {
+            self.request_render();
         }
         // A rebuilt cursor is a cursor change like any other: a redraw where
         // frames draw it, and news for every capture that asked for the
@@ -421,6 +509,12 @@ impl State {
         // resolved name -- so the session keeps the startup value rather
         // than re-reading the outer environment. Self-consistent and
         // idempotent; only a restart picks up an externally changed variable.
+        //
+        // The bitmap build runs on a worker, not here: it exceeds a frame
+        // at common cursor sizes (measured 23 ms at 24 px in a release
+        // build), so building it on the loop would drop frames on every
+        // cursor-changing swap. What is stored below is exactly what the
+        // worker builds from; the swap lands when its answer arrives.
         let cursor_size = appearance.cursor_size != live.cursor_size;
         let cursor_color = appearance.cursor_color != live.cursor_color;
         let cursor_theme = appearance.cursor_theme != live.cursor_theme;
@@ -430,22 +524,7 @@ impl State {
             self.appearance
                 .cursor_theme
                 .clone_from(&appearance.cursor_theme);
-            self.cursor.rebuild(
-                appearance.cursor_size,
-                appearance.cursor_color,
-                appearance.cursor_theme.as_deref(),
-            );
-            // The overlay-plane twins are keyed by the old images' ids: drop
-            // them now rather than leaving stale dma-bufs cached per output
-            // until the bound turns over (see `render::cursor_plane`).
-            #[cfg(feature = "gpu-scanout")]
-            if let Some(tty) = self.tty.as_mut() {
-                tty.clear_cursor_overlays();
-            }
-            // The paints changed for every scale, and the output set may
-            // have scales no entry serves yet: build for the live set now
-            // (cold), never on the frame path.
-            super::headless::sync_cursor_scales(self);
+            self.spawn_cursor_rebuild();
             if cursor_size {
                 report.applied.push(field::CURSOR_SIZE.to_owned());
             }
@@ -904,6 +983,112 @@ impl State {
         }
     }
 
+    /// Builds the new cursor bitmaps on a worker and swaps them in when its
+    /// answer arrives, rather than rebuilding on the loop: the build exceeds
+    /// a frame at common cursor sizes (23 ms at 24 px in a release build),
+    /// so building it here would drop frames on every cursor-changing swap.
+    /// What the worker builds from is exactly what this reload stored above,
+    /// so a second reload diffs against the new values (not the still-old
+    /// pixels) and agrees silently.
+    ///
+    /// If the worker cannot spawn (a thread per rebuild is one short-lived
+    /// thread per rare swap; only resource exhaustion refuses it), the
+    /// rebuild runs synchronously instead: a slow reload beats a stale
+    /// cursor, and the reply already reports the fields applied.
+    fn spawn_cursor_rebuild(&mut self) {
+        if self.ensure_cursor_sink().is_err() {
+            tracing::warn!("no cursor completion channel; rebuilding on the loop thread");
+            self.cursor.rebuild(
+                self.appearance.cursor_size,
+                self.appearance.cursor_color,
+                self.appearance.cursor_theme.as_deref(),
+            );
+            super::headless::sync_cursor_scales(self);
+            return;
+        }
+        self.cursor_generation = self.cursor_generation.wrapping_add(1);
+        let generation = self.cursor_generation;
+        let input = super::cursor::RebuildInput {
+            size: self.appearance.cursor_size,
+            color: self.appearance.cursor_color,
+            theme_name: self.appearance.cursor_theme.clone(),
+            icon: self.cursor.status_icon(),
+            scales: self.cursor.scale_list(),
+        };
+        let done = self
+            .cursor_sink
+            .as_ref()
+            .expect("the sink was just ensured")
+            .done
+            .clone();
+        let worker = std::thread::Builder::new()
+            .name("scoot-cursor".to_string())
+            .spawn(move || {
+                let rebuilt = super::cursor::Cursor::rebuild_async(input);
+                let _ = done.send(super::cursor::CursorBuilt {
+                    generation,
+                    rebuilt,
+                });
+            });
+        if worker.is_err() {
+            tracing::warn!("the cursor worker would not spawn; rebuilding on the loop thread");
+            self.cursor.rebuild(
+                self.appearance.cursor_size,
+                self.appearance.cursor_color,
+                self.appearance.cursor_theme.as_deref(),
+            );
+            super::headless::sync_cursor_scales(self);
+        }
+    }
+
+    /// Creates the cursor worker's completion channel and its event source,
+    /// once per session: every rebuild answers through the same registered
+    /// source, so an abandoned source can never accumulate (the screenshot
+    /// worker's arrangement).
+    fn ensure_cursor_sink(&mut self) -> Result<(), ()> {
+        use smithay::reexports::calloop::channel::{self, Event as ChannelEvent};
+
+        if self.cursor_sink.is_some() {
+            return Ok(());
+        }
+        let (done_tx, done_rx) = channel::channel::<super::cursor::CursorBuilt>();
+        self.loop_handle
+            .insert_source(done_rx, |event, _, state: &mut State| {
+                if let ChannelEvent::Msg(built) = event {
+                    state.install_cursor(built);
+                }
+                // `Closed` means the sending end is gone, which only happens
+                // with this `State` -- and then this source is gone too, so
+                // there is nothing to clean up here.
+            })
+            .map_err(|_| ())?;
+        self.cursor_sink = Some(super::cursor::CursorSink { done: done_tx });
+        Ok(())
+    }
+
+    /// Installs a worker-built cursor bitmap set, when it is still the
+    /// newest: two quick swaps cannot land out of order (the older answer is
+    /// dropped, the cursor keeps the newest). Then what the synchronous
+    /// rebuild did: drop the overlay twins keyed by the old images' ids,
+    /// sync the live output scales, and re-serve pointer captures.
+    fn install_cursor(&mut self, built: super::cursor::CursorBuilt) {
+        if built.generation != self.cursor_generation {
+            return;
+        }
+        self.cursor.install_rebuilt(built.rebuilt);
+        // The overlay-plane twins are keyed by the old images' ids: drop
+        // them now rather than leaving stale dma-bufs cached per output
+        // until the bound turns over (see `render::cursor_plane`).
+        #[cfg(feature = "gpu-scanout")]
+        if let Some(tty) = self.tty.as_mut() {
+            tty.clear_cursor_overlays();
+        }
+        // The paints changed for every scale, and the output set may have
+        // scales no entry serves yet: build for the live set now (cold),
+        // never on the frame path.
+        super::headless::sync_cursor_scales(self);
+        self.cursor_changed();
+    }
     /// `[binds]`: rebuilt from defaults plus the file (see
     /// [`keybindings_for`](super::config::keybindings_for)), swapped in
     /// whole. A key held across the swap neither wedges nor drops -- see

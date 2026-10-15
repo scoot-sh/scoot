@@ -1,9 +1,10 @@
 ---
 title: "The compositor reads a look layer under the user's config"
-status: "open"
-area: "core"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-15"
 ---
 
 # The compositor reads a look layer under the user's config
@@ -86,3 +87,24 @@ times, and the rounded-corner frame cost on pixman.
 The look-scoped reload, per-session state, the CLI, scootbar, IPC requests.
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
+
+## Resolution (PR #613, branch `look-layer-scoot`)
+
+Landed as designed, with four deviations noted in the PR: no `--state`
+flag yet (the CLI is `look-apply-cli`'s; the resolver takes an explicit
+dir for it), a missing link stays silent rather than warning (absent is
+every install's default state), the merge runs on pre-derivation struct
+values instead of raw TOML tables (the stack-overflow trap `config.rs`
+measures for passthrough-table parses), and the cursor worker fired: the
+release-build measurement showed 23.4 ms at 24 px, past a frame at common
+sizes. D15's pixman condition passed (~+5-6% per frame at 1, 10 and 50
+windows), so the shipped looks' radius and bar opacity rose to the
+examples' values in the same PR (rebased onto `look-shipped`, which landed
+mid-ticket). Evidence: per-key/unit/derived-pair tests, whole-layer
+refusals, bad-user-color fallback, dangling-link startup, the `Look` event
+firing once per identity change; ring-reload, cursor-rebuild and
+rounded-corner benchmarks on headless at 1/10/50 windows with raw numbers
+in the PR. One unrelated failure stands:
+`xwayland refused_cost::a_refused_managed_window_costs_the_server_nothing`
+(273 fds vs ≤264) fails deterministically on the dev VM in code paths this
+diff does not touch; unverified against main for lack of VM disk.

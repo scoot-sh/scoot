@@ -55,7 +55,7 @@ Cachix cache with the flake on FlakeHub (rolling release) — see
 the command below.
 
 A build that is not a release says how far past one it is: `scoot
---version` prints `scoot 0.2.1+14.g615608c (ipc protocol 10)`. The Nix
+--version` prints `scoot 0.2.1+14.g615608c (ipc protocol 11)`. The Nix
 flake's rolling release is numbered `0.3.<commits on main>`, so it sorts
 above every 0.2.x tag.
 

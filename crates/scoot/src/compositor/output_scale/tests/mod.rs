@@ -1198,7 +1198,10 @@ fn a_reload_rescales_what_a_live_client_sees() {
 
     // The reload itself, through the real request path.
     let response = fixture.reload_with("[output]\nscale = 2.0\n");
-    let Response::Reloaded { applied, refused } = response else {
+    let Response::Reloaded {
+        applied, refused, ..
+    } = response
+    else {
         panic!("a valid scale reload should report, not error: {response:?}");
     };
     assert_eq!(applied, &["output.scale".to_owned()]);
@@ -1379,7 +1382,10 @@ fn a_reload_applies_1_33_as_160_over_120_and_settles() {
     });
 
     let response = fixture.reload_with("[output]\nscale = 1.33\n");
-    let Response::Reloaded { applied, refused } = response else {
+    let Response::Reloaded {
+        applied, refused, ..
+    } = response
+    else {
         panic!("a valid scale reload should report, not error: {response:?}");
     };
     assert_eq!(applied, &["output.scale".to_owned()]);
@@ -1415,7 +1421,10 @@ fn a_reload_applies_1_33_as_160_over_120_and_settles() {
     // Same file again: the live value is already the resolved one, so the
     // reload agrees instead of re-applying.
     let response = fixture.reload_with("[output]\nscale = 1.33\n");
-    let Response::Reloaded { applied, refused } = response else {
+    let Response::Reloaded {
+        applied, refused, ..
+    } = response
+    else {
         panic!("a repeat reload should report, not error: {response:?}");
     };
     assert!(

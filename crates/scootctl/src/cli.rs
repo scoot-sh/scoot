@@ -21,11 +21,12 @@ use scoot_ipc::{Action, EventKind, Horizontal, PointerButton, Request, Vertical}
 
 /// The request grammar both clients print in their `--help`. The single
 /// owner: `scoot --help` embeds this same block rather than a second copy.
+/// The `reload` line contains [`crate::help::RELOAD_DESCRIPTION`] verbatim
+/// (pinned by test), so the prose and the table cannot drift.
 pub const REQUESTS_HELP: &str = "\
     version | outputs | windows
     action ACTION [ARGUMENT...]
-    reload                          re-read the config file and re-apply
-                                    what can be re-applied live
+    reload                          re-read the config file and re-apply it live
     keyboard                        the active keyboard layout's name and
                                     index -- what a layout indicator shows
     locked                          whether the session is locked -- the
@@ -53,7 +54,7 @@ pub const REQUESTS_HELP: &str = "\
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
     subscribe [EVENT...]          stream events until killed (default: output;
-                                    known events: output, keyboard, workspace, lock)
+                                    known events: output, keyboard, workspace, lock, look)
 ";
 
 /// The action grammar both clients print in their `--help`. Same single-owner
@@ -207,7 +208,17 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
         "version" => Request::Version,
         "outputs" => Request::Outputs,
         "windows" => Request::Windows,
-        "reload" => Request::Reload,
+        "reload" => {
+            for flag in args.by_ref() {
+                match flag.as_str() {
+                    "--json" => json = true,
+                    other => {
+                        return Err(hinted("flag", other.to_owned(), &["--json"], "help reload"));
+                    }
+                }
+            }
+            Request::Reload
+        }
         "keyboard" => Request::Keyboard,
         "locked" => Request::Locked,
         "binds" => {
@@ -342,11 +353,12 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                     "keyboard" => events.push(EventKind::Keyboard),
                     "workspace" => events.push(EventKind::Workspace),
                     "lock" => events.push(EventKind::Lock),
+                    "look" => events.push(EventKind::Look),
                     other => {
                         return Err(
                             match scoot_ipc::suggest(
                                 other,
-                                ["output", "keyboard", "workspace", "lock"],
+                                ["output", "keyboard", "workspace", "lock", "look"],
                             ) {
                                 Some(suggestion) => Error::Hinted {
                                     kind: "event",
@@ -355,7 +367,7 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                                     topic: "help subscribe",
                                 },
                                 None => Error::Unknown(format!(
-                                    "event {other} (known events: output, keyboard, workspace, lock)"
+                                    "event {other} (known events: output, keyboard, workspace, lock, look)"
                                 )),
                             },
                         );

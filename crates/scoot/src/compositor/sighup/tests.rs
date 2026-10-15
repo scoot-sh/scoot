@@ -217,7 +217,9 @@ fn sighup_reloads_the_config_and_the_session_stays_up() {
     assert_eq!(fixture.gap(), 20);
 
     match fixture.state.handle_request(scoot_ipc::Request::Reload) {
-        Response::Reloaded { applied, refused } => assert!(
+        Response::Reloaded {
+            applied, refused, ..
+        } => assert!(
             applied.is_empty() && refused.is_empty(),
             "the IPC reload after the HUP should change nothing: {applied:?} / {refused:?}"
         ),
@@ -288,7 +290,9 @@ fn rapid_hup_hup_is_safe_coalesced_or_sequential() {
     fixture.raise_and_settle("the HUP reloads to apply", |fixture| fixture.gap() == 20);
     assert_eq!(fixture.gap(), 20);
     match fixture.state.handle_request(scoot_ipc::Request::Reload) {
-        Response::Reloaded { applied, refused } => assert!(
+        Response::Reloaded {
+            applied, refused, ..
+        } => assert!(
             applied.is_empty() && refused.is_empty(),
             "the burst should settle coherent: {applied:?} / {refused:?}"
         ),
@@ -314,7 +318,9 @@ fn hup_racing_an_ipc_reload_runs_sequentially_on_the_shared_path() {
     // no-op by the shared diff.
     fixture.raise_and_settle("the session to stay dispatchable", |_| true);
     match fixture.state.handle_request(scoot_ipc::Request::Reload) {
-        Response::Reloaded { applied, refused } => assert!(
+        Response::Reloaded {
+            applied, refused, ..
+        } => assert!(
             applied.is_empty() && refused.is_empty(),
             "HUP and IPC should converge, not diverge: {applied:?} / {refused:?}"
         ),
@@ -556,7 +562,9 @@ fn hup_does_not_rerun_old_autostart_entries() {
     assert_eq!(raised, 0, "raising SIGHUP at the test process failed");
     fixture.settle();
     match fixture.state.handle_request(Request::Reload) {
-        Response::Reloaded { applied, refused } => assert!(
+        Response::Reloaded {
+            applied, refused, ..
+        } => assert!(
             applied.is_empty() && refused.is_empty(),
             "the HUP should have decided nothing new: {applied:?} / {refused:?}"
         ),

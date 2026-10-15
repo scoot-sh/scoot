@@ -361,7 +361,9 @@ fn a_reload_reports_the_section() {
     let command = stub.path();
     let command = command.to_str().unwrap();
     let reload = |fixture: &mut Fixture| match fixture.state.reload() {
-        Response::Reloaded { applied, refused } => (applied, refused),
+        Response::Reloaded {
+            applied, refused, ..
+        } => (applied, refused),
         other => panic!("unexpected reply {other:?}"),
     };
 

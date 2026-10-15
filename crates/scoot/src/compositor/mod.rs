@@ -36,6 +36,7 @@ mod ipc;
 mod keybindings;
 mod keyboard_focus;
 mod layer_shell;
+mod look_layer;
 mod nested;
 mod nested_dispatch;
 mod no_memory;
@@ -115,8 +116,38 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // in directly rather than built as defaults and patched after the fact.
     // The only error this can return is an explicit `--config PATH` that
     // couldn't be read -- every other config problem already resolved
-    // itself to defaults inside `load` (see `config`'s module doc).
-    let loaded = config::load(options.config.as_deref())?;
+    // itself to defaults inside `load` (see `config`'s module doc). The
+    // active look layer merges under the user's file when one is in force;
+    // a refused layer logs and runs without it, never failing startup.
+    let look_dir = look_layer::state_dir(
+        None,
+        std::env::var_os("SCOOT_LOOK_STATE"),
+        std::env::var_os("XDG_STATE_HOME"),
+        std::env::var_os("HOME"),
+    );
+    let look_outcome = look_dir.as_deref().map(look_layer::load);
+    let (look_text, look_identity, mut look_warn) = match look_outcome {
+        Some(look_layer::LoadOutcome { load, warn }) => match load {
+            look_layer::FragmentLoad::Present(fragment) => {
+                let identity = fragment.identity.clone();
+                (Some(fragment.text), Some(identity), warn)
+            }
+            _ => (None, None, warn),
+        },
+        None => (None, None, None),
+    };
+    let startup = config::load_with_layer(options.config.as_deref(), look_text.as_deref())?;
+    look_warn = look_warn.or(startup.layer_warning.clone());
+    if let Some(warning) = look_warn.as_deref() {
+        tracing::error!("{warning}");
+    }
+    for shadowed in &startup.shadowed {
+        tracing::info!(key = %shadowed, "user config shadows the active look");
+    }
+    for invalid in &startup.invalid {
+        tracing::warn!(key = %invalid, "invalid user value fell back to the active look");
+    }
+    let loaded = startup.loaded;
 
     // `--nested` cannot honour a non-1.0 output scale: the host compositor
     // owns the scale of the window scoot is drawn in, so a scaled output
@@ -231,6 +262,9 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         std::env::var_os("XDG_CONFIG_HOME"),
         std::env::var_os("HOME"),
     );
+    // The look layer's identity at startup: the baseline reloads compare
+    // against, set without emitting (see `reload.rs`).
+    state.look_identity = look_identity;
     state.startup_gpu = loaded.gpu.clone();
     state.startup_renderer_request = loaded.renderer;
     state.startup_autostart = loaded.autostart.clone();

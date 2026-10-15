@@ -37,6 +37,8 @@ OPTIONS (backends in brackets: all means --headless, --nested and --tty):
 /// The config-file topics `scoot help config` summarizes: every section
 /// `site/src/content/docs/scoot/configure.md` documents, with the one command that emits them
 /// all. The file itself stays the reference; this is the map to it.
+/// The `reload` sentence is rendered from [`scootctl::help::RELOAD_DESCRIPTION`]
+/// in [`config_help`], so it cannot drift from the client help.
 const CONFIG_BODY: &str = "\
 CONFIG:
     The config file ($XDG_CONFIG_HOME/scoot/config.toml) holds every option;
@@ -47,17 +49,21 @@ CONFIG:
 
     `scoot --print-default-config` prints a starting file generated from the
     compositor's own live defaults; with `--write` it places the file (never
-    overwriting). `scoot msg reload` re-applies what can be re-applied live.
-";
+    overwriting). ";
 
-/// The config-file map: [`CONFIG_BODY`] plus the reference URLs, rendered
-/// from [`scoot_ipc::DOCS_URL`] -- the one copy of the docs domain, so a
-/// move is one edit. A function rather than a `const` so the text can name
-/// that constant; a cold path (one process per `--help`), so the one small
-/// allocation costs nothing.
+/// The config-file map: [`CONFIG_BODY`] plus the reload sentence (from the
+/// one [`scootctl::help::RELOAD_DESCRIPTION`]) plus the reference URLs,
+/// rendered from [`scoot_ipc::DOCS_URL`] -- the one copy of the docs domain,
+/// so a move is one edit. A function rather than a `const` so the text can name
+/// those constants; a cold path (one process per `--help`), so the small
+/// allocations cost nothing.
 pub fn config_help() -> String {
-    let mut text = String::with_capacity(CONFIG_BODY.len() + 128);
+    let mut text = String::with_capacity(CONFIG_BODY.len() + 256);
     text.push_str(CONFIG_BODY);
+    text.push_str(&format!(
+        " `scoot msg reload`: {}.\n",
+        scootctl::help::RELOAD_DESCRIPTION
+    ));
     text.push_str(&scoot_ipc::docs_tail("scoot/configure.md"));
     text
 }
@@ -1030,6 +1036,16 @@ mod tests {
 
     fn parse_args(args: &[&str]) -> Result<Command, Error> {
         parse(args.iter().map(|a| (*a).to_owned()))
+    }
+
+    #[test]
+    fn the_config_help_reload_sentence_shares_the_client_string() {
+        // `scoot help config` renders its reload sentence from
+        // scootctl's RELOAD_DESCRIPTION, so it cannot drift from the client.
+        assert!(
+            config_help().contains(scootctl::help::RELOAD_DESCRIPTION),
+            "config help drifted from RELOAD_DESCRIPTION"
+        );
     }
 
     #[test]

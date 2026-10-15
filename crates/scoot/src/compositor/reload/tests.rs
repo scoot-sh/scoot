@@ -48,6 +48,7 @@ struct Fixture {
     state: State,
     path: PathBuf,
     _dir: tempfile::TempDir,
+    event_loop: EventLoop<'static, State>,
 }
 
 impl Fixture {
@@ -86,6 +87,7 @@ impl Fixture {
             state,
             path,
             _dir: dir,
+            event_loop,
         }
     }
 
@@ -95,6 +97,24 @@ impl Fixture {
 
     fn reload(&mut self) -> Response {
         self.state.handle_request(Request::Reload)
+    }
+
+    /// Runs the event loop until the cursor worker's answer lands (or a
+    /// bound passes): cursor bitmaps arrive asynchronously since the build
+    /// moved off the loop thread, so a test that asserts on rebuilt pixels
+    /// settles first and a test that asserts on stored values needs nothing.
+    fn settle_cursor(&mut self, theme: &str, size: u32) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while self.state.cursor.theme().name() != theme || self.state.cursor.theme().size() != size
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the cursor worker never answered"
+            );
+            self.event_loop
+                .dispatch(Some(Duration::from_millis(25)), &mut self.state)
+                .expect("a compositor dispatch");
+        }
     }
 }
 
@@ -876,6 +896,7 @@ fn reload_rebuilds_the_cursor_and_reports_each_field() {
         fixture.state.appearance.cursor_theme.as_deref(),
         Some("Adwaita")
     );
+    fixture.settle_cursor("Adwaita", 24);
     assert_eq!(
         fixture.state.cursor.theme().name(),
         "Adwaita",
@@ -2785,5 +2806,322 @@ fn a_placed_sole_output_clamps_the_pointer_to_itself() {
         (location.x, location.y),
         (f64::from(-CANVAS), f64::from(-100)),
         "the pointer escaped the placed sole output"
+    );
+}
+
+// The look layer end to end: the merge the ticket's evidence requires
+// (per-key precedence with a lone user `cursor_size`, the wallpaper unit,
+// the derived pair in both directions), the shadowed/invalid reply lists,
+// the whole-layer refusal, and the `Look` event firing once per identity
+// change.
+//
+// These tests pass their layer explicitly through `reload_with_state`, so
+// none depends on ambient `SCOOT_LOOK_STATE`/`XDG_STATE_HOME` and none can
+// leak into another test through process-global environment state.
+
+use super::LookLayerState;
+use crate::compositor::look_layer::{Fragment, LookIdentity};
+use scoot_ipc::{EventKind, decode};
+use std::io::{BufRead, BufReader};
+
+fn look_fragment(text: &str, name: &str, hash: &str) -> Fragment {
+    Fragment {
+        text: text.to_owned(),
+        identity: LookIdentity {
+            name: Some(name.to_owned()),
+            source_hash: hash.to_owned(),
+        },
+    }
+}
+
+const LOOK_APPEARANCE: &str = r##"
+[appearance]
+focus_ring_width = 2
+focus_ring_inactive_width = 2
+focus_ring_active_color = "#FF9A49"
+focus_ring_inactive_color = "#5E4B5B"
+background_color = "#2B3648"
+corner_radius = 14
+cursor_size = 24
+cursor_color = "#FF9A49"
+cursor_theme = "Mocu"
+"##;
+
+fn reload_with_look(fixture: &mut Fixture, text: &str) -> Response {
+    fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            text, "moonrise", "hash-a",
+        )))
+}
+
+fn shadowed(response: &Response) -> &[String] {
+    match response {
+        Response::Reloaded { shadowed, .. } => shadowed,
+        other => panic!("expected a reload report, got {other:?}"),
+    }
+}
+
+fn invalid(response: &Response) -> &[String] {
+    match response {
+        Response::Reloaded { invalid, .. } => invalid,
+        other => panic!("expected a reload report, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_lone_user_cursor_size_keeps_the_look_theme_and_accent() {
+    let mut fixture = Fixture::with_config("[appearance]\ncursor_size = 32\n");
+    let response = reload_with_look(&mut fixture, LOOK_APPEARANCE);
+    assert_eq!(
+        fixture.state.appearance.cursor_size, 32,
+        "the user's size wins: {response:?}"
+    );
+    assert_eq!(
+        fixture.state.appearance.cursor_theme.as_deref(),
+        Some("Mocu"),
+        "the look's theme survives a lone user size: {response:?}"
+    );
+    assert_eq!(
+        shadowed(&response),
+        ["appearance.cursor_size"],
+        "only the overridden key is shadowed: {response:?}"
+    );
+    assert!(
+        applied(&response).contains(&"appearance.cursor_size".to_owned()),
+        "the size applied: {response:?}"
+    );
+}
+
+#[test]
+fn a_user_wallpaper_color_wins_the_unit_whole() {
+    let mut fixture = Fixture::with_config("[wallpaper]\ncolor = \"#112233\"\n");
+    let response = reload_with_look(
+        &mut fixture,
+        "[wallpaper]\nimage = \"/looks/moonrise.png\"\nmode = \"fill\"\n",
+    );
+    assert_eq!(
+        shadowed(&response),
+        ["wallpaper"],
+        "the unit reports as one entry: {response:?}"
+    );
+    match fixture.state.wallpaper.live_section() {
+        Some(section) => {
+            assert!(
+                section.json.contains("#112233"),
+                "the user's color is what runs: {}",
+                section.json
+            );
+            assert!(
+                !section.json.contains("moonrise.png"),
+                "the look's image does not leak in: {}",
+                section.json
+            );
+        }
+        None => panic!("the user's section should run: {response:?}"),
+    }
+}
+
+#[test]
+fn a_user_active_width_alone_drops_the_look_inactive_width() {
+    let mut fixture = Fixture::with_config("[appearance]\nfocus_ring_width = 5\n");
+    let response = reload_with_look(&mut fixture, LOOK_APPEARANCE);
+    assert_eq!(
+        fixture.state.appearance.focus_ring_width, 5,
+        "the user's width wins: {response:?}"
+    );
+    assert_eq!(
+        fixture.state.appearance.focus_ring_inactive_width, None,
+        "the look's inactive width is dropped so the unset value follows the user's: {response:?}"
+    );
+}
+
+#[test]
+fn a_user_inactive_width_alone_keeps_the_look_active_width() {
+    let mut fixture = Fixture::with_config("[appearance]\nfocus_ring_inactive_width = 4\n");
+    let response = reload_with_look(&mut fixture, LOOK_APPEARANCE);
+    assert_eq!(
+        fixture.state.appearance.focus_ring_width, 2,
+        "the look's active width stays: {response:?}"
+    );
+    assert_eq!(
+        fixture.state.appearance.focus_ring_inactive_width,
+        Some(4),
+        "the user's inactive width wins: {response:?}"
+    );
+}
+
+#[test]
+fn a_forbidden_layer_key_refuses_the_whole_reload() {
+    let mut fixture = Fixture::with_config("[layout]\ngap = 20\n");
+    let response = reload_with_look(
+        &mut fixture,
+        "[appearance]\nbackground_color = \"#2B3648\"\n[binds]\n\"super+h\" = \"close\"\n",
+    );
+    match &response {
+        Response::Error { message } => assert!(
+            message.contains("look layer") && message.contains("keeping the running config"),
+            "the refusal names the layer and keeps the session: {response:?}"
+        ),
+        other => panic!("a forbidden layer key must refuse the reload: {other:?}"),
+    }
+    assert_eq!(
+        fixture.state.world.config().gap,
+        Config::default().gap,
+        "everything is kept: the user's own gap never applied"
+    );
+}
+
+#[test]
+fn a_bad_layer_value_refuses_the_whole_reload() {
+    let mut fixture = Fixture::with_config("[layout]\ngap = 20\n");
+    let response = reload_with_look(&mut fixture, "[appearance]\nbackground_color = \"nope\"\n");
+    match &response {
+        Response::Error { .. } => {}
+        other => panic!("a bad layer value must refuse the reload: {other:?}"),
+    }
+    assert_eq!(fixture.state.world.config().gap, Config::default().gap);
+}
+
+#[test]
+fn a_bad_user_color_falls_back_to_the_layer_and_reports_both_lists() {
+    let mut fixture = Fixture::with_config("[appearance]\nbackground_color = \"nope\"\n");
+    let response = reload_with_look(&mut fixture, LOOK_APPEARANCE);
+    assert_eq!(
+        invalid(&response),
+        ["appearance.background_color"],
+        "the bad user value is invalid: {response:?}"
+    );
+    assert_eq!(
+        shadowed(&response),
+        ["appearance.background_color"],
+        "and shadowing: {response:?}"
+    );
+}
+
+#[test]
+fn a_broken_layer_refuses_the_reload_and_keeps_everything() {
+    let mut fixture = Fixture::with_config("[layout]\ngap = 20\n");
+    let response = fixture.state.reload_with_state(LookLayerState::Broken(
+        "the look layer at /x cannot be read (dangling)".to_owned(),
+    ));
+    match &response {
+        Response::Error { message } => assert!(
+            message.contains("keeping the running config"),
+            "the refusal keeps the session: {response:?}"
+        ),
+        other => panic!("a broken layer must refuse the reload: {other:?}"),
+    }
+    assert_eq!(fixture.state.world.config().gap, Config::default().gap);
+}
+
+/// Subscribes a fresh connection to `Look`: the reader carries a timeout,
+/// so a missing event fails instead of hanging the suite.
+fn look_subscriber(state: &mut State) -> BufReader<UnixStream> {
+    let (server, client) = UnixStream::pair().expect("a socket pair");
+    let response = state.subscribe(7, server, vec![EventKind::Look]);
+    assert!(
+        matches!(response, Response::Subscribed { .. }),
+        "subscribing answers subscribed, got {response:?}"
+    );
+    client
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("a read timeout, so a missing event fails instead of hanging the suite");
+    BufReader::new(client)
+}
+
+fn next_event(reader: &mut BufReader<UnixStream>) -> Response {
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .expect("the event arrived within the timeout");
+    decode(&line).expect("a decodable event")
+}
+
+#[test]
+fn the_look_event_fires_once_per_identity_change() {
+    let mut fixture = Fixture::with_config("");
+    let mut reader = look_subscriber(&mut fixture.state);
+
+    fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_APPEARANCE,
+            "moonrise",
+            "hash-a",
+        )));
+    match next_event(&mut reader) {
+        Response::LookChanged { name, source_hash } => {
+            assert_eq!(name.as_deref(), Some("moonrise"));
+            assert_eq!(source_hash, "hash-a");
+        }
+        other => panic!("the first layered reload emits once: {other:?}"),
+    }
+
+    // Same identity twice emits nothing.
+    fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_APPEARANCE,
+            "moonrise",
+            "hash-a",
+        )));
+    reader
+        .get_mut()
+        .set_nonblocking(true)
+        .expect("non-blocking for the silence check");
+    let mut line = String::new();
+    match reader.read_line(&mut line) {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+        other => panic!("the same identity emits nothing: {other:?} {line:?}"),
+    }
+    reader
+        .get_mut()
+        .set_nonblocking(false)
+        .expect("blocking again afterwards");
+
+    // A new hash emits once more; the layer going away emits with no name.
+    fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_APPEARANCE,
+            "moonrise",
+            "hash-b",
+        )));
+    match next_event(&mut reader) {
+        Response::LookChanged { source_hash, .. } => assert_eq!(source_hash, "hash-b"),
+        other => panic!("a changed identity emits: {other:?}"),
+    }
+    fixture.state.reload_with_state(LookLayerState::Absent);
+    match next_event(&mut reader) {
+        Response::LookChanged { name, .. } => assert_eq!(name, None),
+        other => panic!("the layer going away emits: {other:?}"),
+    }
+}
+
+#[test]
+fn a_stale_cursor_answer_is_dropped() {
+    use crate::compositor::cursor::{Cursor, CursorBuilt, RebuildInput};
+
+    // Two cursor-changing reloads in quick succession: the older worker's
+    // answer must not overwrite the newer one.
+    let mut fixture = Fixture::with_config("");
+    fixture.state.cursor_generation = 41;
+    let input = RebuildInput {
+        size: 24,
+        color: Color::new(1.0, 0.0, 0.0, 1.0),
+        theme_name: None,
+        icon: None,
+        scales: Vec::new(),
+    };
+    let stale = CursorBuilt {
+        generation: 40,
+        rebuilt: Cursor::rebuild_async(input),
+    };
+    fixture.state.install_cursor(stale);
+    assert_eq!(
+        fixture.state.cursor.theme().size(),
+        16,
+        "a stale answer installs nothing: the startup size stands"
     );
 }

@@ -1855,3 +1855,73 @@ fn add_path_remove_then_readd_rebuilds_its_bitmaps() {
     let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
     assert_native_element(&fixture.state, &mut renderer, 2.0, 32);
 }
+
+/// What `Cursor::rebuild` costs on the loop thread at the sizes a reload can
+/// ask for (design section 4.10). A swap that changes the cursor pays this
+/// inside one loop turn; if it exceeds a frame at common sizes the rebuild
+/// moves to a worker. Prints for a human; asserts nothing:
+///
+/// ```text
+/// cargo test --release -p scoot --bin scoot cursor_rebuild_cost -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "prints rebuild timings for a human; asserts nothing"]
+fn cursor_rebuild_cost() {
+    use std::time::Instant;
+
+    use super::Cursor;
+    use crate::compositor::decorations::Color;
+
+    // Ten timed rebuilds per size; the minimum is the number (noise only
+    // ever adds time on a shared VM host).
+    for size in [24, 48, 256] {
+        let mut cursor = Cursor::new(size, Color::new(1.0, 1.0, 1.0, 1.0), None);
+        // One warmup: theme lookup caching happens here, not in the timed
+        // span, which is the steady-state cost of swapping between two looks
+        // whose themes are both already known.
+        cursor.rebuild(size, Color::new(1.0, 0.0, 0.0, 1.0), None);
+        let mut best = std::time::Duration::MAX;
+        for _ in 0..10 {
+            let started = Instant::now();
+            cursor.rebuild(size, Color::new(1.0, 1.0, 1.0, 1.0), None);
+            best = best.min(started.elapsed());
+        }
+        println!("cursor rebuild, {size}px: BEST {best:?} of 10 (loop thread)");
+    }
+}
+
+/// The worker build installs exactly what the synchronous rebuild builds:
+/// same size, same paints, same scale set, same themed resolution. (The
+/// buffers carry fresh `Id`s by design, so this compares what they draw
+/// from, not the `Id`s.)
+#[test]
+fn async_rebuild_installs_what_sync_rebuild_builds() {
+    use super::{Cursor, RebuildInput};
+    use crate::compositor::decorations::Color;
+
+    let fill = Color::new(1.0, 0.0, 0.0, 1.0);
+    let mut sync = Cursor::new(16, Color::new(1.0, 1.0, 1.0, 1.0), None);
+    sync.ensure_scale(2.0);
+    sync.rebuild(24, fill, None);
+    let mut async_cursor = Cursor::new(16, Color::new(1.0, 1.0, 1.0, 1.0), None);
+    async_cursor.ensure_scale(2.0);
+    let rebuilt = Cursor::rebuild_async(RebuildInput {
+        size: 24,
+        color: fill,
+        theme_name: None,
+        icon: None,
+        scales: vec![2.0],
+    });
+    async_cursor.install_rebuilt(rebuilt);
+    assert_eq!(async_cursor.theme().name(), sync.theme().name());
+    assert_eq!(async_cursor.theme().size(), sync.theme().size());
+    assert_eq!(
+        async_cursor.scales.len(),
+        sync.scales.len(),
+        "the worker builds every scale the synchronous rebuild builds"
+    );
+    for (left, right) in async_cursor.scales.iter().zip(sync.scales.iter()) {
+        assert_eq!(left.physical, right.physical);
+        assert_eq!(left.key, right.key);
+    }
+}

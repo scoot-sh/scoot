@@ -73,6 +73,7 @@ use smithay::backend::renderer::element::surface::{
 use smithay::backend::renderer::element::{Kind, render_elements};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
+use smithay::reexports::calloop::channel;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Size, Transform};
 use smithay::wayland::compositor::{SurfaceAttributes, get_parent, with_states};
@@ -155,10 +156,9 @@ pub struct Cursor {
     /// per cold-path build rather than per frame (`rebuild` replaces the
     /// whole set at once). The bound is on the count of scales, not on
     /// bytes: at logical 256 four scales (physical 256/320/384/512) hold
-    /// 78,544,896 B (~75 MiB), and rebuilding that set costs a few seconds
-    /// on the event-loop thread -- rare (a 256px cursor at four live
-    /// scales) and accepted, which is why no byte cap complicates this
-    /// further.
+    /// 78,544,896 B (~75 MiB), and rebuilding that set costs seconds --
+    /// which is why a reload builds it on a worker and swaps it in
+    /// (see `reload.rs`), never on the loop thread.
     scales: Vec<ScaleEntry>,
     /// The clamped logical edge length every entry is drawn for, kept so the
     /// element can be sized in logical units. Not a hotspot itself: each
@@ -180,19 +180,66 @@ pub struct Cursor {
     theme: Theme,
 }
 
+/// What a cursor rebuild needs that the loop thread already holds: the new
+/// paints plus the bitmap set to build. Cheap to move onto a worker; the
+/// bitmaps are built from it, never from compositor state.
+pub struct RebuildInput {
+    /// The new logical edge length (clamped like [`Cursor::new`]).
+    pub size: i32,
+    /// The new fill color.
+    pub color: Color,
+    /// The new theme name.
+    pub theme_name: Option<String>,
+    /// The named shape showing now, if the cursor shows one: what the
+    /// worker warms the fresh theme's cache with.
+    pub icon: Option<CursorIcon>,
+    /// The output scales to build alongside scale 1.0, in first-use order.
+    pub scales: Vec<f64>,
+}
+
+/// A worker-built cursor bitmap set: installed by
+/// [`Cursor::install_rebuilt`] in one atomic swap. Everything the loop
+/// thread's `rebuild` replaced, built off it.
+pub struct RebuiltCursor {
+    size: i32,
+    fill: [u8; 4],
+    rim: [u8; 4],
+    theme: Theme,
+    scales: Vec<ScaleEntry>,
+}
+
+/// A finished off-loop cursor rebuild, with the generation it was built
+/// for: what a cursor worker sends back, and what the loop installs when it
+/// is still the newest (see `reload.rs`).
+pub struct CursorBuilt {
+    /// The [`State::cursor_generation`] this rebuild was spawned for.
+    pub generation: u64,
+    /// The bitmap set to swap in.
+    pub rebuilt: RebuiltCursor,
+}
+
+/// The sending end of the channel cursor rebuild workers answer through.
+/// One per `State`, created lazily with its event source and kept across
+/// rebuilds -- so a restart reuses the one registered source rather than
+/// abandoning one per generation (the screenshot worker's arrangement).
+pub struct CursorSink {
+    pub(crate) done: channel::Sender<CursorBuilt>,
+}
+
 /// One output scale's bitmaps: the fallback shapes rasterised at
 /// [`physical_size`] pixels plus the theme image resolved at that size for
 /// the current [`Cursor::status`].
 ///
 /// The per-entry theme image keeps [`Cursor::themed`'s old invariant](Cursor)
 /// in a new place: **every write to `status` refreshes every entry's image
-/// in the same statement.** There are exactly three write sites -- the
-/// constructor in [`Cursor::new`] (immediately followed by a refresh),
-/// [`Cursor::set_status`] (which refreshes inline), and [`Cursor::rebuild`]
-/// (which reloads the whole theme and then refreshes) -- and adding a fourth
-/// without refreshing these would leave the previous shape's pixels drawn
-/// under the new shape's name -- the single most likely way this module
-/// could silently draw the wrong thing.
+/// in the same statement.** There are exactly two writes to `status` -- the
+/// constructor in [`Cursor::new`] (immediately followed by a refresh) and
+/// [`Cursor::set_status`] (which refreshes inline) -- plus
+/// [`Cursor::install_rebuilt`], which swaps the whole bitmap set without
+/// touching `status` and then refreshes for the live one. Adding another
+/// writer of either without refreshing these would leave the previous
+/// shape's pixels drawn under the new shape's name -- the single most
+/// likely way this module could silently draw the wrong thing.
 ///
 /// `themed: None` means "no theme image for this status at this size": a
 /// hidden cursor, a client surface, or a named shape the theme does not
@@ -305,42 +352,106 @@ impl Cursor {
     }
 
     /// Rebuilds the fallback bitmaps and re-resolves the theme from fresh
-    /// `[appearance]` values, on a config reload (`reload.rs`).
+    /// `[appearance]` values, synchronously.
     ///
     /// The `status` is untouched -- whatever shape the pointer shows keeps
     /// showing, redrawn from the new pixels -- but the theme is reloaded
     /// whole (dropping the old image cache, which belonged to the old theme
-    /// at the old size) and [`Self::themed`] is re-resolved for that same
-    /// status, which is what keeps the field's invariant across the third
-    /// write site. `size` is clamped exactly as in [`Cursor::new`].
+    /// at the old size) and the themed image is re-resolved for that same
+    /// status. `size` is clamped exactly as in [`Cursor::new`].
     ///
     /// Replacing the buffers (rather than reusing their `Id`s) is what makes
     /// the new pixels actually appear: to the damage tracker these read as
     /// new content for one frame, which is true -- the pixels did change.
     /// `Theme::load` never fails (an unresolvable name is an empty theme,
-    /// drawn as the fallback shapes), so this cannot fail either, and
-    /// running it synchronously on the event loop is fine -- a reload is a
-    /// cold path, not a frame.
+    /// drawn as the fallback shapes), so this cannot fail either.
+    ///
+    /// Synchronous: only startup-adjacent and test callers run it directly.
+    /// A live reload builds the same set on a worker through
+    /// [`Cursor::rebuild_async`] and swaps it in with
+    /// [`Cursor::install_rebuilt`] (see `reload.rs`), because the build
+    /// exceeds a frame at common cursor sizes.
     pub fn rebuild(&mut self, size: i32, color: Color, theme_name: Option<&str>) {
-        let size = Appearance::clamp_cursor_size(size);
-        let (fill, rim) = paints(color);
-        self.size = size;
-        self.fill = fill;
-        self.rim = rim;
-        // The scale-1 bitmaps first (every session keeps drawing while the
-        // reload lands), then every scale this cursor already served, at the
-        // new paints -- one atomic swap per entry, never a half-rebuilt set.
-        // `sync_scales` (called by the reload path right after) adds scales
-        // for outputs added since and drops ones no output uses anymore.
-        let keys: Vec<u64> = self.scales.iter().map(|entry| entry.key).collect();
-        self.scales.clear();
-        self.ensure_scale(1.0);
-        for key in keys {
-            if key != scale_key(1.0) {
-                self.ensure_scale(key as f64 / 100.0);
+        let rebuilt = Self::rebuild_async(RebuildInput {
+            size,
+            color,
+            theme_name: theme_name.map(str::to_owned),
+            icon: self.status_icon(),
+            scales: self.scale_list(),
+        });
+        self.install_rebuilt(rebuilt);
+    }
+
+    /// The named shape showing now, if the cursor shows one: what a worker
+    /// warms the fresh theme's cache with, so installing its bitmaps needs
+    /// no image load on the loop. A client surface or a hidden cursor has
+    /// no theme image either way.
+    pub(crate) fn status_icon(&self) -> Option<CursorIcon> {
+        match &self.status {
+            CursorImageStatus::Named(icon) => Some(*icon),
+            CursorImageStatus::Surface(_) | CursorImageStatus::Hidden => None,
+        }
+    }
+
+    /// The output scales this cursor serves, in first-use order: what a
+    /// worker rebuilds alongside scale 1.0, so installing its set drops no
+    /// live scale.
+    pub(crate) fn scale_list(&self) -> Vec<f64> {
+        self.scales.iter().map(|entry| entry.scale).collect()
+    }
+
+    /// Builds the bitmap set a reload installs, off the loop thread (see
+    /// `reload.rs`'s cursor worker): the fallback shapes rasterised for
+    /// scale 1.0 plus every scale in `input.scales`, and the fresh theme
+    /// with `input.icon` resolved at each size, so installing needs no file
+    /// or image load on the loop. Pure over its input -- no compositor
+    /// state, no globals -- and infallible like [`Cursor::rebuild`].
+    pub fn rebuild_async(input: RebuildInput) -> RebuiltCursor {
+        let size = Appearance::clamp_cursor_size(input.size);
+        let (fill, rim) = paints(input.color);
+        let mut theme = Theme::load(input.theme_name.as_deref(), size);
+        // Scale 1.0 first, then the live scales in first-use order -- the
+        // same sequence [`Cursor::rebuild`] feeds `ensure_scale`, including
+        // its oldest-first eviction past [`MAX_SCALES`]: keeping the last
+        // four is exactly what pushing each and dropping index 0 at four
+        // leaves behind.
+        let mut keys: Vec<(u64, f64)> = Vec::with_capacity(input.scales.len() + 1);
+        for scale in std::iter::once(1.0).chain(input.scales) {
+            let key = scale_key(scale);
+            if !keys.iter().any(|(known, _)| *known == key) {
+                keys.push((key, scale));
             }
         }
-        self.theme = Theme::load(theme_name, size);
+        while keys.len() > MAX_SCALES {
+            keys.remove(0);
+        }
+        let mut scales = Vec::with_capacity(keys.len());
+        for (_, scale) in keys {
+            scales.push(Self::build_entry_for(
+                size, fill, rim, &mut theme, input.icon, scale,
+            ));
+        }
+        RebuiltCursor {
+            size,
+            fill,
+            rim,
+            theme,
+            scales,
+        }
+    }
+
+    /// Installs a worker-built bitmap set in one atomic swap: the size, the
+    /// paints, the theme and every scale's buffers together, never a
+    /// half-rebuilt cursor. Re-resolves the theme image for the *live*
+    /// status afterwards -- a cache hit when the pointer still shows the
+    /// shape the worker warmed, a load when it moved on meanwhile -- which
+    /// keeps [`ScaleEntry`]'s invariant across this fourth write site.
+    pub fn install_rebuilt(&mut self, rebuilt: RebuiltCursor) {
+        self.size = rebuilt.size;
+        self.fill = rebuilt.fill;
+        self.rim = rebuilt.rim;
+        self.theme = rebuilt.theme;
+        self.scales = rebuilt.scales;
         self.refresh_themed();
     }
 
@@ -348,18 +459,34 @@ impl Cursor {
     /// bitmaps rasterised natively at [`physical_size`] pixels, in
     /// [`Shape::index`] order, plus the current status's theme image resolved
     /// at that size. Every shape is `shapes::generate` -- Mocu's art at
-    /// physical pixels, so a 2x output samples native art 1:1 instead of a
-    /// stretched logical bitmap.
+    /// physical pixels, so a 2x output draws the theme's 32px art, not its
+    /// 16px art stretched.
     ///
     /// Cold paths only ([`Cursor::new`], [`Cursor::rebuild`],
     /// [`Cursor::ensure_scale`]); the frame path only reads entries. Shared
     /// by all three so they cannot disagree about what a size/scale pair
     /// draws.
     fn build_entry(&mut self, scale: f64) -> ScaleEntry {
+        let icon = self.status_icon();
+        Self::build_entry_for(self.size, self.fill, self.rim, &mut self.theme, icon, scale)
+    }
+
+    /// The worker half of [`build_entry`](Self::build_entry): the same
+    /// bitmaps from explicit paints and theme instead of `&mut self`, so a
+    /// worker thread builds without touching the live cursor. The loop-side
+    /// entry point stays the one cold paths call; the worker calls this one.
+    fn build_entry_for(
+        size: i32,
+        fill: [u8; 4],
+        rim: [u8; 4],
+        theme: &mut Theme,
+        icon: Option<CursorIcon>,
+        scale: f64,
+    ) -> ScaleEntry {
         let key = scale_key(scale);
         let sane = key as f64 / 100.0;
-        let physical = physical_size(self.size, sane);
-        let shapes = Self::build_shapes(physical, self.fill, self.rim);
+        let physical = physical_size(size, sane);
+        let shapes = Self::build_shapes(physical, fill, rim);
         let mut entry = ScaleEntry {
             key,
             scale: sane,
@@ -368,7 +495,10 @@ impl Cursor {
             hotspots: Shape::ALL.map(|shape| shape.hotspot(physical)),
             themed: None,
         };
-        entry.themed = self.resolve_themed(entry.physical);
+        entry.themed = match icon {
+            Some(icon) => theme.image_at(icon, entry.physical.max(1) as u32).cloned(),
+            None => None,
+        };
         entry
     }
 
@@ -475,10 +605,12 @@ impl Cursor {
     /// now is.
     ///
     /// The one place entries' images are written. Called from every site
-    /// that writes `status`, which is what keeps the two from disagreeing --
-    /// see [`ScaleEntry`]'s doc. Loading happens here, on the event that
-    /// changed the shape, and never on the render path; a shape already
-    /// looked up (or already known missing) costs one hash lookup.
+    /// that writes `status`, and from [`Self::install_rebuilt`] (which
+    /// swaps the bitmaps without touching `status`), which is what keeps
+    /// the two from disagreeing -- see [`ScaleEntry`]'s doc. Loading
+    /// happens here, on the event that changed the shape, and never on the
+    /// render path; a shape already looked up (or already known missing)
+    /// costs one hash lookup.
     fn refresh_themed(&mut self) {
         let status = &self.status;
         let theme = &mut self.theme;
@@ -493,19 +625,6 @@ impl Cursor {
                 // stop.
                 CursorImageStatus::Surface(_) | CursorImageStatus::Hidden => None,
             };
-        }
-    }
-
-    /// The theme image for the current status at `physical_px` physical
-    /// pixels, shared by [`Cursor::build_entry`] and [`Cursor::refresh_themed`]
-    /// so a new scale resolves what a status change would have resolved.
-    fn resolve_themed(&mut self, physical_px: i32) -> Option<Themed> {
-        match &self.status {
-            CursorImageStatus::Named(icon) => self
-                .theme
-                .image_at(*icon, physical_px.max(1) as u32)
-                .cloned(),
-            CursorImageStatus::Surface(_) | CursorImageStatus::Hidden => None,
         }
     }
 

@@ -351,6 +351,15 @@ pub enum Response {
     /// or validate the file at all answers `Error` instead (the running
     /// config untouched), which is why there is no third list here.
     ///
+    /// `shadowed` names every user-file key that overrides a look token,
+    /// whether or not it differs from the running session (a user key pins
+    /// its value even when it equals the look's). `invalid` names user keys
+    /// whose values failed to parse and fell back to the look layer's value;
+    /// each also appears in `shadowed`. Both are empty without a look layer.
+    /// Added with defaults, so no `PROTOCOL_VERSION` move: an older client
+    /// ignores the fields, and an older server's reply decodes with both
+    /// empty.
+    ///
     /// A new variant, so this is the half that moved `PROTOCOL_VERSION` (see
     /// that constant's doc): an older client that somehow received one would
     /// fail to decode it. In practice only a client new enough to send
@@ -358,11 +367,16 @@ pub enum Response {
     Reloaded {
         applied: Vec<String>,
         refused: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        shadowed: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        invalid: Vec<String>,
     },
     /// What a `Subscribe` request answers on success: the event kinds this
     /// connection is now dedicated to, echoed back. Afterwards the
     /// connection carries [`OutputAdded`]/[`OutputRemoved`]/[`OutputRestored`]/
-    /// [`OutputChanged`]/[`KeyboardChanged`]/[`Workspaces`] unasked, and
+    /// [`OutputChanged`]/[`KeyboardChanged`]/[`Workspaces`]/[`LookChanged`]
+    /// unasked, and
     /// any other request on it is refused with an error.
     ///
     /// A new variant, so this is one of the halves that moved
@@ -448,6 +462,18 @@ pub enum Response {
     /// the unsubscribed interval as one change.
     LockChanged {
         locked: bool,
+    },
+    /// The active look layer changed; see [`EventKind::Look`] for when this
+    /// fires. Sent only to connections subscribed to [`EventKind::Look`].
+    /// `name` is the rendered look's name, `None` when the layer went away;
+    /// `source_hash` is the rendered look's hash from its `render.json`.
+    ///
+    /// A new variant, so this moves `PROTOCOL_VERSION` 10 → 11 (see that
+    /// constant's doc): an older client handed one would fail its decode,
+    /// which can only happen to a client new enough to have subscribed.
+    LookChanged {
+        name: Option<String>,
+        source_hash: String,
     },
     /// The answer to [`Request::Binds`](crate::Request::Binds): the live
     /// keymap as the running compositor uses it, plus the config binds that
