@@ -3,7 +3,7 @@ title: "The five shipped looks as look.toml under looks/, validated in CI"
 status: "open"
 area: "core"
 priority: "high"
-blocked: "look-format"
+blocked: null
 ---
 
 # The five shipped looks as look.toml under looks/, validated in CI

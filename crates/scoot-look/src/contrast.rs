@@ -21,10 +21,20 @@ fn channel(c: f64) -> f64 {
 }
 
 /// WCAG relative luminance, the formula of the existing Nix check.
+/// Never panics: a malformed color reads as black. The pipeline only calls
+/// this on resolved looks whose colors passed the `#rrggbb` grammar, so the
+/// fallback is unreachable there; it exists because `ResolvedLook` fields
+/// are public and a caller can always build one by hand.
 pub fn luminance(hex: &str) -> f64 {
-    let v =
-        |i: usize| u8::from_str_radix(&hex[1 + 2 * i..3 + 2 * i], 16).unwrap_or(0) as f64 / 255.0;
-    0.2126 * channel(v(0)) + 0.7152 * channel(v(1)) + 0.0722 * channel(v(2))
+    let byte = |i: usize| {
+        hex.as_bytes()
+            .get(1 + 2 * i..3 + 2 * i)
+            .and_then(|s| std::str::from_utf8(s).ok())
+            .and_then(|s| u8::from_str_radix(s, 16).ok())
+            .unwrap_or(0) as f64
+            / 255.0
+    };
+    0.2126 * channel(byte(0)) + 0.7152 * channel(byte(1)) + 0.0722 * channel(byte(2))
 }
 
 /// WCAG contrast ratio of two `#rrggbb` colors.

@@ -69,3 +69,18 @@ fn dim_and_urgent_never_refuse() {
     assert!(report.refusals().is_empty());
     assert_eq!(report.warnings().len(), 2);
 }
+
+#[test]
+fn malformed_colors_never_panic() {
+    // `ResolvedLook` fields are public, so a caller can hand `check` colors
+    // the grammar would have refused. That must measure (as black), never
+    // panic on a slice or a parse.
+    for bad in ["", "#", "#12", "blue", "#GGGGGG", "＃２Ｂ３６４８"] {
+        let _ = luminance(bad);
+        let _ = ratio(bad, "#FFFFFF");
+        let _ = ratio("#FFFFFF", bad);
+    }
+    let mut look = moonrise();
+    look.palette.foreground = "blue".to_string();
+    let _ = check(&look, Origin::Shipped);
+}

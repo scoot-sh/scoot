@@ -3,7 +3,7 @@ title: "scootnotify: cards, the stack, lock and idle rules, outputs, the look la
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-server, scootui-surfaces-on-demand, look-format"
+blocked: "notify-server, scootui-surfaces-on-demand"
 milestone: "M7"
 ---
 

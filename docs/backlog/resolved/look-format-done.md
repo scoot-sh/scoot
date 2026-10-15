@@ -1,9 +1,10 @@
 ---
 title: "The look format: the scoot-look crate, look.toml schema, value grammar and pure validation"
-status: "open"
-area: "core"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-14"
 ---
 
 # The look format: the scoot-look crate, look.toml schema, value grammar and pure validation

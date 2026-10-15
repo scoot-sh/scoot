@@ -1,0 +1,76 @@
+//! The non-Nix path: listing, validating and rendering a look uses plain
+//! files and this crate only. No `nix` binary is involved, so the full
+//! pipeline must succeed with no `nix` on `PATH`.
+
+use std::collections::BTreeMap;
+
+use scoot_look::{Origin, RenderInputs, check_contrast, render_bar, render_scoot, resolve};
+
+const MINIMAL: &str = r##"
+schema = 1
+name = "moonrise"
+title = "Moonrise"
+description = "Slate navy."
+polarity = "dark"
+
+[palette]
+background = "#2B3648"
+foreground = "#F6EEDC"
+dim = "#9C8B95"
+accent = "#FFA45C"
+urgent = "#E87F6A"
+
+[fonts]
+ui = "DroidSansM Nerd Font Propo"
+sans = "DejaVu Sans"
+mono = "FiraCode Nerd Font"
+size = 10
+
+[shape]
+radius = 14
+ring-width = 2
+
+[cursor]
+theme = "Mocu"
+size = 24
+accent = "#FF9A49"
+
+[wallpaper]
+color = "#2B3648"
+"##;
+
+/// Scrub `nix` (and every other helper) from `PATH` for the duration of the
+/// closure. A test that only passes because a `nix` binary happened to be
+/// installed is a test of the wrong path.
+fn without_nix_on_path(f: impl FnOnce()) {
+    let old = std::env::var_os("PATH");
+    // `set_var` is `unsafe` (it can race another thread's `getenv`); the
+    // body runs alone here and restores the value before returning.
+    unsafe { std::env::set_var("PATH", "/usr/bin:/bin") };
+    let found = std::process::Command::new("nix")
+        .arg("--version")
+        .output()
+        .is_ok();
+    assert!(!found, "nix is on PATH after scrubbing it");
+    f();
+    if let Some(path) = old {
+        unsafe { std::env::set_var("PATH", path) };
+    }
+}
+
+#[test]
+fn validate_render_contrast_without_nix() {
+    without_nix_on_path(|| {
+        let raw = scoot_look::parse_look_toml(MINIMAL.as_bytes()).expect("parses");
+        assert!(scoot_look::validate_for_origin(&raw, Origin::User).is_empty());
+        assert!(scoot_look::validate_apps_allowlist(&raw.apps).is_empty());
+        let map = BTreeMap::from([("moonrise".to_string(), (raw, Origin::User))]);
+        let look = resolve(&map, "moonrise").expect("resolves");
+        assert!(check_contrast(&look, Origin::User).refusals().is_empty());
+        let inputs = RenderInputs::default();
+        let scoot = render_scoot(&look, &inputs).expect("renders scoot.toml");
+        let bar = render_bar(&look, &inputs).expect("renders bar.toml");
+        let _: toml::Value = toml::from_str(&scoot).expect("scoot.toml parses");
+        let _: toml::Value = toml::from_str(&bar).expect("bar.toml parses");
+    });
+}
