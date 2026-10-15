@@ -143,13 +143,17 @@ const MAX_FDS: usize = MAX_POLL + 1 + MAX_CONNECTIONS + MAX_CHILDREN;
 
 /// Everything a start needs before it touches the system: the placed modules
 /// started and the font loaded, or the reason it cannot go on. Shared with
-/// [`check`] so `--check` gives exactly the errors a start does.
-fn prepare(config: &Config) -> Result<Content, Error> {
+/// [`check`] so `--check` gives exactly the errors a start does. Also says
+/// whether any module was left out as unavailable: the daemon's reloads
+/// retry it while that holds.
+fn prepare(config: &Config) -> Result<(Content, bool), Error> {
+    let mut left_out = false;
     let modules = modules::start(
         &config.outputs.to_start(&config.layout),
         &config.modules,
         &mut Vec::new(),
         &mut |id, why| {
+            left_out = true;
             warn(format_args!(
                 "scootbar: note: the {id} module is unavailable, and left out: {why}"
             ));
@@ -164,13 +168,16 @@ fn prepare(config: &Config) -> Result<Content, Error> {
             font::text(config.font.as_deref(), &config.fallback_fonts).map_err(Error::Font)?;
         Some(text)
     };
-    Ok(Content {
-        modules,
-        text,
-        style: config.style(),
-        #[cfg(feature = "popup")]
-        tooltip_delay: std::time::Duration::from_millis(config.tooltip_delay.into()),
-    })
+    Ok((
+        Content {
+            modules,
+            text,
+            style: config.style(),
+            #[cfg(feature = "popup")]
+            tooltip_delay: std::time::Duration::from_millis(config.tooltip_delay.into()),
+        },
+        left_out,
+    ))
 }
 
 /// `scootbar daemon --check`: what a start does before it connects, and
@@ -185,7 +192,7 @@ pub fn check(config: &Config) -> Result<(), Error> {
 /// at start-up, so the precedence (defaults, then the file, then the
 /// flags) holds for the running bar at all times.
 pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Error> {
-    let content = prepare(&config)?;
+    let (content, mut left_out) = prepare(&config)?;
     // The control socket first, so a second daemon refuses before it
     // touches the compositor.
     let paths = paths::from_env().map_err(Error::ControlPaths)?;
@@ -246,7 +253,9 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
     let mut wants_write = false;
     // What the running bar was started with, post-flags: every `reload`
     // compares against it to find the style-only fast path, and a
-    // successful one replaces it (`respond::Responder`).
+    // successful one replaces it (`respond::Responder`). `left_out` rides
+    // beside it: while any module is left out as unavailable, even a
+    // style-only reload takes the full path and retries it.
     let mut last = config;
     loop {
         wayland
@@ -382,6 +391,7 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
                 &given,
                 server.subscribers(),
                 &mut last,
+                &mut left_out,
             );
             let mut index = 0;
             while index < server.conns().len() {

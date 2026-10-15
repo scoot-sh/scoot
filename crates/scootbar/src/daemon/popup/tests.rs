@@ -1,7 +1,7 @@
 //! The popup glue's pure parts: what is arithmetic, not protocol.
 
 use super::events::device;
-use super::resized;
+use super::{fits, resized};
 use crate::density::Scale;
 use crate::popup::Layout;
 
@@ -48,4 +48,30 @@ fn a_refill_at_another_size_reopens_and_at_the_same_size_does_not() {
     let grown = sized(300, 260);
     assert!(resized(&grown, dims));
     assert!(!resized(&grown, (grown.width, grown.height)));
+}
+
+#[test]
+fn a_restyled_popup_is_remade_only_when_it_no_longer_fits() {
+    fn sized(width: u32, height: u32) -> Layout {
+        let mut layout = Layout::default();
+        layout.width = width;
+        layout.height = height;
+        layout
+    }
+    // Scale 1: the buffer is the size itself. Smaller keeps the surface
+    // (no flicker); bigger is made again.
+    assert!(fits(Scale::Integer(1), &sized(300, 200), (300, 200)));
+    assert!(fits(Scale::Integer(1), &sized(240, 200), (300, 200)));
+    assert!(!fits(Scale::Integer(1), &sized(300, 201), (300, 200)));
+    assert!(!fits(Scale::Integer(1), &sized(301, 200), (300, 200)));
+    // Scale 2 with an odd device width: the buffer rounds up (101 device
+    // is 51 logical, 102 buffered), and the same content still fits it.
+    // The old device-size comparison remade here, at every reload.
+    assert!(fits(Scale::Integer(2), &sized(101, 50), (102, 100)));
+    assert!(fits(Scale::Integer(2), &sized(100, 50), (102, 100)));
+    assert!(!fits(Scale::Integer(2), &sized(103, 50), (102, 100)));
+    assert!(!fits(Scale::Integer(2), &sized(101, 101), (102, 100)));
+    // Fractional 1.5: 101 device is 68 logical, 102 buffered.
+    assert!(fits(Scale::Fractional(180), &sized(101, 50), (102, 51)));
+    assert!(!fits(Scale::Fractional(180), &sized(103, 50), (102, 51)));
 }

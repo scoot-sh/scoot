@@ -231,8 +231,12 @@ impl Popups {
     }
 
     /// A reload: whatever was hovered is for modules that are gone, and the
-    /// delay may be new.
+    /// delay may be new. The shown tooltip goes with the hover state:
+    /// `reset` forgets `Shown`, and an `Idle` hover never emits the `Hide`
+    /// a kept tip would need when the pointer then leaves — so the tip
+    /// would sit on screen past a delay-changing reload that kept it.
     pub fn reset_hover(&mut self, delay: std::time::Duration) {
+        self.close_tip();
         self.hover.reset(delay);
     }
 
@@ -315,6 +319,24 @@ fn anchor_span(scale: Scale, span: crate::paint::Span, bar_width: u32) -> (u32, 
 /// so this fires once per size change, never in a loop.
 fn resized(layout: &Layout, dims: (u32, u32)) -> bool {
     (layout.width, layout.height) != dims
+}
+
+/// Whether a restyled popup or tooltip still fits the surface it opened
+/// at: the new layout's device size, back through the logical size the
+/// compositor was asked for, buffers to no more than the buffer has — the
+/// same check `keep_tooltip` uses for a refilled tooltip. A smaller layout
+/// keeps the surface it has (no flicker); only one that no longer fits is
+/// made again. Comparing device sizes directly would remake at every
+/// reload on scales where the buffer rounds up (scale 2 with an odd width,
+/// any fractional scale), reusing the old grab serial each time — which a
+/// compositor may refuse, closing the popup.
+fn fits(scale: Scale, layout: &Layout, dims: (u32, u32)) -> bool {
+    scale
+        .buffer(Size {
+            width: scale.logical_ceil(layout.width),
+            height: scale.logical_ceil(layout.height),
+        })
+        .is_some_and(|(width, height)| width <= dims.0 && height <= dims.1)
 }
 
 /// A protocol `int` for a size or a coordinate: saturated.
@@ -618,9 +640,7 @@ impl State {
             open.dims.0,
             open.dims.1,
         );
-        if (open.layout.width, open.layout.height) != open.dims
-            || round.rounded() != open.round.rounded()
-        {
+        if !fits(open.scale, &open.layout, open.dims) || round.rounded() != open.round.rounded() {
             let (output, module, serial) = (open.output, open.module, open.serial);
             open.destroy();
             let member = self
@@ -725,7 +745,7 @@ impl State {
             tip.dims.0,
             tip.dims.1,
         );
-        if (layout.width, layout.height) != tip.dims || round.rounded() != tip.round.rounded() {
+        if !fits(tip.scale, &layout, tip.dims) || round.rounded() != tip.round.rounded() {
             let (output, module) = (tip.output, tip.module);
             tip.destroy();
             let key = Key { output, module };

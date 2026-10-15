@@ -14,6 +14,7 @@ mod common;
 
 use std::fs;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 
 use common::{Reaper, Session, rgb};
 use serde_json::Value;
@@ -211,4 +212,161 @@ fn a_refused_reload_changes_nothing_and_the_next_one_routes_on_the_running_bar()
     assert_eq!(rig.pid(), pid, "the kept child survived the full reload");
     rig.alive();
     rig.clean();
+}
+
+/// A reload retries a module left out as unavailable: the bar runs in a
+/// user and network namespace with only `lo`, so the network module is
+/// unavailable at start; an interface appears later, and a colors-only
+/// reload picks it up. Without the retry the same file stays style-only
+/// and the module stays absent.
+#[test]
+#[cfg(feature = "network")]
+fn a_reload_retries_a_module_left_out_as_unavailable() {
+    fn tool(name: &str, args: &[&str]) -> bool {
+        Command::new(name)
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+    if !tool("unshare", &["-Urn", "true"]) || !tool("ip", &["-V"]) {
+        eprintln!("skipped -- no unshare/ip for the namespace retry test");
+        return;
+    }
+    let Some(session) = Session::scoot("style-retry", 1, "") else {
+        return;
+    };
+    let dir = session.runtime_dir().join("out");
+    fs::create_dir_all(&dir).unwrap();
+    let file = session.runtime_dir().join("bar.toml");
+    let lists = "left = [\"network\"]\nright = [\"out\"]\n";
+    let tables = out_table(&dir);
+    fs::write(&file, config(lists, &tables, "", BAR)).unwrap();
+    // The wrapper runs the daemon in a user and network namespace: only
+    // `lo`, down, so `network` starts unavailable. A reader inside the
+    // namespace waits on a fifo and brings up a `dummy0` when the test
+    // writes to it (`nsenter -U` cannot enter the namespace: setgroups is
+    // denied — so the trigger comes from inside).
+    let fifo = session.runtime_dir().join("netns-trigger");
+    let ack = session.runtime_dir().join("netns-ack");
+    let inner = session.runtime_dir().join("netns-inner.sh");
+    fs::write(
+        &inner,
+        format!(
+            "#!/bin/sh\n( read _ < \"{fifo}\" && ip link add dummy0 type dummy && ip link set dummy0 up && echo up > \"{ack}\" ) &\nexec {bin} \"$@\"\n",
+            fifo = fifo.display(),
+            ack = ack.display(),
+            bin = common::scootbar_bin().display()
+        ),
+    )
+    .unwrap();
+    let wrapper = session.runtime_dir().join("netns-bar.sh");
+    fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nexec unshare -Urn sh {} \"$@\"\n",
+            inner.display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    for script in [&inner, &wrapper] {
+        fs::set_permissions(script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let out = Command::new("mkfifo").arg(&fifo).output().unwrap();
+    assert!(
+        out.status.success(),
+        "mkfifo: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let log = fs::File::create(session.bar_log()).unwrap();
+    let mut daemon = Command::new(&wrapper);
+    daemon.arg("daemon").arg("--font").arg(session.font());
+    daemon.args(["--config", file.to_str().unwrap()]);
+    daemon.env("WAYLAND_DISPLAY", &session.wayland_display);
+    daemon.env("XDG_RUNTIME_DIR", session.runtime_dir());
+    session.scratch.sandbox(&mut daemon);
+    daemon
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(log);
+    let mut bar = Reaper(daemon.spawn().unwrap());
+    let query = || {
+        let out = session.scootbar().arg("msg").arg("query").output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        serde_json::from_slice::<Value>(&out.stdout).unwrap()
+    };
+    let pid = || {
+        fs::read_to_string(dir.join("pid"))
+            .expect("the command wrote its pid")
+            .trim()
+            .parse::<u32>()
+            .expect("a pid")
+    };
+    // The bar is up with its `exec` line, but no network module.
+    session.wait_for(&mut bar.0, "the bar drawn", |session| {
+        (session.scoot_screenshot(1).at(5, 5) == rgb(BAR)).then_some(())
+    });
+    session.wait_for(&mut bar.0, "the command's line shown", |_| {
+        query()["modules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|module| module["id"] == "out" && module["text"] == "started")
+            .then_some(())
+    });
+    assert!(
+        query()["modules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|module| module["id"] != "network"),
+        "the network module started with only lo"
+    );
+    assert!(
+        session.bar_stderr().contains("left out"),
+        "no left-out note: {}",
+        session.bar_stderr()
+    );
+    let kept = pid();
+    // An interface appears in the bar's namespace; only then does the
+    // reload run, so the retry either sees it or it is a real failure.
+    fs::write(&fifo, "go\n").unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if fs::read_to_string(&ack).is_ok_and(|text| text.trim() == "up") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the interface never came up: {}",
+            session.bar_stderr()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // Colors only otherwise: the retry takes the full path and the network
+    // module starts; the kept `exec` child survives it.
+    fs::write(&file, config(lists, &tables, "", NEW)).unwrap();
+    let out = session
+        .scootbar()
+        .arg("msg")
+        .args(["reload"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    session.wait_for(&mut bar.0, "the retried network module", |_| {
+        query()["modules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|module| module["id"] == "network")
+            .then_some(())
+    });
+    assert_eq!(pid(), kept, "the kept child survived the retrying reload");
+    assert!(
+        bar.0.try_wait().unwrap().is_none(),
+        "scootbar exited: {}",
+        session.bar_stderr()
+    );
 }

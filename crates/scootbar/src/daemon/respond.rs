@@ -11,7 +11,8 @@
 //! keys, the font) takes a fast path: every module keeps running with its
 //! state, an open popup or tooltip is restyled to the new style (remade or
 //! closed where it cannot be), and every output only repaints. Anything
-//! else restarts the modules as at start-up.
+//! else restarts the modules as at start-up — as does a style-only reload
+//! while any module is left out as unavailable, so the retry is not lost.
 //!
 //! A refused `reload` changes nothing: the file is re-read and fully
 //! validated before anything is touched, and the font and the modules are
@@ -48,6 +49,11 @@ pub struct Responder<'a> {
     /// post-flags: what a `reload` compares against to find the style-only
     /// fast path. Updated only by a successful reload.
     last: &'a mut Config,
+    /// Whether the running bar's last module start left any module out as
+    /// unavailable: while set, even a style-only reload takes the full path
+    /// and retries it. Set at start-up and by every full reload, never by
+    /// the fast path (which starts nothing).
+    left_out: &'a mut bool,
     /// One view, reused for every module on every output a `query` asks
     /// about, so a query allocates nothing past the reply itself.
     view: View,
@@ -58,6 +64,7 @@ pub struct Responder<'a> {
 }
 
 impl<'a> Responder<'a> {
+    #[allow(clippy::too_many_arguments)] // The loop's one handler wiring: every reload input in one place.
     pub fn new(
         state: &'a mut State,
         conn: &'a Connection,
@@ -66,6 +73,7 @@ impl<'a> Responder<'a> {
         given: &'a Given,
         subscribers: usize,
         last: &'a mut Config,
+        left_out: &'a mut bool,
     ) -> Self {
         Self {
             stop: false,
@@ -75,6 +83,7 @@ impl<'a> Responder<'a> {
             file,
             given,
             last,
+            left_out,
             view: View::default(),
             subscribers,
             subscription: None,
@@ -220,6 +229,16 @@ fn style_only(old: &Config, new: &Config) -> bool {
     probe == *old
 }
 
+/// Whether `new` takes the style-only fast path against the running `old`:
+/// the differences are style alone ([`style_only`]), and no module was left
+/// out when the running bar last started its modules. A module left out as
+/// unavailable (no battery, no interface) may have become available since,
+/// so that reload takes the full path and retries it; without this an
+/// unchanged file would stay style-only and the module would stay absent.
+fn takes_fast_path(old: &Config, new: &Config, left_out: bool) -> bool {
+    !left_out && style_only(old, new)
+}
+
 impl Responder<'_> {
     /// Re-reads the config file and live-applies it, with the daemon flags
     /// overlaid as at start-up. `Err` is the reply, and the running bar
@@ -251,7 +270,7 @@ impl Responder<'_> {
         {
             config.modules.window_title.link = self.state.title.clone();
         }
-        if style_only(&*self.last, &config) {
+        if takes_fast_path(&*self.last, &config, *self.left_out) {
             self.apply_style(&config)?;
         } else {
             self.apply_full(&config)?;
@@ -318,9 +337,12 @@ impl Responder<'_> {
                 "the {id} module is unavailable, and left out: {why}"
             ));
         })?;
-        for note in notes {
+        for note in notes.iter() {
             warn(format_args!("scootbar: note: {note}"));
         }
+        // What the next reload retries on: a style-only file still takes
+        // the full path while any module is left out.
+        *self.left_out = !notes.is_empty();
         // The swap drops what the new bar did not keep: a removed `exec`'s
         // group dies with its module here.
         self.state.content = content;
