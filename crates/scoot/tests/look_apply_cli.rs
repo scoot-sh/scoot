@@ -11,7 +11,7 @@
 //! The settings bus is neutralized for the CLI child, so the toolkit step
 //! can only note, never write outside the test.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
