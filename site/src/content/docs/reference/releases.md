@@ -3,7 +3,7 @@ title: Releases
 description: "Get a scoot release, know which file is which, and verify it: checksums, provenance, SBOM."
 ---
 
-Every release is one tag, `vX.Y.Z` (`v0.2.0`), and holds every binary
+Every release is one tag, `vX.Y.Z` (`v0.2.1`), and holds every binary
 at that one version: the compositor with `scoot msg`, the wallpaper
 daemon and the bar. The [release workflow](#where-releases-come-from)
 builds and publishes it, nothing by hand. If you are deciding whether
@@ -24,16 +24,17 @@ A release holds one set of files per architecture (`x86_64-linux`,
 | `sbom-scoot-<version>.cyclonedx.json` | The locked dependencies of every shipped binary (their union), CycloneDX 1.3 |
 | `SHA256SUMS` | The checksum of every file above |
 
-The binaries are the default feature build: the GPU-free compositor
-that runs on a box with no GPU stack installed, and a bar that links
-nothing beyond the C library. They are built with cargo from the
+The binaries are the default feature build: one binary that scans out
+from the GPU on real hardware and renders on the CPU everywhere else
+(the GPU scanout tier is compiled in and reaches the GPU libraries at
+run time via `dlopen`, so the same binary starts with and without a GPU
+stack installed), with `xwayland` compiled in (needs the `Xwayland`
+binary on `PATH` at run time to drive X11 apps). They are built with cargo from the
 vendored tree on Debian 12 (glibc 2.36) with Rust 1.97.0 (the rustup
 pin in `release.yml`), so they run on any glibc distro at or past that
-floor. What they are not: the `gpu-scanout`
-build (needs libgbm at run time) and the `xwayland` build (needs the
-`Xwayland` binary on `PATH`). For those, build from the vendored
-tarball ([package scoot offline](./packaging.md)) or take the Nix
-packages, which cover all four combinations.
+floor. For a CPU-only build with no GPU or X11 code at all, build from
+the vendored tarball ([package scoot offline](./packaging.md)) or take
+the Nix packages.
 
 The easy way to get them: the [install
 script](../../start/install/#use-it-every-day) picks the right files
@@ -54,7 +55,7 @@ Cachix cache with the flake on FlakeHub (rolling release) — see
 the command below.
 
 A build that is not a release says how far past one it is: `scoot
---version` prints `scoot 0.2.0+14.g615608c (ipc protocol 10)`. The Nix
+--version` prints `scoot 0.2.1+14.g615608c (ipc protocol 10)`. The Nix
 flake's rolling release is numbered `0.3.<commits on main>`, so it sorts
 above every 0.2.x tag.
 
@@ -77,8 +78,8 @@ not covered — these are glibc binaries. Check what you have before
 anything else:
 
 ```sh
-chmod +x scoot-0.2.0-x86_64-linux   # release downloads carry no executable bit
-./scoot-0.2.0-x86_64-linux --version
+chmod +x scoot-0.2.1-x86_64-linux   # release downloads carry no executable bit
+./scoot-0.2.1-x86_64-linux --version
 ```
 
 It prints one line and exits without starting anything. If a library
@@ -104,7 +105,7 @@ checked against `gh attestation verify --help` at gh 2.92.0 and
 2.100.0; `ubuntu-latest` runners provide a recent `gh`):
 
 ```sh
-gh attestation verify scoot-0.2.0-x86_64-linux --owner scoot-sh --signer-workflow scoot-sh/scoot/.github/workflows/release.yml
+gh attestation verify scoot-0.2.1-x86_64-linux --owner scoot-sh --signer-workflow scoot-sh/scoot/.github/workflows/release.yml
 ```
 
 Pinning `--signer-workflow` matters: `--owner` alone accepts a
@@ -115,8 +116,8 @@ tag's commit) and what went in. The SBOM is plain JSON for the same
 reason — read it with `jq`:
 
 ```sh
-jq '.components | length' sbom-scoot-0.2.0.cyclonedx.json
-jq -r '.components[].name' sbom-scoot-0.2.0.cyclonedx.json | sort | head
+jq '.components | length' sbom-scoot-0.2.1.cyclonedx.json
+jq -r '.components[].name' sbom-scoot-0.2.1.cyclonedx.json | sort | head
 ```
 
 ## Where releases come from

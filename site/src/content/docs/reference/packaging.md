@@ -9,7 +9,8 @@ Start here if you maintain the Arch, deb or rpm package. The Arch
 PKGBUILDs (release and `-git`) have landed in
 [`packaging/arch/`][arch-pkg] and build on this page; the deb
 (`packaging/deb`, `deb.yml`) and rpm recipes have landed too --
-contributor history in [deb][deb-pkg], [rpm][rpm-pkg].
+contributor history in [deb][deb-pkg], [rpm][rpm-pkg]. All three
+workflows are manual-only and no packages are shipped yet.
 
 [arch-pkg]: https://github.com/scoot-sh/scoot/blob/main/packaging/arch/README.md
 [deb-pkg]: https://github.com/scoot-sh/scoot/blob/main/docs/backlog/resolved/deb-package-done.md
@@ -21,8 +22,7 @@ Releases ship a vendored tarball: the exact tagged tree plus `vendor/`
 (every dependency, crates.io and git alike), `.cargo/config.toml`
 (source replacement pointing at `vendor/`), `THIRD-PARTY-LICENSES` (every
 locked crate and its license) and `OFFLINE-BUILD.txt` (the same build
-below, readable with no network). Until the tag-triggered release job
-lands, the same tarball is one command from any clean checkout:
+below, readable with no network). The same tarball is one command from any clean checkout:
 
 ```sh
 scripts/vendor-release.sh --out ./dist --check-offline
