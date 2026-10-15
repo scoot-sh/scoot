@@ -233,7 +233,10 @@ fn a_reload_rescales_only_the_output_whose_entry_changed() {
 
     let response = fixture
         .reload_with("[output]\nscale = 1.0\n[[outputs]]\nname = \"headless-2\"\nscale = 1.5\n");
-    let Response::Reloaded { applied, refused, .. } = response else {
+    let Response::Reloaded {
+        applied, refused, ..
+    } = response
+    else {
         panic!("a valid reload should report, not error: {response:?}");
     };
     assert_eq!(applied, ["outputs.headless-2.scale"]);
@@ -253,7 +256,10 @@ fn a_reload_rescales_only_the_output_whose_entry_changed() {
     // The same file again changes nothing, so says nothing.
     let response = fixture
         .reload_with("[output]\nscale = 1.0\n[[outputs]]\nname = \"headless-2\"\nscale = 1.5\n");
-    let Response::Reloaded { applied, refused, .. } = response else {
+    let Response::Reloaded {
+        applied, refused, ..
+    } = response
+    else {
         panic!("a valid reload should report, not error: {response:?}");
     };
     assert!(
@@ -269,7 +275,10 @@ fn a_default_reload_leaves_an_output_with_its_own_entry_alone() {
     let mut fixture = Fixture::with_outputs(1.0, SECOND_AT_2, &["headless-2"]);
     fixture.install_config(SECOND_AT_2);
     let response = fixture.reload_with(&format!("[output]\nscale = 1.25\n{SECOND_AT_2}"));
-    let Response::Reloaded { applied, refused, .. } = response else {
+    let Response::Reloaded {
+        applied, refused, ..
+    } = response
+    else {
         panic!("a valid reload should report, not error: {response:?}");
     };
     assert_eq!(applied, ["output.scale"]);
@@ -294,7 +303,10 @@ fn a_reload_of_an_absent_outputs_entry_stores_it_and_moves_nothing() {
     let mut fixture = Fixture::with_outputs(1.0, "", &["headless-2"]);
     fixture.install_config("");
     let response = fixture.reload_with("[[outputs]]\nname = \"DP-9\"\nscale = 3\n");
-    let Response::Reloaded { applied, refused, .. } = response else {
+    let Response::Reloaded {
+        applied, refused, ..
+    } = response
+    else {
         panic!("a valid reload should report, not error: {response:?}");
     };
     assert_eq!(applied, ["outputs.DP-9.scale"]);
@@ -323,7 +335,10 @@ fn a_reload_applies_a_changed_mode_by_resizing() {
     fixture.install_config(SECOND_AT_2);
     let file = "[[outputs]]\nname = \"headless-2\"\nscale = 1.0\nmode = \"100x80\"\n";
     let response = fixture.reload_with(file);
-    let Response::Reloaded { applied, refused, .. } = response else {
+    let Response::Reloaded {
+        applied, refused, ..
+    } = response
+    else {
         panic!("a valid reload should report, not error: {response:?}");
     };
     assert_eq!(
@@ -342,7 +357,10 @@ fn a_reload_applies_a_changed_mode_by_resizing() {
 
     // Same file again: stored entries agree, so nothing reports.
     let response = fixture.reload_with(file);
-    let Response::Reloaded { applied, refused, .. } = response else {
+    let Response::Reloaded {
+        applied, refused, ..
+    } = response
+    else {
         panic!("a valid reload should report, not error: {response:?}");
     };
     assert!(applied.is_empty(), "{applied:?}");

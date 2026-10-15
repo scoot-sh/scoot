@@ -94,7 +94,9 @@ impl Fixture {
     }
 
     fn reload(&mut self) -> Response {
-        self.state.handle_request(Request::Reload { wait_wallpaper: false })
+        self.state.handle_request(Request::Reload {
+            wait_wallpaper: false,
+        })
     }
 }
 
@@ -1373,7 +1375,9 @@ fn no_config_path_is_an_error_not_a_guess() {
     )
     .expect("a compositor state");
     // `config_path` stays `None`: nowhere to reload from.
-    let response = state.handle_request(Request::Reload { wait_wallpaper: false });
+    let response = state.handle_request(Request::Reload {
+        wait_wallpaper: false,
+    });
     assert!(
         matches!(response, Response::Error { .. }),
         "a pathless reload should refuse, not read a default: {response:?}"
@@ -1808,7 +1812,9 @@ fn reload_under_lock_skips_new_spawns_without_advancing_the_snapshot() {
         format!("[autostart]\ncommands = [\"{}\"]\n", touch_entry(&marker)),
     )
     .expect("a rewritten config file");
-    let response = harness.state.handle_request(Request::Reload { wait_wallpaper: false });
+    let response = harness.state.handle_request(Request::Reload {
+        wait_wallpaper: false,
+    });
     assert!(
         applied(&response).is_empty(),
         "a locked reload must apply nothing: {response:?}"
@@ -2216,7 +2222,9 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
     let client = lock_with(&mut harness);
 
     fs::write(&path, "[autostart]\ncommands = [\"quit\"]\n").expect("a rewritten config file");
-    let response = harness.state.handle_request(Request::Reload { wait_wallpaper: false });
+    let response = harness.state.handle_request(Request::Reload {
+        wait_wallpaper: false,
+    });
     assert!(
         applied(&response).is_empty(),
         "a locked reload must apply nothing: {response:?}"
@@ -2240,7 +2248,9 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
     );
 
     unlock(&mut harness, client);
-    let unlocked = harness.state.handle_request(Request::Reload { wait_wallpaper: false });
+    let unlocked = harness.state.handle_request(Request::Reload {
+        wait_wallpaper: false,
+    });
     assert!(
         applied(&unlocked).is_empty(),
         "a reloaded quit must apply nothing: {unlocked:?}"
@@ -2263,7 +2273,9 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
         ),
     )
     .expect("a rewritten config file");
-    let third = harness.state.handle_request(Request::Reload { wait_wallpaper: false });
+    let third = harness.state.handle_request(Request::Reload {
+        wait_wallpaper: false,
+    });
     assert!(
         applied(&third).contains(&field::AUTOSTART.to_owned()),
         "the session should still serve after the quit sequence: {third:?}"
@@ -2287,7 +2299,9 @@ fn a_removed_while_locked_entry_never_runs() {
         format!("[autostart]\ncommands = [\"{}\"]\n", touch_entry(&marker)),
     )
     .expect("a rewritten config file");
-    let added = harness.state.handle_request(Request::Reload { wait_wallpaper: false });
+    let added = harness.state.handle_request(Request::Reload {
+        wait_wallpaper: false,
+    });
     assert!(
         applied(&added).is_empty(),
         "a locked reload must apply nothing: {added:?}"
@@ -2304,7 +2318,9 @@ fn a_removed_while_locked_entry_never_runs() {
     );
 
     fs::write(&path, "[autostart]\ncommands = []\n").expect("a rewritten config file");
-    let removed = harness.state.handle_request(Request::Reload { wait_wallpaper: false });
+    let removed = harness.state.handle_request(Request::Reload {
+        wait_wallpaper: false,
+    });
     assert!(
         applied(&removed).is_empty() && refused(&removed).is_empty(),
         "with the entry gone there is nothing actionable to skip: {removed:?}"
@@ -2315,7 +2331,9 @@ fn a_removed_while_locked_entry_never_runs() {
     );
 
     unlock(&mut harness, client);
-    let after = harness.state.handle_request(Request::Reload { wait_wallpaper: false });
+    let after = harness.state.handle_request(Request::Reload {
+        wait_wallpaper: false,
+    });
     assert!(
         applied(&after).is_empty() && refused(&after).is_empty(),
         "after unlock the cancelled entry stays silent: {after:?}"
@@ -2873,8 +2891,7 @@ fn a_lone_user_cursor_size_keeps_the_look_theme_and_accent() {
 
 #[test]
 fn a_user_wallpaper_color_wins_the_unit_whole() {
-    let mut fixture =
-        Fixture::with_config("[wallpaper]\ncolor = \"#112233\"\n");
+    let mut fixture = Fixture::with_config("[wallpaper]\ncolor = \"#112233\"\n");
     let response = reload_with_look(
         &mut fixture,
         "[wallpaper]\nimage = \"/looks/moonrise.png\"\nmode = \"fill\"\n",
@@ -2903,8 +2920,7 @@ fn a_user_wallpaper_color_wins_the_unit_whole() {
 
 #[test]
 fn a_user_active_width_alone_drops_the_look_inactive_width() {
-    let mut fixture =
-        Fixture::with_config("[appearance]\nfocus_ring_width = 5\n");
+    let mut fixture = Fixture::with_config("[appearance]\nfocus_ring_width = 5\n");
     let response = reload_with_look(&mut fixture, LOOK_APPEARANCE);
     assert_eq!(
         fixture.state.appearance.focus_ring_width, 5,
@@ -2918,8 +2934,7 @@ fn a_user_active_width_alone_drops_the_look_inactive_width() {
 
 #[test]
 fn a_user_inactive_width_alone_keeps_the_look_active_width() {
-    let mut fixture =
-        Fixture::with_config("[appearance]\nfocus_ring_inactive_width = 4\n");
+    let mut fixture = Fixture::with_config("[appearance]\nfocus_ring_inactive_width = 4\n");
     let response = reload_with_look(&mut fixture, LOOK_APPEARANCE);
     assert_eq!(
         fixture.state.appearance.focus_ring_width, 2,
@@ -2956,10 +2971,7 @@ fn a_forbidden_layer_key_refuses_the_whole_reload() {
 #[test]
 fn a_bad_layer_value_refuses_the_whole_reload() {
     let mut fixture = Fixture::with_config("[layout]\ngap = 20\n");
-    let response = reload_with_look(
-        &mut fixture,
-        "[appearance]\nbackground_color = \"nope\"\n",
-    );
+    let response = reload_with_look(&mut fixture, "[appearance]\nbackground_color = \"nope\"\n");
     match &response {
         Response::Error { .. } => {}
         other => panic!("a bad layer value must refuse the reload: {other:?}"),
@@ -2969,8 +2981,7 @@ fn a_bad_layer_value_refuses_the_whole_reload() {
 
 #[test]
 fn a_bad_user_color_falls_back_to_the_layer_and_reports_both_lists() {
-    let mut fixture =
-        Fixture::with_config("[appearance]\nbackground_color = \"nope\"\n");
+    let mut fixture = Fixture::with_config("[appearance]\nbackground_color = \"nope\"\n");
     let response = reload_with_look(&mut fixture, LOOK_APPEARANCE);
     assert_eq!(
         invalid(&response),

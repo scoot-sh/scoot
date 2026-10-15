@@ -65,10 +65,7 @@ fn a_missing_link_is_a_silent_absence() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let outcome = load(dir.path());
     assert!(
-        matches!(
-            outcome.load,
-            FragmentLoad::Absent(FragmentAbsent::Missing)
-        ),
+        matches!(outcome.load, FragmentLoad::Absent(FragmentAbsent::Missing)),
         "no link is the default state, not a problem"
     );
     assert_eq!(outcome.warn, None);
@@ -79,12 +76,10 @@ fn a_dangling_link_warns_and_loads_nothing() {
     let dir = tempfile::tempdir().expect("a temp dir");
     symlink(dir.path().join("gone"), dir.path().join("look")).expect("a dangling link");
     let outcome = load(dir.path());
-    assert!(
-        matches!(
-            outcome.load,
-            FragmentLoad::Absent(FragmentAbsent::Broken)
-        )
-    );
+    assert!(matches!(
+        outcome.load,
+        FragmentLoad::Absent(FragmentAbsent::Broken)
+    ));
     let warn = outcome.warn.expect("a dangling link warns");
     assert!(
         warn.contains("cannot be read"),

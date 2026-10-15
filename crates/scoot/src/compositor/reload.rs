@@ -322,7 +322,9 @@ impl State {
             }
             LookLayerState::Present(fragment) => Some(fragment),
         };
-        let identity = layer_text.as_ref().map(|fragment| fragment.identity.clone());
+        let identity = layer_text
+            .as_ref()
+            .map(|fragment| fragment.identity.clone());
         let fresh = match config::reload_from_with_layer(
             &path,
             self.tty.is_some(),

@@ -199,9 +199,9 @@ impl AppearanceConfig {
         // caller), else to the built-in default with a warning as before --
         // never neither the user's color nor the look's.
         let mut color = |field: Option<String>,
-                     name: &'static str,
-                     default: Color,
-                     layer_key: &'static str| match field {
+                         name: &'static str,
+                         default: Color,
+                         layer_key: &'static str| match field {
             None => default,
             Some(raw) => Color::parse(&raw).unwrap_or_else(|| {
                 if let Some(layer_raw) = layer
@@ -853,9 +853,10 @@ pub fn reload_from_with_layer(
         reason,
     };
     let layer = match layer_text {
-        Some(text) => Some(parse_layer(text).map_err(|reason| {
-            fail(format!("the look layer is refused ({reason})"))
-        })?),
+        Some(text) => Some(
+            parse_layer(text)
+                .map_err(|reason| fail(format!("the look layer is refused ({reason})")))?,
+        ),
         None => None,
     };
     let text = fs::read_to_string(path).map_err(|source| fail(source.to_string()))?;
@@ -984,10 +985,7 @@ fn parse_layer(text: &str) -> Result<LayerFile, String> {
 /// checked as an absolute path here rather than through the relative kind.
 fn validate_layer(layer: &LayerFile) -> Result<(), String> {
     if let Some(appearance) = &layer.appearance {
-        check_layer_int(
-            "appearance.focus_ring_width",
-            appearance.focus_ring_width,
-        )?;
+        check_layer_int("appearance.focus_ring_width", appearance.focus_ring_width)?;
         check_layer_int(
             "appearance.focus_ring_inactive_width",
             appearance.focus_ring_inactive_width,
@@ -1015,8 +1013,10 @@ fn validate_layer(layer: &LayerFile) -> Result<(), String> {
             appearance.cursor_theme.as_deref(),
         )?;
         if appearance.cursor_hide_after_ms.is_some() {
-            return Err("key `appearance.cursor_hide_after_ms` is not in the scoot look allowlist"
-                .to_owned());
+            return Err(
+                "key `appearance.cursor_hide_after_ms` is not in the scoot look allowlist"
+                    .to_owned(),
+            );
         }
         if appearance.prefer_no_csd.is_some() {
             return Err(
@@ -1054,9 +1054,7 @@ fn validate_layer_wallpaper(wallpaper: &WallpaperConfig) -> Result<(), String> {
         ));
     }
     if wallpaper.command.is_some() {
-        return Err(
-            "key `wallpaper.command` is not in the scoot look allowlist".to_owned(),
-        );
+        return Err("key `wallpaper.command` is not in the scoot look allowlist".to_owned());
     }
     validate_layer_wallpaper_table("wallpaper", &wallpaper.top, true)?;
     if let Some(outputs) = &wallpaper.outputs {
@@ -1089,9 +1087,7 @@ fn gate_wallpaper_name(prefix: &str) -> Result<(), String> {
     if scoot_look::allows("scoot", &format!("{prefix}.color")) {
         Ok(())
     } else {
-        Err(format!(
-            "key `{prefix}` is not in the scoot look allowlist"
-        ))
+        Err(format!("key `{prefix}` is not in the scoot look allowlist"))
     }
 }
 
@@ -1115,10 +1111,7 @@ fn validate_layer_wallpaper_table(
     check_layer_str(&format!("{prefix}.color"), table.color.as_deref())?;
     check_layer_str(&format!("{prefix}.mode"), table.mode.as_deref())?;
     check_layer_str(&format!("{prefix}.fill"), table.fill.as_deref())?;
-    check_layer_str(
-        &format!("{prefix}.transition"),
-        table.transition.as_deref(),
-    )?;
+    check_layer_str(&format!("{prefix}.transition"), table.transition.as_deref())?;
     for key in [
         "filter",
         "sha256",
@@ -1184,7 +1177,9 @@ fn check_layer_image(key: &str, path: &str) -> Result<(), String> {
 fn merge_layer(mut user: FileConfig, layer: &LayerFile) -> (FileConfig, Vec<String>) {
     let mut shadowed = Vec::new();
     if let Some(layer_appearance) = &layer.appearance {
-        let user_appearance = user.appearance.get_or_insert_with(AppearanceConfig::default);
+        let user_appearance = user
+            .appearance
+            .get_or_insert_with(AppearanceConfig::default);
         merge_appearance_key(
             &mut user_appearance.focus_ring_width,
             layer_appearance.focus_ring_width,
@@ -1244,8 +1239,7 @@ fn merge_layer(mut user: FileConfig, layer: &LayerFile) -> (FileConfig, Vec<Stri
         } else if user_appearance.focus_ring_width.is_some() {
             user_appearance.focus_ring_inactive_width = None;
         } else {
-            user_appearance.focus_ring_inactive_width =
-                layer_appearance.focus_ring_inactive_width;
+            user_appearance.focus_ring_inactive_width = layer_appearance.focus_ring_inactive_width;
         }
     }
     if let Some(layer_wallpaper) = &layer.wallpaper {
@@ -1293,15 +1287,20 @@ fn wallpaper_has_keys(wallpaper: Option<&WallpaperConfig>) -> bool {
         return true;
     }
     if wallpaper.outputs.as_ref().is_some_and(|outputs| {
-        outputs
-            .values()
-            .any(|output| wallpaper_table_has_keys(&output.table) || output.workspaces.as_ref().is_some_and(|workspaces| workspaces.values().any(wallpaper_table_has_keys)))
+        outputs.values().any(|output| {
+            wallpaper_table_has_keys(&output.table)
+                || output
+                    .workspaces
+                    .as_ref()
+                    .is_some_and(|workspaces| workspaces.values().any(wallpaper_table_has_keys))
+        })
     }) {
         return true;
     }
-    wallpaper.workspaces.as_ref().is_some_and(|workspaces| {
-        workspaces.values().any(wallpaper_table_has_keys)
-    })
+    wallpaper
+        .workspaces
+        .as_ref()
+        .is_some_and(|workspaces| workspaces.values().any(wallpaper_table_has_keys))
 }
 
 /// Whether one wallpaper table names any leaf.
@@ -5368,15 +5367,11 @@ mod tests {
 
     #[test]
     fn wallpaper_merges_as_one_unit_never_per_key() {
-        let layer = layer(
-            "[wallpaper]\nimage = \"/looks/moonrise.png\"\nmode = \"fill\"\n",
-        );
+        let layer = layer("[wallpaper]\nimage = \"/looks/moonrise.png\"\nmode = \"fill\"\n");
         // A user color with a look image yields the user's section whole:
         // per-key merging would hand scootbg both and lose the wallpaper.
-        let (merged, shadowed) = merge_layer(
-            user_file("[wallpaper]\ncolor = \"#112233\"\n"),
-            &layer,
-        );
+        let (merged, shadowed) =
+            merge_layer(user_file("[wallpaper]\ncolor = \"#112233\"\n"), &layer);
         let wallpaper = merged.wallpaper.expect("a merged section");
         assert_eq!(
             wallpaper.top.color.as_deref(),
@@ -5392,25 +5387,17 @@ mod tests {
         // A look-only section passes through whole.
         let (merged, shadowed) = merge_layer(user_file("[layout]\ngap = 20\n"), &layer);
         let wallpaper = merged.wallpaper.expect("the look's section passes through");
-        assert_eq!(
-            wallpaper.top.image.as_deref(),
-            Some("/looks/moonrise.png")
-        );
+        assert_eq!(wallpaper.top.image.as_deref(), Some("/looks/moonrise.png"));
         assert_eq!(wallpaper.top.mode.as_deref(), Some("fill"));
         assert!(shadowed.is_empty());
     }
 
     #[test]
     fn a_derived_inactive_width_follows_the_layer_that_supplied_its_base() {
-        let layer = layer(
-            "[appearance]\nfocus_ring_width = 2\nfocus_ring_inactive_width = 1\n",
-        );
+        let layer = layer("[appearance]\nfocus_ring_width = 2\nfocus_ring_inactive_width = 1\n");
         // User active width alone: the look's inactive width is dropped so
         // the unset value follows the user's width.
-        let (merged, _) = merge_layer(
-            user_file("[appearance]\nfocus_ring_width = 5\n"),
-            &layer,
-        );
+        let (merged, _) = merge_layer(user_file("[appearance]\nfocus_ring_width = 5\n"), &layer);
         let appearance = merged.appearance.expect("merged appearance");
         assert_eq!(appearance.focus_ring_width, Some(5));
         assert_eq!(

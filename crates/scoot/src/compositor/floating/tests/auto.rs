@@ -11,7 +11,9 @@ impl Fixture {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, toml).expect("a config file");
         self.state.config_path = Some(path);
-        let reply = self.state.handle_request(Request::Reload { wait_wallpaper: false });
+        let reply = self.state.handle_request(Request::Reload {
+            wait_wallpaper: false,
+        });
         self.settle();
         reply
     }
@@ -22,7 +24,9 @@ impl Fixture {
 /// file without that table also reports it going back to the defaults.
 fn reloaded(reply: Response) -> (Vec<String>, Vec<String>) {
     match reply {
-        Response::Reloaded { applied, refused, .. } => (
+        Response::Reloaded {
+            applied, refused, ..
+        } => (
             applied
                 .into_iter()
                 .filter(|name| !name.starts_with("appearance."))
