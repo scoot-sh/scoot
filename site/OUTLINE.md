@@ -1,4 +1,4 @@
-# Docs site outline (proposal for review — phase 1, nothing moves yet)
+# Docs site outline (mapping record — the move has landed)
 
 > Status 2026-10-05: the maintainer approved this outline (scoot desktop
 > as the primary path, three front doors) and PR B (`docs/site-move`)
@@ -10,11 +10,15 @@
 > the contributor guide and the research/testing notes moved to `dev/`).
 > One deliberate deviation: `scootbar/modules`
 > is one searchable page rather than thirteen (see the PR).
+> Status 2026-10-15: historical sections below marked as superseded are
+> kept as the record; the live structure is the sidebar in
+> `site/astro.config.mjs` (nested slugs, all sections live) and
+> `docs/*.md` files are short stubs pointing at their `site/` pages.
 
-This is the draft page outline the `docs-site` ticket asks the maintainer to
-review **before** any existing doc is moved or rewritten. The scaffold beside
-it (`site/`, Astro Starlight) proves the shape with 4 adapted pages; every
-mapping below says which current `docs/*.md` sections feed each planned page.
+This is the page outline the `docs-site` ticket asked the maintainer to
+review. The move has executed: slugs nest under their app
+(`/scoot/keybindings/`, twin `/scoot/keybindings.md`) and the sidebar
+grouping carries the structure.
 
 Conventions used below: `docs/configuration.md#section` means "that section
 moves (rewritten task-first) into the named page". "Stays" means the file
@@ -27,10 +31,7 @@ Top-level order is the order a new user reads in: start → one app at a
 time → fix → look up. Each app is its own sidebar section with its own
 subsections, everywhere in the same shape — overview → configure →
 reference → troubleshooting — so a reader learns it once. Page slugs
-nest under their app (`/scoot/keybindings/`) once the move PR lands;
-in phase 1 slugs stay flat (`/keybindings/`, twin `/keybindings.md`)
-and the sidebar grouping carries the structure, so the 4 sample pages
-keep working unchanged.
+nest under their app (`/scoot/keybindings/`).
 
 ### Start (cross-cutting: everyone reads this first)
 
@@ -142,7 +143,7 @@ What moves, exactly:
 - `docs/scootbar/spikes/**` → `dev/spikes/`
 - `docs/forks.md` → `dev/forks.md`
 - `docs/scootbar/backlog/lightest.md`, `docs/scootbar/research.md`, `docs/scootbar/testing.md`, `docs/scootbg/testing.md`, `docs/development.md` → `dev/ratchet/`, `dev/research/`, `dev/README.md`
-- Stays in `docs/` as site sources (rewritten in place, then published): `configuration.md`, `ipc.md`, `nix.md`, `tty.md`, `protocols.md`, `scootbar/cli.md`, `scootbar/icons.md`, `scootbg/cli.md`, `scootbar/README.md`, `scootbg/README.md`, `examples/**`, `assets/**`
+- Stays in `docs/` as moved stubs pointing at the site (rewritten in place, then published): `configuration.md`, `ipc.md`, `nix.md`, `tty.md`, `protocols.md`, `scootbar/cli.md`, `scootbar/icons.md`, `scootbg/cli.md`, `scootbar/README.md`, `scootbg/README.md`, `examples/**`, `assets/**`
 
 ## Every place that hard-codes those paths
 
@@ -160,15 +161,15 @@ edit `.claude/*`, so those two are flagged for the maintainer):
 9. `flake.nix` comments naming `docs/` (nix.md, `docs/backlog/resolved/nix-crane-done.md`, `docs/scootbg/backlog/resolved/dependencies-done.md`) — comments only, but fix them in the move PR so they don't rot.
 10. `vm/configuration.nix:150` (`docs/backlog/packaging/nix-publishing.md`) and `nix/tests.nix:53` (`docs/scootbar/backlog/resolved/nix-package-done.md`) — comment-only references, fixed in the move PR. (`nix/scootbar-tests.nix` has none; verified 2026-10-05.)
 
-## Phase-1 scaffold (what `site/` holds today)
+## Phase-1 scaffold (historical: what `site/` held at proposal time)
 
-- `astro.config.mjs` — Starlight + `starlight-llms-txt` (pinned; see `site/README.md` "Why starlight-llms-txt"), sidebar in the per-app shape above (`Start` + `scoot` live now; `scootctl / IPC`, `scootbar`, `scootbg`, `Troubleshooting` land commented as their pages do). Slugs stay flat in phase 1 — the sidebar carries the structure — and nest under their app in the move PR.
-- `src/content/docs/` — 4 adapted (not moved) pages proving the shape: `index.md` (home), `install.md`, `first-session.md` (both `Start`), `keybindings.md` (under `scoot` in the sidebar). Originals untouched in `docs/`.
+- `astro.config.mjs` — Starlight + `starlight-llms-txt` (pinned; see `site/README.md` "Why starlight-llms-txt"), sidebar in the per-app shape above (all sections live now; the proposal-time note about `Start` + `scoot` landing first with the rest commented is superseded). Slugs nest under their app.
+- `src/content/docs/` — the proposal-time scaffold proved the shape with 4 adapted pages (`index.md`, `install.md`, `first-session.md`, `keybindings.md`); the tree now holds every section and the `docs/` originals are stubs.
 - `src/styles/custom.css` — scoot theme in the logo's colors (true-black
   ground `#000000`, white type, the one ginger accent `#CB6F34`; dark
   only since 2026-10-06); system font stack (see below).
 - `src/pages/[...page].md.ts` — per-page Markdown twins at stable `/<slug>.md` URLs (the plugin covers the aggregates; this covers the per-page requirement).
-- Per-app `customSets` in the plugin config (`Start`, `scoot` today): one llms set per sidebar section that has pages, served at `/_llms-txt/<set>.txt` and linked from `llms.txt`. Paths match Starlight's extensionless page ids, so sets widen to `<app>/**` when slugs nest in the move PR.
+- Per-app `customSets` in the plugin config (one set per sidebar section with pages, served at `/_llms-txt/<set>.txt` and linked from `llms.txt`). Paths match Starlight's extensionless page ids (`<app>/**`).
 - `scripts/check-llms.mjs` — build gate: fails if `llms.txt` misses a page, a `.md` twin, or a linked bundle 404s (bundles and `_llms-txt/` sets alike).
 - Fonts: **one display face is bundled.** League Spartan 900 (OFL 1.1,
   The League Spartan Project Authors — Micah Rich and Tyler Finck,

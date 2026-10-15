@@ -1,8 +1,9 @@
-# scoot docs site (phase-1 scaffold)
+# scoot docs site
 
 Astro Starlight + pnpm, built reproducibly through the flake
-(`nix build .#docs-site`). The outline awaiting maintainer review is
-[OUTLINE.md](OUTLINE.md); nothing in `docs/` has moved.
+(`nix build .#docs-site`). The page map is
+[OUTLINE.md](OUTLINE.md); `docs/*.md` files that feed the site are
+short stubs pointing at their `site/` pages.
 
 ## Why Starlight, why this plugin
 
@@ -18,14 +19,15 @@ machine-readable surface — evaluated 2026-10-05 against:
 | `starlight-llm-actions` | Rejected. Same reason: page-action dropdowns and renderers we don't need. |
 | `astro-slop`, `astro-markdown-for-agents` | Rejected. Generic Astro integrations, not Starlight-aware; more hand-rolling for less. |
 
-The plugin does **not** do per-page Markdown, so the scaffold adds its own
-tiny route instead of a second dependency: `src/pages/[page].md.ts` serves
+The plugin does **not** do per-page Markdown, so the site adds its own
+tiny route instead of a second dependency: `src/pages/[...page].md.ts` serves
 each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
 ~30 lines, no new dependency, covered by the `check-llms` gate below.
 
 ## Add a page
 
-1. Write `src/content/docs/<slug>.md` — plain Markdown only, no MDX
+1. Write `src/content/docs/<section>/<slug>.mdx` (or `.md` for a plain
+   page) — plain Markdown only, no MDX
    components (the `.md` twin serves the raw body; MDX imports would leak
    into it). Small raw-HTML accents are allowed where Markdown cannot do
    the job (the hero art, the home Looks grid, the 404 terminal chrome),
