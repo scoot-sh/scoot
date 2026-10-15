@@ -1,9 +1,7 @@
 # scootbar
 
-A status bar for scoot, and for any compositor with `wlr-layer-shell-v1`:
-the lightest bar that is still beautiful and configurable. It starts as a
-clock, gains workspaces, and grows by modules, one small daemon of a
-composable shell.
+A status bar for scoot, and for any compositor with `wlr-layer-shell-v1`.
+It starts as a clock, gains workspaces, and grows by modules.
 
 > **Status: early.** `scootbar daemon` puts a bar with a clock on every
 > output (or the ones you list), reserving its space, across outputs coming and going; the flags

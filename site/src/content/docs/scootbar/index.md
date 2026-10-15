@@ -4,19 +4,16 @@ description: "The lightest status bar that is still beautiful — enable it, pla
 ---
 
 A status bar for scoot, and for any compositor with
-`wlr-layer-shell-v1`: the lightest bar that is still beautiful and
-configurable. One thin strip, nothing knocked off the table. It starts as a clock, gains workspaces, and grows by
-modules. It runs anywhere a layer-shell bar runs (scoot, sway, niri,
-Hyprland) — on scoot it also answers the desktop profile's theming.
+`wlr-layer-shell-v1` (scoot, sway, niri, Hyprland) — on scoot, it follows
+the desktop profile's look. It starts as a clock,
+gains workspaces, and grows by modules.
 
 ```sh
 scootbar daemon --left workspaces --center clock
 ```
 
 One binary, linking nothing beyond glibc and libgcc_s, and **no font
-in its closure** — the font is yours to choose (even DejaVu Sans, the
-first face the bar looks for, is 742 KiB against the bar's own ~826
-KiB binary). It takes the font from `--font`, or the first of a short
+in its closure** — the font is yours to choose. It takes the font from `--font`, or the first of a short
 list of well-known files; with neither it refuses to start, saying how
 to give one. Trying it on a box with no fonts:
 
@@ -26,7 +23,7 @@ nix run github:scoot-sh/scoot#scootbar-demo -- daemon --right clock  # any daemo
 ```
 
 (`scootbar-demo` is the same binary behind a script adding DejaVu
-Sans — a demo, not what a system installs.)
+Sans.)
 
 ## Enable it
 
@@ -67,16 +64,14 @@ path, so a hand-started daemon reads what the service does); NixOS
 writes `/etc/scootbar/bar.toml`, named with `--config` in the system
 unit.
 
-There is deliberately no `[bar]` section in scoot's own config: the
+There is no `[bar]` section in scoot's own config: the
 service above (or `[autostart]` without Nix) is the one route that
 starts the bar, and a config change restarts it through the service
-(`scootbar msg reload` by hand). A scoot-driven launcher would duplicate
-that supervisor while coupling the two releases; the decision is recorded
-in the backlog ([`scoot-integration`](https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/backlog/resolved/scoot-integration-done.md)).
+(`scootbar msg reload` by hand).
 
 Modules are Cargo features, reachable through `.override` — a bar
 with no modules needs no font, and `icon-image` (the PNG decoder,
-+115 KB) builds the same way (each line is one alternative):
++115 KB) builds the same way:
 
 ```nix title="home.nix"
 programs.scootbar.package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scootbar.override { buildNoDefaultFeatures = true; };
@@ -103,8 +98,7 @@ scootbar msg toggle                        # hide the bar (and release its space
 Every module answers the pointer: clicks, scrolls and hover run a
 module action, a command, or a request to scoot that the config binds.
 A module can open a popup under itself (the volume slider, the network
-list) and shows a tooltip after a hover delay. The config can define
-its own `button`, a `push` target for `scootbar msg set`, and an
-`exec` module streaming a command's output — with no Rust.
+list) and shows a tooltip after a hover delay. The config can also define
+its own `button`, `push`, and `exec` modules — with no Rust.
 
 Next: [Configure](./configure.md) for layout and looks, [Modules](./modules.md) for the full set, [CLI reference](./cli.md) for flags and the agent interface.
