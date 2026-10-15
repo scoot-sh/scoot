@@ -3,15 +3,14 @@ title: CLI reference
 description: "Every scootbar command and flag, scootbar msg, the agent interface, checks and exit statuses."
 ---
 
-Every command and flag, how each behaves at the edges, the `msg` control channel, and the agent interface.
-
 Every `scootbar` command and flag, and how it behaves at the edges. What
-scootbar is and why is in [Overview](./index.md). Every option lives in
-the [config file](./cli.md#the-config-file) too (`$XDG_CONFIG_HOME/scoot/bar.toml`);
+scootbar is for is in [Overview](./index.md). Every option lives in
+the [config file](./cli.md#the-config-file) too
+(`$XDG_CONFIG_HOME/scoot/bar.toml`);
 the flags stay and override its values, one by one, at start-up and on
 every reload.
 
-**Early days:** the bar shows a clock in the center, and workspaces wherever
+The bar shows a clock in the center, and workspaces wherever
 they are placed (`--left workspaces`). Modules answer the pointer
 ([click, scroll and hover](./modules.md#pointer-input)).
 
@@ -44,8 +43,7 @@ scootbar --help --json                       # the same content as JSON (see bel
 scootbar --version
 ```
 
-The binaries document themselves for agents: `scootbar help daemon` and
-`scootbar help msg` print each command's page, and `scootbar --help --json`
+`scootbar help daemon` and `scootbar help msg` print each command's page, and `scootbar --help --json`
 emits commands, daemon flags (with types and defaults), msg commands, the
 modules in the build, exit codes and environment — see
 [Generated CLI pages](../reference/cli.md) for the contract.
@@ -53,8 +51,7 @@ modules in the build, exit codes and environment — see
 `scootbar daemon` runs in the foreground until the compositor goes away
 (start it with `&`, or from your compositor's autostart). It connects to
 the compositor named by `$WAYLAND_DISPLAY`, which must support
-`wlr-layer-shell` (scoot, sway, niri, Hyprland and most wlroots compositors
-do).
+`wlr-layer-shell`.
 
 
 
@@ -65,7 +62,7 @@ Each flag at most once, as `--flag VALUE` or `--flag=VALUE`.
 | Flag | Takes | Default | What it does |
 | --- | --- | --- | --- |
 | `--outputs` | `all`, or connector names, comma-separated | `all` | Which outputs get a bar (`DP-1,eDP-1`). See [Outputs](./configure.md#outputs). |
-| `--edge` | `top` or `bottom` | `top` | The output edge the bar runs along. Vertical bars (left and right) are a deliberate omission: the layout is horizontal, and the modules, the hit-testing and the text all assume it. |
+| `--edge` | `top` or `bottom` | `top` | The output edge the bar runs along. Vertical bars are not offered: layout, modules, and hit-testing are horizontal. |
 | `--layer` | `bottom`, `top` or `overlay` | `top` | The layer-shell layer. See [Layers and the zone](./configure.md#layers-and-the-zone). |
 | `--exclusive` | `true` or `false` | `true` | Whether the bar reserves its height, so windows are arranged beside it, or floats over them, reserving nothing. |
 | `--height` | 1 to 1024 | 28 | The bar's height in logical pixels. On a scaled output it is drawn at the output's real pixels: 28 at scale 1.5 is 42 device pixels. |
@@ -252,11 +249,7 @@ to be installed: the Nix module's check runs it over every rendered file
 (`checks.<system>.scootbar-modules`).
 Modules that report themselves unavailable at start (the clock without a
 time zone database, say) print their note as a start does and are left out;
-that is not a failure. What the flag costs (aarch64, release, stripped): +2.4 KB of text (code and
-help; 1,200,636 to 1,203,036 bytes), no change in data or bss, the file
-the same size to the byte (segments are page-aligned), and an idle daemon's
-`VmRSS` unchanged within noise (3,360 to 3,376 kB, one 3,552 outlier, five runs each). It moves startup
-code into a function the start also uses; nothing on a per-frame path.
+that is not a failure.
 
 
 
@@ -342,8 +335,7 @@ daemon, every command fails saying so (exit status 1).
 
 ## The agent interface
 
-What an agent (or a script) uses to read the bar and press it, with no
-screenshot to read and no pixels to hunt. All of it is on the bar's own
+All of it is on the bar's own
 socket, separate from scoot's IPC.
 
 **`layout`** prints, per output, its `output` name, `origin` (in the
@@ -385,9 +377,8 @@ now and only changes follow, so to read the state and then follow it,
 the two; this one at worst repeats one the `query` already shows). A `module` event is a `query` entry with `"type":"module"`,
 sent when that module's view changed, once per output that shows it; an
 `output` event is `{"type":"output","change":"added"|"removed","name":...}`.
-Events are **coalesced to the frame rate**: a module that changes a hundred
-times in a frame is told once, with its latest view, and a batch goes out at
-most every 16 ms (the loop sleeps only until a held batch is due). A reload
+Events are **coalesced to the frame rate**: a batch goes out at
+most every 16 ms. A reload
 tells every module again. A subscribed connection serves no further requests
 (it gets one error line, however many it sends), at most 4 may be subscribed
 at once (a fifth is refused saying so), and **a subscriber that stops
@@ -448,11 +439,8 @@ cannot:
   `exec` commands end with it all the same (the kernel's parent-death
   signal, see `exec` above); only what such a command started in turn is
   left to finish. **SIGHUP keeps its default action** (it ends the daemon)
-  rather than reloading: catching one would need `unsafe` signal
-  registration, which the crate forbids (`#![forbid(unsafe_code)]`), so a
-  reload is `scootbar msg reload`.
-- **Vertical bars** (`left` and `right` edges) are not offered: a
-  deliberate omission, not a gap. The layout, the modules and the click
+  rather than reloading; a reload is `scootbar msg reload`.
+- **Vertical bars** (`left` and `right` edges) are not offered. The layout, the modules and the click
   hit-test are horizontal; a vertical bar would be a second layout, not an
   option.
 - **One daemon per display** holds the control socket: a second daemon

@@ -64,19 +64,11 @@ has `share/fonts/truetype/DejaVuSans.ttf`), or run the flake's
 `scootbar-demo`, which gives it DejaVu Sans by default
 (see [Enable it](./index.md#enable-it)).
 
-**Replacing the font file while the bar runs cannot crash it**, unless a
-*root* process rewrites a mapped store file in place through a read-write view
-(root ignores the write bit; `nix-daemon` never does, it adds, unlinks and
-renames whole paths). The font is mapped
-(costing only the pages drawn from, shared with every other program using
-the font) only when it is owned by root, has no write bit for anyone, and
-lies on a read-only mount: NixOS's `/nix/store`. Every other font (your
-`~/.local/share/fonts`, `/usr/share/fonts`, and a writable file seen
-through a read-only view such as systemd's `ProtectHome=read-only` or
-flatpak's `/run/host/fonts`) is read into the bar's memory once, costing
-its size (about 740 KB for DejaVu Sans): copying a new file over it with
-`cp`, which truncates it in place, would kill a bar that had mapped it,
-and cannot touch one that read it. The file is read at start and on every
+**A font on a read-only mount is mapped, not copied**: on NixOS only the
+pages of the glyphs drawn are resident. Any other font (your
+`~/.local/share/fonts`, `/usr/share/fonts`) is read into the bar's memory
+once, costing its size (about 740 KB for DejaVu Sans, 32 MB or more for a
+CJK font). The file is read at start and on every
 reload: changing `bar.font` (or any option) and running
 `scootbar msg reload` swaps it live.
 
@@ -128,10 +120,7 @@ it). A title in such a script draws per codepoint.
 `NotoSansCJK-VF.otf.ttc` (nixpkgs' `nerd-fonts.symbols-only` and
 `noto-fonts-cjk-sans`) draw Latin, a symbol icon and Japanese, Korean and
 Chinese together. A `.ttc` collection loads (its first face), and so does a
-variable CFF2 font (its default instance). A CJK font is 30 MB or more, so
-put it where it is mapped (a read-only `/nix/store`) or expect its size in the
-bar's memory, as for any font not on a read-only mount; see
-[Fonts: what the real ones do](./configure.md#fonts-what-the-real-ones-do).
+variable CFF2 font (its default instance).
 
 
 
@@ -267,9 +256,6 @@ the default `true` the zone is the bar's height, and the compositor adds the
 margin on the anchored edge (see [Margins](./configure.md#margins)). Whichever layer:
 the bar never takes the keyboard, so clicking it never moves window focus.
 
-Each of the three layers on each of the two edges, with and without the
-zone, is checked on headless scoot (`crates/scootbar/tests/visibility.rs`),
-along with the layer and the zone in the protocol requests themselves.
 Changing either on a running bar is a `reload`, which makes the surfaces
 again.
 
@@ -341,8 +327,7 @@ font-size = 20                  # 1 to 256, as [bar] font-size; absent is the sh
   `[output]` table then leaves it off every bar, and every output's bar
   reads it, so a second
   monitor adds a surface and its two buffers, not a second clock timer or a
-  second set of file descriptors (checked in `tests/outputs.rs`: the daemon
-  holds 8 fds with one output and 8 with two). A module's change redraws
+  second set of file descriptors. A module's change redraws
   only the outputs that show it. The workspaces module is shared too, and
   each bar shows its own output's workspaces (see [Workspaces](./modules.md#workspaces)
   for the switching limit). There is no "primary" output: to put a module
@@ -391,14 +376,10 @@ font-size = 20                  # 1 to 256, as [bar] font-size; absent is the sh
 ## Hiding the bar
 
 `scootbar msg hide` **destroys the bar's layer surface and its buffers** on
-every output: a hidden bar holds no `wl_shm` buffer (checked in
-`tests/visibility.rs` by counting the daemon's memory mappings, which go to
-zero and come back), and its exclusive zone is released, so windows
+every output: a hidden bar holds no `wl_shm` buffer, and its exclusive zone is released, so windows
 reclaim the space. `show` makes them again, committed with no buffer before
 the first draw as at start-up, so windows move once (back out of the bar's
-way) and do not jump again when it draws; the round trip leaves a window
-where it started (also checked, sampling the window's rectangle every few
-milliseconds across the show). `toggle` flips whichever it is. The reply says
+way) and do not jump again when it draws. `toggle` flips whichever it is. The reply says
 what is now the case: `{"type":"bar","visible":false}`.
 
 - All three are idempotent, and applied **once per loop turn** with the net
@@ -429,15 +410,9 @@ what is now the case: `{"type":"bar","visible":false}`.
 
 ### Not built: auto-hide
 
-An auto-hide bar that appears on pointer contact needs a thin
-always-present sensing surface at the edge, which is exactly what `hide`
-removes (a surface, a buffer, an input region and pointer events that wake
-the daemon). It was **decided against for now, not measured**: the cost
-that matters (a sensing strip's pages and its pointer wakeups) would only
-be worth paying if the strip could beat a key bind that toggles the bar
-(above), which costs nothing when unused. Pointer input on the bar exists
-now ([Pointer input](./modules.md#pointer-input)), so the strip's cost could be
-measured; it has not been, and the decision stands until it is.
+There is no auto-hide: a sensing strip at the edge would cost a surface,
+a buffer, and pointer wakeups even when unused, against a key bind that
+toggles the bar for nothing. Bind `toggle` (above) instead.
 
 
 
@@ -554,18 +529,12 @@ radius = 10
 opacity = 0.9
 ```
 
-- **The corners are analytic**: each edge pixel's alpha is how far its
-  center sits inside the circle, no supersampling. The coverage of one
-  corner is computed once per radius and scale, and the other three mirror
-  it, so a repaint costs a table lookup for the few pixels in a corner.
 - **A rounded or translucent bar is an `ARGB8888` buffer** (premultiplied);
-  a square, opaque bar stays `XRGB8888`, exactly as before either option.
-  Only the surface is the bar, never a bigger transparent one: the margin
+  a square, opaque bar stays `XRGB8888`. Only the surface is the bar, never a bigger transparent one: the margin
   is still the protocol's, and the corner pixels are the only transparent
   ones.
 - **Opaque region**: an opaque bar tells the compositor which pixels are
-  opaque, so it can skip blending under them (all of a square bar; all but
-  the four corner squares of a rounded one). A translucent bar declares
+  opaque, so it can skip blending under them. A translucent bar declares
   none: the compositor blends all of it, which is the cost of the option.
 - **The radius is cut back to fit**: `--height` below twice the file's
   `radius` (the flag replaces the file's height), or a compositor giving
@@ -573,37 +542,21 @@ opacity = 0.9
   holds.
 - **Text is kept out of the corners, not clipped to them**: the layout
   clears the bar's ends by the radius (see [Layout](./configure.md#layout)), so no ink
-  is near a corner whatever `padding` is. This costs the radius less half a
-  padding of room at each end, and needs no per-pixel clipping in the
-  paint; a bar whose radius is 0 loses nothing.
+  is near a corner whatever `padding` is. A bar whose radius is 0 loses nothing.
 - **Corners are not clickable**: the surface's input region is the rounded
-  shape (one rectangle per corner row, at most `2 x radius + 1`, set when
-  the size or radius changes), so a click in a cut corner reaches what is
+  shape, so a click in a cut corner reaches what is
   behind the bar (the wallpaper, a window under a bar that does not reserve
-  space) instead of an invisible bar. scoot honors `wl_surface.set_input_region`
-  on layer surfaces, checked end to end on a headless scoot: a click in the
-  window's corner under a rounded bar focuses that window, and the same click
-  under a square bar does not. The region is in logical pixels, so it is the
-  same at every scale (at a fractional scale it can differ from the drawn
-  edge by a device pixel). A compositor that ignores input regions leaves
+  space) instead of an invisible bar. A compositor that ignores input regions leaves
    the corners clickable, which is the protocol's fallback.
 - **Popups round separately**: `[bar] radius` never rounds a popup; that is
   `[bar] popup-radius` ([Popups](./modules.md#popups)), which follows this radius when
   unset.
-- Measured costs (release build, 1600x28 bar, radius 14): filling the whole
-  bar takes 4.9 us square and 6.1 us rounded and translucent; 3200x56 (scale
-  2), 16.2 us and 29.2 us. A repaint of one module's span, the common case,
-  costs the same as before except in the rows of a corner.
 
 
 
 ## Icons and fonts: mechanism and measurements
 
-The reference for the config keys is [the Icons section](./modules.md#icons); this is the
-mechanism and the measurements behind it, for the button, push, exec,
-volume,
-microphone, network, battery, brightness, bluetooth, media and
-window-title modules that reuse it, and for whoever asks "why not X".
+The reference for the config keys is [the Icons section](./modules.md#icons).
 
 An icon is one of three things, chosen by which config key a module's section
 sets (at most one):
@@ -614,243 +567,83 @@ sets (at most one):
 | `icon-path = "M12 2 ..."` | SVG path data, filled by the bar's own rasterizer, tinted from the theme | +36.9 KB of binary | always |
 | `icon-image = "/abs/icon.png"` | A PNG, decoded once, scaled at the output's real scale | +115 KB of binary | `--features icon-image` |
 
-The clock was the first module with an icon. A module names an icon, never
-pixels: it holds an `Icon` (`src/icon/mod.rs`) from its settings and shows it
-with `View::show_icon`; `config/icon.rs` turns the three keys into one, and the
-render path measures, lays out and draws it. **The per-module `icon` keys arrive
-with the modules that need them** (button, push, exec, volume, microphone, network,
-battery, brightness, bluetooth, media, window-title, in their own tickets):
-each takes the same three keys through `config::icon`, and none
-is invented ahead of its module.
-
 ## Path icons
 
-`src/icon/path.rs` parses the `d` attribute of an SVG `<path>` by hand:
-`M m L l H h V v C c S s Q q T t A a Z z`, implicit repeats (`M 1 2 3 4` is a
-move and a line), shorthand numbers (`.5.5`, `1e2`, `-1-2`), arc flags without
-separators (`a1 1 0 00.5.5`). Relative commands become absolute, quadratics
-become cubics and each arc becomes at most four cubics (the endpoint-to-center
-conversion of the SVG implementation notes, F.6), so the rasterizer sees only
-lines and cubics. Nothing is guessed: a stray character, a missing argument, a
-bad flag, a number that is not finite or past 1,000,000, a path that does not
-start with `M`, or one that draws nothing is an error naming the byte it
-stopped at, and the config error names the key (`clock.icon-path: not usable
-SVG path data: at byte 7: expected a number`). The bounds are 16 KiB of text,
-1024 commands (an implicit repeat counts each time) and 4096 segments; a
-fuzzed-string test (20,000 random and 20,000 mutated strings, plus every
-truncation of a corpus of real icon paths) runs on every `cargo test`, and
-another feeds hostile numbers (1e6 coordinates, radii of 1e-6, a 0.001-unit
-viewbox) through the rasterizer.
+`icon-path` takes the `d` attribute of an SVG `<path>`: `M m L l H h V v
+C c S s Q q T t A a Z z` with implicit repeats and shorthand numbers.
+A bad path is an error naming the byte it stopped at and the config key.
+The bounds are 16 KiB of text, 1024 commands, and 4096 segments.
 
 The path has no size of its own, so `icon-viewbox = "min-x min-y width height"`
 says which part of its plane is the icon. The default is `0 0 24 24`
 (Material's); Font Awesome's are `0 0 512 512` and so on. The viewbox is fitted
 into the icon's square with SVG's `xMidYMid meet`: scaled uniformly, centered.
 
-`src/icon/raster.rs` fills it **analytically, with no supersampling**: the
-signed-area accumulation `font-rs` and `ab_glyph` use for glyphs. Each edge adds
-the area it uncovers into a buffer of one float a pixel; a running sum along
-each row is the coverage. Curves are flattened first into at most 48 lines
-within 0.025 px of the curve (a circle of radius 10 then covers 0.3% less area
-than the true one; at a tenth of a pixel it was 1.1%, visibly small). The
-fill rule is the accumulated winding clamped to 0 to 1: SVG's default `nonzero`
-for icons as drawn (a hole wound the other way cancels, overlapping
-same-direction shapes saturate). Edges outside the square are clamped to it, so
-a path past its viewbox costs nothing and cannot write outside the buffer.
-
 The size is the **em in device pixels**, rounded, so the icon is as tall as the
-text's em at whatever scale the output is at: the bitmap is made at that size,
-never a smaller one stretched. It is drawn tinted with the theme token of the
-view's class (`normal` `fg`, `warn` `accent`, `urgent` `urgent`, `muted` `dim`),
-so it follows Stylix like the text beside it. A gap of one space of the primary
+text's em at whatever scale the output is at. It is drawn tinted with the theme token of the
+view's class (`normal` `fg`, `warn` `accent`, `urgent` `urgent`, `muted` `dim`).
+A gap of one space of the primary
 font follows it when text does.
 
-The cache clears **wholesale** past 16 (icon, size) pairs or 4 MiB, and an
-image's scaling allocates a temporary buffer on each miss (up to 8 MiB for a
-1024-pixel source), so it starts to matter when several modules and outputs at
-different scales all use icons: each refill is a burst of work and allocation at
-the next draw, though never per frame in steady state.
-
 The bitmap is cached per (icon, size) in one arena of at most 4 MiB and 16
-entries; past either the cache is dropped and refilled from what is drawn next
-(the glyph cache's rule), and a size past 512 pixels draws nothing and takes no room. A new
-output scale is a new size, so it is one miss. A warm repaint allocates nothing
-(`render/tests/icons.rs`, counted through `scootbg_mem`'s allocator).
-
-### Measured
-
-Release build (`lto = "fat"`, `codegen-units = 1`, `strip`), one core of a
-4-vCPU container, `cargo test --release` ignored benchmarks (thrown away, not
-committed) at the commit before this record:
-
-| | |
-| --- | --- |
-| parse a 149-byte cloud path | 1.0 us |
-| rasterize the cloud at 14 / 16 / 21 / 24 / 32 / 64 px | 2.3 / 2.4 / 3.0 / 3.5 / 6.2 / 13.8 us |
-| the same at 128 / 512 px | 32 / 374 us |
-| a ring (two arcs, four 90-degree cubics each) at 24 / 512 px | 5.7 / 498 us |
-| a warm repaint of the whole bar, 1920x28, three text modules, before / after this change | 5.78 and 6.64 us / 5.07 and 6.66 us (two runs each: noise) |
-| an unchanged repaint (nothing to do) before / after | 0.043 and 0.039 us / 0.031 and 0.040 us |
-
-So a path icon costs microseconds once per (icon, size) and nothing per frame:
-the draw path for a view with no icon gained one `Option` check. Binary size
-(release, the bar built alone, sizes in bytes):
-
-| Build | main | this change |
-| --- | --- | --- |
-| `--no-default-features` (no module) | 1,164,032 | 1,168,128 (+4,096) |
-| default (`clock`, `workspaces`) | 1,442,576 | 1,479,448 (+36,872, +2.6%) |
-| default + `icon-image` | | 1,594,136 (+114,688 for the decoder) |
-
-Sizes re-measured on the final code (`cargo build --release -p scootbar` twice, identical: main's default is 1,442,576 and its
-`--no-default-features` 1,164,032, rebuilt from `origin/main`; a size taken at an
-earlier commit of this branch differs by a few KB, as the config plumbing grew).
-
-Idle RSS of the default release bar on headless scoot with a clock and a path
-icon is 4,792 kB against 4,744 kB without the icon (`VmRSS` after 2.5 s; the
-cache holds one 15 x 15 bitmap).
+entries; past either the cache is dropped and refilled from what is drawn next,
+and a size past 512 pixels draws nothing and takes no room. A path icon
+costs microseconds once per (icon, size) and nothing per frame.
 
 ## Image icons
 
 `icon-image = "/abs/path.png"` (an absolute path; a relative one is refused) in
-a build with the **`icon-image`** feature. `src/icon/image.rs` decodes it once,
+a build with the **`icon-image`** feature. Decoded once,
 when the config is read (so a bad file is a refused reload naming
-`clock.icon-image`, with the running bar untouched), holds it as a
-premultiplied `b, g, r, a` bitmap, and drops it with the module at the next
-reload. It uses the `png` crate the workspace already carries (scootbg, scoot),
-`0.18`, MIT OR Apache-2.0, default features, no new package in the tree.
+`clock.icon-image`, with the running bar untouched), and dropped with the module at the next
+reload.
 
-**The feature is off by default**, measured: the decoder is +114,688 bytes on a
-1,479,448-byte bar (+7.8%), and the [resource ratchet](https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/backlog/lightest.md) does
-not let a row regress for a feature most bars will not use, where a path icon
-does the same job for 37 KB and follows the theme. `--no-default-features` is
-the smallest build either way. Build it in with `--features icon-image`, or on
+**The feature is off by default**: the decoder adds about 115 KB, where a path icon
+does the same job for 37 KB and follows the theme. Build it in with `--features icon-image`, or on
 Nix through the module's `features` list
 (`programs.scootbar.features = [ "clock" "workspaces" "icon-image" ]`, see
 [Overview](./index.md)). Without it the key is unknown, and
-the config error says so, as for a module that is not built. The CI matrix
-treats it as one more feature: clippy and unit tests alone and combined, and
-the headless-scoot test with it on.
+the config error says so, as for a module that is not built.
 
 **Where it runs**: on the daemon's main thread, when the config is read (start-up
 and every `scootbar msg reload`), so a large file stalls the bar for as long as
-it takes to decode: measured worst cases, release, 10.7 ms for a 1024 x 1024
-RGBA image, 24 ms for a 4.5 MB file of 300,000 `tEXt` chunks (the flood test
-is in the tree); the scaling to a size happens at the first draw of that size
-(6 ms for 1024 to 512 px). Nothing runs per frame.
+it takes to decode. Nothing runs per frame.
 
-Bounded like the font loader: opened `O_NONBLOCK` and required to be a regular
-file (a FIFO or device is refused without a read; a symlink loop is the kernel's
-`ELOOP`), at most 8 MiB, read whole (a file that grew past that since `fstat`
-is cut and refused); the decoder has a 16 MiB allocation budget and the header's
-size is checked before any pixel buffer exists (at most 1024 x 1024, so a
-100000 x 100000 header is refused once the header chunk is read). Tests refuse a truncated file
-at every length, a bad checksum in the header and in the data, a zero size,
-oversize headers, and compressed data 4096x larger than its header declares.
+Bounded like the font loader: must be a regular
+file, at most 8 MiB; the decoder has a 16 MiB allocation budget and the header's
+size is checked before any pixel buffer exists (at most 1024 x 1024).
 **Ignored on purpose**: gamma (`gAMA`), `sRGB`, ICC profiles and text chunks:
-the pixels are taken as stored, and `tEXt`/`zTXt`/`iTXt`/`iCCP` are discarded
-as they are read (the decoder's 16 MiB budget covers pixel and row buffers, not
-ancillary chunks, so keeping them let an 8 MiB file of ~600k tiny `tEXt` chunks
-reach 71 MB of RSS in review). Adam7-interlaced files and APNG (the default
-image, whether or not an `fcTL` precedes its `IDAT`) are tested pixel-exact.
-Palettes, 1 to 16 bits, gray, gray and alpha, RGB and RGBA are all read (the
-decoder expands them to 8-bit RGBA); an animated PNG shows its default image.
+the pixels are taken as stored. Adam7-interlaced files and APNG show the default
+image.
+Palettes, 1 to 16 bits, gray, gray and alpha, RGB and RGBA are all read;
+an animated PNG shows its default image.
 
-**The filter**: a separable triangle (bilinear) filter over *premultiplied*
-color, its support widened to the scale ratio when shrinking (so it is an area
-average: a 256-pixel icon at 20 pixels is smooth, and no source pixel is
-skipped), plain bilinear when enlarging. Premultiplied, so a transparent
-pixel's color never bleeds into its neighbor as a fringe. The image is fitted
+The image is fitted
 into the em-sized square keeping its aspect ratio, centered, with transparent
 margins, and drawn source-over with its own colors (not tinted). A full-color
-SVG is converted to PNG ahead of time (the Nix module can do it in a
-derivation): **no SVG files and no `resvg` in the bar**.
-
-Measured, release: decode 256 x 256 RGBA 0.56 ms, 1024 x 1024 10.7 ms; scale
-256 to 24 px 0.12 ms, 1024 to 24 px 1.8 ms, 1024 to 512 px 6.0 ms. All once, at
-load or at the first draw of a size, never per frame. The cache holds one
-`side x side x 4` bitmap per size (a 21-pixel icon is 1.7 KB).
+SVG is converted to PNG ahead of time: **no SVG files in the bar**.
 
 ## Fonts: what the real ones do
 
-The fallback chain is documented in [Fallback fonts and icons](./configure.md#fallback-fonts-and-icons)
-and was tested against the test font in code. To check it against real ones,
-the run on headless scoot (scale 1, a 32-pixel bar, 15 px) was:
-
-- primary `DejaVuSans.ttf` (nixpkgs `dejavu_fonts.minimal`,
-  `/nix/store/zqhby0xidpi0xsafsbl4l7dc72imqqq6-dejavu-fonts-minimal-2.37`),
-- fallbacks `SymbolsNerdFont-Regular.ttf` (`nerd-fonts.symbols-only` 3.5.0,
-  `/nix/store/hqsjk54dhxf2s380j6rrnn4jx6a5xwrm-nerd-fonts-symbols-only-3.5.0`)
-  and `NotoSansCJK-VF.otf.ttc` (`noto-fonts-cjk-sans` 2.004,
-  `/nix/store/dllg6pqphyxipzwihzb6phmjlq4r0w4b-noto-fonts-cjk-sans-2.004`),
-- `[clock] format = "%H:%M  日本語 한국어 中文"`, `icon = "\U000f0e65"`.
+Checked against real fonts on headless scoot (scale 1, a 32-pixel bar,
+15 px): primary DejaVu Sans with a Nerd Font symbols fallback and a CJK
+fallback, `[clock] format = "%H:%M  日本語 한국어 中文"`, `icon = "\U000f0e65"`.
 
 ![Latin digits, a Nerd Font symbol icon and Japanese, Korean and Chinese in one clock](../../../assets/scootbar-fonts-1x.png)
 
 The symbol icon, the Latin digits and the three CJK scripts all draw, from three
-files, with no `.notdef` box. What the run showed beyond the picture:
+files, with no `.notdef` box. A `.ttc` collection loads (its first face),
+and so does a variable CFF2 font (its default instance).
 
-- **A `.ttc` collection loads** (index 0), and **so does a variable CFF2 font**
-  (`NotoSansCJK-VF`): `ab_glyph` reads its default instance.
-- **A 32 MB CJK font costs its size in memory unless it is mapped**: it was
-  read into the heap here (`RssAnon` 35,432 kB, `VmRSS` 39,140 kB with all
-  three fonts), because this container's `/nix/store` is a writable mount and
-  the bar maps a font only from a read-only one
-  ([Fonts](./configure.md#fonts)); on NixOS it is mapped, and only the pages of the
-  glyphs drawn are resident. A bar that needs CJK on another distribution pays
-  the file's size (this one is 32.7 MB).
-- **Shaping is not done**: the run is per codepoint, in order (see the out of
-  scope list in cli.md).
+## Hinting
 
-## Hinting: `swash` against `ab_glyph`, decided
+Text is not hinted. A comparison against hinted rendering showed a small
+gain at 1x sizes for 57% more binary and a sixth more memory, so the bar
+ships unhinted:
 
-The ticket asked whether 1x text needs hinting. A throwaway copy of the bar
-(not in the tree) replaced only `ab_glyph`'s rasterization with `swash` 0.2.10
-hinted (`Render` with `hint(true)`, TrueType instructions), everything else the
-same, and rendered the same text at 12, 14, 15 and 16 px at scale 1 in
-DejaVu Sans on headless scoot. In the image each pair is `ab_glyph` (top) then
-`swash` hinted (bottom), 3x nearest-neighbor, sizes 12, 14, 15, 16 from the top:
-
-![Text at 12, 14, 15 and 16 px, ab_glyph then swash hinted, in pairs](../../../assets/scootbar-hinting-comparison.png)
-
-| | `ab_glyph` (shipped) | `swash` hinted | Cost |
-| --- | --- | --- | --- |
-| Release binary, default features (both at `804c0d1`) | 1,467,160 B | 2,310,928 B | **+843,768 B (+57%)** |
-| Idle `VmRSS`, three runs at 15 px | 4,780 / 4,760 / 4,796 kB | 5,580 / 5,532 / 5,592 kB | **+0.79 MB (+16.7%)**, PSS +0.79 MB |
-
-(`RssAnon` +50 kB and `RssFile` +0.75 MB: the cost is the code's pages, not the
-glyph cache.) Ink pixels in the crop, by how much of them are partial coverage
-(20 to 80%) and how many are fully inked (90% or more):
-
-| px | partial, `ab_glyph` / `swash` | full, `ab_glyph` / `swash` |
-| --- | --- | --- |
-| 12 | 55.4% / 51.2% | 13.1% / 20.5% |
-| 14 | 57.1% / 54.3% | 18.0% / 22.3% |
-| 15 | 46.3% / 48.5% | 23.4% / 28.3% |
-| 16 | 49.0% / 45.9% | 25.0% / 29.5% |
-
-**Decision: do not ship `swash`.** Hinting does snap horizontal stems (more
-fully inked pixels, four to seven points, and 3 to 13% fewer ink pixels), and a
-side-by-side shows a slightly crisper x-height and crossbars at 12 and 14 px.
-But the difference is small (the share of blurry pixels moves by three or four
-points and at 15 px goes *up*), where the cost is 57% more binary and a sixth
-more memory for the smallest consumer of either, which is the resource ratchet's
-whole point; and the bar is meant for HiDPI outputs at fractional scales, where
-device-pixel sizes are large and hinting matters least. Revisit if a real user
-on a 1x display reports blurry text, and try the cheaper levers first (a
-contrast curve on the coverage, a gamma-corrected blend). Nothing in the bar
-depends on the choice: the rasterizer is one function, `Text::fill`.
+![Text at 12, 14, 15 and 16 px, unhinted then hinted, in pairs](../../../assets/scootbar-hinting-comparison.png)
 
 ## What was not built
 
-- **Icon-theme lookup** (`.desktop` files and named icons, option 4): only the
-  [tray](./modules.md#tray) or window icons force it, and it is the heavy path
-  (loading and decoding files). It is not started.
-- **A libFuzzer target** for the path parser. The stable property tests (above)
-  run on every `cargo test`; the clock's two parsers have `cargo fuzz` targets
-  because CI budgets them, and the path parser would be a third with the same
-  shape (`icon/path.rs` uses only `std`, so it compiles by `#[path]` as they do)
-  if a finding ever calls for it.
-- **Built-in bitmaps or paths compiled in for the built-in modules** (mute, wifi
-  bars, battery levels): those modules do not exist. The mechanism is what
-  they will use.
+- **Icon-theme lookup** (`.desktop` files and named icons): only the
+  [tray](./modules.md#tray) or window icons would need it. It is not started.
