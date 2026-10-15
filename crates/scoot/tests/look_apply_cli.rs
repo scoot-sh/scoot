@@ -269,8 +269,8 @@ fn offline_commands_list_show_validate_and_build() {
     let scratch = Scratch::new("offline");
     let session = Session::start(&scratch);
     let list = session.check_look(&["list"]);
-    assert(list.contains("look-a"), "the catalog lists look-a:\n{list}");
-    assert(list.contains("look-b"), "the catalog lists look-b:\n{list}");
+    assert!(list.contains("look-a"), "the catalog lists look-a:\n{list}");
+    assert!(list.contains("look-b"), "the catalog lists look-b:\n{list}");
     let show = session.check_look(&["show", "look-a", "--json"]);
     let show: serde_json::Value = serde_json::from_str(&show).expect("JSON from show");
     assert_eq!(show["name"], "look-a");
@@ -305,16 +305,16 @@ fn a_swap_applies_two_looks_through_the_scoped_reload() {
     );
     let private = session.private_dir();
     let record = std::fs::read_to_string(private.join("look.json")).expect("a record");
-    assert(record.contains("\"name\":\"look-a\"") || record.contains("\"name\": \"look-a\""), "{record}");
+    assert!(record.contains("\"name\":\"look-a\"") || record.contains("\"name\": \"look-a\""), "{record}");
     let link = std::fs::read_link(private.join("look")).expect("a link");
-    assert(link.is_dir(), "the link points at a render: {}", link.display());
-    assert(link.join("scoot.toml").is_file());
+    assert!(link.is_dir(), "the link points at a render: {}", link.display());
+    assert!(link.join("scoot.toml").is_file());
     let second = session.check_look(&["apply", "look-b", "--json"]);
     let second: serde_json::Value = serde_json::from_str(&second).expect("JSON from apply");
     assert_eq!(second["applied"], "look-b");
     assert_eq!(second["generation"], 2);
     let current = session.check_look(&["current"]);
-    assert(current.contains("look-b"), "current names the swap:\n{current}");
+    assert!(current.contains("look-b"), "current names the swap:\n{current}");
 }
 
 #[test]
@@ -329,7 +329,7 @@ fn a_swap_never_applies_a_pending_user_edit() {
     std::fs::write(&config, "[binds]\n\"super+F12\" = \"close\"\n").expect("a pending bind");
     session.check_look(&["apply", "look-b"]);
     let binds = session.msg(&["binds", "--json"]);
-    assert(binds.status.success(), "binds answers");
+    assert!(binds.status.success(), "binds answers");
     let before = String::from_utf8(binds.stdout).expect("UTF-8 binds");
     assert!(
         !before.contains("super+F12"),
@@ -337,7 +337,7 @@ fn a_swap_never_applies_a_pending_user_edit() {
     );
     // A plain reload applies what the swap held back.
     let reload = session.msg(&["reload"]);
-    assert(reload.status.success(), "a plain reload answers");
+    assert!(reload.status.success(), "a plain reload answers");
     let binds = session.msg(&["binds", "--json"]);
     let after = String::from_utf8(binds.stdout).expect("UTF-8 binds");
     assert!(
