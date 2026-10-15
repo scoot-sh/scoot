@@ -166,6 +166,9 @@ if [ -n "$SMOKE_PREFIX" ]; then
     WALLPAPER_SOCK="$SMOKE_PREFIX-wp.sock"
     WALLPAPER_LOG="$SMOKE_PREFIX-wp.log"
     WALLPAPER_DIR="$SMOKE_PREFIX-wp"
+    LOOKS_SOCK="$SMOKE_PREFIX-looks.sock"
+    LOOKS_LOG="$SMOKE_PREFIX-looks.log"
+    LOOKS_DIR="$SMOKE_PREFIX-looks"
 else
     SOCKET=${SOCKET:-/run/user/$(id -u)/scoot-smoke.sock}
     SHOT=${SHOT:-/tmp/scoot-smoke.png}
@@ -190,6 +193,9 @@ else
     WALLPAPER_SOCK="/run/user/$(id -u)/scoot-smoke-wp.sock"
     WALLPAPER_LOG=/tmp/scoot-smoke-wp.log
     WALLPAPER_DIR=/tmp/scoot-smoke-wp
+    LOOKS_SOCK="/run/user/$(id -u)/scoot-smoke-looks.sock"
+    LOOKS_LOG=/tmp/scoot-smoke-looks.log
+    LOOKS_DIR=/tmp/scoot-smoke-looks
 fi
 export SCOOT_SOCKET="$SOCKET"
 
@@ -1045,6 +1051,113 @@ run_wallpaper_test() {
 }
 if [ -n "$SCOOTBG" ]; then
     ( run_wallpaper_test ) || exit 1
+else
+    echo "skipped: no scootbg binary (see the binaries header above)"
+fi
+
+echo "=== looks: scoot look applies two looks and the background pixel of each ==="
+# Its own headless session with an empty config (no [appearance], no
+# [wallpaper]), so the looks show through unshadowed, and its own state,
+# cache and config homes, so no developer's real look is in reach (R3).
+# Always --headless: only headless sessions keep a private look state the
+# CLI can target with --state; config handling is backend-agnostic.
+# Needs scootbg beside SCOOT: an image wallpaper with no daemon to show it
+# refuses the swap and rolls it back.
+run_looks_test() {
+    local socket="$LOOKS_SOCK"
+    local log="$LOOKS_LOG"
+    local dir="$LOOKS_DIR"
+    rm -rf "$dir"
+    mkdir -p "$dir/state" "$dir/cache" "$dir/config"
+    rm -f "$socket" "$log"
+    export XDG_STATE_HOME="$dir/state"
+    export XDG_CACHE_HOME="$dir/cache"
+    export XDG_CONFIG_HOME="$dir/config"
+
+    local repo
+    repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
+    export SCOOT_LOOKS_DIR="$repo/looks"
+    : >"$dir/config.toml"
+
+    "$SCOOT" --headless --width 800 --height 600 --socket "$socket" \
+        --config "$dir/config.toml" >"$log" 2>&1 &
+    # Not `local` -- and EXIT, not RETURN -- see run_config_bind_test's
+    # identical trap for why.
+    pid=$!
+    trap 'kill "$pid" 2>/dev/null || true' EXIT
+    export SCOOT_SOCKET="$socket"
+    for _ in $(seq 1 60); do
+        [ -S "$socket" ] && break
+        sleep 0.1
+    done
+    if [ ! -S "$socket" ]; then
+        echo "looks test: the control socket never appeared; compositor log:"
+        tail -20 "$log"
+        return 1
+    fi
+    # The session's private look state: the one scoot-look-*/ dir beside
+    # the socket. --headless always keeps one; without it the CLI would
+    # act on the developer's real look.
+    local runtime state
+    runtime="$(dirname "$socket")"
+    state=$(echo "$runtime"/scoot-look-*/)
+    if [ ! -d "$state" ]; then
+        echo "BUG: no private look state beside $socket:"
+        ls -la "$runtime" || true
+        return 1
+    fi
+
+    local shot="$dir/shot.png"
+    wait_wallpaper_pixel() {
+        local want="$1" what="$2"
+        for _ in $(seq 1 75); do
+            if "$SCOOT" msg screenshot --no-cursor --out "$shot" >/dev/null 2>&1 \
+                && expect_pixel_color "$shot" 10 10 "$want" "$what" >/dev/null 2>&1; then
+                echo "ok: the screen shows $what (#$want)"
+                return 0
+            fi
+            sleep 0.2
+        done
+        echo "BUG: the screen never showed $what:"
+        expect_pixel_color "$shot" 10 10 "$want" "$what (after two looks)" || true
+        tail -30 "$log"
+        return 1
+    }
+
+    echo "--- an unknown look refuses with exit 1 and touches nothing ---"
+    if "$SCOOT" look apply nosuchlook --state "$state" --socket "$socket" >/dev/null 2>&1; then
+        echo "BUG: applying an unknown look succeeded"
+        return 1
+    fi
+    if [ -e "$state/look.json" ]; then
+        echo "BUG: a refused apply recorded a choice"
+        return 1
+    fi
+    echo "ok: an unknown look refuses and records nothing"
+
+    echo "--- vinyl-sunset, then ginger-night, each pixel-checked ---"
+    if ! "$SCOOT" look apply vinyl-sunset --state "$state" --socket "$socket" >"$dir/apply.out" 2>&1; then
+        echo "BUG: applying vinyl-sunset failed:"
+        cat "$dir/apply.out"
+        tail -30 "$log"
+        return 1
+    fi
+    wait_wallpaper_pixel "271A1F" "vinyl-sunset's flat wallpaper" || return 1
+    if ! "$SCOOT" look apply ginger-night --state "$state" --socket "$socket" >"$dir/apply.out" 2>&1; then
+        echo "BUG: applying ginger-night failed:"
+        cat "$dir/apply.out"
+        tail -30 "$log"
+        return 1
+    fi
+    wait_wallpaper_pixel "0E0E0E" "ginger-night's letterbox fill" || return 1
+    if ! "$SCOOT" look current --state "$state" | grep -q "ginger-night"; then
+        echo "BUG: current does not name the applied look"
+        return 1
+    fi
+    echo "ok: two looks applied, each background pixel checked"
+}
+if [ -n "$SCOOTBG" ]; then
+    ( run_looks_test ) || exit 1
 else
     echo "skipped: no scootbg binary (see the binaries header above)"
 fi
