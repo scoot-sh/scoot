@@ -28,11 +28,11 @@ One command. No install, no GPU.
 docker run --rm -p 127.0.0.1:6080:6080 ghcr.io/scoot-sh/try-scoot
 ```
 
-Open `http://127.0.0.1:6080`. Click the desktop. Press `Alt+Return` for a second terminal. No Docker? [Use Nix](./start/install.md#or-in-a-window-on-linux-nix) instead.
+Open `http://127.0.0.1:6080`. Click the desktop. Press `Alt+Return` for a second terminal. No Docker? [Use Nix](./start/install.md#or-in-a-window-on-linux-nix).
 
 ## Looks
 
-Same cat, different wallpaper. Five looks ship with the desktop — picking
+Five looks ship with the desktop — picking
 one themes the compositor, the bar and the wallpaper together (the
 default is ginger-night):
 

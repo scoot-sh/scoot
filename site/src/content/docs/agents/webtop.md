@@ -4,8 +4,8 @@ description: "Run scoot nested inside a linuxserver webtop container — GPU-fre
 ---
 
 scoot runs inside a [linuxserver webtop](https://docs.linuxserver.io/images/docker-webtop/)
-container nested in the host compositor — no GPU, no seat, no problem,
-because the default build needs neither. The container's desktop init
+container nested in the host compositor — no GPU or seat needed,
+because the default build requires neither. The container's desktop init
 execs a session script with the environment already set; start scoot
 nested in the host compositor with the same session script:
 
@@ -22,11 +22,11 @@ supervision is the container's job (there is no systemd here), and the
 D-Bus activation half is the session script's (see [the portal
 setup](../scoot/index.md#starting-a-session), s6 flavor).
 
-Why this works untouched: `auto` resolves to pixman here and GPU-free
+`auto` resolves to pixman here and GPU-free
 operation is a hard requirement, so there is no driver to install and
 no device to pass through. The one-command check on
 [Install](../start/install.md#which-build-do-i-need) answers "no
 render node" here — take the default `scoot`.
 Drive it over [IPC](../msg/index.md) and read it back with
-[Screenshots](../msg/screenshots.md), exactly like a headless
+[Screenshots](../msg/screenshots.md), like a headless
 agent session.

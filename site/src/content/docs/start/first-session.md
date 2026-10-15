@@ -16,7 +16,7 @@ scoot --nested -- foot
 ```
 
 A window opens with a terminal in it. Close the window to quit — nothing on
-your real desktop is touched.
+your real desktop changes.
 
 > **Symptom:** the nested window opens and instantly closes.
 > scoot printed why in the terminal you started it from. Usually it is a missing `$XDG_RUNTIME_DIR` or a host that never answered: see [Backends](../scoot/backends.md).
@@ -77,6 +77,6 @@ you can never strand yourself.
 
 ## Learn 3 keys today
 
-You already know the three that run everything: <kbd>Super</kbd>+<kbd>Return</kbd> (terminal), <kbd>Super</kbd>+<kbd>h</kbd>/<kbd>Super</kbd>+<kbd>l</kbd> (move between columns), <kbd>Super</kbd>+<kbd>q</kbd> (close). Use only those today. Tomorrow, learn three more from [Keybindings](../scoot/keybindings.md).
+You already know the three that run everything: <kbd>Super</kbd>+<kbd>Return</kbd> (terminal), <kbd>Super</kbd>+<kbd>h</kbd>/<kbd>Super</kbd>+<kbd>l</kbd> (move between columns), <kbd>Super</kbd>+<kbd>q</kbd> (close).
 
 Next: [Keybindings](../scoot/keybindings.md) — the full default map, and how to make it yours. Or [build your desktop](./compose.md) — bar, wallpaper, launcher and notifications.

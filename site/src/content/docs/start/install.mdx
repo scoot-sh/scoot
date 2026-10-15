@@ -5,7 +5,7 @@ description: "Try scoot in your browser, install it on any Linux with one comman
 
 import { Tabs, TabItem, Steps, Aside } from '@astrojs/starlight/components';
 
-Two minutes from here to a scoot window. The cat is impatient too.
+Two minutes from here to a scoot window.
 
 ## Try it in your browser
 
@@ -55,7 +55,7 @@ Pick your system. The site remembers your choice.
 <Tabs syncKey="distro">
 <TabItem label="NixOS">
 
-**This is the easy mode.** A flake with home-manager gets you the whole
+A flake with home-manager gets you the whole
 scoot desktop from one switch: the bar, wallpaper, lock, notifications,
 launcher, clipboard history, screenshots and screen sharing, all themed
 by one look, and rolled back together if you change your mind.
@@ -238,8 +238,6 @@ service and backlight access ([details](../../desktop/#home-manager)).
 </TabItem>
 <TabItem label="Any Linux">
 
-No Nix on this machine? This is your route.
-
 One command installs scoot, the wallpaper daemon and the bar from
 GitHub, checks each binary against the release's checksums, and tells
 you which system libraries are missing. Any distro with glibc 2.36 or
@@ -257,8 +255,8 @@ failed and the script never ran — check the network and run it again.
 
 Minimal Fedora and Arch images ship no usable font, and the bar refuses
 to start without one (`no font: none of the usual font files is usable`).
-The script says so when that is you, naming the package for your distro
-(`fonts-dejavu-core` on Debian and Ubuntu, `dejavu-sans-fonts` on
+The script names the package for your distro
+when that is you (`fonts-dejavu-core` on Debian and Ubuntu, `dejavu-sans-fonts` on
 Fedora, `dejavu-fonts` on openSUSE, `ttf-dejavu` on Arch) — or point the
 bar at any file with `--font PATH` instead.
 
@@ -295,7 +293,7 @@ Read the script before you run it:
 [install.sh](https://www.scoot.sh/install.sh). Every option:
 `sh install.sh --help`.
 
-This gets you the compositor, the bar and the wallpaper. The lock,
+The lock,
 notifications, launcher and screenshots come from your distro: [Build
 your desktop](../compose/#any-other-linux-the-parts) has the one
 command per distro.
@@ -355,7 +353,7 @@ your `PATH`. To build `.deb`, `.rpm` or Arch packages yourself, see
 
 </Steps>
 
-All four work? You are done.
+All four work — you are done.
 
 ## Which build do I need?
 

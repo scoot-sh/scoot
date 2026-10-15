@@ -6,7 +6,7 @@ description: "Skip compiling Smithay: point Nix at the public Cachix cache and d
 Every merge to `main` pushes built binaries for `x86_64-linux` and
 `aarch64-linux` to the public Cachix cache `scoot-sh`. Without it, Nix
 compiles Smithay and scoot's crates on your machine (minutes); with it,
-you download. Opt in once with the two lines below.
+you download. Opt in once:
 
 ## Use it
 
@@ -47,7 +47,7 @@ nix show-config | grep -E "substituters|trusted-public-keys"
 
 Non-interactive (scripts, containers): the flake itself carries these two
 values as `nixConfig`, and Nix asks whether to accept them on first use.
-Answer once, or pass the flag:
+Answer once, or pass the flag (`--accept-flake-config` skips the prompt):
 
 ```sh
 nix run --accept-flake-config github:scoot-sh/scoot#scootbar -- --version
@@ -71,8 +71,7 @@ curl -s https://app.cachix.org/api/v1/cache/scoot-sh
 ```
 
 The `publicSigningKeys` it reports must equal the key in the config
-above (`scoot-sh.cachix.org-1:QMj7CMw8uqZxrvqqm6SggdxTHz6Q4prt30ydDcXJXCo=`).
-A substituter can serve any store path your Nix asks for, so this trusts
+above. A substituter can serve any store path your Nix asks for, so this trusts
 CI's builds the way installing the flake already trusts its source. The
 signing key is what stops a cache-only compromise from doing more than serve
 stale or signed paths or go away; whoever holds the key can make your Nix
@@ -124,11 +123,10 @@ prints `scootbar 0.1.0` in 14.6 seconds with 7 paths fetched (1.1 MB
 download, 58.6 MB unpacked) — the bar itself coming from
 `scoot-sh.cachix.org`, nothing compiled. The ticket's original cold
 build measured 5m10s for two packages on four vCPUs; current CI on a
-code-change push takes ~19–21 minutes per architecture (run
-`37587122304`: 317 dependencies substituted, then the changed crates
-compiled), while a push with nothing to rebuild substitutes everything
-in about a minute per architecture (run `37604984779`: 58–76 seconds
-per job, 3m18s end to end).
+code-change push takes ~19–21 minutes per architecture (317
+dependencies substituted, then the changed crates compiled), while a
+push with nothing to rebuild substitutes everything in about a minute
+per architecture (58–76 seconds per job, 3m18s end to end).
 
 > **Symptom:** it is compiling anyway (Smithay scrolls past for
 > minutes).
