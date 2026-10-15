@@ -269,7 +269,8 @@ by default.
 - **Cost.** One socket while the server is up, one inotify watch on its
   directory while it is not: no timer, no polling, no wakeups with no
   audio activity. A server that restarts is found when its socket comes
-  back. A server that refuses the handshake (a cookie) is not probed again
+  back, or at once when it kept the path and only dropped the connection.
+  A server that refuses the handshake (a cookie) is not probed again
   until something new happens in the socket's directory. Sets are absolute levels from what is shown
   (never accumulated steps, so a touchpad flood cannot drift), one in
   flight at most, and every answered set is re-read, so what the server
@@ -302,7 +303,8 @@ Cargo feature (`network`), on by default.
   signal has no kernel event, so the module re-reads it on a 10 s timer,
   armed only while WiFi is shown. The redraw follows only when the shown level moves.
   The tooltip's exact dBm is drawn live from the latest re-read, so it
-  is fresh whenever it opens.
+  is fresh whenever it opens, and an open tooltip refreshes with the
+  next redraw.
 - **A click opens the picker**, with no binding at all: `network.menu-command`
   is spawned with the cached scan's SSIDs on stdin (one per line), a
   dmenu-style launcher fed from the scan list. Connecting is the
@@ -585,7 +587,7 @@ bar's own client (no `zbus`, no libdbus, no thread).
   untrusted bytes from a same-user peer: a message past 1 MiB
   is skipped whole, the item keeps its last state and is read again at its next
   signal (a header past 128 MiB ends the connection). Nesting past 32 and
-  pixmaps past 256 px a side are refused; at most 8 pixmap entries, stored
+  pixmaps past 256 px a side are refused; at most 8 pixmap entries each, stored
   at most 64 px a side and 512 KiB tray-wide. Titles are cut at 128 bytes
   (controls stripped); themed names past 128 bytes, with a `/` or starting
   with a dot, are refused, and an `IconThemePath` that is not absolute or
@@ -600,7 +602,9 @@ bar's own client (no `zbus`, no libdbus, no thread).
   set-up (auth and `Hello`) is blocking, bounded to 2 seconds in total.
 - **Cost.** Idle costs nothing (`unix:path=` addresses; a `unix:abstract=`
   address has no directory to watch, so it polls once every 30 s): zero wakeups with
-  no bus, with a bus and no items, and with items on it.
+  no bus, with a bus and no items, and with items on it. An item that
+  re-announces its icon continuously is read at most every 50 ms (0.7% of
+  a core, against 9.7% with no floor).
 
 
 ## Media
@@ -663,9 +667,12 @@ Cargo feature (`media`), on by default; the smallest build
   (the last one gone or stopped, the bus lost) is drawn at once, never coalesced.
 - **Idle cost: nothing.** The bus does the filtering, so an
   app unrelated to media coming or going never wakes the bar. A
-  track change is one signal carrying the value (no round trip). With no bus the module waits for it;
+  track change is one signal carrying the value (no round trip); a player
+  that only invalidates a property is read once, no oftener than every
+  50 ms. With no bus the module waits for it;
   a bus that goes away drops every player at
-  once and dials once more.
+  once and dials once more, and one that keeps dropping the bar is left
+  alone for 30 seconds, said once on stderr (the [tray's](./modules.md#tray) rules).
 - **Bounds, for a hostile or broken player.** Anything on the session bus
   can claim a player name and say anything. It
   cannot crash or hang the bar or grow it without
@@ -677,7 +684,8 @@ Cargo feature (`media`), on by default; the smallest build
   whole and the player keeps its last state. Dictionaries past 128 entries
   are refused; `ListNames` is read to 4096 names, so a bus with more can
   hide a player from the start-up listing. A read that errors (a timeout
-  or `UnknownObject`) leaves the player held, shown as nothing. Method
+  or `UnknownObject`) leaves the player held, shown as nothing, and one
+  that never answers is forgotten after 30 seconds when its slot is wanted. Method
   replies are matched by serial and sender.
 - **Cost.** Idle costs nothing (`unix:path=` addresses; a `unix:abstract=`
   address has no directory to watch, so it polls once every 30 s): zero wakeups with no
@@ -735,9 +743,11 @@ has none of it.
   once, never coalesced.
 - **Idle cost: nothing.** The bus does the filtering, so anything else on
   the system bus never wakes the bar. A power or connection change is one signal carrying the
-  value (no round trip). With no
+  value (no round trip); an object whose signal only invalidates a shown
+  property is read once (`GetAll`), no oftener than every 50 ms. With no
   system bus the module waits for it; a bus that goes away drops everything at once and dials once
-  more.
+  more, and one that keeps dropping the bar is left alone for 30 seconds
+  (the [tray's](./modules.md#tray) rules).
 - **Bounds, for a hostile or missing BlueZ.** Anything on the system bus
   can own `org.bluez` when BlueZ itself is absent and say anything. It
   cannot crash or hang the bar or grow it without
@@ -748,7 +758,8 @@ has none of it.
   where they are stored. Dictionaries past 128 entries and interfaces past
   32 of one object are refused. A `GetManagedObjects` answer past 1 MiB is skipped
   whole and the module keeps showing its last state: one retry on the
-  coalesce timer, then again at the next signal. The system bus is
+  coalesce timer, then again at the next signal; one that never answers
+  is forgotten after 30 seconds when its slot is wanted. The system bus is
   `DBUS_SYSTEM_BUS_ADDRESS` when it names a filesystem path, else
   `/run/dbus/system_bus_socket`.
 - **Cost.** Idle costs nothing: zero wakeups with no
@@ -825,7 +836,8 @@ on-click = "popup"
   connection stays, woken only by its own replies; no match rules are
   installed, so nothing else on the system bus wakes the bar.
 - **Bounds, for a hostile logind.** On a bus without logind anything can
-  own `org.freedesktop.login1` and say anything. It cannot crash or hang the bar;
+  own `org.freedesktop.login1` and say anything. It cannot crash or hang the bar:
+  a reply that does not parse keeps the last state, said once per connection;
   an answer other than `yes`/`challenge`/`no`/`na` never hides a row;
   the error text kept is cut to 256 bytes.
 
@@ -930,7 +942,8 @@ itself, so the tint lands there rather than over its text). Unset,
 **Cost.** The bar asks the seat for a pointer only while a placed module
 has a binding or a default of its own.
 A clock-only bar with no bindings never takes the pointer. A reload that adds or removes bindings
-takes or drops it.
+takes or drops it. A motion event stores two numbers; no pointer event,
+hover repaint or module action allocates.
 
 
 
@@ -1425,7 +1438,8 @@ Every key is optional. `text` and `tooltip` are strings, `class` is one of
 glyph from a symbol font, as a static `icon` key takes), drawn before the
 text instead of the module's static icon while set, `version` is the shape this was
 written for; a `version` above 1 is refused by name,
-and keys it does not know are ignored. Text and tooltip are cut at 256 bytes on a character boundary, and
+and keys it does not know are ignored, so an older bar reads an update
+carrying `icon` as if it were not there. Text and tooltip are cut at 256 bytes on a character boundary, and
 every control character (a tab, a carriage return, an escape) becomes a
 space, so nothing but printable text reaches the bar. A line or value
 past 4096 bytes, or JSON nested more than 8 deep, is refused. The tooltip is

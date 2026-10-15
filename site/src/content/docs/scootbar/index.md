@@ -71,7 +71,7 @@ starts the bar, and a config change restarts it through the service
 
 Modules are Cargo features, reachable through `.override` — a bar
 with no modules needs no font, and `icon-image` (the PNG decoder,
-+115 KB) builds the same way:
++115 KB) builds the same way (each line is one alternative):
 
 ```nix title="home.nix"
 programs.scootbar.package = inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scootbar.override { buildNoDefaultFeatures = true; };
