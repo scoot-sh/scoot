@@ -51,7 +51,7 @@ and fails on a missing role"; no such check exists. And a change under
 The five files, the CI job running on a look-only change (and a deliberately
 broken look failing it), and the registry-equality check.
 
-## Resolution
+## Resolution (PR #610, branch `feat/look-shipped`)
 
 `looks/<name>/look.toml` for all five looks, from the registry's values,
 foot's 16 hues, and the examples' ring widths, padding, spacing and
