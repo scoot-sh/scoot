@@ -1224,7 +1224,6 @@ fn build_leaves_a_sibling_build_tmp_alone() {
 
 #[test]
 fn validate_names_a_bad_wallpaper_instead_of_blank() {
-    use super::super::catalog::tests::write_look;
     // A wallpaper symlink escaping the look, a FIFO, and a missing file
     // all land in `errors` (never a blank refusal), and `validate_entry`
     // reports invalid (not valid:true).
