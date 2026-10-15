@@ -51,7 +51,7 @@ The IPC requests (`look-ipc`).
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
 
-## Resolution (branch `look-session-state`)
+## Resolution (PR #616, branch `look-session-state`)
 
 Landed as designed, with two deviations worth naming. First, there is no
 `--state` flag yet and no `scoot look` command (both are `look-apply-cli`'s):
