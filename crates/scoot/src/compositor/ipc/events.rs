@@ -244,7 +244,19 @@ impl State {
         self.emit(EventKind::Lock, &line);
     }
 
-    /// The shared tail of all seven emitters: one encoded line to every
+    /// Sends a look-layer identity event to every `Look` subscriber. Fires
+    /// once per identity change, as seen by a reload (see `reload.rs`):
+    /// same identity twice emits nothing, and startup sets the baseline
+    /// without emitting. A cold path (a look swap, never per frame), so the
+    /// one small encode plus one clone per subscriber costs nothing.
+    pub fn emit_look_changed(&mut self, name: Option<String>, source_hash: String) {
+        let Ok(line) = encode(&Response::LookChanged { name, source_hash }) else {
+            return;
+        };
+        self.emit(EventKind::Look, &line);
+    }
+
+    /// The shared tail of all eight emitters: one encoded line to every
     /// subscriber of `kind`.
     ///
     /// `line` is encoded once, outside, and cloned per subscriber -- one

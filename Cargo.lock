@@ -868,6 +868,7 @@ dependencies = [
  "rustix 1.1.4",
  "scoot-core",
  "scoot-ipc",
+ "scoot-look",
  "scootctl",
  "serde",
  "serde_json",

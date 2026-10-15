@@ -92,4 +92,8 @@ pub use socket::{SOCKET_ENV, socket_path};
 /// receives one. It rides the existing `output` kind rather than a new one,
 /// so an older subscriber handed one fails its decode: exactly the break
 /// this constant exists to announce.
-pub const PROTOCOL_VERSION: u32 = 10;
+///
+/// And again 10 → 11 for the look-layer event (2026-10): one new tag,
+/// `Response::LookChanged`, under the same rule -- only a subscriber to the
+/// new `look` kind ever receives one.
+pub const PROTOCOL_VERSION: u32 = 11;

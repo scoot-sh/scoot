@@ -885,7 +885,7 @@ impl Fixture {
             .clone()
             .expect("install_config ran first");
         std::fs::write(&path, contents).expect("a rewritten config file");
-        let response = self.state.handle_request(Request::Reload);
+        let response = self.state.handle_request(Request::Reload { wait_wallpaper: false });
         self.settle();
         response
     }

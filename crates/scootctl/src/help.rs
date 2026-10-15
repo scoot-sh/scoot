@@ -59,8 +59,8 @@ pub const REQUESTS: &[RequestDoc] = &[
     },
     RequestDoc {
         verb: "reload",
-        syntax: "reload",
-        description: "re-read the config file and re-apply what can be re-applied live",
+        syntax: "reload [--wait-wallpaper]",
+        description: "re-read the config file and re-apply what can be re-applied live (with --wait-wallpaper, the wallpaper run finishes first)",
         example: "scoot msg reload",
         reply: "`{\"type\":\"reloaded\",...}`",
     },
@@ -144,7 +144,7 @@ pub const REQUESTS: &[RequestDoc] = &[
     RequestDoc {
         verb: "subscribe",
         syntax: "subscribe [EVENT...]",
-        description: "stream events (output, keyboard, workspace, lock; default: output) until killed",
+        description: "stream events (output, keyboard, workspace, lock, look; default: output) until killed",
         example: "scoot msg subscribe workspace",
         reply: "`{\"type\":\"subscribed\",...}`, then one event per line, e.g. `{\"type\":\"output_added\",...}`",
     },

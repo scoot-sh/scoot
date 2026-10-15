@@ -241,6 +241,6 @@ impl State {
     /// semantic the shared path owns (validate-before-apply, the TTY VT-bind
     /// guard, applying under lock) rides along untouched.
     fn reload_from_sighup(&mut self) {
-        let _ = self.reload();
+        let _ = self.reload(false);
     }
 }

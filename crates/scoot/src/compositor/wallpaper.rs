@@ -54,7 +54,7 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 
 pub use queue::Waited;
 use queue::{Ended, Exit, Queue};
-pub use section::{Section, WallpaperConfig, WallpaperSetting};
+pub use section::{OutputConfig, Section, Table, WallpaperConfig, WallpaperSetting};
 
 use super::State;
 
@@ -107,6 +107,12 @@ impl Wallpaper {
     /// Whether no `apply-config` is tracked (the reaper's fast path).
     pub fn is_idle(&self) -> bool {
         self.queue.is_empty()
+    }
+
+    /// The pid in flight, if any -- what `reload --wait-wallpaper` polls
+    /// before answering.
+    pub(super) fn running_pid(&self) -> Option<u32> {
+        self.queue.running_pid()
     }
 
     /// The queue, for the glue's tests.

@@ -73,7 +73,7 @@ use super::input::keysym_named;
 use super::keybindings::{BindFlags, Bound, Keybindings, Modifiers};
 use super::output_config::{OutputEntries, OutputEntryConfig};
 use super::output_scale::{MAX_SCALE, MIN_SCALE, clamp_scale, clamp_scale_range};
-use super::wallpaper::{WallpaperConfig, WallpaperSetting};
+use super::wallpaper::{Table as WallpaperTable, WallpaperConfig, WallpaperSetting};
 use super::window_rules::{
     DEFAULT_DRAG_MODIFIER, FloatingConfig, FloatingRules, WindowRuleConfig, drag_modifier,
 };
@@ -191,20 +191,37 @@ impl AppearanceConfig {
     /// lower half of that clamp changes nothing here. That same call also
     /// bounds `cursor_size`, which has nothing to do with `gap` -- see
     /// [`Appearance::clamped`].
-    fn into_appearance(self, gap: i32) -> Appearance {
+    fn into_appearance(self, gap: i32, layer: Option<&LayerFile>) -> (Appearance, Vec<String>) {
         let defaults = Appearance::default();
-        let color = |field: Option<String>, name: &'static str, default: Color| match field {
+        let mut invalid = Vec::new();
+        // One malformed color degrades to the look layer's value when the
+        // layer provides that key (reported as invalid and shadowing by the
+        // caller), else to the built-in default with a warning as before --
+        // never neither the user's color nor the look's.
+        let color = |field: Option<String>,
+                     name: &'static str,
+                     default: Color,
+                     layer_key: &'static str| match field {
             None => default,
             Some(raw) => Color::parse(&raw).unwrap_or_else(|| {
-                tracing::warn!(
-                    field = name,
-                    value = %raw,
-                    "invalid color in config file; using the default for this field only"
-                );
-                default
+                if let Some(layer_raw) = layer
+                    .and_then(|layer| layer.appearance.as_ref())
+                    .and_then(|appearance| layer_color_raw(appearance, layer_key))
+                    && let Some(fallback) = Color::parse(layer_raw)
+                {
+                    invalid.push(format!("appearance.{layer_key}"));
+                    fallback
+                } else {
+                    tracing::warn!(
+                        field = name,
+                        value = %raw,
+                        "invalid color in config file; using the default for this field only"
+                    );
+                    default
+                }
             }),
         };
-        Appearance {
+        let appearance = Appearance {
             focus_ring_width: self.focus_ring_width.unwrap_or(defaults.focus_ring_width),
             // Unset stays unset: the ring then follows the active width.
             focus_ring_inactive_width: self.focus_ring_inactive_width,
@@ -212,20 +229,28 @@ impl AppearanceConfig {
                 self.focus_ring_active_color,
                 "focus_ring_active_color",
                 defaults.focus_ring_active_color,
+                "focus_ring_active_color",
             ),
             focus_ring_inactive_color: color(
                 self.focus_ring_inactive_color,
                 "focus_ring_inactive_color",
                 defaults.focus_ring_inactive_color,
+                "focus_ring_inactive_color",
             ),
             background_color: color(
                 self.background_color,
                 "background_color",
                 defaults.background_color,
+                "background_color",
             ),
             corner_radius: self.corner_radius.unwrap_or(defaults.corner_radius),
             cursor_size: self.cursor_size.unwrap_or(defaults.cursor_size),
-            cursor_color: color(self.cursor_color, "cursor_color", defaults.cursor_color),
+            cursor_color: color(
+                self.cursor_color,
+                "cursor_color",
+                defaults.cursor_color,
+                "cursor_color",
+            ),
             // An empty string is treated as unset rather than as a theme
             // named "": it is what a user writing `cursor_theme = ""` to mean
             // "no override" would expect, and `Theme::load` would otherwise
@@ -236,7 +261,22 @@ impl AppearanceConfig {
                 .unwrap_or(defaults.cursor_hide_after_ms),
             prefer_no_csd: self.prefer_no_csd.unwrap_or(defaults.prefer_no_csd),
         }
-        .clamped(gap)
+        .clamped(gap);
+        (appearance, invalid)
+    }
+}
+
+/// One raw color string from a validated layer's `[appearance]`, for the
+/// bad-user-value fallback in [`AppearanceConfig::into_appearance`]. The
+/// layer is strictly validated before it merges, so a color key present
+/// here always parses there.
+fn layer_color_raw(appearance: &AppearanceConfig, key: &str) -> Option<&str> {
+    match key {
+        "focus_ring_active_color" => appearance.focus_ring_active_color.as_deref(),
+        "focus_ring_inactive_color" => appearance.focus_ring_inactive_color.as_deref(),
+        "background_color" => appearance.background_color.as_deref(),
+        "cursor_color" => appearance.cursor_color.as_deref(),
+        _ => None,
     }
 }
 
@@ -641,11 +681,28 @@ impl LoadedConfig {
     /// `false` here: the VT bindings are added later, once `--tty` is known
     /// to be the backend.
     fn from_file_with_vt(file: FileConfig, path: &Path, vt: bool) -> Self {
+        Self::from_file_with_layer(file, path, vt, None).loaded
+    }
+
+    /// Builds the loaded config from a parsed file merged over an optional
+    /// validated look layer. See [`merge_layer`] for the merge rules and
+    /// [`AppearanceConfig::into_appearance`] for the bad-user-value
+    /// fallback.
+    fn from_file_with_layer(
+        file: FileConfig,
+        path: &Path,
+        vt: bool,
+        layer: Option<&LayerFile>,
+    ) -> LayeredLoaded {
+        let (file, shadowed) = match layer {
+            Some(layer) => merge_layer(file, layer),
+            None => (file, Vec::new()),
+        };
         let config = file.layout.unwrap_or_default().into_config();
-        let appearance = file
+        let (appearance, invalid) = file
             .appearance
             .unwrap_or_default()
-            .into_appearance(Config::clamp_gap(config.gap));
+            .into_appearance(Config::clamp_gap(config.gap), layer);
         let scale = file.output.unwrap_or_default().into_scale();
         let outputs = OutputEntries::resolve(file.outputs);
         let gpu = file.tty.and_then(|tty| tty.gpu);
@@ -700,28 +757,42 @@ impl LoadedConfig {
         for skipped in &skipped_rules {
             tracing::warn!(rule = %skipped, "skipping an unusable [[window_rule]]");
         }
-        Self {
-            config,
-            keybindings,
-            skipped_binds,
-            appearance,
-            scale,
-            outputs,
-            gpu,
-            renderer,
-            xwayland,
-            virtual_input,
-            virtual_input_binds,
-            xwayland_fractional,
-            invalid_xwayland_fractional,
-            autostart,
-            floating,
-            skipped_rules,
-            floating_modifier,
-            invalid_floating_modifier,
-            wallpaper,
+        LayeredLoaded {
+            loaded: Self {
+                config,
+                keybindings,
+                skipped_binds,
+                appearance,
+                scale,
+                outputs,
+                gpu,
+                renderer,
+                xwayland,
+                virtual_input,
+                virtual_input_binds,
+                xwayland_fractional,
+                invalid_xwayland_fractional,
+                autostart,
+                floating,
+                skipped_rules,
+                floating_modifier,
+                invalid_floating_modifier,
+                wallpaper,
+            },
+            shadowed,
+            invalid,
         }
     }
+}
+
+/// A [`LoadedConfig`] built over an optional look layer, plus the look
+/// report: the user keys that override look tokens (`shadowed`), and the
+/// user keys whose bad values fell back to the layer's (`invalid`, each
+/// also in `shadowed`).
+pub struct LayeredLoaded {
+    pub loaded: LoadedConfig,
+    pub shadowed: Vec<String>,
+    pub invalid: Vec<String>,
 }
 
 /// The config file a session started from: the explicit `--config PATH`
@@ -768,6 +839,468 @@ pub fn reload_from(path: &Path, vt: bool) -> Result<LoadedConfig, ReloadError> {
         })
 }
 
+/// Re-reads `path` like [`reload_from`], merged over the active look layer's
+/// fragment (`layer_text`, the raw `scoot.toml` bytes, `None` for no layer).
+/// The merge runs on the pre-derivation values by [`merge_layer`]; a bad
+/// user color for a key the layer provides falls back to the layer's value
+/// and is reported in `invalid` (and `shadowing`).
+///
+/// A layer that fails the strict parse refuses the whole reload like a bad
+/// file: the running config is untouched. Startup instead logs and runs
+/// without the layer (see [`load_with_layer`]).
+pub fn reload_from_with_layer(
+    path: &Path,
+    vt: bool,
+    layer_text: Option<&str>,
+) -> Result<LayeredLoaded, ReloadError> {
+    let fail = |reason: String| ReloadError {
+        path: path.to_owned(),
+        reason,
+    };
+    let layer = match layer_text {
+        Some(text) => Some(parse_layer(text).map_err(fail)?),
+        None => None,
+    };
+    let text = fs::read_to_string(path).map_err(|source| fail(source.to_string()))?;
+    toml::from_str::<FileConfig>(&text)
+        .map(|file| LoadedConfig::from_file_with_layer(file, path, vt, layer.as_ref()))
+        .map_err(fail)
+}
+
+/// Loads like [`load`], merged over the active look layer's fragment
+/// (`layer_text`, `None` for no layer). A layer that fails the strict parse
+/// logs and runs without the layer: startup never fails over a look, and
+/// the user's own file still applies.
+pub fn load_with_layer(
+    explicit: Option<&Path>,
+    layer_text: Option<&str>,
+) -> Result<LayeredStartup, ConfigFileError> {
+    let loaded = load(explicit)?;
+    let Some(text) = layer_text else {
+        return Ok(LayeredStartup {
+            loaded,
+            shadowed: Vec::new(),
+            invalid: Vec::new(),
+            layer_warning: None,
+        });
+    };
+    let layer = match parse_layer(text) {
+        Ok(layer) => layer,
+        Err(reason) => {
+            return Ok(LayeredStartup {
+                loaded,
+                shadowed: Vec::new(),
+                invalid: Vec::new(),
+                layer_warning: Some(format!(
+                    "the look layer is refused ({reason}); starting without it"
+                )),
+            });
+        }
+    };
+    // Re-parse the user's file and merge: `load` above already validated it
+    // parses, so this second parse only fails if the file changed under us,
+    // in which case startup keeps the unlayered load rather than defaults.
+    let path = match startup_path(
+        explicit,
+        std::env::var_os("XDG_CONFIG_HOME"),
+        std::env::var_os("HOME"),
+    ) {
+        Some(path) => path,
+        None => {
+            return Ok(LayeredStartup {
+                loaded,
+                shadowed: Vec::new(),
+                invalid: Vec::new(),
+                layer_warning: None,
+            });
+        }
+    };
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(_) => {
+            return Ok(LayeredStartup {
+                loaded,
+                shadowed: Vec::new(),
+                invalid: Vec::new(),
+                layer_warning: None,
+            });
+        }
+    };
+    match toml::from_str::<FileConfig>(&text) {
+        Ok(file) => {
+            let layered = LoadedConfig::from_file_with_layer(file, &path, false, Some(&layer));
+            Ok(LayeredStartup {
+                loaded: layered.loaded,
+                shadowed: layered.shadowed,
+                invalid: layered.invalid,
+                layer_warning: None,
+            })
+        }
+        Err(_) => Ok(LayeredStartup {
+            loaded,
+            shadowed: Vec::new(),
+            invalid: Vec::new(),
+            layer_warning: None,
+        }),
+    }
+}
+
+/// A [`load_with_layer`] result: the loaded config, the user keys that
+/// override look tokens, the user keys whose bad values fell back to the
+/// layer's, and the warning when the layer was refused.
+pub struct LayeredStartup {
+    pub loaded: LoadedConfig,
+    pub shadowed: Vec<String>,
+    pub invalid: Vec<String>,
+    pub layer_warning: Option<String>,
+}
+
+/// A strictly validated look layer: the fragment's `[appearance]` and
+/// `[wallpaper]` as the file had them, every key allowlisted and every
+/// value of the allowlisted kind (see [`validate_layer`]).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayerFile {
+    appearance: Option<AppearanceConfig>,
+    wallpaper: Option<WallpaperConfig>,
+}
+
+/// Parses a look fragment and strictly validates it: only `appearance` and
+/// `wallpaper` tables (`deny_unknown_fields` refuses a `[binds]`, a
+/// `[layout]` or anything else by name), then every present value against
+/// scoot's allowlist from `scoot-look` -- the same crate the tool renders
+/// the fragment from, so the validator and the loader cannot disagree.
+/// Any refusal names the key; the whole layer goes with it.
+fn parse_layer(text: &str) -> Result<LayerFile, String> {
+    let file: LayerFile = toml::from_str(text).map_err(|error| error.to_string())?;
+    validate_layer(&file)?;
+    Ok(file)
+}
+
+/// Validates a parsed layer against scoot's allowlist: every present key
+/// allowlisted for `scoot`, every present value of the allowlisted kind. A
+/// look may set colors, geometry, fonts, opacity, the wallpaper and the
+/// cursor -- never a command, a bind, an autostart entry, or any restart-
+/// only key, and the bar's geometry stays out the same way. `wallpaper.image`
+/// is the one key whose rendered form differs from its authoring grammar
+/// (an absolute path the tool resolved, not a relative one), so it is
+/// checked as an absolute path here rather than through the relative kind.
+fn validate_layer(layer: &LayerFile) -> Result<(), String> {
+    if let Some(appearance) = &layer.appearance {
+        check_layer_int(
+            "appearance.focus_ring_width",
+            appearance.focus_ring_width,
+        )?;
+        check_layer_int(
+            "appearance.focus_ring_inactive_width",
+            appearance.focus_ring_inactive_width,
+        )?;
+        check_layer_int("appearance.corner_radius", appearance.corner_radius)?;
+        check_layer_int("appearance.cursor_size", appearance.cursor_size)?;
+        if appearance.cursor_hide_after_ms.is_some() {
+            return Err("key `appearance.cursor_hide_after_ms` is not in the scoot look allowlist"
+                .to_owned());
+        }
+        if appearance.prefer_no_csd.is_some() {
+            return Err(
+                "key `appearance.prefer_no_csd` is not in the scoot look allowlist".to_owned(),
+            );
+        }
+    }
+    if let Some(wallpaper) = &layer.wallpaper {
+        validate_layer_wallpaper(wallpaper)?;
+    }
+    Ok(())
+}
+
+/// Checks one optional layer integer against its allowlisted range.
+fn check_layer_int(key: &str, value: Option<i32>) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    match scoot_look::check_app_value("scoot", key, &toml::Value::Integer(i64::from(value))) {
+        Some(error) => Err(error.to_string()),
+        None => Ok(()),
+    }
+}
+
+/// Validates a layer's `[wallpaper]`: no `command` (a look never runs one),
+/// no `problems` the lenient parse collected, only the four look leaves per
+/// table (`color`, `mode`, `fill`, `transition`) plus the top-level `image`,
+/// each of the allowlisted kind, under output and workspace names the
+/// allowlist accepts.
+fn validate_layer_wallpaper(wallpaper: &WallpaperConfig) -> Result<(), String> {
+    if !wallpaper.problems.is_empty() {
+        return Err(format!(
+            "the look layer's [wallpaper] is refused ({})",
+            wallpaper.problems.join("; ")
+        ));
+    }
+    if wallpaper.command.is_some() {
+        return Err(
+            "key `wallpaper.command` is not in the scoot look allowlist".to_owned(),
+        );
+    }
+    validate_layer_wallpaper_table("wallpaper", &wallpaper.top, true)?;
+    if let Some(outputs) = &wallpaper.outputs {
+        for (name, output) in outputs {
+            let prefix = format!("wallpaper.output.{name}");
+            gate_wallpaper_name(&prefix)?;
+            validate_layer_wallpaper_table(&prefix, &output.table, false)?;
+            if let Some(workspaces) = &output.workspaces {
+                for (workspace, table) in workspaces {
+                    let nested = format!("{prefix}.workspace.{workspace}");
+                    gate_wallpaper_name(&nested)?;
+                    validate_layer_wallpaper_table(&nested, table, false)?;
+                }
+            }
+        }
+    }
+    if let Some(workspaces) = &wallpaper.workspaces {
+        for (name, table) in workspaces {
+            let prefix = format!("wallpaper.workspace.{name}");
+            gate_wallpaper_name(&prefix)?;
+            validate_layer_wallpaper_table(&prefix, table, false)?;
+        }
+    }
+    Ok(())
+}
+
+/// Refuses a wallpaper dotted prefix the allowlist does not hold (which is
+/// also what enforces the output/workspace name shape).
+fn gate_wallpaper_name(prefix: &str) -> Result<(), String> {
+    if scoot_look::allows("scoot", &format!("{prefix}.color")) {
+        Ok(())
+    } else {
+        Err(format!(
+            "key `{prefix}` is not in the scoot look allowlist"
+        ))
+    }
+}
+
+/// Validates one wallpaper table's leaves: only `color`, `mode`, `fill` and
+/// `transition` (plus `image` at the top level), each of the allowlisted
+/// kind. `filter`, `sha256`, the transition tunables and any per-output
+/// `image` are render-time or user-file concerns, never look leaves.
+fn validate_layer_wallpaper_table(
+    prefix: &str,
+    table: &WallpaperTable,
+    allow_image: bool,
+) -> Result<(), String> {
+    if let Some(image) = &table.image {
+        if !allow_image {
+            return Err(format!(
+                "key `{prefix}.image` is not in the scoot look allowlist"
+            ));
+        }
+        check_layer_image(&format!("{prefix}.image"), image)?;
+    }
+    check_layer_str(&format!("{prefix}.color"), table.color.as_deref())?;
+    check_layer_str(&format!("{prefix}.mode"), table.mode.as_deref())?;
+    check_layer_str(&format!("{prefix}.fill"), table.fill.as_deref())?;
+    check_layer_str(
+        &format!("{prefix}.transition"),
+        table.transition.as_deref(),
+    )?;
+    for key in [
+        "filter",
+        "sha256",
+        "duration_ms",
+        "easing",
+        "angle",
+        "position",
+    ] {
+        let present = match key {
+            "filter" => table.filter.is_some(),
+            "sha256" => table.sha256.is_some(),
+            "duration_ms" => table.duration_ms.is_some(),
+            "easing" => table.easing.is_some(),
+            "angle" => table.angle.is_some(),
+            _ => table.position.is_some(),
+        };
+        if present {
+            return Err(format!(
+                "key `{prefix}.{key}` is not in the scoot look allowlist"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Checks one optional layer string against its allowlisted kind.
+fn check_layer_str(key: &str, value: Option<&str>) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    match scoot_look::check_app_value("scoot", key, &toml::Value::String(value.to_owned())) {
+        Some(error) => Err(error.to_string()),
+        None => Ok(()),
+    }
+}
+
+/// The rendered form of `wallpaper.image`: an absolute path the tool
+/// resolved, not the relative path the authoring grammar checks.
+fn check_layer_image(key: &str, path: &str) -> Result<(), String> {
+    if path.is_empty() || path.len() > 4096 || path.contains('\0') || path.contains('\n') {
+        return Err(format!("`{key}` must be a plain absolute path"));
+    }
+    if !path.starts_with('/') {
+        return Err(format!("`{key}` must be an absolute path"));
+    }
+    Ok(())
+}
+
+/// Merges a validated look layer under the user's parsed file, on the
+/// pre-derivation values, by the three rules:
+///
+/// 1. Every `[appearance]` key merges per key: the user's value if their
+///    file sets it, else the look's.
+/// 2. `[wallpaper]` merges as the one unit: the user's whole section when
+///    their file has any `[wallpaper]` key, else the look's whole section.
+/// 3. `focus_ring_inactive_width` follows the layer that supplied its base:
+///    the user's when they set it; else dropped from the look when they set
+///    `focus_ring_width`, so the unset value follows the user's width; else
+///    the look's.
+///
+/// Returns the merged file plus the shadowed user keys (dotted;
+/// `wallpaper` as one entry when the user's section wins the unit).
+fn merge_layer(mut user: FileConfig, layer: &LayerFile) -> (FileConfig, Vec<String>) {
+    let mut shadowed = Vec::new();
+    if let Some(layer_appearance) = &layer.appearance {
+        let user_appearance = user.appearance.get_or_insert_with(AppearanceConfig::default);
+        merge_appearance_key(
+            &mut user_appearance.focus_ring_width,
+            layer_appearance.focus_ring_width,
+            "appearance.focus_ring_width",
+            &mut shadowed,
+        );
+        merge_appearance_key(
+            &mut user_appearance.focus_ring_active_color,
+            layer_appearance.focus_ring_active_color.clone(),
+            "appearance.focus_ring_active_color",
+            &mut shadowed,
+        );
+        merge_appearance_key(
+            &mut user_appearance.focus_ring_inactive_color,
+            layer_appearance.focus_ring_inactive_color.clone(),
+            "appearance.focus_ring_inactive_color",
+            &mut shadowed,
+        );
+        merge_appearance_key(
+            &mut user_appearance.background_color,
+            layer_appearance.background_color.clone(),
+            "appearance.background_color",
+            &mut shadowed,
+        );
+        merge_appearance_key(
+            &mut user_appearance.corner_radius,
+            layer_appearance.corner_radius,
+            "appearance.corner_radius",
+            &mut shadowed,
+        );
+        merge_appearance_key(
+            &mut user_appearance.cursor_size,
+            layer_appearance.cursor_size,
+            "appearance.cursor_size",
+            &mut shadowed,
+        );
+        merge_appearance_key(
+            &mut user_appearance.cursor_color,
+            layer_appearance.cursor_color.clone(),
+            "appearance.cursor_color",
+            &mut shadowed,
+        );
+        merge_appearance_key(
+            &mut user_appearance.cursor_theme,
+            layer_appearance.cursor_theme.clone(),
+            "appearance.cursor_theme",
+            &mut shadowed,
+        );
+        // Rule 3: the derived key follows the layer that supplied its base.
+        // The user's own inactive width always wins; else, when the user set
+        // the active width, the look's inactive width is dropped so the
+        // unset value follows the user's; else the look's stands.
+        if user_appearance.focus_ring_inactive_width.is_some() {
+            if layer_appearance.focus_ring_inactive_width.is_some() {
+                shadowed.push("appearance.focus_ring_inactive_width".to_owned());
+            }
+        } else if user_appearance.focus_ring_width.is_some() {
+            user_appearance.focus_ring_inactive_width = None;
+        } else {
+            user_appearance.focus_ring_inactive_width =
+                layer_appearance.focus_ring_inactive_width;
+        }
+    }
+    if let Some(layer_wallpaper) = &layer.wallpaper {
+        if wallpaper_has_keys(user.wallpaper.as_ref()) {
+            if wallpaper_has_keys(Some(layer_wallpaper)) {
+                shadowed.push("wallpaper".to_owned());
+            }
+        } else {
+            user.wallpaper = Some(layer_wallpaper.clone());
+        }
+    }
+    shadowed.sort();
+    shadowed.dedup();
+    (user, shadowed)
+}
+
+/// Merges one `[appearance]` key: the user's value stands (shadowed when
+/// the layer also sets the key), else the look's fills in.
+fn merge_appearance_key<T: Clone>(
+    user: &mut Option<T>,
+    layer: Option<T>,
+    dotted: &str,
+    shadowed: &mut Vec<String>,
+) {
+    if user.is_some() {
+        if layer.is_some() {
+            shadowed.push(dotted.to_owned());
+        }
+    } else {
+        *user = layer;
+    }
+}
+
+/// Whether a `[wallpaper]` section has any key: the unit rule's trigger. An
+/// explicitly empty table (or no section) has none, so the look's passes
+/// through; a bare `command` counts, like any other key the file sets.
+fn wallpaper_has_keys(wallpaper: Option<&WallpaperConfig>) -> bool {
+    let Some(wallpaper) = wallpaper else {
+        return false;
+    };
+    if wallpaper.command.is_some() {
+        return true;
+    }
+    if wallpaper_table_has_keys(&wallpaper.top) {
+        return true;
+    }
+    if wallpaper.outputs.as_ref().is_some_and(|outputs| {
+        outputs
+            .values()
+            .any(|output| wallpaper_table_has_keys(&output.table) || output.workspaces.as_ref().is_some_and(|workspaces| workspaces.values().any(wallpaper_table_has_keys)))
+    }) {
+        return true;
+    }
+    wallpaper.workspaces.as_ref().is_some_and(|workspaces| {
+        workspaces.values().any(wallpaper_table_has_keys)
+    })
+}
+
+/// Whether one wallpaper table names any leaf.
+fn wallpaper_table_has_keys(table: &WallpaperTable) -> bool {
+    table.image.is_some()
+        || table.color.is_some()
+        || table.mode.is_some()
+        || table.fill.is_some()
+        || table.filter.is_some()
+        || table.sha256.is_some()
+        || table.transition.is_some()
+        || table.duration_ms.is_some()
+        || table.easing.is_some()
+        || table.angle.is_some()
+        || table.position.is_some()
+}
 /// A reload that could not load or validate the file. The running config is
 /// untouched; the message is what the `reload` reply (and the log) carries.
 #[derive(Debug)]

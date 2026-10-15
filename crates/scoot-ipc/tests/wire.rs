@@ -15,7 +15,24 @@ fn json_of<T: serde::Serialize>(value: &T) -> Value {
 #[test]
 fn unit_requests_are_just_a_type() {
     assert_eq!(json_of(&Request::Windows), json!({ "type": "windows" }));
-    assert_eq!(json_of(&Request::Reload), json!({ "type": "reload" }));
+    assert_eq!(
+        json_of(&Request::Reload {
+            wait_wallpaper: false,
+        }),
+        json!({ "type": "reload" })
+    );
+    assert_eq!(
+        json_of(&Request::Reload {
+            wait_wallpaper: true,
+        }),
+        json!({ "type": "reload", "wait_wallpaper": true })
+    );
+    assert_eq!(
+        decode::<Request>(r#"{"type":"reload"}"#).unwrap(),
+        Request::Reload {
+            wait_wallpaper: false,
+        }
+    );
     assert_eq!(json_of(&Request::Keyboard), json!({ "type": "keyboard" }));
     assert_eq!(
         decode::<Request>(&encode(&Request::Keyboard).unwrap()).unwrap(),
@@ -28,8 +45,16 @@ fn unit_requests_are_just_a_type() {
         json!({ "type": "subscribe", "events": ["output"] })
     );
     assert_eq!(
-        decode::<Request>(&encode(&Request::Reload).unwrap()).unwrap(),
-        Request::Reload
+        decode::<Request>(
+            &encode(&Request::Reload {
+                wait_wallpaper: false,
+            })
+            .unwrap()
+        )
+        .unwrap(),
+        Request::Reload {
+            wait_wallpaper: false,
+        }
     );
     assert_eq!(
         decode::<Request>(
@@ -456,6 +481,8 @@ fn a_reload_report_round_trips_with_both_lists() {
     let response = Response::Reloaded {
         applied: vec!["layout.gap".into(), "binds".into()],
         refused: vec!["output.scale".into()],
+        shadowed: Vec::new(),
+        invalid: Vec::new(),
     };
     assert_eq!(
         json_of(&response),
@@ -481,8 +508,8 @@ fn a_reload_report_round_trips_with_both_lists() {
 #[test]
 fn reworded_reload_refusals_are_payload_not_wire_format() {
     assert_eq!(
-        PROTOCOL_VERSION, 10,
-        "no new reply variant or field shipped with the reload completion"
+        PROTOCOL_VERSION, 11,
+        "the look-layer event moved the protocol to 11"
     );
     let response = Response::Reloaded {
         applied: vec!["autostart.commands".into()],
@@ -493,6 +520,8 @@ fn reworded_reload_refusals_are_payload_not_wire_format() {
             "autostart.commands (Quit is not a spawn entry; only new spawn entries run on reload)"
                 .into(),
         ],
+        shadowed: Vec::new(),
+        invalid: Vec::new(),
     };
     assert_eq!(
         decode::<Response>(&encode(&response).unwrap()).unwrap(),
@@ -506,7 +535,12 @@ fn every_request_round_trips_on_one_line() {
         Request::Version,
         Request::Outputs,
         Request::Windows,
-        Request::Reload,
+        Request::Reload {
+            wait_wallpaper: false,
+        },
+        Request::Reload {
+            wait_wallpaper: true,
+        },
         Request::Action(Action::Spawn {
             command: vec!["foot".into()],
         }),
@@ -555,6 +589,9 @@ fn every_request_round_trips_on_one_line() {
         },
         Request::Subscribe {
             events: vec![EventKind::Lock],
+        },
+        Request::Subscribe {
+            events: vec![EventKind::Look],
         },
         Request::Keyboard,
         Request::Locked,
@@ -1208,8 +1245,8 @@ fn an_output_changed_event_round_trips_with_the_new_mode() {
 #[test]
 fn an_output_added_event_round_trips_and_moved_the_protocol() {
     assert_eq!(
-        PROTOCOL_VERSION, 10,
-        "the output-added event moved the protocol 9 → 10"
+        PROTOCOL_VERSION, 11,
+        "the output-added event moved the protocol 9 → 10 (and the look-layer event 10 → 11)"
     );
     let response = Response::OutputAdded(OutputAdded {
         output: 3,
@@ -1347,8 +1384,8 @@ fn a_locked_query_round_trips_with_the_live_state() {
 #[test]
 fn a_binds_query_round_trips_rows_and_skipped() {
     assert_eq!(
-        PROTOCOL_VERSION, 10,
-        "the binds reply moved the protocol 8 → 9 (and the output-added event 9 → 10)"
+        PROTOCOL_VERSION, 11,
+        "the binds reply moved the protocol 8 → 9 (and the output-added event 9 → 10, the look-layer event 10 → 11)"
     );
     let request = Request::Binds;
     assert_eq!(json_of(&request), json!({ "type": "binds" }));
@@ -1471,5 +1508,94 @@ fn a_lock_changed_event_round_trips_for_both_transitions() {
             decode::<Response>(&encode(&response).unwrap()).unwrap(),
             response
         );
+    }
+}
+
+/// The look-layer event on the wire: the rendered look's name (absent when
+/// the layer went away) and its hash from `render.json`. A new tag, so it
+/// moved the protocol 10 → 11: an older subscriber handed one fails its
+/// decode, which is the break the bump announces.
+#[test]
+fn a_look_changed_event_round_trips_and_moved_the_protocol() {
+    assert_eq!(
+        PROTOCOL_VERSION, 11,
+        "the look-layer event moved the protocol 10 → 11"
+    );
+    let request = Request::Subscribe {
+        events: vec![EventKind::Look],
+    };
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "subscribe", "events": ["look"] })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+
+    let response = Response::LookChanged {
+        name: Some("moonrise".into()),
+        source_hash: "9f2c".into(),
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({ "type": "look_changed", "name": "moonrise", "source_hash": "9f2c" })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+
+    let gone = Response::LookChanged {
+        name: None,
+        source_hash: String::new(),
+    };
+    assert_eq!(
+        decode::<Response>(&encode(&gone).unwrap()).unwrap(),
+        gone
+    );
+}
+
+/// The reload reply's look lists: shadowed user keys and invalid user values
+/// that fell back to the layer. Added with defaults, so an older server's
+/// reply (both missing) decodes with both empty -- no bump for the fields.
+#[test]
+fn a_reload_report_round_trips_shadowed_and_invalid() {
+    let response = Response::Reloaded {
+        applied: vec!["appearance.focus_ring_active_color".into()],
+        refused: Vec::new(),
+        shadowed: vec![
+            "appearance.focus_ring_active_color".into(),
+            "wallpaper".into(),
+        ],
+        invalid: vec!["appearance.focus_ring_active_color".into()],
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "reloaded",
+            "applied": ["appearance.focus_ring_active_color"],
+            "refused": [],
+            "shadowed": ["appearance.focus_ring_active_color", "wallpaper"],
+            "invalid": ["appearance.focus_ring_active_color"],
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+    let older: Response =
+        decode(r#"{"type":"reloaded","applied":[],"refused":[]}"#).expect("an older reply decodes");
+    match older {
+        Response::Reloaded {
+            applied,
+            refused,
+            shadowed,
+            invalid,
+        } => {
+            assert!(applied.is_empty() && refused.is_empty());
+            assert!(shadowed.is_empty() && invalid.is_empty());
+        }
+        other => panic!("expected a reload report, got {other:?}"),
     }
 }

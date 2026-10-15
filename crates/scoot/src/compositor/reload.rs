@@ -127,7 +127,9 @@
 //!   `wallpaper.rs`). Reported applied as `wallpaper` when the section's
 //!   values differ from what the session last handed over, and as
 //!   `wallpaper.command` when `command` does (both, when both do) --
-//!   "applied" meaning handed over, never waited on. A section with a
+//!   "applied" meaning handed over, never waited on, unless the reload
+//!   asked to wait (`reload --wait-wallpaper`, which holds the reply until
+//!   the run exits, up to a bound). A section with a
 //!   problem (inside `[wallpaper]`, an unknown key no longer fails the
 //!   whole reload) is refused by name on every reload that finds it, and
 //!   the running one is kept and re-run.
@@ -184,9 +186,48 @@ use scoot_ipc::Response;
 
 use super::State;
 use super::config::{self, LoadedConfig};
+use super::look_layer::{self, Fragment, FragmentAbsent, FragmentLoad};
 use super::output_config::EntriesDiff;
 use super::tty::Tty;
 use super::wallpaper::Reloaded;
+
+/// How long a `reload --wait-wallpaper` waits for the `scootbg apply-config`
+/// run before answering anyway. scootbg bounds itself (5 s to reach a
+/// daemon, 30 s for its reply); past this the reply reports the wallpaper
+/// as handed over but unwaited-on, and the run's exit is still logged when
+/// it comes.
+const WAIT_WALLPAPER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The look layer as a reload sees it: absent, broken (refuse whole), or
+/// present with the fragment bytes to strictly validate.
+enum LookLayerState {
+    Absent,
+    Broken(String),
+    Present(Fragment),
+}
+
+/// Resolves the look state dir from the live environment and loads the
+/// active rendered look's fragment. A dangling link or an unreadable
+/// fragment refuses the reload whole; a missing link is no layer.
+fn look_layer_state() -> LookLayerState {
+    let Some(dir) = look_layer::state_dir(
+        None,
+        std::env::var_os("SCOOT_LOOK_STATE"),
+        std::env::var_os("XDG_STATE_HOME"),
+        std::env::var_os("HOME"),
+    ) else {
+        return LookLayerState::Absent;
+    };
+    match look_layer::load(&dir) {
+        look_layer::LoadOutcome { load, warn } => match load {
+            FragmentLoad::Absent(FragmentAbsent::Missing) => LookLayerState::Absent,
+            FragmentLoad::Absent(FragmentAbsent::Broken) => LookLayerState::Broken(
+                warn.unwrap_or_else(|| "the look layer cannot be read".to_owned()),
+            ),
+            FragmentLoad::Present(fragment) => LookLayerState::Present(fragment),
+        },
+    }
+}
 
 #[cfg(test)]
 mod tests;
@@ -237,7 +278,13 @@ impl State {
     /// Serves `Request::Reload`: re-reads [`State::config_path`] and
     /// re-applies what can be re-applied live. See the module doc for the
     /// field list, the failure semantics, and the while-locked decision.
-    pub fn reload(&mut self) -> Response {
+    ///
+    /// The active look layer (`<state>/look/scoot.toml`) merges under the
+    /// user's file on raw keys before derivation (see `look_layer.rs` and
+    /// `config::merge_layer`). A layer that fails the strict parse refuses
+    /// the whole reload -- everything kept. A reload that sees the layer's
+    /// identity change emits `EventKind::Look`.
+    pub fn reload(&mut self, wait_wallpaper: bool) -> Response {
         let Some(path) = self.config_path.clone() else {
             // Logged as well as answered: over IPC the client sees the
             // error, but a SIGHUP trigger has no reply channel, so without
@@ -251,14 +298,40 @@ impl State {
                  file to reload; keeping the running config",
             );
         };
-        let fresh = match config::reload_from(&path, self.tty.is_some()) {
+        let layer_text = match look_layer_state() {
+            LookLayerState::Absent => None,
+            LookLayerState::Broken(reason) => {
+                tracing::error!(%reason, "config reload failed");
+                return Response::error(format!(
+                    "refused: the look layer is refused ({reason}); keeping the running config"
+                ));
+            }
+            LookLayerState::Present(fragment) => Some(fragment),
+        };
+        let identity = layer_text.as_ref().map(|fragment| fragment.identity.clone());
+        let fresh = match config::reload_from_with_layer(
+            &path,
+            self.tty.is_some(),
+            layer_text.as_ref().map(|fragment| fragment.text.as_str()),
+        ) {
             Ok(fresh) => fresh,
             Err(error) => {
                 tracing::error!(%error, "config reload failed");
                 return Response::error(error.to_string());
             }
         };
-        let report = self.apply_reload(&fresh);
+        let mut report = self.apply_reload(&fresh.loaded);
+        if wait_wallpaper {
+            self.wait_wallpaper(&mut report);
+        }
+        if identity != self.look_identity {
+            self.look_identity = identity.clone();
+            let (name, source_hash) = match &identity {
+                Some(identity) => (identity.name.clone(), identity.source_hash.clone()),
+                None => (None, String::new()),
+            };
+            self.emit_look_changed(name, source_hash);
+        }
         tracing::info!(
             applied = ?report.applied,
             refused = ?report.refused,
@@ -267,6 +340,8 @@ impl State {
         Response::Reloaded {
             applied: report.applied,
             refused: report.refused,
+            shadowed: fresh.shadowed,
+            invalid: fresh.invalid,
         }
     }
 
@@ -300,24 +375,30 @@ impl State {
         self.apply_binds_reload(fresh, &mut report);
         self.apply_wallpaper_reload(fresh, &mut report);
 
-        // Recompute the arrangement and request a render when anything
-        // visible moved. A binds-only reload skips it: no placement changed,
-        // so there is nothing to configure and nothing dirty. A cursor-only
-        // reload redraws without re-arranging: cursor pixels are not
-        // placement, so `apply()` would reconfigure every window for nothing.
+        // Recompute the arrangement and request a render when placement
+        // moved. A binds-only reload skips it: no placement changed, so
+        // there is nothing to configure and nothing dirty. Ring, background
+        // and corner changes request a redraw without `apply()`: every
+        // reader takes those values live from `State::appearance`, so
+        // re-arranging (and reconfiguring every window) buys nothing but
+        // client re-renders. A cursor-only reload redraws without
+        // re-arranging for the same reason: cursor pixels are not placement.
         if report.applied.iter().any(|name| {
             name == field::GAP
                 || name == field::COLUMN_WIDTHS
                 || name == field::DEFAULT_COLUMN_WIDTH
-                || name == field::RING_WIDTH
+        }) || report.relayout
+        {
+            self.apply();
+        } else if report.applied.iter().any(|name| {
+            name == field::RING_WIDTH
                 || name == field::RING_INACTIVE_WIDTH
                 || name == field::RING_ACTIVE
                 || name == field::RING_INACTIVE
                 || name == field::BACKGROUND
                 || name == field::CORNER_RADIUS
-        }) || report.relayout
-        {
-            self.apply();
+        }) {
+            self.request_render();
         }
         // A rebuilt cursor is a cursor change like any other: a redraw where
         // frames draw it, and news for every capture that asked for the
@@ -901,6 +982,30 @@ impl State {
                     &format!("{problem}; kept the running section"),
                 ));
             }
+        }
+    }
+
+    /// Waits for the `scootbg apply-config` run this reload handed over, up
+    /// to [`WAIT_WALLPAPER_TIMEOUT`], then answers. Opt-in per reload
+    /// (`reload --wait-wallpaper`): waiting blocks the loop while scootbg
+    /// works, so the default stays fire-and-forget. Reaps through the same
+    /// path the `SIGCHLD` reaper drives, so a run that exits while waiting
+    /// is logged exactly once and the queue advances the same way.
+    fn wait_wallpaper(&mut self, report: &mut Report) {
+        if self.wallpaper.running_pid().is_none() {
+            return;
+        }
+        let deadline = std::time::Instant::now() + WAIT_WALLPAPER_TIMEOUT;
+        while self.wallpaper.running_pid().is_some() {
+            if std::time::Instant::now() >= deadline {
+                report.refused.push(refused(
+                    field::WALLPAPER,
+                    "timed out waiting for the wallpaper run; handed over, exit unwaited-on",
+                ));
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            self.reap_wallpaper();
         }
     }
 

@@ -533,6 +533,12 @@ pub struct State {
     /// and written only by a config reload (see `reload.rs`), which is what
     /// keeps a second reload diffing against the first one's results.
     pub appearance: Appearance,
+    /// The active look layer's identity (the rendered look's name and hash
+    /// from its `render.json`), or `None` when no look layer is in force. A
+    /// reload that sees this change emits `EventKind::Look`; startup sets
+    /// the initial value without emitting. Written only by the config load
+    /// paths (see `reload.rs` and `compositor::run`).
+    pub look_identity: Option<super::look_layer::LookIdentity>,
     /// Per-window persistent ring buffers -- see `decorations.rs`'s module
     /// doc for why these live here rather than being rebuilt every frame.
     pub decorations: Decorations,
@@ -1367,6 +1373,7 @@ impl State {
             host_loss: None,
             tty: None,
             appearance,
+            look_identity: None,
             decorations: Decorations::default(),
             cursor,
             compositor_state,

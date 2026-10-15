@@ -555,7 +555,7 @@ fn hup_does_not_rerun_old_autostart_entries() {
     let raised = unsafe { libc::raise(libc::SIGHUP) };
     assert_eq!(raised, 0, "raising SIGHUP at the test process failed");
     fixture.settle();
-    match fixture.state.handle_request(Request::Reload) {
+    match fixture.state.handle_request(Request::Reload { wait_wallpaper: false }) {
         Response::Reloaded { applied, refused } => assert!(
             applied.is_empty() && refused.is_empty(),
             "the HUP should have decided nothing new: {applied:?} / {refused:?}"

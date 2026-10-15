@@ -92,6 +92,12 @@ pub enum EventKind {
     /// `ext-session-lock-v1` events go only to the lock client itself.
     /// Read-only: nothing over IPC locks or unlocks the session.
     Lock,
+    /// The active look layer changed: what tells a bar or an agent "repaint
+    /// in the new look" without polling. Fires when a reload sees the
+    /// layer's identity change (the rendered look's hash in its
+    /// `render.json`), once per change. Read-only: nothing over IPC
+    /// selects a look (a swap is a state-dir link move plus a reload).
+    Look,
 }
 
 /// An output was removed: its workspaces were adopted onto a remaining
