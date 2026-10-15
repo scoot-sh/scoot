@@ -48,8 +48,8 @@ Three rules, matching the request/reply contract beside them:
 - **Filtering is by kind, not by field.** The server sends every event of
   the subscribed kinds, and the client filters or debounces further
   itself. The removal/add pair below (plus a restore when
-  the monitor held windows) fires on every monitor standby too —
-  that is the difference
+  the monitor held windows) fires on every monitor standby too;
+  that is accepted, and it is the difference
   from a notification pushed at the user unconditionally, which is why
   scoot still draws and sends nothing itself. `output_changed` fires
   only on an applied resize, never on standby, and a refused resize fires nothing.

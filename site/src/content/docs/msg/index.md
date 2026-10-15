@@ -11,7 +11,7 @@ for agents: `scoot msg --help` (topics `requests`, `actions`,
 
 # Driving scoot over IPC
 
-Every keybinding action is also a request on a Unix socket. This page is the reference for scripts and
+Every keybinding action, and typing and clicking, is also a request on a Unix socket. This page is the reference for scripts and
 for agents doing computer-use tasks.
 
 `scoot msg` is part of the compositor binary itself — there is
@@ -46,8 +46,8 @@ where focus returns once that surface goes away. While a launcher is up,
 `type` and `key` go to the launcher, while `windows` still names the window
 behind it. No IPC request reports a layer surface.
 
-The focus-family actions take the keyboard back. Each reclaims a click
-that gave a *click-focused* (`on_demand`) layer surface the
+The focus-family actions take the keyboard back. Each spends a click
+that had given a *click-focused* (`on_demand`) layer surface the
 keyboard, so afterwards keystrokes go to the window `windows` reports as
 focused:
 
