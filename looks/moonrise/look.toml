@@ -1,0 +1,57 @@
+# Moonrise: slate navy, amber ring, night-sky illustration. Tokens lifted from
+# nix/modules/desktop.nix (palette, fonts, nightTemp, wallpaper) and
+# docs/examples/moonrise/ (terminal hues, ring widths, bar style) per
+# docs/backlog/core/look-shipped.md. The image stays under the Unsplash
+# License (see NOTICE); the tokens are MIT.
+schema = 1
+name = "moonrise"
+title = "Moonrise"
+description = "Slate navy, amber ring, night-sky illustration."
+polarity = "dark"
+license = "MIT AND LicenseRef-Unsplash"
+
+[palette]
+background = "#2B3648"
+foreground = "#F6EEDC"
+dim = "#9C8B95"
+accent = "#FFA45C"
+urgent = "#E87F6A"
+hover = "#FFD54A"
+focus = "#FF9A49"
+border = "#5E4B5B"
+
+[terminal]
+colors = ["#1a2230", "#c96a63", "#8fa382", "#e8a34c", "#7c8fb0", "#9a7b94", "#7e9bb0", "#c9bfae", "#5e6b7f", "#e87f6a", "#a9bd9b", "#ffd54a", "#93a8c8", "#b595ad", "#a8c4d8", "#f6eedc"]
+
+[fonts]
+ui = "DroidSansM Nerd Font Propo"
+sans = "DejaVu Sans"
+mono = "FiraCode Nerd Font"
+size = 10 # renders the example bar font-size 13
+
+[opacity]
+# 1.0 until look-layer-scoot's pixman benchmark passes; the example uses 0.82.
+bar = 1.0
+
+[shape]
+# 0 until look-layer-scoot's pixman benchmark passes; the example uses 14.
+radius = 0
+ring-width = 2
+ring-inactive-width = 2
+
+[cursor]
+theme = "Mocu"
+size = 24
+
+[wallpaper]
+image = "wallpaper.png"
+mode = "fill"
+
+[night]
+temperature = 3400
+
+[apps.scootbar]
+"bar.padding" = 10
+"bar.separator" = 1
+"bar.spacing" = 8
+"workspaces.inactive-color" = "#B595AD"

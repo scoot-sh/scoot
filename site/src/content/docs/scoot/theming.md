@@ -22,11 +22,13 @@ nothing.
 
 | Look | Ring / background | Wallpaper | |
 |---|---|---|---|
-| `ginger-night` | ginger `#FF9A30` on near-black `#0E0E0E` | ships (`fit` on the look's black, so the cat is never cropped) | ![ginger-night](../../../assets/ginger-night-preview.png) |
-| `music-desk` | blue `#3D579A` on paper `#FCFBFB` | ships | ![music-desk](../../../assets/music-desk-preview.png) |
-| `radial-burst` | blue `#31a9e5` on plum `#241721` | ships | ![radial-burst](../../../assets/radial-burst-preview.png) |
-| `moonrise` | amber `#FF9A49` on slate navy `#2B3648` | ships | ![moonrise](../../../assets/moonrise-preview.png) |
-| `vinyl-sunset` | orange `#E59560` on espresso `#271A1F` | flat color (the illustration is yours to download) | ![vinyl-sunset](../../../assets/vinyl-sunset-preview.png) |
+| [`ginger-night`](https://github.com/scoot-sh/scoot/tree/main/looks/ginger-night) | ginger `#FF9A30` on near-black `#0E0E0E` | ships (`fit` on the look's black, so the cat is never cropped) | ![ginger-night](../../../assets/ginger-night-preview.png) |
+| [`music-desk`](https://github.com/scoot-sh/scoot/tree/main/looks/music-desk) | blue `#3D579A` on paper `#FCFBFB` | ships | ![music-desk](../../../assets/music-desk-preview.png) |
+| [`radial-burst`](https://github.com/scoot-sh/scoot/tree/main/looks/radial-burst) | blue `#31a9e5` on plum `#241721` | ships | ![radial-burst](../../../assets/radial-burst-preview.png) |
+| [`moonrise`](https://github.com/scoot-sh/scoot/tree/main/looks/moonrise) | amber `#FF9A49` on slate navy `#2B3648` | ships | ![moonrise](../../../assets/moonrise-preview.png) |
+| [`vinyl-sunset`](https://github.com/scoot-sh/scoot/tree/main/looks/vinyl-sunset) | orange `#E59560` on espresso `#271A1F` | flat color (the illustration is yours to download) | ![vinyl-sunset](../../../assets/vinyl-sunset-preview.png) |
+
+Each look's tokens live in `looks/<name>/look.toml`, in the [look format](../reference/look-format.md): the same manifest on a Nix install and a plain binary install, with no Nix-only step anywhere in it. A check validates and renders every look there and fails on a missing role. The examples below keep their own copies of those values until the look layer lands, so they still apply as before.
 
 (Previews: real screenshots of each example, captured from live
 sessions. The vinyl-sunset wallpaper illustration stays under its

@@ -304,6 +304,18 @@ jobs:
                 # catch-all, which also sets look=true.
                 crates/scoot-look/*)
                   look=true ;;
+                # The shipped looks (looks/): the scoot-look test over the
+                # directory validates and renders every look there, which
+                # is the gate behind the theming page's "a check renders
+                # every look into every target and fails on a missing
+                # role". nix/looks-shipped-check.nix also reads these
+                # files and compares them to the Nix look registry; the
+                # Linux job's `nix flake check` evaluates it, so a looks/
+                # change runs that job too (scoot=true) as well as the
+                # look job.
+                looks/*)
+                  scoot=true
+                  look=true ;;
                 # scootbar's benchmark harness; its unit tests run in the
                 # scootbar job. It imports scootbg's runner, whose own
                 # changes fall to the catch-all below and run everything.

@@ -11566,6 +11566,12 @@ let
     )
   ];
 
+  # The shipped looks agree with the registry (`looks-shipped-check.nix`):
+  # each `looks/<name>/look.toml` against `nix/modules/desktop.nix`, and
+  # the style tokens against the example files. Pure evaluation, so it
+  # runs on every platform, not only where the desktop profile can run.
+  _lookShippedPins = import ./looks-shipped-check.nix { inherit lib; };
+
   _darwinAudioPins = lib.optionals (!isLinux) [
     # Home-manager: every tool null, nothing installed for the slot...
     (
@@ -14290,6 +14296,7 @@ assert lib.all (x: x) _nightlightPins;
 assert lib.all (x: x) _inputMethodPins;
 assert lib.all (x: x) _authPins;
 assert lib.all (x: x) _themePins;
+assert lib.all (x: x) _lookShippedPins;
 assert lib.all (x: x) _keysPins;
 assert lib.all (x: x) _powerPins;
 assert lib.all (x: x) _displaysPins;
