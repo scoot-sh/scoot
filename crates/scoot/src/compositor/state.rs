@@ -53,7 +53,7 @@ use crate::cli::RendererKind;
 
 use super::bind_budget::BindBudget;
 use super::bind_repeat::BindRepeat;
-use super::cursor::Cursor;
+use super::cursor::{Cursor, CursorSink};
 use super::decorations::{Appearance, Decorations};
 use super::ext_workspace::ExtWorkspaceState;
 use super::foreign_toplevel::ForeignToplevels;
@@ -1186,6 +1186,19 @@ pub struct State {
     /// When a client last committed, which is what `wait-idle` waits on.
     pub last_commit: Instant,
     pub pending_idle: Vec<PendingIdle>,
+    /// The cursor rebuild worker's completion channel. Created once,
+    /// alongside its event source, on the first cursor-changing reload --
+    /// a session that never changes its cursor pays for no thread and no
+    /// event source. Each rebuild spawns one short-lived thread answering
+    /// through this same source, so an abandoned source can never
+    /// accumulate. `None` until the first cursor rebuild, like the
+    /// screenshot worker above.
+    pub(crate) cursor_sink: Option<CursorSink>,
+    /// Which cursor rebuild is newest: incremented on every cursor-changing
+    /// reload, carried by the worker's answer, and checked on install, so
+    /// two quick swaps cannot land out of order (the older answer is
+    /// dropped, the cursor keeps the newest).
+    pub(crate) cursor_generation: u64,
     /// The screenshot encode worker, if one has been needed yet. `None`
     /// until the first capture spawns it lazily (see `screenshot.rs`):
     /// a session that never screenshots pays for no thread and no event
@@ -1490,6 +1503,8 @@ impl State {
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),
+            cursor_sink: None,
+            cursor_generation: 0,
             screenshot_encoder: None,
             screenshot_sink: None,
             pending_shots: Vec::new(),

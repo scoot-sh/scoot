@@ -518,6 +518,12 @@ impl State {
         // resolved name -- so the session keeps the startup value rather
         // than re-reading the outer environment. Self-consistent and
         // idempotent; only a restart picks up an externally changed variable.
+        //
+        // The bitmap build runs on a worker, not here: it exceeds a frame
+        // at common cursor sizes (measured 23 ms at 24 px in a release
+        // build), so building it on the loop would drop frames on every
+        // cursor-changing swap. What is stored below is exactly what the
+        // worker builds from; the swap lands when its answer arrives.
         let cursor_size = appearance.cursor_size != live.cursor_size;
         let cursor_color = appearance.cursor_color != live.cursor_color;
         let cursor_theme = appearance.cursor_theme != live.cursor_theme;
@@ -527,22 +533,7 @@ impl State {
             self.appearance
                 .cursor_theme
                 .clone_from(&appearance.cursor_theme);
-            self.cursor.rebuild(
-                appearance.cursor_size,
-                appearance.cursor_color,
-                appearance.cursor_theme.as_deref(),
-            );
-            // The overlay-plane twins are keyed by the old images' ids: drop
-            // them now rather than leaving stale dma-bufs cached per output
-            // until the bound turns over (see `render::cursor_plane`).
-            #[cfg(feature = "gpu-scanout")]
-            if let Some(tty) = self.tty.as_mut() {
-                tty.clear_cursor_overlays();
-            }
-            // The paints changed for every scale, and the output set may
-            // have scales no entry serves yet: build for the live set now
-            // (cold), never on the frame path.
-            super::headless::sync_cursor_scales(self);
+            self.spawn_cursor_rebuild();
             if cursor_size {
                 report.applied.push(field::CURSOR_SIZE.to_owned());
             }
@@ -1025,6 +1016,112 @@ impl State {
         }
     }
 
+    /// Builds the new cursor bitmaps on a worker and swaps them in when its
+    /// answer arrives, rather than rebuilding on the loop: the build exceeds
+    /// a frame at common cursor sizes (23 ms at 24 px in a release build),
+    /// so building it here would drop frames on every cursor-changing swap.
+    /// What the worker builds from is exactly what this reload stored above,
+    /// so a second reload diffs against the new values (not the still-old
+    /// pixels) and agrees silently.
+    ///
+    /// If the worker cannot spawn (a thread per rebuild is one short-lived
+    /// thread per rare swap; only resource exhaustion refuses it), the
+    /// rebuild runs synchronously instead: a slow reload beats a stale
+    /// cursor, and the reply already reports the fields applied.
+    fn spawn_cursor_rebuild(&mut self) {
+        if self.ensure_cursor_sink().is_err() {
+            tracing::warn!("no cursor completion channel; rebuilding on the loop thread");
+            self.cursor.rebuild(
+                self.appearance.cursor_size,
+                self.appearance.cursor_color,
+                self.appearance.cursor_theme.as_deref(),
+            );
+            super::headless::sync_cursor_scales(self);
+            return;
+        }
+        self.cursor_generation = self.cursor_generation.wrapping_add(1);
+        let generation = self.cursor_generation;
+        let input = super::cursor::RebuildInput {
+            size: self.appearance.cursor_size,
+            color: self.appearance.cursor_color,
+            theme_name: self.appearance.cursor_theme.clone(),
+            icon: self.cursor.status_icon(),
+            scales: self.cursor.scale_list(),
+        };
+        let done = self
+            .cursor_sink
+            .as_ref()
+            .expect("the sink was just ensured")
+            .done
+            .clone();
+        let worker = std::thread::Builder::new()
+            .name("scoot-cursor".to_string())
+            .spawn(move || {
+                let rebuilt = super::cursor::Cursor::rebuild_async(input);
+                let _ = done.send(super::cursor::CursorBuilt {
+                    generation,
+                    rebuilt,
+                });
+            });
+        if worker.is_err() {
+            tracing::warn!("the cursor worker would not spawn; rebuilding on the loop thread");
+            self.cursor.rebuild(
+                self.appearance.cursor_size,
+                self.appearance.cursor_color,
+                self.appearance.cursor_theme.as_deref(),
+            );
+            super::headless::sync_cursor_scales(self);
+        }
+    }
+
+    /// Creates the cursor worker's completion channel and its event source,
+    /// once per session: every rebuild answers through the same registered
+    /// source, so an abandoned source can never accumulate (the screenshot
+    /// worker's arrangement).
+    fn ensure_cursor_sink(&mut self) -> Result<(), ()> {
+        use smithay::reexports::calloop::channel::{self, Event as ChannelEvent};
+
+        if self.cursor_sink.is_some() {
+            return Ok(());
+        }
+        let (done_tx, done_rx) = channel::channel::<super::cursor::CursorBuilt>();
+        self.loop_handle
+            .insert_source(done_rx, |event, _, state: &mut State| {
+                if let ChannelEvent::Msg(built) = event {
+                    state.install_cursor(built);
+                }
+                // `Closed` means the sending end is gone, which only happens
+                // with this `State` -- and then this source is gone too, so
+                // there is nothing to clean up here.
+            })
+            .map_err(|_| ())?;
+        self.cursor_sink = Some(super::cursor::CursorSink { done: done_tx });
+        Ok(())
+    }
+
+    /// Installs a worker-built cursor bitmap set, when it is still the
+    /// newest: two quick swaps cannot land out of order (the older answer is
+    /// dropped, the cursor keeps the newest). Then what the synchronous
+    /// rebuild did: drop the overlay twins keyed by the old images' ids,
+    /// sync the live output scales, and re-serve pointer captures.
+    fn install_cursor(&mut self, built: super::cursor::CursorBuilt) {
+        if built.generation != self.cursor_generation {
+            return;
+        }
+        self.cursor.install_rebuilt(built.rebuilt);
+        // The overlay-plane twins are keyed by the old images' ids: drop
+        // them now rather than leaving stale dma-bufs cached per output
+        // until the bound turns over (see `render::cursor_plane`).
+        #[cfg(feature = "gpu-scanout")]
+        if let Some(tty) = self.tty.as_mut() {
+            tty.clear_cursor_overlays();
+        }
+        // The paints changed for every scale, and the output set may have
+        // scales no entry serves yet: build for the live set now (cold),
+        // never on the frame path.
+        super::headless::sync_cursor_scales(self);
+        self.cursor_changed();
+    }
     /// `[binds]`: rebuilt from defaults plus the file (see
     /// [`keybindings_for`](super::config::keybindings_for)), swapped in
     /// whole. A key held across the swap neither wedges nor drops -- see
