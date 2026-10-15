@@ -673,6 +673,56 @@ fn a_reload_closes_it_and_the_new_delay_applies() {
 }
 
 #[test]
+fn a_style_only_reload_keeps_it_and_repaints_it() {
+    let Some(mut rig) = Rig::start("tip-style") else {
+        return;
+    };
+    rig.set(TIP);
+    rig.move_to(rig.tip);
+    rig.wait_tip(rig.tip.0, true, "shown");
+    // Colors only: the tooltip stays open and repaints at the new style.
+    const NEW: &str = "#ff0000";
+    fs::write(&rig.file, config(TABLES, "").replace(BAR, NEW)).unwrap();
+    assert!(rig.msg(&["reload"]).status.success());
+    let x = rig.tip.0;
+    rig.session
+        .wait_for(&mut rig.bar.0, "the tooltip repainted", |session| {
+            (session.scoot_screenshot(1).at(x, HEIGHT + 2) == rgb(NEW)).then_some(())
+        });
+    rig.alive();
+    rig.clean();
+}
+
+#[test]
+fn a_delay_change_then_leaving_leaves_no_tooltip_behind() {
+    let Some(mut rig) = Rig::start("tip-delay-leave") else {
+        return;
+    };
+    rig.set(TIP);
+    rig.move_to(rig.tip);
+    rig.wait_tip(rig.tip.0, true, "shown");
+    // Only the delay changes (300 to 400): a style-only reload, which
+    // re-arms the hover. Leaving the module must still take the tooltip
+    // with it — an `Idle` hover never emits the `Hide` a kept tip needs.
+    fs::write(
+        &rig.file,
+        config(TABLES, "").replace("tooltip-delay = 300", "tooltip-delay = 400"),
+    )
+    .unwrap();
+    assert!(rig.msg(&["reload"]).status.success());
+    rig.move_to(AWAY);
+    rig.wait_tip(rig.tip.0, false, "hidden after leaving past a delay change");
+    // Four times the new delay: nothing stuck on screen.
+    std::thread::sleep(Duration::from_millis(400) * 4);
+    assert!(!rig.tip_at(rig.tip.0), "a tooltip stuck past the reload");
+    // And the new delay governs from here: resting shows it again.
+    rig.move_to(rig.tip);
+    rig.wait_tip(rig.tip.0, true, "shown again under the new delay");
+    rig.alive();
+    rig.clean();
+}
+
+#[test]
 fn hiding_the_bar_or_a_bad_reload_takes_it_down_without_harm() {
     let Some(mut rig) = Rig::start("tip-hide") else {
         return;

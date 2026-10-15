@@ -32,7 +32,10 @@
 //!    (which is what makes a second click on the module a toggle, and a
 //!    click on another one a dismissal), the module having nothing to show
 //!    or leaving the bar, the output going away or the bar being hidden or
-//!    made again, a scale change, a reload. [`Popups::close`] is
+//!    made again, a scale change, a full reload. A style-only reload
+//!    instead restyles it in place where the new style fits its surface,
+//!    remakes it where it does not, and only closes it where even that
+//!    fails ([`State::restyle_popups`]). [`Popups::close`] is
 //!    idempotent and destroys the popup before the surface it hangs off,
 //!    so every site that destroys a bar surface calls it first.
 //!
@@ -90,7 +93,7 @@ use crate::bar::Edge;
 use crate::density::Scale;
 use crate::modules::OutputView;
 use crate::outputs::{OutputId, Size};
-use crate::popup::{self, Activate, Content, Interaction, Layout, Round, Wheel};
+use crate::popup::{self, Activate, Content, Interaction, Key, Layout, Round, Wheel};
 use crate::print::warn;
 use crate::render;
 
@@ -228,8 +231,12 @@ impl Popups {
     }
 
     /// A reload: whatever was hovered is for modules that are gone, and the
-    /// delay may be new.
+    /// delay may be new. The shown tooltip goes with the hover state:
+    /// `reset` forgets `Shown`, and an `Idle` hover never emits the `Hide`
+    /// a kept tip would need when the pointer then leaves — so the tip
+    /// would sit on screen past a delay-changing reload that kept it.
     pub fn reset_hover(&mut self, delay: std::time::Duration) {
+        self.close_tip();
         self.hover.reset(delay);
     }
 
@@ -312,6 +319,24 @@ fn anchor_span(scale: Scale, span: crate::paint::Span, bar_width: u32) -> (u32, 
 /// so this fires once per size change, never in a loop.
 fn resized(layout: &Layout, dims: (u32, u32)) -> bool {
     (layout.width, layout.height) != dims
+}
+
+/// Whether a restyled popup or tooltip still fits the surface it opened
+/// at: the new layout's device size, back through the logical size the
+/// compositor was asked for, buffers to no more than the buffer has — the
+/// same check `keep_tooltip` uses for a refilled tooltip. A smaller layout
+/// keeps the surface it has (no flicker); only one that no longer fits is
+/// made again. Comparing device sizes directly would remake at every
+/// reload on scales where the buffer rounds up (scale 2 with an odd width,
+/// any fractional scale), reusing the old grab serial each time — which a
+/// compositor may refuse, closing the popup.
+fn fits(scale: Scale, layout: &Layout, dims: (u32, u32)) -> bool {
+    scale
+        .buffer(Size {
+            width: scale.logical_ceil(layout.width),
+            height: scale.logical_ceil(layout.height),
+        })
+        .is_some_and(|(width, height)| width <= dims.0 && height <= dims.1)
 }
 
 /// A protocol `int` for a size or a coordinate: saturated.
@@ -551,6 +576,208 @@ impl State {
             sent_destination: None,
             sent_scale: 1,
         })
+    }
+
+    /// A style-only reload's popup half ([`State::restyle`], after the
+    /// outputs are placed again and the new font and style are swapped
+    /// in): an open popup or tooltip is brought onto the new style, never
+    /// left painting old glyphs at old metrics. A tooltip with tooltips
+    /// now off closes, as a full reload closes everything. What stays open
+    /// is remeasured at the new em, laid out again and marked dirty, so
+    /// its next draw paints the new style throughout. Where the new layout
+    /// no longer fits the surface it opened at (an `xdg_popup` cannot
+    /// change size after configure) or the frame changed shape (square
+    /// wants no alpha buffer or regions, rounded wants both), it is made
+    /// again at once where it belongs — the tooltip with no new delay,
+    /// the popup with the grab serial the open earned — and only closed
+    /// where even that fails. The modules are the same ones in the same
+    /// order, so their indices still name the same modules, and the grab,
+    /// the keyboard and the pointer focus stay where they were.
+    pub fn restyle_popups(&mut self, qh: &QueueHandle<State>) {
+        // Tooltips now off close: a shown tooltip with no delay to govern
+        // it is a mixed state. (`reset_hover` already ran with the new
+        // delay, so this reads new.)
+        if !self.popup.tooltips_on() {
+            self.popup.close_tip();
+        }
+        if self.popup.open.is_some() {
+            self.restyle_open(qh);
+        }
+        if self.popup.tip.is_some() {
+            self.restyle_tip(qh);
+        }
+    }
+
+    /// Brings the open click popup onto the new style: remeasured at the
+    /// new em and laid out again from its content, then repainted once.
+    /// Remade where the new layout does not fit the surface it opened at
+    /// or the frame changed shape (see [`Self::restyle_popups`]).
+    fn restyle_open(&mut self, qh: &QueueHandle<State>) {
+        let Some(mut open) = self.popup.open.take() else {
+            return;
+        };
+        let style = self.content.style;
+        let font_size = match self.outputs.get_mut(open.output) {
+            Some(entry) if entry.objects.layer.is_some() => entry.objects.font_size,
+            _ => {
+                open.destroy();
+                return;
+            }
+        };
+        // The output's scale is not a reload's business: outputs do not
+        // re-scale, so the open keeps the scale it drew at.
+        let em = render::em(font_size, open.scale);
+        let pad = render::device(style.padding, open.scale);
+        let frame = render::device(1, open.scale).max(1);
+        let Some(text) = self.content.text.as_mut() else {
+            open.destroy();
+            return;
+        };
+        open.layout.compute(&open.content, text, em, pad, frame);
+        let round = Round::new(
+            render::device(style.popup_radius, open.scale),
+            frame,
+            open.dims.0,
+            open.dims.1,
+        );
+        if !fits(open.scale, &open.layout, open.dims) || round.rounded() != open.round.rounded() {
+            let (output, module, serial) = (open.output, open.module, open.serial);
+            open.destroy();
+            let member = self
+                .outputs
+                .iter()
+                .find(|entry| entry.output.id() == output)
+                .and_then(|entry| Popups::member_of(&entry.objects.scene, module));
+            if let Some(member) = member
+                && let Ok(fresh) = self.build_popup(qh, output, member, Flavor::Popup { serial })
+            {
+                self.popup.open = Some(fresh);
+            }
+            return;
+        }
+        open.em = em;
+        // The popup keeps the size it opened at.
+        open.layout.width = open.dims.0;
+        open.layout.height = open.dims.1;
+        open.round = round;
+        open.interaction.retain(&open.content, &open.layout);
+        open.dirty = true;
+        if open.round.rounded() {
+            // The new radius, on the same surface: the regions are
+            // re-sent, as at the open.
+            let radius = crate::region::effective_radius(
+                style.popup_radius,
+                open.requested.width,
+                open.requested.height,
+            );
+            super::canvas::set_opaque_region(
+                &self.globals,
+                qh,
+                &open.surface,
+                (open.requested, Some(radius.saturating_add(1))),
+            );
+            super::canvas::set_input_region(
+                &self.globals,
+                qh,
+                &open.surface,
+                (open.requested, radius),
+            );
+        }
+        self.popup.open = Some(open);
+    }
+
+    /// Brings the shown tooltip onto the new style: its text re-wrapped at
+    /// the new em and laid out again, then repainted once. Remade where
+    /// the new layout does not fit the surface it opened at or the frame
+    /// changed shape (see [`Self::restyle_popups`]).
+    fn restyle_tip(&mut self, qh: &QueueHandle<State>) {
+        let Some(mut tip) = self.popup.tip.take() else {
+            return;
+        };
+        let style = self.content.style;
+        let found = match self.outputs.get_mut(tip.output) {
+            Some(entry) => {
+                let member = Popups::member_of(&entry.objects.scene, tip.module);
+                let line = member
+                    .and_then(|member| entry.objects.scene.view(member))
+                    .map_or("", |view| view.tooltip())
+                    .to_owned();
+                let bar_width = entry
+                    .output
+                    .surface_size(&entry.objects.bar)
+                    .map_or(0, |size| size.width);
+                member.map(|member| (member, line, entry.objects.font_size, bar_width))
+            }
+            None => None,
+        };
+        let (member, line, font_size, bar_width) = match found {
+            Some(found) => found,
+            None => {
+                tip.destroy();
+                return;
+            }
+        };
+        if line.is_empty() {
+            tip.destroy();
+            return;
+        }
+        let em = render::em(font_size, tip.scale);
+        let pad = render::device(style.padding, tip.scale);
+        let frame = render::device(1, tip.scale).max(1);
+        let room = render::device(bar_width, tip.scale)
+            .saturating_sub(pad.saturating_add(frame).saturating_mul(2));
+        let wide = ((em * popup::TIP_MAX_EM) as u32).min(room).max(1);
+        let Some(text) = self.content.text.as_mut() else {
+            tip.destroy();
+            return;
+        };
+        let mut content = Content::default();
+        content.wrap_tooltip(&line, wide, |line| text.measure(None, line, em));
+        if content.is_empty() {
+            tip.destroy();
+            return;
+        }
+        let mut layout = Layout::default();
+        layout.compute_tooltip(&content, text, em, pad, frame);
+        let round = Round::new(
+            render::device(style.popup_radius, tip.scale),
+            frame,
+            tip.dims.0,
+            tip.dims.1,
+        );
+        if !fits(tip.scale, &layout, tip.dims) || round.rounded() != tip.round.rounded() {
+            let (output, module) = (tip.output, tip.module);
+            tip.destroy();
+            let key = Key { output, module };
+            if !self.open_tooltip(qh, key, member) {
+                self.popup.hover.dismiss(None);
+            }
+            return;
+        }
+        tip.content = content;
+        tip.em = em;
+        // The tooltip keeps the size it opened at.
+        layout.width = tip.dims.0;
+        layout.height = tip.dims.1;
+        tip.layout = layout;
+        tip.round = round;
+        tip.dirty = true;
+        if tip.round.rounded() {
+            let radius = crate::region::effective_radius(
+                style.popup_radius,
+                tip.requested.width,
+                tip.requested.height,
+            );
+            super::canvas::set_opaque_region(
+                &self.globals,
+                qh,
+                &tip.surface,
+                (tip.requested, Some(radius.saturating_add(1))),
+            );
+            // A tooltip keeps its empty input region: it never takes a
+            // click, at any radius.
+        }
+        self.popup.tip = Some(tip);
     }
 
     /// Carries out what a popup interaction asks of its module, through the

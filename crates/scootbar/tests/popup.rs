@@ -511,9 +511,119 @@ fn the_popup_goes_with_its_module_the_bar_hiding_and_a_reload() {
     rig.click(MODULE);
     rig.wait_popup(true, "a popup on the bar made again");
 
-    // A reload with the popup open.
+    // A reload with the popup open: an unchanged file is style-only, so
+    // the popup stays open and the bar lives.
     assert!(rig.msg(&["reload"]).status.success());
-    rig.wait_popup(false, "the popup closed by a reload");
+    rig.wait_popup(true, "the popup kept across a style-only reload");
+    rig.alive();
+    // A structural change is still a full reload, and closes the popup.
+    fs::write(
+        &rig.file,
+        config(BINDING).replace(
+            &format!("height = {HEIGHT}"),
+            &format!("height = {}", HEIGHT + 1),
+        ),
+    )
+    .unwrap();
+    assert!(rig.msg(&["reload"]).status.success());
+    rig.wait_popup(false, "the popup closed by a full reload");
+    rig.alive();
+    rig.clean();
+}
+
+#[test]
+fn a_style_only_reload_keeps_the_popup_open_and_repaints_it() {
+    let Some(mut rig) = Rig::start("popup-style") else {
+        return;
+    };
+    rig.click(MODULE);
+    rig.wait_popup(true, "the popup shown");
+    // Colors only: the popup stays open and repaints at the new style,
+    // with new glyphs at fresh metrics rather than the old ones.
+    const NEW: &str = "#ff0000";
+    fs::write(&rig.file, config(BINDING).replace(BAR, NEW)).unwrap();
+    assert!(rig.msg(&["reload"]).status.success());
+    rig.session
+        .wait_for(&mut rig.bar.0, "the popup repainted", |session| {
+            (session.scoot_screenshot(1).at(MODULE.0, HEIGHT + 2) == rgb(NEW)).then_some(())
+        });
+    rig.alive();
+    rig.clean();
+}
+
+/// The `xdg_surface.get_popup` requests in a protocol trace (the layer
+/// surface's `get_popup`, which adopts each one, is not another popup).
+fn popups_in(trace: &str) -> usize {
+    trace
+        .lines()
+        .filter(|line| line.contains("xdg_surface@") && line.contains(".get_popup("))
+        .count()
+}
+
+#[test]
+fn a_font_size_change_remakes_the_open_popup_and_repaints_it() {
+    let Some(mut rig) = Rig::start_with("popup-fontsize", BINDING, &[("WAYLAND_DEBUG", "1")])
+    else {
+        return;
+    };
+    rig.click(MODULE);
+    rig.wait_popup(true, "the popup shown");
+    assert_eq!(popups_in(&rig.session.bar_stderr()), 1);
+    // A bigger font is style-only, but the popup no longer fits the surface
+    // it opened at: made again at once (a second `get_popup`), still open
+    // and painting the new style.
+    const NEW: &str = "#ff0000";
+    fs::write(
+        &rig.file,
+        config(BINDING)
+            .replace(BAR, NEW)
+            .replace("font-size = 20", "font-size = 28"),
+    )
+    .unwrap();
+    assert!(rig.msg(&["reload"]).status.success());
+    rig.session
+        .wait_for(&mut rig.bar.0, "the popup remade", |session| {
+            (popups_in(&session.bar_stderr()) == 2).then_some(())
+        });
+    // Still open and painting the new style (the old surface is gone, so
+    // the old color is never asserted past the reload).
+    rig.session
+        .wait_for(&mut rig.bar.0, "the popup repainted", |session| {
+            (session.scoot_screenshot(1).at(MODULE.0, HEIGHT + 2) == rgb(NEW)).then_some(())
+        });
+    rig.alive();
+    rig.clean();
+}
+
+#[test]
+fn a_refused_style_reload_leaves_the_open_popup_and_the_style_alone() {
+    let Some(mut rig) = Rig::start("popup-refused-style") else {
+        return;
+    };
+    rig.click(MODULE);
+    rig.wait_popup(true, "the popup shown");
+    // Style-only (a new background) but unusable (a fallback font that is
+    // no font): refused with the popup still open and nothing repainted.
+    const NEW: &str = "#ff0000";
+    fs::write(
+        &rig.file,
+        config(BINDING).replace(BAR, NEW).replace(
+            "tooltip-delay = 0",
+            "tooltip-delay = 0\nfallback-fonts = [\"/nonexistent/scootbar-test-font.ttf\"]",
+        ),
+    )
+    .unwrap();
+    let out = rig.msg(&["reload"]);
+    assert!(
+        !out.status.success(),
+        "a missing fallback refuses the reload"
+    );
+    assert!(rig.popup_shown(), "the popup closed on a refused reload");
+    assert_eq!(
+        rig.shot().at(5, 5),
+        rgb(BAR),
+        "repainted on a refused reload"
+    );
     rig.alive();
     rig.clean();
 }

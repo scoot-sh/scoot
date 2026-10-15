@@ -7,6 +7,13 @@
 //! config file and live-applies it, `version` and `kill` are what they
 //! sound like, and `set` goes to the module (only `push` takes one).
 //!
+//! A reload whose only differences are style (the theme, the `[bar]` style
+//! keys, the font) takes a fast path: every module keeps running with its
+//! state, an open popup or tooltip is restyled to the new style (remade or
+//! closed where it cannot be), and every output only repaints. Anything
+//! else restarts the modules as at start-up — as does a style-only reload
+//! while any module is left out as unavailable, so the retry is not lost.
+//!
 //! A refused `reload` changes nothing: the file is re-read and fully
 //! validated before anything is touched, and the font and the modules are
 //! started before the running ones are swapped out.
@@ -39,6 +46,15 @@ pub struct Responder<'a> {
     file: Option<&'a PathBuf>,
     /// The daemon flags, overlaid onto every reload as at start-up.
     given: &'a Given,
+    /// The config the running bar was started or last reloaded with,
+    /// post-flags: what a `reload` compares against to find the style-only
+    /// fast path. Updated only by a successful reload.
+    last: &'a mut Config,
+    /// Whether the running bar's last module start left any module out as
+    /// unavailable: while set, even a style-only reload takes the full path
+    /// and retries it. Set at start-up and by every full reload, never by
+    /// the fast path (which starts nothing).
+    left_out: &'a mut bool,
     /// The look layer's snapshot: a plain reload refreshes it, a scoped
     /// one merges under it.
     look: &'a mut LookState,
@@ -52,6 +68,7 @@ pub struct Responder<'a> {
 }
 
 impl<'a> Responder<'a> {
+    #[allow(clippy::too_many_arguments)] // The loop's one handler wiring: every reload input in one place.
     pub fn new(
         state: &'a mut State,
         conn: &'a Connection,
@@ -59,6 +76,8 @@ impl<'a> Responder<'a> {
         file: Option<&'a PathBuf>,
         given: &'a Given,
         subscribers: usize,
+        last: &'a mut Config,
+        left_out: &'a mut bool,
         look: &'a mut LookState,
     ) -> Self {
         Self {
@@ -68,6 +87,8 @@ impl<'a> Responder<'a> {
             qh,
             file,
             given,
+            last,
+            left_out,
             look,
             view: View::default(),
             subscribers,
@@ -186,6 +207,50 @@ impl Handler for Responder<'_> {
     }
 }
 
+/// Whether `new` differs from the running `old` in style alone: the theme
+/// (`[colors]`), the `[bar]` style keys (`radius`, `popup-radius`,
+/// `opacity`, `font`, `fallback-fonts`, `font-size`), the layout's gaps
+/// (`padding`, `spacing`, `separator`, the per-module `margins`) and the
+/// tooltip delay. Everything else — the bar geometry, the module lists,
+/// the outputs policy, the module tables and their bindings — takes the
+/// full reload (fresh modules, and surfaces remade where geometry moved).
+///
+/// The check is fail-closed: every known style field of a scratch copy of
+/// `new` is reset to the running value, and the rest must then compare
+/// fully equal. A field added to [`Config`](crate::config::Config) or
+/// [`Layout`](crate::layout::Layout) later takes the full reload until it
+/// is deliberately listed here as style — a new field can never slip
+/// through as style-only, silently dropped while the reload answers ok.
+fn style_only(old: &Config, new: &Config) -> bool {
+    let mut probe = new.clone();
+    probe.theme = old.theme;
+    probe.font.clone_from(&old.font);
+    probe.fallback_fonts.clone_from(&old.fallback_fonts);
+    probe.font_size = old.font_size;
+    probe.radius = old.radius;
+    #[cfg(feature = "popup")]
+    {
+        probe.popup_radius = old.popup_radius;
+        probe.tooltip_delay = old.tooltip_delay;
+    }
+    probe.opacity = old.opacity;
+    probe.layout.padding = old.layout.padding;
+    probe.layout.spacing = old.layout.spacing;
+    probe.layout.separator = old.layout.separator;
+    probe.layout.margins.clone_from(&old.layout.margins);
+    probe == *old
+}
+
+/// Whether `new` takes the style-only fast path against the running `old`:
+/// the differences are style alone ([`style_only`]), and no module was left
+/// out when the running bar last started its modules. A module left out as
+/// unavailable (no battery, no interface) may have become available since,
+/// so that reload takes the full path and retries it; without this an
+/// unchanged file would stay style-only and the module would stay absent.
+fn takes_fast_path(old: &Config, new: &Config, left_out: bool) -> bool {
+    !left_out && style_only(old, new)
+}
+
 impl Responder<'_> {
     /// Re-reads the config file and the look layer, and live-applies
     /// them, with the daemon flags overlaid as at start-up. `Err` is the
@@ -243,11 +308,14 @@ impl Responder<'_> {
         Ok(())
     }
 
-    fn apply(
-        &mut self,
-        #[cfg(any(feature = "workspaces", feature = "window-title"))] mut config: Config,
-        #[cfg(not(any(feature = "workspaces", feature = "window-title")))] config: Config,
-    ) -> Result<(), String> {
+    // `config` is mutated only to set the module links, which exist only
+    // with the `workspaces` or `window-title` feature: a minimal build
+    // (`--no-default-features`, CI's scootbar job) would warn on the `mut`.
+    #[cfg_attr(
+        not(any(feature = "workspaces", feature = "window-title")),
+        allow(unused_mut)
+    )]
+    fn apply(&mut self, mut config: Config) -> Result<(), String> {
         // The workspaces link is plumbing, not configuration: the daemon's
         // Wayland dispatch and the module share this run's one, and the
         // file never sets it (`[workspaces]` is reserved and empty).
@@ -262,17 +330,79 @@ impl Responder<'_> {
         {
             config.modules.window_title.link = self.state.title.clone();
         }
+        if takes_fast_path(&*self.last, &config, *self.left_out) {
+            self.apply_style(&config)?;
+        } else {
+            self.apply_full(&config)?;
+        }
+        *self.last = config;
+        Ok(())
+    }
+
+    /// A style-only reload: the theme, the `[bar]` style keys or the font
+    /// moved and nothing else (see [`style_only`]). No module is started,
+    /// so every one keeps running with its state — its D-Bus connections,
+    /// its child, its shown output — and an open popup or tooltip is
+    /// restyled to the new style where it fits its surface, remade where
+    /// it does not, and closed where neither is possible
+    /// (`State::restyle_popups`), never left showing the old style. Every
+    /// output is placed again (new scenes, emptied buffers) and draws once
+    /// more at the new style; subscribers hear nothing, since no module's
+    /// revision moved. `Err` leaves the running bar exactly as it was:
+    /// the font is loaded before anything is touched, as in
+    /// [`Self::stage`].
+    fn apply_style(&mut self, config: &Config) -> Result<(), String> {
+        let placing = config.outputs.to_start(&config.layout);
+        let text = if placing.placed().next().is_none() {
+            None
+        } else {
+            let text = font::text(config.font.as_deref(), &config.fallback_fonts)
+                .map_err(|error| error.to_string())?;
+            Some(text)
+        };
+        self.state.content.style = config.style();
+        self.state.content.text = text;
+        #[cfg(feature = "popup")]
+        {
+            self.state.content.tooltip_delay =
+                std::time::Duration::from_millis(config.tooltip_delay.into());
+            // A new delay re-arms the hover; an unchanged one leaves it
+            // alone, so a shown tooltip is not remade a delay later for
+            // a reload that changed nothing about it.
+            if self.last.tooltip_delay != config.tooltip_delay {
+                self.state
+                    .popup
+                    .reset_hover(self.state.content.tooltip_delay);
+            }
+        }
+        self.state.restyle(
+            Placement {
+                bar: config.bar,
+                font_size: config.font_size,
+                layout: config.layout.clone(),
+                policy: config.outputs.clone(),
+            },
+            self.conn,
+            self.qh,
+        );
+        Ok(())
+    }
+
+    fn apply_full(&mut self, config: &Config) -> Result<(), String> {
         // Said only once the reload is known good (see below): a refused
         // reload stays silent.
         let mut notes = Vec::new();
-        let content = Self::stage(&config, &mut self.state.content.modules, &mut |id, why| {
+        let content = Self::stage(config, &mut self.state.content.modules, &mut |id, why| {
             notes.push(format!(
                 "the {id} module is unavailable, and left out: {why}"
             ));
         })?;
-        for note in notes {
+        for note in notes.iter() {
             warn(format_args!("scootbar: note: {note}"));
         }
+        // What the next reload retries on: a style-only file still takes
+        // the full path while any module is left out.
+        *self.left_out = !notes.is_empty();
         // The swap drops what the new bar did not keep: a removed `exec`'s
         // group dies with its module here.
         self.state.content = content;
@@ -293,8 +423,8 @@ impl Responder<'_> {
             Placement {
                 bar: config.bar,
                 font_size: config.font_size,
-                layout: config.layout,
-                policy: config.outputs,
+                layout: config.layout.clone(),
+                policy: config.outputs.clone(),
             },
             self.conn,
             self.qh,
@@ -304,7 +434,7 @@ impl Responder<'_> {
         Ok(())
     }
 
-    /// What a reload swaps in. The font comes first: a font that vanished
+    /// What a full reload swaps in. The font comes first: a font that vanished
     /// since validation refuses the reload with the running bar untouched
     /// — nothing is started, nothing is moved out of `old`, nothing is
     /// killed. Only then are the modules started, with `old` handed over
@@ -356,5 +486,7 @@ impl Responder<'_> {
     }
 }
 
+#[cfg(test)]
+mod style_tests;
 #[cfg(all(test, feature = "exec"))]
 mod tests;

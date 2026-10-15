@@ -26,7 +26,11 @@
 //! leaving the module or the bar (the loop sees the bar's `leave`), any
 //! press, any scroll, a click popup opening, the module's text going empty,
 //! the compositor's `popup_done` (a session lock), the output, the bar or
-//! the module going, a scale change, a reload. After a press, a scroll or
+//! the module going, a scale change, a full reload (which closes every
+//! popup), or tooltips turned off. A style-only reload instead restyles it
+//! in place where the new style fits its surface, remakes it where it does
+//! not, and only closes it where even that fails
+//! (`State::restyle_popups`). After a press, a scroll or
 //! the compositor's `popup_done` it stays dismissed until the pointer has
 //! left the module.
 //!
@@ -131,8 +135,15 @@ impl State {
         ))
     }
 
-    /// Makes the tooltip; whether it did.
-    fn open_tooltip(&mut self, qh: &QueueHandle<State>, key: Key, member: usize) -> bool {
+    /// Makes the tooltip; whether it did. `pub(super)` for the style-only
+    /// reload's remake (`State::restyle_tip`), which reuses this path so a
+    /// remade tooltip is exactly a newly shown one.
+    pub(super) fn open_tooltip(
+        &mut self,
+        qh: &QueueHandle<State>,
+        key: Key,
+        member: usize,
+    ) -> bool {
         self.popup.close_tip();
         match self.build_popup(qh, key.output, member, Flavor::Tooltip) {
             Ok(tip) => {

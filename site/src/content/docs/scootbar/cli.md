@@ -314,9 +314,19 @@ each capped at 256 bytes), and is written from the very state the screen is
 drawn from, so it cannot disagree with a screenshot.
 `reload` re-reads the file and live-applies it — geometry, style, layout,
 modules, the font — after fully validating it first; a bad file is
-refused and the running bar stands. `reload --look` re-reads only the
-look layer, under a snapshot of the file, so a look swap never applies
-pending edits; with no layer it is refused. `hide`, `show` and `toggle` are
+refused and the running bar stands. A reload that changes only style
+(`[colors]`; `[bar]` `radius`, `popup-radius`, `opacity`, `font`,
+`fallback-fonts`, `font-size`; the layout's `padding`, `spacing`,
+`separator` and per-module `margins`; `tooltip-delay`) keeps every module
+running with its state and only repaints; an open popup or tooltip is
+restyled to the new style where it fits its surface, remade where it does
+not, and closed only where neither is possible. Anything else restarts the
+modules as at start-up: a module's own colors (like `workspaces`
+`active-color`) and its icon art take the full reload, and so does any
+reload while a module is left out as unavailable, which retries it.
+`reload --look` re-reads only the look layer, under a snapshot of the file,
+so a look swap never applies pending edits; with no layer it is refused.
+`hide`, `show` and `toggle` are
 [below](./configure.md#hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
 `toggle` print the reply; `kill`, `set` and `invoke` print nothing on success,
 and `subscribe` prints what the daemon sends until it closes (below). A request
