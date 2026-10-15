@@ -145,6 +145,41 @@ fn nested_carrier_paths_check_basename() {
 }
 
 #[test]
+fn preview_is_preview_png_and_bundled_fonts_need_a_license() {
+    // Finding 6: `preview` took any file name though the design fixes it
+    // as `preview.png`, and `[fonts.files]` never required the license the
+    // design demands for bundled fonts.
+    let bad = MINIMAL.replacen("[palette]", "preview = \"other.png\"\n[palette]", 1);
+    let err = parse_look_toml(bad.as_bytes()).expect_err("free-form preview parses");
+    assert!(err.iter().any(|e| e.field == "preview"), "{err:?}");
+    let ok = MINIMAL.replacen("[palette]", "preview = \"preview.png\"\n[palette]", 1);
+    assert!(parse_look_toml(ok.as_bytes()).is_ok());
+
+    let fonts = MINIMAL.replacen(
+        "[cursor]",
+        "[fonts.files]\nui = \"fonts/DroidSansM-Regular.otf\"\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(fonts.as_bytes()).expect("bundled fonts parse");
+    for origin in [
+        Origin::User,
+        Origin::Declared,
+        Origin::Shipped,
+        Origin::Installed,
+    ] {
+        assert!(
+            validate_for_origin(&raw, origin)
+                .iter()
+                .any(|e| e.field == "license"),
+            "{origin:?} with bundled fonts needs no license"
+        );
+    }
+    let licensed = fonts.replacen("[palette]", "license = \"MIT\"\n[palette]", 1);
+    let raw = parse_look_toml(licensed.as_bytes()).expect("licensed parses");
+    assert!(validate_for_origin(&raw, Origin::User).is_empty());
+}
+
+#[test]
 fn license_required_for_shipped_and_installed() {
     let raw = parse_look_toml(MINIMAL.as_bytes()).unwrap();
     assert!(
@@ -159,4 +194,88 @@ fn license_required_for_shipped_and_installed() {
     );
     assert!(validate_for_origin(&raw, Origin::User).is_empty());
     assert!(validate_for_origin(&raw, Origin::Declared).is_empty());
+}
+
+#[test]
+fn apps_allowlist_is_enforced_by_parse() {
+    // Finding 3: `parse_look_toml` accepted any app and key, with
+    // enforcement in a separate function a library caller could skip,
+    // while the site page claimed only allowlisted keys parse.
+    let bad = MINIMAL.replacen(
+        "[cursor]",
+        "[apps.scoot]\n\"binds.foo\" = \"x\"\n[cursor]",
+        1,
+    );
+    let err = parse_look_toml(bad.as_bytes()).expect_err("non-allowlisted key parses");
+    assert!(
+        err.iter().any(|e| e.reason.contains("allowlist")),
+        "unnamed allowlist refusal: {err:?}"
+    );
+    let bad = MINIMAL.replacen(
+        "[cursor]",
+        "[apps.evil]\n\"colors.accent\" = \"#FFA45C\"\n[cursor]",
+        1,
+    );
+    assert!(parse_look_toml(bad.as_bytes()).is_err());
+}
+
+#[test]
+fn app_values_are_checked_per_key() {
+    // Finding 3: values got only a control-char and 512-byte check, so
+    // `nothex` colors and negative sizes parsed and rendered.
+    for (app, key, value) in [
+        ("scootbar", "colors.accent", "\"nothex\""),
+        ("scootbar", "bar.radius", "-5"),
+        ("scootbar", "bar.font-size", "0"),
+        ("scootbar", "bar.opacity", "1.5"),
+        ("scootbar", "workspaces.display", "\"grid\""),
+        ("scootbar", "window-title.icon", "\"a=b\""),
+        ("scoot", "appearance.background_color", "\"nothex\""),
+        ("scoot", "appearance.cursor_size", "3"),
+        ("scoot", "wallpaper.mode", "\"spin\""),
+        ("scootnotify", "colors.accent", "\"nothex\""),
+    ] {
+        let bad = MINIMAL.replacen(
+            "[cursor]",
+            &format!("[apps.{app}]\n\"{key}\" = {value}\n[cursor]"),
+            1,
+        );
+        assert!(
+            parse_look_toml(bad.as_bytes()).is_err(),
+            "{app}[{key}] = {value} parses"
+        );
+    }
+    // The valid forms of the same keys still parse.
+    for (app, key, value) in [
+        ("scootbar", "colors.accent", "\"#000000\""),
+        ("scootbar", "bar.radius", "3"),
+        ("scootbar", "bar.font-size", "13"),
+        ("scootbar", "bar.opacity", "0.8"),
+        ("scootbar", "workspaces.display", "\"dots\""),
+        ("scootbar", "window-title.icon", "\"●\""),
+        ("scoot", "appearance.background_color", "\"#000000\""),
+        ("scoot", "appearance.cursor_size", "24"),
+        ("scoot", "wallpaper.mode", "\"tile\""),
+        ("scootnotify", "colors.accent", "\"#000000\""),
+    ] {
+        let ok = MINIMAL.replacen(
+            "[cursor]",
+            &format!("[apps.{app}]\n\"{key}\" = {value}\n[cursor]"),
+            1,
+        );
+        assert!(
+            parse_look_toml(ok.as_bytes()).is_ok(),
+            "{app}[{key}] = {value} refused"
+        );
+    }
+}
+
+#[test]
+fn name_must_match_the_directory() {
+    // Finding 6: the site page says `name` matches the directory name, but
+    // nothing checked it.
+    let raw = parse_look_toml(MINIMAL.as_bytes()).expect("minimal parses");
+    assert!(check_name_matches_dir(&raw, "moonrise").is_none());
+    let err = check_name_matches_dir(&raw, "other").expect("mismatch passes");
+    assert_eq!(err.field, "name");
 }

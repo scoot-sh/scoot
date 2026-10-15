@@ -77,3 +77,24 @@ The shipped looks (`look-shipped`), reading the layer in any app, the CLI,
 Nix, the third-party renderers.
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
+
+## Resolution (PR #608, branch `look-format`; review-fix pass)
+
+Review findings 1-8 fixed in the `scoot-look` crate, each reproduced
+with a failing test first (see the PR body for the finding-by-finding
+record):
+
+- Dependency list: `serde` (workspace) plus `toml = "1"` only. `toml`
+  adds no new package to the tree: `scoot` and `scootbar` already pin
+  it (`Cargo.lock`: `toml 1.1.6+spec-1.1.0`), and no other crate
+  depends on `scoot-look`, so no dependency cycle is possible.
+- The `scoot` binary is unchanged: the pass touches only
+  `crates/scoot-look` and the site reference page
+  (`site/src/content/docs/reference/look-format.md`); nothing else
+  in the workspace reads the crate yet.
+- Rendered fragments verified against the real parsers where
+  reachable: an override-heavy `bar.toml` passes `scootbar daemon
+  --check` (`ok`, exit 0) on Linux. `scoot` has no `--check` and its
+  look-layer loader is a later ticket, so the `scoot.toml` fragment
+  is validated by reparse plus key-by-key comparison against
+  `AppearanceConfig` and the wallpaper `Table`.

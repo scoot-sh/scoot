@@ -185,6 +185,15 @@ pub fn check_relative_path(field: &str, value: &str) -> Option<GrammarError> {
     if value.split('/').any(|c| c == "..") {
         return Some(GrammarError::new(field, "path must not contain `..`"));
     }
+    // Normalized: no `.` components, no empty segments from `//` or a
+    // trailing `/`, no leading `./`. Two spellings of one file must never
+    // compare unequal downstream.
+    if value.split('/').any(|c| c.is_empty() || c == ".") {
+        return Some(GrammarError::new(
+            field,
+            "path must be normalized: no `.`, `//` or trailing `/`",
+        ));
+    }
     if value.contains('\\') {
         return Some(GrammarError::new(field, "path must not contain `\\`"));
     }
@@ -219,9 +228,11 @@ pub fn is_permitted_look_file(name: &str) -> bool {
 }
 
 /// What is wrong with a wallpaper URL, if anything (section 3.5, findings
-/// F2/R5). `https://` only, printable ASCII without space, `"`, `'`, `\`,
-/// `<`, `>` or backtick; the host must be a DNS name with at least one dot:
-/// no userinfo, no IP literal, no explicit port, not `localhost` or a name
+/// F2/R5). `https://` only, at most 2048 bytes, printable ASCII without
+/// space, `"`, `'`, `\`, `<`, `>` or a backtick, and never `?`, `#` or `%`
+/// nor any control character; the host must be a DNS name with at least one
+/// dot: no userinfo, no IP literal (dotted, decimal, octal or hex IPv4, or
+/// bracketed or bare IPv6), no explicit port, not `localhost` or a name
 /// under `.localhost`/`.local`/`.internal`/`.home.arpa`. The host is
 /// lowercased and one trailing dot stripped before those checks, and a host
 /// whose last label is all digits or starts with `0x` is refused, because
@@ -236,22 +247,26 @@ pub fn check_wallpaper_url(field: &str, url: &str) -> Option<GrammarError> {
         Some(rest) => rest,
         None => return refuse("wallpaper URL must start with `https://`"),
     };
-    if !url.is_ascii()
-        || url.bytes().any(|c| {
-            c == b' '
-                || c == b'"'
-                || c == b'\''
-                || c == b'\\'
-                || c == b'<'
-                || c == b'>'
-                || c == b'`'
-        })
+    // Printable ASCII only (`0x21..=0x7E`): this refuses spaces, DEL,
+    // non-ASCII and every control character outright.
+    if !url.bytes().all(|c| (0x21..=0x7E).contains(&c)) {
+        return refuse("URL must be printable ASCII with no spaces or control characters");
+    }
+    if url.bytes().any(|c| c == b'?' || c == b'#' || c == b'%') {
+        return refuse("URL must not contain `?`, `#` or `%`");
+    }
+    if url
+        .bytes()
+        .any(|c| c == b'"' || c == b'\'' || c == b'\\' || c == b'<' || c == b'>' || c == b'`')
     {
         return refuse(
             "URL must be printable ASCII without space, `\"`, `'`, `\\`, `<`, `>` or backtick",
         );
     }
-    let authority = rest.split('/').next().unwrap_or("");
+    // The authority ends at the first `/` (`?` and `#` cannot occur: they
+    // are refused above, and splitting on them too keeps the parse honest
+    // if that ever changes).
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
     let host = authority.split('@').next_back().unwrap_or("");
     if authority.contains('@') {
         return refuse("URL must not contain userinfo");

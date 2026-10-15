@@ -98,6 +98,18 @@ fn paths() {
 }
 
 #[test]
+fn paths_must_be_normalized() {
+    // Finding 6: `./a.png`, `a//b.png`, `a/./b` and a trailing `/` all
+    // passed, so two spellings of one file slipped past later comparisons.
+    for bad in ["./a.png", "a//b.png", "a/./b", "a/", ".", "a/b/"] {
+        assert!(
+            check_relative_path("p", bad).is_some(),
+            "should refuse {bad:?}"
+        );
+    }
+}
+
+#[test]
 fn wallpaper_urls() {
     assert!(check_wallpaper_url("wallpaper.image", "https://example.com/w.png").is_none());
     // IDNs and punycode are fine given the hash pin.
@@ -126,6 +138,41 @@ fn wallpaper_urls() {
             "should refuse {bad:?}"
         );
     }
+}
+
+#[test]
+fn wallpaper_urls_reject_query_fragment_percent_and_controls() {
+    // Finding 2: the authority was split on `/` only, so `?`/`#` smuggled
+    // an IP literal past the checks, `%` smuggled encoded dots, and raw
+    // controls were never refused.
+    for bad in [
+        "https://127.0.0.1?x/a.png",
+        "https://10.0.0.1#/a.png",
+        "https://127.0.0.%31/a.png",
+        "https://example.com/a.png?x=1",
+        "https://example.com/a.png#frag",
+        "https://example.com/a%20b.png",
+        "https://example.com/a\nb.png",
+        "https://example.com/a\tb.png",
+        "https://example.com/a\rb.png",
+        // Decimal, octal, hex and IPv6 literal forms the design lists.
+        "https://2130706433/a.png",
+        "https://0x7f000001/a.png",
+        "https://0177.0.0.1/a.png",
+        "https://0x7f.0.0.1/a.png",
+        "https://127.0.0.1/a.png",
+        "https://[::1]/a.png",
+        "https://[2001:db8::1]/a.png",
+        "https://::1/a.png",
+        "https://user:pass@example.com/a.png",
+    ] {
+        assert!(
+            check_wallpaper_url("wallpaper.image", bad).is_some(),
+            "should refuse {bad:?}"
+        );
+    }
+    assert!(check_wallpaper_url("wallpaper.image", "https://example.com/w.png").is_none());
+    assert!(check_wallpaper_url("wallpaper.image", "https://a.b/w.png").is_none());
 }
 
 #[test]

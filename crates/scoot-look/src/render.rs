@@ -52,30 +52,71 @@ fn toml_str(s: &str) -> String {
     out
 }
 
-fn toml_value(v: &toml::Value) -> String {
+fn toml_value(v: &toml::Value) -> Result<String, GrammarError> {
     match v {
-        toml::Value::String(s) => toml_str(s),
-        toml::Value::Integer(i) => i.to_string(),
+        toml::Value::String(s) => Ok(toml_str(s)),
+        toml::Value::Integer(i) => Ok(i.to_string()),
         toml::Value::Float(f) => {
             if f.is_finite() {
-                format!("{f:?}")
+                Ok(format!("{f:?}"))
             } else {
-                "0.0".to_string()
+                Ok("0.0".to_string())
             }
         }
-        toml::Value::Boolean(b) => b.to_string(),
-        _ => "\"<unsupported>\"".to_string(),
+        toml::Value::Boolean(b) => Ok(b.to_string()),
+        toml::Value::Array(items) => {
+            let mut rendered = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    toml::Value::Array(_) | toml::Value::Table(_) => {
+                        return Err(GrammarError::new(
+                            "apps",
+                            "per-app overrides must be strings, integers, floats, booleans or flat arrays of those",
+                        ));
+                    }
+                    _ => rendered.push(toml_value(item)?),
+                }
+            }
+            Ok(format!("[{}]", rendered.join(", ")))
+        }
+        _ => Err(GrammarError::new(
+            "apps",
+            "per-app overrides must be strings, integers, floats, booleans or flat arrays of those",
+        )),
     }
 }
 
-/// Split `[apps.<app>]` overrides into sections by their first dotted
-/// segment, refusing any key no allowlist holds. The loader re-checks; the
-/// renderer never trusts the tool, not even itself.
+/// One TOML key: bare when it is already bare, quoted otherwise. The
+/// renderer never trusts the grammar alone: even a key that slipped past
+/// validation renders quoted, so a newline, `=`, `[` or quote in it can
+/// never open a new table or key.
+fn toml_key(key: &str) -> String {
+    if !key.is_empty()
+        && key
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+    {
+        key.to_string()
+    } else {
+        toml_str(key)
+    }
+}
+
+/// A dotted key path: each segment quoted on its own, so `output.My
+/// Monitor.image` renders as `output."My Monitor".image`.
+fn toml_dotted(path: &str) -> String {
+    path.split('.').map(toml_key).collect::<Vec<_>>().join(".")
+}
+
+/// Split `[apps.<app>]` overrides by their first dotted segment, refusing
+/// any key no allowlist holds. The loader re-checks; the renderer never
+/// trusts the tool, not even itself. Values render through [`toml_value`];
+/// sections map each key once, so a repeated key is one entry, never two.
 fn override_sections(
     app: &str,
     apps: &BTreeMap<String, BTreeMap<String, toml::Value>>,
-) -> Result<BTreeMap<String, Vec<(String, String)>>, GrammarError> {
-    let mut sections: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+) -> Result<BTreeMap<String, BTreeMap<String, String>>, GrammarError> {
+    let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     if let Some(table) = apps.get(app) {
         for (key, value) in table {
             if !allows(app, key) {
@@ -88,7 +129,7 @@ fn override_sections(
             sections
                 .entry(section.to_string())
                 .or_default()
-                .push((rest.to_string(), toml_value(value)));
+                .insert(rest.to_string(), toml_value(value)?);
         }
     }
     Ok(sections)
@@ -98,43 +139,41 @@ fn override_sections(
 /// widths, the cursor triple, `corner_radius`, and `[wallpaper]` as one
 /// unit. Never autostart, binds, window rules, `[tty]`, `[renderer]`,
 /// `[xwayland]` or `[virtual_input]`.
+///
+/// Overrides merge into the base tables: each section is emitted once, so
+/// an override of `appearance.background_color` replaces the derived value
+/// instead of opening a duplicate `[appearance]` table.
 pub fn render_scoot(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, GrammarError> {
     let p = &look.palette;
+    // A hand-built `ResolvedLook` skips the name grammar, so the comment
+    // quotes rather than interpolates: a newline in the name stays one line.
     let mut out = format!(
-        "# Rendered from look \"{}\" by scoot-look. Do not edit: re-rendered on every apply.\n",
-        look.name
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n",
+        toml_str(&look.name)
     );
-    out.push_str("[appearance]\n");
-    out.push_str(&format!("focus_ring_width = {}\n", look.shape.ring_width));
-    out.push_str(&format!(
-        "focus_ring_inactive_width = {}\n",
-        look.shape.ring_inactive_width
-    ));
-    out.push_str(&format!(
-        "focus_ring_active_color = {}\n",
-        toml_str(&p.focus)
-    ));
-    out.push_str(&format!(
-        "focus_ring_inactive_color = {}\n",
-        toml_str(&p.border)
-    ));
-    out.push_str(&format!("background_color = {}\n", toml_str(&p.background)));
-    out.push_str(&format!("corner_radius = {}\n", look.shape.radius));
-    out.push_str(&format!(
-        "cursor_theme = {}\n",
-        toml_str(&look.cursor.theme)
-    ));
-    out.push_str(&format!("cursor_size = {}\n", look.cursor.size));
+    let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let appearance = sections.entry("appearance".to_string()).or_default();
+    appearance.insert(
+        "focus_ring_width".to_string(),
+        look.shape.ring_width.to_string(),
+    );
+    appearance.insert(
+        "focus_ring_inactive_width".to_string(),
+        look.shape.ring_inactive_width.to_string(),
+    );
+    appearance.insert("focus_ring_active_color".to_string(), toml_str(&p.focus));
+    appearance.insert("focus_ring_inactive_color".to_string(), toml_str(&p.border));
+    appearance.insert("background_color".to_string(), toml_str(&p.background));
+    appearance.insert("corner_radius".to_string(), look.shape.radius.to_string());
+    appearance.insert("cursor_theme".to_string(), toml_str(&look.cursor.theme));
+    appearance.insert("cursor_size".to_string(), look.cursor.size.to_string());
     if look.cursor.accent != "none" {
-        out.push_str(&format!(
-            "cursor_color = {}\n",
-            toml_str(&look.cursor.accent)
-        ));
+        appearance.insert("cursor_color".to_string(), toml_str(&look.cursor.accent));
     }
     if let Some(wallpaper) = &look.wallpaper {
-        out.push_str("\n[wallpaper]\n");
+        let table = sections.entry("wallpaper".to_string()).or_default();
         if let Some(color) = &wallpaper.color {
-            out.push_str(&format!("color = {}\n", toml_str(color)));
+            table.insert("color".to_string(), toml_str(color));
         } else {
             let abs = inputs.wallpaper_abs.as_ref().ok_or_else(|| {
                 GrammarError::new(
@@ -142,30 +181,33 @@ pub fn render_scoot(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String
                     "an image wallpaper needs its resolved absolute path",
                 )
             })?;
-            out.push_str(&format!("image = {}\n", toml_str(abs)));
+            table.insert("image".to_string(), toml_str(abs));
         }
-        out.push_str(&format!(
-            "mode = {}\n",
-            toml_str(wallpaper.mode.map(|m| m.as_str()).unwrap_or("fill"))
-        ));
-        out.push_str(&format!(
-            "fill = {}\n",
+        table.insert(
+            "mode".to_string(),
+            toml_str(wallpaper.mode.map(|m| m.as_str()).unwrap_or("fill")),
+        );
+        table.insert(
+            "fill".to_string(),
             toml_str(
                 &wallpaper
                     .fill
                     .clone()
-                    .unwrap_or_else(|| p.background.clone())
-            )
-        ));
-        out.push_str(&format!(
-            "transition = {}\n",
-            toml_str(wallpaper.transition.map(|t| t.as_str()).unwrap_or("none"))
-        ));
+                    .unwrap_or_else(|| p.background.clone()),
+            ),
+        );
+        table.insert(
+            "transition".to_string(),
+            toml_str(wallpaper.transition.map(|t| t.as_str()).unwrap_or("none")),
+        );
     }
     for (section, keys) in override_sections("scoot", &look.apps)? {
-        out.push_str(&format!("\n[{section}]\n"));
+        sections.entry(section).or_default().extend(keys);
+    }
+    for (section, keys) in &sections {
+        out.push_str(&format!("\n[{}]\n", toml_key(section)));
         for (key, value) in keys {
-            out.push_str(&format!("{key} = {value}\n"));
+            out.push_str(&format!("{} = {value}\n", toml_dotted(key)));
         }
     }
     Ok(out)
@@ -174,13 +216,19 @@ pub fn render_scoot(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String
 /// Render the scootbar fragment (`bar.toml`): `[colors]`, the bar's style,
 /// and allowlisted per-module visual keys. Never geometry, placement,
 /// module lists or actions.
+///
+/// Like [`render_scoot`], overrides merge into the base tables: an override
+/// of `colors.accent` replaces the derived value in `[colors]` instead of
+/// appending a second entry, and `bar.*` overrides land in `[bar]`, never
+/// as `bar.bar.*`.
 pub fn render_bar(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, GrammarError> {
     let p = &look.palette;
     let mut out = format!(
-        "# Rendered from look \"{}\" by scoot-look. Do not edit: re-rendered on every apply.\n",
-        look.name
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n",
+        toml_str(&look.name)
     );
-    out.push_str("[colors]\n");
+    let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let colors = sections.entry("colors".to_string()).or_default();
     for (key, color) in [
         ("background", &p.background),
         ("foreground", &p.foreground),
@@ -189,30 +237,30 @@ pub fn render_bar(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, 
         ("dim", &p.dim),
         ("urgent", &p.urgent),
     ] {
-        out.push_str(&format!("{key} = {}\n", toml_str(color)));
+        colors.insert(key.to_string(), toml_str(color));
     }
-    out.push_str("\n[bar]\n");
-    out.push_str(&format!("radius = {}\n", look.shape.radius));
+    let bar = sections.entry("bar".to_string()).or_default();
+    bar.insert("radius".to_string(), look.shape.radius.to_string());
     if inputs.bar_popup {
-        out.push_str(&format!("popup-radius = {}\n", look.shape.radius));
+        bar.insert("popup-radius".to_string(), look.shape.radius.to_string());
     }
-    out.push_str(&format!("opacity = {:?}\n", look.opacity.bar));
+    bar.insert("opacity".to_string(), format!("{:?}", look.opacity.bar));
     let font = inputs
         .ui_font_file
         .clone()
         .unwrap_or_else(|| look.fonts.ui.clone());
-    out.push_str(&format!("font = {}\n", toml_str(&font)));
-    out.push_str(&format!("font-size = {}\n", pt_to_px(look.fonts.size)));
+    bar.insert("font".to_string(), toml_str(&font));
+    bar.insert(
+        "font-size".to_string(),
+        pt_to_px(look.fonts.size).to_string(),
+    );
     for (section, keys) in override_sections("scootbar", &look.apps)? {
-        if section == "colors" || section == "bar" {
-            for (key, value) in keys {
-                out.push_str(&format!("{section}.{key} = {value}\n"));
-            }
-        } else {
-            out.push_str(&format!("\n[{section}]\n"));
-            for (key, value) in keys {
-                out.push_str(&format!("{key} = {value}\n"));
-            }
+        sections.entry(section).or_default().extend(keys);
+    }
+    for (section, keys) in &sections {
+        out.push_str(&format!("\n[{}]\n", toml_key(section)));
+        for (key, value) in keys {
+            out.push_str(&format!("{} = {value}\n", toml_dotted(key)));
         }
     }
     Ok(out)

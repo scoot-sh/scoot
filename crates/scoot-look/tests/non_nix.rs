@@ -1,6 +1,11 @@
 //! The non-Nix path: listing, validating and rendering a look uses plain
-//! files and this crate only. No `nix` binary is involved, so the full
-//! pipeline must succeed with no `nix` on `PATH`.
+//! files and this crate only. The full pipeline must succeed with no `nix`
+//! helper involved, so this test runs it with `PATH` pointed at an empty
+//! directory: anything the pipeline shells out to (or looks up on `PATH`)
+//! would fail, and success proves the render is plain files plus this crate.
+//! Purity is also structural: the library links no process, environment or
+//! network API (no `std::process`, no `std::env`, no sockets in `src/`,
+//! outside this test).
 
 use std::collections::BTreeMap;
 
@@ -39,19 +44,16 @@ accent = "#FF9A49"
 color = "#2B3648"
 "##;
 
-/// Scrub `nix` (and every other helper) from `PATH` for the duration of the
-/// closure. A test that only passes because a `nix` binary happened to be
-/// installed is a test of the wrong path.
-fn without_nix_on_path(f: impl FnOnce()) {
+/// Run `f` with a `PATH` that resolves nothing: an empty directory. A test
+/// that passes because a helper binary happened to be installed is a test
+/// of the wrong path; a pipeline that needs no helper passes either way.
+fn without_helpers_on_path(f: impl FnOnce()) {
     let old = std::env::var_os("PATH");
+    let empty = std::env::temp_dir().join("scoot-look-empty-path");
+    std::fs::create_dir_all(&empty).expect("empty PATH dir");
     // `set_var` is `unsafe` (it can race another thread's `getenv`); the
     // body runs alone here and restores the value before returning.
-    unsafe { std::env::set_var("PATH", "/usr/bin:/bin") };
-    let found = std::process::Command::new("nix")
-        .arg("--version")
-        .output()
-        .is_ok();
-    assert!(!found, "nix is on PATH after scrubbing it");
+    unsafe { std::env::set_var("PATH", &empty) };
     f();
     if let Some(path) = old {
         unsafe { std::env::set_var("PATH", path) };
@@ -60,7 +62,7 @@ fn without_nix_on_path(f: impl FnOnce()) {
 
 #[test]
 fn validate_render_contrast_without_nix() {
-    without_nix_on_path(|| {
+    without_helpers_on_path(|| {
         let raw = scoot_look::parse_look_toml(MINIMAL.as_bytes()).expect("parses");
         assert!(scoot_look::validate_for_origin(&raw, Origin::User).is_empty());
         assert!(scoot_look::validate_apps_allowlist(&raw.apps).is_empty());

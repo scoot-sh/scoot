@@ -23,10 +23,12 @@
 //!
 //! # Pipeline
 //!
-//! 1. [`parse_look_toml`](schema::parse_look_toml) parses one file.
+//! 1. [`parse_look_toml`](schema::parse_look_toml) parses one file, refusing
+//!    unknown keys, grammar violations, non-allowlisted `[apps.<app>]` keys
+//!    and per-key value mismatches: there is no unvalidated path.
 //! 2. [`validate_for_origin`](schema::validate_for_origin) adds the
 //!    origin-dependent rules; [`validate_apps_allowlist`](allowlist::validate_apps_allowlist)
-//!    refuses non-allowlisted `[apps.<app>]` keys.
+//!    re-checks the allowlist by name over already-parsed tables.
 //! 3. [`resolve`] follows `extends` over source looks only.
 //! 4. [`check`](contrast::check) measures contrast, refusing or warning by
 //!    origin.
@@ -46,10 +48,13 @@ pub mod resolve;
 pub mod resolved;
 pub mod schema;
 
-pub use allowlist::{allows, validate_apps_allowlist};
+pub use allowlist::{
+    ValueKind, allows, check_app_value, is_wallpaper_override_key, validate_apps_allowlist,
+    value_kind,
+};
 pub use contrast::{ContrastPair, ContrastReport, check as check_contrast};
 pub use grammar::GrammarError;
 pub use render::{RenderInputs, render_bar, render_json, render_scoot, source_hash};
 pub use resolve::resolve;
 pub use resolved::ResolvedLook;
-pub use schema::{Origin, RawLook, parse_look_toml, validate_for_origin};
+pub use schema::{Origin, RawLook, check_name_matches_dir, parse_look_toml, validate_for_origin};

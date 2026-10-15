@@ -50,7 +50,10 @@ fn resolve_into(
     let (raw, origin) = sources
         .get(name)
         .ok_or_else(|| GrammarError::new("extends", format!("unknown base look `{name}`")))?;
-    if *origin == Origin::Installed {
+    // Installed looks (someone else's) can be applied but never extended
+    // (design section 3.1): the refusal runs only when reached through
+    // `extends`, never on the root being resolved for apply.
+    if !chain.is_empty() && !origin.extendable() {
         return Err(GrammarError::new(
             "extends",
             format!("`{name}` is an installed look and can be applied but never extended"),

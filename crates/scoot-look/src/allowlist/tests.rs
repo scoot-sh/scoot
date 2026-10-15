@@ -49,3 +49,32 @@ fn validate_names_the_key() {
     assert_eq!(errors.len(), 1);
     assert!(errors[0].to_string().contains("binds.foo"));
 }
+
+#[test]
+fn wallpaper_output_suffix_is_strict() {
+    // Finding 1: `allows("scoot", k)` accepted any key starting
+    // `wallpaper.output.` / `wallpaper.workspace.`, so a quoted key
+    // carrying a newline, `=`, `[` or a quote sailed through and the
+    // renderer wrote it raw: a real `[autostart]` table out.
+    assert!(allows("scoot", "wallpaper.output.HDMI-A-1.image"));
+    assert!(allows("scoot", "wallpaper.workspace.2.color"));
+    assert!(allows(
+        "scoot",
+        "wallpaper.output.HDMI-A-1.workspace.2.image"
+    ));
+    for bad in [
+        "wallpaper.output.x = 1\n[autostart]\ncommand",
+        "wallpaper.output.\n[autostart]",
+        "wallpaper.output.x[evil]",
+        "wallpaper.output.x\"evil",
+        "wallpaper.output.x=1",
+        "wallpaper.output.",
+        "wallpaper.output.HDMI-A-1.evil",
+        "wallpaper.output.HDMI-A-1.command",
+        "wallpaper.output..image",
+        "wallpaper.output.HDMI-A-1.",
+        "wallpaper.workspace.2.binds",
+    ] {
+        assert!(!allows("scoot", bad), "allows {bad:?}");
+    }
+}

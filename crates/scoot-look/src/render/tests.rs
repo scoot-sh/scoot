@@ -122,10 +122,81 @@ fn overrides_merge_and_refuse() {
         "[apps.scoot]\n\"binds.foo\" = \"x\"\n[cursor]",
         1,
     );
-    let raw = parse_look_toml(bad.as_bytes()).expect("parses");
+    // Non-allowlisted keys never reach the renderer: the parse refuses
+    // them (finding 3), so the renderer's own refusal is only a backstop.
+    // A hand-built look still hits it.
+    assert!(parse_look_toml(bad.as_bytes()).is_err());
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let mut look = resolve(&map, "x").expect("resolves");
+    look.apps = BTreeMap::from([(
+        "scoot".to_string(),
+        BTreeMap::from([("binds.foo".to_string(), toml::Value::String("x".into()))]),
+    )]);
+    assert!(render_scoot(&look, &inputs()).is_err());
+}
+
+#[test]
+fn overrides_merge_into_base_tables() {
+    // Finding 5: overrides used to append duplicate `[appearance]` /
+    // `[wallpaper]` tables (which do not reparse) and `bar.*` overrides
+    // landed at `bar.bar.*` (which the bar's deny-unknown-fields refuses).
+    // Every rendered fragment with overrides must reparse, with each
+    // section emitted once and the override winning.
+    let text = crate::schema::tests::minimal_toml()
+        .replacen(
+            "[cursor]",
+            "[apps.scoot]\n\"appearance.background_color\" = \"#000000\"\n\"wallpaper.mode\" = \"tile\"\n[cursor]",
+            1,
+        );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
     let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
     let look = resolve(&map, "x").expect("resolves");
-    assert!(render_scoot(&look, &inputs()).is_err());
+    let frag = render_scoot(&look, &inputs()).expect("renders");
+    assert_eq!(
+        frag.matches("[appearance]").count(),
+        1,
+        "duplicate [appearance]:\n{frag}"
+    );
+    assert_eq!(
+        frag.matches("[wallpaper]").count(),
+        1,
+        "duplicate [wallpaper]:\n{frag}"
+    );
+    let parsed: toml::Table = toml::from_str(&frag).expect("scoot fragment reparses");
+    assert_eq!(
+        parsed["appearance"]["background_color"].as_str(),
+        Some("#000000")
+    );
+    assert_eq!(parsed["wallpaper"]["mode"].as_str(), Some("tile"));
+
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[apps.scootbar]\n\"colors.accent\" = \"#000000\"\n\"bar.radius\" = 3\n\"bar.fallback-fonts\" = [\"DejaVu Sans\"]\n\"workspaces.inactive-color\" = \"#111111\"\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_bar(&look, &inputs()).expect("renders");
+    assert_eq!(
+        frag.matches("[colors]").count(),
+        1,
+        "duplicate [colors]:\n{frag}"
+    );
+    assert_eq!(frag.matches("[bar]").count(), 1, "duplicate [bar]:\n{frag}");
+    assert!(!frag.contains("bar.bar."), "misplaced bar key:\n{frag}");
+    let parsed: toml::Table = toml::from_str(&frag).expect("bar fragment reparses");
+    assert_eq!(parsed["colors"]["accent"].as_str(), Some("#000000"));
+    assert_eq!(parsed["bar"]["radius"].as_integer(), Some(3));
+    assert_eq!(
+        parsed["bar"]["fallback-fonts"].as_array().map(|a| a.len()),
+        Some(1)
+    );
+    assert_eq!(
+        parsed["workspaces"]["inactive-color"].as_str(),
+        Some("#111111")
+    );
 }
 
 #[test]
@@ -136,4 +207,65 @@ fn pt_to_px_follows_the_bar_rule() {
     assert_eq!(pt_to_px(12.0), 16);
     assert_eq!(pt_to_px(1000.0), 256);
     assert_eq!(pt_to_px(0.5), 1);
+}
+
+#[test]
+fn hostile_keys_never_render_raw() {
+    // Finding 1, both halves: hostile keys are refused by the allowlist
+    // before the renderer sees them, and the key quoter the renderer uses
+    // quotes every one of the design's probe characters (newline, `=`,
+    // `[`, quote), so even a grammar bypass cannot open a new table.
+    for hostile in [
+        "wallpaper.output.x = 1\n[autostart]\ncommand",
+        "wallpaper.output.x\n[autostart]",
+        "colors.accent\n[autostart]",
+        "a=b",
+        "a[",
+        "a\"b",
+        "a\\b",
+        "a b",
+        "a\nb",
+    ] {
+        let quoted = toml_key(hostile);
+        assert!(
+            quoted.starts_with('"'),
+            "{hostile:?} renders bare: {quoted}"
+        );
+        // The quoted key reparses to exactly itself.
+        let parsed: toml::Table =
+            toml::from_str(&format!("{quoted} = 1")).expect("quoted key is TOML");
+        assert_eq!(parsed.get(hostile), Some(&toml::Value::Integer(1)));
+    }
+    assert_eq!(toml_key("radius"), "radius");
+    assert_eq!(
+        toml_dotted("output.My Monitor.image"),
+        "output.\"My Monitor\".image"
+    );
+
+    // End to end: a valid override whose output name needs quoting renders
+    // quoted and reparses, with no duplicate table.
+    let mut look = moonrise();
+    look.apps = BTreeMap::from([(
+        "scoot".to_string(),
+        BTreeMap::from([(
+            "wallpaper.output.My Monitor.image".to_string(),
+            toml::Value::String("wallpaper.png".to_string()),
+        )]),
+    )]);
+    let frag = render_scoot(&look, &inputs()).expect("renders");
+    let parsed: toml::Value = toml::from_str(&frag).expect("fragment is TOML");
+    assert!(
+        frag.contains("\"My Monitor\""),
+        "output name not quoted:\n{frag}"
+    );
+    assert!(!frag.contains("[autostart]"), "injection:\n{frag}");
+    let _ = parsed;
+
+    // A scootbar key through the scoot renderer is refused, not misplaced.
+    let mut look = moonrise();
+    look.apps = BTreeMap::from([(
+        "scoot".to_string(),
+        BTreeMap::from([("bar.radius".to_string(), toml::Value::Integer(3))]),
+    )]);
+    assert!(render_scoot(&look, &inputs()).is_err());
 }

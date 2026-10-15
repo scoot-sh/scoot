@@ -115,6 +115,28 @@ fn installed_look_never_extended() {
 }
 
 #[test]
+fn installed_look_applies_but_never_extends() {
+    // Finding 4: the `Origin::Installed` refusal ran on the root too, so an
+    // installed look could not even be resolved to apply it. Design 3.1:
+    // installed looks can be applied but never extended.
+    let base = minimal_toml();
+    let map = sources(&[("moonrise", &base, Origin::Installed)]);
+    resolve(&map, "moonrise").expect("installed root refuses to apply");
+
+    let child = base.replacen(
+        "name = \"moonrise\"",
+        "name = \"child\"\nextends = \"moonrise\"",
+        1,
+    );
+    let map = sources(&[
+        ("moonrise", &base, Origin::Installed),
+        ("child", &child, Origin::User),
+    ]);
+    let err = resolve(&map, "child").expect_err("installed base resolves");
+    assert!(err.reason.contains("never extended"), "unexpected: {err}");
+}
+
+#[test]
 fn incomplete_chain_reports_missing_token() {
     // A base missing required tokens fails at resolution, naming the token.
     let thin = r##"

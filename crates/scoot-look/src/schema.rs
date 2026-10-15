@@ -19,8 +19,8 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 use crate::grammar::{
-    GrammarError, MAX_FILE_BYTES, check_display_text, check_glyph, check_relative_path,
-    check_wallpaper_url, is_cursor_accent, is_hex_color, is_identifier, is_name, is_nix_attr_path,
+    GrammarError, MAX_FILE_BYTES, check_display_text, check_relative_path, check_wallpaper_url,
+    is_cursor_accent, is_hex_color, is_identifier, is_name, is_nix_attr_path,
     is_permitted_look_file, is_sha256_hex,
 };
 
@@ -366,10 +366,16 @@ fn validate_raw(raw: &RawLook, errors: &mut Vec<GrammarError>) {
             errors.push(e);
         }
     }
-    if let Some(preview) = &raw.preview
-        && let Some(e) = check_relative_path("preview", preview)
-    {
-        errors.push(e);
+    if let Some(preview) = &raw.preview {
+        // The design fixes the file name: `preview.png` beside `look.toml`.
+        if preview != "preview.png" {
+            errors.push(GrammarError::new(
+                "preview",
+                "must be exactly \"preview.png\"",
+            ));
+        } else if let Some(e) = check_relative_path("preview", preview) {
+            errors.push(e);
+        }
     }
 
     validate_palette(&raw.palette, errors);
@@ -648,45 +654,63 @@ fn validate_apps(
                 errors.push(GrammarError::new(&field, "key must be 1 to 128 bytes"));
                 continue;
             }
-            match value {
-                toml::Value::String(s) => {
-                    if s.contains('\0') || s.chars().any(|c| c.is_control()) {
-                        errors.push(GrammarError::new(
-                            &field,
-                            "must not contain control characters",
-                        ));
-                    } else if s.len() > 512 {
-                        errors.push(GrammarError::new(&field, "must be at most 512 bytes"));
-                    } else if (key.ends_with(".glyph") || key.ends_with("-glyph"))
-                        && let Some(e) = check_glyph(&field, s)
-                    {
-                        errors.push(e);
-                    }
+            // The allowlist is enforced here, inside the parse pipeline, so
+            // there is no unvalidated path: a library caller cannot parse
+            // and forget the separate check.
+            if let Some(e) = crate::allowlist::check_app_value(app, key, value) {
+                errors.push(e);
+                continue;
+            }
+            // Backstop for strings: the kind checks above subsume it, but a
+            // value that passed its kind is still bounded here.
+            if let toml::Value::String(s) = value {
+                if s.contains('\0') || s.chars().any(|c| c.is_control()) {
+                    errors.push(GrammarError::new(
+                        &field,
+                        "must not contain control characters",
+                    ));
+                } else if s.len() > 512 {
+                    errors.push(GrammarError::new(&field, "must be at most 512 bytes"));
                 }
-                toml::Value::Integer(_) | toml::Value::Float(_) | toml::Value::Boolean(_) => {}
-                _ => errors.push(GrammarError::new(
-                    &field,
-                    "per-app overrides must be strings, integers, floats or booleans",
-                )),
             }
         }
     }
 }
 
+/// The site page says a look's `name` matches its directory name; the tool
+/// enforces it at `validate`/`build` time, where the directory is known.
+/// Pure over the already-read directory name, so it stays testable.
+pub fn check_name_matches_dir(raw: &RawLook, dir_name: &str) -> Option<GrammarError> {
+    if raw.name != dir_name {
+        Some(GrammarError::new(
+            "name",
+            format!("must match the look directory name `{dir_name}`"),
+        ))
+    } else {
+        None
+    }
+}
+
 /// Origin-dependent rules: the `license` requirement for shipped and
-/// installed looks. Contrast refusal-vs-warning and the installed-never-
+/// installed looks, plus the bundled-fonts license for every origin
+/// (design section D13: a look carrying files in `fonts/` names their
+/// license). Contrast refusal-vs-warning and the installed-never-
 /// extended rule live with their callers ([`contrast`](crate::contrast),
 /// [`resolve`](crate::resolve)), beside the data they need.
 pub fn validate_for_origin(raw: &RawLook, origin: Origin) -> Vec<GrammarError> {
     let mut errors = Vec::new();
-    if origin.license_required() {
-        match &raw.license {
-            Some(license) if !license.is_empty() => {}
-            _ => errors.push(GrammarError::new(
-                "license",
-                "shipped and installed looks require a license",
-            )),
-        }
+    let licensed = matches!(&raw.license, Some(license) if !license.is_empty());
+    if origin.license_required() && !licensed {
+        errors.push(GrammarError::new(
+            "license",
+            "shipped and installed looks require a license",
+        ));
+    }
+    if !raw.fonts.files.is_empty() && !licensed {
+        errors.push(GrammarError::new(
+            "license",
+            "looks bundling font files require a license",
+        ));
     }
     errors
 }

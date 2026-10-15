@@ -11,7 +11,7 @@
 //! ```
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use scoot_look::{
     Origin, RenderInputs, check_contrast, render_bar, render_json, render_scoot, resolve,
@@ -42,25 +42,36 @@ fn parse_origin(s: &str) -> Origin {
 
 fn read_look_toml(dir: &Path) -> Vec<u8> {
     let path = dir.join("look.toml");
-    std::fs::read(&path).unwrap_or_else(|e| {
-        eprintln!("cannot read {}: {e}", path.display());
-        std::process::exit(1);
-    })
-}
-
-/// Refuse anything but a regular file inside `dir`: a symlink, device, FIFO
-/// or socket refuses the read (design section 8.3).
-fn check_regular_inside(dir: &Path, name: &str) -> PathBuf {
-    let path = dir.join(name);
+    // Refuse anything but a regular file inside `dir` (design section 8.3):
+    // symlinks first, so a link to anywhere outside the look never reads,
+    // then open once and check the opened handle, so the bytes validated
+    // are the bytes read. A swap between the two checks is still
+    // theoretically possible with plain `std`; what this closes is the old
+    // double-stat plus dead binding, where even the checked path was never
+    // the read one.
     let meta = std::fs::symlink_metadata(&path).unwrap_or_else(|e| {
         eprintln!("cannot stat {}: {e}", path.display());
         std::process::exit(1);
     });
-    if !meta.is_file() {
+    if meta.is_symlink() {
+        eprintln!("refused: {} is a symlink", path.display());
+        std::process::exit(1);
+    }
+    let mut file = std::fs::File::open(&path).unwrap_or_else(|e| {
+        eprintln!("cannot read {}: {e}", path.display());
+        std::process::exit(1);
+    });
+    if !file.metadata().map(|m| m.is_file()).unwrap_or(false) {
         eprintln!("refused: {} is not a regular file", path.display());
         std::process::exit(1);
     }
-    path
+    let mut bytes = Vec::new();
+    use std::io::Read as _;
+    file.read_to_end(&mut bytes).unwrap_or_else(|e| {
+        eprintln!("cannot read {}: {e}", path.display());
+        std::process::exit(1);
+    });
+    bytes
 }
 
 fn main() {
@@ -108,11 +119,18 @@ fn main() {
 }
 
 fn load_raw(dir: &Path) -> (scoot_look::RawLook, Vec<u8>) {
-    let path = check_regular_inside(dir, "look.toml");
-    let _ = path;
     let bytes = read_look_toml(dir);
     match scoot_look::parse_look_toml(&bytes) {
-        Ok(raw) => (raw, bytes),
+        Ok(raw) => {
+            // The look's `name` must match its directory name (site
+            // reference): a copy under another name does not validate.
+            let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if let Some(e) = scoot_look::check_name_matches_dir(&raw, dir_name) {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
+            (raw, bytes)
+        }
         Err(errors) => {
             for e in errors {
                 eprintln!("error: {e}");

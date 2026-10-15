@@ -82,12 +82,54 @@ color = "#2B3648"
 | `wallpaper` | One unit, never merged per key: `image` or `color`, never both. `image` is a path inside the look dir, or `https://` plus a required 64-hex `sha256`. `mode`: `fill`, `fit`, `stretch`, `center` or `tile`. `fill`: default = `background`. `transition`: `none`, `fade`, `wipe` or `grow`. |
 | `icons` | `theme`: name. Default `Adwaita`. |
 | `night` | `temperature`: 1000 to 10000. |
-| `apps.<app>` | Per-app overrides. Each key is the app's own dotted config key, quoted. Only allowlisted keys parse: `scoot` takes its appearance, cursor and wallpaper keys; `scootbar` takes its six colors, bar style and per-module visual keys; `scootnotify`, `scootlaunch` and `scootgreet` take the thirteen color roles plus face, size, opacity and radius. Anything else refuses by name. |
+| `apps.<app>` | Per-app overrides. Each key is the app's own dotted config key, quoted. Only allowlisted keys parse, and each key's value is checked against its kind (see below). Anything else refuses by name. `name` must match the look directory name. |
 
 ```toml
 [apps.scootbar]
 "workspaces.inactive-color" = "#B595AD"
 ```
+
+### Per-app override keys and values
+
+`scoot` takes its appearance, cursor and wallpaper keys, plus
+per-output and per-workspace wallpaper overrides of the form
+`wallpaper.output.<name>.<leaf>`,
+`wallpaper.workspace.<name>.<leaf>` and
+`wallpaper.output.<name>.workspace.<name>.<leaf>`, where `<leaf>`
+is one of `image`, `color`, `mode`, `fill`, `transition`.
+Output and workspace names hold 1 to 64 ASCII letters, digits,
+spaces and `_.+-`. Anything else in the suffix refuses, as does any
+key with a newline, `=`, `[` or quote. The renderer quotes every
+key on top of that.
+
+`scootbar` takes its six colors, bar style and per-module visual
+keys. `scootnotify`, `scootlaunch` and `scootgreet` take the thirteen
+color roles plus face, size, opacity and radius.
+
+Every allowlisted key has a value kind, checked at parse. There is
+no key whose value gets only a length check.
+
+| Key | Value |
+|---|---|
+| color keys (`appearance.*_color`, `colors.*`, `wallpaper.color`, `wallpaper.fill`, `workspaces.*-color`) | exactly `#rrggbb` |
+| `appearance.focus_ring_width`, `appearance.focus_ring_inactive_width`, `appearance.corner_radius` | whole number, 0 to 64 |
+| `appearance.cursor_size` | whole number, 4 to 256 |
+| `appearance.cursor_theme`, `bar.font`, shell `font` | identifier (see Values) |
+| `wallpaper.image` and its per-output/workspace leaves | relative image path (see below); never a URL |
+| `wallpaper.mode` and its leaves | `fill`, `fit`, `stretch`, `center` or `tile` |
+| `wallpaper.transition` and its leaves | `none`, `fade`, `wipe` or `grow` |
+| `bar.radius`, `bar.popup-radius` | whole number, 0 to 512 |
+| `bar.opacity`, shell `opacity` | number, 0 to 1 |
+| `bar.fallback-fonts` | array of up to 2 identifier strings |
+| `bar.font-size`, shell `font-size` | whole number, 1 to 256 |
+| `bar.padding`, `bar.spacing`, `bar.separator` | whole number, 0 to 1024 |
+| `workspaces.item-gap` | whole number, 0 to 1024 |
+| `workspaces.display` | `numbers` or `dots` |
+| `window-title.icon` | glyph string (see Values) |
+| shell `radius` | whole number, 0 to 64 |
+
+A URL wallpaper cannot be overridden per app: its `sha256` pin has
+no place in an override, so per-app `image` values refuse URLs.
 
 ## extends
 
@@ -100,23 +142,31 @@ unit. Resolution refuses unknown names, cycles, chains deeper than
 
 Every string is bounded, because look strings land in line-based
 app configs where some keys run code. Names (`name`, `extends`):
-`[a-z0-9-]{1,32}`. Identifiers (font families, theme names):
+`[a-z0-9-]{1,32}`, and `name` must match the look directory name.
+Identifiers (font families, theme names):
 ASCII letters, digits, space and `-_.+`, 1 to 64 bytes, starting
 with a letter or digit, so never `.` or `..`. ASCII-only in v1:
 a look that needs a non-Latin family name carries the file in
 `fonts.files`. Display text (`title` to 64 bytes, `description`,
 `credits`, `license` to 200): no control characters and no `=`,
-`[`, `]`, `"` or `\`. Glyph strings: 1 to 8 characters, no
+`[`, `]`, `"` or `\`. Glyph strings (such as
+`window-title.icon`): 1 to 8 characters, no
 control, format or ASCII punctuation characters. Paths: relative,
-no `..`, no leading `/`; the file must sit inside the look dir.
+normalized (no `.`, `..`, `//` or trailing `/`), no leading `/`;
+the file must sit inside the look dir. `preview`, when set, is
+exactly `preview.png`. A look bundling files in `fonts/` names
+their `license`, whatever its origin.
 NUL refuses everywhere. The whole file caps at 64 KiB.
 
-Wallpaper URLs take `https://` only, to 2048 bytes, with a host
-that is a DNS name with a dot: no userinfo, IP literal, port,
+Wallpaper URLs take `https://` only, to 2048 bytes: printable
+ASCII with no spaces or control characters, and never `?`, `#`
+or `%`. The host is a DNS name with a dot: no userinfo, IP
+literal (dotted, decimal, octal, hex or IPv6), port,
 `localhost` or local name. The host lowercases and strips one
 trailing dot before those checks. A public name can still resolve
 to a private address, so someone else's look fetches at install
-time, never at swap time.
+time, never at swap time. A URL wallpaper requires a `sha256`
+pin of exactly 64 hex digits.
 
 ## Contrast
 
@@ -134,6 +184,8 @@ refuses.
 corner radius and the wallpaper unit. `bar.toml` carries the six
 bar colors, radius, `popup-radius` (only when the target binary
 has the `popup` feature), opacity, font and font size.
+Per-app overrides merge into those tables: each section renders
+once, with the override winning, so every fragment reparses.
 `render.json` names the source, its hash and the resolved inputs
 (font files, wallpaper path). The inputs come from the
 environment: the tool resolves font files and the wallpaper's
@@ -149,9 +201,16 @@ scoot-look build ./moonrise --out /tmp/moonrise --wallpaper-abs /tmp/moonrise/wa
 ```
 
 `validate` refuses malformed files, unknown keys, values outside
-the grammar, non-allowlisted `[apps.*]` keys and contrast
-shortfalls per origin. `build` writes `scoot.toml`, `bar.toml`
-and `render.json` into the output dir. On Nix the same binary
+the grammar, non-allowlisted `[apps.*]` keys, per-key value
+mismatches, a `name` that does not match the directory, and
+contrast shortfalls per origin. `validate` skips contrast for a
+look with `extends`: without the catalog only single-file looks
+resolve here. `build` takes a single source without `extends`
+and refuses one with it; resolve the catalog first. `build`
+writes `scoot.toml`, `bar.toml`
+and `render.json` into the output dir. Both read `look.toml`
+only through a regular file: symlinks, devices, FIFOs and
+sockets refuse. On Nix the same binary
 runs inside the render derivation with the look's font packages
 as build inputs. Exit nonzero names the field and the reason.
 
