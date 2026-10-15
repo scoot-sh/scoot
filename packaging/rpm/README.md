@@ -4,8 +4,7 @@ Three spec files, one per shipped binary, built from the vendored-sources
 tarball (`scripts/vendor-release.sh`: the tagged tree plus `vendor/`,
 `.cargo/config.toml` and `THIRD-PARTY-LICENSES`, so the build is offline).
 Nothing here is published anywhere: there is no COPR project, no repo, no
-tag, no release in CI or out of it. The COPR layout below is designed and
-documented only (the ticket's second half is a host account away).
+tag, no release in CI or out of it.
 
 | Spec | Package | Source tag | Version follows |
 |---|---|---|---|
@@ -20,8 +19,7 @@ client library inside the `scoot` binary (`scoot msg`). `scoot` requires exactly
 the coupled pair installs at one version, and the bar requires no
 compositor package at all (standard Wayland protocols only).
 
-Why a hand-written spec and not `cargo-generate-rpm`: the ticket allows
-either, and the generated file would need the same hand edits anyway
+Why a hand-written spec and not `cargo-generate-rpm`: the generated file would need the same hand edits anyway
 (the session entry, the session user units, the portal selection, the
 bar's user unit, the license set including the
 deny-generated inventory, the vendored offline build, the versioned
@@ -140,9 +138,8 @@ carry no `ExclusiveArch`, so the same SRPM builds on either.
 
 ## The COPR-style repository (designed, not created)
 
-Level 1 asks for repo-hosted RPMs published through a hosted build
-service, with Fedora's COPR as the obvious host — and explicitly not to
-assume its terms, chroots or architecture coverage. What was checked,
+RPMs published through a hosted build
+service, with Fedora's COPR as the host. What was checked,
 and what stays manual:
 
 - **Layout.** One COPR project (e.g. `scoot-sh/scoot`) holding one
@@ -190,8 +187,7 @@ and what stays manual:
 builds all three specs with `rpmbuild -ba` in each, lints every built RPM
 with `rpmlint`, installs the trio, and runs `scoot --version`,
 `scootbg --version`, `scootbar --version`, `scootbar daemon --check` on
-the shipped example, and — in the Fedora container only, which is what
-the ticket's "done when" names — the headless smoke test
+the shipped example, and — in the Fedora container only — the headless smoke test
 (`scripts/smoke-test.sh`) against the installed binaries. The
 `desktop-file-validate` gate on the session entry also runs in the
 Fedora container only: the file is identical in both jobs, and

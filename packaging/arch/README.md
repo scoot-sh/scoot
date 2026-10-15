@@ -1,9 +1,7 @@
 # Arch Linux packages
 
-Six PKGBUILDs, one per shipped binary in each of the two lines the
-ticket ([arch-package](../../docs/backlog/resolved/arch-package-done.md))
-asks for: a release build from the tagged tarball, and a `-git` build
-tracking `main`. Nothing here is published anywhere: there is no AUR
+Six PKGBUILDs, one per shipped binary in each of two lines: a release
+build from the tagged tarball, and a `-git` build tracking `main`. Nothing here is published anywhere: there is no AUR
 push, no tag, no release in CI or out of it. AUR submission stays a
 manual maintainer step (below).
 
@@ -29,12 +27,10 @@ compositor package at all (standard Wayland protocols only).
 ## Dependencies, from data
 
 `depends` is the `ldd`-derived list from the site's packaging page
-(`site/src/content/docs/reference/packaging.md`), not memory: the
+(`site/src/content/docs/reference/packaging.md`): the
 compositor links `libinput.so.10`, `libseat.so.1`, `libudev.so.1`,
 `libpixman-1.so.0`, `libxkbcommon.so.0`, and the wallpaper daemon and
-the bar link nothing past the C library (measured on an aarch64
-release build: `scoot` 6.5 MB with those five sonames, `scootbg`
-1.6 MB and `scootbar` 2.4 MB libc-only). The Arch package names:
+the bar link nothing past the C library. The Arch package names:
 
 - `libseat.so.1` comes from **`seatd`**, not `libseat`: Arch renamed
   the package (it `Provides: libseat.so`, `Replaces: libseat`), on
@@ -57,8 +53,8 @@ release build: `scoot` 6.5 MB with those five sonames, `scootbg`
 
 `namcap` is clean on errors; the remaining warnings are each
 explained, not waived: `scootbg` on the `scoot` packages reads as
-unneeded because it is a spawned program dependency (the lockstep
-pair), not a linked library, which a linkage linter cannot see.
+unneeded because it is a spawned program dependency,
+not a linked library, which a linkage linter cannot see.
 
 ## Installed files
 
@@ -86,23 +82,20 @@ pair), not a linked library, which a linkage linter cannot see.
   starting `bar.toml.example` (proven valid: `scootbar daemon --check`
   prints `ok`).
 
-Two deliberate packaging choices, both namcap-driven: `options=('!debug')`
+`options=('!debug')`
 everywhere (the auto-split `-debug` subpackages ship a build-id symlink
 into the main package that a per-package lint reads as dangling, and
 carry no value for AUR users), and the `-git` packages install their
 licenses under their own name (`/usr/share/licenses/scoot-git/`, where
 namcap requires them) while their docs follow the provided name
-(`/usr/share/doc/scoot/`, which the install notes reference).
+(`/usr/share/doc/scoot/`).
 
 ## Architectures
 
 `arch=('x86_64' 'aarch64')`: Arch Linux ARM carries the same package
-names for every dependency above (`seatd`, `cargo-deny` verified
-against its own package index), and the tree already ships
-`aarch64-linux` release binaries from the same source, so the ARM
+names for every dependency above (`seatd` verified against its package index), so the ARM
 build is the same compile. CI builds `x86_64` only (the `archlinux`
-container image ships no ARM variant); the `aarch64` entry is one
-line to drop if it ever misbehaves.
+container image ships no ARM variant).
 
 ## Cutting a release (maintainer)
 
