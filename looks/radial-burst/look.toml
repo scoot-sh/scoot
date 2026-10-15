@@ -30,12 +30,10 @@ mono = "DejaVu Sans Mono"
 size = 12.5 # renders the example bar font-size 17
 
 [opacity]
-# 1.0 until look-layer-scoot's pixman benchmark passes; the example uses 0.88.
-bar = 1.0
+bar = 0.88
 
 [shape]
-# 0 until look-layer-scoot's pixman benchmark passes; the example uses 16.
-radius = 0
+radius = 16
 ring-width = 2
 ring-inactive-width = 2
 

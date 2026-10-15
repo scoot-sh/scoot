@@ -129,24 +129,33 @@ fn every_shipped_look_validates_and_renders() {
             toml::from_str(&scoot).unwrap_or_else(|e| panic!("{name}: scoot.toml reparse: {e}"));
         let bar: toml::Value =
             toml::from_str(&bar).unwrap_or_else(|e| panic!("{name}: bar.toml reparse: {e}"));
-        // R3 (design D15): radius and bar opacity hold at 0 and 1.0 until
-        // look-layer-scoot's pixman benchmark passes; the examples' values
-        // sit beside them as comments in each look.toml. Locked here so
-        // raising them is a test change in that ticket's PR.
+        // D15 decided yes (2026-10-14) with look-layer-scoot's pixman
+        // benchmark as the condition: ~+5-6% per frame (~6-12 us at 1, 10
+        // and 50 windows on pixman, release build), acceptable. The shipped
+        // looks carry the examples' shape and opacity, locked per look so
+        // a retune shows up as a test change.
+        let (corners, bar_opacity) = match *name {
+            "ginger-night" => (14, 0.82),
+            "moonrise" => (14, 0.82),
+            "music-desk" => (14, 0.7),
+            "radial-burst" => (16, 0.88),
+            "vinyl-sunset" => (12, 0.78),
+            _ => panic!("unexpected shipped look {name}"),
+        };
         assert_eq!(
             scoot["appearance"]["corner_radius"].as_integer(),
-            Some(0),
-            "{name}: corner_radius holds at 0"
+            Some(corners),
+            "{name}: corner_radius holds the example value"
         );
         assert_eq!(
             bar["bar"]["radius"].as_integer(),
-            Some(0),
-            "{name}: bar radius holds at 0"
+            Some(corners.min(14)),
+            "{name}: bar radius holds the example value (clamped to the bar limit)"
         );
         assert_eq!(
             bar["bar"]["opacity"].as_float(),
-            Some(1.0),
-            "{name}: bar opacity holds at 1.0"
+            Some(bar_opacity),
+            "{name}: bar opacity holds the example value"
         );
         // Without `--ui-font-file` the bar fragment carries no `font` key
         // (scootbar's is a file path, not the family name), so the bar
