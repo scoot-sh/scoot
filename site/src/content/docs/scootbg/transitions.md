@@ -5,8 +5,7 @@ description: "Animate a wallpaper change on scootbg — fade, wipe, grow, durati
 
 Animate the change from one wallpaper to the next, instead of landing
 at once: a fade, a wipe, or a grow, with a duration and an easing
-curve. It costs at most two extra buffers while it runs (one, where
-the compositor releases promptly) and nothing after.
+curve. It costs nothing after it runs.
 
 ```sh
 scootbg set '#101014' --transition fade --duration-ms 800
@@ -20,9 +19,7 @@ While a transition runs, `query` reports it: `"transition":"fade"`
 (`"wipe"`, `"grow"`, else `null`). `set` returns once the last frame
 is on screen, so a screenshot taken straight after shows the target —
 and a newer `set` mid-transition starts from the frame showing then,
-never queued behind the old one. How each kind paces and damages its
-frames is [below](#how-it-works); the raw protocol is in
-[README.md](https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/README.md#the-control-protocol).
+never queued behind the old one.
 
 ## Options
 
@@ -57,19 +54,14 @@ transition = "wipe"
 angle = "90"
 ```
 
-Each table stands alone, as for the wallpaper itself: an output's
+Each table stands alone: an output's
 change does not take the top level's transition, and an output with no
-table follows the top level. A section an older scootbg does not know
-these keys in is refused loudly (exit 2, the session carries on), while
-a `set` from a newer client on an older daemon shows the wallpaper
-without the animation.
+table follows the top level.
 
 ## The kinds
 
-**Fade** lerps every pixel from old to new — the simplest kind, and the
-most expensive per frame (about 5.4 ms at 1080p, 21.6 ms at 4K,
-measured; at 4K it holds time with fewer steps, see
-[below](#how-it-works)):
+**Fade** blends every pixel from old to new — the simplest kind, and the
+most expensive per frame:
 
 ```sh
 scootbg set '#101014' --transition fade --duration-ms 800 --easing smooth
@@ -92,31 +84,16 @@ output:
 scootbg set ~/Pictures/grid.png --transition grow --position 0,0
 ```
 
-At `t = 0` every pixel is old and at `t = 1` every pixel is new,
-exactly — no stray line of either side at either end.
-
 ## How it works
 
 CPU only, into `wl_shm`, one frame at a time: each frame blends the two
-endpoint buffers (shared references to pixels that already exist, never
-copies) into a full-size frame buffer — the third buffer the ticket
-budgets, 33 MB at 4K, with a second where the compositor releases
-lazily — and commits it with damage limited to what changed (the
+endpoint buffers into a full-size frame buffer, committed with damage
+limited to what changed (the
 whole buffer for a fade, the sweeping band for a wipe, the disc's box
-for a grow). Frames are paced by frame callbacks, with presentation
-feedback where the compositor offers `wp_presentation` (a discarded
-frame just jumps the clock ahead) and a 60 Hz timer covering the rest;
-the eased progress always comes from the clock, so a slow frame drops
-frames rather than falling behind, and a frame past its 8 ms budget
-skips the next one. At 1080p every kind holds 60 fps outright (2.4–5.4
-ms a frame, measured); at 4K a fade blends in 21.6 ms, a wipe in
-12.1 ms, a grow in 10.0 ms, so 4K transitions keep time with fewer
-steps instead of lagging. A restart snapshots what is on screen with one
-memcpy and starts from there. When the last frame lands, the final
+for a grow). A slow frame drops
+frames rather than falling behind. When the last frame lands, the final
 wallpaper goes on through the normal draw and every extra buffer is
-freed: an idle daemon costs what a static wallpaper costs (zero
-wakeups, measured). Allocation failure ends the transition at once at
-the final wallpaper — never wedged.
+freed: an idle daemon costs what a static wallpaper costs.
 
 > **Symptom:** *the change lands at once, no animation.*
 > No `--transition` on the request (the default is `none`), a zero

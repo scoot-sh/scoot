@@ -3,10 +3,8 @@ title: scootbg overview
 description: "The lightest wallpaper daemon for Wayland — color or image on each output, one command to change it."
 ---
 
-The lightest wallpaper daemon for Wayland, in place of `swaybg`,
-`hyprpaper`, `wpaperd` and friends. It shows a color or an image on
-each output, and one command changes it. It holds the wallpaper still
-while everything else slides around. Built for scoot and set up by
+The lightest wallpaper daemon for Wayland. It shows a color or an image on
+each output, and one command changes it. Built for scoot and set up by
 scoot's own config, but not tied to it: scootbg speaks only standard
 protocols, so it also runs on any compositor with
 `wlr-layer-shell-v1`.
@@ -44,8 +42,7 @@ color = "#101014"
 ```
 
 A link works where a path does: `image = "https://example.com/hills.jpg"`
-is downloaded once and cached by scootbg, so an example look can name
-an image nobody commits. `sha256` pins the download's bytes.
+is downloaded once and cached by scootbg. `sha256` pins the download's bytes.
 
 | Field | Type | Reload | Meaning |
 |---|---|---|---|
@@ -104,14 +101,10 @@ without a viewporter a full-size buffer. A static color asks for no frame
 callbacks and wakes the daemon for nothing.
 
 Once on screen a wallpaper costs no CPU (no wakeups in a minute, measured)
-and one buffer per output at most: about 4.0 MB RSS with a color, 36.8 MB
-with an image on a 4K output, and the same 36.8 MB with two 4K outputs
-showing it. The measured budget is in
+and one buffer per output at most. The measured budget is in
 [README.md](https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/README.md#the-resource-budget),
 and so is [the comparison](https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/README.md#against-the-other-daemons)
-with swaybg, awww, wbg and wpaperd on one machine. It is not yet the
-lightest on every row: awww holds 1.1–1.5 MiB less idle RSS (1.0–1.4 MiB
-PSS) above the output buffers. `scripts/scootbg-bench/bench.py` re-runs the comparison.
+with swaybg, awww, wbg and wpaperd on one machine. `scripts/scootbg-bench/bench.py` re-runs the comparison.
 
 
 

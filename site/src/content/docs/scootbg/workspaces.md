@@ -5,10 +5,9 @@ description: "Show a different wallpaper on each workspace with scootbg — set 
 
 A different wallpaper on each workspace: while workspace 2 is active,
 the outputs show one image; on workspace 1, another. It follows the
-standard `ext-workspace-v1` protocol scoot already speaks, so it works
+standard `ext-workspace-v1` protocol, so it works
 on any compositor with it — not only scoot — and costs nothing when
-unused (the daemon binds the protocol only while a mapping exists: no
-extra wakeups, verified idle).
+unused (the daemon binds the protocol only while a mapping exists).
 
 ```sh
 scootbg set '#1e1e2e'                              # the base, every output
@@ -19,7 +18,7 @@ scootbg query                                      # actives and mappings, one J
 ```
 
 Workspaces are named by the compositor: `"1"`, `"2"`, ... on scoot (the
-1-based position, as `query` lists it per output under `"workspace"`).
+1-based position).
 Other compositors announce their own names (`"web"`, `"code"`); the
 mapping keys on that string either way. On scoot the names are
 positions, not identities: closing the last window on workspace 3 drops
@@ -30,50 +29,37 @@ too.
 
 ## How switching works
 
-Switch workspaces as usual (keybinding, bar, `scoot msg action
-focus-workspace-index 1`): the output fades — or lands at once —
-through the transition the mapping was set with (`--transition fade`
-beside `--workspace`, as [`set` takes them](./cli.md#commands)). `query`
+Switch workspaces as usual: the output fades — or lands at once —
+through the transition the mapping was set with. `query`
 reports the switch the same way it does a `set`: `"shows"` is what is
-on screen, and `"workspace"` names the active one. A switch never waits
-for a client: there is no request in flight, so nothing answers — it
-just lands.
+on screen, and `"workspace"` names the active one.
 
 ```sh
 scootbg set ~/Pictures/calm.jpg --workspace 1 --transition fade --duration-ms 800
 scootbg set ~/Pictures/loud.jpg --workspace 2 --transition wipe --angle 90
 ```
 
-Each output switches on its own: on two outputs, workspace 2 on the
-left screen never disturbs the right one's. A mapping without
+Each output switches on its own. A mapping without
 `--output` covers every output; one with `--output` covers only that
 connector (kept by name, so it survives unplug and replug). Where both
-cover an output, and where the base `set` covers it too, the newest
-change wins — one timeline: a `set` newer than a `set --workspace`
-covers it until a still newer `set --workspace`. `clear --workspace`
-takes one mapping off (that output falls back to its own wallpaper);
-`clear` without it leaves the mappings in place under the newer clear.
+cover an output, the newest
+change wins. `clear --workspace`
+takes one mapping off;
+`clear` without it leaves the mappings in place.
 
 ## What it costs
 
-Switching must be instant, and decoding is not (about 400 ms for a 4K
-JPEG, measured): so every mapped image is decoded and scaled in the
+Switching must be instant, and decoding is not: so every mapped image is decoded and scaled in the
 background when it is set — and again when an output is reconfigured to
 a new size — and its buffers are kept while the mapping stands. The
-price is one output-sized buffer per mapped image per size: about
-33 MB at 3840×2160 `XRGB8888`, shared between outputs of one size
-showing one image (the second output costs a `wl_buffer`, not the
-pixels). Four workspaces with four 4K images hold about 132 MB over the
-floor; unmapped workspaces hold nothing, and `clear --workspace` frees
-its image's buffers at once. Colors cost nothing anywhere (no shared
-memory on compositors with single-pixel buffers). Past 64 live mappings
+price is one output-sized buffer per mapped image per size,
+shared between outputs of one size
+showing one image. Unmapped workspaces hold nothing, and `clear --workspace` frees
+its image's buffers at once. Colors cost nothing anywhere. Past 64 live mappings
 a `set --workspace` is refused naming the cap — clear one first.
 
 Mapping the same file on two workspaces decodes and holds it twice (one
-buffer per mapping per size): 64 mappings of one 4K file hold about
-64 × 33 MB. Each `set` re-reads the file (it may have changed), so the
-daemon never shares pixels between mappings by path; the 64-mapping cap
-bounds the worst case. Map colors, or fewer images, where memory is
+buffer per mapping per size). Map colors, or fewer images, where memory is
 tight.
 
 ## Animated images
@@ -93,20 +79,14 @@ A slideshow cannot be mapped per workspace:
 `set DIR --every DURATION --workspace NAME` is refused (usage error,
 exit 2) on the CLI and on the wire.
 
-A `--no-animate` still is live-only: the state file never persists the
-flag, so after a restart the caps are checked again and an over-cap
-mapping is refused then (the output shows its own wallpaper until the
-next `set --workspace`). A slideshow cannot be mapped per workspace at
-all: map images or colors per workspace instead. The `[wallpaper]` workspace
+A `--no-animate` still is live-only: after a restart the caps are checked
+again and an over-cap mapping is refused then. The `[wallpaper]` workspace
 tables always animate: there is no `animate` key, so if the caps refuse an
 animated file, map a still or a smaller file.
 
 Without the compositor's workspace protocol (sway has none), mappings
 are recorded and saved all the same, and apply once a compositor with
-one is: the base wallpaper shows meanwhile, and the daemon says so once
-on stderr. A group the compositor announces with zero outputs, or more
-than one, cannot say which output is on which workspace, so it is
-ignored (the base shows there) rather than guessed.
+one is: the base wallpaper shows meanwhile.
 
 ## Saved and restored
 
@@ -117,13 +97,9 @@ the next start — transition included.
 
 Scoot's `[wallpaper]` section manages the same mappings: `[wallpaper.workspace."2"]`
 for every output, `[wallpaper.output."DP-1".workspace."2"]` for one output
-alone, each with the same image/color keys plus transition keys as any
-other table, each standing alone. An empty workspace table takes that
+alone. An empty workspace table takes that
 mapping back off; a workspace table you remove from the section leaves its
-live mapping alone. Whichever you changed last wins: a `set --workspace`
-made since keeps showing until the section itself changes, and an unchanged
-reload repairs a mapping whose file came back. Mapped images are preloaded
-on apply, so the first switch is instant — see [the section](./index.md#the-wallpaper-section).
+live mapping alone. Whichever you changed last wins — see [the section](./index.md#the-wallpaper-section).
 
 > **Symptom:** *the workspace wallpaper never appears; the base stays.*
 > The compositor has no `ext-workspace-v1` (the daemon says so once on
