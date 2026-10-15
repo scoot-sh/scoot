@@ -51,7 +51,7 @@ an image nobody commits. `sha256` pins the download's bytes.
 |---|---|---|---|
 | `image` | string (path or URL) | live (re-applied) | A PNG, JPEG, GIF or WebP image. A path: `~` expands against `HOME`, a relative path resolves against the config file's directory. A URL (`http://`/`https://`): downloaded once and cached — see [Wallpaper from a link](./from-url.md). |
 | `color` | string (`"#rrggbb"`) | live (re-applied) | A solid color. `image` or `color`, never both; neither is nothing (the compositor's own `background_color`). |
-| `mode` | string | live | With an `image` only: `fill` (cover and crop), `fit` (letterbox with `fill`), `stretch`, `center`, `tile`. |
+| `mode` | string | live | With an `image` only: `fill` (cover and crop), `fit` (letterbox with the fill color), `stretch`, `center`, `tile`. |
 | `fill` | string (`"#rrggbb"`) | live | With an `image` only: the color around a `fit` or `center` image. |
 | `filter` | string | live | With an `image` only: `lanczos3`, `catmull-rom`, `bilinear` or `nearest`. |
 | `sha256` | string (64 hex digits) | live (re-downloads) | With a URL `image` only: the download's expected SHA-256. Anything else fails instead of showing. Refused beside a path. |
@@ -64,6 +64,10 @@ an image nobody commits. `sha256` pins the download's bytes.
 | `workspace."NAME"` | table | live | The same keys while workspace `NAME` is active, on every output (the name is what the compositor announces: `"1"`, `"2"`, ... on scoot). Each workspace table stands alone: it takes no other table's `mode` or `transition`. An empty table takes that mapping back off. Absent tables leave live mappings alone. |
 | `output."NAME".workspace."WS"` | table | live | The same keys while workspace `WS` is active on output `NAME` alone. Within one section, where both it and `workspace."WS"` name one output, this table wins for that output (it applies after the global one). Against `set --workspace` the newest change wins. |
 | `command` | string | live | The `scootbg` to run. Default `"scootbg"` on `PATH`; the Nix modules set it to the installed package's store path. |
+
+Limits: at most 256 outputs, 64 workspace mappings in a section, and
+63 KiB of JSON per section; transition keys (`duration-ms`, `easing`,
+`angle`, `position`) without a `transition` are refused.
 
 **Whichever you changed last wins.** Edit `[wallpaper]` (and start or
 reload scoot): the config's wallpaper shows, workspace mappings included.
@@ -106,8 +110,8 @@ showing it. The measured budget is in
 [README.md](https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/README.md#the-resource-budget),
 and so is [the comparison](https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/README.md#against-the-other-daemons)
 with swaybg, awww, wbg and wpaperd on one machine. It is not yet the
-lightest on every row: awww holds 1.0–1.6 MiB less idle memory above the
-output buffers. `scripts/scootbg-bench/bench.py` re-runs the comparison.
+lightest on every row: awww holds 1.1–1.5 MiB less idle RSS (1.0–1.4 MiB
+PSS) above the output buffers. `scripts/scootbg-bench/bench.py` re-runs the comparison.
 
 
 
@@ -115,7 +119,7 @@ output buffers. `scripts/scootbg-bench/bench.py` re-runs the comparison.
 
 One daemon per display: its socket is
 `$XDG_RUNTIME_DIR/scootbg-NAME.sock`, `NAME` being the last component of
-`$WAYLAND_DISPLAY`. A second `scootbg daemon` refuses while one runs, and
+`$WAYLAND_DISPLAY` (`wayland-0` when it is unset or empty). A second `scootbg daemon` refuses while one runs, and
 a socket left by a dead one is replaced. It exits 0 on `kill` and 1 when
 the compositor goes away, removing its socket either way. A signal
 (SIGTERM, Ctrl-C) ends it on the spot and leaves the socket file; the other

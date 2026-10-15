@@ -85,8 +85,10 @@ keep working unchanged.
 | `/scootbg/` (overview) | Solid color vs image, daemon and socket, what it costs | `docs/nix.md` The wallpaper; `docs/scootbg/cli.md` Commands, The daemon and its socket, What it costs |
 | `/scootbg/images` | Images and colors, scaling | `docs/scootbg/cli.md` Colors and images, Scale |
 | `/scootbg/outputs` | One output or every output | `docs/scootbg/cli.md` One output or every output |
-| `/scootbg/from-url` | From a link and the cache — in flight on branch `feat/wallpaper-from-url` (another worktree; describe the shipped behavior, not the branch) | That work's docs when it merges |
-| `/scootbg/restore` | Restore on login, apply-config, query | `docs/scootbg/cli.md` Restore, `apply-config`, `query`, When a command returns |
+| `/scootbg/from-url` | From a link and the cache | `crates/scootbg/src/fetch.rs`; `site/src/content/docs/scootbg/from-url.md` |
+| `/scootbg/restore` | Restore on login (`apply-config` and `query` live in `/cli`) | `docs/scootbg/cli.md` Restore; `site/src/content/docs/scootbg/restore.md` |
+| `/scootbg/transitions` | Transitions between wallpapers | `site/src/content/docs/scootbg/transitions.md` |
+| `/scootbg/workspaces` | A wallpaper per workspace | `site/src/content/docs/scootbg/workspaces.md` |
 | `/scootbg/cli` (reference) | Complete flags and exit statuses | `docs/scootbg/cli.md` Commands, When a command returns |
 | `/scootbg/troubleshooting` | Wallpaper symptoms ("image not filling", "restore lost it") | `docs/scootbg/cli.md` failure modes |
 

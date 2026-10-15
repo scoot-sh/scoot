@@ -11,7 +11,8 @@ description: "The wallpaper comes back at the next start: profiles, state files,
 is saved, per output (the choice for every output, and each one made with
 `--output NAME`), in a state file, `$XDG_STATE_HOME/scootbg/PROFILE`
 (`~/.local/state/scootbg/PROFILE` when `XDG_STATE_HOME` is unset or not
-absolute), and `scootbg daemon` shows it again when it starts:
+absolute; with neither it nor `HOME` absolute there is nowhere to keep
+state, and nothing is restored or saved), and `scootbg daemon` shows it again when it starts:
 
 - **A profile, not a display, names the state.** `--profile NAME` picks
   it (default `default`): 1 to 64 of `A-Z a-z 0-9 . _ -`, not starting
@@ -49,7 +50,8 @@ absolute), and `scootbg daemon` shows it again when it starts:
   and a `set` or `clear` then updates it as usual, keeping the rest.
 - **A state file it cannot use never stops the daemon.** A malformed line
   (or one whose path is not UTF-8) is skipped with a warning and the rest
-  is used; a file that is not one (no `scootbg-state 1` or `scootbg-state 2` first line, over
+  is used; a file that is not one (no `scootbg-state N` first line
+  (versions 1–3), over
   256 KiB) restores nothing and is replaced at the next save; a newer
   scootbg's format (a later version) restores nothing and is never
   written over; an unreadable one restores nothing, and nothing is saved

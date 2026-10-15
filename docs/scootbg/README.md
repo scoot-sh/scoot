@@ -12,7 +12,7 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 > `unsafe` in `crates/scootbg-mem/`): `scootbg daemon` connects, tracks
 > every output as it comes and goes, and gives each one a `background`
 > layer surface. **Solid colors and images work**: `scootbg set '#rrggbb'`
-> or `scootbg set PATH` (PNG, JPEG, WebP) with a fit mode, on every output
+> or `scootbg set PATH` (PNG, JPEG, GIF, WebP) with a fit mode, on every output
 > or one (`--output NAME`), and `scootbg clear`, drawn at each output's
 > real device pixels, fractional scales included; `query` reports what
 > each output shows, and `version` and `kill` work. **The wallpaper is
@@ -37,7 +37,7 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   on each compositor, where awww holds 1.0–1.5 MiB less), is waived for
   v1 by the user (2026-09-28); every other row is a win or a tie
   ([the comparison](#against-the-other-daemons)).
-- **Colors and images.** A solid color or a PNG, JPEG or WebP image per
+- **Colors and images.** A solid color or a PNG, JPEG, GIF or WebP image per
   output — a file, or an `http(s)` URL downloaded once and cached —
   changed live with one command and restored at login. That is
   v1.
@@ -49,7 +49,7 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   at most (outputs of one size showing one image share one), no file
   descriptor held per buffer, and the decoded source image dropped once it
   is scaled. Measured: [the resource budget](#the-resource-budget).
-- **GPU-free.** Decoding, scaling and (later) transitions all run on the CPU
+- **GPU-free.** Decoding, scaling and transitions all run on the CPU
   into `wl_shm` buffers, the same bar the compositor holds itself to for
   webtop and no-GPU boxes. A GPU path, if ever, is an optional tier.
 - **Sharp at any scale.** Buffers are drawn at the output's real device
@@ -62,8 +62,9 @@ Transitions (fade, wipe with an angle, grow from a point, and `none`,
 with a duration and an easing curve) work: `scootbg set ... --transition
 fade`, the five `[wallpaper]` keys, and the control protocol's transition
 fields ([below](#the-control-protocol),
-[Transitions](https://www.scoot.sh/scootbg/transitions/)). Animated
-images (GIF, APNG, animated WebP) are the next milestone, not v1. They are
+[Transitions](https://www.scoot.sh/scootbg/transitions/)). Frame-by-frame
+playback of animated images (GIF, APNG, animated WebP — currently shown
+as first-frame stills) is the next milestone, not v1. They are
 the features people move to
 awww for, and they are also a steady CPU cost under a software renderer,
 so they arrive once the static path is measured and they can be held to a
@@ -104,7 +105,7 @@ scootbg daemon --profile sway                  # ... restoring and saving the `s
 Every command above works today (`set` also takes `--filter
 lanczos3|catmull-rom|bilinear|nearest`, and `daemon` `--no-restore`), and
 so does the `[wallpaper]` section. The
-[command reference](cli.md) has the details (exit codes, what
+[command reference](https://www.scoot.sh/scootbg/cli/) has the details (exit codes, what
 `set` waits for). One binary: `daemon` runs the Wayland client, every
 other subcommand talks to it over its socket.
 
@@ -294,7 +295,7 @@ scootbg apply-config --profile scoot '{}'     # the section is gone: clear
 
 | Key | |
 |---|---|
-| `image` | an absolute path (scoot resolves `~/` and relative paths against its config file first), or an `http(s)` URL (downloaded once and cached: [cli.md](cli.md#a-wallpaper-from-a-link)) |
+| `image` | an absolute path (scoot resolves `~/` and relative paths against its config file first), or an `http(s)` URL (downloaded once and cached: [from a link](https://www.scoot.sh/scootbg/from-url/)) |
 | `color` | `#rrggbb`; `image` or `color`, never both; neither is nothing (the compositor's own background) |
 | `mode`, `fill`, `filter` | with an `image` only, as `scootbg set` takes them: `fill`/`fit`/`stretch`/`center`/`tile`, `#rrggbb`, `lanczos3`/`catmull-rom`/`bilinear`/`nearest` |
 | `transition`, `duration-ms`, `easing`, `angle`, `position` | how the next change arrives, as `scootbg set` takes them: `none`/`fade`/`wipe`/`grow`, milliseconds as digits, an easing curve, a wipe's degrees, a grow's `X,Y`; without a `transition` refused, with an explicit `none` ignored |
