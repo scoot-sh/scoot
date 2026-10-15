@@ -272,13 +272,17 @@ Then log out and pick **scoot** on your login screen.
   `scoot-session`.
 - `--look` installs the five [looks](../../scoot/theming/) under
   `<prefix>/share/scoot/looks` and applies one with `scoot look apply`.
-  Your `config.toml` and `bar.toml` are never written, only read: a file
-  still identical to an older `--look` run has its look keys removed so
-  the layer shows through, and anything else is left alone while `apply`
-  names the keys shadowing the look. Under `sudo` the apply runs as the
-  invoking user. A re-run that is already up to date still installs the
-  catalog and applies a `--look` you name (without downloading
-  anything); without `--look` it changes nothing.
+  Your `config.toml` and `bar.toml` are never written, only read: the
+  apply runs first, and only when it succeeds does a file still
+  identical to an older `--look` run have its look keys removed so the
+  layer shows through. A refused apply (a missing font, usually) leaves
+  your files alone. Anything else is left alone while `apply` names the
+  keys shadowing the look, and a symlinked config is always left alone.
+  Under `sudo` the apply runs as the invoking user. A re-run that is
+  already up to date still installs the catalog and applies a `--look`
+  you name (without downloading anything); without `--look` it changes
+  nothing. Releases before v0.3.0 have no looks: `--look` then installs
+  the binaries and says so instead of failing.
 - Re-running the script updates: it installs the newest tagged release,
   or says `already up to date (<version>)` and changes nothing
   (`--force` reinstalls anyway). "Up to date" is per destination:

@@ -2,8 +2,10 @@
 # Installer gate: runs public/install.sh against a fake release tree
 # (file:// URLs, stub binaries, stub session files), so the script's
 # paths, checksum refusal, no-tag failure, up-to-date rerun, --check,
-# --force, look handling, uninstall and missing-library/font report are
-# proved without the network. shellcheck runs first when it is on PATH
+# --force, look handling (a refused apply migrates nothing, symlinks are
+# skipped, the swap is atomic, pre-looks releases degrade with one
+# note), uninstall and missing-library/font report are proved without
+# the network. shellcheck runs first when it is on PATH
 # (CI provides it). `pnpm test-install`; CI's docs-site job.
 set -eu
 
@@ -53,13 +55,19 @@ echo "$2"
 EOF
     chmod +x "$1"
 }
-mkdir -p "$f/dl/scoot-v0.1.0" "$f/dl/scootbar-v0.2.0" "$f/dl/v0.3.0"
+mkdir -p "$f/dl/scoot-v0.1.0" "$f/dl/scootbar-v0.2.0" "$f/dl/v0.3.0" "$f/dl/v0.2.1"
 scoot_stub "$f/dl/scoot-v0.1.0/scoot-0.1.0-$arch" "scoot 0.1.0"
 stub "scootbg 0.1.0" "$f/dl/scoot-v0.1.0/scootbg-0.1.0-$arch"
 stub "scootbar 0.2.0" "$f/dl/scootbar-v0.2.0/scootbar-0.2.0-$arch"
 scoot_stub "$f/dl/v0.3.0/scoot-0.3.0-$arch" "scoot 0.3.0"
 stub "scootbg 0.3.0" "$f/dl/v0.3.0/scootbg-0.3.0-$arch"
 stub "scootbar 0.3.0" "$f/dl/v0.3.0/scootbar-0.3.0-$arch"
+# v0.2.1 ships no looks and its scoot knows no `look apply`: plain stubs,
+# so any apply attempt would show up as a missing stub-scoot-calls file
+# check below rather than a refusal.
+stub "scoot 0.2.1" "$f/dl/v0.2.1/scoot-0.2.1-$arch"
+stub "scootbg 0.2.1" "$f/dl/v0.2.1/scootbg-0.2.1-$arch"
+stub "scootbar 0.2.1" "$f/dl/v0.2.1/scootbar-0.2.1-$arch"
 for d in "$f"/dl/*; do (cd "$d" && sha256sum -- * >SHA256SUMS); done
 
 for ref in scoot-v0.1.0 v0.3.0; do
@@ -136,10 +144,22 @@ for ref in scoot-v0.1.0 v0.3.0; do
     printf '#!/bin/sh\n' >"$r/docs/examples/ginger-night/load.sh"
     printf 'moon\n' >"$r/docs/assets/wallpapers/moonrise.png"
 done
+# v0.2.1 has no looks/ tree and no docs/examples: the session files only,
+# like the real release before looks shipped in v0.3.0.
+r=$f/raw/v0.2.1
+mkdir -p "$r/resources/systemd/user" "$r/packaging/deb"
+printf '#!/bin/sh\n' >"$r/resources/scoot-session"
+printf '[preferred]\n' >"$r/resources/scoot-portals.conf"
+printf '[Service]\nExecStart=@SCOOT_BIN@ --tty\n' >"$r/resources/systemd/user/scoot.service"
+printf '[Unit]\n' >"$r/resources/systemd/user/scoot-session.target"
+printf '[Unit]\n' >"$r/resources/systemd/user/scoot-shutdown.target"
+printf '[Desktop Entry]\nExec=/usr/bin/scoot-session\n' >"$r/packaging/deb/scoot.desktop"
+printf '[Unit]\nPartOf=graphical-session.target\nAfter=graphical-session.target\n[Service]\nExecStart=/usr/bin/scootbar daemon\n[Install]\nWantedBy=graphical-session.target\n' >"$r/packaging/deb/scootbar.service"
 printf '[{"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0", "body": "compare scoot-v9.9.9 and scootbar-v9.9.9"}]' >"$f/tags.json"
 printf '[{"tag_name": "v0.3.0"}, {"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0"}]' >"$f/tags-unified.json"
 printf '[{"tag_name": "scoot-v0.1.1"}, {"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0"}]' >"$f/tags-new.json"
 printf '[]' >"$f/none.json"
+printf '[{"tag_name": "v0.2.1"}]' >"$f/tags-old.json"
 
 export SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl" SCOOT_INSTALL_RAW_URL="file://$f/raw"
 unset XDG_CONFIG_HOME XDG_DATA_HOME
@@ -287,6 +307,27 @@ grep -q "^tag=scoot-v0.1.0$" "$h/.local/share/scoot/install-version" || fail "re
 h=$work/h1
 ok "a refused apply fails last, after the install"
 
+# 1e2. A refused apply migrates nothing: configs still byte-identical to
+#      an earlier --look run's output are left alone, with no migration
+#      note, and the error still points at a re-run with --look.
+h=$work/h-fail-mig
+mkdir -p "$h/.config/scoot"
+sed "s|^image *= *\"[^\"]*\"|image = \"wallpaper.png\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/scoot.toml" >"$h/.config/scoot/config.toml"
+sed "s|\"cpu.sh\"|\"$h/.config/scoot/cpu.sh\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/bar.toml" >"$h/.config/scoot/bar.toml"
+cp "$h/.config/scoot/config.toml" "$work/fail-mig-config.before"
+cp "$h/.config/scoot/bar.toml" "$work/fail-mig-bar.before"
+export SCOOT_STUB_APPLY_FAIL="font Fake is not installed"
+if run_in "$h" --look moonrise; then fail "a refused apply with migratable configs exited 0"; fi
+unset SCOOT_STUB_APPLY_FAIL
+grep -q "was not applied" "$work/out" || fail "no refused-apply error with migratable configs"
+grep -q "re-run with --look" "$work/out" || fail "no re-run pointer with migratable configs"
+if grep -Fq "migrated $h/.config/scoot/config.toml" "$work/out"; then fail "refused apply migrated config.toml"; fi
+if grep -Fq "migrated $h/.config/scoot/bar.toml" "$work/out"; then fail "refused apply migrated bar.toml"; fi
+cmp -s "$h/.config/scoot/config.toml" "$work/fail-mig-config.before" || fail "refused apply touched config.toml"
+cmp -s "$h/.config/scoot/bar.toml" "$work/fail-mig-bar.before" || fail "refused apply touched bar.toml"
+h=$work/h1
+ok "a refused apply leaves migratable configs byte-identical"
+
 # 2. A second look never overwrites the first, and a re-run updates
 #    its own files.
 mkdir -p "$h/.config/scoot"
@@ -333,6 +374,44 @@ fi
 grep -q 'command = \["top"\]' "$h/.config/scoot/bar.toml" || fail "plain command lost without rewrites"
 h=$work/h1
 ok "byte-identical configs migrate their look keys away"
+
+# 2d2. A migratable config that is a symlink is left alone, never written
+#      through: the link still points where it did, its target keeps its
+#      bytes, and the output says so. The regular migratable file beside
+#      it still migrates.
+h=$work/h-symlink
+mkdir -p "$h/.config/scoot" "$work/sym-target"
+sed "s|^image *= *\"[^\"]*\"|image = \"wallpaper.png\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/scoot.toml" >"$work/sym-target/real-config.toml"
+cp "$work/sym-target/real-config.toml" "$work/sym-target-config.before"
+ln -s "$work/sym-target/real-config.toml" "$h/.config/scoot/config.toml"
+sed "s|\"cpu.sh\"|\"$h/.config/scoot/cpu.sh\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/bar.toml" >"$h/.config/scoot/bar.toml"
+run_in "$h" --look moonrise || { cat "$work/out"; fail "symlink run"; }
+[ -L "$h/.config/scoot/config.toml" ] || fail "symlink was replaced"
+[ "$(readlink "$h/.config/scoot/config.toml")" = "$work/sym-target/real-config.toml" ] || fail "symlink retargeted"
+cmp -s "$work/sym-target/real-config.toml" "$work/sym-target-config.before" || fail "symlink target was written through"
+grep -Fq "left $h/.config/scoot/config.toml alone" "$work/out" || fail "no symlink note"
+if grep -q "^\[colors\]" "$h/.config/scoot/bar.toml"; then fail "regular file beside a symlink did not migrate"; fi
+h=$work/h1
+ok "a symlinked config is left alone, never written through"
+
+# 2d3. Migration swaps the stripped config in atomically: the migrated
+#      file is a new directory entry (a truncating rewrite would keep the
+#      inode), keeps its permission bits, and leaves no temp files.
+h=$work/h-atomic
+mkdir -p "$h/.config/scoot"
+sed "s|^image *= *\"[^\"]*\"|image = \"wallpaper.png\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/scoot.toml" >"$h/.config/scoot/config.toml"
+sed "s|\"cpu.sh\"|\"$h/.config/scoot/cpu.sh\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/bar.toml" >"$h/.config/scoot/bar.toml"
+chmod 600 "$h/.config/scoot/config.toml"
+ino_before=$(stat -c %i "$h/.config/scoot/config.toml" 2>/dev/null || stat -f %i "$h/.config/scoot/config.toml")
+run_in "$h" --look moonrise || { cat "$work/out"; fail "atomic run"; }
+ino_after=$(stat -c %i "$h/.config/scoot/config.toml" 2>/dev/null || stat -f %i "$h/.config/scoot/config.toml")
+[ "$ino_before" != "$ino_after" ] || fail "migration rewrote in place instead of swapping"
+mode_after=$(stat -c %a "$h/.config/scoot/config.toml" 2>/dev/null || stat -f %Lp "$h/.config/scoot/config.toml" 2>/dev/null)
+[ "$mode_after" = 600 ] || fail "migration changed mode 600 to $mode_after"
+if ls "$h/.config/scoot"/.scoot-migrate.* >/dev/null 2>&1; then fail "migration left temp files"; fi
+if grep -q "^\[appearance\]" "$h/.config/scoot/config.toml"; then fail "atomic run left look sections"; fi
+h=$work/h1
+ok "migration swaps atomically, keeping mode and leaving no temp files"
 
 # 2e. An edited file (one byte off the old output) is left alone, and
 #     the apply reply names the keys shadowing the look.
@@ -435,6 +514,24 @@ if releases=file://$f/tags-unified.json run_in "$h" --bar-version 0.3.0; then fa
 unset releases
 grep -q "retired" "$work/out" || fail "unified --bar-version names no retirement"
 ok "unified tag"
+
+# 4d. A release from before looks (v0.2.1: unified tag, no looks/ tree,
+#     a scoot with no `look apply`) degrades: --look installs the
+#     binaries with one plain note and exits 0, attempting no catalog and
+#     no apply.
+h=$work/h-old
+releases=file://$f/tags-old.json run_in "$h" --look ginger-night || { cat "$work/out"; fail "pre-looks install"; }
+unset releases
+[ "$("$h/.local/bin/scoot")" = "scoot 0.2.1" ] || fail "pre-looks scoot is not 0.2.1"
+[ "$("$h/.local/bin/scootbar")" = "scootbar 0.2.1" ] || fail "pre-looks bar is not 0.2.1"
+grep -q "has no looks" "$work/out" || fail "pre-looks run names no missing looks"
+grep -q "v0.3 or later" "$work/out" || fail "pre-looks run names no newer release"
+if grep -q "could not download the look catalog" "$work/out"; then fail "pre-looks run failed on the catalog"; fi
+[ ! -e "$h/.local/share/scoot/looks" ] || fail "pre-looks run fetched a catalog"
+[ ! -e "$h/stub-scoot-calls" ] || fail "pre-looks run invoked the look-less scoot"
+grep -q "^tag=v0.2.1$" "$h/.local/share/scoot/install-version" || fail "pre-looks record has no tag"
+h=$work/h1
+ok "a pre-looks release installs binaries with one note"
 
 # 5. A file that fails its checksum installs nothing.
 echo tampered >>"$f/dl/scoot-v0.1.0/scootbg-0.1.0-$arch"

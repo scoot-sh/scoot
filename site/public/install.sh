@@ -16,7 +16,10 @@
 #   4. with --system, also adds "scoot" to your login screen;
 #   5. with --look, installs the shipped looks under the prefix's share
 #      dir and applies one with `scoot look apply` (your config files are
-#      never written, only read);
+#      never written, only read; old look configs migrate only after the
+#      apply succeeds, so a refused apply leaves them byte-identical).
+#      Releases before v0.3.0 have no looks: --look then installs the
+#      binaries and says so, once, instead of failing.
 #   6. lists any system library or font scoot still needs, with the one
 #      command to install them (it stays confirmation-based: add -y or
 #      --noconfirm yourself for a non-interactive run);
@@ -27,8 +30,9 @@
 #      for the same destination can say it is already up to date
 #      instead of downloading again (a different destination, or
 #      binaries gone from the recorded one, reinstalls). A re-run
-#      with --look still installs the catalog, migrates old look configs
-#      and applies the look when already up to date.
+#      with --look still installs the catalog and applies the look when
+#      already up to date, migrating old look configs only after the
+#      apply succeeds.
 #      It never replaces a file it did not
 #      install itself, such as one from a distro package.
 #
@@ -429,6 +433,22 @@ if [ "$with_bar" = 1 ]; then
     fi
 fi
 
+# Looks ship in v0.3.0 together: earlier unified releases have no looks/
+# tree and no `scoot look apply`. Detect that here, before anything is
+# downloaded or written, and degrade to a plain install with one note
+# instead of failing after the binaries land. (Per-package tags keep
+# the old behavior: their catalog fetch decides, since a per-package tag
+# can point at a commit new enough to carry looks.)
+if [ -n "$look" ] && [ "$unified" = 1 ]; then
+    look_major=${version%%.*}
+    look_rest=${version#*.}
+    look_minor=${look_rest%%.*}
+    if [ "$look_major" -eq 0 ] 2>/dev/null && [ "$look_minor" -lt 3 ] 2>/dev/null; then
+        note "this release ($scoot_tag) has no looks; use v0.3 or later for --look (installing the binaries only)"
+        look=""
+    fi
+fi
+
 # What is already installed (the record written by an earlier run, beside
 # the manifest). Absent before this change: then nothing is current.
 # bin_dir pins the record to its destination: a re-run with a different
@@ -732,13 +752,34 @@ migrate_look_configs() {
         for l in $LOOKS; do
             old_look_file "$l" "$which" "$tmp/old-$l-$which" || continue
             if cmp -s "$file" "$tmp/old-$l-$which"; then
+                # A symlink (home-manager, dotfiles) is never written
+                # through: its target is someone else's file. Leave it
+                # alone and say so.
+                if [ -L "$file" ]; then
+                    note "left $file alone (it is a symlink; migrate it by hand)"
+                    break
+                fi
                 if [ "$dry_run" = 1 ]; then
                     say "would migrate $file (still the $l example: remove its look keys)"
                     break
                 fi
-                strip_look_keys "$which" "$looks_dest/$l/look.toml" <"$file" >"$tmp/stripped"
-                cat "$tmp/stripped" >"$file"
-                note "migrated $file: it was still the $l example config, so its look keys were removed and the look layer shows through (layout kept)"
+                # Swap the stripped config in atomically: a temp file in
+                # the same directory plus rename, never a truncating
+                # redirect into the live file. A failed strip leaves the
+                # original untouched.
+                tmp_new=$(mktemp "$(dirname "$file")/.scoot-migrate.XXXXXX") || {
+                    note "could not migrate $file (no temp file); left alone"
+                    break
+                }
+                if strip_look_keys "$which" "$looks_dest/$l/look.toml" <"$file" >"$tmp_new"; then
+                    mode=$(stat -c %a "$file" 2>/dev/null || stat -f %Lp "$file" 2>/dev/null || true)
+                    if [ -n "$mode" ]; then chmod "$mode" "$tmp_new" 2>/dev/null || true; fi
+                    mv -f "$tmp_new" "$file"
+                    note "migrated $file: it was still the $l example config, so its look keys were removed and the look layer shows through (layout kept)"
+                else
+                    rm -f "$tmp_new"
+                    note "could not migrate $file; left alone"
+                fi
                 break
             fi
         done
@@ -823,8 +864,13 @@ run_look_apply() {
 look_error=""
 if [ -n "$look" ]; then
     install_look_catalog
-    migrate_look_configs
+    # Apply before migrating: a refused apply (a missing font, usually)
+    # must leave the user's configs byte-identical, so the look keys are
+    # stripped only after the apply succeeds.
     run_look_apply || look_error="the look was not applied (see above); the binaries and the catalog are installed, so fix the cause and re-run with --look"
+    if [ -z "$look_error" ]; then
+        migrate_look_configs
+    fi
 fi
 
 # A look-only re-run stops here: the record is already current, and
