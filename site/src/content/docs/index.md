@@ -28,11 +28,11 @@ One command. No install, no GPU.
 docker run --rm -p 127.0.0.1:6080:6080 ghcr.io/scoot-sh/try-scoot
 ```
 
-Open `http://127.0.0.1:6080`. Click the desktop. Press `Alt+Return` for a second terminal. No Docker? [Use Nix](./start/install.md#or-in-a-window-on-linux-nix) instead.
+Open `http://127.0.0.1:6080`. Click the desktop. Press `Alt+Return` for a second terminal. No Docker? [Use Nix](./start/install.md#or-in-a-window-on-linux-nix).
 
 ## Looks
 
-Same cat, different wallpaper. Five looks ship with the desktop — picking
+Five looks ship with the desktop — picking
 one themes the compositor, the bar and the wallpaper together (the
 default is ginger-night):
 
@@ -48,19 +48,19 @@ default is ginger-night):
 
 Pick one:
 
-- **[The scoot desktop](./desktop/index.md)** — the easy mode, on NixOS
+- **[The scoot desktop](./desktop/index.md)** — on NixOS
   with a flake and home-manager. One switch plus a look gets the full
   lightweight desktop: compositor, bar, wallpaper, idle and lock,
   notifications, launcher, screenshots, hardware keys, all themed
-  together. Start here if you run NixOS.
+  together.
 - **[Any Linux](./start/install.md#use-it-every-day)** — one command
   installs the compositor, the bar and the wallpaper on any glibc
   distro, puts scoot on your login screen, and can write a look.
   [Build your desktop](./start/compose.md) adds the lock, launcher and
   notifications from your distro.
 - **[Agents, headless and webtop](./agents/index.md)** — drive scoot from
-  code. The IPC socket, screenshots, `--help --json`, `llms.txt` sets for
-  every section, and the webtop recipe for containers.
+  code: the IPC socket, screenshots, `--help --json`, `llms.txt` sets,
+  and the webtop recipe.
 
 ## Start here, in order
 
@@ -75,7 +75,7 @@ Pick one:
 ## Why scoot
 
 - **Scrolling columns, not a grid.** Focus follows position; nothing ever hides.
-- **No GPU required.** The CPU renderer draws without a GPU, so scoot runs on a webtop container, a VM, and real hardware alike — and the same build scans out from the GPU where there is one ([picking takes one look](./start/install.md#which-build-do-i-need)).
-- **Scriptable to the core.** Every action in [Keybindings](./scoot/keybindings.md) is also an IPC action an agent can send — windows, screenshots, input, the lot.
+- **No GPU required.** Scoot runs on a webtop container, a VM, and real hardware alike — and the same build scans out from the GPU where there is one ([picking takes one look](./start/install.md#which-build-do-i-need)).
+- **Scriptable.** Every action in [Keybindings](./scoot/keybindings.md) is also an IPC action an agent can send — windows, screenshots, input, the lot.
 
 *Home-page art: the project logo (`docs/assets/logo.png`). Look previews: [vinyl-sunset](https://github.com/scoot-sh/scoot/tree/main/docs/examples/vinyl-sunset) (the wallpaper illustration stays under its [Pixabay license](https://pixabay.com/service/license/)), moonrise, music-desk and radial-burst.*

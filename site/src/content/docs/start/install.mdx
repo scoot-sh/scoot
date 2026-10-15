@@ -5,7 +5,7 @@ description: "Try scoot in your browser, install it on any Linux with one comman
 
 import { Tabs, TabItem, Steps, Aside } from '@astrojs/starlight/components';
 
-Two minutes from here to a scoot window. The cat is impatient too.
+Two minutes from here to a scoot window.
 
 ## Try it in your browser
 
@@ -24,8 +24,7 @@ You need [Docker](https://docs.docker.com/get-started/get-docker/). Nothing else
 3. Click the desktop. One terminal is already open.
 
 4. Press `Alt+Return`. A second terminal opens. This route uses `Alt`
-   wherever the rest of the docs say `Super`, because your browser
-   keeps `Super`.
+   wherever the rest of the docs say `Super`.
 
 5. To stop, press `Ctrl+C` in the terminal where you started the container. `--rm` deletes the container.
 
@@ -50,12 +49,12 @@ yet: see [Use the binary cache](../binary-cache/).
 
 ## Use it every day
 
-Pick your system. The site remembers your choice.
+Pick your system.
 
 <Tabs syncKey="distro">
 <TabItem label="NixOS">
 
-**This is the easy mode.** A flake with home-manager gets you the whole
+A flake with home-manager gets you the whole
 scoot desktop from one switch: the bar, wallpaper, lock, notifications,
 launcher, clipboard history, screenshots and screen sharing, all themed
 by one look, and rolled back together if you change your mind.
@@ -102,7 +101,7 @@ name everywhere below.
    ```
 
 2. `configuration.nix` is the system side: the login-screen entry and
-   the system services. Add these lines to the one you have. The cache
+   the system services. The cache
    lines save compiling Smithay on the first rebuild.
 
    ```nix title="configuration.nix"
@@ -153,14 +152,12 @@ Your other sessions stay. To undo, set `desktop.enable = false;` in
 both files and rebuild, or boot the previous generation.
 
 Every snippet on this site is titled with the file it goes in. Most
-desktop options are titled **configuration.nix and home.nix**: each
-side does its half (the system installs the service, your user runs
-it), so set them in both.
+desktop options are titled **configuration.nix and home.nix**: set them
+in both.
 
 On real hardware with a GPU, the same default package scans out through
 it — nothing to pick — once the OS provides the drivers
-(`hardware.graphics.enable = true;` on NixOS). VMs
-and containers stay on the default.
+(`hardware.graphics.enable = true;` on NixOS).
 
 The login screen, every piece and every option: [The scoot
 desktop](../../desktop/).
@@ -169,8 +166,7 @@ desktop](../../desktop/).
 <TabItem label="Nix on another Linux">
 
 Nix on another distro gets the themed desktop from home-manager on its
-own: the config, the bar, the user services and the look. Your distro
-keeps the login screen.
+own: the config, the bar, the user services and the look.
 
 <Steps>
 
@@ -238,8 +234,6 @@ service and backlight access ([details](../../desktop/#home-manager)).
 </TabItem>
 <TabItem label="Any Linux">
 
-No Nix on this machine? This is your route.
-
 One command installs scoot, the wallpaper daemon and the bar from
 GitHub, checks each binary against the release's checksums, and tells
 you which system libraries are missing. Any distro with glibc 2.36 or
@@ -251,14 +245,13 @@ installed.
 curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --system --look ginger-night
 ```
 
-You need `curl` (or `wget`) and `sh`: `sudo apt install curl` on
-Debian and Ubuntu. Silence with a zero exit means the download itself
+You need `curl` (or `wget`) and `sh`. Silence with a zero exit means the download itself
 failed and the script never ran — check the network and run it again.
 
 Minimal Fedora and Arch images ship no usable font, and the bar refuses
 to start without one (`no font: none of the usual font files is usable`).
-The script says so when that is you, naming the package for your distro
-(`fonts-dejavu-core` on Debian and Ubuntu, `dejavu-sans-fonts` on
+The script names the package for your distro
+when that is you (`fonts-dejavu-core` on Debian and Ubuntu, `dejavu-sans-fonts` on
 Fedora, `dejavu-fonts` on openSUSE, `ttf-dejavu` on Arch) — or point the
 bar at any file with `--font PATH` instead.
 
@@ -295,7 +288,7 @@ Read the script before you run it:
 [install.sh](https://www.scoot.sh/install.sh). Every option:
 `sh install.sh --help`.
 
-This gets you the compositor, the bar and the wallpaper. The lock,
+The lock,
 notifications, launcher and screenshots come from your distro: [Build
 your desktop](../compose/#any-other-linux-the-parts) has the one
 command per distro.
@@ -355,20 +348,18 @@ your `PATH`. To build `.deb`, `.rpm` or Arch packages yourself, see
 
 </Steps>
 
-All four work? You are done.
+All four work — you are done.
 
 ## Which build do I need?
 
-One build is enough for everyone: `scoot`. With the default
+One build fits everyone: `scoot`. With the default
 (`auto`) it resolves to the CPU renderer where there is no GPU and to
-the GPU renderer on real hardware, so it is what the script and the
-default Nix package install. X11 apps need no different package (the
-`xwayland` feature is compiled in; just turn the knob on), and the
-deliberate avoidance of all GPU code is a cargo-only build
-(`cargo build --no-default-features`), not a published package. Every
-build, flag and renderer rule is in [Builds and
-renderers](../../reference/builds/); what the binary cache trusts is in
-[Use the binary cache](../binary-cache/).
+the GPU renderer on real hardware. X11 apps need no different package (the
+`xwayland` feature is compiled in; just turn it on), and a build with
+no GPU code at all is cargo-only
+(`cargo build --no-default-features`), not a published package. Details:
+[Builds and
+renderers](../../reference/builds/); the cache: [Use the binary cache](../binary-cache/).
 
 ## Where next
 
