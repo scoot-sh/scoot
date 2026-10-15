@@ -63,12 +63,12 @@ follow the palette:
 
 | File the profile writes | From the look | Takes effect |
 |---|---|---|
-| `~/.config/gtk-3.0/settings.ini`, `~/.config/gtk-4.0/settings.ini` | Adwaita (Adwaita-dark for a dark look), Adwaita icons, the look's proportional sans and cursor, the dark preference | newly started apps; running GTK apps re-read it where the toolkit watches |
-| `~/.config/gtk-3.0/gtk.css`, `~/.config/gtk-4.0/gtk.css` | the look's accent and surfaces as named colors (`accent_bg_color`, `window_bg_color`, `view_bg_color`, `headerbar_bg_color`, …) plus the matching `:root` vars libadwaita widgets paint with | GTK apps on restart |
-| dconf `org.gnome.desktop.interface color-scheme` | `prefer-dark` for a dark look, `prefer-light` for the light one — the dark-mode signal libadwaita follows (its `prefer-dark-theme` fallback only warns) | GTK apps on restart |
-| `~/.config/qt6ct/qt6ct.conf` (through `QT_QPA_PLATFORMTHEME=qt6ct`) | the Adwaita Qt style in the look's polarity, Adwaita icons, and `custom_palette` pointing at the scheme below | Qt apps on restart |
-| `~/.config/qt6ct/colors/scoot-look.conf` | a color scheme generated from the look's palette (dark looks get a dark palette, the light look a light one) | Qt apps on restart |
-| `~/.config/fontconfig/conf.d/10-scoot-look.conf` | the proportional sans for sans-serif, the terminal face for monospace | `fc-cache` is not needed: fontconfig reads it on next lookup |
+| `~/.config/gtk-3.0/settings.ini`, `~/.config/gtk-4.0/settings.ini` | Adwaita (Adwaita-dark for a dark look), Adwaita icons, the look's proportional sans and cursor, the dark preference | Next launch; running apps do not re-read it (the keys that also live in dconf follow live, next row) |
+| `~/.config/gtk-3.0/gtk.css`, `~/.config/gtk-4.0/gtk.css` | the look's accent and surfaces as named colors (`accent_bg_color`, `window_bg_color`, `view_bg_color`, `headerbar_bg_color`, …) plus the matching `:root` vars libadwaita widgets paint with | Next launch; running apps keep their palette (`gtk.css` is never re-read) |
+| dconf `org.gnome.desktop.interface` (`color-scheme`, `gtk-theme`, `icon-theme`, `cursor-theme`, `cursor-size`, `font-name`), written by `scoot look apply` | `prefer-dark` for a dark look, `prefer-light` for the light one, the Adwaita theme in the look's polarity, Adwaita icons, the Mocu cursor at 24, the proportional sans | Live: GTK 4 and libadwaita follow through the portal; GTK 3 follows the theme, icons, cursor and font through GSettings directly (`color-scheme` means nothing to GTK 3) |
+| `~/.config/qt6ct/qt6ct.conf` (through `QT_QPA_PLATFORMTHEME=qt6ct`) | the Adwaita Qt style in the look's polarity, Adwaita icons, and `custom_palette` pointing at the scheme below | Next launch for the style; running Qt apps keep their palette (an in-place scheme change fires no watcher — measured against qt6ct 0.11) |
+| `~/.config/qt6ct/colors/scoot-look.conf` | a color scheme generated from the look's palette (dark looks get a dark palette, the light look a light one) | Next launch; under the Adwaita style QWidget apps keep Adwaita's fixed palette instead (measured) — a style honoring `custom_palette` paints the scheme |
+| `~/.config/fontconfig/conf.d/10-scoot-look.conf` | the proportional sans for sans-serif, the terminal face for monospace | Next font lookup (fontconfig rescans lazily); `fc-cache` is not needed |
 | `~/.config/foot/foot.ini` | the example's own file | foot on restart |
 | `~/.config/starship.toml` | the example's own file | next prompt |
 | `~/.config/helix/config.toml` + `themes/<look>.toml` | the example's own files | Helix on restart |
@@ -154,7 +154,7 @@ only.
 ## Dark mode, X11 and Flatpak
 
 Each look declares dark or light (`music-desk` light, the other
-three dark): that drives `gtk-application-prefer-dark-theme`, the
+four dark): that drives `gtk-application-prefer-dark-theme`, the
 Adwaita variant on both toolkits, and the greeter's dark setting.
 X11 apps through XWayland read the same `settings.ini` and
 `qt6ct.conf` — no settings daemon runs for them, and the theme sets

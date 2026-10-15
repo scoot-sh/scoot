@@ -23,8 +23,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use scoot_look::{
-    ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_json,
-    render_scoot, resolve, source_hash, validate_apps_allowlist, validate_for_origin,
+    ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_gtk_css,
+    render_json, render_qt_scheme, render_scoot, resolve, source_hash, validate_apps_allowlist,
+    validate_for_origin,
 };
 
 fn usage() -> ! {
@@ -339,10 +340,22 @@ fn build_dir(
         eprintln!("error: {e}");
         std::process::exit(1);
     });
+    // The toolkit fragments beside the first-party ones: `gtk.css` and
+    // the Qt scheme render from tokens alone. `qt6ct.conf`,
+    // `settings.ini` and the fontconfig file are apply-rendered (the
+    // conf points through the state link, which `build` does not know).
+    let gtk_css = render_gtk_css(&look);
+    let qt_scheme = render_qt_scheme(&look);
     std::fs::create_dir_all(out).unwrap_or_else(|e| {
         eprintln!("cannot create {}: {e}", out.display());
         std::process::exit(1);
     });
+    for dir in ["gtk", "qt"] {
+        std::fs::create_dir_all(out.join(dir)).unwrap_or_else(|e| {
+            eprintln!("cannot create {}: {e}", out.join(dir).display());
+            std::process::exit(1);
+        });
+    }
     for (file, contents) in [
         ("scoot.toml", scoot),
         ("bar.toml", bar),
@@ -350,6 +363,8 @@ fn build_dir(
             "render.json",
             render_json(&look.name, &source_hash(&bytes), inputs),
         ),
+        ("gtk/gtk.css", gtk_css),
+        ("qt/scoot-look.conf", qt_scheme),
     ] {
         std::fs::write(out.join(file), contents).unwrap_or_else(|e| {
             eprintln!("cannot write {}: {e}", out.join(file).display());

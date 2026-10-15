@@ -34,13 +34,13 @@ use scoot_look::state::{
     read_record, state_dir_from_env, write_record,
 };
 use scoot_look::{
-    Origin, RawLook, RenderInputs, check_contrast, render_bar, render_json, render_scoot, resolve,
-    source_hash,
+    Origin, RawLook, RenderInputs, check_contrast, render_bar, render_gtk_css, render_json,
+    render_qt_scheme, render_scoot, resolve, source_hash,
 };
 
 use super::catalog::{Catalog, Entry, cache_home, config_home};
 use super::reload::{BarReload, CompositorReload, ReloadError};
-use super::toolkit::{Dconf, apply_toolkit};
+use super::toolkit::{Dconf, apply_toolkit, apply_toolkit_files};
 
 /// How long a second writer waits on `<state>/look.lock` before refusing.
 pub const LOCK_WAIT: Duration = Duration::from_secs(10);
@@ -55,7 +55,8 @@ pub const MAX_IMAGE_BYTES: u64 = 32 << 20;
 pub struct ApplyOptions {
     /// How long to wait on the lock.
     pub lock_wait: Duration,
-    /// Skip every dconf write (`--no-toolkit`).
+    /// Skip the toolkit step (`--no-toolkit`): no dconf key and no
+    /// toolkit file is written for this apply.
     pub no_toolkit: bool,
 }
 
@@ -1241,6 +1242,8 @@ fn render_cached(
         if identity.get("name").and_then(|n| n.as_str()) == Some(name)
             && target.join("scoot.toml").is_file()
             && target.join("bar.toml").is_file()
+            && target.join("gtk/gtk.css").is_file()
+            && target.join("qt/scoot-look.conf").is_file()
         {
             notes.push(format!("reusing cached render {}", target.display()));
             return Ok(target);
@@ -1252,8 +1255,13 @@ fn render_cached(
         render_scoot(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
     let bar =
         render_bar(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let gtk_css = render_gtk_css(merged);
+    let qt_scheme = render_qt_scheme(merged);
     // The fragments must parse as TOML: the renderers quote, and this is
     // where a quoting failure shows itself, before any app reads them.
+    // (`gtk.css` and the Qt scheme have no strict parser handy; their
+    // renderers only interpolate `#rrggbb` tokens and are pinned by unit
+    // tests instead.)
     for (file, text) in [("scoot.toml", &scoot), ("bar.toml", &bar)] {
         text.parse::<toml::Table>()
             .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
@@ -1288,8 +1296,13 @@ fn render_cached(
             ("scoot.toml", scoot.as_str()),
             ("bar.toml", bar.as_str()),
             ("render.json", rendered_json.as_str()),
+            ("gtk/gtk.css", gtk_css.as_str()),
+            ("qt/scoot-look.conf", qt_scheme.as_str()),
         ] {
             let path = tmp.join(file);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             std::fs::write(&path, contents)?;
             std::fs::File::open(&path)?.sync_all()?;
         }
@@ -1303,6 +1316,8 @@ fn render_cached(
         if target.is_dir()
             && target.join("scoot.toml").is_file()
             && target.join("bar.toml").is_file()
+            && target.join("gtk/gtk.css").is_file()
+            && target.join("qt/scoot-look.conf").is_file()
         {
             notes.push(format!("reusing cached render {}", target.display()));
             return Ok(target);
@@ -1639,12 +1654,14 @@ pub fn apply_with(
             .as_ref()
             .and_then(|record| record.declared_default.clone()),
         toolkit: previous.as_ref().and_then(|record| record.toolkit),
-        color_scheme: previous
+        dconf_wrote: previous
             .as_ref()
-            .and_then(|record| record.color_scheme.clone()),
-        color_scheme_orig: previous
+            .map(|record| record.dconf_wrote.clone())
+            .unwrap_or_default(),
+        dconf_orig: previous
             .as_ref()
-            .and_then(|record| record.color_scheme_orig.clone()),
+            .map(|record| record.dconf_orig.clone())
+            .unwrap_or_default(),
     };
     write_record(state_dir, &record)
         .map_err(|error| refuse(format!("cannot record the choice: {error}")))?;
@@ -1809,22 +1826,35 @@ pub fn apply_with(
             }
         }
     }
-    // The toolkit step is best-effort: a missing `dconf` or a key someone
-    // else owns is a note, never a refusal.
-    let dark = merged.polarity == scoot_look::schema::Polarity::Dark;
+    // The toolkit step is best-effort: a missing `dconf`, a key someone
+    // else owns, or a foreign config file is a note, never a refusal.
+    // dconf keys first (recorded in `look.json`), then the owned toolkit
+    // files (the `gtk.css` shims, the inis, qt6ct, fontconfig), all
+    // through the state link so a swap rewrites no file per look.
     if options.no_toolkit {
         report
             .notes
-            .push("toolkit writes off for this apply (--no-toolkit)".to_owned());
+            .push("toolkit step off for this apply (--no-toolkit)".to_owned());
     } else {
         report
             .notes
-            .extend(apply_toolkit(state_dir, &mut record, dark, dconf));
+            .extend(apply_toolkit(state_dir, &mut record, &merged, dconf));
         if let Err(error) = write_record(state_dir, &record) {
             report.notes.push(format!(
                 "cannot record the toolkit state: {error}: the look applied, the record lags"
             ));
         }
+        let xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let home = std::env::var_os("HOME");
+        let toolkit_home = config_home(xdg.as_deref(), home.as_deref());
+        let link = state_dir.join(LINK_NAME);
+        report.notes.extend(apply_toolkit_files(
+            state_dir,
+            &record,
+            &merged,
+            toolkit_home.as_deref(),
+            &link,
+        ));
     }
     // Shadowed keys: the compositor's reply when it reloaded; else the
     // files, read directly.
@@ -1881,8 +1911,8 @@ fn rollback(
                 chosen_by: Some("rollback".to_owned()),
                 declared_default: previous.declared_default.clone(),
                 toolkit: previous.toolkit,
-                color_scheme: previous.color_scheme.clone(),
-                color_scheme_orig: previous.color_scheme_orig.clone(),
+                dconf_wrote: previous.dconf_wrote.clone(),
+                dconf_orig: previous.dconf_orig.clone(),
             };
             if let Err(error) = write_record(state_dir, &restored) {
                 failure

@@ -244,9 +244,10 @@ COMMANDS:
     apply       render, validate, record, repoint, then reload each app's
                 look layer in order (the compositor, then every bar),
                 rolling back on a refusal; --no-toolkit skips the
-                color-scheme write for this apply (the first apply with no
-                record adopts the color-scheme key whatever it holds)
-    toolkit     show whether the color-scheme write is on, or persist
+                toolkit step (dconf keys and toolkit files) for this apply
+                (the first apply with no record adopts each key whatever
+                it holds)
+    toolkit     show whether the toolkit step is on, or persist
                 `toolkit on|off` in look.json
 
 A look is presentation only (colors, fonts, opacity, shape, cursor, the
@@ -1001,11 +1002,13 @@ fn run_toolkit(look: &Look, action: Option<bool>) -> Result<(), String> {
             .map_err(|error| format!("cannot record the toolkit state: {error}"))?;
     }
     let on = toolkit_on(&record);
+    let keys = record.dconf_wrote.clone();
     if look.json {
         output::print_line(
             &serde_json::to_string_pretty(&serde_json::json!({
                 "toolkit": on,
-                "color_scheme": record.color_scheme,
+                "color_scheme": keys.get("color-scheme"),
+                "keys": keys,
             }))
             .unwrap_or_default(),
         )
@@ -1017,11 +1020,13 @@ fn run_toolkit(look: &Look, action: Option<bool>) -> Result<(), String> {
             "toolkit writes: off"
         })
         .map_err(|error| error.to_string())?;
-        match &record.color_scheme {
-            Some(scheme) => output::print_line(&format!("last color-scheme written: {scheme}"))
-                .map_err(|error| error.to_string())?,
-            None => output::print_line("no color-scheme written yet")
-                .map_err(|error| error.to_string())?,
+        if keys.is_empty() {
+            output::print_line("no toolkit keys written yet").map_err(|error| error.to_string())?;
+        } else {
+            for (key, value) in &keys {
+                output::print_line(&format!("last {key} written: {value}"))
+                    .map_err(|error| error.to_string())?;
+            }
         }
     }
     Ok(())

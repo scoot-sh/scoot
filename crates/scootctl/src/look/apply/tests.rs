@@ -244,7 +244,7 @@ impl Checks for FakeChecks {
 
 #[derive(Default)]
 struct FakeDconf {
-    live: Option<String>,
+    live: std::collections::HashMap<String, String>,
     writes: RefCell<Vec<(String, String)>>,
     missing: bool,
 }
@@ -252,7 +252,7 @@ struct FakeDconf {
 impl FakeDconf {
     fn absent() -> Self {
         Self {
-            live: None,
+            live: std::collections::HashMap::new(),
             writes: RefCell::new(Vec::new()),
             missing: true,
         }
@@ -264,8 +264,8 @@ impl Dconf for FakeDconf {
         !self.missing
     }
 
-    fn read(&self, _key: &str) -> Result<Option<String>, String> {
-        Ok(self.live.clone())
+    fn read(&self, key: &str) -> Result<Option<String>, String> {
+        Ok(self.live.get(key).cloned())
     }
 
     fn write(&self, key: &str, value: &str) -> Result<(), String> {
@@ -1255,12 +1255,38 @@ fn the_toolkit_write_lands_in_the_record() {
         &dconf,
     )
     .expect("the apply succeeds");
-    assert_eq!(dconf.writes.borrow().len(), 1);
+    assert_eq!(
+        dconf.writes.borrow().len(),
+        super::super::toolkit::TOOL_KEYS.len()
+    );
     let record = record_of(&fixture.state);
-    assert_eq!(record.color_scheme.as_deref(), Some("'prefer-dark'"));
-    // A key someone else changed since is left alone and named.
+    assert_eq!(
+        record.dconf_wrote.get("color-scheme").map(String::as_str),
+        Some("'prefer-dark'")
+    );
+    assert_eq!(
+        record.dconf_wrote.len(),
+        super::super::toolkit::TOOL_KEYS.len()
+    );
+    // A key someone else changed since is left alone and named, while the
+    // keys the tool still owns rewrite: every key reads back what the
+    // first apply wrote, except `color-scheme`, which reads `prefer-light`
+    // against the recorded `prefer-dark`.
+    let mut live = record.dconf_wrote.clone();
+    live.insert("color-scheme".to_owned(), "'prefer-light'".to_owned());
+    let live = live
+        .into_iter()
+        .map(|(short, value)| {
+            let path = super::super::toolkit::TOOL_KEYS
+                .iter()
+                .find(|(name, _)| name == &short)
+                .map(|(_, path)| (*path).to_owned())
+                .expect("a toolkit key");
+            (path, value)
+        })
+        .collect();
     let dconf = FakeDconf {
-        live: Some("'prefer-light'".to_owned()),
+        live,
         ..FakeDconf::default()
     };
     let mut compositor = FakeCompositor::not_running();
@@ -1277,7 +1303,14 @@ fn the_toolkit_write_lands_in_the_record() {
         &dconf,
     )
     .expect("the second apply succeeds");
-    assert!(dconf.writes.borrow().is_empty());
+    let writes = dconf.writes.borrow();
+    assert!(
+        writes
+            .iter()
+            .all(|(key, _)| key != super::super::toolkit::COLOR_SCHEME_KEY),
+        "the foreign key was written: {writes:?}"
+    );
+    assert_eq!(writes.len(), super::super::toolkit::TOOL_KEYS.len() - 1);
     assert!(
         report
             .notes

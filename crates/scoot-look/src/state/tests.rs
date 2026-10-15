@@ -5,6 +5,7 @@
 //! `/tmp/scoot-look-state-*` dirs behind (a failed assert still drops the
 //! guard and cleans the dir).
 
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::fs::symlink;
@@ -32,8 +33,8 @@ fn record(name: &str, rendered: &str, generation: u64) -> Record {
         chosen_by: Some("apply".to_owned()),
         declared_default: Some("ginger-night".to_owned()),
         toolkit: None,
-        color_scheme: None,
-        color_scheme_orig: None,
+        dconf_wrote: BTreeMap::new(),
+        dconf_orig: BTreeMap::new(),
     }
 }
 
