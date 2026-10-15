@@ -1,8 +1,7 @@
 # Debian and Ubuntu packages
 
 Three `.deb`s, one per shipped binary, built with cargo from the
-vendored sources and staged with `dpkg-deb` (ticket:
-[deb-package](../../docs/backlog/resolved/deb-package-done.md)). Nothing
+vendored sources and staged with `dpkg-deb`. Nothing
 here is published anywhere: no repository upload, no tag, no release
 in CI or out of it. The signed apt repository is designed below and
 its no-secret pieces ship here; the key itself is the maintainer's
@@ -23,37 +22,33 @@ compositor package at all (standard Wayland protocols only).
 
 ## Why `dpkg-deb`, not `cargo-deb`
 
-The ticket's level 1 names `cargo-deb` with metadata in each crate's
-`Cargo.toml`. This tree builds the `.deb`s with `cargo` plus
-`dpkg-deb` instead (a maintainer-away decision, trivially reversible:
-`build-deb.sh` is one script and the manifests are untouched):
+This tree builds the `.deb`s with `cargo` plus
+`dpkg-deb` instead of `cargo-deb`:
 
 - It mirrors the Arch shape (`packaging/arch` builds with `cargo` and
-  stages files; no manifest metadata), so the two distro paths stay
-  one idea.
+  stages files; no manifest metadata).
 - `cargo-deb` would be a new build dependency that itself must vendor
   offline, and its metadata in `Cargo.toml` would sit beside the one
   workspace version every crate inherits (docs/versioning.md).
-- The ticket's `$auto` requirement is kept literally: `Depends`
+- `Depends`
   versions come out of `dpkg-shlibdeps -O` at build time, checked
   against the `ldd`-derived allow-list (below) -- a renamed or new
   system library fails the build instead of shipping a wrong
   dependency.
 
-A full `debian/` source package (the ticket's level 2, for archive
-inclusion) is out of scope until there is demand, as the ticket says.
+A full `debian/` source package (for archive
+inclusion) is out of scope until there is demand.
 
 ## Dependencies, from data
 
 `Depends` is derived at build time by `dpkg-shlibdeps`, and every
 package name it emits must already be in the allow-list in `deb-meta.py`
 (`ALLOW`), which is the `ldd`-derived table from the site's packaging
-page (`site/src/content/docs/reference/packaging.md`) -- not memory.
+page (`site/src/content/docs/reference/packaging.md`).
 The compositor links `libinput.so.10`, `libseat.so.1`, `libudev.so.1`,
 `libpixman-1.so.0`, `libxkbcommon.so.0` (plus the C library and its
 closure); the wallpaper daemon and the bar link nothing past the C
-library (measured on a release build: `scootbg` and `scootbar` are
-libc-only). On Debian 12 / Ubuntu 24.04 and newer the sonames resolve
+library. On Debian 12 / Ubuntu 24.04 and newer the sonames resolve
 to `libinput10`, `libseat1`, `libudev1`, `libpixman-1-0`,
 `libxkbcommon0` (plus `libc6`, `libgcc-s1` via shlibdeps). The GPU
 libraries (`libgbm1`, `libdrm2`) are not in any shipped `.deb`'s
@@ -70,10 +65,9 @@ probes, `crates/scootbar/src/font.rs`).
 ## Toolchain: the distro's rustc is too old, so the container pins one
 
 The workspace floor is `rust-version = "1.88"`. Bookworm ships 1.63,
-noble 1.75, trixie 1.85.1 -- none builds the tree (the site packaging
-page's table, checked 2026-10-07). Per the ticket this picks the
-first option: the build container installs a newer toolchain, which
-is fine for a repo-hosted package. It is the same rustup pin the
+noble 1.75, trixie 1.85.1 -- none builds the tree.
+The build container installs a newer toolchain instead:
+the same rustup pin the
 release builds use (`RUST_TOOLCHAIN: 1.97.0` in `release.yml` and
 `deb.yml`), and the glibc floor is the container's: bookworm's 2.36,
 asserted in CI, so one build runs on trixie, noble and newer.
@@ -154,13 +148,11 @@ pair can never skew.
 
 ## The signed apt repository (designed, not yet live)
 
-Decision: `reprepro` (maintainer-away, reversible -- the repo is
+Decision: `reprepro` (reversible -- the repo is
 static files either way). It is in the Debian archive (no third-party
 binary to trust), handles several distributions in one repository
 (`conf/distributions`), and signs with an ordinary GPG key at export
-time. `aptly` would do the same job with its own database and more
-moving parts; if it ever fits better, only the publisher side
-changes -- the `.deb`s and the client setup below do not.
+time.
 
 What ships here (needs no secret): `make-repo-index.sh` builds the
 unsigned metadata (`Packages`, `Packages.gz`, `Release`) from a
@@ -186,8 +178,7 @@ What the maintainer must provide before the repository goes live
    CI secret, or a maintainer-side sign-and-upload -- decided then;
    no secret name or value is pre-created here).
 
-Publishing then looks like this (maintainer runs it, not CI, until
-item 5 is decided):
+Publishing then looks like this (maintainer runs it, not CI):
 
 ```sh
 reprepro -b /srv/apt/scoot includedeb bookworm scoot_0.2.1-1_amd64.deb

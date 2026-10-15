@@ -44,7 +44,5 @@ through them would falsify that record. Read `flexwm` as `scoot`.
 | [18](./18-session-lock.md) | `ext-session-lock-v1` | done | #25 |
 | [19](./19-multi-output.md) | Multi-output (more than one monitor) | done | #208 + follow-ups |
 
-Every numbered roadmap item is built (item 6 verified on real hardware
-2026-09-21; item 19 landed across phases A–H with position and live mode
-in the follow-up); everything else current
+Every numbered roadmap item is built; everything else current
 lives in [`docs/backlog/`](../backlog/).

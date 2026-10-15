@@ -4,8 +4,7 @@ Three spec files, one per shipped binary, built from the vendored-sources
 tarball (`scripts/vendor-release.sh`: the tagged tree plus `vendor/`,
 `.cargo/config.toml` and `THIRD-PARTY-LICENSES`, so the build is offline).
 Nothing here is published anywhere: there is no COPR project, no repo, no
-tag, no release in CI or out of it. The COPR layout below is designed and
-documented only (the ticket's second half is a host account away).
+tag, no release in CI or out of it.
 
 | Spec | Package | Source tag | Version follows |
 |---|---|---|---|
@@ -20,8 +19,7 @@ client library inside the `scoot` binary (`scoot msg`). `scoot` requires exactly
 the coupled pair installs at one version, and the bar requires no
 compositor package at all (standard Wayland protocols only).
 
-Why a hand-written spec and not `cargo-generate-rpm`: the ticket allows
-either, and the generated file would need the same hand edits anyway
+Why a hand-written spec and not `cargo-generate-rpm`: the generated file would need the same hand edits anyway
 (the session entry, the session user units, the portal selection, the
 bar's user unit, the license set including the
 deny-generated inventory, the vendored offline build, the versioned
@@ -37,10 +35,8 @@ compositor links `libinput.so.10`, `libseat.so.1`, `libudev.so.1`,
 `libpixman-1.so.0`, `libxkbcommon.so.0`, and the wallpaper daemon and the
 bar link nothing past the C library. Runtime requirements for those
 sonames are auto-generated from the binaries at build time, so only the
-`-devel` names below are written in the specs. Verified 2026-10-08
-against each distro's own metadata (`dnf repoquery --whatprovides` on
-Fedora 43, `zypper what-provides` on Tumbleweed); re-run those two
-commands at packaging time, names move:
+`-devel` names below are written in the specs. Re-run the two
+provider queries at packaging time, names move:
 
 | Soname | Fedora 43 (dnf) | openSUSE Tumbleweed (zypper) |
 |---|---|---|
@@ -60,9 +56,7 @@ Notes:
   local `rpmbuild` edit, not a separate spec.
 - Toolchain floor: both distros clear the workspace floor
   (`rust-version = "1.88"`), so no rustup is needed in the build
-  containers — Fedora 43 resolves rust 1.98.1, Tumbleweed ships rust
-  1.98.1 (both re-measured 2026-10-08 with the same queries;
-  toolchains move, so re-check at build time).
+  containers (toolchains move, so re-check at build time).
 - `cargo-deny` exists on Fedora but has no openSUSE package, so no spec
   runs it: `THIRD-PARTY-LICENSES` arrives inside the vendored tarball
   (staged by `scripts/vendor-release.sh`) and the specs only install it.
@@ -124,13 +118,8 @@ Notes:
   the `--check` on the installed example would test a file the package
   owns but the container never wrote.
 - No `-debuginfo`/`-debugsource` subpackages (`debug_package %{nil}`):
-  the vendored crate sources carry their upstream modes (executable
-  `.rs` files plus a `#!` attribute line in one crate that is not a
-  shebang), which fails `brp-mangle-shebangs` over `/usr/src/debug`.
-  The revisit, if distro-grade inclusion ever wants debuginfo, is a
-  mode-normalizing `find vendor -type f -exec chmod a-x {} +` in `%prep`
-  (cargo checks content hashes, not modes, so the build is unaffected)
-  — not yet proven, so not yet shipped.
+  the vendored crate sources carry their upstream modes, which fails
+  `brp-mangle-shebangs` over `/usr/src/debug`.
 
 ## Architectures
 
@@ -140,9 +129,8 @@ carry no `ExclusiveArch`, so the same SRPM builds on either.
 
 ## The COPR-style repository (designed, not created)
 
-Level 1 asks for repo-hosted RPMs published through a hosted build
-service, with Fedora's COPR as the obvious host — and explicitly not to
-assume its terms, chroots or architecture coverage. What was checked,
+RPMs published through a hosted build
+service, with Fedora's COPR as the host. What was checked,
 and what stays manual:
 
 - **Layout.** One COPR project (e.g. `scoot-sh/scoot`) holding one
@@ -160,11 +148,9 @@ and what stays manual:
 - **Not done here, on purpose.** No COPR account was touched, no project
   created, nothing uploaded, no token in any file: creating the project
   and the first build is a manual maintainer step (the COPR new-project
-  flow plus `copr-cli buildscm`), exactly like the AUR push stays manual
-  for the Arch packages. The `Source0` name is the release asset's real
-  name, `scoot-<version>-vendored.tar.gz` (release.yml passes the version
-  to `scripts/vendor-release.sh --label`; see the comment at the top of
-  `scoot.spec`); the `.copr/Makefile` is written at setup, against that
+  flow plus `copr-cli buildscm`).
+  The `Source0` name is the release asset's real
+  name, `scoot-<version>-vendored.tar.gz`; the `.copr/Makefile` is written at setup, against that
   name.
 
 ## Cutting a release (maintainer)
@@ -190,14 +176,10 @@ and what stays manual:
 builds all three specs with `rpmbuild -ba` in each, lints every built RPM
 with `rpmlint`, installs the trio, and runs `scoot --version`,
 `scootbg --version`, `scootbar --version`, `scootbar daemon --check` on
-the shipped example, and — in the Fedora container only, which is what
-the ticket's "done when" names — the headless smoke test
+the shipped example, and — in the Fedora container only — the headless smoke test
 (`scripts/smoke-test.sh`) against the installed binaries. The
 `desktop-file-validate` gate on the session entry also runs in the
-Fedora container only: the file is identical in both jobs, and
-`rpm-build` itself requires `gawk`, which conflicts with the Tumbleweed
-image's `busybox-gawk` (removed first in CI; `desktop-file-utils` stays
-out for the same reason). The one thing CI cannot prove yet: the `Source0` URLs, which
+Fedora container only. The one thing CI cannot prove yet: the `Source0` URLs, which
 404 until the first release is cut; until then the staged tarball is
 placed under that same name, and only the URL part is
 substitution.
