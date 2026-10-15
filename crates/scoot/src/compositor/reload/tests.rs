@@ -48,6 +48,7 @@ struct Fixture {
     state: State,
     path: PathBuf,
     _dir: tempfile::TempDir,
+    event_loop: EventLoop<'static, State>,
 }
 
 impl Fixture {
@@ -86,6 +87,7 @@ impl Fixture {
             state,
             path,
             _dir: dir,
+            event_loop,
         }
     }
 
@@ -97,6 +99,25 @@ impl Fixture {
         self.state.handle_request(Request::Reload {
             wait_wallpaper: false,
         })
+    }
+
+    /// Runs the event loop until the cursor worker's answer lands (or a
+    /// bound passes): cursor bitmaps arrive asynchronously since the build
+    /// moved off the loop thread, so a test that asserts on rebuilt pixels
+    /// settles first and a test that asserts on stored values needs nothing.
+    fn settle_cursor(&mut self, theme: &str, size: i32) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while self.state.cursor.theme().name() != theme
+            || self.state.cursor.theme().size() != size
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the cursor worker never answered"
+            );
+            self.event_loop
+                .dispatch(Some(Duration::from_millis(25)), &mut self.state)
+                .expect("a compositor dispatch");
+        }
     }
 }
 
@@ -878,6 +899,7 @@ fn reload_rebuilds_the_cursor_and_reports_each_field() {
         fixture.state.appearance.cursor_theme.as_deref(),
         Some("Adwaita")
     );
+    fixture.settle_cursor("Adwaita", 24);
     assert_eq!(
         fixture.state.cursor.theme().name(),
         "Adwaita",
@@ -3087,4 +3109,31 @@ fn the_look_event_fires_once_per_identity_change() {
         Response::LookChanged { name, .. } => assert_eq!(name, None),
         other => panic!("the layer going away emits: {other:?}"),
     }
+}
+
+#[test]
+fn a_stale_cursor_answer_is_dropped() {
+    use crate::compositor::cursor::{Cursor, CursorBuilt, RebuildInput};
+
+    // Two cursor-changing reloads in quick succession: the older worker's
+    // answer must not overwrite the newer one.
+    let mut fixture = Fixture::with_config("");
+    fixture.state.cursor_generation = 41;
+    let input = RebuildInput {
+        size: 24,
+        color: Color::new(1.0, 0.0, 0.0, 1.0),
+        theme_name: None,
+        icon: None,
+        scales: Vec::new(),
+    };
+    let stale = CursorBuilt {
+        generation: 40,
+        rebuilt: Cursor::rebuild_async(input),
+    };
+    fixture.state.install_cursor(stale);
+    assert_eq!(
+        fixture.state.cursor.theme().size(),
+        16,
+        "a stale answer installs nothing: the startup size stands"
+    );
 }

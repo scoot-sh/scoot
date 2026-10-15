@@ -1889,3 +1889,39 @@ fn cursor_rebuild_cost() {
         println!("cursor rebuild, {size}px: BEST {best:?} of 10 (loop thread)");
     }
 }
+
+/// The worker build installs exactly what the synchronous rebuild builds:
+/// same size, same paints, same scale set, same themed resolution. (The
+/// buffers carry fresh `Id`s by design, so this compares what they draw
+/// from, not the `Id`s.)
+#[test]
+fn async_rebuild_installs_what_sync_rebuild_builds() {
+    use super::{Cursor, RebuildInput};
+    use crate::compositor::decorations::Color;
+
+    let fill = Color::new(1.0, 0.0, 0.0, 1.0);
+    let mut sync = Cursor::new(16, Color::new(1.0, 1.0, 1.0, 1.0), None);
+    sync.ensure_scale(2.0);
+    sync.rebuild(24, fill, None);
+    let mut async_cursor = Cursor::new(16, Color::new(1.0, 1.0, 1.0, 1.0), None);
+    async_cursor.ensure_scale(2.0);
+    let rebuilt = Cursor::rebuild_async(RebuildInput {
+        size: 24,
+        color: fill,
+        theme_name: None,
+        icon: None,
+        scales: vec![2.0],
+    });
+    async_cursor.install_rebuilt(rebuilt);
+    assert_eq!(async_cursor.theme().name(), sync.theme().name());
+    assert_eq!(async_cursor.theme().size(), sync.theme().size());
+    assert_eq!(
+        async_cursor.scales.len(),
+        sync.scales.len(),
+        "the worker builds every scale the synchronous rebuild builds"
+    );
+    for (left, right) in async_cursor.scales.iter().zip(sync.scales.iter()) {
+        assert_eq!(left.physical, right.physical);
+        assert_eq!(left.key, right.key);
+    }
+}
