@@ -54,7 +54,7 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 
 pub use queue::Waited;
 use queue::{Ended, Exit, Queue};
-pub use section::{OutputConfig, Section, Table, WallpaperConfig, WallpaperSetting};
+pub use section::{Section, Table, WallpaperConfig, WallpaperSetting};
 
 use super::State;
 

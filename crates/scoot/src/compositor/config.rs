@@ -827,16 +827,7 @@ pub fn startup_path(
 /// - `vt` is whether this session drives `--tty` (see
 ///   [`LoadedConfig::from_file_with_vt`](LoadedConfig::from_file_with_vt)).
 pub fn reload_from(path: &Path, vt: bool) -> Result<LoadedConfig, ReloadError> {
-    let text = fs::read_to_string(path).map_err(|source| ReloadError {
-        path: path.to_owned(),
-        reason: source.to_string(),
-    })?;
-    toml::from_str::<FileConfig>(&text)
-        .map(|file| LoadedConfig::from_file_with_vt(file, path, vt))
-        .map_err(|source| ReloadError {
-            path: path.to_owned(),
-            reason: source.to_string(),
-        })
+    reload_from_with_layer(path, vt, None).map(|layered| layered.loaded)
 }
 
 /// Re-reads `path` like [`reload_from`], merged over the active look layer's
