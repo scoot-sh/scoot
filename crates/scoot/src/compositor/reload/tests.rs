@@ -96,7 +96,7 @@ impl Fixture {
     }
 
     fn reload(&mut self) -> Response {
-        self.state.handle_request(Request::Reload)
+        self.state.handle_request(Request::Reload { scope: None })
     }
 
     /// Runs the event loop until the cursor worker's answer lands (or a
@@ -1394,7 +1394,7 @@ fn no_config_path_is_an_error_not_a_guess() {
     )
     .expect("a compositor state");
     // `config_path` stays `None`: nowhere to reload from.
-    let response = state.handle_request(Request::Reload);
+    let response = state.handle_request(Request::Reload { scope: None });
     assert!(
         matches!(response, Response::Error { .. }),
         "a pathless reload should refuse, not read a default: {response:?}"
@@ -1829,7 +1829,9 @@ fn reload_under_lock_skips_new_spawns_without_advancing_the_snapshot() {
         format!("[autostart]\ncommands = [\"{}\"]\n", touch_entry(&marker)),
     )
     .expect("a rewritten config file");
-    let response = harness.state.handle_request(Request::Reload);
+    let response = harness
+        .state
+        .handle_request(Request::Reload { scope: None });
     assert!(
         applied(&response).is_empty(),
         "a locked reload must apply nothing: {response:?}"
@@ -2237,7 +2239,9 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
     let client = lock_with(&mut harness);
 
     fs::write(&path, "[autostart]\ncommands = [\"quit\"]\n").expect("a rewritten config file");
-    let response = harness.state.handle_request(Request::Reload);
+    let response = harness
+        .state
+        .handle_request(Request::Reload { scope: None });
     assert!(
         applied(&response).is_empty(),
         "a locked reload must apply nothing: {response:?}"
@@ -2261,7 +2265,9 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
     );
 
     unlock(&mut harness, client);
-    let unlocked = harness.state.handle_request(Request::Reload);
+    let unlocked = harness
+        .state
+        .handle_request(Request::Reload { scope: None });
     assert!(
         applied(&unlocked).is_empty(),
         "a reloaded quit must apply nothing: {unlocked:?}"
@@ -2284,7 +2290,9 @@ fn a_quit_only_locked_reload_defers_without_promising_a_run() {
         ),
     )
     .expect("a rewritten config file");
-    let third = harness.state.handle_request(Request::Reload);
+    let third = harness
+        .state
+        .handle_request(Request::Reload { scope: None });
     assert!(
         applied(&third).contains(&field::AUTOSTART.to_owned()),
         "the session should still serve after the quit sequence: {third:?}"
@@ -2308,7 +2316,9 @@ fn a_removed_while_locked_entry_never_runs() {
         format!("[autostart]\ncommands = [\"{}\"]\n", touch_entry(&marker)),
     )
     .expect("a rewritten config file");
-    let added = harness.state.handle_request(Request::Reload);
+    let added = harness
+        .state
+        .handle_request(Request::Reload { scope: None });
     assert!(
         applied(&added).is_empty(),
         "a locked reload must apply nothing: {added:?}"
@@ -2325,7 +2335,9 @@ fn a_removed_while_locked_entry_never_runs() {
     );
 
     fs::write(&path, "[autostart]\ncommands = []\n").expect("a rewritten config file");
-    let removed = harness.state.handle_request(Request::Reload);
+    let removed = harness
+        .state
+        .handle_request(Request::Reload { scope: None });
     assert!(
         applied(&removed).is_empty() && refused(&removed).is_empty(),
         "with the entry gone there is nothing actionable to skip: {removed:?}"
@@ -2336,7 +2348,9 @@ fn a_removed_while_locked_entry_never_runs() {
     );
 
     unlock(&mut harness, client);
-    let after = harness.state.handle_request(Request::Reload);
+    let after = harness
+        .state
+        .handle_request(Request::Reload { scope: None });
     assert!(
         applied(&after).is_empty() && refused(&after).is_empty(),
         "after unlock the cancelled entry stays silent: {after:?}"
@@ -2821,7 +2835,7 @@ fn a_placed_sole_output_clamps_the_pointer_to_itself() {
 
 use super::LookLayerState;
 use crate::compositor::look_layer::{Fragment, LookIdentity};
-use scoot_ipc::{EventKind, decode};
+use scoot_ipc::{EventKind, ReloadScope, decode};
 use std::io::{BufRead, BufReader};
 
 fn look_fragment(text: &str, name: &str, hash: &str) -> Fragment {
@@ -3123,5 +3137,362 @@ fn a_stale_cursor_answer_is_dropped() {
         fixture.state.cursor.theme().size(),
         16,
         "a stale answer installs nothing: the startup size stands"
+    );
+}
+
+// -- Look-scoped reload -------------------------------------------------------
+//
+// `Request::Reload` with `scope = "look"` merges the freshly read layer
+// under a snapshot of the user file from the last successful plain load,
+// swapping only what the layer supplies. These tests pass both the plain
+// and the scoped layers explicitly (`reload_with_state` /
+// `reload_scoped_with_state`), so none depends on ambient
+// `SCOOT_LOOK_STATE`/`XDG_STATE_HOME`.
+
+/// Two minimal look fragments: the same key, different values, so a scoped
+/// reload from one to the other visibly swaps exactly one field.
+const LOOK_BG_A: &str = "[appearance]\nbackground_color = \"#111111\"\n";
+const LOOK_BG_B: &str = "[appearance]\nbackground_color = \"#222222\"\n";
+
+fn reload_scoped_with_look(fixture: &mut Fixture, text: &str, name: &str, hash: &str) -> Response {
+    fixture
+        .state
+        .reload_scoped_with_state(LookLayerState::Present(look_fragment(text, name, hash)))
+}
+
+fn scope_of(response: &Response) -> Option<ReloadScope> {
+    match response {
+        Response::Reloaded { scope, .. } => *scope,
+        other => panic!("expected a reload report, got {other:?}"),
+    }
+}
+
+fn background_of(fixture: &Fixture) -> Color {
+    fixture.state.appearance.background_color
+}
+
+fn assert_background(fixture: &Fixture, hex: &str, response: &Response) {
+    assert_eq!(
+        background_of(fixture),
+        Color::parse(hex).expect("a parsable color"),
+        "the background is {hex}: {response:?}"
+    );
+}
+
+#[test]
+fn a_scoped_reload_swaps_only_the_look_and_names_its_scope() {
+    let mut fixture = Fixture::with_config("[layout]\ngap = 20\n");
+    let plain = fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_BG_A, "a", "hash-a",
+        )));
+    assert_eq!(scope_of(&plain), None, "a plain reload omits the scope");
+    assert_eq!(fixture.state.world.config().gap, 20);
+    assert_background(&fixture, "#111111", &plain);
+    assert_eq!(
+        fixture.state.user_snapshot.as_deref(),
+        Some("[layout]\ngap = 20\n"),
+        "the plain load snapshots the file it ran"
+    );
+
+    let scoped = reload_scoped_with_look(&mut fixture, LOOK_BG_B, "b", "hash-b");
+    assert_eq!(
+        scope_of(&scoped),
+        Some(ReloadScope::Look),
+        "the reply says which scope ran: {scoped:?}"
+    );
+    assert!(
+        applied(&scoped).contains(&field::BACKGROUND.to_owned()),
+        "the layer's background applied: {scoped:?}"
+    );
+    assert_background(&fixture, "#222222", &scoped);
+    assert_eq!(
+        fixture.state.world.config().gap,
+        20,
+        "a look swap moves no layout"
+    );
+    assert_eq!(
+        fixture.state.user_snapshot.as_deref(),
+        Some("[layout]\ngap = 20\n"),
+        "the scoped reload never advances the snapshot"
+    );
+    assert_eq!(
+        fixture
+            .state
+            .look_identity
+            .as_ref()
+            .and_then(|identity| identity.name.clone())
+            .as_deref(),
+        Some("b"),
+        "the layer identity commits after the scoped apply"
+    );
+}
+
+#[test]
+fn a_scoped_reload_spawns_no_new_autostart_entry() {
+    let marker = marker_path("scoped-autostart");
+    let mut fixture = Fixture::with_config("");
+    fixture.state.reload_with_state(LookLayerState::Absent);
+
+    // A pending edit the user has not reloaded yet: a new spawn entry.
+    fixture.rewrite(&format!(
+        "[autostart]\ncommands = [\"{}\"]\n",
+        touch_entry(&marker)
+    ));
+    let scoped = reload_scoped_with_look(&mut fixture, LOOK_BG_B, "b", "hash-b");
+    assert_eq!(scope_of(&scoped), Some(ReloadScope::Look));
+    assert!(
+        !applied(&scoped).contains(&field::AUTOSTART.to_owned()),
+        "no autostart entry runs on a look swap: {scoped:?}"
+    );
+    assert_marker_never_appears(&marker);
+    assert!(
+        fixture.state.startup_autostart.is_empty(),
+        "the spawn-delta snapshot freezes on a scoped reload"
+    );
+
+    // The plain reload afterwards runs exactly that entry.
+    let plain = fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_BG_B, "b", "hash-b",
+        )));
+    assert_eq!(scope_of(&plain), None);
+    assert!(
+        applied(&plain).contains(&field::AUTOSTART.to_owned()),
+        "the pending entry runs on the plain reload: {plain:?}"
+    );
+    wait_for_marker(&marker);
+}
+
+#[test]
+fn a_scoped_reload_leaves_a_pending_bind_for_the_plain_reload() {
+    let mut fixture = Fixture::with_config("[binds]\n\"super+a\" = \"close\"\n");
+    fixture.state.reload_with_state(LookLayerState::Absent);
+    let key = |name: &str| crate::compositor::input::keysym_named(name).expect("a named key");
+    let super_only = Modifiers {
+        super_: true,
+        ..Modifiers::default()
+    };
+    assert!(
+        fixture
+            .state
+            .keybindings
+            .match_key(key("a"), super_only)
+            .is_some(),
+        "bind A runs before the pending edit"
+    );
+
+    // A pending edit: one more bind the user has not reloaded yet.
+    fixture.rewrite("[binds]\n\"super+a\" = \"close\"\n\"super+b\" = \"close\"\n");
+    let scoped = reload_scoped_with_look(&mut fixture, LOOK_BG_B, "b", "hash-b");
+    assert_eq!(scope_of(&scoped), Some(ReloadScope::Look));
+    assert!(
+        !applied(&scoped).contains(&field::BINDS.to_owned()),
+        "no bind swaps on a look swap: {scoped:?}"
+    );
+    assert!(
+        fixture
+            .state
+            .keybindings
+            .match_key(key("b"), super_only)
+            .is_none(),
+        "the pending bind waits for the plain reload"
+    );
+    assert!(
+        fixture
+            .state
+            .keybindings
+            .match_key(key("a"), super_only)
+            .is_some(),
+        "the applied bind survives the swap"
+    );
+
+    let plain = fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_BG_B, "b", "hash-b",
+        )));
+    assert!(
+        applied(&plain).contains(&field::BINDS.to_owned()),
+        "the pending bind applies on the plain reload: {plain:?}"
+    );
+    assert!(
+        fixture
+            .state
+            .keybindings
+            .match_key(key("b"), super_only)
+            .is_some(),
+        "the pending bind fires after the plain reload"
+    );
+}
+
+#[test]
+fn a_scoped_reload_applies_despite_a_half_written_user_file() {
+    let mut fixture = Fixture::with_config("[layout]\ngap = 20\n");
+    fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_BG_A, "a", "hash-a",
+        )));
+    assert_eq!(fixture.state.world.config().gap, 20);
+
+    // The user is mid-keystroke: the file does not parse at all.
+    fixture.rewrite("this is not valid toml [[[");
+    let scoped = reload_scoped_with_look(&mut fixture, LOOK_BG_B, "b", "hash-b");
+    assert_eq!(scope_of(&scoped), Some(ReloadScope::Look));
+    assert!(
+        applied(&scoped).contains(&field::BACKGROUND.to_owned()),
+        "the swap applies without reading the broken file: {scoped:?}"
+    );
+    assert_background(&fixture, "#222222", &scoped);
+    assert_eq!(
+        fixture.state.world.config().gap,
+        20,
+        "the half-written gap never applied"
+    );
+
+    // The plain reload afterwards still refuses the broken file -- and keeps
+    // what the swap applied.
+    let refused = fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_BG_B, "b", "hash-b",
+        )));
+    assert!(
+        matches!(refused, Response::Error { .. }),
+        "a broken file refuses the plain reload: {refused:?}"
+    );
+    assert_background(&fixture, "#222222", &refused);
+
+    // Once the file parses again, the plain reload applies the pending
+    // edits (a new gap and a new bind) on top of the swapped look.
+    fixture.rewrite("[layout]\ngap = 24\n[binds]\n\"super+n\" = \"close\"\n");
+    let plain = fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_BG_B, "b", "hash-b",
+        )));
+    assert!(
+        applied(&plain).contains(&field::GAP.to_owned())
+            && applied(&plain).contains(&field::BINDS.to_owned()),
+        "the pending edits apply on the plain reload: {plain:?}"
+    );
+    assert_eq!(fixture.state.world.config().gap, 24);
+    assert_background(&fixture, "#222222", &plain);
+}
+
+#[test]
+fn the_snapshot_advances_only_on_a_successful_plain_load() {
+    let mut fixture = Fixture::with_config("[appearance]\ncursor_size = 32\n");
+    fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            "[appearance]\ncursor_size = 24\nbackground_color = \"#111111\"\n",
+            "a",
+            "hash-a",
+        )));
+    assert_eq!(fixture.state.appearance.cursor_size, 32);
+    assert_eq!(
+        fixture.state.user_snapshot.as_deref(),
+        Some("[appearance]\ncursor_size = 32\n")
+    );
+
+    // A broken file refuses the plain reload -- and the snapshot keeps the
+    // last applied file, not the broken bytes.
+    fixture.rewrite("this is not valid toml [[[");
+    let refused = fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            "[appearance]\ncursor_size = 24\nbackground_color = \"#111111\"\n",
+            "a",
+            "hash-a",
+        )));
+    assert!(matches!(refused, Response::Error { .. }));
+    assert_eq!(
+        fixture.state.user_snapshot.as_deref(),
+        Some("[appearance]\ncursor_size = 32\n"),
+        "a refused reload advances nothing"
+    );
+
+    // Proof it is the old snapshot: the scoped merge still sees the user's
+    // size, so the layer's size stays shadowed. Had the snapshot cleared to
+    // defaults, the layer's 24 would apply instead.
+    let scoped = reload_scoped_with_look(
+        &mut fixture,
+        "[appearance]\ncursor_size = 24\nbackground_color = \"#222222\"\n",
+        "b",
+        "hash-b",
+    );
+    assert_eq!(scope_of(&scoped), Some(ReloadScope::Look));
+    assert_eq!(
+        fixture.state.appearance.cursor_size, 32,
+        "the snapshot still holds the applied file: {scoped:?}"
+    );
+    assert_background(&fixture, "#222222", &scoped);
+}
+
+#[test]
+fn a_refused_scoped_reload_leaves_everything_untouched() {
+    let mut fixture = Fixture::with_config("[layout]\ngap = 20\n");
+    let plain = fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_BG_A, "a", "hash-a",
+        )));
+    assert_background(&fixture, "#111111", &plain);
+
+    let refused = fixture
+        .state
+        .reload_scoped_with_state(LookLayerState::Broken(
+            "the look layer cannot be read".to_owned(),
+        ));
+    match &refused {
+        Response::Error { message } => assert!(
+            message.contains("keeping the running config"),
+            "the refusal keeps the session: {refused:?}"
+        ),
+        other => panic!("a broken layer must refuse the scoped reload: {other:?}"),
+    }
+    assert_background(&fixture, "#111111", &refused);
+    assert_eq!(fixture.state.world.config().gap, 20);
+    assert_eq!(
+        fixture.state.user_snapshot.as_deref(),
+        Some("[layout]\ngap = 20\n"),
+        "a refused scoped reload moves neither the snapshot nor the session"
+    );
+    assert_eq!(
+        fixture
+            .state
+            .look_identity
+            .as_ref()
+            .and_then(|identity| identity.name.clone())
+            .as_deref(),
+        Some("a"),
+        "a refused scoped reload never advances the identity past what applied"
+    );
+}
+
+#[test]
+fn a_scoped_reload_with_no_layer_refuses_and_keeps_the_session() {
+    let mut fixture = Fixture::with_config("[layout]\ngap = 20\n");
+    fixture.state.reload_with_state(LookLayerState::Absent);
+    assert_eq!(fixture.state.world.config().gap, 20);
+
+    let refused = fixture
+        .state
+        .reload_scoped_with_state(LookLayerState::Absent);
+    match &refused {
+        Response::Error { message } => assert!(
+            message.contains("no look layer"),
+            "the refusal names the missing layer: {refused:?}"
+        ),
+        other => panic!("a scoped reload with no layer must refuse: {other:?}"),
+    }
+    assert_eq!(fixture.state.world.config().gap, 20);
+    assert!(
+        fixture.state.look_identity.is_none(),
+        "nothing applied, so no identity was recorded"
     );
 }

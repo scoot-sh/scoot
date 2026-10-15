@@ -518,7 +518,7 @@ fn a_file_with_a_wallpaper_section_still_applies_its_binds() {
         dir.path(),
         "[layout]\ngap = 3\n[binds]\n\"super+n\" = \"close\"\n[wallpaper]\ncolor = \"#1e1e2e\"\n",
     );
-    let loaded = config::load(Some(&path)).expect("the explicit config loads");
+    let (loaded, _) = config::load(Some(&path)).expect("the explicit config loads");
     assert_eq!(loaded.config.gap, 3, "the file was not discarded");
     let super_n = Modifiers {
         super_: true,
@@ -549,7 +549,7 @@ fn a_broken_wallpaper_section_costs_only_the_wallpaper() {
         dir.path(),
         "[layout]\ngap = 3\n[wallpaper]\nimgae = \"x\"\ncolor = 7\n",
     );
-    let loaded = config::load(Some(&path)).expect("the explicit config loads");
+    let (loaded, _) = config::load(Some(&path)).expect("the explicit config loads");
     assert_eq!(loaded.config.gap, 3, "the rest of the file applied");
     let WallpaperSetting::Invalid(problem) = &loaded.wallpaper else {
         panic!("expected a refusal, got {:?}", loaded.wallpaper);
@@ -563,7 +563,7 @@ fn a_broken_wallpaper_section_costs_only_the_wallpaper() {
 fn the_loader_resolves_against_the_files_own_directory() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_config(dir.path(), "[wallpaper]\nimage = \"walls/a.png\"\n");
-    let loaded = config::load(Some(&path)).unwrap();
+    let (loaded, _) = config::load(Some(&path)).unwrap();
     let WallpaperSetting::Section(section) = &loaded.wallpaper else {
         panic!("expected a section, got {:?}", loaded.wallpaper);
     };
@@ -640,7 +640,7 @@ fn the_deepest_tree_under_wallpaper_falls_back_to_defaults_at_startup() {
     let (config, wallpaper) = on_main_thread_stack(move || {
         let dir = tempfile::tempdir().unwrap();
         let path = write_config(dir.path(), &text);
-        let loaded = config::load(Some(&path)).expect("an explicit, readable file");
+        let (loaded, _) = config::load(Some(&path)).expect("an explicit, readable file");
         (loaded.config, loaded.wallpaper)
     });
     assert_eq!(config, scoot_core::Config::default(), "full defaults");

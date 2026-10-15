@@ -25,6 +25,22 @@ pub enum PointerButton {
     Forward,
 }
 
+/// A `reload`'s scope: what it re-reads.
+///
+/// `None` (absent on the wire) is the plain reload: the file and the look
+/// layer both. `Some(Look)` re-reads only the look layer, under a snapshot
+/// of the file from the last successful plain load. Any other scope string
+/// fails the decode, so an older server meets a newer scoped client with an
+/// ordinary `Error` like any unknown request tag -- never a silent plain
+/// reload (which would apply the pending edits the scope meant to skip).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReloadScope {
+    /// Only the look layer, under the snapshot: a look swap that never
+    /// applies pending edits, spawns no autostart entry and swaps no binds.
+    Look,
+}
+
 /// What [`Request::OutputScale`] names: an output id from `outputs` (a
 /// JSON number), or a connector name (a JSON string: `DP-1`,
 /// `headless-2`). Ids are stable for the session but fresh after every
@@ -115,11 +131,19 @@ pub enum Request {
     /// Re-read the config file the session started from and re-apply what
     /// can be re-applied live (layout gap, appearance, keybindings).
     ///
-    /// Additive like `MoveWindowToWorkspaceIndex`: a client that never sends
-    /// this tag decodes exactly as before, so no `PROTOCOL_VERSION` bump for
-    /// the request half. (The reply half is a new `Response` variant, which
-    /// is why the version still moved -- see `Response::Reloaded`.)
-    Reload,
+    /// Without a scope both the file and the look layer are re-read; with
+    /// `"look"` only the look layer is, merged under a snapshot of the file
+    /// from the last successful plain load -- so a look swap never applies
+    /// pending edits. Additive like `MoveWindowToWorkspaceIndex`: a client
+    /// that never sends this tag decodes exactly as before, and a request
+    /// that omits `scope` is the old shape exactly, so no
+    /// `PROTOCOL_VERSION` bump for the request half. (The reply half is a
+    /// new `Response` variant, which is why the version still moved -- see
+    /// `Response::Reloaded`.)
+    Reload {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<ReloadScope>,
+    },
     /// Subscribe this connection to events of the named kinds, dedicating
     /// it to them: the reply is `Response::Subscribed`, and afterwards the
     /// connection carries events only (any other request on it is refused

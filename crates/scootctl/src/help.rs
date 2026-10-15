@@ -65,9 +65,9 @@ pub const REQUESTS: &[RequestDoc] = &[
     },
     RequestDoc {
         verb: "reload",
-        syntax: "reload",
+        syntax: "reload [--look]",
         description: RELOAD_DESCRIPTION,
-        example: "scoot msg reload",
+        example: "scoot msg reload --look",
         reply: "`{\"type\":\"reloaded\",...}`",
     },
     RequestDoc {

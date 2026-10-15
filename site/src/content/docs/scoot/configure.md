@@ -89,11 +89,24 @@ each applied field:
 
 `shadowed` lists every file key that overrides the active look (see
 [Appearance](./appearance.md#the-look-layer)); `invalid` lists file keys
-whose bad values fell back to the look's. The reply answers once the
-wallpaper run is handed over, without waiting for it. The look itself
+whose bad values fell back to the look's. `scope` names which reload ran:
+absent for a plain reload, `"look"` for a look-scoped one (below). The
+reply answers once the wallpaper run is handed over, without waiting for
+it. The look itself
 lives at `$XDG_STATE_HOME/scoot/look/scoot.toml` (or
 `$SCOOT_LOOK_STATE/look/scoot.toml`); a reload with a dangling link or an
 unreadable fragment there is refused whole, keeping everything.
+
+**A look-scoped reload** (`scoot msg reload --look`, driven by
+`scoot look apply`) swaps only what the look layer supplies — appearance
+and wallpaper — merged under a snapshot of the file from the last
+successful plain load. It never re-reads the file, so it never applies
+pending edits, spawns no autostart entry and swaps no binds; a
+half-written file cannot refuse it. A missing or broken layer refuses it
+whole, keeping everything. `SIGHUP` always runs the plain reload. No Nix
+is involved on either path: the snapshot is the plain file, the layer is
+plain rendered output, and both reloads work the same on a Nix install
+and a plain binary install.
 
 **Refused, explicitly, pending a restart:** `[tty] gpu`, `[renderer]
 backend`, `[xwayland] enabled`, `[virtual_input] enabled` and

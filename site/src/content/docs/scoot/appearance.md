@@ -79,7 +79,12 @@ to render in place, or point `<state>/look` at DIR afterwards. With Nix
 the catalog install does this.
 When the link is absent there is no look layer and this file behaves as
 before. A dangling link or an unreadable fragment warns at startup and
-refuses a reload whole, keeping everything.
+refuses a reload whole, keeping everything. A look swap drives a
+look-scoped reload (`scoot msg reload --look`), which re-reads only this
+fragment under a snapshot of this file — see
+[Reloading the config](./configure.md#reloading-the-config). It works the
+same on a Nix install and a plain binary install: no Nix-only step is
+involved.
 
 ## The built-in cursors
 

@@ -4,8 +4,8 @@
 use scoot_ipc::{
     Action, BindRow, EventKind, Horizontal, KeyboardLayout, OutputAdded, OutputChanged,
     OutputRemoved, OutputRestored, OutputSnapshot, OutputTarget, PROTOCOL_VERSION, PointerButton,
-    Rect, Request, Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, SkippedBind, WindowSnapshot,
-    WorkspaceSnapshot, decode, encode,
+    Rect, ReloadScope, Request, Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, SkippedBind,
+    WindowSnapshot, WorkspaceSnapshot, decode, encode,
 };
 use serde_json::{Value, json};
 fn json_of<T: serde::Serialize>(value: &T) -> Value {
@@ -15,10 +15,13 @@ fn json_of<T: serde::Serialize>(value: &T) -> Value {
 #[test]
 fn unit_requests_are_just_a_type() {
     assert_eq!(json_of(&Request::Windows), json!({ "type": "windows" }));
-    assert_eq!(json_of(&Request::Reload), json!({ "type": "reload" }));
+    assert_eq!(
+        json_of(&Request::Reload { scope: None }),
+        json!({ "type": "reload" })
+    );
     assert_eq!(
         decode::<Request>(r#"{"type":"reload"}"#).unwrap(),
-        Request::Reload
+        Request::Reload { scope: None }
     );
     assert_eq!(json_of(&Request::Keyboard), json!({ "type": "keyboard" }));
     assert_eq!(
@@ -32,8 +35,8 @@ fn unit_requests_are_just_a_type() {
         json!({ "type": "subscribe", "events": ["output"] })
     );
     assert_eq!(
-        decode::<Request>(&encode(&Request::Reload).unwrap()).unwrap(),
-        Request::Reload
+        decode::<Request>(&encode(&Request::Reload { scope: None }).unwrap()).unwrap(),
+        Request::Reload { scope: None }
     );
     assert_eq!(
         decode::<Request>(
@@ -462,6 +465,7 @@ fn a_reload_report_round_trips_with_both_lists() {
         refused: vec!["output.scale".into()],
         shadowed: Vec::new(),
         invalid: Vec::new(),
+        scope: None,
     };
     assert_eq!(
         json_of(&response),
@@ -501,6 +505,7 @@ fn reworded_reload_refusals_are_payload_not_wire_format() {
         ],
         shadowed: Vec::new(),
         invalid: Vec::new(),
+        scope: None,
     };
     assert_eq!(
         decode::<Response>(&encode(&response).unwrap()).unwrap(),
@@ -514,7 +519,7 @@ fn every_request_round_trips_on_one_line() {
         Request::Version,
         Request::Outputs,
         Request::Windows,
-        Request::Reload,
+        Request::Reload { scope: None },
         Request::Action(Action::Spawn {
             command: vec!["foot".into()],
         }),
@@ -1540,6 +1545,7 @@ fn a_reload_report_round_trips_shadowed_and_invalid() {
             "wallpaper".into(),
         ],
         invalid: vec!["appearance.focus_ring_active_color".into()],
+        scope: None,
     };
     assert_eq!(
         json_of(&response),
@@ -1563,10 +1569,58 @@ fn a_reload_report_round_trips_shadowed_and_invalid() {
             refused,
             shadowed,
             invalid,
+            scope,
         } => {
             assert!(applied.is_empty() && refused.is_empty());
             assert!(shadowed.is_empty() && invalid.is_empty());
+            assert!(scope.is_none());
         }
         other => panic!("expected a reload report, got {other:?}"),
     }
+}
+
+/// The look-scoped reload on the wire: `{"type":"reload","scope":"look"}`
+/// decodes to the scoped request, a plain `{"type":"reload"}` stays plain,
+/// and any other scope string fails the decode (an older server meets it
+/// with an ordinary error, never a silent plain reload). The reply carries
+/// the scope that ran; a plain reply omits it, so the old shape still
+/// decodes.
+#[test]
+fn a_look_scoped_reload_round_trips_with_its_scope() {
+    assert_eq!(
+        json_of(&Request::Reload {
+            scope: Some(ReloadScope::Look)
+        }),
+        json!({ "type": "reload", "scope": "look" })
+    );
+    assert_eq!(
+        decode::<Request>(r#"{"type":"reload","scope":"look"}"#).unwrap(),
+        Request::Reload {
+            scope: Some(ReloadScope::Look)
+        }
+    );
+    assert!(
+        decode::<Request>(r#"{"type":"reload","scope":"wallpaper"}"#).is_err(),
+        "an unknown reload scope must fail the decode, never read as plain"
+    );
+    let response = Response::Reloaded {
+        applied: vec!["appearance.focus_ring_active_color".into()],
+        refused: Vec::new(),
+        shadowed: Vec::new(),
+        invalid: Vec::new(),
+        scope: Some(ReloadScope::Look),
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "reloaded",
+            "applied": ["appearance.focus_ring_active_color"],
+            "refused": [],
+            "scope": "look",
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
 }

@@ -17,7 +17,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use scoot_ipc::{Action, EventKind, Horizontal, PointerButton, Request, Vertical};
+use scoot_ipc::{Action, EventKind, Horizontal, PointerButton, ReloadScope, Request, Vertical};
 
 /// The request grammar both clients print in their `--help`. The single
 /// owner: `scoot --help` embeds this same block rather than a second copy.
@@ -26,7 +26,10 @@ use scoot_ipc::{Action, EventKind, Horizontal, PointerButton, Request, Vertical}
 pub const REQUESTS_HELP: &str = "\
     version | outputs | windows
     action ACTION [ARGUMENT...]
-    reload                          re-read the config file and re-apply it live
+    reload [--look]                re-read the config file and re-apply it live
+                                    (`--look`: only the look layer, under the
+                                    file's snapshot -- a swap applies no
+                                    pending edits)
     keyboard                        the active keyboard layout's name and
                                     index -- what a layout indicator shows
     locked                          whether the session is locked -- the
@@ -209,15 +212,22 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
         "outputs" => Request::Outputs,
         "windows" => Request::Windows,
         "reload" => {
+            let mut scope = None;
             for flag in args.by_ref() {
                 match flag.as_str() {
                     "--json" => json = true,
+                    "--look" => scope = Some(ReloadScope::Look),
                     other => {
-                        return Err(hinted("flag", other.to_owned(), &["--json"], "help reload"));
+                        return Err(hinted(
+                            "flag",
+                            other.to_owned(),
+                            &["--json", "--look"],
+                            "help reload",
+                        ));
                     }
                 }
             }
-            Request::Reload
+            Request::Reload { scope }
         }
         "keyboard" => Request::Keyboard,
         "locked" => Request::Locked,
@@ -768,7 +778,17 @@ mod tests {
         assert_eq!(
             parse_msg_args(&["reload"]),
             Ok(Msg {
-                request: Request::Reload,
+                request: Request::Reload { scope: None },
+                out: None,
+                json: false,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["reload", "--look"]),
+            Ok(Msg {
+                request: Request::Reload {
+                    scope: Some(ReloadScope::Look),
+                },
                 out: None,
                 json: false,
             })

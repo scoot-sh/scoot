@@ -140,6 +140,18 @@
 //! `[wallpaper]` section with a problem (neither is ever in effect, so each
 //! always differs from what the file says).
 //!
+//! # The look-scoped reload
+//!
+//! `Request::Reload` with `scope = "look"` (driven by `scoot look apply`,
+//! never by `SIGHUP`) merges the freshly read look layer under a snapshot
+//! of the user file -- its raw bytes from the last successful plain load,
+//! kept in [`State::user_snapshot`] -- and swaps only what the layer
+//! supplies (appearance and wallpaper). The user's file is never re-read,
+//! so a swap never applies pending edits, spawns no autostart entry and
+//! swaps no binds; a half-written file cannot refuse it. A missing or
+//! broken layer refuses it whole with everything untouched, and the reply
+//! carries the scope that ran (`Response::Reloaded::scope`).
+//!
 //! # While locked
 //!
 //! A reload applies under session lock, deliberately. Nothing in the applied
@@ -180,7 +192,7 @@
 //! there is nothing actionable to skip.)
 
 use scoot_core::{Action, OutputId};
-use scoot_ipc::Response;
+use scoot_ipc::{ReloadScope, Response};
 
 use super::State;
 use super::config::{self, LoadedConfig};
@@ -274,9 +286,26 @@ impl State {
     /// user's file on raw keys before derivation (see `look_layer.rs` and
     /// `config::merge_layer`). A layer that fails the strict parse refuses
     /// the whole reload -- everything kept. A reload that sees the layer's
-    /// identity change emits `EventKind::Look`.
+    /// identity change emits `EventKind::Look`. The snapshot
+    /// ([`State::user_snapshot`]) refreshes from this load only after the
+    /// apply below, so a refused reload leaves it holding the last applied
+    /// file.
     pub fn reload(&mut self) -> Response {
         self.reload_with_state(look_layer_state())
+    }
+
+    /// Serves `Request::Reload` scoped to the look: merges the freshly read
+    /// layer under the snapshot -- the user file's raw bytes from the last
+    /// successful plain load -- and swaps only what the look layer supplies
+    /// (appearance and wallpaper). The user's file is never re-read, so
+    /// pending edits wait for their own plain reload; no autostart entry
+    /// spawns and no bind swaps. A missing or broken layer refuses the
+    /// reload whole, leaving everything untouched; a half-written user file
+    /// cannot refuse it, because it is never read. The snapshot never
+    /// advances here; the layer identity commits after the apply, like a
+    /// plain reload.
+    pub fn reload_scoped(&mut self) -> Response {
+        self.reload_scoped_with_state(look_layer_state())
     }
 
     /// Serves a reload against an explicit look layer state. The live edge
@@ -324,13 +353,14 @@ impl State {
             }
         };
         let report = self.apply_reload(&fresh.loaded);
-        // The identity commits after the apply, never before: a reload that
+        // Both commits happen after the apply, never before: a reload that
         // fails to load returns above without touching either, so a broken
-        // layer or file can never advance the identity past what applied.
-        // Per-field refusals in the report do not hold it back -- the layer
-        // was seen and its applicable fields applied, and the next reload
-        // diffs against what this one did -- which is the same
-        // commit-after-apply ordering scootbar's look reload uses.
+        // layer or file can never advance the snapshot or the identity past
+        // what applied. Per-field refusals in the report do not hold them
+        // back -- the layer was seen and its applicable fields applied, and
+        // the next reload diffs against what this one did -- which is the
+        // same commit-after-apply ordering scootbar's look reload uses.
+        self.user_snapshot = fresh.user_text;
         if identity != self.look_identity {
             self.look_identity = identity.clone();
             let (name, source_hash) = match &identity {
@@ -349,6 +379,78 @@ impl State {
             refused: report.refused,
             shadowed: fresh.shadowed,
             invalid: fresh.invalid,
+            scope: None,
+        }
+    }
+
+    /// Serves a look-scoped reload against an explicit look layer state.
+    /// The live edge ([`State::reload_scoped`]) resolves the state through
+    /// [`look_layer_state`]; tests pass their layer directly, so no test
+    /// depends on ambient `SCOOT_LOOK_STATE` / `XDG_STATE_HOME` and no layer
+    /// test can leak into another test through process-global environment
+    /// state.
+    pub(crate) fn reload_scoped_with_state(&mut self, layer: LookLayerState) -> Response {
+        let Some(path) = self.config_path.clone() else {
+            tracing::error!(
+                "config reload refused: no resolvable config path; keeping the running config"
+            );
+            return Response::error(
+                "refused: this session started with no resolvable config path \
+                 (neither XDG_CONFIG_HOME nor HOME is set), so there is no \
+                 file to reload; keeping the running config",
+            );
+        };
+        let fragment = match layer {
+            LookLayerState::Absent => {
+                let reason = "no look layer is configured, refusing the look-scoped reload";
+                tracing::error!("config reload failed: {reason}");
+                return Response::error(format!("refused: {reason}; keeping the running config"));
+            }
+            LookLayerState::Broken(reason) => {
+                tracing::error!(%reason, "config reload failed");
+                return Response::error(format!(
+                    "refused: the look layer is refused ({reason}); keeping the running config"
+                ));
+            }
+            LookLayerState::Present(fragment) => fragment,
+        };
+        let identity = Some(fragment.identity.clone());
+        let fresh = match config::reload_scoped_from_snapshot(
+            self.user_snapshot.as_deref(),
+            fragment.text.as_str(),
+            &path,
+            self.tty.is_some(),
+        ) {
+            Ok(fresh) => fresh,
+            Err(error) => {
+                tracing::error!(%error, "config reload failed");
+                return Response::error(error.to_string());
+            }
+        };
+        let report = self.apply_look_reload(&fresh.loaded);
+        // The identity commits after the apply, never before; the snapshot
+        // never moves here -- it advances only on a successful plain load,
+        // so a later scoped reload still merges under the file the session
+        // runs, not under anything this swap saw.
+        if identity != self.look_identity {
+            self.look_identity = identity.clone();
+            let (name, source_hash) = match &identity {
+                Some(identity) => (identity.name.clone(), identity.source_hash.clone()),
+                None => (None, String::new()),
+            };
+            self.emit_look_changed(name, source_hash);
+        }
+        tracing::info!(
+            applied = ?report.applied,
+            refused = ?report.refused,
+            "config reloaded (look scope)"
+        );
+        Response::Reloaded {
+            applied: report.applied,
+            refused: report.refused,
+            shadowed: fresh.shadowed,
+            invalid: fresh.invalid,
+            scope: Some(ReloadScope::Look),
         }
     }
 
@@ -382,6 +484,33 @@ impl State {
         self.apply_binds_reload(fresh, &mut report);
         self.apply_wallpaper_reload(fresh, &mut report);
 
+        self.finish_reload(&report);
+        report
+    }
+
+    /// Diffs a look-scoped `fresh` load -- the fresh layer merged under the
+    /// snapshot -- against the running session and swaps in only what the
+    /// look layer supplies: appearance and wallpaper. Everything else
+    /// (layout, output, autostart, floating, binds, device refusals) is
+    /// untouched by construction: the snapshot did not move, so those
+    /// derive identically on both sides, and the appliers that would act on
+    /// them never run here. A pending autostart entry stays pending for the
+    /// next plain reload; pending binds wait there too.
+    fn apply_look_reload(&mut self, fresh: &LoadedConfig) -> Report {
+        let mut report = Report::default();
+        self.apply_appearance_reload(fresh, &mut report);
+        self.apply_wallpaper_reload(fresh, &mut report);
+
+        self.finish_reload(&report);
+        report
+    }
+
+    /// Recomputes the arrangement and requests a render when placement
+    /// moved, else redraws for a ring, background, corner or cursor change.
+    /// Shared by the plain and the look-scoped paths: the scoped path can
+    /// only ever report appearance names, so it takes the redraw branches,
+    /// never the re-arrange one.
+    fn finish_reload(&mut self, report: &Report) {
         // Recompute the arrangement and request a render when placement
         // moved. A binds-only reload skips it: no placement changed, so
         // there is nothing to configure and nothing dirty. Ring, background
@@ -417,7 +546,6 @@ impl State {
         }) {
             self.cursor_changed();
         }
-        report
     }
 
     /// `[layout]`: `gap`, `column_widths` and `default_column_width` apply

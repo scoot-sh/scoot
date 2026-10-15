@@ -1850,6 +1850,7 @@ mod tests {
             &["outputs"],
             &["windows"],
             &["reload"],
+            &["reload", "--look"],
             &["action", "focus-column", "left"],
             &["action", "move-window-to-workspace", "down"],
             &["action", "focus-workspace-index", "2"],
