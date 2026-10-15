@@ -65,3 +65,25 @@ Keeping modules across a style-only reload
 ([`scootbar-style-reload`](scootbar-style-reload.md)), the picker.
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
+
+## Resolution
+
+Resolved 2026-10-15 in #612 (`feat(scootbar,scoot-look): read a look
+layer under bar.toml, with a look-scoped reload`).
+
+What landed: `crates/scootbar/src/look.rs` (state resolution, raw-key
+merge with the hover/accent derived pair, the user-file snapshot, the
+fixed `[look] layer`, the feature drop, the startup font probe),
+`{"type":"reload","scope":"look"}` plus `scootbar msg reload --look`,
+and the `scoot-look` allowlist gains the workspaces pill keys, the disc
+flag and the single-glyph module icons. Docs in
+`site/src/content/docs/scootbar/` (`configure.md`, `theming.md`,
+`cli.md`). CI fans `crates/scoot-look` changes out to the scootbar job.
+
+Evidence: `cargo nextest run -p scootbar -p scoot-look` 1529 passed;
+`cargo test` all suites ok; clippy `-D warnings` clean on default,
+`--no-default-features` and each module alone; `fmt --check` clean; an
+end-to-end `scoot-look build` plus `scootbar daemon --check` over the
+state link on the dev VM. Deviations from the design (font as a
+fragment key only, array icon levels user-only, no protocol bump, the
+item-gap bound) are listed with reasons in the PR.
