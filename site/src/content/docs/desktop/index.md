@@ -118,8 +118,9 @@ Which options live on which side:
 
 ## Home Manager
 
-Standalone home-manager (Nix on another distro, or managing the config
-on macOS for the Linux box it deploys to) takes the same `home.nix`.
+Standalone home-manager (Nix on another distro, or a `home.nix` kept next
+to the machine that edits it, which also manages the config on macOS for
+the Linux box it deploys to) takes the same `home.nix`.
 The flake for it is on [Install](../start/install.md#use-it-every-day),
 under **Nix on another Linux**.
 
@@ -959,7 +960,7 @@ of scope for this slot.
 Why wob, measured at the pinned rev (`8ce4ef6`, `aarch64-linux`:
 full closures by `nix path-info --closure-size`, marginals as new
 store paths over the profile's own tools, idle RSS as VmRSS, wakeups as
-context-switch deltas over 62 s hidden under a headless scoot, all on
+context-switch deltas over 62 s hidden, all on
 the M2):
 
 | Tool | Version | Full closure | New over profile | Idle RSS | Wakeups hidden | Why / why not |
@@ -1224,8 +1225,8 @@ refuses loud until unlocked).
 Why polkit-gnome, measured at the pinned rev (`8ce4ef6`,
 `aarch64-linux`: full closures by `nix path-info --closure-size`,
 marginals as new store paths over the profile's own tools, idle RSS as
-VmRSS under Xvfb, wakeups as context-switch deltas over 60 s idle
-under a headless scoot, all on the M2):
+VmRSS under Xvfb, wakeups as context-switch deltas over 60 s idle,
+all on the M2):
 
 | Tool | Version | Full closure | New over profile | Idle RSS | Wakeups idle | Why / why not |
 |---|---|---|---|---|---|---|
@@ -1233,8 +1234,8 @@ under a headless scoot, all on the M2):
 | lxqt-policykit | 2.4.0 | 858.9 MiB | 385.9 MiB (39 paths) | ~4.1 MB | 0 in 60 s | a second toolkit (Qt6: qtdeclarative alone is 195 MB) for the same prompt |
 | hyprpolkitagent | 0.1.3 | 1.7 GiB | 642.9 MiB (71 paths) | ~4.2 MB | 0 in 60 s | Qt6 *plus* KDE (kirigami, breeze-icons, ffmpeg) at ~1600× the marginal — and the youngest codebase of the three |
 
-Every agent idles at zero wakeups:
-polkit-gnome's marginal is three orders of magnitude smaller than
+Every agent idles at zero wakeups (all three block on D-Bus, none
+polls), so the pick is closure, not CPU: polkit-gnome's marginal is three orders of magnitude smaller than
 either Qt agent's.
 
 Why gnome-keyring, same method:
@@ -1531,7 +1532,7 @@ Without them the pickers fail loud (below).
   keyring already holds it. To skip the prompt, stash it once:
   `secret-tool store --label='WiFi Home' scoot-wifi 'Home'`. The key
   reaches `nmcli` on stdin, never in an argument (the process table
-is readable by every user), and NetworkManager keeps it after the
+  is readable by every user), and NetworkManager keeps it after the
   first join (system-owned, in `/etc/NetworkManager/system-connections`).
 - A wrong key fails loud, and the failed join leaves no profile
   behind, so the next pick asks again. A key from the keyring that the
@@ -1795,7 +1796,8 @@ hold a charge longer on the shelf, the 80% cap is the whole trick.
 ### Profiles
 
 `power-profiles-daemon` runs as a system service, owning
-`org.freedesktop.UPower.PowerProfiles` on the system bus. Switch one keypress at
+`org.freedesktop.UPower.PowerProfiles` on the system bus, which is what
+applets and shells read, driver or not. Switch one keypress at
 a time:
 
 | Press | Does |
@@ -1812,7 +1814,8 @@ On Apple silicon the daemon runs a placeholder driver offering
 `power-saver` + `balanced` — both no-ops there, so `set` to either
 succeeds while changing no CPU behavior, and only `performance` is
 refused (loudly, with the daemon's own error). `Super+p` (`cycle`) steps only
-between the profiles the daemon lists; `set` to an unlisted profile stays loud
+between the profiles the daemon lists, so the bind never fails silently
+from the keymap; `set` to an unlisted profile stays loud
 for terminal use. Where no driver honors the daemon at all, drop
 it and its bind entirely:
 
@@ -2068,7 +2071,8 @@ written:
 
 The record of its own offs is `$XDG_RUNTIME_DIR/scoot-displays.off`.
 It goes when your last session logs out (unless lingering is on), but
-it survives a compositor restart inside one login:
+it survives a compositor restart inside one login,
+so a fresh scoot can find an old record:
 until the watcher's first apply in that session, an entry whose name
 and id match a live output can turn that output on once. It only ever
 lights a screen, never darkens one. Everything else is live runtime
@@ -2312,7 +2316,7 @@ its candidate window (below); without one fcitx5's own theme
 stands.
 
 Why fcitx5, measured at the pinned rev (`8ce4ef6`,
-`aarch64-linux`: closures by `nix path-info --closure-size`
+`aarch64-linux`: full closures by `nix path-info --closure-size`
 against the binary cache):
 
 | Engine | Version | Full closure | Speaks `input-method-v2` | Verdict |
@@ -2412,7 +2416,7 @@ a headless text-input client ships — see there).
 ### Trying it headless
 
 Proven live on the M2 against headless scoot (installed `0.1.0`,
-IPC protocol 10 at the time — current release v0.2.1 / protocol 11 —
+IPC protocol 10 —
 the change itself is Nix-only, so no compositor behavior moves):
 fcitx5 5.1.21 started with the slot's shape (user
 unit past the session target, no polling) binds the seat:
