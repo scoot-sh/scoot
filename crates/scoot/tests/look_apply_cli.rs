@@ -202,7 +202,11 @@ impl Session {
         let mut found = Vec::new();
         for entry in std::fs::read_dir(&self.runtime).expect("readable runtime dir") {
             let entry = entry.expect("an entry");
-            if entry.file_name().to_string_lossy().starts_with("scoot-look-") {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("scoot-look-")
+            {
                 found.push(entry.path());
             }
         }
@@ -281,10 +285,7 @@ fn offline_commands_list_show_validate_and_build() {
     let out = scratch.dir.join("built");
     session.check_look(&["build", "look-a", "--out", &out.to_string_lossy()]);
     for file in ["scoot.toml", "bar.toml", "render.json"] {
-        assert!(
-            out.join(file).is_file(),
-            "build writes {file}"
-        );
+        assert!(out.join(file).is_file(), "build writes {file}");
     }
     let current = session.check_look(&["current", "--json"]);
     let current: serde_json::Value = serde_json::from_str(&current).expect("JSON from current");
@@ -300,21 +301,35 @@ fn a_swap_applies_two_looks_through_the_scoped_reload() {
     assert_eq!(first["applied"], "look-a");
     assert_eq!(first["generation"], 1);
     assert!(
-        first["reloaded"].as_array().expect("a reloaded list").iter().any(|entry| entry == "compositor"),
+        first["reloaded"]
+            .as_array()
+            .expect("a reloaded list")
+            .iter()
+            .any(|entry| entry == "compositor"),
         "the running compositor reloads: {first}",
     );
     let private = session.private_dir();
     let record = std::fs::read_to_string(private.join("look.json")).expect("a record");
-    assert!(record.contains("\"name\":\"look-a\"") || record.contains("\"name\": \"look-a\""), "{record}");
+    assert!(
+        record.contains("\"name\":\"look-a\"") || record.contains("\"name\": \"look-a\""),
+        "{record}"
+    );
     let link = std::fs::read_link(private.join("look")).expect("a link");
-    assert!(link.is_dir(), "the link points at a render: {}", link.display());
+    assert!(
+        link.is_dir(),
+        "the link points at a render: {}",
+        link.display()
+    );
     assert!(link.join("scoot.toml").is_file());
     let second = session.check_look(&["apply", "look-b", "--json"]);
     let second: serde_json::Value = serde_json::from_str(&second).expect("JSON from apply");
     assert_eq!(second["applied"], "look-b");
     assert_eq!(second["generation"], 2);
     let current = session.check_look(&["current"]);
-    assert!(current.contains("look-b"), "current names the swap:\n{current}");
+    assert!(
+        current.contains("look-b"),
+        "current names the swap:\n{current}"
+    );
 }
 
 #[test]
