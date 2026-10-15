@@ -539,6 +539,15 @@ pub struct State {
     /// the initial value without emitting. Written only by the config load
     /// paths (see `reload.rs` and `compositor::run`).
     pub look_identity: Option<super::look_layer::LookIdentity>,
+    /// The private look state dir in force (`$XDG_RUNTIME_DIR/scoot-look-<display>/`),
+    /// or `None` when this session shares the user state. Set once in
+    /// `compositor::run`, after the Wayland socket names the display; read
+    /// by [`State::session_command`], which exports it as `SCOOT_LOOK_STATE`
+    /// to direct children (and strips an inherited one when `None`, so a
+    /// nested session inside a private one still starts on the user state).
+    /// Reloads resolve the same dir through the process environment, which
+    /// `run` settles beside `WAYLAND_DISPLAY`.
+    pub private_look_dir: Option<PathBuf>,
     /// Per-window persistent ring buffers -- see `decorations.rs`'s module
     /// doc for why these live here rather than being rebuilt every frame.
     pub decorations: Decorations,
@@ -1387,6 +1396,7 @@ impl State {
             tty: None,
             appearance,
             look_identity: None,
+            private_look_dir: None,
             decorations: Decorations::default(),
             cursor,
             compositor_state,
@@ -1732,7 +1742,8 @@ impl State {
     /// `XDG_SESSION_TYPE`, `XDG_SESSION_DESKTOP` -- see `session_env` for
     /// which are unconditional and which fill a vacuum), the live cursor
     /// theme (`XCURSOR_THEME`/`XCURSOR_SIZE`, read off the rebuilt `Cursor`
-    /// so a reloaded theme reaches future children), and -- while the
+    /// so a reloaded theme reaches future children), and -- in a private
+    /// session -- `SCOOT_LOOK_STATE` (see `session_command`), and -- while the
     /// session's XWayland server is believed live -- `DISPLAY` for X11
     /// clients (see `xwayland/mod.rs`; unset there means inherit, so a
     /// host-provided `DISPLAY` under `--nested` survives when XWayland is
@@ -1819,8 +1830,9 @@ impl State {
     /// so a child gets stdio and nothing else of scoot's.
     ///
     /// `WAYLAND_DISPLAY` and the IPC socket path, the session-identity
-    /// environment, the live cursor theme and, while XWayland is live,
-    /// `DISPLAY`; an inherited activation token or startup id is removed.
+    /// environment, the live cursor theme and -- in a private session -- the
+    /// look state, and, while XWayland is live, `DISPLAY`; an inherited
+    /// activation token or startup id is removed.
     pub(super) fn session_command(&self, program: &std::ffi::OsStr) -> Command {
         let mut child = Command::new(program);
         child.env("WAYLAND_DISPLAY", &self.socket_name);
@@ -1871,6 +1883,22 @@ impl State {
         // proven not to read.
         child.env("XCURSOR_THEME", self.cursor.theme().name());
         child.env("XCURSOR_SIZE", self.cursor.theme().size().to_string());
+        // The look state this session reads, beside `XCURSOR_*` above: only
+        // a private session exports `SCOOT_LOOK_STATE`, to its direct
+        // children (which is also how their bar resolves the private dir).
+        // Set explicitly -- like `WAYLAND_DISPLAY` above -- rather than
+        // relying on the process environment, so the contract reads at this
+        // site and a test-harness `State` (whose process environment was
+        // never settled) still gets it right. A session on the user state
+        // strips an inherited one instead, so a nested session started
+        // inside a private one does not follow its parent's private dir;
+        // systemd user units never see either, so they always act on the
+        // user state.
+        if let Some(dir) = &self.private_look_dir {
+            child.env(scoot_look::state::STATE_ENV, dir);
+        } else {
+            child.env_remove(scoot_look::state::STATE_ENV);
+        }
         // Removed rather than overwritten: the compositor itself may have been
         // started with one (a launcher client, a nested session), and that
         // token is a receipt for someone else's user action -- handing it to

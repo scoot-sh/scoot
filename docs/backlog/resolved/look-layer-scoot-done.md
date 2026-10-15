@@ -13,7 +13,7 @@ Filed 2026-10-12, child of [`live-looks`](live-looks.md). Serves **both**:
 the ring, background, cursor and wallpaper are the most visible half of a
 look, and the screenshots agents take. The look-scoped reload
 ([`look-scoped-reload`](look-scoped-reload.md)) and the per-session state
-([`look-session-state`](look-session-state.md)) are split out.
+([`look-session-state`](look-session-state-done.md)) are split out.
 
 ## The gap
 

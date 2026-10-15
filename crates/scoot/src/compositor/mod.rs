@@ -96,6 +96,8 @@ pub(crate) mod test_support;
 mod tests;
 
 use std::error::Error;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
@@ -117,15 +119,31 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // The only error this can return is an explicit `--config PATH` that
     // couldn't be read -- every other config problem already resolved
     // itself to defaults inside `load` (see `config`'s module doc). The
+    // user's own look state seeds what this session reads: an inherited
+    // `$SCOOT_LOOK_STATE` is ignored here, so a `--nested` session started
+    // inside a private session's terminal still starts on the user state,
+    // and a private session seeds its own dir from this one below. The
     // active look layer merges under the user's file when one is in force;
     // a refused layer logs and runs without it, never failing startup.
-    let look_dir = look_layer::state_dir(
+    let user_look_dir = look_layer::state_dir(
         None,
-        std::env::var_os("SCOOT_LOOK_STATE"),
+        None,
         std::env::var_os("XDG_STATE_HOME"),
         std::env::var_os("HOME"),
     );
-    let look_outcome = look_dir.as_deref().map(look_layer::load);
+    let private_session =
+        scoot_look::state::wants_private_session(options.nested, options.tty, options.private_look);
+    if !private_session {
+        // A session on the user state repairs its link from its record
+        // before reading it, so a crash between the two renames heals here
+        // rather than loading a stale layer. A private session never touches
+        // the user dir, not even to repair it: its own repair runs on the
+        // private dir after the seed below.
+        if let Some(dir) = user_look_dir.as_deref() {
+            log_link_repair(scoot_look::state::ensure_link(dir));
+        }
+    }
+    let look_outcome = user_look_dir.as_deref().map(look_layer::load);
     let (look_text, look_identity, mut look_warn) = match look_outcome {
         Some(look_layer::LoadOutcome { load, warn }) => match load {
             look_layer::FragmentLoad::Present(fragment) => {
@@ -265,6 +283,26 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // The look layer's identity at startup: the baseline reloads compare
     // against, set without emitting (see `reload.rs`).
     state.look_identity = look_identity;
+    // Per-session look state (design section 4.2): `--headless` is private
+    // by default and any backend opts in with `--private-look`, so an
+    // agent's test session can swap looks without repointing the user's
+    // desktop. The display names the dir, so this waits for `State::new`
+    // (which binds the Wayland socket). The seed copies the user state the
+    // config load read above, byte for byte, which is why the load needs
+    // no re-merge: the fragment it merged is the fragment the private dir
+    // now holds.
+    state.private_look_dir = if private_session {
+        let settled = settle_private_look(&state.socket_name, user_look_dir.as_deref());
+        // The seed copies the user's record and link; the repair heals what
+        // the user side could not supply (a record with no link reseeds as
+        // a record alone, and the link is recreated from it here).
+        if let Some(dir) = settled.as_deref() {
+            log_link_repair(scoot_look::state::ensure_link(dir));
+        }
+        settled
+    } else {
+        None
+    };
     state.startup_gpu = loaded.gpu.clone();
     state.startup_renderer_request = loaded.renderer;
     state.startup_autostart = loaded.autostart.clone();
@@ -538,6 +576,20 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         // rather than fall back to something else again.
         std::env::set_var("XCURSOR_THEME", state.cursor.theme().name());
         std::env::set_var("XCURSOR_SIZE", state.cursor.theme().size().to_string());
+        // The look state this session reads, beside `XCURSOR_*`: only a
+        // private session exports `SCOOT_LOOK_STATE`, to its direct children
+        // (which is also how reloads resolve it, reading this same
+        // environment). Systemd user units never see it -- it is not among
+        // the variables `resources/scoot-session` imports -- so they always
+        // act on the user state. A session on the user state strips an
+        // inherited one instead, so a `--nested` session started inside a
+        // private session's terminal does not follow its parent's private
+        // dir.
+        if let Some(dir) = &state.private_look_dir {
+            std::env::set_var(scoot_look::state::STATE_ENV, dir);
+        } else {
+            std::env::remove_var(scoot_look::state::STATE_ENV);
+        }
     }
 
     // The SIGCHLD reaper, before the first spawn below: an exit between the
@@ -587,7 +639,18 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         renderer = %state.renderer,
         "scoot is up"
     );
-    event_loop.run(None, &mut state, post_dispatch)?;
+    let loop_outcome = event_loop.run(None, &mut state, post_dispatch);
+    // A clean return removes the private state, so per-display dirs never
+    // accumulate: only a panic or a kill leaves one behind, and the next
+    // session with that display name wipes and reseeds it at startup. This
+    // runs whatever the loop reports, before the host-loss check below: a
+    // nested session that lost its host still owns no state worth keeping.
+    if let Some(dir) = state.private_look_dir.as_deref()
+        && let Err(error) = scoot_look::state::remove_private_dir(dir)
+    {
+        tracing::warn!("{error}");
+    }
+    loop_outcome?;
     // A host-driven stop is clean at the loop level but a failure of the
     // session: without the host nothing presents and no input arrives, so
     // answering `Ok` here would report success for a session that lost its
@@ -656,6 +719,68 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
 /// is that client's problem -- wayland-backend already swallows the per-client
 /// error internally (`flush(None)` does `let _ = client.flush()` per client and
 /// returns `Ok`), so there is nothing actionable left to propagate.
+/// Seeds `$XDG_RUNTIME_DIR/scoot-look-<display>/` from the user state and
+/// returns it, or `None` (the session shares the user state) with a warning
+/// logged. Startup never fails over a look: a missing runtime dir, an
+/// unnameable display or an unwritable private dir degrades to the user
+/// state loudly rather than refusing the session. A `--tty` or `--nested`
+/// session never reaches this (it shares the user state); a private one
+/// that degrades this way warns, because its swaps then touch the user's
+/// choice -- exactly what the private state exists to avoid.
+///
+/// The seed copies `look.json` byte for byte and replicates the `look`
+/// link (resolved to absolute when relative, so it names the same directory
+/// from the private dir) and never writes the user dir, so a headless test
+/// session's later swaps leave the user's choice byte-identical.
+///
+/// `socket_name` is the Wayland socket `State::new` bound (`wayland-1`
+/// onward), which is why the display -- and only the display -- can name a
+/// per-display dir: nothing earlier in startup knows it.
+fn settle_private_look(socket_name: &OsStr, user_dir: Option<&Path>) -> Option<PathBuf> {
+    let degraded = |reason: &str| {
+        tracing::warn!(
+            "{reason}; this session shares the user look state, and its swaps will touch it"
+        );
+        None
+    };
+    let dir = match look_layer::private_state_dir(
+        std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
+        socket_name,
+    ) {
+        Ok(dir) => dir,
+        Err(error) => return degraded(&error),
+    };
+    // No user dir at all (no home resolves): an empty private state still
+    // isolates, so create it rather than sharing nothing in particular.
+    let Some(user) = user_dir else {
+        return match scoot_look::state::prepare_private_dir(&dir) {
+            Ok(()) => Some(dir),
+            Err(error) => degraded(&error),
+        };
+    };
+    match scoot_look::state::seed_private(user, &dir) {
+        Ok(notes) => {
+            for note in notes {
+                tracing::info!("{note}");
+            }
+            Some(dir)
+        }
+        Err(error) => degraded(&error),
+    }
+}
+
+/// Logs a startup link repair: a heal names what moved (a crash recovered),
+/// a refusal names why, and the steady states stay silent (a missing record
+/// with no link is the default install, not news).
+fn log_link_repair(outcome: Result<scoot_look::state::LinkRepair, String>) {
+    match outcome {
+        Ok(scoot_look::state::LinkRepair::Consistent) => {}
+        Ok(scoot_look::state::LinkRepair::Healed(note)) => tracing::warn!("{note}"),
+        Ok(scoot_look::state::LinkRepair::Skipped(_)) => {}
+        Err(error) => tracing::warn!("{error}"),
+    }
+}
+
 /// The size a `--headless`/`--nested` output named `name` is created at:
 /// its `[[outputs]]` entry's `mode` when it has one, else `--width` by
 /// `--height`. A parsed mode is two positive `u16`s, so it is always inside

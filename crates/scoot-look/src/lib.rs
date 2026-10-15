@@ -40,6 +40,12 @@
 //! to a source look's `look.toml` (design section 5.3): the plain-install
 //! source of palettes, pure like the rest here.
 //!
+//! [`state`] is the per-session state (`<state>/look.json` plus the `look`
+//! link): the state-dir rule scoot and scootbar share (scootbg takes no
+//! look state), the record, the link repair the compositor runs at startup,
+//! the seed a private session copies at startup, and the lock every writer
+//! takes for the future `look-apply-cli` tool.
+//!
 //! The effectful checks live in the caller: fonts through their carrier,
 //! the wallpaper through `scootbg check-image`, the fragments through the
 //! apps' own strict parsers.
@@ -52,6 +58,7 @@ pub mod render;
 pub mod resolve;
 pub mod resolved;
 pub mod schema;
+pub mod state;
 
 pub use allowlist::{
     ValueKind, allows, check_app_value, is_wallpaper_override_key, validate_apps_allowlist,

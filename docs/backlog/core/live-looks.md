@@ -56,12 +56,12 @@ stated rule.
 | [`look-shipped`](look-shipped.md) | high | both | `look-format` |
 | [`look-layer-scoot`](look-layer-scoot.md) | high | both | `look-format` |
 | [`look-scoped-reload`](look-scoped-reload.md) | high | both | `look-layer-scoot` |
-| [`look-session-state`](look-session-state.md) | medium | computer use | `look-layer-scoot` |
+| [`look-session-state`](resolved/look-session-state-done.md) | medium | computer use | `look-layer-scoot` |
 | [`look-layer-scootbar`](../../scootbar/backlog/resolved/look-layer-scootbar-done.md) | high | daily-drive | `look-format` |
 | [`scootbar-style-reload`](../../scootbar/backlog/resolved/scootbar-style-reload-done.md) | medium | daily-drive | |
 | [`look-apply-cli`](look-apply-cli.md) | high | both | `look-shipped`, `look-scoped-reload` |
 | [`look-cycle-preview`](look-cycle-preview.md) | medium | daily-drive | `look-apply-cli` |
-| [`look-ipc`](../ipc/look-ipc.md) | medium | computer use | `look-apply-cli`, `look-session-state` |
+| [`look-ipc`](../ipc/look-ipc.md) | medium | computer use | `look-apply-cli` |
 | [`look-golden-screenshots`](../testing/look-golden-screenshots.md) | medium | computer use | `look-ipc` |
 | [`look-nix-catalog`](../packaging/look-nix-catalog.md) | high | daily-drive | `look-apply-cli` |
 | [`look-import-base16`](look-import-base16.md) | medium | daily-drive | `look-format` |
