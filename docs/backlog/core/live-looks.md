@@ -97,6 +97,25 @@ carriers), D14 (Stylix targets keep their paths), D15 (the shipped looks
 carry the examples' shape and opacity, a visible change for every Nix
 profile user). D1, D6 and D8 are defaults that need no call.
 
+## Maintainer direction, 2026-10-14
+
+- **Works on Nix and without Nix, equally.** No core behavior may need Nix.
+- **Stylix is a source, never a requirement.** It is a Nix-only way to get a
+  palette. Every theming path a Stylix user has must also exist for a plain
+  install, using `scoot-look` alone: the `look-leaves-*` and
+  `look-toolkit-live` tickets render each third-party app's own config (foot,
+  mako, fuzzel, GTK `gtk.css`, qt6ct colors, dconf keys through the
+  `gsettings`/`dconf` CLI) from the look's tokens **once, at `scoot look
+  apply`**, then send that app's own reload signal. No resident theming
+  daemon, no watcher process, no per-frame work: memory and CPU cost is zero
+  between swaps. `look-import-base16` gives a plain install any base16 scheme
+  as a source look, which is what Stylix gives a Nix user.
+- **Own launcher and notification daemon are not prerequisites.** fuzzel
+  (reads its config on every launch, so it is live by construction) and mako
+  (`makoctl reload`) are themed through the render path above. `scootlaunch`
+  and `scootnotify` stay separate, later work; if a leaf proves unthemeable
+  live, that is the trigger to build the first-party one.
+
 ## Not in this epic
 
 Per-window looks, per-output colors, a high-contrast look, a live login
