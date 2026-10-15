@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "scoot"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "calloop-wayland-source",
  "cc",
@@ -886,11 +886,11 @@ dependencies = [
 
 [[package]]
 name = "scoot-core"
-version = "0.2.0"
+version = "0.2.1"
 
 [[package]]
 name = "scoot-ipc"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64",
  "scoot-core",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "scootbar"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ab_glyph",
  "base64",
@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "scootbg"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64",
  "gif",
@@ -939,14 +939,14 @@ dependencies = [
 
 [[package]]
 name = "scootbg-mem"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rustix 1.1.4",
 ]
 
 [[package]]
 name = "scootctl"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "scoot-ipc",
  "serde_json",
