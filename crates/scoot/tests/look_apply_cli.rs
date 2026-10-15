@@ -246,7 +246,7 @@ impl Session {
 
     fn check_look(&self, args: &[&str]) -> String {
         let out = self.look(args);
-        assert(
+        assert!(
             out.status.success(),
             "`scoot look {}` failed:\nstdout:\n{}\nstderr:\n{}",
             args.join(" "),
@@ -281,9 +281,9 @@ fn offline_commands_list_show_validate_and_build() {
     let out = scratch.dir.join("built");
     session.check_look(&["build", "look-a", "--out", &out.to_string_lossy()]);
     for file in ["scoot.toml", "bar.toml", "render.json"] {
-        assert(
+        assert!(
             out.join(file).is_file(),
-            "build writes {file}",
+            "build writes {file}"
         );
     }
     let current = session.check_look(&["current", "--json"]);
@@ -299,7 +299,7 @@ fn a_swap_applies_two_looks_through_the_scoped_reload() {
     let first: serde_json::Value = serde_json::from_str(&first).expect("JSON from apply");
     assert_eq!(first["applied"], "look-a");
     assert_eq!(first["generation"], 1);
-    assert(
+    assert!(
         first["reloaded"].as_array().expect("a reloaded list").iter().any(|entry| entry == "compositor"),
         "the running compositor reloads: {first}",
     );
@@ -331,7 +331,7 @@ fn a_swap_never_applies_a_pending_user_edit() {
     let binds = session.msg(&["binds", "--json"]);
     assert(binds.status.success(), "binds answers");
     let before = String::from_utf8(binds.stdout).expect("UTF-8 binds");
-    assert(
+    assert!(
         !before.contains("super+F12"),
         "the swap applied a pending edit:\n{before}",
     );
@@ -340,7 +340,7 @@ fn a_swap_never_applies_a_pending_user_edit() {
     assert(reload.status.success(), "a plain reload answers");
     let binds = session.msg(&["binds", "--json"]);
     let after = String::from_utf8(binds.stdout).expect("UTF-8 binds");
-    assert(
+    assert!(
         after.contains("super+F12"),
         "the plain reload did not apply the pending bind:\n{after}",
     );
