@@ -78,4 +78,4 @@ checks pass; the monolithic content run could not go green on the dev
 VM (root disk exhausted by concurrent agents, failing in unrelated
 power/watcher sections), so CI owns the final full run.
 
-PR: (link on open).
+PR: https://github.com/scoot-sh/scoot/pull/632 (open, do not merge: the coordinator gates merges).
