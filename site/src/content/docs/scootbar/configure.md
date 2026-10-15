@@ -64,7 +64,7 @@ has `share/fonts/truetype/DejaVuSans.ttf`), or run the flake's
 `scootbar-demo`, which gives it DejaVu Sans by default
 (see [Enable it](./index.md#enable-it)).
 
-**Replacing the font file under a running bar cannot crash it**: the font is
+**Replacing the font file under a running bar cannot crash it** — unless a root process rewrites a mapped store file in place through a read-write view (root ignores the write bit; nix-daemon never does): the font is
 mapped (only the pages drawn stay resident, shared with every other program
 using it) only when root-owned, with no write bit, on a read-only mount
 (NixOS's `/nix/store`); everywhere else — including a writable file seen
@@ -124,7 +124,8 @@ it). A title in such a script draws per codepoint.
 `NotoSansCJK-VF.otf.ttc` (nixpkgs' `nerd-fonts.symbols-only` and
 `noto-fonts-cjk-sans`) draw Latin, a symbol icon and Japanese, Korean and
 Chinese together. A `.ttc` collection loads (its first face), and so does a
-variable CFF2 font (its default instance).
+variable CFF2 font (its default instance). A 30 MB+ CJK font costs its size in
+memory unless it is on a read-only mount (mapped, as above).
 
 
 

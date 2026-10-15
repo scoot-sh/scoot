@@ -114,7 +114,7 @@ so on a second monitor's bar use `focus-output` first, then click.
   it wakes for none of it. A `scootbar msg reload` that adds the module binds both then; one
   that removes it releases them (a seat below version 5 cannot be released
   and stays bound). A compositor that starts advertising the protocol later
-  is bound if the module is placed; one that finishes the manager and
+  is bound if the module is placed, even if nothing was bound before; one that finishes the manager and
   re-advertises it is not rebound until a reload removes and re-adds the
   module.
 - **Without `ext-workspace-v1`** the module shows nothing (one stderr note
@@ -338,7 +338,9 @@ Cargo feature (`network`), on by default.
   refused naming why with no command configured, a row past the list or
   gone from the scan. A second `connect` while one runs ends the running
   command (SIGTERM to its process group, then SIGKILL after 100 ms) and
-  starts the new one; only a `connect` that will start ends the old one.
+  starts the new one, so a hung command never blocks the next connect;
+  only a `connect` that will start ends the old one, and a refused one
+  leaves the running command alone.
   A reload or removal of the module ends both children the same way. With `show-ssid = false` the list
   stays closed, as the picker does.
 - **`interface`** (1 to 15 bytes, a kernel interface name) pins what is
@@ -396,7 +398,8 @@ A Cargo feature (`brightness`), on by default.
   and the bar never darkens its own screen past what a scroll
   can bring back.
 - **Cost.** No timer, no polling, no
-  wakeups with no backlight activity.
+  wakeups with no backlight activity. Sysfs values are digits only; a zero
+  range or a missing file skips its device.
 
 
 
@@ -420,7 +423,9 @@ A Cargo feature (`battery`), on by default.
 - **Several batteries** are combined by default (`batteries =
   "combine"`: the mean capacity, discharging winning the state), or the
   first in sorted name order with `batteries = "first"`. A battery
-  removed at runtime hides the module until one is back. The percentage
+  removed at runtime hides the module until one is back: one stderr line, not
+  one per wake, and the uevent socket stays as the appearance watch, so a
+  reinsert shows again with no polling. The percentage
   always comes from `capacity`, never `charge_now`/`charge_full` (about 4
   points apart at full). No time-remaining is shown: it needs rate
   smoothing to be honest, and a wrong estimate is worse than none.
@@ -459,7 +464,10 @@ bar's own client (no `zbus`, no libdbus, no thread).
   and a bus that
   dies mid-run drops every icon at once and dials once more. A bus that
   takes the bar and drops it within 5 s three times running is retried
-  after 30 s. A policy denying `own` of the watcher name is said once on
+  after 30 s, and again each time that try dies the same way, or as soon as
+  its socket is made anew (for an abstract address, at the next 30-second
+  poll). Only the bus's own `NameOwnerChanged` is believed (a peer's,
+  addressed to the bar, removes nothing). A policy denying `own` of the watcher name is said once on
   stderr, and the bar hosts. The address is `DBUS_SESSION_BUS_ADDRESS` when it names a
   `unix:` socket (`unix:path=` vs `unix:abstract=`, path winning when both
   are present), else `$XDG_RUNTIME_DIR/bus` when it is not set; an address
@@ -543,9 +551,10 @@ bar's own client (no `zbus`, no libdbus, no thread).
   > way.
 - **Menus.** An item's menu (`ContextMenu`, the DBusMenu protocol) opens
   in a [popup](./modules.md#popups): the bar reads it with its DBusMenu client
-  and draws one row per item. A row click sends `Event(id, "clicked",
-  ...)` to the item and closes the menu; a submenu row drills a level
-  deeper in the same popup (a `< Back` row on top walks back out); a layout update while open re-fills it, and the item
+  and draws one row per item. A row click sends `Event(id, "clicked", 0, 0)`
+  (variant int32 0, timestamp 0) to the item and closes the menu; a submenu row drills a level
+  deeper in the same popup (a `< Back` row on top walks back out); a layout update while open re-fills it (update signals
+  only from the menu's owner), and the item
   vanishing closes it. A level longer than the popup holds (16 widgets,
   less the back row) is cut, the extras dropped silently like any
   module's; a scrolled popup pans within its rows, and a row wider than
@@ -580,10 +589,17 @@ bar's own client (no `zbus`, no libdbus, no thread).
   at most 64 px a side and 512 KiB tray-wide. Titles are cut at 128 bytes
   (controls stripped); themed names past 128 bytes, with a `/` or starting
   with a dot, are refused, and an `IconThemePath` that is not absolute or
-  holds `..` is ignored. At most 32 items, 8 from one service; a menu's layout is read bounded (at most 8 levels,
-  64 nodes). A call nobody answers is forgotten after 30 seconds when its slot
-  is wanted.
-- **Cost.** Idle costs nothing: zero wakeups with
+  holds `..` is ignored. A theme file is read only when it resolves inside
+  its base (symlink escapes refused), opened `O_NONBLOCK`/`O_NOFOLLOW` and
+  taken only when the opened fd is a regular file, at most 8 MiB, decoded
+  under a 16 MiB budget with a 512-px, 1 M-pixel header check. At most 32 items, 8 from one service or one registrant; a menu's layout is read bounded (at most 8 levels,
+  64 nodes including the root — 63 drawable rows — one `GetLayout` in flight, re-read no oftener than every
+  50 ms however it floods `LayoutUpdated`), one `GetAll` in flight per item,
+  and update signals only from the item that owns the open menu. A call nobody answers is forgotten after 30 seconds when its slot
+  is wanted. A bus that stops reading drops the connection, not the bar. The bus
+  set-up (auth and `Hello`) is blocking, bounded to 2 seconds in total.
+- **Cost.** Idle costs nothing (`unix:path=` addresses; a `unix:abstract=`
+  address has no directory to watch, so it polls once every 30 s): zero wakeups with
   no bus, with a bus and no items, and with items on it.
 
 
@@ -627,7 +643,8 @@ Cargo feature (`media`), on by default; the smallest build
   is no bus, no player playing or paused, or the player says it cannot
   (`CanControl`, `CanGoNext`, `CanGoPrevious` false). **A skip within 250 ms
   of the last is refused** (a scroll arrives at up to sixty actions a
-  second, and thirty steps are one skip): an agent that wants two skips waits for the first to show in
+  second, and thirty steps are one skip; a scroll that hits the limit is one
+  line on stderr a second at most): an agent that wants two skips waits for the first to show in
   `query`.
 - **`query`** reports `{ "player", "bus_name", "status", "title", "artist",
   "players": [{ "bus_name", "status" }] }` for the player shown (`status` is
@@ -642,7 +659,8 @@ Cargo feature (`media`), on by default; the smallest build
 - **A run of changes is drawn ten times a second at most.** The first
   change after a quiet spell is drawn in the turn it arrives;
   later ones wait for one timer, and the bar then shows the latest; the last
-  change is never lost.
+  change is never lost. The module appearing (a first player) or emptying
+  (the last one gone or stopped, the bus lost) is drawn at once, never coalesced.
 - **Idle cost: nothing.** The bus does the filtering, so an
   app unrelated to media coming or going never wakes the bar. A
   track change is one signal carrying the value (no round trip). With no bus the module waits for it;
@@ -651,7 +669,8 @@ Cargo feature (`media`), on by default; the smallest build
 - **Bounds, for a hostile or broken player.** Anything on the session bus
   can claim a player name and say anything. It
   cannot crash or hang the bar or grow it without
-  bound. At most 8 players are held, one a connection; the rest wait in
+  bound: only the bus's own `NameOwnerChanged` is believed, and
+  `PropertiesChanged` only from the connection that owns a held name. At most 8 players are held, one a connection; the rest wait in
   a list of 16 names (an evicted player that starts playing is not seen
   until a held one is removed: 9+ MPRIS names). Titles and artists are cleaned (controls stripped) and
   cut to 120 bytes where they are stored. A message past 1 MiB is skipped
@@ -660,8 +679,12 @@ Cargo feature (`media`), on by default; the smallest build
   hide a player from the start-up listing. A read that errors (a timeout
   or `UnknownObject`) leaves the player held, shown as nothing. Method
   replies are matched by serial and sender.
-- **Cost.** Idle costs nothing: zero wakeups with no
-  bus, with a bus and no player, and with players on it.
+- **Cost.** Idle costs nothing (`unix:path=` addresses; a `unix:abstract=`
+  address has no directory to watch, so it polls once every 30 s): zero wakeups with no
+  bus, with a bus and no player, and with players on it. A player that
+  signals constantly pays for itself (about 0.6-0.85% of a core at 500 signals/s,
+  draws held to 10 a second); one that re-sends unchanged metadata wakes the bar
+  once a second and draws nothing (mpv with the lavfi source does).
 
 
 ## Bluetooth
@@ -707,7 +730,9 @@ has none of it.
   shown only when BlueZ reports it (`Battery1`); it is never polled.
 - **A run of changes is drawn ten times a second at most**: the first
   change after a quiet spell is drawn at once,
-  the rest wait for one 100 ms timer.
+  the rest wait for one 100 ms timer. The module appearing (a first adapter)
+  or emptying (the last one gone, BlueZ leaving, the bus lost) is drawn at
+  once, never coalesced.
 - **Idle cost: nothing.** The bus does the filtering, so anything else on
   the system bus never wakes the bar. A power or connection change is one signal carrying the
   value (no round trip). With no
@@ -716,7 +741,8 @@ has none of it.
 - **Bounds, for a hostile or missing BlueZ.** Anything on the system bus
   can own `org.bluez` when BlueZ itself is absent and say anything. It
   cannot crash or hang the bar or grow it without
-  bound. Signals are accepted only from the tracked `org.bluez` owner; a
+  bound. Only the bus's own `NameOwnerChanged` is believed, every other
+  signal only from the tracked `org.bluez` owner; a
   signal for an unknown path re-reads the set once on a 50 ms timer. It holds at most 8 adapter slots and 64 device slots, and a newcomer to a full room is ignored.
   Names are cleaned (controls stripped) and cut to 120 bytes
   where they are stored. Dictionaries past 128 entries and interfaces past
@@ -849,7 +875,9 @@ on-click = { exec = ["foot", "-e", "btop"] }     # a command, run directly
   through a shell**; write `["sh", "-c", "..."]` to use one, and the
   quoting is yours. A string instead of an array is a refusal that says
   so. The command's stdin, stdout and stderr are `/dev/null`, it leads its
-  own process group. Its environment is the bar's. It is reaped the moment it
+  own process group, and it inherits none of the file descriptors the bar
+  opens (a descriptor the launcher left open without close-on-exec when it
+  started the bar is handed on, as with any child). Its environment is the bar's. It is reaped the moment it
   exits (no zombie, no timer), and at most 8 launched commands run at once:
   a ninth is refused with a line on stderr, not queued, so a hung command
   and a flood of clicks cannot fill the process table. The bar does not
@@ -1202,19 +1230,24 @@ module shows text alone, as before.
   silent.
 - **Children**: reaped the moment they exit. Its stdin is `/dev/null`, its stderr is the bar's own,
   it leads its own process group, and it inherits none of the file
-  descriptors the bar opens.
+  descriptors the bar opens (a descriptor the launcher left open without
+  close-on-exec when it started the bar is handed on, as with any child).
   **The whole process group is
   killed when the module goes**: on a reload that changed its table or
   removed it (one whose table is unchanged keeps its child and shown output), and when the
   command exits, so a worker it backgrounded does not pile up across
   restarts. **The command ends with the bar, however the bar ends**: by the
   kernel's parent-death signal as well as the group kill — which does not
-  reach what the command started in turn (a backgrounded worker is not
-  touched), nor a set-user-id program (the kernel clears the signal on such
+  reach what the command started in turn (a shell loop dies, and the `sleep`
+  it was in the middle of runs out its sleep; its next write to the closed
+  pipe ends a writer such as `date` or `curl` with `SIGPIPE`; a backgrounded
+  worker is not touched), nor a set-user-id program (the kernel clears the signal on such
   an `exec`). Commands a pointer binding starts are not
   guarded: a launched application outlives a bar restart on purpose.
   **The guard needs `/proc`** (it runs `/proc/self/exe`): where `/proc` is not
-  mounted no `exec` module can start.
+  mounted no `exec` module can start, and the warning is ``cannot start
+  `/proc/self/exe` to run `sh`: No such file or directory`` (the bar runs each
+  command through itself, which needs /proc mounted).
 - **Count**: at most 8 `exec` modules are placed (on any output); each
   holds a child, a `timerfd` and at most two polled fds.
 - **Start-up**: a command is started right after the bar's first frame, not
@@ -1379,7 +1412,8 @@ treatment per line ([below](./modules.md#the-update-payload)).
 ### The update payload
 
 What a `push` takes and an `exec` in `json` mode prints per line, scootbar's
-own, version 1:
+own and deliberately not Waybar's (no `alt`, no `percentage`, no class lists),
+version 1:
 
 ```json
 {"version": 1, "text": "72%", "class": "warn", "tooltip": "battery low", "icon": "󰂁"}
