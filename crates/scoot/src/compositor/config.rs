@@ -5317,7 +5317,6 @@ mod tests {
     /// derivation (design section 4.3). These tests pin the three merge
     /// rules, the strict layer parse, and the bad-user-value fallback; the
     /// reload reply and the `Look` event ride on top in `reload/tests.rs`.
-
     fn layer(text: &str) -> LayerFile {
         parse_layer(text).expect("a valid test layer parses")
     }

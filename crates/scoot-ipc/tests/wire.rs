@@ -1550,10 +1550,7 @@ fn a_look_changed_event_round_trips_and_moved_the_protocol() {
         name: None,
         source_hash: String::new(),
     };
-    assert_eq!(
-        decode::<Response>(&encode(&gone).unwrap()).unwrap(),
-        gone
-    );
+    assert_eq!(decode::<Response>(&encode(&gone).unwrap()).unwrap(), gone);
 }
 
 /// The reload reply's look lists: shadowed user keys and invalid user values
