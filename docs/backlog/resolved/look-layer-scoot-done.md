@@ -1,9 +1,10 @@
 ---
 title: "The compositor reads a look layer under the user's config"
-status: "open"
-area: "core"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-15"
 ---
 
 # The compositor reads a look layer under the user's config

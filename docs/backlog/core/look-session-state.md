@@ -3,7 +3,7 @@ title: "Per-session look state: headless and --private-look sessions never touch
 status: "open"
 area: "core"
 priority: "medium"
-blocked: "look-layer-scoot"
+blocked: null
 ---
 
 # Per-session look state: headless and --private-look sessions never touch the user's choice
