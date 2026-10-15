@@ -8,18 +8,23 @@
 //! ```sh
 //! scoot-look validate looks/moonrise [--origin shipped]
 //! scoot-look build looks/moonrise --out /tmp/moonrise --wallpaper-abs /tmp/moonrise/wallpaper.png
+//! scoot-look import-base16 scheme.yaml [--name NAME] [--extends LOOK] [--out user-looks/NAME]
 //! ```
 //!
 //! `validate` and `build` take `--name NAME` to check the look's `name`
 //! against that instead of the directory (a Nix store path carries a
 //! hash prefix the check strips; anything else unusual goes here).
+//! `import-base16` takes `--name` to name the look instead of the
+//! scheme's slug, `--extends` to emit a child of that look, and `--out`
+//! to write `<dir>/look.toml` (without it the `look.toml` goes to
+//! stdout, for the caller to place under `user-looks/`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use scoot_look::{
-    Origin, RenderInputs, check_contrast, render_bar, render_json, render_scoot, resolve,
-    source_hash, validate_apps_allowlist, validate_for_origin,
+    ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_json,
+    render_scoot, resolve, source_hash, validate_apps_allowlist, validate_for_origin,
 };
 
 fn usage() -> ! {
@@ -29,6 +34,9 @@ fn usage() -> ! {
     );
     eprintln!(
         "  scoot-look build <dir> --out <dir> [--wallpaper-abs PATH] [--ui-font-file PATH] [--no-popup] [--origin shipped|declared|user|installed] [--name NAME]"
+    );
+    eprintln!(
+        "  scoot-look import-base16 <file> [--name NAME] [--extends LOOK] [--out <dir>] [--origin shipped|declared|user|installed]"
     );
     std::process::exit(2);
 }
@@ -182,6 +190,29 @@ fn main() {
                 name.as_deref(),
             );
         }
+        "import-base16" => {
+            let file = args.next().unwrap_or_else(|| usage());
+            let mut name: Option<String> = None;
+            let mut extends: Option<String> = None;
+            let mut out: Option<String> = None;
+            let mut origin = Origin::User;
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--name" => name = Some(args.next().unwrap_or_else(|| usage())),
+                    "--extends" => extends = Some(args.next().unwrap_or_else(|| usage())),
+                    "--out" => out = Some(args.next().unwrap_or_else(|| usage())),
+                    "--origin" => origin = parse_origin(&args.next().unwrap_or_else(|| usage())),
+                    _ => usage(),
+                }
+            }
+            import_scheme(
+                Path::new(&file),
+                name.as_deref(),
+                extends.as_deref(),
+                out.as_deref().map(Path::new),
+                origin,
+            );
+        }
         _ => usage(),
     }
 }
@@ -233,14 +264,16 @@ fn validate_dir(dir: &Path, origin: Origin, explicit_name: Option<&str>) {
         failed = true;
     }
     // Contrast needs a resolved look; without a catalog only single-file
-    // (extends-free) looks resolve here.
+    // (extends-free) looks resolve here. Warnings go to stderr: stdout
+    // stays machine-readable (import without `--out` prints `look.toml`
+    // there).
     if raw.extends.is_none() {
         let map = BTreeMap::from([(raw.name.clone(), (raw.clone(), origin))]);
         match resolve(&map, &raw.name) {
             Ok(look) => {
                 let report = check_contrast(&look, origin);
                 for w in report.warnings() {
-                    println!("warning: {} is {} (bar {})", w.name, w.ratio, w.threshold);
+                    eprintln!("warning: {} is {} (bar {})", w.name, w.ratio, w.threshold);
                 }
                 for r in report.refusals() {
                     eprintln!("error: {} is {} (bar {})", r.name, r.ratio, r.threshold);
@@ -324,6 +357,122 @@ fn build_dir(
         });
     }
     println!("built {} -> {}", dir.display(), out.display());
+}
+
+/// `scoot-look import-base16 FILE`: map one scheme to a source look.
+/// The emitted `look.toml` is verified through the same pipeline as
+/// `validate` before anything is written; a contrast shortfall in a look
+/// the user's own configuration produced warns (to stderr) and never
+/// refuses, except a child (`--extends`) skips the contrast check here:
+/// the base is unknown without the catalog. `--extends` is never checked
+/// against a catalog here. With `--out DIR` the text lands in
+/// `DIR/look.toml` (the caller places that under `user-looks/`); the
+/// directory must match the look name or the command errors. Without
+/// `--out` the text goes to stdout (warnings still go to stderr, so the
+/// stdout parses as TOML). `--origin` defaults to `user`.
+fn import_scheme(
+    file: &Path,
+    name: Option<&str>,
+    extends: Option<&str>,
+    out: Option<&Path>,
+    origin: Origin,
+) {
+    let bytes = match read_regular_file(file) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let stem = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(str::to_string);
+    let text = match import_base16(
+        &bytes,
+        &ImportOptions {
+            name: name.map(str::to_string),
+            extends: extends.map(str::to_string),
+            file_stem: stem,
+        },
+    ) {
+        Ok(text) => text,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+    };
+    let raw = match scoot_look::parse_look_toml(text.as_bytes()) {
+        Ok(raw) => raw,
+        Err(errors) => {
+            for e in errors {
+                eprintln!("error: {e}");
+            }
+            std::process::exit(1);
+        }
+    };
+    let mut failed = false;
+    for e in validate_for_origin(&raw, origin)
+        .into_iter()
+        .chain(validate_apps_allowlist(&raw.apps))
+    {
+        eprintln!("error: {e}");
+        failed = true;
+    }
+    // Contrast needs a resolved look; without a catalog only single-file
+    // (extends-free) imports resolve here, as in `validate`. A child
+    // (`--extends`) skips the check here: the base is unknown without the
+    // catalog, so the catalog owner reports the resolved contrast.
+    // Warnings go to stderr so stdout without `--out` stays pure TOML.
+    if raw.extends.is_none() {
+        let map = BTreeMap::from([(raw.name.clone(), (raw.clone(), origin))]);
+        match resolve(&map, &raw.name) {
+            Ok(look) => {
+                let report = check_contrast(&look, origin);
+                for w in report.warnings() {
+                    eprintln!("warning: {} is {} (bar {})", w.name, w.ratio, w.threshold);
+                }
+                for r in report.refusals() {
+                    eprintln!("error: {} is {} (bar {})", r.name, r.ratio, r.threshold);
+                    failed = true;
+                }
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                failed = true;
+            }
+        }
+    }
+    if failed {
+        std::process::exit(1);
+    }
+    match out {
+        Some(dir) => {
+            // A mismatched directory fails `validate` (name must match
+            // the directory), so refuse here with a nonzero exit instead
+            // of writing a look that cannot validate.
+            if let Some(base) = dir.file_name().and_then(|n| n.to_str())
+                && base != raw.name
+            {
+                eprintln!(
+                    "error: look `{}` does not match directory `{base}`: the name check expects them to match",
+                    raw.name
+                );
+                std::process::exit(1);
+            }
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                eprintln!("cannot create {}: {e}", dir.display());
+                std::process::exit(1);
+            }
+            let path = dir.join("look.toml");
+            if let Err(e) = std::fs::write(&path, &text) {
+                eprintln!("cannot write {}: {e}", path.display());
+                std::process::exit(1);
+            }
+            println!("imported {} -> {}", file.display(), path.display());
+        }
+        None => print!("{text}"),
+    }
 }
 
 #[cfg(test)]

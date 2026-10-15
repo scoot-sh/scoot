@@ -36,6 +36,10 @@
 //!    [`render_bar`](render::render_bar) emit the first-party fragments from
 //!    the resolved look plus [`RenderInputs`](render::RenderInputs).
 //!
+//! [`import_base16`](import::import_base16) maps a base16 or base24 scheme
+//! to a source look's `look.toml` (design section 5.3): the plain-install
+//! source of palettes, pure like the rest here.
+//!
 //! The effectful checks live in the caller: fonts through their carrier,
 //! the wallpaper through `scootbg check-image`, the fragments through the
 //! apps' own strict parsers.
@@ -43,6 +47,7 @@
 pub mod allowlist;
 pub mod contrast;
 pub mod grammar;
+pub mod import;
 pub mod render;
 pub mod resolve;
 pub mod resolved;
@@ -54,6 +59,7 @@ pub use allowlist::{
 };
 pub use contrast::{ContrastPair, ContrastReport, check as check_contrast};
 pub use grammar::GrammarError;
+pub use import::{ImportOptions, import_base16};
 pub use render::{
     BAR_RADIUS_LIMIT, RenderInputs, render_bar, render_json, render_scoot, source_hash,
 };

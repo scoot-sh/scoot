@@ -9,7 +9,10 @@
 
 use std::collections::BTreeMap;
 
-use scoot_look::{Origin, RenderInputs, check_contrast, render_bar, render_scoot, resolve};
+use scoot_look::{
+    ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_scoot,
+    resolve,
+};
 
 const MINIMAL: &str = r##"
 schema = 1
@@ -85,4 +88,90 @@ fn validate_render_contrast_without_nix() {
             );
         }
     });
+}
+
+/// A base16 scheme becomes a source look with plain files only: import,
+/// parse, resolve, contrast and render under an empty `PATH`, the way a
+/// plain binary install runs it (no Nix anywhere in the path).
+#[test]
+fn import_base16_without_nix() {
+    without_helpers_on_path(|| {
+        let scheme = "name: Plain\nbase00: 090300\nbase01: 3a3432\nbase02: 4a4543\nbase03: 5c5855\nbase04: 807d7c\nbase05: a5a2a2\nbase06: d6d5d4\nbase07: f7f7f7\nbase08: db2d20\nbase09: e8bbd0\nbase0A: fded02\nbase0B: 01a252\nbase0C: b5e4f4\nbase0D: 01a0e4\nbase0E: a16a94\nbase0F: cdab53\n";
+        let look = import_base16(scheme.as_bytes(), &ImportOptions::default()).expect("imports");
+        let raw = scoot_look::parse_look_toml(look.as_bytes()).expect("parses");
+        assert_eq!(raw.name, "plain");
+        assert!(scoot_look::validate_for_origin(&raw, Origin::User).is_empty());
+        let map = BTreeMap::from([("plain".to_string(), (raw, Origin::User))]);
+        let resolved = resolve(&map, "plain").expect("resolves");
+        assert_eq!(resolved.palette.accent, "#01a0e4");
+        assert!(
+            check_contrast(&resolved, Origin::User)
+                .refusals()
+                .is_empty()
+        );
+        let inputs = RenderInputs::default();
+        let _: toml::Value =
+            toml::from_str(&render_scoot(&resolved, &inputs).expect("renders")).expect("parses");
+        let _: toml::Value =
+            toml::from_str(&render_bar(&resolved, &inputs).expect("renders")).expect("parses");
+    });
+}
+
+/// Finding 2: without `--out`, stdout is pure `look.toml` even when the
+/// import warns (low contrast): warnings go to stderr.
+#[test]
+fn import_stdout_parses_despite_warnings() {
+    let dir = std::env::temp_dir().join(format!("scoot-look-stdout-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("tmp dir");
+    let scheme = dir.join("low.yaml");
+    std::fs::write(
+        &scheme,
+        "name: low\nauthor: t\nbase00: \"#808080\"\nbase01: \"#808080\"\nbase02: \"#808080\"\nbase03: \"#808080\"\nbase04: \"#808080\"\nbase05: \"#808080\"\nbase06: \"#808080\"\nbase07: \"#808080\"\nbase08: \"#808080\"\nbase09: \"#808080\"\nbase0A: \"#808080\"\nbase0B: \"#808080\"\nbase0C: \"#808080\"\nbase0D: \"#808080\"\nbase0E: \"#808080\"\nbase0F: \"#808080\"\n",
+    )
+    .expect("write scheme");
+    let bin = env!("CARGO_BIN_EXE_scoot-look");
+    let out = std::process::Command::new(bin)
+        .arg("import-base16")
+        .arg(&scheme)
+        .output()
+        .expect("runs");
+    assert!(out.status.success(), "exits 0: {out:?}");
+    let stdout = String::from_utf8(out.stdout).expect("stdout UTF-8");
+    assert!(
+        !stdout.contains("warning:"),
+        "no warnings on stdout:\n{stdout}"
+    );
+    let value: toml::Value = toml::from_str(&stdout).expect("stdout parses as TOML");
+    assert_eq!(value["name"].as_str(), Some("low"));
+}
+
+/// Finding 8: `--out` into a directory whose name differs from the look
+/// name errors with a nonzero exit instead of writing an unvalidatable
+/// look.
+#[test]
+fn import_out_mismatch_errors() {
+    let dir = std::env::temp_dir().join(format!("scoot-look-mismatch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("tmp dir");
+    let scheme = dir.join("scheme.yaml");
+    std::fs::write(
+        &scheme,
+        "name: Plain\nbase00: 090300\nbase01: 3a3432\nbase02: 4a4543\nbase03: 5c5855\nbase04: 807d7c\nbase05: a5a2a2\nbase06: d6d5d4\nbase07: f7f7f7\nbase08: db2d20\nbase09: e8bbd0\nbase0A: fded02\nbase0B: 01a252\nbase0C: b5e4f4\nbase0D: 01a0e4\nbase0E: a16a94\nbase0F: cdab53\n",
+    )
+    .expect("write scheme");
+    let bin = env!("CARGO_BIN_EXE_scoot-look");
+    let out_dir = dir.join("some-other-name");
+    let _ = std::fs::remove_dir_all(&out_dir);
+    let out = std::process::Command::new(bin)
+        .arg("import-base16")
+        .arg(&scheme)
+        .arg("--out")
+        .arg(&out_dir)
+        .output()
+        .expect("runs");
+    assert!(!out.status.success(), "mismatch exits nonzero: {out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("does not match"),
+        "names the mismatch: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
