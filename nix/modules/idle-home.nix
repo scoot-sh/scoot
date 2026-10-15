@@ -19,6 +19,8 @@ let
   themeLook = import ./theme-look.nix { inherit lib; };
   look = themeLook.lookFor cfg.desktop;
   themed = themeLook.themed cfg.desktop "lock";
+  # The live look's locker config at runtime (never evaluation).
+  lookSwaylock = import ./look-state.nix "swaylock";
 
   # A `#rrggbb` look token as swaylock's `rrggbb` (its parser also takes
   # a leading `#` and an alpha pair, but the looks are opaque hex).
@@ -80,7 +82,22 @@ let
     && idle.offPackage != null
     && (!idle.lock.enable || idle.lock.package != null);
 
-  lockerCmd = "${lib.getExe idle.lock.package} -f -C ${swaylockConfig}";
+  # The locker behind the lock event: the live look's swaylock config
+  # when a swap rendered one (`<state>/look/swaylock`, next lock), else
+  # the generated store config above. A script and not a bare `-C` path
+  # because swayidle runs each line through `sh -c` as ONE word, so the
+  # choice is made at lock time -- and because a session that never
+  # applied a look has no state file, where the store config stands.
+  lockerScript = pkgs.writeShellScriptBin "scoot-locker" ''
+    look_conf=${lookSwaylock}
+    if [ -f "$look_conf" ]; then
+      exec ${lib.getExe idle.lock.package} -f -C "$look_conf"
+    else
+      exec ${lib.getExe idle.lock.package} -f -C ${swaylockConfig}
+    fi
+  '';
+
+  lockerCmd = "${lockerScript}/bin/scoot-locker";
 
   # The clipboard wipe on the lock boundary (clear-on-lock): the history
   # db emptied as the session locks, so pre-lock copies never sit on
@@ -289,7 +306,10 @@ in
         lib.optional (idle.package != null) idle.package
         ++ lib.optional (idle.dimPackage != null) idle.dimPackage
         ++ lib.optional (idle.offPackage != null) idle.offPackage
-        ++ lib.optional (idle.lock.enable && idle.lock.package != null) idle.lock.package
+        ++ lib.optionals (idle.lock.enable && idle.lock.package != null) [
+          idle.lock.package
+          lockerScript
+        ]
         ++ lib.optional (
           idle.mediaInhibit.enable && idle.mediaInhibit.package != null
         ) idle.mediaInhibit.package;

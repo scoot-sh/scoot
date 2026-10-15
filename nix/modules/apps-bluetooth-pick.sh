@@ -56,8 +56,12 @@ TIMEOUT=@TIMEOUT@
 # Whether the audio slot's sink helper is there to offer.
 AUDIO=@AUDIO@
 # The look's menu colors as fuzzel flags (empty without a look): split
-# on purpose below, each flag one word.
+# on purpose below, each flag one word. The fallback: once a swap
+# renders the live look's `fuzzel.ini`, `menu` below takes `--config`
+# at it instead (next launch).
 THEME=@THEME@
+# The live look's launcher config at runtime (never evaluation).
+LOOK_INI=@LOOK_INI@
 
 PAIR_ROW="Pair a new device..."
 AUDIO_ROW="Audio output..."
@@ -78,6 +82,18 @@ fail() {
     say "$*"
     notify "$*"
     exit 1
+}
+
+# The menu behind every pick below: the live look's config when a swap
+# rendered one, else the eval-time flags in $THEME. One function, so the
+# choice is made at pick time and every call site reads the same.
+menu() {
+    # shellcheck disable=SC2086
+    if [ -f "$LOOK_INI" ]; then
+        "$MENU" "$@" --config "$LOOK_INI"
+    else
+        "$MENU" "$@" $THEME
+    fi
 }
 
 # One bluetoothctl call, bounded: `bt_run SECS ARGS...`. Past the bound
@@ -270,16 +286,14 @@ pair_pick() {
         BEGIN { n = split(ENVIRON["PAIRED"], rows, "\n"); for (i = 1; i <= n; i++) { split(rows[i], f, "\t"); old[f[1]] = 1 } }
         NF && !($1 in old) { print $1 " " substr($0, index($0, "\t") + 1) }')
     [ -n "$rows" ] || fail "no new device found (is it in pairing mode?)"
-    # shellcheck disable=SC2086
-    sel=$(printf '%s\n' "$rows" | "$MENU" --dmenu --prompt='pair: ' --no-run-if-empty --only-match $THEME) || exit 0
+    sel=$(printf '%s\n' "$rows" | menu --dmenu --prompt='pair: ' --no-run-if-empty --only-match) || exit 0
     [ -n "$sel" ] || exit 0
     do_pair "${sel%% *}"
 }
 
 audio_pick() {
     sinks=$("$SINK" list) || fail "no audio outputs to offer (scoot-audio-sink list failed)"
-    # shellcheck disable=SC2086
-    choice=$(printf '%s\n' "$sinks" | "$MENU" --dmenu --prompt='sink: ' --no-run-if-empty --only-match $THEME) || exit 0
+    choice=$(printf '%s\n' "$sinks" | menu --dmenu --prompt='sink: ' --no-run-if-empty --only-match) || exit 0
     [ -n "$choice" ] || exit 0
     exec "$SINK" set "${choice%% *}"
 }
@@ -304,8 +318,7 @@ case "${1:-}" in
             [ "$AUDIO" != 1 ] || rows=$(printf '%s\n%s\n' "$rows" "$AUDIO_ROW")
             rows=$(printf '%s\n%s\n' "$rows" "$OFF_ROW")
         fi
-        # shellcheck disable=SC2086
-        sel=$(printf '%s\n' "$rows" | "$AWK" 'NF' | "$MENU" --dmenu --prompt='bluetooth: ' --no-run-if-empty --only-match $THEME) || exit 0
+        sel=$(printf '%s\n' "$rows" | "$AWK" 'NF' | menu --dmenu --prompt='bluetooth: ' --no-run-if-empty --only-match) || exit 0
         case "$sel" in
             "" | "$head") exit 0 ;;
             "$ON_ROW") bt_act 10 power on ;;
@@ -322,8 +335,7 @@ case "${1:-}" in
     menu)
         # The bar's rows are names, ` (connected)` where connected; a
         # paired one toggles, any other pairs.
-        # shellcheck disable=SC2086
-        sel=$("$MENU" --dmenu --prompt='bluetooth: ' --no-run-if-empty --only-match $THEME) || exit 0
+        sel=$(menu --dmenu --prompt='bluetooth: ' --no-run-if-empty --only-match) || exit 0
         [ -n "$sel" ] || exit 0
         require_ctl
         name=${sel% (connected)}

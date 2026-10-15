@@ -20,7 +20,8 @@ ls ~/.local/share/scoot/user-looks/moonrise/
 
 A rendered look is the output of a build: `scoot.toml`, `bar.toml`,
 `gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`, `qt/scoot-look.conf`,
-`foot.ini` (only when the look has `[terminal]`), `render.json` and the
+`foot.ini` (only when the look has `[terminal]`), `fuzzel.ini`,
+`swaylock`, `render.json` and the
 daemon leaves (`mako`, `wob.ini`, `fcitx5/theme.conf`, `nightlight` when
 the look names a temperature). It is never edited and never a source for
 anything. The two never share a path.
@@ -211,7 +212,12 @@ polarity, and the 16 `[terminal]` hues as `regular0-7` then
 has no `[colors]`), each with `alpha` from `opacity.terminal`. Both
 themes hold the same hues, so new terminals match whatever theme is
 in effect.
-`render.json` names the source, its hash and the resolved inputs
+`fuzzel.ini` carries the seven launcher colors as a `[colors]`
+table in fuzzel's `rrggbbaa` spelling; it sets no font, so the launcher keeps the user's
+own. `swaylock` carries the fourteen locker colors as
+`key=value` lines in swaylock's `rrggbb` spelling. Both are
+next-launch: fuzzel reads its config on every start, swaylock on
+every lock. `render.json` names the source, its hash and the resolved inputs
 (font files, wallpaper path). The inputs come from the
 environment: the tool resolves font files and the wallpaper's
 absolute path, and the Nix build passes the font packages. The
@@ -246,7 +252,7 @@ resolve here. `build` takes a single source without `extends`
 and refuses one with it; resolve the catalog first. `build`
 writes `scoot.toml`, `bar.toml`, `gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`,
 `qt/scoot-look.conf`, `foot.ini` (only when the look has
-`[terminal]`), `render.json` and the daemon leaves into the output dir
+`[terminal]`), `fuzzel.ini`, `swaylock`, `render.json` and the daemon leaves into the output dir
 (never through a symlink, and never beside files it did not write). Both
 read `look.toml` only through a regular file opened without blocking:
 symlinks, directories, devices, FIFOs and sockets refuse. On Nix the same

@@ -6030,6 +6030,7 @@ let
   idleSettingsConf = hmLockSettings.config.xdg.configFile."swaylock/config".source;
   idleTargetOffConf = hmThemeTargetOff.config.xdg.configFile."swaylock/config".source;
   idleNoLookConf = hmIdleNoLook.config.xdg.configFile."swaylock/config".source;
+  idleLocker = slotScriptBin hmIdle "scoot-locker";
   # The notification daemon's generated files: the mako config
   # (overlay layer, DND section, themed leaves, critical ring), plus
   # the lookless, recolored and opt-out variants the content checks
@@ -6082,6 +6083,7 @@ let
   # profile with music-desk), lookless, opt-out, rebound and relocated
   # variants the content checks read.
   idleClipOffConf = hmClipOff.config.xdg.configFile."swayidle/config".source;
+  idleClipOffLocker = slotScriptBin hmClipOff "scoot-locker";
   idleClipBoundsConf = hmClipBounds.config.xdg.configFile."swayidle/config".source;
   clipEntry = clipEntryOf hmClip "scoot-clipboard-store";
   clipBoundsEntry = clipEntryOf hmClipBounds "scoot-clipboard-store";
@@ -6761,6 +6763,7 @@ let
           pkgs.brightnessctl
           pkgs.wlopm
           pkgs.swaylock
+          (slotScriptDrv hmDeskLookMusic "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           leanMako
           leanClip
@@ -7763,7 +7766,7 @@ let
     # it appears twice, and `fuzzel` five (the clipboard picker, the
     # launcher, the capture chooser and both pickers' menus).
     (
-      assert builtins.length hmIdle.config.home.packages == 47;
+      assert builtins.length hmIdle.config.home.packages == 48;
       true
     )
     (
@@ -7773,6 +7776,7 @@ let
           pkgs.brightnessctl
           pkgs.wlopm
           pkgs.swaylock
+          (slotScriptDrv hmIdle "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           leanMako
           leanClip
@@ -7962,9 +7966,10 @@ let
       assert !(hmInhibitOff.config.systemd.user.services ? scoot-audio-inhibit);
       true
     )
-    # 39 slot packages plus the default look's theme seven.
+    # 39 slot packages plus the default look's theme seven, and the
+    # locker script beside the locker.
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 46;
+      assert builtins.length hmInhibitOff.config.home.packages == 47;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -12891,6 +12896,7 @@ let
           pkgs.brightnessctl
           pkgs.wlopm
           pkgs.swaylock
+          (slotScriptDrv hmKeys "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           leanMako
           leanClip
@@ -13130,6 +13136,7 @@ let
           pkgs.brightnessctl
           pkgs.wlopm
           pkgs.swaylock
+          (slotScriptDrv hmKeysOff "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           leanMako
           pkgs.fuzzel
@@ -14717,8 +14724,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     #     timeouts -- dim at 2 min with save/restore, lock at 4 min
     #     through loginctl, screens off at 5 min with the output wildcard
     #     quoted intact -- plus the sleep lock and the lock event, each
-    #     wiping the clipboard history before `swaylock -f` with its
-    #     config (the profile has the clipboard slot on). (Fixed-string
+    #     wiping the clipboard history before the locker script (the
+    #     profile has the clipboard slot on). (Fixed-string
     #     matches throughout: the quoting is the assertion.)
     grep -F "timeout 120 '${pkgs.brightnessctl}/bin/brightnessctl -s set 10%' resume '${pkgs.brightnessctl}/bin/brightnessctl -r'" ${idleConf}
     grep -F "timeout 240 '${pkgs.systemd}/bin/loginctl lock-session'" ${idleConf}
@@ -14729,8 +14736,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F "timeout 300 '${pkgs.wlopm}/bin/wlopm --off \"*\"' resume '${pkgs.wlopm}/bin/wlopm --on \"*\"; ${hmIdle.config.programs.scoot.desktop.displays.watcher}/bin/scoot-displays apply'" ${idleConf}
     grep -F "resume '${pkgs.wlopm}/bin/wlopm --on \"*\"'" ${idleStandaloneConf}
     if grep -F -q "scoot-displays" ${idleStandaloneConf}; then echo "the idle resume calls the watcher with display profiles off" >&2; exit 1; fi
-    grep -F "before-sleep '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
-    grep -F "lock '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
+    grep -F "before-sleep '${leanClip}/bin/cliphist wipe; ${idleLocker}'" ${idleConf}
+    grep -F "lock '${leanClip}/bin/cliphist wipe; ${idleLocker}'" ${idleConf}
     echo "ok: swayidle config carries the idle timeouts, the sleep lock and the lock event"
 
     # 11b. The lock off: dim and screens-off stay, and no line locks
@@ -14783,6 +14790,15 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -x "ring-color=#123456" ${idleTargetOffConf}
     if grep -q "color=" ${idleNoLookConf}; then echo "themed leaf present with no look" >&2; exit 1; fi
     echo "ok: opting out (or no look) leaves the locker unthemed"
+
+    # 12d. The locker prefers the live look's swaylock config (next
+    #      lock) and falls back to the generated store config: a
+    #      session that never applied a look locks exactly as before.
+    grep -F -q 'if [ -f "$look_conf" ]' ${idleLocker}
+    grep -F -q -- '-f -C "$look_conf"' ${idleLocker}
+    grep -F -q -- '-f -C /nix/store/' ${idleLocker}
+    grep -F -q 'look/swaylock' ${idleLocker}
+    echo "ok: the locker takes the live look's swaylock config when applied"
 
     # 13. Notification daemon, music-desk: the overlay layer (popups
     #     above fullscreen -- mako's own default is `top`, which the
@@ -15291,11 +15307,11 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     #     CLI colors, opaque), unthemed without a look or opted out;
     #     the store entry bounds the history and guards the lock; the
     #     lean manager carries no picker fat.
-    grep -F "lock '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock" ${idleConf}
-    grep -F "before-sleep '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock" ${idleConf}
+    grep -F "lock '${leanClip}/bin/cliphist wipe; ${idleLocker}'" ${idleConf}
+    grep -F "before-sleep '${leanClip}/bin/cliphist wipe; ${idleLocker}'" ${idleConf}
     echo "ok: the lock lines wipe the history before the locker"
     if grep -F "lock '" ${idleClipOffConf} | grep -q cliphist; then echo "wipe present with the slot off" >&2; exit 1; fi
-    grep -F "lock '${pkgs.swaylock}/bin/swaylock" ${idleClipOffConf}
+    grep -F "lock '${idleClipOffLocker}'" ${idleClipOffConf}
     echo "ok: with the slot off the lock lines stay wipe-free"
 
     # 16b. The picker, music-desk: the look's roles as fuzzel colors
@@ -15310,6 +15326,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "--match-color=5D7AB0ff" ${clipPickerThemed}
     grep -F -q -- "--prompt-color=1A2032ff" ${clipPickerThemed}
     grep -F -q -- "--dmenu --prompt='clipboard: ' --no-run-if-empty --only-match" ${clipPickerThemed}
+    grep -F -q 'look/fuzzel.ini' ${clipPickerThemed}
+    grep -F -q -- '--config "$look_ini"' ${clipPickerThemed}
     grep -F -q "clipboard_unlocked" ${clipPickerThemed}
     grep -F -q "msg locked" ${clipPickerThemed}
     grep -F -q 'wl-copy <"$tmp"' ${clipPickerThemed}
@@ -15501,6 +15519,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "--match-color=5D7AB0ff" ${launchThemed}
     grep -F -q -- "--prompt-color=1A2032ff" ${launchThemed}
     grep -F -q -- '"$@"' ${launchThemed}
+    grep -F -q 'look/fuzzel.ini' ${launchThemed}
+    grep -F -q -- '--config "$look_ini"' ${launchThemed}
     if grep -q -- "--dmenu" ${launchThemed}; then echo "dmenu flag in the launcher script" >&2; exit 1; fi
     if grep -q "clipboard_unlocked" ${launchThemed}; then echo "lock probe in the launcher script" >&2; exit 1; fi
     echo "ok: the launcher runs fuzzel on overlay, themed, passing args through"
@@ -15547,6 +15567,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "--background-color=FCFBFBff" "''${chooserScript}"
     grep -F -q -- "--text-color=1A2032ff" "''${chooserScript}"
     grep -F -q -- "--selection-color=3D579Aff" "''${chooserScript}"
+    grep -F -q 'look/fuzzel.ini' "''${chooserScript}"
+    grep -F -q -- '--config "$look_ini"' "''${chooserScript}"
     echo "ok: the chooser is a themed dmenu list at 30 fps"
 
     # 20b. Lookless (or opted out): the menu and the behavior stay,
@@ -16329,6 +16351,10 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       grep -F -q -- "--background-color=FCFBFBff" ${appsBluePickThemed}
       grep -F -q -- "--dmenu --prompt='wifi: ' --no-run-if-empty --only-match" ${appsNetPickThemed}
       grep -F -q -- "--dmenu --prompt='bluetooth: ' --no-run-if-empty --only-match" ${appsBluePickThemed}
+      grep -F -q 'look/fuzzel.ini' ${appsNetPickThemed}
+      grep -F -q 'look/fuzzel.ini' ${appsBluePickThemed}
+      grep -F -q -- '--config "$LOOK_INI"' ${appsNetPickThemed}
+      grep -F -q -- '--config "$LOOK_INI"' ${appsBluePickThemed}
       grep -F -q "lookup scoot-wifi" ${appsNetPickThemed}
       grep -x -q "AUDIO=1" ${appsBluePickThemed}
       grep -F -q "scoot-audio-sink" ${appsBluePickThemed}

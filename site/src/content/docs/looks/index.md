@@ -74,7 +74,7 @@ wrong.
 | OSD colors (wob) | Live, on apply (the unit restarts) |
 | Input-method candidate theme (fcitx5) | Live, on apply (D-Bus reload) |
 | Night-light temperature | Live, on apply (the unit restarts) |
-| Launcher and notification configs | Next launch of each app |
+| Launcher, picker and lock colors (`fuzzel.ini`, `swaylock`) | Next launch of each app |
 | Running terminals | Keep their palette; new terminals use the look's |
 | Cursor size in already-running apps | Next launch |
 
@@ -121,7 +121,21 @@ The choice is per-session state: `<state>/look.json` (the record) plus a
 `look` link to one complete rendered look, under one lock. Renders live
 in the cache (`$XDG_CACHE_HOME/scoot/rendered/<name>-<hash>/`), pruned to
 the active, the previous and the four most recent. An unwritable state dir
-refuses loudly.
+refuses loudly. The rendered look holds `fuzzel.ini` and `swaylock`
+beside the first-party fragments: point the apps at the link and the
+next launch picks the look up, no Nix involved.
+
+```sh
+fuzzel --config ~/.local/state/scoot/look/fuzzel.ini
+swaylock -C ~/.local/state/scoot/look/swaylock
+```
+
+(`~/.local/state/scoot` is the default state dir; `--state` and
+`$SCOOT_LOOK_STATE` move it, as above.) With `--config` fuzzel reads that file instead of its own config, so
+the look's seven colors replace the whole file while it is active;
+the font and remaining keys fall back to fuzzel's defaults. A Nix
+install wires this for the launcher, the pickers and the lock screen,
+falling back to the eval-time theme while no look is applied.
 
 - `--state DIR` takes the state (default: `$SCOOT_LOOK_STATE`, then
   `$XDG_STATE_HOME/scoot`, then `~/.local/state/scoot`).

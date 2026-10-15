@@ -13,7 +13,10 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use scoot_look::{Origin, RenderInputs, check_contrast, render_bar, render_scoot, resolve};
+use scoot_look::{
+    Origin, RenderInputs, check_contrast, parse_kv_config, render_bar, render_fuzzel, render_scoot,
+    render_swaylock, resolve,
+};
 
 /// Every directory under `looks/` with a `look.toml`.
 const SHIPPED: &[&str] = &[
@@ -221,6 +224,51 @@ fn every_shipped_look_validates_and_renders() {
                 );
             }
         }
+        // The launcher and locker leaves render too, and reparse to the
+        // same pairs: the gate behind "a check renders every look into
+        // every target" covers the next-launch apps as well.
+        let fuzzel = render_fuzzel(&look)
+            .unwrap_or_else(|e| panic!("{name}: fuzzel.ini does not render: {e}"));
+        let swaylock = render_swaylock(&look)
+            .unwrap_or_else(|e| panic!("{name}: swaylock does not render: {e}"));
+        let fuzzel =
+            parse_kv_config(&fuzzel).unwrap_or_else(|e| panic!("{name}: fuzzel.ini reparse: {e}"));
+        let swaylock =
+            parse_kv_config(&swaylock).unwrap_or_else(|e| panic!("{name}: swaylock reparse: {e}"));
+        let colors = fuzzel
+            .get("colors")
+            .unwrap_or_else(|| panic!("{name}: fuzzel.ini has no [colors]"));
+        assert_eq!(
+            colors.len(),
+            7,
+            "{name}: fuzzel.ini carries the seven CLI leaves"
+        );
+        let global = swaylock
+            .get("")
+            .unwrap_or_else(|| panic!("{name}: swaylock has section-less pairs"));
+        assert_eq!(
+            global.len(),
+            14,
+            "{name}: swaylock carries the fourteen lockTheme leaves"
+        );
+        // The overlays keep today's borders: fuzzel's border is the
+        // focused ring, the locker's ring the same. (Hex case rides
+        // through from the source, as in the TOML fragments.)
+        let focus = look.palette.focus.trim_start_matches('#').to_string();
+        assert!(
+            colors
+                .get("border")
+                .is_some_and(|border| border.eq_ignore_ascii_case(&format!("{focus}ff"))),
+            "{name}: fuzzel border is the focus ring: {:?}",
+            colors.get("border")
+        );
+        assert!(
+            global
+                .get("ring-color")
+                .is_some_and(|ring| ring.eq_ignore_ascii_case(&focus)),
+            "{name}: swaylock ring is the focus ring: {:?}",
+            global.get("ring-color")
+        );
     }
 }
 

@@ -67,8 +67,11 @@ let
   # fuzzel CLI colors (opaque: fuzzel takes `rrggbbaa`), the same roles
   # the bar and the locker are themed from, shared through
   # `fuzzel-theme.nix` so the two menus read as one. Nothing without a
-  # look (or opted out): fuzzel's own style stands.
+  # look (or opted out): fuzzel's own style stands. These flags are the
+  # fallback: once a swap renders the live look's `fuzzel.ini`, both
+  # scripts below take `--config` at it instead (next launch).
   fuzzelTheme = import ./fuzzel-theme.nix { inherit lib; };
+  lookFuzzelIni = import ./look-state.nix "fuzzel.ini";
   clipboardThemed = themeLook.themed cfg.desktop "clipboard";
   clipboardThemeFlags = lib.optionalString clipboardThemed (
     fuzzelTheme (themeLook.lookFor cfg.desktop)
@@ -106,7 +109,14 @@ let
       echo "scoot-clipboard-pick: the session is locked -- unlock to pick from history" >&2
       exit 1
     fi
-    sel="$(${cliphistBin} ${clipboardDbFlags}list | ${fuzzelPickBin} --dmenu --prompt='clipboard: ' --no-run-if-empty --only-match${clipboardThemeFlags})" || exit 0
+    # The live look's menu config when a swap rendered one (next
+    # launch), else the eval-time flags above.
+    look_ini=${lookFuzzelIni}
+    if [ -f "$look_ini" ]; then
+      sel="$(${cliphistBin} ${clipboardDbFlags}list | ${fuzzelPickBin} --dmenu --prompt='clipboard: ' --no-run-if-empty --only-match --config "$look_ini")" || exit 0
+    else
+      sel="$(${cliphistBin} ${clipboardDbFlags}list | ${fuzzelPickBin} --dmenu --prompt='clipboard: ' --no-run-if-empty --only-match${clipboardThemeFlags})" || exit 0
+    fi
     case "$sel" in
       "") exit 0 ;;
     esac
@@ -119,10 +129,11 @@ let
 
   # The launcher: fuzzel as the keymap's drun/run binds (XDG apps,
   # most-launched first, PATH executables on the run bind -- see
-  # site/src/content/docs/desktop/index.md#launcher). A script because the theme travels as CLI
-  # flags (seven colors from the look, the same ones the picker above
-  # carries -- one menu, one palette), and a `[binds]` action gets no
-  # shell to hold them beside the binary. Absolute fuzzel path when the
+  # site/src/content/docs/desktop/index.md#launcher). A script because the theme needs a
+  # shell beside the binary (the live look's `fuzzel.ini` once a swap
+  # renders one, seven eval-time colors as CLI flags before that -- the
+  # same ones the picker above carries, one menu, one palette), and a
+  # `[binds]` action gets no shell of its own. Absolute fuzzel path when the
   # launcher child names a package (the one fuzzel the picker already
   # themes: same derivation, no second copy), bare name from PATH
   # otherwise, with the same fail-quiet contract as the picker above.
@@ -137,7 +148,12 @@ let
   # while locked no `[binds]` action fires at all, so these binds never
   # run behind the lock screen -- and a manual run only lists apps.
   launcherScript = pkgs.writeShellScriptBin "scoot-launcher" ''
-    exec ${fuzzel} --layer=overlay${launcherThemeFlags} "$@"
+    look_ini=${lookFuzzelIni}
+    if [ -f "$look_ini" ]; then
+      exec ${fuzzel} --layer=overlay --config "$look_ini" "$@"
+    else
+      exec ${fuzzel} --layer=overlay${launcherThemeFlags} "$@"
+    fi
   '';
 
   # Screenshot scripts: dated files into `~/Pictures` (`$HOME`

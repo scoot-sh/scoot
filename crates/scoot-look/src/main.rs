@@ -24,8 +24,9 @@ use std::path::Path;
 
 use scoot_look::{
     ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_foot,
-    render_gtk3_css, render_gtk4_css, render_json, render_leaf_files, render_qt_scheme,
-    render_scoot, resolve, source_hash, validate_apps_allowlist, validate_for_origin,
+    render_fuzzel, render_gtk3_css, render_gtk4_css, render_json, render_leaf_files,
+    render_qt_scheme, render_scoot, render_swaylock, resolve, source_hash,
+    validate_apps_allowlist, validate_for_origin,
 };
 
 fn usage() -> ! {
@@ -352,6 +353,14 @@ fn build_dir(
         eprintln!("error: {e}");
         std::process::exit(1);
     });
+    let fuzzel = render_fuzzel(&look).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
+    let swaylock = render_swaylock(&look).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
     let leaves = render_leaf_files(&look).unwrap_or_else(|e| {
         eprintln!("error: {e}");
         std::process::exit(1);
@@ -369,6 +378,8 @@ fn build_dir(
     let mut files: Vec<(&str, String)> = vec![
         ("scoot.toml", scoot),
         ("bar.toml", bar),
+        ("fuzzel.ini", fuzzel),
+        ("swaylock", swaylock),
         (
             "render.json",
             render_json(&look.name, &source_hash(&bytes), inputs),

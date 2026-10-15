@@ -654,6 +654,160 @@ pub fn render_foot(look: &ResolvedLook) -> Result<Option<String>, GrammarError> 
     }
     Ok(Some(out))
 }
+/// One `key=value` line for the line-based leaf formats (`fuzzel.ini`,
+/// swaylock). Those formats have no string quoting, so the writer is the
+/// quoting: a value that would open a new line (or smuggle NUL) is
+/// refused, and every other byte renders literally. Keys are the
+/// renderer's own fixed spellings, never interpolated, so only values
+/// pass through here.
+fn kv_line(key: &str, value: &str) -> Result<String, GrammarError> {
+    if value.contains(['\n', '\r', '\0']) {
+        return Err(GrammarError::new(
+            "leaf",
+            format!("value for `{key}` must stay on one line"),
+        ));
+    }
+    Ok(format!("{key}={value}\n"))
+}
+
+/// A `#rrggbb` token as fuzzel's opaque `rrggbbaa` (its CLI and its
+/// config spell colors without the `#`). The grammar guarantees the
+/// shape on validated looks; a hand-built look carrying anything else
+/// is refused here, so a broken config never reaches the app.
+fn fuzzel_color(field: &str, color: &str) -> Result<String, GrammarError> {
+    if !is_hex_color(color) {
+        return Err(GrammarError::new(
+            field,
+            "must be exactly #rrggbb to render a leaf config",
+        ));
+    }
+    Ok(format!("{}ff", &color[1..]))
+}
+
+/// A `#rrggbb` token as swaylock's `rrggbb` (its parser also takes a
+/// leading `#` and an alpha pair, but the looks are opaque hex).
+fn swaylock_color(field: &str, color: &str) -> Result<String, GrammarError> {
+    if !is_hex_color(color) {
+        return Err(GrammarError::new(
+            field,
+            "must be exactly #rrggbb to render a leaf config",
+        ));
+    }
+    Ok(color[1..].to_string())
+}
+
+/// Render the launcher fragment (`fuzzel.ini`): the seven roles the
+/// inlined CLI flags carry today (`fuzzel-theme.nix`), as a `[colors]`
+/// table. No `[main]` section: the font, line count and every command
+/// key (`launch-prefix`, `terminal`) stay the user's own config, exactly
+/// what the flags leave alone today.
+pub fn render_fuzzel(look: &ResolvedLook) -> Result<String, GrammarError> {
+    let p = &look.palette;
+    let mut out = format!(
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n",
+        toml_str(&look.name)
+    );
+    out.push_str("\n[colors]\n");
+    for (key, color) in [
+        ("background", &p.background),
+        ("text", &p.foreground),
+        ("prompt", &p.foreground),
+        ("match", &p.r#match),
+        ("selection", &p.selection),
+        ("selection-text", &p.selection_text),
+        ("border", &p.focus),
+    ] {
+        let rendered = fuzzel_color(key, color)?;
+        out.push_str(&kv_line(key, &rendered)?);
+    }
+    Ok(out)
+}
+
+/// Render the locker fragment (`swaylock`): the fourteen `key=value`
+/// leaves the store config carries today (`idle-home.nix` `lockTheme`),
+/// section-less, in swaylock's spelling.
+pub fn render_swaylock(look: &ResolvedLook) -> Result<String, GrammarError> {
+    let p = &look.palette;
+    let mut out = format!(
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n",
+        toml_str(&look.name)
+    );
+    out.push('\n');
+    for (key, color) in [
+        ("color", &p.background),
+        ("inside-color", &p.background),
+        ("ring-color", &p.focus),
+        ("ring-ver-color", &p.accent),
+        ("ring-clear-color", &p.hover),
+        ("ring-wrong-color", &p.urgent),
+        ("inside-ver-color", &p.accent),
+        ("inside-clear-color", &p.hover),
+        ("inside-wrong-color", &p.urgent),
+        ("key-hl-color", &p.accent),
+        ("bs-hl-color", &p.accent),
+        ("text-color", &p.foreground),
+        ("line-color", &p.border),
+        ("separator-color", &p.border),
+    ] {
+        let rendered = swaylock_color(key, color)?;
+        out.push_str(&kv_line(key, &rendered)?);
+    }
+    Ok(out)
+}
+
+/// Parse a rendered leaf fragment back: `[section]` headers, `key=value`
+/// lines, `#` comments and blank lines. Anything else (a bare word, a
+/// second `=`-less line, a broken header) is refused. The section-less
+/// pairs of a swaylock fragment read under `""`. Strict by design: the
+/// fragments never emit anything else, so a reparse failure names a
+/// renderer bug, and `validate` runs this over exactly what `apply`
+/// writes.
+pub fn parse_kv_config(
+    text: &str,
+) -> Result<BTreeMap<String, BTreeMap<String, String>>, GrammarError> {
+    let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let mut current = String::new();
+    for (index, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            if !line.ends_with(']') || line.len() < 3 {
+                return Err(GrammarError::new(
+                    "leaf",
+                    format!("line {} is not a section: {line}", index + 1),
+                ));
+            }
+            current = line[1..line.len() - 1].to_string();
+            if current.is_empty() || current.contains(['\n', '\r', '\0', '[', ']']) {
+                return Err(GrammarError::new(
+                    "leaf",
+                    format!("line {} is not a section: {line}", index + 1),
+                ));
+            }
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(GrammarError::new(
+                "leaf",
+                format!("line {} is not key=value: {line}", index + 1),
+            ));
+        };
+        if key.is_empty() || key.contains(['\n', '\r', '\0']) {
+            return Err(GrammarError::new(
+                "leaf",
+                format!("line {} has a bad key: {line}", index + 1),
+            ));
+        }
+        sections
+            .entry(current.clone())
+            .or_default()
+            .insert(key.to_string(), value.to_string());
+    }
+    Ok(sections)
+}
+
 /// A cache identity for `render.json`, not security: FNV-1a over the source
 /// bytes. No hash crate enters the tree for this.
 pub fn source_hash(bytes: &[u8]) -> String {

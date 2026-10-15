@@ -84,15 +84,22 @@ let
   };
   # A picker script from its shell file, every `@NAME@` replaced by a
   # shell-quoted value (a tool path, the theme flags, a switch).
+  # `@LOOK_INI@` is the one raw substitution, never quoted: the live
+  # look's launcher config at RUNTIME, so the session's own
+  # `$SCOOT_LOOK_STATE` (a private look) or `$XDG_STATE_HOME` resolves
+  # when the picker runs.
+  lookIni = import ./look-state.nix "fuzzel.ini";
   pickerScript =
     name: file: values:
     let
       all = shared // values;
     in
     pkgs.writeShellScriptBin name (
-      builtins.replaceStrings (builtins.attrNames all) (map lib.escapeShellArg (
-        builtins.attrValues all
-      )) (builtins.readFile file)
+      builtins.replaceStrings [ "@LOOK_INI@" ] [ lookIni ] (
+        builtins.replaceStrings (builtins.attrNames all) (map lib.escapeShellArg (
+          builtins.attrValues all
+        )) (builtins.readFile file)
+      )
     );
 
   # WiFi through `nmcli` (see `apps-network-pick.sh` for the entry
