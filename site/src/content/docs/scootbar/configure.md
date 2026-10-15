@@ -62,7 +62,7 @@ placed draws no text and needs no font. On NixOS those directories are
 usually empty: give `--font` a store path (`nix build nixpkgs#dejavu_fonts`
 has `share/fonts/truetype/DejaVuSans.ttf`), or run the flake's
 `scootbar-demo`, which gives it DejaVu Sans by default
-(see [Enable it](./index.md)).
+(see [Enable it](./index.md#enable-it)).
 
 **Replacing the font file while the bar runs cannot crash it**, unless a
 *root* process rewrites a mapped store file in place through a read-write view
