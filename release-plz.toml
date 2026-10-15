@@ -111,4 +111,15 @@ name = "scoot"
 git_tag_enable = true
 changelog_update = true
 changelog_path = "./CHANGELOG.md"
-changelog_include = ["scootctl", "scoot-core", "scoot-ipc", "scootbg", "scootbg-mem", "scootbar"]
+changelog_include = ["scootctl", "scoot-core", "scoot-ipc", "scoot-look", "scootbg", "scootbg-mem", "scootbar"]
+
+# `scoot-look` first appeared after v0.2.1. Every package shares the one
+# `v{{ version }}` tag, so release-plz finds `v0.2.1` as its latest release,
+# checks that tag out and fails with `cannot find package "scoot-look" in
+# workspace` (red on main from the look-format merge until this entry).
+# Giving it a tag template no tag matches makes release-plz treat it as
+# never released, so it takes the workspace version bump like the rest.
+# Keep `git_tag_enable` off: the one tag is the `scoot` package's.
+[[package]]
+name = "scoot-look"
+git_tag_name = "scoot-look-v{{ version }}"
