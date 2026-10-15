@@ -109,17 +109,51 @@ step writes `color-scheme` from polarity under the D11 rules with
 `look.json` beside the choice. The dogfood settings and their cost are on
 the new [looks page](../../../site/src/content/docs/looks/index.md).
 
-Evidence: 45 scootctl look unit tests (catalog order/shadowing, parse,
-socket wire, D11 rules, atomicity race, refuse-and-keep, rollback,
-rollback-with-errors, first-apply rollback, lock, link repair, shadowed
-from reply and from files, toolkit record, cache prune); 2 scoot CLI
-parity tests; 3 headless integration tests against the real binary
-(offline commands, a two-look swap through the scoped reload, a pending
-bind surviving the swap and applying on the plain reload after); 9
-`check-image` tests; live headless screenshots across a moonrise to
-ginger-night swap with differing background pixels. Full matrices on the
-dev VM (Linux): nextest + cargo test for scoot/scoot-core/scoot-ipc/
-scootctl, scoot-look, scootbg; clippy `-D warnings` default, xwayland and
-no-default; `fmt --check`. Two unrelated stands: the xwayland
-`refused_cost` fd-budget failure (fails on pristine main too) and
-load-flaky scootbg scaler timing tests (623/623 serialized).
+Second fix round (pushed as `53bff9e73`, same PR): ten review findings,
+each reproduced with a failing test against the real binary or a byte-exact
+wire fake before fixing — the scoped bar reload as a distinct `reload-look`
+verb (a real pre-scope bar applied a pending `height 28 -> 90` on the old
+bytes and answers `unknown request` with nothing applied on the new ones),
+rollback only re-running positive receipts, whole-stderr bar checks with a
+popup-less re-render (real `--no-default-features` binary beside `scoot`:
+`apply` and `build` exit 0), conditional `toolkit off` with tri-state dconf
+reads, `validate .`, the bar check in `validate`, an honest first-apply
+note, followed symlinks for user configs and farm manifests, and guarded
+`build --out` staging. Details and per-finding evidence:
+`scratchpad/fix628b-report.md` (unpublished working notes, not in this PR).
+
+Evidence (dev VM, Linux, both at `53bff9e73` unless noted):
+
+- `cargo build --workspace`: clean.
+- `cargo nextest run --workspace --no-fail-fast`: 5479 run, 5477 passed,
+  50 skipped, 2 failed — the pre-existing xwayland `refused_cost` fd-budget
+  failure (fails on main too) and one new test in pre-hardened form (fixed
+  the same day; the rerun over `scootctl`/`scoot-look`/`scootbar`/`scoot`
+  is 4456 run, 4455 passed, 46 skipped, 1 failed: only the xwayland one).
+- `cargo test -p scootctl -p scoot-look -p scootbg -p scootbar`: every suite
+  ok, 0 failed (incl. 80 `scootctl` look unit tests and the 4
+  `look_apply_cli` headless integration tests against the real binary:
+  offline commands, two-look swap, pending-bind scope, JSON failure shapes).
+- `cargo clippy -p scoot -p scootctl -p scoot-look -p scootbg -p scootbar -p scoot-ipc --all-targets -D warnings`: clean; the `scootbar`
+  per-feature matrix (default, none, each module alone, `popup` with each)
+  clean; `scootbg`/`scootbg-mem` clippy clean with no `libc` dependency.
+- `cargo fmt --check`: clean. `scripts/backlog check`: 0 problems.
+- `scripts/smoke-test.sh` with `SMOKE_REQUIRE_SCOOTBG=1`: passes.
+- `nix build .#docs-site`: passes (llms, page-link, asset, snippet and
+  mdx-twin gates with the new pages).
+- Live headless screenshots across a moonrise to ginger-night swap with
+  differing background pixels (prior round, unchanged).
+
+Swap cost (dev VM, `53bff9e73` debug build, headless, 1 output, no bar,
+dconf disabled, alternating two color-only looks, cache warm after 3
+warmups; wall time per `scoot look apply`, frame proxy per `scoot msg
+screenshot` round trip):
+
+| run | apply wall ms | shot at rest ms | shot post-swap ms |
+|---|---|---|---|
+| 1–20 | 372, 369, 369, 373, 371, 375, 370, 373, 371, 378, 374, 374, 377, 373, 376, 370, 375, 373, 375, 374 | 219, 189, 179, 185, 186, 184, 185, 184, 172, 177, 180, 174, 181, 173, 173, 176, 181, 179, 185, 185 | 176, 200, 182, 183, 178, 188, 179, 179, 184, 187, 188, 188, 186, 187, 191, 183, 188, 184, 185, 188 |
+
+Supplement: screenshots taken concurrently *during* six further swaps
+(36 samples): 169–179 ms, indistinguishable from rest. The swap adds no
+frame debt on this path; per-frame allocation audit after a swap is still
+open (no instrumentation landed for it).
