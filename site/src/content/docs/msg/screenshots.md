@@ -14,7 +14,7 @@ scoot msg screenshot --no-cursor --out /tmp/clean.png
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
-| `--output ID` | int | `1` (first output) | Which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. A powered-off output is refused too, naming the recovery. |
+| `--output ID` | int | `(primary output)` | Which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. A powered-off output is refused too, naming the recovery. |
 | `--out FILE` | path | stdout | Where the PNG goes; without it, the PNG bytes go to stdout. |
 | `--no-cursor` | switch | draw it in | Leave the pointer out (below). |
 

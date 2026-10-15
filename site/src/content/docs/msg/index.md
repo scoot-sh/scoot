@@ -52,7 +52,7 @@ behind it. There is no IPC request that reports a layer surface.
 
 The focus-family actions do take the keyboard back. `focus-column`,
 `focus-window`, `focus-window-id`, `focus-workspace` and
-`focus-workspace-index` -- with or without `--output ID` -- each spend a click that had given a *click-focused*
+`focus-workspace-index` -- with or without `--output ID` -- plus `focus-output`, `focus-output-index`, `focus-output-left/right` and `toggle-floating-focus` -- each spend a click that had given a *click-focused*
 (`on_demand`) layer surface the keyboard, so after one, keystrokes go to the
 window `windows` reports as focused. A `focus-window-id` naming no window
 is a miss: it answers `ok` and changes nothing, leaving the click -- and
