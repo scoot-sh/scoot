@@ -308,6 +308,13 @@ impl Responder<'_> {
         Ok(())
     }
 
+    // `config` is mutated only to set the module links, which exist only
+    // with the `workspaces` or `window-title` feature: a minimal build
+    // (`--no-default-features`, CI's scootbar job) would warn on the `mut`.
+    #[cfg_attr(
+        not(any(feature = "workspaces", feature = "window-title")),
+        allow(unused_mut)
+    )]
     fn apply(&mut self, mut config: Config) -> Result<(), String> {
         // The workspaces link is plumbing, not configuration: the daemon's
         // Wayland dispatch and the module share this run's one, and the
