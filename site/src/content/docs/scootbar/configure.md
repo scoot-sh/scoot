@@ -581,10 +581,10 @@ sets (at most one):
 
 `icon-path` takes the `d` attribute of an SVG `<path>`: `M m L l H h V v
 C c S s Q q T t A a Z z` with implicit repeats and shorthand numbers.
-A number that is not finite or past 1,000,000, a path not starting with
+Nothing is guessed: a number that is not finite or past 1,000,000, a path not starting with
 `M`, or one that draws nothing is refused, naming the byte it stopped at
 and the config key (e.g. `clock.icon-path: not usable SVG path data: at byte 7: expected a number`).
-The bounds are 16 KiB of text, 1024 commands, and 4096 segments.
+The bounds are 16 KiB of text, 1024 commands (an implicit repeat counts each time), and 4096 segments.
 
 The path has no size of its own, so `icon-viewbox = "min-x min-y width height"`
 says which part of its plane is the icon. The default is `0 0 24 24`
