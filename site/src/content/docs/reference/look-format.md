@@ -18,8 +18,9 @@ ls ~/.local/share/scoot/user-looks/moonrise/
 # look.toml  wallpaper.png  fonts/  preview.png  apps/
 ```
 
-A rendered look is the output of a build: `scoot.toml`, `bar.toml`
-and `render.json`. It is never edited and never a source for
+A rendered look is the output of a build: `scoot.toml`, `bar.toml`,
+`foot.ini` (only when the look has `[terminal]`) and `render.json`. It
+is never edited and never a source for
 anything. The two never share a path.
 
 The catalog is the union of the source directories, in fixed order:
@@ -196,6 +197,10 @@ only with `--ui-font-file`: scootbar reads a file path there, and
 without one the bar falls back to its well-known font paths.
 Per-app overrides merge into those tables: each section renders
 once, with the override winning, so every fragment reparses.
+`foot.ini` carries `[colors-dark]` (dark looks) or `[colors-light]`
+(light looks; foot 1.28 has no `[colors]`) with the 16 `[terminal]`
+hues as `regular0-7` then `bright0-7`, plus `alpha` from
+`opacity.terminal`.
 `render.json` names the source, its hash and the resolved inputs
 (font files, wallpaper path). The inputs come from the
 environment: the tool resolves font files and the wallpaper's

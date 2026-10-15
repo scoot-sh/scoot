@@ -23,8 +23,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use scoot_look::{
-    ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_json,
-    render_scoot, resolve, source_hash, validate_apps_allowlist, validate_for_origin,
+    ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_foot,
+    render_json, render_scoot, resolve, source_hash, validate_apps_allowlist, validate_for_origin,
 };
 
 fn usage() -> ! {
@@ -339,18 +339,28 @@ fn build_dir(
         eprintln!("error: {e}");
         std::process::exit(1);
     });
+    let foot = render_foot(&look).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
     std::fs::create_dir_all(out).unwrap_or_else(|e| {
         eprintln!("cannot create {}: {e}", out.display());
         std::process::exit(1);
     });
-    for (file, contents) in [
+    let mut files: Vec<(&str, String)> = vec![
         ("scoot.toml", scoot),
         ("bar.toml", bar),
         (
             "render.json",
             render_json(&look.name, &source_hash(&bytes), inputs),
         ),
-    ] {
+    ];
+    // No `[terminal]` table means no foot fragment, never a synthesized
+    // palette: the file is simply absent.
+    if let Some(foot) = foot {
+        files.push(("foot.ini", foot));
+    }
+    for (file, contents) in &files {
         std::fs::write(out.join(file), contents).unwrap_or_else(|e| {
             eprintln!("cannot write {}: {e}", out.join(file).display());
             std::process::exit(1);

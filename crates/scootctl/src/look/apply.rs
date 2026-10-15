@@ -34,8 +34,8 @@ use scoot_look::state::{
     read_record, state_dir_from_env, write_record,
 };
 use scoot_look::{
-    Origin, RawLook, RenderInputs, check_contrast, render_bar, render_json, render_scoot, resolve,
-    source_hash,
+    Origin, RawLook, RenderInputs, check_contrast, render_bar, render_foot, render_json,
+    render_scoot, resolve, source_hash,
 };
 
 use super::catalog::{Catalog, Entry, cache_home, config_home};
@@ -131,6 +131,10 @@ pub trait Checks {
     /// parser (`scootbar daemon --check --config`). A missing binary is
     /// [`Availability::Unavailable`]; a failing check refuses.
     fn bar_fragment(&self, fragment: &Path) -> Result<Availability<()>, String>;
+    /// Validates a rendered `foot.ini` with the installed binary's own
+    /// parser (`foot --check-config --config`). A missing binary is
+    /// [`Availability::Unavailable`]; a failing check refuses.
+    fn foot_fragment(&self, fragment: &Path) -> Result<Availability<()>, String>;
 }
 
 /// What `validate` found.
@@ -179,6 +183,8 @@ pub fn validate_entry(
         // runs it: a look whose fragment its own bar refuses must not
         // validate.
         check_bar_fragment(name, &merged, &inputs.inputs, checks, &mut validation);
+        // Foot's own parser over its fragment, as `apply` runs it.
+        check_foot_fragment(name, &merged, checks, &mut validation);
     }
     Ok(validation)
 }
@@ -289,6 +295,7 @@ pub fn validate_dir(
             checks,
             &mut validation,
         );
+        check_foot_fragment(&merged.name, &merged, checks, &mut validation);
         return Ok(validation);
     }
     Ok(validation)
@@ -687,6 +694,48 @@ fn check_bar_fragment(
                 }
             }
         }
+    }
+}
+
+/// Renders foot's fragment and runs the installed binary's own parser over
+/// it — the same check `apply` and `build` run, so `validate` and `apply`
+/// agree on foot. A missing binary is a note. Looks without a `[terminal]`
+/// table render no fragment and check nothing. Refusals land in `errors`.
+fn check_foot_fragment(
+    name: &str,
+    merged: &scoot_look::ResolvedLook,
+    checks: &dyn Checks,
+    validation: &mut Validation,
+) {
+    let foot = match render_foot(merged) {
+        Ok(Some(foot)) => foot,
+        Ok(None) => return,
+        Err(error) => {
+            validation
+                .errors
+                .push(format!("cannot render {name}: {error}"));
+            return;
+        }
+    };
+    let scratch = match ScratchDir::new("validate") {
+        Ok(scratch) => scratch,
+        Err(error) => {
+            validation.errors.push(error);
+            return;
+        }
+    };
+    let path = scratch.path().join("foot.ini");
+    if let Err(error) = std::fs::write(&path, &foot) {
+        validation.errors.push(format!(
+            "cannot stage the foot fragment {}: {error}",
+            path.display()
+        ));
+        return;
+    }
+    match checks.foot_fragment(&path) {
+        Ok(Availability::Available(())) => {}
+        Ok(Availability::Unavailable(note)) => validation.notes.push(note),
+        Err(message) => validation.errors.push(message),
     }
 }
 
@@ -1170,8 +1219,8 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 
 /// The render schema: bumped whenever the renderers' output changes shape,
 /// so an upgrade re-renders an unchanged look instead of reusing a stale
-/// cached directory. Part of the cache key.
-pub const RENDER_VERSION: u32 = 2;
+/// cached directory. Part of the cache key. 3 adds foot's `foot.ini`.
+pub const RENDER_VERSION: u32 = 3;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
@@ -1219,7 +1268,8 @@ fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
 }
 
 /// Renders the look into the cache: `<cache>/<name>-<hash>/` with
-/// `scoot.toml`, `bar.toml` and `render.json`, written into a fresh
+/// `scoot.toml`, `bar.toml`, `foot.ini` (only when the look has a
+/// `[terminal]` table) and `render.json`, written into a fresh
 /// directory and renamed, so a reader racing the render sees the old or
 /// the new directory, never a half-written one. An existing directory with
 /// the same key is reused after its `render.json` names this look.
@@ -1241,6 +1291,7 @@ fn render_cached(
         if identity.get("name").and_then(|n| n.as_str()) == Some(name)
             && target.join("scoot.toml").is_file()
             && target.join("bar.toml").is_file()
+            && (merged.terminal.is_none() || target.join("foot.ini").is_file())
         {
             notes.push(format!("reusing cached render {}", target.display()));
             return Ok(target);
@@ -1252,6 +1303,7 @@ fn render_cached(
         render_scoot(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
     let bar =
         render_bar(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let foot = render_foot(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     // The fragments must parse as TOML: the renderers quote, and this is
     // where a quoting failure shows itself, before any app reads them.
     for (file, text) in [("scoot.toml", &scoot), ("bar.toml", &bar)] {
@@ -1263,6 +1315,14 @@ fn render_cached(
         .map(|link| link.bytes.as_slice())
         .unwrap_or_default();
     let rendered_json = render_json(name, &source_hash(target_bytes), inputs);
+    let mut files: Vec<(&str, &str)> = vec![
+        ("scoot.toml", scoot.as_str()),
+        ("bar.toml", bar.as_str()),
+        ("render.json", rendered_json.as_str()),
+    ];
+    if let Some(foot) = &foot {
+        files.push(("foot.ini", foot.as_str()));
+    }
     std::fs::create_dir_all(cache)
         .map_err(|error| format!("cannot create {}: {error}", cache.display()))?;
     // Unique across processes and threads of this process: two applies of
@@ -1284,11 +1344,7 @@ fn render_cached(
     std::fs::create_dir(&tmp)
         .map_err(|error| format!("cannot create {}: {error}", tmp.display()))?;
     let write = (|| {
-        for (file, contents) in [
-            ("scoot.toml", scoot.as_str()),
-            ("bar.toml", bar.as_str()),
-            ("render.json", rendered_json.as_str()),
-        ] {
+        for (file, contents) in &files {
             let path = tmp.join(file);
             std::fs::write(&path, contents)?;
             std::fs::File::open(&path)?.sync_all()?;
@@ -1626,6 +1682,16 @@ pub fn apply_with(
             }
         }
     }
+    // Foot's own parser over the rendered fragment, when the look renders
+    // one. A missing foot is a note; a refusal refuses the swap before
+    // anything is recorded, like the bar's genuine errors.
+    if merged.terminal.is_some() {
+        match checks.foot_fragment(&target.join("foot.ini")) {
+            Ok(Availability::Available(())) => {}
+            Ok(Availability::Unavailable(note)) => report.notes.push(note),
+            Err(message) => return Err(refuse(message)),
+        }
+    }
     let generation = previous
         .as_ref()
         .map(|record| record.generation + 1)
@@ -1828,6 +1894,7 @@ pub fn apply_with(
     }
     // Shadowed keys: the compositor's reply when it reloaded; else the
     // files, read directly.
+    report.notes.extend(foot_notes(&merged, state_dir, config));
     if !completed_compositor {
         let (shadowed, mut file_notes) = shadowed_from_files_in(&target, config);
         report.shadowed.extend(shadowed);
@@ -2007,6 +2074,76 @@ fn unknown_look(name: &str, catalog: &Catalog) -> String {
     format!("unknown look `{name}` (available: {})", names.join(", "))
 }
 
+/// The foot leaf after a swap: new terminals read the rendered `foot.ini`
+/// through the state link, so the reply names the one-time setup until the
+/// user's `foot.ini` includes it, and says running terminals keep their
+/// palette either way.
+///
+/// No signal is ever sent: foot never re-reads its config, and `SIGUSR1` /
+/// `SIGUSR2` only switch between the two palettes loaded at foot start —
+/// after a swap those are the old colors, so signaling would flip running
+/// terminals stale instead of applying the new look. A live OSC push into
+/// running ptys stays research-only: it can interleave with a program's own
+/// output. Best-effort notes only, never a refusal.
+fn foot_notes(
+    merged: &scoot_look::ResolvedLook,
+    state_dir: &Path,
+    config: Option<&Path>,
+) -> Vec<String> {
+    if merged.terminal.is_none() {
+        return Vec::new();
+    }
+    if foot_include_present(config) {
+        return vec![
+            "foot: new terminals read the look's colors; running terminals keep their palette until restart".to_owned(),
+        ];
+    }
+    vec![format!(
+        "foot: new terminals follow the look once foot.ini includes `{}`; running terminals keep their palette until restart",
+        state_dir.join("look/foot.ini").display()
+    )]
+}
+
+/// Whether the user's `foot.ini` already includes a look fragment: any
+/// uncommented `include` line naming `look/foot.ini`. A missing or
+/// unreadable file counts as absent: the setup hint covers creating it.
+fn foot_include_present(config: Option<&Path>) -> bool {
+    let owned;
+    let base = match config {
+        Some(dir) => Some(dir),
+        None => {
+            let xdg = std::env::var_os("XDG_CONFIG_HOME");
+            let home = std::env::var_os("HOME");
+            owned = config_home(xdg.as_deref(), home.as_deref());
+            owned.as_deref()
+        }
+    };
+    let Some(path) = base.map(|dir| dir.join("foot/foot.ini")) else {
+        return false;
+    };
+    // The user's own file: home-manager links it into the store, so
+    // symlinks are followed here, like the shadowed-keys read.
+    let text = match read_capped_follow(&path) {
+        Ok(text) => text,
+        Err(_) => return false,
+    };
+    text.lines().any(|line| {
+        let line = line.trim();
+        if line.starts_with('#') || line.starts_with(';') {
+            return false;
+        }
+        let Some(rest) = line.strip_prefix("include") else {
+            return false;
+        };
+        // `include`, `include =`, `include=` all spell the directive; a
+        // longer word (`included`) is not it.
+        if !rest.is_empty() && !rest.starts_with(['=', ' ', '\t']) {
+            return false;
+        }
+        rest.contains("look/foot.ini")
+    })
+}
+
 /// Reads the user's own config files and reports the keys that override
 /// the rendered look: the offline shadowed-keys approximation for when the
 /// compositor is not running to answer. Missing or unparsable files are
@@ -2133,8 +2270,10 @@ fn flatten_keys(table: &toml::Table, prefix: String) -> Vec<String> {
     keys
 }
 
-/// Our three output files, the only ones `build --out` may write.
-const BUILD_FILES: [&str; 3] = ["scoot.toml", "bar.toml", "render.json"];
+/// Our output files, the only ones `build --out` may write. `foot.ini`
+/// joins them only when the look has a `[terminal]` table; a rebuild
+/// without one clears a stale copy (see `build_to_out`).
+const BUILD_FILES: [&str; 4] = ["scoot.toml", "bar.toml", "foot.ini", "render.json"];
 
 /// Renders a source (a directory, or a catalog name) into `out` without
 /// touching state, the cache, or any app: `build` without `apply`.
@@ -2191,23 +2330,39 @@ pub fn build_to_out(
     };
     let mut render_inputs = inputs.inputs;
     let render_details = inputs.details;
-    let render_once = |render_inputs: &RenderInputs| -> Result<(String, String, String), String> {
-        let scoot = render_scoot(&merged, render_inputs)
-            .map_err(|error| format!("cannot render {name}: {error}"))?;
-        let bar = render_bar(&merged, render_inputs)
-            .map_err(|error| format!("cannot render {name}: {error}"))?;
-        for (file, text) in [("scoot.toml", &scoot), ("bar.toml", &bar)] {
-            text.parse::<toml::Table>()
-                .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
+    let render_once =
+        |render_inputs: &RenderInputs| -> Result<(String, String, Option<String>, String), String> {
+            let scoot = render_scoot(&merged, render_inputs)
+                .map_err(|error| format!("cannot render {name}: {error}"))?;
+            let bar = render_bar(&merged, render_inputs)
+                .map_err(|error| format!("cannot render {name}: {error}"))?;
+            let foot =
+                render_foot(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+            for (file, text) in [("scoot.toml", &scoot), ("bar.toml", &bar)] {
+                text.parse::<toml::Table>()
+                    .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
+            }
+            let target_bytes = chain
+                .last()
+                .map(|link| link.bytes.as_slice())
+                .unwrap_or_default();
+            let rendered_json = render_json(&name, &source_hash(target_bytes), render_inputs);
+            Ok((scoot, bar, foot, rendered_json))
+        };
+    // One staged list per render, so the bar downgrade loop below rebuilds
+    // the same files it checks.
+    let stage_of = |scoot: &str, bar: &str, foot: &Option<String>, json: &str| {
+        let mut staged = vec![
+            ("scoot.toml".to_owned(), scoot.to_owned()),
+            ("bar.toml".to_owned(), bar.to_owned()),
+            ("render.json".to_owned(), json.to_owned()),
+        ];
+        if let Some(foot) = foot {
+            staged.push(("foot.ini".to_owned(), foot.clone()));
         }
-        let target_bytes = chain
-            .last()
-            .map(|link| link.bytes.as_slice())
-            .unwrap_or_default();
-        let rendered_json = render_json(&name, &source_hash(target_bytes), render_inputs);
-        Ok((scoot, bar, rendered_json))
+        staged
     };
-    let (mut scoot, mut bar, mut rendered_json) = render_once(&render_inputs)?;
+    let (mut scoot, mut bar, mut foot, mut rendered_json) = render_once(&render_inputs)?;
     // The bar's own parser runs before anything lands in `--out`: a
     // refused fragment leaves no complete-looking output behind. The
     // check needs a file, so the fragments stage in a tool-owned temp dir
@@ -2219,17 +2374,11 @@ pub fn build_to_out(
     //
     // `out` itself is never followed through a symlink, and a non-empty
     // foreign dir is refused: only an absent dir, an empty dir, or one
-    // holding only our own three files is written into. That keeps
+    // holding only our own files is written into. That keeps
     // `--out .` from wiping the cwd.
     let scratch = ScratchDir::new("build")?;
     let stage: &Path = scratch.path();
-    let mut staged: Vec<(String, String)> = [
-        ("scoot.toml".to_owned(), scoot),
-        ("bar.toml".to_owned(), bar),
-        ("render.json".to_owned(), rendered_json),
-    ]
-    .into_iter()
-    .collect();
+    let mut staged: Vec<(String, String)> = stage_of(&scoot, &bar, &foot, &rendered_json);
     for (file, contents) in &staged {
         std::fs::write(stage.join(file), contents)
             .map_err(|error| format!("cannot write {}: {error}", stage.join(file).display()))?;
@@ -2268,23 +2417,24 @@ pub fn build_to_out(
                     return Err(message);
                 }
                 drops.push(drop_);
-                (scoot, bar, rendered_json) = render_once(&render_inputs)?;
-                for (file, contents) in [
-                    ("scoot.toml", &scoot),
-                    ("bar.toml", &bar),
-                    ("render.json", &rendered_json),
-                ] {
+                (scoot, bar, foot, rendered_json) = render_once(&render_inputs)?;
+                staged = stage_of(&scoot, &bar, &foot, &rendered_json);
+                for (file, contents) in &staged {
                     std::fs::write(stage.join(file), contents).map_err(|error| {
                         format!("cannot write {}: {error}", stage.join(file).display())
                     })?;
                 }
-                // Rebuild the staged list to match the re-render.
-                staged = vec![
-                    ("scoot.toml".to_owned(), scoot.clone()),
-                    ("bar.toml".to_owned(), bar.clone()),
-                    ("render.json".to_owned(), rendered_json.clone()),
-                ];
             }
+        }
+    }
+    // Foot's own parser over the staged fragment, when the look renders
+    // one. A missing foot is a note; a refusal refuses the build before
+    // anything lands in `--out`.
+    if foot.is_some() {
+        match checks.foot_fragment(&stage.join("foot.ini")) {
+            Ok(Availability::Available(())) => {}
+            Ok(Availability::Unavailable(note)) => validation.notes.push(note),
+            Err(message) => return Err(message),
         }
     }
     // Refuse a symlinked `out`: writing through it would land outside the
@@ -2342,6 +2492,18 @@ pub fn build_to_out(
         if let Err(error) = write_nofollow(&path, contents.as_bytes()) {
             return Err(format!("cannot write {}: {error}", path.display()));
         }
+    }
+    // A rebuild of a look without a `[terminal]` table over a dir holding
+    // one from an earlier build must not leave the old colors behind:
+    // `foot.ini` is build-owned (see `BUILD_FILES`), so it goes.
+    if foot.is_none()
+        && let Err(error) = std::fs::remove_file(out.join("foot.ini"))
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(format!(
+            "cannot clear {}: {error}",
+            out.join("foot.ini").display()
+        ));
     }
     Ok(BuildReport {
         name,
@@ -2450,6 +2612,7 @@ pub struct ProdChecks {
     scootbg: Option<PathBuf>,
     scootbar: Option<PathBuf>,
     fc_match: Option<PathBuf>,
+    foot: Option<PathBuf>,
 }
 
 impl ProdChecks {
@@ -2458,6 +2621,7 @@ impl ProdChecks {
             scootbg: find_binary("scootbg"),
             scootbar: find_binary("scootbar"),
             fc_match: find_binary("fc-match"),
+            foot: find_binary("foot"),
         }
     }
 
@@ -2467,6 +2631,7 @@ impl ProdChecks {
             scootbg: None,
             scootbar: None,
             fc_match: None,
+            foot: None,
         }
     }
 
@@ -2478,6 +2643,7 @@ impl ProdChecks {
             scootbg: None,
             scootbar: None,
             fc_match: Some(path),
+            foot: None,
         }
     }
 }
@@ -2615,6 +2781,36 @@ impl Checks for ProdChecks {
             let detail = truncate_head(&detail, 4096);
             Err(format!(
                 "bar fragment refused by scootbar daemon --check{}",
+                if detail.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {detail}")
+                }
+            ))
+        }
+    }
+
+    fn foot_fragment(&self, fragment: &Path) -> Result<Availability<()>, String> {
+        let Some(foot) = &self.foot else {
+            return Ok(Availability::Unavailable(
+                "no `foot` found: foot fragment unchecked".to_owned(),
+            ));
+        };
+        // `foot --check-config` verifies the configuration and exits
+        // nonzero when it refuses it (its report goes to stderr: `err:
+        // config.c:…`). The fragment alone is a valid config: foot fills
+        // every missing key with its default.
+        let out = run_with_timeout(
+            foot,
+            &["--check-config", "--config", &fragment.to_string_lossy()],
+        )?;
+        if out.status.success() {
+            Ok(Availability::Available(()))
+        } else {
+            let detail = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+            let detail = truncate_head(&detail, 4096);
+            Err(format!(
+                "foot fragment refused by foot --check-config{}",
                 if detail.is_empty() {
                     String::new()
                 } else {
