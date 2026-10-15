@@ -1,7 +1,7 @@
 # Arch Linux packages
 
 Six PKGBUILDs, one per shipped binary in each of the two lines the
-ticket ([arch-package](../../docs/backlog/packaging/arch-package.md))
+ticket ([arch-package](../../docs/backlog/resolved/arch-package-done.md))
 asks for: a release build from the tagged tarball, and a `-git` build
 tracking `main`. Nothing here is published anywhere: there is no AUR
 push, no tag, no release in CI or out of it. AUR submission stays a
@@ -12,14 +12,14 @@ manual maintainer step (below).
 | `scoot/` | `scoot` | tag `v$pkgver` | the workspace version (`Cargo.toml`) |
 | `scootbg/` | `scootbg` | tag `v$pkgver` | the same |
 | `scootbar/` | `scootbar` | tag `v$pkgver` | the same |
-| `scoot-git/` | `scoot-git` | `main` | `pkgver()`: last `v*` tag, commits since it, short hash (`0.2.0.r14.g615608c`) |
+| `scoot-git/` | `scoot-git` | `main` | `pkgver()`: last `v*` tag, commits since it, short hash (`0.2.1.r14.g615608c`) |
 | `scootbg-git/` | `scootbg-git` | `main` | the same scheme |
 | `scootbar-git/` | `scootbar-git` | `main` | the same scheme |
 
 One tag releases every binary at the repository's one version
 (docs/versioning.md), so all three release packages carry the same
 `pkgver`, and the `-git` `pkgver` is the binaries' own build label
-(`scoot --version` says `0.2.0+14.g615608c`). Before the first tag the
+(`scoot --version` says `0.2.1+14.g615608c`). Before the first tag the
 `-git` scheme counts every commit over the workspace version. There is
 no `scootctl` package: it is the client library inside the `scoot`
 binary (`scoot msg`). `scoot` depends on exactly `scootbg=$pkgver`:
@@ -108,8 +108,8 @@ line to drop if it ever misbehaves.
 
 1. In the release PR, before it merges, bump `pkgver` in all three
    release packages to the proposed version and regenerate `.SRCINFO`
-   (`arch.yml` runs on the release tag and fails if `pkgver` is not the
-   workspace version).
+   (run `arch.yml` by hand from the release PR; it fails if `pkgver` is
+   not the workspace version).
 2. Once the tag exists, `updpkgsums` in each directory (the `SKIP`
    checksums are placeholders until there is a tag tarball to hash).
 3. `makepkg --printsrcinfo > .SRCINFO` in each touched directory and
@@ -121,10 +121,12 @@ line to drop if it ever misbehaves.
    package (CI does the same; an AUR helper builds the chain in this
    order on its own).
 
-Rebuilding with the opt-in tier (`--features xwayland` plus the
-`xwayland` runtime package) is a local `makepkg` edit, not a separate
-package: add the feature to the `cargo build` line and the matching
-`optdepends` to `depends`. The GPU scanout tier needs no such edit: it
+XWayland is compiled in by default (the `xwayland` cargo feature is on
+in the default set); enabling it at run time needs the `Xwayland` binary
+on `PATH` plus scoot's runtime opt-in (`--xwayland` / `[xwayland]
+enabled`). A local `makepkg` edit is only needed to build *without* it
+(`--no-default-features`, the cargo-only minimal build), not a separate
+package. The GPU scanout tier needs no such edit: it
 is on by default and detects `mesa`/`libdrm` at run time.
 
 ## What CI proves

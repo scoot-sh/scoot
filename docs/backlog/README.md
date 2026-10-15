@@ -452,7 +452,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
   serial); resize and VT-switch reactivation leave it where the user left
   it; the smoke test's park-the-pointer workaround stays as harmless
   protection.
-- [`auto` renderer request: gpu on real hardware, cpu in VMs and headless](./resolved/renderer-auto-policy-done.md) — medium, filed 2026-10-10 (runtime-renderer plan, NEXT implementer ticket): `--renderer auto` / `SCOOT_RENDERER` / `[renderer] backend = "auto"` through a pure `render/policy.rs` (flag > env > config precedence, KMS-driver + GBM/EGL + `GL_RENDERER` software checks, one INFO line, reload request-diff fix). Default stays cpu.
+- [`auto` renderer request: gpu on real hardware, cpu in VMs and headless](./resolved/renderer-auto-policy-done.md) — RESOLVED 2026-10-10: `--renderer auto` / `SCOOT_RENDERER` / `[renderer] backend = "auto"` through a pure `render/policy.rs` (flag > env > config precedence, KMS-driver + GBM/EGL + `GL_RENDERER` software checks, one INFO line, reload request-diff fix). Default is `auto`.
 - [Swap cpu <-> gpu at runtime over IPC](./core/runtime-renderer-swap.md) — research, filed 2026-10-10 (runtime-renderer plan): `scoot msg renderer` query + `set` without restarting clients, headless/nested first, `--tty` second. Design gate: no client kill (target must import every advertised and live dma-buf, else refuse); teardown-first; refuse while locked.
 - [Measure cpu vs gpu scanout on virgl/venus and vmwgfx](./core/renderer-auto-virtual-gpus.md) — research, filed 2026-10-10 (runtime-renderer plan): flip those `auto` rows to the gpu tier only on >10% bench numbers over ≥4 rounds; no such host exists in this project today.
 - [Measure nested gpu+dma-buf vs cpu on real hardware](./core/renderer-auto-nested.md) — research, filed 2026-10-10 (runtime-renderer plan): `INNER_RENDERER` bench variable on the M2, same >10% rule before nested `auto` picks the gpu.
@@ -466,7 +466,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [Vendored sources, third-party licenses, advisories](./resolved/vendoring-and-licenses-done.md) — medium: what every distro package needs first (two git-fork dependencies vendor and resolve offline) — RESOLVED 2026-10-07 in #491
 - [Release artifacts](./resolved/release-artifacts-done.md) — RESOLVED 2026-10-07 in #498: tag-triggered release workflow with dry run, vendored tarball, portable glibc binaries for both architectures, SBOM, checksums, keyless provenance, per-package changelog notes
 - [A Nix binary cache for users](./resolved/nix-binary-cache-done.md) — RESOLVED 2026-10-07 in #499: verified serving (all Linux outputs), clean-machine proof, trust/rotation docs on site/start/binary-cache
-- [Arch packages](./resolved/arch-package-done.md) — RESOLVED 2026-10-08 in #517: six PKGBUILDs (release and `-git`) in `packaging/arch/`, built and linted in CI, [Debian and Ubuntu packages](./resolved/deb-package-done.md), [RPM packages](./resolved/rpm-package-done.md) — low, open since #498 (build from the release tarball) — RPM RESOLVED 2026-10-08 in #526
+- [Arch packages](./resolved/arch-package-done.md) — RESOLVED 2026-10-08 in #517: six PKGBUILDs (release and `-git`) in `packaging/arch/`, built and linted in CI. [Debian and Ubuntu packages](./resolved/deb-package-done.md) — RESOLVED 2026-10-08 in #528 (build from the release tarball). [RPM packages](./resolved/rpm-package-done.md) — RESOLVED 2026-10-08 in #526.
 - [A Stylix target for the compositor](./resolved/scoot-stylix-target-done.md) — medium (M6): window borders, background, cursor and wallpaper from the scheme, the way `programs.scootbar` already themes the bar — RESOLVED 2026-10-03 (PR #407)
 - [Nix: a wallpaper color beside Stylix's image is refused, and only the log says so](./resolved/stylix-wallpaper-color-trap-done.md) (low): from the #407 review — RESOLVED 2026-10-04 in #426
 - [Publish: binaries on Cachix, the flake on FlakeHub](resolved/nix-publishing-done.md) (medium) — RESOLVED 2026-10-04 in #410
@@ -487,7 +487,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [kunifiedpush-distributor runs in minimal sessions at 15 MB PSS](./resolved/kunifiedpush-sessions-done.md) (low) — RESOLVED 2026-10-08 in #538: no portal backend pulls it in (nothing advertises the Push portal); the benchmark sessions carried it via the harness's system-wide Plasma (`requiredPackages`, every graphical session), which a pure scoot profile never installs — docs-only, mask the user unit on Plasma boxes
 - [Remove the standalone scootctl client](./resolved/remove-scootctl-done.md) (medium) — RESOLVED 2026-10-05 in #464: `scoot msg` is the only client; no compatibility link
 - [Drop compatibility aliases for scoot's own old names](./resolved/drop-compat-shims-done.md) (medium) — RESOLVED 2026-10-06 in #475: `homeManagerModules` goes away clean, no alias period
-- [Always compile in xwayland](./core/xwayland-always.md) — low (filed 2026-10-10 from the `runtime-gbm` spike): the feature is pure-Rust `x11rb` with no link-time dependency, so measure the binary size delta and, if accepted, compile it in unconditionally behind the existing opt-in runtime gate and collapse the `-xwayland` packages
+- [Always compile in xwayland](./resolved/xwayland-always-done.md) — RESOLVED 2026-10-14 in the docs review: `default = ["gpu-scanout", "xwayland"]`, the `-xwayland` packages collapsed (stream X default-on, stream G collapse in PR #588)
 
 ### Security
 - [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev). **But see the entry below: the fd/mapping bound it documents is not the bound it has.**
@@ -634,10 +634,11 @@ be revisited.
   — SUPERSEDED 2026-09-28 (docs-only triage, no live gap): the original spec
   is archived with a section-by-section landing map. The live tracker is
   [Milestone 19](../roadmap/19-multi-output.md) (phases A–F done, E included
-  2026-09-25, `--tty` drives every connected monitor), and the one remaining
-  surface is the [remainder](./core/multi-output-remainder.md) below (open,
-  high: its scale/mode surface landed 2026-09-29; position and a live mode
-  change are the [follow-up](./resolved/output-position-and-live-mode-done.md)).
+  2026-09-25, `--tty` drives every connected monitor), and the
+  [remainder](./resolved/multi-output-remainder-done.md) — RESOLVED
+  2026-10-14 in the docs review (its scale/mode surface landed 2026-09-29;
+  position and a live mode change are the
+  [follow-up](./resolved/output-position-and-live-mode-done.md)).
 - [Cycle outputs left and right, wrapping](./resolved/output-cycle-binds-done.md)
   — RESOLVED 2026-10-03 in #400: `focus-output-left/right` + `move-window-to-output-left/right` (wrapping ring in scoot-core); defaults retargeted.
 - [Nested scoot waits forever at startup against a host that accepts but never answers](./resolved/nested-startup-wedge-done.md)
@@ -941,9 +942,9 @@ scale/mode) into one hardware session.
   origin over `ext-workspace-v1` ("2 DP-1"), and IPC `windows` reports the
   0-based workspace, adoption and origin. Follow-up filed:
   [IPC output-removed/restored event](./ipc/output-removed-restored-event.md).
-- [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
-  — OPEN, **HIGH**: everything else in milestone 19's wake is landed and
-  proven. G (pointer-output placement) + H (default `Super+comma/period`
+- [Multi-output remainder: --tty multi-CRTC, placement, default binds](./resolved/multi-output-remainder-done.md)
+  — RESOLVED 2026-10-14 in the docs review: everything else in milestone
+  19's wake is landed and proven. G (pointer-output placement) + H (default `Super+comma/period`
   output binds) LANDED 2026-09-21 (PR #208). E1 (every connector driven at
   startup) + E2 (per-head rendering, per-output lock waits, hotplug
   add/remove) LANDED 2026-09-25, live on the Asahi M2 Air including a
@@ -955,8 +956,8 @@ scale/mode) into one hardware session.
   restore](./resolved/output-reconnect-restore-done.md) resolved (PR #249);
   per-output render scheduling parked as not-planned (~1 pp optimisation).
   The [per-output scale/mode](./resolved/per-output-scale-mode-done.md)
-  entry landed 2026-09-29; left: [position and a live mode
-  change](./resolved/output-position-and-live-mode-done.md).
+  entry landed 2026-09-29, and [position and a live mode
+  change](./resolved/output-position-and-live-mode-done.md) landed 2026-10-08.
 - [XWayland: drops onto X windows do not land](./resolved/xwayland-pointer-focus-x11-done.md)
   — RESOLVED (filed by XWayland Phase 4, PR #246). The pointer focus has
   an X arm, and with the fork's proxy-remap flush (`6e6fe896`) drops work

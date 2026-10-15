@@ -833,7 +833,7 @@ each item's own file records why it landed when it did.
   Ticket stays OPEN for `column_widths` → scale → autostart → reword.
 
 - **[Multi-output remainder G+H: pointer-output placement + default output
-  binds](docs/backlog/core/multi-output-remainder.md)** (2026-09-21,
+  binds](docs/backlog/resolved/multi-output-remainder-done.md)** (2026-09-21,
   PR #208) — new windows file under the pointer's output (shared helper, so
   wlr announce and core filing agree; primary fallback), and four new
   default binds (`Super+comma/period` focus, `+Shift` move; 36→40).

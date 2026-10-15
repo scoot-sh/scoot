@@ -1,9 +1,10 @@
 ---
 title: "Multi-output remainder: --tty multi-CRTC, placement policy, default binds (milestone 19 phases E–I)"
-status: "open"
-area: "core"
-priority: "high"
-blocked: "E1/E2 landed and ran on hardware (a physical DP-1 replug on the Asahi M2 Air, 2026-09-25; GPU-tier runtime add and multi-head mode change proven there 2026-09-26, Asahi.md Tests 11-12); #48 MoveTo proven live on the dev VM 2026-09-28 (Virtual-1 force-off / Virtual-2 force-on, switch_crtc to CRTC 44 — see tty-hotplug-confirmation-done.md); the scale/mode surface landed 2026-09-29 (per-output-scale-mode-done.md); left: position and a live mode change (output-position-and-live-mode)"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
+resolved: "2026-10-14"
 ---
 
 # Multi-output remainder: --tty multi-CRTC, placement policy, default binds
@@ -222,3 +223,13 @@ When it lands, the README "Not yet" bullet — already narrowed to
 **Per-monitor settings** ("Multiple monitors work, but they share one
 scale and resolution…", `README.md:174-175`, retitled past one-output in
 `../resolved/readme-rereview-done.md`) — clears.
+
+## Resolved 2026-10-14 (docs review)
+
+Every section of this entry is marked landed (E1/E2 2026-09-25, G/H in
+PR #208), and the two remaining items its "What done looks like" named —
+position and a live mode change — are in
+`../resolved/output-position-and-live-mode-done.md` (resolved 2026-10-08).
+`crates/scoot/src/compositor/config.rs` carries per-output position, and
+the README "Not yet" list has no monitor bullet left. Resolved via
+`scripts/backlog resolve multi-output-remainder`.

@@ -1,9 +1,10 @@
 ---
 title: "Always compile in xwayland: pure-Rust x11rb costs no link-time dependency"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-14"
 ---
 
 # Always compile in xwayland: pure-Rust x11rb costs no link-time dependency
@@ -99,3 +100,11 @@ minimal Nix package — the CPU-only minimal build is cargo-only
 no-`libgbm` `readelf`, no-stub `nm`, no-C-compiler and headless-start
 checks). Docs updated in the same PR (`builds.md`, `nix.md`,
 `packaging.md`, `xwayland.md`, `install.mdx`, `binary-cache.md`).
+
+## Resolved 2026-10-14 (docs review)
+
+Both completion steps above held on re-verification: `crates/scoot/Cargo.toml`
+carries `default = ["gpu-scanout", "xwayland"]`, and `flake.nix` names
+`scoot-xwayland` only in comments describing the collapse. The "stays open
+until G lands that collapse" condition is satisfied by the stream G section
+in this same entry. Resolved via `scripts/backlog resolve xwayland-always`.

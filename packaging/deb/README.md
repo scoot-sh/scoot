@@ -2,7 +2,7 @@
 
 Three `.deb`s, one per shipped binary, built with cargo from the
 vendored sources and staged with `dpkg-deb` (ticket:
-[deb-package](../../docs/backlog/packaging/deb-package.md)). Nothing
+[deb-package](../../docs/backlog/resolved/deb-package-done.md)). Nothing
 here is published anywhere: no repository upload, no tag, no release
 in CI or out of it. The signed apt repository is designed below and
 its no-secret pieces ship here; the key itself is the maintainer's
@@ -147,7 +147,7 @@ scripts/vendor-release.sh --out ./dist          # before the first release: stag
 packaging/deb/build-deb.sh --source ./dist/source --out ./debs
 ```
 
-`--revision N` sets the Debian revision (`0.1.0-1` the first time; a
+`--revision N` sets the Debian revision (`0.2.1-1` the first time; a
 rebuild of the same upstream version bumps it). `scoot`'s `scootbg`
 pin always names the `scootbg` version the same run builds, so the
 pair can never skew.
@@ -190,8 +190,8 @@ Publishing then looks like this (maintainer runs it, not CI, until
 item 5 is decided):
 
 ```sh
-reprepro -b /srv/apt/scoot includedeb bookworm scoot_0.1.0-1_amd64.deb
-reprepro -b /srv/apt/scoot includedeb bookworm scoot_0.1.0-1_arm64.deb
+reprepro -b /srv/apt/scoot includedeb bookworm scoot_0.2.1-1_amd64.deb
+reprepro -b /srv/apt/scoot includedeb bookworm scoot_0.2.1-1_arm64.deb
 # ... every .deb, every codename; reprepro signs Release into InRelease
 # with the item-1 key at export time.
 ```

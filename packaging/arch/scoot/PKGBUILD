@@ -4,14 +4,15 @@
 # cargo feature set: the single build, which runs on a box with no GPU
 # stack installed and scans out from the GPU where there is one (the
 # `gpu-scanout` tier is on by default and reaches libgbm at run time, so
-# no libgbm link dependency). The `xwayland` tier stays a compile-time
-# feature; rebuilding with it is documented in packaging/arch/README.md.
+# no libgbm link dependency). The `xwayland` tier is compiled in by
+# default too; enabling it needs the Xwayland binary on PATH plus the
+# runtime opt-in (`--xwayland` / `[xwayland] enabled`).
 # The default build compiles a small C stub (`crates/scoot/gbm-stub/`),
 # so a C compiler is needed at build time (base-devel, which makepkg
 # assumes; CI installs it explicitly).
 #
 # The versioned `scootbg` dependency is the coupled pair from
-# docs/backlog/packaging/arch-package.md: one tag releases every binary
+# docs/backlog/resolved/arch-package-done.md: one tag releases every binary
 # at the repository's one version (docs/versioning.md), so the pair
 # installs at that version.
 # No tag is cut yet, so `sha256sums` is SKIP until the first release;

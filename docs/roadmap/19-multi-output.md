@@ -1,3 +1,9 @@
+---
+item: "19"
+title: "Multi-output (more than one monitor)"
+status: "done"
+---
+
 # Milestone 19: multi-output (more than one monitor at a time)
 
 Promoted from `docs/backlog/core/multi-output.md` (superseded 2026-09-28 —

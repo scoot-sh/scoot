@@ -161,9 +161,9 @@ jobs:
           VENDOR_SOURCE: ${{ runner.temp }}/vendor/source
         run: |
           src="$VENDOR_SOURCE"
-          # A release tag builds the release (`0.2.0-1`); a weekly or
-          # manual run builds a commit that is not one, and the snapshot
-          # suffix says so (`0.2.0+git<commit date>.<commit>-1`,
+          # A manual run from the release PR builds the release (`0.2.1-1`);
+          # any other manual run builds a commit that is not one, and the
+          # snapshot suffix says so (`0.2.1+git<commit date>.<commit>-1`,
           # docs/versioning.md).
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             DEB_SUFFIX=""
