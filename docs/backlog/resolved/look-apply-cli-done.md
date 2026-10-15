@@ -146,12 +146,12 @@ Evidence (dev VM, Linux, at the pushed head unless noted):
   --no-default-features` beside `scoot`, then `scoot look build` and
   `scoot look apply` of a look carrying `[apps.scootbar]
   "workspaces.inactive-color"`: exit 0 with
-  `bar without 'popup': rendered without popup-radius` and
-  `bar without 'workspaces': rendered without workspaces tokens
-  (inactive-color)`. The un-downgraded fragment against the minimal
+  ``bar without `popup`: rendered without popup-radius`` and
+  ``bar without `workspaces`: rendered without workspaces tokens
+  (inactive-color)``. The un-downgraded fragment against the minimal
   binary answers exactly
-  `unknown field 'inactive-color', there are no fields` (and
-  `unknown field 'popup-radius', expected one of ...` with the popup
+  ``unknown field `inactive-color`, there are no fields`` (and
+  ``unknown field `popup-radius`, expected one of ...`` with the popup
   keys present); against the default binary the same fragment answers
   `ok` and no token is dropped.
 - Live headless screenshots across a moonrise to ginger-night swap with

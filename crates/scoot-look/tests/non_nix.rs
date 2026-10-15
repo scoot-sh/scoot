@@ -121,8 +121,13 @@ fn import_base16_without_nix() {
 /// import warns (low contrast): warnings go to stderr.
 #[test]
 fn import_stdout_parses_despite_warnings() {
-    let dir = std::env::temp_dir().join(format!("scoot-look-stdout-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("tmp dir");
+    // A `TempDir` guard, so the run leaves no `/tmp/scoot-look-stdout-*`
+    // dirs behind.
+    let _scratch = tempfile::Builder::new()
+        .prefix("scoot-look-stdout-")
+        .tempdir()
+        .expect("tmp dir");
+    let dir = _scratch.path();
     let scheme = dir.join("low.yaml");
     std::fs::write(
         &scheme,
@@ -150,8 +155,13 @@ fn import_stdout_parses_despite_warnings() {
 /// look.
 #[test]
 fn import_out_mismatch_errors() {
-    let dir = std::env::temp_dir().join(format!("scoot-look-mismatch-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("tmp dir");
+    // A `TempDir` guard, so the run leaves no `/tmp/scoot-look-mismatch-*`
+    // dirs behind.
+    let _scratch = tempfile::Builder::new()
+        .prefix("scoot-look-mismatch-")
+        .tempdir()
+        .expect("tmp dir");
+    let dir = _scratch.path();
     let scheme = dir.join("scheme.yaml");
     std::fs::write(
         &scheme,

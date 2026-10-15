@@ -7,13 +7,17 @@ use std::path::PathBuf;
 
 use super::check;
 
-/// A scratch file with `bytes` in it.
-fn scratch(name: &str, bytes: &[u8]) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("scootbg-check-{name}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("a scratch dir");
-    let path = dir.join("image.png");
+/// A scratch file with `bytes` in it: the `TempDir` guard removes the
+/// tree on drop, so the suite leaves no `/tmp/scootbg-check-*` dirs behind.
+/// Callers hold the guard for the test's duration.
+fn scratch(name: &str, bytes: &[u8]) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::Builder::new()
+        .prefix(&format!("scootbg-check-{name}-"))
+        .tempdir()
+        .expect("a scratch dir");
+    let path = dir.path().join("image.png");
     std::fs::write(&path, bytes).expect("a scratch image");
-    path
+    (dir, path)
 }
 
 /// A valid 1x1 RGB PNG (69 bytes).
@@ -38,7 +42,7 @@ const HUGE_HEADER: &[u8] = &[
 
 #[test]
 fn a_valid_image_reports_its_format_size_and_bytes() {
-    let path = scratch("valid", VALID);
+    let (_scratch, path) = scratch("valid", VALID);
     let report = check(&path).expect("a valid PNG checks");
     assert_eq!(report.format, "PNG");
     assert_eq!((report.width, report.height), (1, 1));
@@ -53,7 +57,7 @@ fn a_valid_image_reports_its_format_size_and_bytes() {
 fn a_huge_header_refuses_before_any_decode() {
     // 69 bytes on disk claiming 10 gigapixels: the refusal names the size,
     // and the file's own size proves nothing was allocated for it.
-    let path = scratch("huge", HUGE_HEADER);
+    let (_scratch, path) = scratch("huge", HUGE_HEADER);
     let error = check(&path).expect_err("a huge header must refuse");
     assert!(
         error.contains("100000x100000"),
@@ -63,7 +67,7 @@ fn a_huge_header_refuses_before_any_decode() {
 
 #[test]
 fn a_corrupt_image_refuses() {
-    let path = scratch("corrupt", b"this is not an image");
+    let (_scratch, path) = scratch("corrupt", b"this is not an image");
     let error = check(&path).expect_err("text must refuse");
     assert!(
         error.contains("not an image"),
@@ -73,7 +77,7 @@ fn a_corrupt_image_refuses() {
 
 #[test]
 fn a_truncated_png_refuses() {
-    let path = scratch("truncated", &VALID[..40]);
+    let (_scratch, path) = scratch("truncated", &VALID[..40]);
     let error = check(&path).expect_err("a truncated PNG must refuse");
     assert!(
         error.contains("cannot decode") || error.contains("truncated") || error.contains("corrupt"),
@@ -83,9 +87,11 @@ fn a_truncated_png_refuses() {
 
 #[test]
 fn a_fifo_refuses_without_hanging() {
-    let dir = std::env::temp_dir().join(format!("scootbg-check-fifo-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("a scratch dir");
-    let fifo = dir.join("image.png");
+    let _scratch = tempfile::Builder::new()
+        .prefix("scootbg-check-fifo-")
+        .tempdir()
+        .expect("a scratch dir");
+    let fifo = _scratch.path().join("image.png");
     let _ = std::fs::remove_file(&fifo);
     let status = std::process::Command::new("mkfifo")
         .arg(&fifo)
@@ -101,7 +107,7 @@ fn a_fifo_refuses_without_hanging() {
 
 #[test]
 fn a_symlink_refuses() {
-    let real = scratch("symlink-real", VALID);
+    let (_scratch, real) = scratch("symlink-real", VALID);
     let link = real.with_file_name("link.png");
     let _ = std::fs::remove_file(&link);
     std::os::unix::fs::symlink(&real, &link).expect("a symlink");
@@ -111,8 +117,11 @@ fn a_symlink_refuses() {
 
 #[test]
 fn a_directory_refuses() {
-    let dir = std::env::temp_dir().join(format!("scootbg-check-dir-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("a scratch dir");
+    let _scratch = tempfile::Builder::new()
+        .prefix("scootbg-check-dir-")
+        .tempdir()
+        .expect("a scratch dir");
+    let dir = _scratch.path().to_path_buf();
     let error = check(&dir).expect_err("a directory must refuse");
     assert!(
         error.contains("not a regular file"),

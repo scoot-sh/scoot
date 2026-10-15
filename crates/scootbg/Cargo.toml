@@ -73,3 +73,6 @@ pic-scale-safe = "0.1"
 [dev-dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
 base64.workspace = true
+# Check tests only: scratch dirs as `TempDir` guards, so a run leaves no
+# `/tmp/scootbg-check-*` dirs behind. Already in the lockfile via `scootctl`.
+tempfile = "3"

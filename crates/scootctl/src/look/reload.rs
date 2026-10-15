@@ -233,8 +233,13 @@ pub trait BarReload {
     fn display(&self) -> &str;
     /// Sends the look-scoped reload: `Ok(true)` reloaded, `Ok(false)` the
     /// socket names nothing listening (skipped with a note, never a
-    /// refusal), `Err` the daemon refused, which rolls the swap back.
-    fn reload_look(&self) -> Result<bool, String>;
+    /// refusal), `Err(Refused)` the daemon refused (an explicit error
+    /// reply, the "predates" wall, a never-sent request, an unreadable or
+    /// unexpected reply: never accepted, so the rollback skips re-running
+    /// it), `Err(Unanswered)` sent-but-unanswered (a read error, a timeout,
+    /// a close after a successful write: it may hold the new layer, so the
+    /// rollback re-runs it, like a positive receipt).
+    fn reload_look(&self) -> Result<bool, ReloadError>;
 }
 
 /// A running bar over its control socket.
@@ -254,17 +259,32 @@ impl BarReload for SockBar {
         &self.display
     }
 
-    fn reload_look(&self) -> Result<bool, String> {
+    fn reload_look(&self) -> Result<bool, ReloadError> {
         bar_reload_outcome(&self.socket)
     }
 }
 
 /// One look-scoped reload against the bar at `socket`: `Ok(true)` the
 /// daemon reloaded, `Ok(false)` nothing listens there (a stale socket from
-/// a crashed bar, or a path that never was one: skipped with a note). A
-/// refused reply, an unreadable reply and a peer that accepts and never
-/// answers are `Err`: the daemon is there and said no.
-pub fn bar_reload_outcome(socket: &Path) -> Result<bool, String> {
+/// a crashed bar, or a path that never was one: skipped with a note). An
+/// explicit error reply, the "predates" wall, a never-sent request (a
+/// connect failure other than absent, a write failure), an unreadable reply
+/// and an unexpected reply are `Refused`: the daemon never accepted the new
+/// layer, so the rollback skips re-running it. A read error, a timeout, or
+/// a close after a successful write is `Unanswered`: sent-but-unanswered,
+/// it may hold the new layer, so the rollback re-runs it like a positive
+/// receipt.
+pub fn bar_reload_outcome(socket: &Path) -> Result<bool, ReloadError> {
+    bar_reload_outcome_with_timeout(socket, TIMEOUT)
+}
+
+/// One look-scoped reload with an explicit wait bound (the tests' short
+/// timeout fake: a peer that accepts and never answers must read as
+/// sent-but-unanswered, never wedge the swap past the bound).
+pub fn bar_reload_outcome_with_timeout(
+    socket: &Path,
+    timeout: Duration,
+) -> Result<bool, ReloadError> {
     let mut stream = match UnixStream::connect(socket) {
         Ok(stream) => stream,
         Err(error)
@@ -276,40 +296,53 @@ pub fn bar_reload_outcome(socket: &Path) -> Result<bool, String> {
             return Ok(false);
         }
         Err(error) => {
-            return Err(format!(
+            return Err(ReloadError::Refused(format!(
                 "cannot reach the bar on {}: {error}",
                 socket.display()
-            ));
+            )));
         }
     };
 
     stream
-        .set_read_timeout(Some(TIMEOUT))
-        .and_then(|()| stream.set_write_timeout(Some(TIMEOUT)))
-        .map_err(|error| format!("cannot set a timeout on {}: {error}", socket.display()))?;
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| stream.set_write_timeout(Some(timeout)))
+        .map_err(|error| {
+            ReloadError::Refused(format!(
+                "cannot set a timeout on {}: {error}",
+                socket.display()
+            ))
+        })?;
     // The scoped reload as its own verb: an old bar has no such `type` and
     // answers `unknown request`, with nothing applied. Never `reload` with
     // a `scope` field: an old bar ignores the unknown field and runs a
     // plain reload first.
     stream
         .write_all(b"{\"protocol\":1,\"type\":\"reload-look\"}\n")
-        .map_err(|error| format!("cannot ask the bar on {}: {error}", socket.display()))?;
+        .map_err(|error| {
+            ReloadError::Refused(format!(
+                "cannot ask the bar on {}: {error}",
+                socket.display()
+            ))
+        })?;
     let mut reader = BufReader::new((&stream).take(MAX_REPLY));
     let mut line = String::new();
-    reader
-        .read_line(&mut line)
-        .map_err(|error| format!("the bar on {} did not answer: {error}", socket.display()))?;
-    if line.is_empty() {
-        return Err(format!(
-            "the bar on {} closed the connection without replying",
+    reader.read_line(&mut line).map_err(|error| {
+        ReloadError::Unanswered(format!(
+            "the bar on {} did not answer: {error}",
             socket.display()
-        ));
+        ))
+    })?;
+    if line.is_empty() {
+        return Err(ReloadError::Unanswered(format!(
+            "the bar on {} closed the connection without replying: it may hold the new look",
+            socket.display()
+        )));
     }
     let reply: serde_json::Value = serde_json::from_str(&line).map_err(|error| {
-        format!(
+        ReloadError::Refused(format!(
             "unreadable reply from the bar on {}: {error}",
             socket.display()
-        )
+        ))
     })?;
     match reply.get("type").and_then(|kind| kind.as_str()) {
         Some("ok") => {
@@ -319,10 +352,10 @@ pub fn bar_reload_outcome(socket: &Path) -> Result<bool, String> {
             // loudly, never retry as plain.
             match reply.get("scope").and_then(|scope| scope.as_str()) {
                 Some("look") => Ok(true),
-                _ => Err(
+                _ => Err(ReloadError::Refused(
                     "the bar answered the look reload without its scope receipt: refusing it"
                         .to_owned(),
-                ),
+                )),
             }
         }
         Some("error") => {
@@ -334,26 +367,31 @@ pub fn bar_reload_outcome(socket: &Path) -> Result<bool, String> {
             // request with an ordinary error: map it to one clear line.
             // Nothing was applied; nothing else is sent.
             if message.contains("unknown request") {
-                return Err(
+                return Err(ReloadError::Refused(
                     "the running bar predates the look-scoped reload: restart it".to_owned(),
-                );
+                ));
             }
-            Err(format!("the bar refused the look reload: {message}"))
+            Err(ReloadError::Refused(format!(
+                "the bar refused the look reload: {message}"
+            )))
         }
-        other => Err(format!(
+        other => Err(ReloadError::Refused(format!(
             "the bar answered the look reload with an unexpected reply: {}",
             other.unwrap_or("(no type)")
-        )),
+        ))),
     }
 }
 
 /// Sends one look-scoped reload to the bar at `socket`, for the unit tests:
 /// an absent listener reads as a refusal here (production callers use
 /// [`bar_reload_outcome`] directly and skip it with a note instead).
-pub fn send_bar_reload(socket: &Path) -> Result<(), String> {
+pub fn send_bar_reload(socket: &Path) -> Result<(), ReloadError> {
     match bar_reload_outcome(socket)? {
         true => Ok(()),
-        false => Err(format!("nothing listens on {}", socket.display())),
+        false => Err(ReloadError::Refused(format!(
+            "nothing listens on {}",
+            socket.display()
+        ))),
     }
 }
 

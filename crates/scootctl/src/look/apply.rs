@@ -540,13 +540,20 @@ impl ScratchDir {
     }
 }
 
-/// Removes `scoot-look-<tag>.<pid>-*` stage dirs whose owner pid is dead:
-/// a signal-killed run never reaches `Drop`, so without this sweep every
-/// SIGTERM/SIGINT leaks one stage dir. Only dead pids (never the current
-/// one, never a live one: pid reuse errs toward keeping), only
-/// directories, failures ignored. Linux probes `/proc`; elsewhere there is
-/// no cheap dead-pid check without a new dependency, so the sweep keeps
+/// Removes `scoot-look-<tag>.<pid>-*` stage dirs whose owner pid is dead.
+/// A signal-killed run never reaches `Drop`, so without this sweep every
+/// SIGTERM/SIGINT leaks one stage dir. The sweep runs at the next staging
+/// (the next `apply`, `build` or `validate` that creates a `ScratchDir`),
+/// not on its own timer. Only dead pids (never the current one, never a
+/// live one: pid reuse errs toward keeping), only directories owned by the
+/// same uid, failures ignored. Linux probes `/proc`; elsewhere there is no
+/// cheap dead-pid check without a new dependency, so the sweep keeps
 /// (rather than deletes) there.
+///
+/// Caveat: the liveness check keys on `/proc/<pid>`, so another PID
+/// namespace sharing `/tmp` could read a live stage's pid as dead and
+/// remove a live stage. Same uid only narrows it, it does not close it:
+/// keep `/tmp` private to the PID namespace, or accept the small risk.
 fn cleanup_stale_stages() {
     let entries = match std::fs::read_dir(std::env::temp_dir()) {
         Ok(entries) => entries,
@@ -566,6 +573,18 @@ fn cleanup_stale_stages() {
         };
         if pid == mine || !pid_dead(pid) {
             continue;
+        }
+        // Same uid only: never sweep another user's stage, even when its
+        // pid reads as dead here.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            let owned = std::fs::metadata(entry.path())
+                .map(|meta| meta.uid() == rustix::process::geteuid().as_raw())
+                .unwrap_or(false);
+            if !owned {
+                continue;
+            }
         }
         if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
             std::fs::remove_dir_all(entry.path()).ok();
@@ -749,6 +768,38 @@ fn unknown_field(message: &str) -> Option<String> {
     Some(field.to_owned())
 }
 
+/// The `TOML parse error at line N, column M` the refusal carries, if it
+/// names one (the whole stderr: the summary line holds the span, the
+/// unknown-field detail sits past it).
+fn error_line(message: &str) -> Option<usize> {
+    let at = message.find("line ")?;
+    let rest = &message[at + "line ".len()..];
+    let end = rest.find(|c: char| !c.is_ascii_digit())?;
+    rest[..end].parse().ok()
+}
+
+/// The table header at or preceding `line` (1-based) in the rendered
+/// fragment: the module whose key the parser refused. Headers render as
+/// `[section]` (bare module names), one per line.
+fn section_at(fragment: &str, line: usize) -> Option<String> {
+    let mut section: Option<String> = None;
+    for (index, raw) in fragment.lines().enumerate() {
+        if index + 1 > line {
+            break;
+        }
+        let trimmed = raw.trim();
+        if let Some(rest) = trimmed.strip_prefix('[')
+            && let Some(end) = rest.find(']')
+        {
+            let name = rest[..end].trim().trim_matches('"').to_owned();
+            if !name.is_empty() {
+                section = Some(name);
+            }
+        }
+    }
+    section
+}
+
 /// Whether `table` holds `field` at any depth (rendered override keys are
 /// flat, but a dotted key nests one level in the parsed fragment).
 fn table_holds(table: &toml::Table, field: &str) -> bool {
@@ -763,12 +814,17 @@ fn table_holds(table: &toml::Table, field: &str) -> bool {
 }
 
 /// The downgrade a `bar_fragment` refusal asks for, if it names something
-/// droppable: the missing-`popup` shape first, else the override section
-/// holding the refused field. `[colors]` and `[bar]` are never dropped
-/// (a refusal naming one of their keys is genuine); anything else the
-/// fragment carries is an override section for a module the installed bar
-/// may lack, and dropping it is what lets a shipped look apply on the
-/// lightest bar.
+/// droppable: the missing-`popup` shape first, else the section the error's
+/// line/column points at (the table header at or preceding the span in the
+/// rendered text). Allowlisted keys collide across sections (`*.icon` in
+/// `clock`, `window-title`, `volume`, ...), so the first BTreeMap holder is
+/// the wrong answer: a clock-only bar refusing `window-title`'s `icon` must
+/// drop `window-title`, never `clock`. `[colors]` and `[bar]` are never
+/// dropped (a refusal naming one of their keys is genuine); anything else
+/// the fragment carries is an override section for a module the installed
+/// bar may lack, and dropping it is what lets a shipped look apply on the
+/// lightest bar. Refusals without a parseable line fall back to the
+/// first-holder search.
 fn bar_downgrade(message: &str, fragment: &str) -> Option<BarDrop> {
     if is_popup_refusal(message) {
         return Some(BarDrop::Popup);
@@ -776,6 +832,29 @@ fn bar_downgrade(message: &str, fragment: &str) -> Option<BarDrop> {
     let field = unknown_field(message)?;
     let table: toml::Table = fragment.parse().ok()?;
     if field == "colors" || field == "bar" {
+        return None;
+    }
+    if let Some(line) = error_line(message)
+        && let Some(section) = section_at(fragment, line)
+    {
+        if section == "colors" || section == "bar" {
+            return None;
+        }
+        if table.contains_key(&section) {
+            let holds = match table.get(&section) {
+                Some(toml::Value::Table(inner)) => {
+                    inner.contains_key(&field) || table_holds(inner, &field)
+                }
+                _ => false,
+            };
+            // The unknown-table shape names the table itself
+            // (`unknown field `volume`` at `[volume]`): the section
+            // cannot hold itself, so equality accepts it.
+            if holds || section == field {
+                return Some(BarDrop::Section { section, field });
+            }
+            return None;
+        }
         return None;
     }
     if table.contains_key(&field) {
@@ -1671,9 +1750,13 @@ pub fn apply_with(
     for (index, bar) in bars.iter().enumerate() {
         // A positive receipt completes the bar; an absent listener never
         // sends, so it is skipped with a note and completes nothing. A
-        // refusal (an old bar's unknown-verb wall included) never accepted
-        // the new layer, so the rollback skips re-running it rather than
-        // refusing twice — and nothing is ever retried as a plain reload.
+        // sent-but-unanswered bar (a timeout, a connection closed after the
+        // write: it may hold the new layer) completes like a positive
+        // receipt, so the rollback re-runs it. A refusal (an explicit error
+        // reply, an old bar's unknown-verb wall, a never-sent request, an
+        // unreadable or unexpected reply) never accepted the new layer, so
+        // the rollback skips re-running it rather than refusing twice —
+        // and nothing is ever retried as a plain reload.
         match bar.reload_look() {
             Ok(true) => {
                 completed_bars.push(index);
@@ -1684,7 +1767,30 @@ pub fn apply_with(
                     .skipped
                     .push(format!("bar {}: nothing listens: skipped", bar.display()));
             }
-            Err(message) => {
+            Err(ReloadError::NotRunning(note)) => {
+                report
+                    .skipped
+                    .push(format!("bar {}: {note}", bar.display()));
+            }
+            Err(ReloadError::Unanswered(message)) => {
+                completed_bars.push(index);
+                let failure = ApplyFailure {
+                    message: format!("bar {}: {message}", bar.display()),
+                    rolled_back_to: None,
+                    rollback_errors: Vec::new(),
+                };
+                return rollback(
+                    state_dir,
+                    previous.as_ref(),
+                    &record,
+                    completed_compositor,
+                    &completed_bars,
+                    compositor,
+                    bars,
+                    failure,
+                );
+            }
+            Err(ReloadError::Refused(message)) => {
                 let failure = ApplyFailure {
                     message: format!("bar {}: {message}", bar.display()),
                     rolled_back_to: None,
@@ -1839,11 +1945,17 @@ fn rollback(
         // `Ok(false)` (absent at rollback) needs nothing: nothing there
         // holds the new layer.
         if let Some(bar) = bars.get(*index)
-            && let Err(message) = bar.reload_look()
+            && let Err(error) = bar.reload_look()
         {
-            failure
-                .rollback_errors
-                .push(format!("bar {} rollback: {message}", bar.display()));
+            let message = match error {
+                ReloadError::NotRunning(note) => {
+                    format!("bar {} rollback skipped: {note}", bar.display())
+                }
+                ReloadError::Refused(message) | ReloadError::Unanswered(message) => {
+                    format!("bar {} rollback: {message}", bar.display())
+                }
+            };
+            failure.rollback_errors.push(message);
         }
     }
     Err(failure)

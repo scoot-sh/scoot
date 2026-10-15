@@ -1,37 +1,23 @@
 //! The session-state record, link, lock, seed and resolution: order,
 //! grammar, atomicity, repair and isolation.
 //!
-//! No `tempfile` here, keeping the crate's dependency floor: scratch dirs
-//! live under `std::env::temp_dir()` with a per-process counter, so both
-//! runners (nextest's one-process-per-test and `cargo test`'s shared one)
-//! stay collision-free. Removed on drop is not attempted: a failed assert
-//! leaves the dir for the debugger, the way `main.rs`'s case dirs do.
+//! Scratch dirs are `TempDir` guards, so a run leaves no
+//! `/tmp/scoot-look-state-*` dirs behind (a failed assert still drops the
+//! guard and cleans the dir).
 
 use std::ffi::OsStr;
 use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use super::*;
 
-static SCRATCHES: AtomicU64 = AtomicU64::new(0);
-
-fn scratch(tag: &str) -> PathBuf {
-    let id = SCRATCHES.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!(
-        "scoot-look-state-{}-{}-{tag}-{id}",
-        std::process::id(),
-        // Nanos alone collide for fast successive tests; the counter above
-        // is the uniqueness, this is readability.
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .subsec_nanos()
-    ));
-    std::fs::create_dir_all(&dir).expect("a scratch dir");
-    dir
+fn scratch(tag: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("scoot-look-state-{tag}-"))
+        .tempdir()
+        .expect("a scratch dir")
 }
 
 fn session(value: &str) -> Option<&OsStr> {
@@ -158,13 +144,15 @@ fn a_display_name_outside_the_socket_grammar_is_refused_not_sanitized() {
 
 #[test]
 fn a_missing_record_is_missing_not_corrupt() {
-    let dir = scratch("missing");
+    let _scratch = scratch("missing");
+    let dir = _scratch.path().to_path_buf();
     assert!(matches!(read_record(&dir), RecordRead::Missing));
 }
 
 #[test]
 fn a_valid_record_reads_back() {
-    let dir = scratch("roundtrip");
+    let _scratch = scratch("roundtrip");
+    let dir = _scratch.path().to_path_buf();
     let want = record("moonrise", "/cache/rendered/moonrise-9f2c", 7);
     write_record(&dir, &want).expect("atomic write");
     let RecordRead::Present(got) = read_record(&dir) else {
@@ -175,7 +163,8 @@ fn a_valid_record_reads_back() {
 
 #[test]
 fn malformed_records_name_their_reason() {
-    let dir = scratch("malformed");
+    let _scratch = scratch("malformed");
+    let dir = _scratch.path().to_path_buf();
     for (tag, body) in [
         ("not json", "{oops"),
         ("missing name", r#"{"rendered":"/r","generation":1}"#),
@@ -231,7 +220,8 @@ fn malformed_records_name_their_reason() {
 
 #[test]
 fn minimal_and_maximal_records_both_read() {
-    let dir = scratch("shapes");
+    let _scratch = scratch("shapes");
+    let dir = _scratch.path().to_path_buf();
     write_json(
         &dir,
         r#"{"name":"moonrise","rendered":"/r","generation":0}"#,
@@ -264,7 +254,8 @@ fn read_on_thread(dir: PathBuf) -> RecordRead {
 
 #[test]
 fn a_fifo_record_refuses_without_blocking() {
-    let dir = scratch("fifo");
+    let _scratch = scratch("fifo");
+    let dir = _scratch.path().to_path_buf();
     make_fifo(&dir.join(RECORD_FILE));
     let RecordRead::Corrupt(reason) = read_on_thread(dir) else {
         panic!("a FIFO is not a record");
@@ -277,7 +268,8 @@ fn a_fifo_record_refuses_without_blocking() {
 
 #[test]
 fn an_oversize_record_refuses_without_reading_it_whole() {
-    let dir = scratch("oversize");
+    let _scratch = scratch("oversize");
+    let dir = _scratch.path().to_path_buf();
     let big = format!(
         r#"{{"name":"moonrise","rendered":"/r","generation":1,"chosen-by":"{}"}}"#,
         "x".repeat(70 * 1024)
@@ -295,7 +287,8 @@ fn an_oversize_record_refuses_without_reading_it_whole() {
 
 #[test]
 fn a_directory_record_is_corrupt() {
-    let dir = scratch("dir-record");
+    let _scratch = scratch("dir-record");
+    let dir = _scratch.path().to_path_buf();
     std::fs::create_dir(dir.join(RECORD_FILE)).expect("a directory at the record path");
     let RecordRead::Corrupt(_) = read_on_thread(dir) else {
         panic!("a directory is not a record");
@@ -315,7 +308,8 @@ fn make_fifo(path: &Path) {
 
 #[test]
 fn a_reader_racing_a_swap_sees_only_whole_records() {
-    let dir = scratch("race");
+    let _scratch = scratch("race");
+    let dir = _scratch.path().to_path_buf();
     let first = record("moonrise", "/cache/a", 1);
     let second = record("ginger-night", "/cache/b", 2);
     write_record(&dir, &first).expect("the first write");
@@ -340,7 +334,8 @@ fn a_reader_racing_a_swap_sees_only_whole_records() {
 
 #[test]
 fn write_atomic_refuses_a_name_that_escapes_the_dir() {
-    let dir = scratch("escape");
+    let _scratch = scratch("escape");
+    let dir = _scratch.path().to_path_buf();
     for bad in ["", "../x", "a/b", ".", ".."] {
         assert!(
             write_atomic(&dir, bad, b"{}").is_err(),
@@ -359,7 +354,8 @@ fn write_atomic_refuses_a_name_that_escapes_the_dir() {
 
 #[test]
 fn a_matching_link_is_consistent() {
-    let dir = scratch("consistent");
+    let _scratch = scratch("consistent");
+    let dir = _scratch.path().to_path_buf();
     write_record(&dir, &record("moonrise", "/cache/a", 3)).expect("a record");
     symlink("/cache/a", dir.join(LINK_NAME)).expect("a matching link");
     assert_eq!(ensure_link(&dir), Ok(LinkRepair::Consistent));
@@ -367,7 +363,8 @@ fn a_matching_link_is_consistent() {
 
 #[test]
 fn a_disagreeing_link_heals_from_the_record() {
-    let dir = scratch("heal");
+    let _scratch = scratch("heal");
+    let dir = _scratch.path().to_path_buf();
     write_record(&dir, &record("moonrise", "/cache/new", 4)).expect("a record");
     symlink("/cache/old", dir.join(LINK_NAME)).expect("a stale link");
     let repaired = ensure_link(&dir).expect("repair works");
@@ -384,7 +381,8 @@ fn a_disagreeing_link_heals_from_the_record() {
 
 #[test]
 fn a_missing_link_is_recreated_from_the_record() {
-    let dir = scratch("recreate");
+    let _scratch = scratch("recreate");
+    let dir = _scratch.path().to_path_buf();
     write_record(&dir, &record("moonrise", "/cache/a", 1)).expect("a record");
     let repaired = ensure_link(&dir).expect("repair works");
     assert!(matches!(repaired, LinkRepair::Healed(_)), "{repaired:?}");
@@ -397,7 +395,8 @@ fn a_missing_link_is_recreated_from_the_record() {
 #[test]
 fn without_a_valid_record_the_link_is_left_alone() {
     for tag in ["missing", "corrupt"] {
-        let dir = scratch(tag);
+        let _scratch = scratch(tag);
+        let dir = _scratch.path().to_path_buf();
         if tag == "corrupt" {
             write_json(&dir, "{oops");
         }
@@ -423,7 +422,8 @@ fn without_a_valid_record_the_link_is_left_alone() {
 
 #[test]
 fn two_writers_serialize_and_a_waiter_past_its_bound_refuses() {
-    let dir = scratch("lock");
+    let _scratch = scratch("lock");
+    let dir = _scratch.path().to_path_buf();
     let _first = acquire_lock(&dir, Duration::from_secs(5)).expect("the first lock");
     assert!(
         acquire_lock(&dir, Duration::from_millis(100)).is_err(),
@@ -435,7 +435,8 @@ fn two_writers_serialize_and_a_waiter_past_its_bound_refuses() {
 
 #[test]
 fn a_waiter_inside_its_bound_blocks_until_release() {
-    let dir = scratch("lock-wait");
+    let _scratch = scratch("lock-wait");
+    let dir = _scratch.path().to_path_buf();
     let dir_clone = dir.clone();
     let holder = std::thread::spawn(move || {
         let _held = acquire_lock(&dir_clone, Duration::from_secs(5)).expect("the holder");
@@ -449,7 +450,8 @@ fn a_waiter_inside_its_bound_blocks_until_release() {
 
 #[test]
 fn a_symlink_or_fifo_lock_refuses() {
-    let dir = scratch("lock-evil");
+    let _scratch = scratch("lock-evil");
+    let dir = _scratch.path().to_path_buf();
     let real = dir.join("real.lock");
     std::fs::write(&real, b"").expect("a target");
     symlink(&real, dir.join(LOCK_FILE)).expect("a symlink lock");
@@ -480,15 +482,16 @@ fn a_lock_needs_its_parent_dir() {
 // The seed: the private dir starts as a copy of the user's choice, and the
 // user dir is never written (not even to repair it).
 
-fn user_state(tag: &str) -> (PathBuf, PathBuf) {
-    let user = scratch(tag);
+fn user_state(tag: &str) -> (tempfile::TempDir, PathBuf) {
+    let guard = scratch(tag);
+    let user = guard.path().to_path_buf();
     let rendered = user.join("rendered-moonrise");
     std::fs::create_dir(&rendered).expect("a rendered dir");
     std::fs::write(rendered.join("scoot.toml"), "[appearance]\n").expect("a fragment");
     write_record(&user, &record("moonrise", "/cache/moonrise-9f2c", 7)).expect("a record");
     symlink("/cache/moonrise-9f2c", user.join(LINK_NAME)).expect("a link");
     // Snapshot the user dir: the seed must not touch it.
-    (user, rendered)
+    (guard, rendered)
 }
 
 fn user_entries(user: &Path) -> Vec<PathBuf> {
@@ -502,16 +505,14 @@ fn user_entries(user: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn the_seed_copies_the_record_and_the_link_leaving_the_user_state_alone() {
-    let (user, _rendered) = user_state("seed");
+    let (_user_guard, _rendered) = user_state("seed");
+    let user = _user_guard.path().to_path_buf();
     let before = user_entries(&user);
     let user_record = std::fs::read(user.join(RECORD_FILE)).expect("the user record");
     // Beside the scratch, not inside the user dir, so the untouched-user
     // assertion below is exact.
-    let private = std::env::temp_dir().join(format!(
-        "scoot-look-private-{}-{}",
-        std::process::id(),
-        SCRATCHES.fetch_add(1, Ordering::SeqCst)
-    ));
+    let _private_guard = scratch("seed-private");
+    let private = _private_guard.path().to_path_buf();
     let notes = seed_private(&user, &private).expect("seeding works");
     assert!(notes.is_empty(), "a clean seed is quiet: {notes:?}");
     assert_eq!(
@@ -524,13 +525,14 @@ fn the_seed_copies_the_record_and_the_link_leaving_the_user_state_alone() {
         PathBuf::from("/cache/moonrise-9f2c")
     );
     assert_eq!(user_entries(&user), before, "the user dir is untouched");
-    std::fs::remove_dir_all(&private).ok();
 }
 
 #[test]
 fn an_absent_user_state_seeds_an_empty_private_dir_with_notes() {
-    let user = scratch("seed-absent");
-    let private = scratch("seed-absent-private");
+    let _user_scratch = scratch("seed-absent");
+    let user = _user_scratch.path().to_path_buf();
+    let _private_scratch = scratch("seed-absent-private");
+    let private = _private_scratch.path().to_path_buf();
     let notes = seed_private(&user, &private).expect("seeding works");
     assert_eq!(notes.len(), 2, "record and link both noted: {notes:?}");
     assert!(
@@ -542,10 +544,12 @@ fn an_absent_user_state_seeds_an_empty_private_dir_with_notes() {
 
 #[test]
 fn a_dangling_user_link_replicates_as_a_dangling_link() {
-    let user = scratch("seed-dangling");
+    let _user_scratch = scratch("seed-dangling");
+    let user = _user_scratch.path().to_path_buf();
     write_record(&user, &record("moonrise", "/cache/gone", 1)).expect("a record");
     symlink("/cache/gone", user.join(LINK_NAME)).expect("a dangling link");
-    let private = scratch("seed-dangling-private");
+    let _private_scratch = scratch("seed-dangling-private");
+    let private = _private_scratch.path().to_path_buf();
     seed_private(&user, &private).expect("seeding works");
     assert_eq!(
         std::fs::read_link(private.join(LINK_NAME)).expect("replicated"),
@@ -556,10 +560,12 @@ fn a_dangling_user_link_replicates_as_a_dangling_link() {
 
 #[test]
 fn an_unreadable_user_record_seeds_no_record_but_still_seeds_the_link() {
-    let user = scratch("seed-fifo");
+    let _user_scratch = scratch("seed-fifo");
+    let user = _user_scratch.path().to_path_buf();
     make_fifo(&user.join(RECORD_FILE));
     symlink("/cache/a", user.join(LINK_NAME)).expect("a link");
-    let private = scratch("seed-fifo-private");
+    let _private_scratch = scratch("seed-fifo-private");
+    let private = _private_scratch.path().to_path_buf();
     let notes = seed_private(&user, &private).expect("seeding works");
     assert_eq!(notes.len(), 1, "the FIFO is noted: {notes:?}");
     assert!(
@@ -589,8 +595,10 @@ fn mode_of(path: &Path) -> u32 {
 // and keep them.
 #[test]
 fn a_stale_private_state_does_not_survive_seeding() {
-    let user = scratch("stale-user");
-    let private = scratch("stale-private");
+    let _user_scratch = scratch("stale-user");
+    let user = _user_scratch.path().to_path_buf();
+    let _private_scratch = scratch("stale-private");
+    let private = _private_scratch.path().to_path_buf();
     write_json(
         &private,
         r#"{"name":"stale","rendered":"/tmp/stale","generation":3}"#,
@@ -613,8 +621,10 @@ fn a_stale_private_state_does_not_survive_seeding() {
 // failure whatever the test runner's umask is.
 #[test]
 fn the_private_dir_is_owner_only_even_when_reused() {
-    let (user, _rendered) = user_state("perm-user");
-    let private = scratch("perm-private");
+    let (_user_guard, _rendered) = user_state("perm-user");
+    let user = _user_guard.path().to_path_buf();
+    let _private_scratch = scratch("perm-private");
+    let private = _private_scratch.path().to_path_buf();
     write_json(
         &private,
         r#"{"name":"stale","rendered":"/tmp/stale","generation":3}"#,
@@ -640,7 +650,8 @@ fn the_private_dir_is_owner_only_even_when_reused() {
 // (control characters stay refused).
 #[test]
 fn a_non_absolute_or_parent_rendered_path_is_corrupt() {
-    let dir = scratch("rendered-path");
+    let _scratch = scratch("rendered-path");
+    let dir = _scratch.path().to_path_buf();
     for (tag, rendered) in [
         ("relative", "cache/moonrise"),
         ("dot-relative", "./moonrise"),
@@ -667,7 +678,8 @@ fn a_non_absolute_or_parent_rendered_path_is_corrupt() {
 // with `std::fs::write`, so the victim below receives the record bytes.
 #[test]
 fn write_atomic_does_not_follow_a_planted_tmp_symlink() {
-    let dir = scratch("tmp-evil");
+    let _scratch = scratch("tmp-evil");
+    let dir = _scratch.path().to_path_buf();
     let victim = dir.join("victim");
     std::fs::write(&victim, b"untouched").expect("a victim");
     symlink(&victim, dir.join(".look.json.tmp")).expect("a planted tmp symlink");
@@ -689,12 +701,14 @@ fn write_atomic_does_not_follow_a_planted_tmp_symlink() {
 // absolute and names the same directory.
 #[test]
 fn a_relative_user_link_seeds_as_an_absolute_target() {
-    let user = scratch("seed-rel");
+    let _user_scratch = scratch("seed-rel");
+    let user = _user_scratch.path().to_path_buf();
     let rendered = user.join("rendered-moonrise");
     std::fs::create_dir(&rendered).expect("a rendered dir");
     write_record(&user, &record("moonrise", "/cache/moonrise-9f2c", 1)).expect("a record");
     symlink("rendered-moonrise", user.join(LINK_NAME)).expect("a relative link");
-    let private = scratch("seed-rel-private");
+    let _private_scratch = scratch("seed-rel-private");
+    let private = _private_scratch.path().to_path_buf();
     seed_private(&user, &private).expect("seeding works");
     let seeded = std::fs::read_link(private.join(LINK_NAME)).expect("the seeded link");
     assert!(

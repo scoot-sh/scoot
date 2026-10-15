@@ -7,14 +7,12 @@ use std::io::{BufRead, BufReader};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 #[cfg(target_os = "linux")]
-use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 #[cfg(target_os = "linux")]
-use super::send_bar_reload;
+use super::{CompositorReload, IpcCompositor, ReloadError};
 #[cfg(target_os = "linux")]
-use super::{CompositorReload, IpcCompositor};
+use super::{bar_reload_outcome_with_timeout, send_bar_reload};
 use super::{display_name, runtime_dir};
 
 #[test]
@@ -59,15 +57,19 @@ fn serve_once(socket: PathBuf, reply: &'static str) -> std::thread::JoinHandle<S
     })
 }
 
+/// A scratch dir guard plus a socket path inside it. The `TempDir` guard
+/// removes the tree on drop, so the suite leaves no `/tmp/slt-*` dirs
+/// behind. Callers hold the guard (`let (_scratch, socket) = ...`) for the
+/// test's duration: the peer binds inside it. Short names: a Unix socket
+/// path must fit in `sun_path` (~104 bytes).
 #[cfg(target_os = "linux")]
-fn socket_path(tag: &str) -> PathBuf {
-    // Short names: a Unix socket path must fit in `sun_path` (~104 bytes),
-    // and the temp dir alone is already half of that.
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let id = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("slt-{}-{id}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("a scratch dir");
-    dir.join(format!("{tag}.sock"))
+fn socket_path(tag: &str) -> (tempfile::TempDir, PathBuf) {
+    let scratch = tempfile::Builder::new()
+        .prefix(&format!("slt-{tag}-"))
+        .tempdir()
+        .expect("a scratch dir");
+    let socket = scratch.path().join(format!("{tag}.sock"));
+    (scratch, socket)
 }
 
 /// The socket peers below need `SO_RCVTIMEO`/`SO_SNDTIMEO` on Unix
@@ -76,7 +78,7 @@ fn socket_path(tag: &str) -> PathBuf {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_look_reload_sends_the_scoped_verb_and_accepts_ok() {
-    let socket = socket_path("ok");
+    let (_scratch, socket) = socket_path("ok");
     let peer = serve_once(socket.clone(), "{\"type\":\"ok\",\"scope\":\"look\"}\n");
     send_bar_reload(&socket).expect("a scoped ok reply reloads");
     let request = peer.join().expect("the peer answered");
@@ -96,15 +98,19 @@ fn an_old_bar_unknown_verb_is_a_predates_refusal() {
     // A bar older than the look scope has no `reload-look` verb: this is
     // the byte-for-byte reply a real old bar sends (its parser answers an
     // unknown `type` with an ordinary error, applying nothing).
-    let socket = socket_path("oldbar");
+    let (_scratch, socket) = socket_path("oldbar");
     let peer = serve_once(
         socket.clone(),
         "{\"type\":\"error\",\"message\":\"unknown request `reload-look`\"}\n",
     );
     let error = send_bar_reload(&socket).expect_err("an old bar refuses");
     assert!(
-        error.contains("predates the look-scoped reload"),
-        "unexpected refusal: {error}"
+        matches!(error, super::ReloadError::Refused(_)),
+        "never accepted: {error:?}"
+    );
+    assert!(
+        format!("{error:?}").contains("predates the look-scoped reload"),
+        "unexpected refusal: {error:?}"
     );
     peer.join().expect("the peer answered");
 }
@@ -114,12 +120,16 @@ fn an_old_bar_unknown_verb_is_a_predates_refusal() {
 fn an_ok_without_the_scope_receipt_is_a_refusal() {
     // A scoped reply must carry its receipt: a plain `ok` answers a
     // different request. Refuse it loudly, never retry as plain.
-    let socket = socket_path("plainok");
+    let (_scratch, socket) = socket_path("plainok");
     let peer = serve_once(socket.clone(), "{\"type\":\"ok\"}\n");
     let error = send_bar_reload(&socket).expect_err("a plain ok refuses");
     assert!(
-        error.contains("without its scope receipt"),
-        "unexpected refusal: {error}"
+        matches!(error, super::ReloadError::Refused(_)),
+        "never accepted: {error:?}"
+    );
+    assert!(
+        format!("{error:?}").contains("without its scope receipt"),
+        "unexpected refusal: {error:?}"
     );
     peer.join().expect("the peer answered");
 }
@@ -129,12 +139,16 @@ fn an_ok_without_the_scope_receipt_is_a_refusal() {
 fn a_bar_reply_is_not_a_reload_receipt() {
     // `{"type":"bar"}` answers a hide/show/toggle, never a reload: it must
     // refuse as an unexpected reply, not count as reloaded.
-    let socket = socket_path("barreply");
+    let (_scratch, socket) = socket_path("barreply");
     let peer = serve_once(socket.clone(), "{\"type\":\"bar\",\"visible\":true}\n");
     let error = send_bar_reload(&socket).expect_err("a bar reply refuses");
     assert!(
-        error.contains("unexpected reply"),
-        "unexpected refusal: {error}"
+        matches!(error, super::ReloadError::Refused(_)),
+        "never accepted: {error:?}"
+    );
+    assert!(
+        format!("{error:?}").contains("unexpected reply"),
+        "unexpected refusal: {error:?}"
     );
     peer.join().expect("the peer answered");
 }
@@ -142,20 +156,27 @@ fn a_bar_reply_is_not_a_reload_receipt() {
 #[cfg(target_os = "linux")]
 #[test]
 fn an_error_reply_is_the_refusal() {
-    let socket = socket_path("error");
+    let (_scratch, socket) = socket_path("error");
     let peer = serve_once(
         socket.clone(),
         "{\"type\":\"error\",\"message\":\"bad layer\"}\n",
     );
     let error = send_bar_reload(&socket).expect_err("an error reply refuses");
-    assert!(error.contains("bad layer"), "unexpected refusal: {error}");
+    assert!(
+        matches!(error, super::ReloadError::Refused(_)),
+        "never accepted: {error:?}"
+    );
+    assert!(
+        format!("{error:?}").contains("bad layer"),
+        "unexpected refusal: {error:?}"
+    );
     peer.join().expect("the peer answered");
 }
 
 #[cfg(target_os = "linux")]
 #[test]
-fn a_closed_connection_is_a_named_refusal() {
-    let socket = socket_path("closed");
+fn a_bar_close_after_the_write_is_sent_but_unanswered() {
+    let (_scratch, socket) = socket_path("closed");
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).expect("a scratch socket");
     let peer = std::thread::spawn(move || {
@@ -168,12 +189,54 @@ fn a_closed_connection_is_a_named_refusal() {
         drop(reader);
         stream.shutdown(std::net::Shutdown::Both).ok();
     });
-    let error = send_bar_reload(&socket).expect_err("a close refuses");
+    let error = send_bar_reload(&socket).expect_err("a close is unanswered");
     assert!(
-        error.contains("without replying"),
-        "unexpected refusal: {error}"
+        matches!(error, super::ReloadError::Unanswered(_)),
+        "sent-but-unanswered: {error:?}"
+    );
+    assert!(
+        format!("{error:?}").contains("without replying"),
+        "unexpected refusal: {error:?}"
     );
     peer.join().expect("the peer ran");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_bar_hung_peer_is_sent_but_unanswered_within_the_bound() {
+    // The timeout fake, mirrored from the compositor's: the peer reads the
+    // request and never answers. The reload must refuse as `Unanswered`
+    // within the bound, never wedge the swap (production waits 30 s; the
+    // test binds 300 ms and asserts well under it).
+    use std::time::Instant;
+    let (_scratch, socket) = socket_path("barhung");
+    let _ = std::fs::remove_file(&socket);
+    let listener = UnixListener::bind(&socket).expect("a scratch socket");
+    let peer = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("one connection");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("a timeout");
+        let mut reader = BufReader::new(&stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("one request line");
+        std::thread::sleep(Duration::from_secs(30));
+    });
+    let start = Instant::now();
+    let error = bar_reload_outcome_with_timeout(&socket, Duration::from_millis(300))
+        .expect_err("a hung bar is unanswered");
+    assert!(
+        matches!(error, ReloadError::Unanswered(_)),
+        "sent-but-unanswered: {error:?}"
+    );
+    assert!(
+        start.elapsed() < Duration::from_secs(10),
+        "the wait is bounded: {:?}",
+        start.elapsed()
+    );
+    // Detached, not joined: the peer sleeps past the test (joining would
+    // wait out its 30 s sleep for no reason).
+    drop(peer);
 }
 
 #[cfg(target_os = "linux")]
@@ -182,8 +245,8 @@ fn a_missing_socket_is_a_reachable_refusal() {
     let missing = std::env::temp_dir().join(format!("slt-absent-{}.sock", std::process::id()));
     let error = send_bar_reload(&missing).expect_err("nothing listens");
     assert!(
-        error.contains("nothing listens"),
-        "unexpected refusal: {error}"
+        format!("{error:?}").contains("nothing listens"),
+        "unexpected refusal: {error:?}"
     );
     // The production outcome skips an absent listener with a note instead.
     assert!(!super::bar_reload_outcome(&missing).expect("absent is not a refusal"));
@@ -202,7 +265,7 @@ fn a_partially_applied_reloaded_reply_is_ok_with_refused() {
     // so it reads as `Ok` — `apply` turns the list into the swap failure
     // and re-runs this peer on rollback, rather than skipping it as never
     // accepted.
-    let socket = socket_path("partial");
+    let (_scratch, socket) = socket_path("partial");
     let peer = serve_once(
         socket.clone(),
         "{\"type\":\"reloaded\",\"applied\":[\"appearance.background_color\"],\"refused\":[\"output:scale\"],\"shadowed\":[],\"invalid\":[],\"scope\":\"look\"}\n",
@@ -219,7 +282,7 @@ fn a_partially_applied_reloaded_reply_is_ok_with_refused() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_clean_reloaded_reply_is_ok() {
-    let socket = socket_path("clean");
+    let (_scratch, socket) = socket_path("clean");
     let peer = serve_once(
         socket.clone(),
         "{\"type\":\"reloaded\",\"applied\":[\"appearance.background_color\"],\"refused\":[],\"shadowed\":[],\"invalid\":[],\"scope\":\"look\"}\n",
@@ -236,7 +299,7 @@ fn a_clean_reloaded_reply_is_ok() {
 fn an_explicit_error_reply_is_a_never_accepted_refusal() {
     // An explicit error reply never applied anything: `Refused`, never
     // `Unanswered` (the rollback skips re-running it).
-    let socket = socket_path("comperror");
+    let (_scratch, socket) = socket_path("comperror");
     let peer = serve_once(
         socket.clone(),
         "{\"type\":\"error\",\"message\":\"bad layer\"}\n",
@@ -261,7 +324,7 @@ fn an_explicit_error_reply_is_a_never_accepted_refusal() {
 fn a_predates_wall_is_a_never_accepted_refusal() {
     // An older compositor answers the unknown `ReloadLook` tag with a
     // serde wall: an ordinary error, which refuses without a re-run.
-    let socket = socket_path("comppredates");
+    let (_scratch, socket) = socket_path("comppredates");
     let peer = serve_once(
         socket.clone(),
         "{\"type\":\"error\",\"message\":\"unknown variant `reload_look`, expected `reload`\"}\n",
@@ -287,7 +350,7 @@ fn a_close_after_the_write_is_sent_but_unanswered() {
     // The peer reads the request, then closes cleanly: sent, but no
     // definitive answer — it may have applied first, so `Unanswered` (the
     // rollback re-runs it), never a never-accepted `Refused`.
-    let socket = socket_path("compclosed");
+    let (_scratch, socket) = socket_path("compclosed");
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).expect("a scratch socket");
     let peer = std::thread::spawn(move || {
@@ -315,7 +378,7 @@ fn a_hung_peer_is_sent_but_unanswered_within_the_bound() {
     // swap (production waits 30 s; the test binds 300 ms and asserts well
     // under it).
     use std::time::Instant;
-    let socket = socket_path("comphung");
+    let (_scratch, socket) = socket_path("comphung");
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).expect("a scratch socket");
     let peer = std::thread::spawn(move || {

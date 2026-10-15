@@ -107,12 +107,12 @@ impl CompositorReload for FakeCompositor {
 
 struct FakeBar {
     display: String,
-    script: RefCell<VecDeque<Result<bool, String>>>,
+    script: RefCell<VecDeque<Result<bool, ReloadError>>>,
     calls: Cell<usize>,
 }
 
 impl FakeBar {
-    fn with_script(display: &str, script: Vec<Result<bool, String>>) -> Self {
+    fn with_script(display: &str, script: Vec<Result<bool, ReloadError>>) -> Self {
         Self {
             display: display.to_owned(),
             script: RefCell::new(script.into()),
@@ -126,12 +126,12 @@ impl BarReload for FakeBar {
         &self.display
     }
 
-    fn reload_look(&self) -> Result<bool, String> {
+    fn reload_look(&self) -> Result<bool, ReloadError> {
         self.calls.set(self.calls.get() + 1);
         self.script
             .borrow_mut()
             .pop_front()
-            .unwrap_or_else(|| Err("no scripted reply left".to_owned()))
+            .unwrap_or_else(|| Err(ReloadError::Refused("no scripted reply left".to_owned())))
     }
 }
 
@@ -189,13 +189,26 @@ impl Checks for FakeChecks {
     fn bar_fragment(&self, fragment: &Path) -> Result<Availability<()>, String> {
         let text = std::fs::read_to_string(fragment).unwrap_or_default();
         self.bar_seen.borrow_mut().push(text.clone());
+        // The 1-based line of the first fragment line holding `needle`
+        // (what the real parser's `TOML parse error at line N` names).
+        let line_of = |needle: &str| {
+            text.lines()
+                .position(|line| line.contains(needle))
+                .map(|index| index + 1)
+                .unwrap_or(1)
+        };
         if self.popup_only {
             // The shape a real `--no-default-features` bar answers with:
             // a TOML parse summary line plus the unknown-field detail naming
             // `popup-radius` (captured from a real binary; the CLI keys its
-            // popup-less re-render off that name in the whole stderr).
+            // popup-less re-render off that name in the whole stderr). The
+            // line number is the fragment's own `popup-radius` line, the
+            // way the real parser reports it.
             if text.contains("popup-radius") {
-                return Err("scootbar: bar.toml: TOML parse error at line 8, column 1\nunknown field `popup-radius`, expected `radius`".to_owned());
+                return Err(format!(
+                    "scootbar: bar.toml: TOML parse error at line {}, column 1\nunknown field `popup-radius`, expected `radius`",
+                    line_of("popup-radius")
+                ));
             }
             return Ok(Availability::Available(()));
         }
@@ -204,12 +217,20 @@ impl Checks for FakeChecks {
             // above, plus the module-table refusal (an empty
             // `WorkspacesFile` denies every key: `there are no fields`).
             // Captured from a real `--no-default-features` binary; the CLI
-            // keys its section drop off the named field.
+            // keys its section drop off the error's line (the table header
+            // at or before the span), so the line numbers are the
+            // fragment's own, like the real parser's.
             if text.contains("popup-radius") {
-                return Err("scootbar: bar.toml: TOML parse error at line 8, column 1\nunknown field `popup-radius`, expected `radius`".to_owned());
+                return Err(format!(
+                    "scootbar: bar.toml: TOML parse error at line {}, column 1\nunknown field `popup-radius`, expected `radius`",
+                    line_of("popup-radius")
+                ));
             }
             if text.contains("[workspaces]") {
-                return Err("scootbar: bar.toml: TOML parse error at line 10, column 1\nunknown field `inactive-color`, there are no fields".to_owned());
+                return Err(format!(
+                    "scootbar: bar.toml: TOML parse error at line {}, column 1\nunknown field `inactive-color`, there are no fields",
+                    line_of("inactive-color")
+                ));
             }
             return Ok(Availability::Available(()));
         }
@@ -603,7 +624,10 @@ fn a_rollback_that_also_refuses_reports_both_errors() {
         Ok(Reloaded::default()),
         Err(ReloadError::Refused("the old layer is bad too".to_owned())),
     ]);
-    let bar = FakeBar::with_script("wayland-0", vec![Err("the new layer is bad".to_owned())]);
+    let bar = FakeBar::with_script(
+        "wayland-0",
+        vec![Err(ReloadError::Refused("the new layer is bad".to_owned()))],
+    );
     let bars: Vec<&dyn BarReload> = vec![&bar];
     let failure = apply_with(
         "look-b",
@@ -694,7 +718,10 @@ fn a_failed_first_apply_names_only_what_actually_reloaded() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::ok(&[], &[]);
-    let bar = FakeBar::with_script("wayland-0", vec![Err("bad layer".to_owned())]);
+    let bar = FakeBar::with_script(
+        "wayland-0",
+        vec![Err(ReloadError::Refused("bad layer".to_owned()))],
+    );
     let bars: Vec<&dyn BarReload> = vec![&bar];
     let failure = apply_with(
         "look-a",
@@ -909,7 +936,10 @@ fn a_bar_refusal_rolls_back_the_compositor_too() {
     // A refusing bar never accepted the new layer, so the rollback never
     // re-runs it (one call, not two): no second refusal, no retry as a
     // plain reload.
-    let bar1 = FakeBar::with_script("wayland-1", vec![Err("bad layer".to_owned())]);
+    let bar1 = FakeBar::with_script(
+        "wayland-1",
+        vec![Err(ReloadError::Refused("bad layer".to_owned()))],
+    );
     let bars: Vec<&dyn BarReload> = vec![&bar0, &bar1];
     let failure = apply_with(
         "look-b",
@@ -930,6 +960,109 @@ fn a_bar_refusal_rolls_back_the_compositor_too() {
     assert_eq!(bar0.calls.get(), 2, "the reloaded bar rolls back");
     assert_eq!(bar1.calls.get(), 1, "a refusing bar is never re-run");
     assert_eq!(record_of(&fixture.state).name, "look-a");
+}
+
+#[test]
+fn a_sent_but_unanswered_bar_is_re_run_on_rollback() {
+    // A bar that closes without a reply after a successful write is
+    // sent-but-unanswered: it may hold the new layer, so the rollback
+    // re-runs it (two calls: the swap and its rollback), like a positive
+    // receipt. Only an explicit error reply, the "predates" wall or a
+    // never-sent request means "never accepted" (one call: no re-run).
+    // (Regression: the bar loop treated every error as never accepted.)
+    let fixture = fixture("bar-unanswered-rerun");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::ok(&[], &[]);
+    apply_with(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("the first apply succeeds");
+    let mut compositor =
+        FakeCompositor::with_script(vec![Ok(Reloaded::default()), Ok(Reloaded::default())]);
+    let bar = FakeBar::with_script(
+        "wayland-0",
+        vec![
+            Err(ReloadError::Unanswered(
+                "the bar on wayland-0 closed the connection without replying".to_owned(),
+            )),
+            Ok(true),
+        ],
+    );
+    let bars: Vec<&dyn BarReload> = vec![&bar];
+    let failure = apply_with(
+        "look-b",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &bars,
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect_err("an unanswered bar fails the swap");
+    assert_eq!(failure.rolled_back_to.as_deref(), Some("look-a"));
+    assert_eq!(
+        bar.calls.get(),
+        2,
+        "the swap and its rollback both reload the bar"
+    );
+    assert_eq!(compositor.calls.get(), 2, "the compositor rolls back too");
+    assert_eq!(record_of(&fixture.state).name, "look-a");
+}
+
+#[test]
+fn a_failed_first_apply_names_an_unanswered_bar() {
+    // No previous look to restore to, and the bar may hold the new layer
+    // while nothing is recorded: the split-brain note names the bar (a
+    // refusing bar is never named: it never left its old layer).
+    let fixture = fixture("first-bar-unanswered");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::not_running();
+    let bar = FakeBar::with_script(
+        "wayland-0",
+        vec![Err(ReloadError::Unanswered(
+            "the bar on wayland-0 did not answer: timed out".to_owned(),
+        ))],
+    );
+    let bars: Vec<&dyn BarReload> = vec![&bar];
+    let failure = apply_with(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &bars,
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect_err("the first apply fails");
+    assert!(failure.rolled_back_to.is_none());
+    assert!(
+        failure
+            .to_string()
+            .contains("bar wayland-0 still shows the new look"),
+        "{}",
+        failure
+    );
+    assert_eq!(bar.calls.get(), 1, "nothing exists to roll back to");
+    assert!(!fixture.state.join("look.json").exists());
 }
 
 #[test]
@@ -1515,9 +1648,13 @@ fn a_missing_font_family_refuses_despite_a_fallback_file() {
     use super::ProdChecks;
     // A stub `fc-match` that answers every query with a fallback file but
     // reports the real matched family: an installed family passes, a
-    // missing one refuses even though a file was answered.
-    let dir = std::env::temp_dir().join(format!("scoot-fc-stub-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("a stub dir");
+    // missing one refuses even though a file was answered. A `TempDir`
+    // guard, so the run leaves no `/tmp/scoot-fc-stub-*` dirs behind.
+    let _stub_dir = tempfile::Builder::new()
+        .prefix("scoot-fc-stub-")
+        .tempdir()
+        .expect("a stub dir");
+    let dir = _stub_dir.path();
     let stub = dir.join("fc-match");
     std::fs::write(
         &stub,
@@ -1538,7 +1675,6 @@ fn a_missing_font_family_refuses_despite_a_fallback_file() {
         .font_file("ZZNoSuchFontFamilyQ")
         .expect_err("a missing family refuses");
     assert!(refusal.contains("not installed"), "{refusal}");
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -2013,6 +2149,57 @@ fn bar_downgrade_names_what_the_refusal_names() {
     assert_eq!(
         super::bar_downgrade("the bar is on fire", "[bar]\nradius = 14\n"),
         None
+    );
+}
+
+#[test]
+fn bar_downgrade_drops_the_section_the_error_points_at() {
+    // Allowlisted `*.icon` keys collide across sections, so the first
+    // BTreeMap holder is the wrong answer. The stderr shape below is
+    // byte-exact from a real `scootbar --no-default-features --features
+    // clock` binary (`daemon --check` over a fragment carrying both
+    // `clock.icon` and `window-title.icon`): the span (`12 | icon = "W"`)
+    // names `[window-title]`, never the `clock` section that sorts first.
+    let fragment = "[bar]\nfont-size = 14\nradius = 14\n\n[clock]\nicon = \"C\"\n\n[colors]\nbackground = \"#000000\"\n\n[window-title]\nicon = \"W\"\n";
+    let message = "bar fragment refused by scootbar daemon --check: scootbar: /tmp/bar.toml: TOML parse error at line 12, column 1\n   |\n12 | icon = \"W\"\n   | ^^^^\nunknown field `icon`, there are no fields";
+    assert_eq!(
+        super::bar_downgrade(message, fragment),
+        Some(super::BarDrop::Section {
+            section: "window-title".to_owned(),
+            field: "icon".to_owned(),
+        })
+    );
+    // The mirror: a window-title-only bar refusing `clock`'s `icon` drops
+    // `clock`, keeping `window-title`.
+    let mirror = "bar fragment refused by scootbar daemon --check: scootbar: /tmp/bar.toml: TOML parse error at line 6, column 1\n   |\n6 | icon = \"C\"\n   | ^^^^\nunknown field `icon`, there are no fields";
+    assert_eq!(
+        super::bar_downgrade(mirror, fragment),
+        Some(super::BarDrop::Section {
+            section: "clock".to_owned(),
+            field: "icon".to_owned(),
+        })
+    );
+    // The unknown-table shape points at the header itself (`8 | [volume]`
+    // from the same real binary): the section is the header on that line.
+    let table_fragment = "[bar]\nradius = 14\nfont-size = 14\n\n[colors]\nbackground = \"#000000\"\n\n[volume]\nicon = \"V\"\n";
+    let table_message = "bar fragment refused by scootbar daemon --check: scootbar: /tmp/bar.toml: TOML parse error at line 8, column 2\n  |\n8 | [volume]\n  |  ^^^^^^\nunknown field `volume`, expected one of `bar`, `left`, `center`, `right`, `colors`, `clock`, `workspaces`, `window-title`, `network`, `brightness`, `tray`, `media`, `bluetooth`, `power`, `outputs`, `output`, `look`";
+    assert_eq!(
+        super::bar_downgrade(table_message, table_fragment),
+        Some(super::BarDrop::Section {
+            section: "volume".to_owned(),
+            field: "volume".to_owned(),
+        })
+    );
+    // The line helpers themselves: the header at or before the span wins.
+    assert_eq!(super::error_line(message), Some(12));
+    assert_eq!(
+        super::section_at(fragment, 12).as_deref(),
+        Some("window-title")
+    );
+    assert_eq!(super::section_at(fragment, 6).as_deref(), Some("clock"));
+    assert_eq!(
+        super::section_at(table_fragment, 8).as_deref(),
+        Some("volume")
     );
 }
 
