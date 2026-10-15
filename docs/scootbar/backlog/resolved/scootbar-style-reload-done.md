@@ -79,3 +79,47 @@ JetBrainsMono mapping per reload). The empty bar (no font load) is flat.
 Main does the same on every reload (`stage` loads the font), so this is
 not a regression; proposed follow-up is a mapping cache keyed by file
 identity in `font.rs`/`scootbg-mem`.
+
+## Round 2 (2026-10-15, PR #609, commit `ee6b25977`)
+
+Review follow-ups on top of the above: a delay-changing reload closed a
+stuck tooltip (`reset_hover` closes the tip with the hover state), the
+restyle remake uses the buffer-fits check (no more remake per reload at
+scale 2 / fractional scales), and a reload while any module is left out
+as unavailable takes the full path and retries it. The vacuous
+child-keeps unit test is dropped (covered live); new integration tests
+cover the font-size remake, the refused style reload with a popup open,
+the delay-change tooltip, and the netns retry.
+
+Evidence (dev VM, `scoot --headless --outputs 1`, 7 modules: clock,
+push, `exec` x4, bluetooth on the system bus; binaries
+`/dev/shm/sbfix2-target/debug/scoot{,bar}` at `ee6b25977`; scripts
+`/dev/shm/sbev3.sh` + `/dev/shm/sbev4.sh`, copies kept at those VM
+paths; JetBrains Mono ExtraLight):
+
+- Wall time, client-observed (`date +%s%N` around `scootbar msg
+  reload`), ms. Colors-only (20): 2.6, 7.9, 3.1, 4.4, 2.7, 2.5, 2.6,
+  6.9, 3.1, 6.0, 4.4, 2.7, 4.4, 11.5, 12.7, 6.4, 2.8, 2.7, 3.6, 1.9
+  (median 3.4). Full, height 28/30 (10): 5.3, 12.3, 11.9, 7.7, 26.0,
+  24.0, 21.7, 23.6, 7.5, 2.4 (median 12.1). The VM is shared with other
+  agents' builds, so the outliers are scheduling noise; the style path
+  stays in single digits throughout.
+- CPU: 0.00 user + 0.00 sys per reload on both paths (`time -p`,
+  below its resolution).
+- D-Bus reconnects: the bar's system-bus unique name (`busctl
+  --system list`) is `:1.109` before, still `:1.109` after 20 style
+  reloads (zero reconnects), `:1.121` after the full reloads
+  (reconnected, as designed), still `:1.121` after 20 more style
+  reloads. Bluetooth is in `query` throughout.
+- `exec` PIDs identical across all 51 reloads on both paths; a
+  `subscribe` connection survived all of them and heard a post-reload
+  `set` (`sub.log` 3488 B, tail ends with the ping event).
+- fds 21 to 22 (the subscriber itself), flat after. RSS 9000 KB to
+  12056 (20 style) to 13640 (10 full) to 16520 (20 more style):
+  `/proc/PID/maps` holds 52 JetBrainsMono mappings at the end, one per
+  reload plus the start — the same pre-existing font-map ratchet as
+  above, unchanged by this round.
+- Allocations beyond that: not measurable with the system allocator;
+  RSS/fds/maps are the reported bounds. Bar log: no errors, no
+  left-out notes (all 7 modules available, so the style samples really
+  took the fast path).
