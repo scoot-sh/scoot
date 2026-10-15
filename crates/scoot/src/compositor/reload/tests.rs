@@ -107,8 +107,7 @@ impl Fixture {
     /// settles first and a test that asserts on stored values needs nothing.
     fn settle_cursor(&mut self, theme: &str, size: u32) {
         let deadline = Instant::now() + Duration::from_secs(30);
-        while self.state.cursor.theme().name() != theme
-            || self.state.cursor.theme().size() != size
+        while self.state.cursor.theme().name() != theme || self.state.cursor.theme().size() != size
         {
             assert!(
                 Instant::now() < deadline,

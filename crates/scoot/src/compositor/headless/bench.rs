@@ -727,10 +727,9 @@ fn look_reload_ring_cost() {
                 },
             };
             let started = Instant::now();
-            let response = fixture.state.reload_with_state(
-                false,
-                LookLayerState::Present(layer),
-            );
+            let response = fixture
+                .state
+                .reload_with_state(false, LookLayerState::Present(layer));
             render_frames(&mut fixture, 1);
             with_redraw.push(started.elapsed());
             debug_assert!(

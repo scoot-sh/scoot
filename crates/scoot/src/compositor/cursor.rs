@@ -427,7 +427,9 @@ impl Cursor {
         }
         let mut scales = Vec::with_capacity(keys.len());
         for (_, scale) in keys {
-            scales.push(Self::build_entry_for(size, fill, rim, &mut theme, input.icon, scale));
+            scales.push(Self::build_entry_for(
+                size, fill, rim, &mut theme, input.icon, scale,
+            ));
         }
         RebuiltCursor {
             size,
@@ -494,9 +496,7 @@ impl Cursor {
             themed: None,
         };
         entry.themed = match icon {
-            Some(icon) => theme
-                .image_at(icon, entry.physical.max(1) as u32)
-                .cloned(),
+            Some(icon) => theme.image_at(icon, entry.physical.max(1) as u32).cloned(),
             None => None,
         };
         entry
