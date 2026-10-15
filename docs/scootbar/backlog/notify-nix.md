@@ -3,7 +3,7 @@ title: "scootnotify: Nix modules, the look layer, the opt-in desktop profile swi
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-bar-feed, look-format"
+blocked: "notify-bar-feed"
 milestone: "M7"
 ---
 

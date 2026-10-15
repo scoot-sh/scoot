@@ -203,6 +203,7 @@ export default defineConfig({
           label: 'Reference',
           items: [
             { label: 'Reference hub', slug: 'reference' },
+            { label: 'Look format', slug: 'reference/look-format' },
             { label: 'Builds and renderers', slug: 'reference/builds' },
             { label: 'Nix flake reference', slug: 'reference/nix' },
             { label: 'Versions and compatibility', slug: 'reference/versions' },

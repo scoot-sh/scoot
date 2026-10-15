@@ -3,7 +3,7 @@ title: "scootgreet: NixOS module, the static look, the supervisor and agreety fa
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "greet-users-sessions, greet-power, look-format"
+blocked: "greet-users-sessions, greet-power"
 milestone: "M7"
 ---
 

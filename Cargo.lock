@@ -899,6 +899,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scoot-look"
+version = "0.2.1"
+dependencies = [
+ "rustix 1.1.4",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "scootbar"
 version = "0.2.1"
 dependencies = [

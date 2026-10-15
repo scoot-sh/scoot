@@ -3,7 +3,7 @@ title: "The compositor reads a look layer under the user's config"
 status: "open"
 area: "core"
 priority: "high"
-blocked: "look-format"
+blocked: null
 ---
 
 # The compositor reads a look layer under the user's config

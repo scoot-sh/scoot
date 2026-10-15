@@ -1,9 +1,10 @@
 ---
 title: "The look format: the scoot-look crate, look.toml schema, value grammar and pure validation"
-status: "open"
-area: "core"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-14"
 ---
 
 # The look format: the scoot-look crate, look.toml schema, value grammar and pure validation
@@ -76,3 +77,63 @@ The shipped looks (`look-shipped`), reading the layer in any app, the CLI,
 Nix, the third-party renderers.
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
+
+## Resolution (PR #608, branch `look-format`; review-fix pass)
+
+Review findings 1-8 fixed in the `scoot-look` crate, each reproduced
+with a failing test first (see the PR body for the finding-by-finding
+record):
+
+- Dependency list: `serde` (workspace) plus `toml = "1"` only. `toml`
+  adds no new package to the tree: `scoot` and `scootbar` already pin
+  it (`Cargo.lock`: `toml 1.1.6+spec-1.1.0`), and no other crate
+  depends on `scoot-look`, so no dependency cycle is possible.
+- The `scoot` binary is unchanged: the pass touches only
+  `crates/scoot-look` and the site reference page
+  (`site/src/content/docs/reference/look-format.md`); nothing else
+  in the workspace reads the crate yet.
+- Rendered fragments verified against the real parsers where
+  reachable: an override-heavy `bar.toml` passes `scootbar daemon
+  --check` (`ok`, exit 0) on Linux. `scoot` has no `--check` and its
+  look-layer loader is a later ticket, so the `scoot.toml` fragment
+  is validated by reparse plus key-by-key comparison against
+  `AppearanceConfig` and the wallpaper `Table`.
+
+## Resolution, round 2 (PR #608, branch `look-format`; second review pass)
+
+Findings 1-8 of the second review, each reproduced with a failing
+test first, then fixed in `crates/scoot-look` plus the site
+reference page:
+
+- Deps: `rustix 1.1.4` joins `serde` plus `toml = "1"`. It adds no
+  new package to the tree (scootbar and scootbg already pin it),
+  and only the `scoot-look` binary uses it; the library stays pure
+  (no Wayland, no fontconfig, no image decoder, no process
+  spawning) and builds on macOS.
+- FIFO/symlink/device refusal verified live: `scoot-look validate`
+  on a FIFO `look.toml` refuses in 0.003 s (it hung before), and on
+  a symlink refuses as one.
+- `name == directory` verified live: `validate .` passes in the
+  look dir, a `/nix/store/<32-char-hash>-<name>` path strips the
+  hash, a mismatch refuses, and `--name` overrides.
+- Rendered fragments verified with the real `scootbar daemon
+  --check` on the dev VM (scootbar built from the same tree at
+  `e5b9dd610`; the pass touches no scootbar code): a `radius = 16`
+  fragment fails with ``'bar.radius': takes a whole number of
+  logical pixels from 0 to half the height (14), not `16` `` (the
+  old output), while the clamped `radius = 14` fragment with a
+  resolved `--ui-font-file` store path prints `ok` (exit 0). The
+  old `font = "DejaVu Sans"` family-name output fails with
+  `cannot use the font DejaVu Sans: No such file or directory`.
+  With no `font` key and no well-known font on the box (NixOS has
+  none of scootbar's eight paths), `--check` names the missing
+  font: expected there; on Debian, Ubuntu, Fedora, Arch, openSUSE
+  and Alpine the fallback resolves, and the tool passes
+  `--ui-font-file` wherever it does not.
+- One finding corrected: no Nix module calls the `scoot-look`
+  binary (`theme-home.nix`, `desktop.nix` and `tests.nix` mention
+  only `scoot-look.*` file names), so the store-path shape is
+  defensive, for the later Nix render derivation, not a live
+  caller. `scoot`'s parser discards the whole `[wallpaper]`
+  *section* on an unknown key (startup: no wallpaper; reload: the
+  field refused), not the whole file.

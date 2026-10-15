@@ -3,7 +3,7 @@ title: "scoot look import-base16: the one base16-to-token mapping"
 status: "open"
 area: "core"
 priority: "medium"
-blocked: "look-format"
+blocked: null
 ---
 
 # scoot look import-base16: the one base16-to-token mapping

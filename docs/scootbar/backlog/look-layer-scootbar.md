@@ -3,7 +3,7 @@ title: "scootbar reads a look layer under bar.toml, with a look-scoped reload"
 status: "open"
 area: "scootbar"
 priority: "high"
-blocked: "look-format"
+blocked: null
 ---
 
 # scootbar reads a look layer under bar.toml, with a look-scoped reload
