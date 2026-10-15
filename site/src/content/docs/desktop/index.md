@@ -379,7 +379,8 @@ The locker follows the look: screen and indicator from its palette (a
 value in `lock.settings` winning per key, `theme.targets.lock.enable =
 false` dropping the themed block while the rest follows the look).
 Locked, it looks like this — the music-desk palette, paper screen, the
-indicator hidden until you type:
+indicator hidden until you type (captured from a real session through
+scoot's own IPC screenshot path):
 
 ![The scoot lock screen in the music-desk look: a plain paper screen, no windows, no indicator until you type](../../../assets/idle-lock-screen.png)
 
@@ -463,10 +464,12 @@ programs.scoot.desktop = {
 
 Popups use `layer=overlay`.
 mako's own default is `top`, which the compositor hides under a
-fullscreen window.
+fullscreen window — so a fullscreen game would swallow every popup.
 `overlay` stays above it (the frame then composites instead of scanning
-out directly). A critical popup over a fullscreen window looks like this
-(blue ring for normal, urgent ring for critical):
+out directly; nothing changes on screen, at the cost of one compositing
+pass). A critical popup over a fullscreen window looks like this (blue
+ring for normal, urgent ring for critical — captured from a real session
+through scoot's own IPC screenshot path):
 
 ![A critical notification over a fullscreen terminal: the popup draws above the fullscreen window](../../../assets/notifications-fullscreen.png)
 
@@ -491,7 +494,8 @@ right = ["notifications", "clock"]
 
 Each state has its own icon: a hollow circle
 while idle, a solid dot beside the unread count, and a crescent moon
-while do-not-disturb holds notifications:
+while do-not-disturb holds notifications (captured from a real session
+through scoot's own IPC screenshot path, DejaVu Sans at 17 px):
 
 ![The notification module while idle: a hollow circle](../../../assets/notifications-bar-idle.png)
 
@@ -501,7 +505,9 @@ while do-not-disturb holds notifications:
 
 The defaults are all in DejaVu Sans, the bar's default font, so they
 render with no symbol font — and a default the font cannot draw fails
-the flake's own checks instead of shipping a missing glyph. Each icon is overridable —
+the flake's own checks instead of shipping a missing glyph. The old
+envelope default is gone for exactly that reason: at bar size its fold
+lines read as the X of a missing-glyph box. Each icon is overridable —
 an empty `unread` or `dnd` sends no icon, so the static `idle` icon
 shows beside the text (empty `idle` too for none) — and each is empty or
 one glyph: two or more glyphs fail evaluation, since the bar refuses
@@ -559,6 +565,9 @@ Troubleshooting, by symptom:
 
 Copy in one window, close it, and the paste still works: every copy
 lands in a history kept by cliphist, restorable with one keypress.
+Without this slot, a copy dies with the app that offered it — from
+your side of the screen that reads as data loss, and agents move text
+through the clipboard constantly, so the profile turns it on.
 
 ```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
@@ -643,7 +652,8 @@ Troubleshooting, by symptom:
 
 ## Launcher
 
-Press `Super+d`, type a few letters, Enter — the app opens. With the
+Press `Super+d`, type a few letters, Enter — the app opens. Without
+this slot a fresh desktop's launcher key does nothing; with the
 profile on, two binds open one menu:
 
 ```nix title="configuration.nix and home.nix"
@@ -663,24 +673,30 @@ beside the apps). The menu draws on the **`overlay`** layer with
 exclusive keyboard — above fullscreen windows (fuzzel's own default
 is `top`, which hides under fullscreen), taking every key while open. There is no daemon, no unit, no
 config file: the launcher holds nothing when closed (no process, no
-memory). The ranking lives in fuzzel's own cache
+memory — verified below). The ranking lives in fuzzel's own cache
 (`$XDG_CACHE_HOME/fuzzel`); a second press while it is open does nothing (fuzzel holds
 a per-display lock and refuses a second instance).
 
 The menu follows the look: background and text, selection and border
-from its palette, a value you set in fuzzel's own config (`fuzzel.ini`: font,
+from its palette (the exact flags are pinned in `nix/tests.nix` —
+the same seven leaves the clipboard picker carries, one menu one
+palette), a value you set in fuzzel's own config (`fuzzel.ini`: font,
 lines, and everything these flags leave alone) winning per key as
 usual, `theme.targets.launcher.enable = false` dropping the themed
 flags while the rest follows the look. In music-desk paper and ink:
 
 ![The launcher over the session: the app list in music-desk paper and ink](../../../assets/launcher-music-desk.png)
 
-And in moonrise (same menu, same flags, that look's roles):
+And in moonrise (same menu, same flags, that look's roles —
+captured from a real session through scoot's own IPC screenshot path):
 
 ![The launcher over the session: the app list in moonrise](../../../assets/launcher-moonrise.png)
 
 Why fuzzel, measured at the pinned rev (`8ce4ef6`, `aarch64-linux`:
-closures by `nix path-info --closure-size`, cold start to first mapped frame on the M2, RSS as VmRSS while mapped):
+full closures by `nix path-info --closure-size`, marginals as new
+store paths over the profile's own tools, cold start as exec to first
+mapped frame under a headless scoot on the M2, screenshot-diff poll
+at ~10 ms, three runs each; RSS as VmRSS while the menu is mapped):
 
 | Tool | Version | Full closure | New over profile | Cold first frame | RSS open | Why / why not |
 |---|---|---|---|---|---|---|
@@ -705,7 +721,8 @@ Launched apps land in the session: fuzzel
 forks the picked entry (a `Terminal=true` entry through your
 terminal) and exits, and the window maps and takes focus through the
 usual activation path. Over the session lock the binds never fire at
-all, and a manual run behind the lock only
+all (plain strings: never repeat, never `allow_when_locked`), so
+there is nothing to refuse — and a manual run behind the lock only
 lists app names, never clipboard or notification content.
 
 Every value is an option, applied on rebuild/switch (the binds
@@ -883,14 +900,15 @@ Troubleshooting, by symptom:
   unconditionally beside Plasma and it starts in every graphical
   session. A pure scoot session never installs it. If this box also
   runs Plasma, `systemctl --user mask kunifiedpush-distributor.service`
-  stops it (`unmask` restores it; no Push backend exists in this
-  closure). The mask is per-user, so it
+  stops it (`unmask` restores it); nothing the session needs breaks —
+  no Push backend exists in this closure. The mask is per-user, so it
   covers that user's Plasma sessions too, where push would stop with
   it.
 
 ## Sound, brightness keys and the on-screen display
 
-Both come on with the profile: PipeWire
+Press a volume key and a bar shows the level; press a brightness key
+and a bar shows that instead. Both come on with the profile: PipeWire
 with WirePlumber running underneath, the keymap's volume, brightness
 and mic-mute binds routed through small scripts that step the control
 *and* poke the on-screen display, and a sink helper the Bluetooth
@@ -919,13 +937,15 @@ keymap below).
 
 The OSD draws on the **`overlay`** layer with the look's colors
 (background and text, accent fill, active-ring border, dim while
-muted, urgent past full), above fullscreen windows (music-desk paper and blue
+muted, urgent past full), above fullscreen windows — a fullscreen
+game never swallows the volume bar (captured from a real session
+through scoot's own IPC screenshot path, music-desk paper and blue
 over a fullscreen terminal):
 
 ![The volume OSD over a fullscreen terminal: the bar draws above the fullscreen window](../../../assets/audio-osd-fullscreen.png)
 
 It holds nothing when hidden: the daemon blocks until the next key
-press, keeps no surface, and wakes nothing. The
+press, keeps no surface, and wakes nothing (measured below). The
 bar's `volume`, `brightness`, `media` and `microphone` modules stay
 the persistent display; the OSD is the transient one.
 
@@ -937,7 +957,10 @@ new over `pipewire` itself). No effects, no per-app routing UI: out
 of scope for this slot.
 
 Why wob, measured at the pinned rev (`8ce4ef6`, `aarch64-linux`:
-closures by `nix path-info --closure-size`, idle RSS as VmRSS, wakeups as context-switch deltas over 62 s hidden on the M2):
+full closures by `nix path-info --closure-size`, marginals as new
+store paths over the profile's own tools, idle RSS as VmRSS, wakeups as
+context-switch deltas over 62 s hidden under a headless scoot, all on
+the M2):
 
 | Tool | Version | Full closure | New over profile | Idle RSS | Wakeups hidden | Why / why not |
 |---|---|---|---|---|---|---|
@@ -990,9 +1013,10 @@ Troubleshooting, by symptom:
   the file (`[binds]` in `~/.config/scoot/config.toml`).
 - *The step lands but no bar shows.* The OSD missed the fifo: same
   unit check as above. The step warns ("the step landed, the OSD did
-  not show") and exits 0.
+  not show") and exits 0 — the control is fine, the display missed.
 - *The bar never hides.* Something keeps feeding the fifo, or the
-  timeout is huge: read `~/.config/wob/wob.ini`, the first content lines are the timeout.
+  timeout is huge: read `~/.config/wob/wob.ini` (the generated
+  file), the first content lines are the timeout.
 - *`scoot-audio-sink list` is empty.* No sinks: PipeWire runs with
   nothing behind it (a VM, or Bluetooth mid-reconnect). `cycle` with
   one sink stays put and says so.
@@ -1030,7 +1054,10 @@ geoclue and no network involved. Unlike home-manager's
 scope, past the display import.
 
 Why wlsunset, measured at the pinned rev (`8ce4ef6`,
-`aarch64-linux`: closures by `nix path-info --closure-size`, wakeups as context-switch deltas over 60 s steady state on the M2, RSS as VmRSS):
+`aarch64-linux`: full closures by `nix path-info --closure-size`,
+marginals as new store paths over the profile's own tools, idle
+wakeups as context-switch deltas over 60 s steady state under a
+headless scoot on the M2, RSS as VmRSS while running):
 
 | Tool | Version | Full closure | New over profile | Wakeups in 60 s steady | RSS steady | Schedule with no location |
 |---|---|---|---|---|---|---|
@@ -1145,7 +1172,9 @@ Troubleshooting, by symptom:
 ## Privilege prompts and the keyring
 
 Mount a disk from the file manager, change a network setting, open a
-printer queue. Both come on with
+printer queue — without this slot every privileged GUI action fails
+for want of someone to ask the password, and without the keyring every
+app asks for its secrets again after each login. Both come on with
 the profile: a polkit agent to ask, a keyring to remember.
 
 ```nix title="configuration.nix and home.nix"
@@ -1170,7 +1199,7 @@ session, and a systemd user unit never joins one (measured live: the
 unit's agent stays connected but unregistered, and registration
 fails with "User of caller and user of subject differs"). The agent
 holds nothing when no prompt is open: it blocks on D-Bus, keeps no
-surface, and wakes nothing. With the prompt off the
+surface, and wakes nothing (measured below). With the prompt off the
 entry is the plain launcher, and privileged actions refuse with
 polkit's own no-agent error. A hand-written entry (a set
 `session.command` replaces the whole line) carries the agent by
@@ -1187,13 +1216,16 @@ secret-tool store --label='wifi' ssid MyNetwork   # any login...
 secret-tool lookup ssid MyNetwork                  # ...reads back, no prompt
 ```
 On a greetd login the login password unlocks
-the keyring during login, so the first use — and every later
+the keyring during login (below), so the first use — and every later
 one till logout — is seamless. Off the greetd path the first use of
 each login performs the one unlock (a graphical app prompts; the CLI
 refuses loud until unlocked).
 
 Why polkit-gnome, measured at the pinned rev (`8ce4ef6`,
-`aarch64-linux`: closures by `nix path-info --closure-size`, idle RSS as VmRSS, wakeups as context-switch deltas over 60 s idle on the M2):
+`aarch64-linux`: full closures by `nix path-info --closure-size`,
+marginals as new store paths over the profile's own tools, idle RSS as
+VmRSS under Xvfb, wakeups as context-switch deltas over 60 s idle
+under a headless scoot, all on the M2):
 
 | Tool | Version | Full closure | New over profile | Idle RSS | Wakeups idle | Why / why not |
 |---|---|---|---|---|---|---|
@@ -1232,9 +1264,13 @@ secrets use finds it through the control socket at its default path
 (`$XDG_RUNTIME_DIR/keyring/control`): D-Bus activation runs
 `gnome-keyring-daemon --start`, which hands the bus name to the
 already-running unlocked daemon and exits, so no second daemon ever
-serves. Nixpkgs' own `enableGnomeKeyring` flag
+serves. (An earlier session misread a greeter-scope kill of the
+*greeter's own* daemon as the user's daemon dying, and measured a
+locked session daemon on logins where the PAM pair was never active;
+re-tested live, logout plus re-login reads back with no prompt — see
+the ticket's landed notes.) Nixpkgs' own `enableGnomeKeyring` flag
 cannot do even the priming
-(it lives inside the default-rules block,
+(probed at the pinned rev: it lives inside the default-rules block,
 and greetd's service sets `useDefaultRules = false`, so the flag is
 a silent no-op there); and the stock
 `services.gnome.gnome-keyring.enable` switch is not used either (it
@@ -1246,7 +1282,8 @@ What else prompts: anything that never puts the password through
 greetd's PAM -- a TTY login, an SSH login, an autologin (no password
 at all), or a login screen that is not greetd -- and a login
 password that differs from the keyring's (changed one without the
-other). A locked keyring is prompts, not a failure.
+other). The keyring never blocks the session: a locked keyring is
+prompts, not a failure.
 
 With neither half, failures stay loud, never silent: no agent, and a
 privileged action refuses with polkit's own error naming the missing
@@ -1352,7 +1389,8 @@ stay unmounted, with no admin prompt at login. A
 `~/.config/udiskie/config.yml` of your own still applies (the unit
 passes no `-c`; its `-a -n -T` flags win over the file's). A file
 udiskie cannot parse makes every start fail, so the unit gives up
-after 5 failed starts in a minute rather than retrying forever.
+after 5 failed starts in a minute rather than retrying forever (see
+troubleshooting below).
 With home-manager's own `services.udiskie` on, that one runs instead
 and this unit stays out: two automounters would race to mount every
 drive and both ask for a passphrase. udiskie stays installed either
@@ -1369,8 +1407,14 @@ Wait for the command to return, then unplug. `udiskie-umount -a`
 unmounts every drive udiskie handles at once; the machine's own disks
 are not among them.
 
-Why these, measured on the M2 (`aarch64-linux`) at the pinned rev
-(`8ce4ef6`) by `nix path-info --closure-size`; idle RSS as VmRSS and wakeups as context switches over 60 s idle after a 30 s settle:
+Why these, measured on the M2 (`aarch64-linux`): full closures at
+the pinned rev (`8ce4ef6`) by `nix path-info --closure-size`;
+"new over the profile" as the store paths the tool adds to the whole
+desktop profile as deployed on the M2 (its system built with and
+without the slot); idle cost under a headless scoot in its own
+`dbus-run-session`, over every process the app brought
+(D-Bus-activated helpers included): VmRSS, and context switches
+summed over the threads alive across 60 s idle after a 30 s settle:
 
 | File manager | Version | Full closure | New over the profile | Idle RSS | Idle wakeups | Left after closing | Why / why not |
 |---|---|---|---|---|---|---|---|
@@ -1383,7 +1427,8 @@ left running once its window closes (no `menu-cached`, `gvfsd` or
 thumbnailer: checked live after closing it). Point `fileManager.package` at another (with its `desktopEntry`) to
 choose differently.
 
-Why udiskie, same method:
+Why udiskie, same method, measured live in the session (the
+automounter's own unit, after the drive test below):
 
 | Process | Idle RSS | Idle wakeups | Closure over the profile |
 |---|---|---|---|
@@ -1464,8 +1509,8 @@ bar's own scan), and a click on the bluetooth module (the whole
 power, which would drop a Bluetooth keyboard with one stray click, so
 the profile rebinds the picker in its place (the module's own default click is the power toggle). The bluetooth module's
 `menu` action (`scootbar msg invoke bluetooth menu`) opens the picker
-fed the bar's device list. Both are fuzzel menus,
-themed like the launcher, and both are
+fed the bar's device list. Both are fuzzel menus through the
+[launcher's dmenu contract](#launcher), themed like it, and both are
 scripts over the stock CLIs (`nmcli`, `bluetoothctl`): nothing runs
 between picks.
 
@@ -1474,7 +1519,7 @@ between picks.
 The profile installs the CLIs and never takes over a service:
 NetworkManager and BlueZ are yours to enable
 (`networking.networkmanager.enable`, `hardware.bluetooth.enable`).
-Without them the pickers fail loud.
+Without them the pickers fail loud (below).
 
 **WiFi.** The menu lists the networks in range from the cached scan
 — saved ones first — then saved networks out of range. Pick one:
@@ -1517,7 +1562,7 @@ Below them:
 
 - *Pair a new device…* listens for 10 seconds, then lists the devices
   it found in pairing mode. A device that advertises without being in
-  pairing mode is left out:
+  pairing mode (a neighbour's earbuds, a beacon) is left out:
 
   ![The Bluetooth picker's pair list: two devices found in pairing mode](../../../assets/picker-bluetooth-pair.png)
 
@@ -1662,7 +1707,8 @@ reload (`scoot msg reload`) or re-login:
 | `desktop.keys.enable` | bool | `true` with the profile | render the keymap into `[binds]` |
 | `desktop.keys.binds.<name>.enable` | bool | `true` | bind that key (`brightnessUp`, `brightnessDown`, `volumeUp`, `volumeDown`, `volumeMute`, `micMute`, `mediaPlay`, `mediaPause`, `mediaStop`, `mediaNext`, `mediaPrev`, `lock`, `launcher`, `launcherRun`, `clipboard`, `notifDismiss`, `notifDnd`, `notifHistory`, `powerProfile`, `captureOutput`, `captureRegion`, `captureClipboard`, `network`, `bluetooth`); `false` leaves its combo unbound |
 
-Each bind renders as a default — override or remove one bind like this:
+Each bind renders as a default a value you set in `settings.binds` wins
+over — override or remove one bind like this:
 
 ```nix title="home.nix"
 programs.scoot.desktop.keys.binds.volumeUp.enable = false;
@@ -1742,7 +1788,7 @@ What each default does for your battery:
 To stretch a flight on driver hardware: switch to `power-saver`
 (`Super+p`, below), dim earlier (`idle.dimTimeout = 60`), and let
 the lid suspend as it already does. On Apple silicon there is no
-driver for profiles to steer, so the charge cap and the lid
+driver for profiles to steer (below), so the charge cap and the lid
 suspend here are what save battery. To
 hold a charge longer on the shelf, the 80% cap is the whole trick.
 
@@ -1794,7 +1840,8 @@ programs.scoot.desktop.power = {
 ```
 
 Either half alone works (`null` keeps the current profile); the
-switch applies on boot too, while a manual switch mid-session stays until the next plug
+switch applies on boot too (udev coldplug fires for the present
+state), while a manual switch mid-session stays until the next plug
 event.
 
 ### Lid, power key, low battery
@@ -2041,8 +2088,9 @@ configuration with failure by design: kanshi matches the profile
 through the read half and then fails it, every hotplug, applying
 nothing. The watcher speaks scoot's own IPC instead (`subscribe` for
 events, `outputs` for matching, `output-scale` and `output-power` for
-applying), event-driven: blocking read, no polling, no idle wakeups.
-The durable answer is a writable output-management protocol, which would
+applying), waking on hotplug the same event-driven way kanshi does:
+blocking read, no polling, no idle wakeups. It is a stopgap. The
+durable answer is a writable output-management protocol, which would
 let kanshi (and positions and modes) work as-is; that work is tracked
 in [the output-management reconfiguration entry](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/output-management-reconfiguration-done.md).
 
@@ -2218,7 +2266,8 @@ sessions the `user-light` class, which never starts
 manager and falls back to a bare `scoot --tty` with no bar, no
 notifications, no clipboard history, no portal and no session target.
 The launcher names that cause on stderr and mirrors it into the
-system journal, so the diagnosis survives the login. An autologin
+system journal (the compositor takes over the console on startup,
+burying stderr), so the diagnosis survives the login. An autologin
 is also one of the logins the keyring cannot prime from the login
 password ([above](#privilege-prompts-and-the-keyring)): the first
 secrets use of each login unlocks once, then stays unlocked till
@@ -2286,7 +2335,7 @@ is wider than ibus, while GTK3/4 and Qt 6.8+ talk to the engine
 over text-input with no plugin at all.
 
 The toolkit variables, only where a toolkit still needs them
-(see fcitx's own [Using Fcitx 5 on
+(checked against fcitx's own [Using Fcitx 5 on
 Wayland](https://fcitx-im.org/wiki/Using_Fcitx_5_on_Wayland)):
 
 | Variable | Value | Who still needs it |
@@ -2355,16 +2404,18 @@ programs.scoot.desktop = {
 Trying it headless: enable the slot with pinyin in `addons`,
 start a headless session, open foot, trigger the engine and type
 `nihao` — the screenshot shows the committed 你好 and, mid-word,
-the candidate list at the cursor. The [acceptance run](#trying-it-headless) below proves the
-binding live (full CJK typing stays a manual step — see there).
+the candidate list at the cursor. The module checks pin this shape
+at eval; the [acceptance run](#trying-it-headless) below proves the
+binding live on the M2 (full CJK typing stays a manual step until
+a headless text-input client ships — see there).
 
 ### Trying it headless
 
 Proven live on the M2 against headless scoot (installed `0.1.0`,
 IPC protocol 10 at the time — current release v0.2.1 / protocol 11 —
 the change itself is Nix-only, so no compositor behavior moves):
-fcitx5 5.1.21 started with the slot's shape
-binds the seat:
+fcitx5 5.1.21 started with the slot's shape (user
+unit past the session target, no polling) binds the seat:
 
 - scoot advertises `zwp_input_method_manager_v2` (global, version
   1) and fcitx5 binds it (`wl_registry.bind`, on the wire under
@@ -2374,7 +2425,8 @@ binds the seat:
   display`).
 
 What this does not yet prove: composing a CJK string through the
-engine into a client. Do that by hand, once, on any box
+engine into a client (no CJK addon or GUI client was fetched on the
+shared box — disk sat at 93%). Do that by hand, once, on any box
 with a display:
 
 1. Enable the slot with pinyin beside the core:
