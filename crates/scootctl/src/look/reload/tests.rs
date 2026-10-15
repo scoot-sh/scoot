@@ -131,8 +131,7 @@ fn a_missing_socket_is_a_reachable_refusal() {
         "unexpected refusal: {error}"
     );
     // The production outcome skips an absent listener with a note instead.
-    assert_eq!(
-        super::bar_reload_outcome(&missing).expect("absent is not a refusal"),
-        false
+    assert!(
+        !super::bar_reload_outcome(&missing).expect("absent is not a refusal")
     );
 }
