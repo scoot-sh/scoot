@@ -18,8 +18,7 @@
 //! bar's surface.
 
 use crate::grammar::{
-    GrammarError, check_glyph, check_relative_path, is_hex_color, is_identifier,
-    is_permitted_look_file,
+    GrammarError, check_glyph, check_relative_path, is_hex_color, is_identifier, is_image_file_name,
 };
 
 /// Dotted keys a look may set in scoot's fragment.
@@ -44,7 +43,10 @@ pub const SCOOT_ALLOWLIST: &[&str] = &[
 /// the bar's style (never its geometry or placement), and per-module visual
 /// keys. `workspaces.active-color` / `inactive-color` are the module's own
 /// override knobs (`crates/scootbar/src/config.rs:512-518`);
-/// `window-title.icon` is its one-glyph knob.
+/// `window-title.icon` is its one-glyph knob. The bar's `font` and
+/// `fallback-fonts` are file paths resolved by the tool
+/// (`--ui-font-file`), never overrides an author writes (round 2
+/// finding 3), so they are absent here.
 pub const SCOOTBAR_ALLOWLIST: &[&str] = &[
     "colors.background",
     "colors.foreground",
@@ -55,8 +57,6 @@ pub const SCOOTBAR_ALLOWLIST: &[&str] = &[
     "bar.radius",
     "bar.popup-radius",
     "bar.opacity",
-    "bar.font",
-    "bar.fallback-fonts",
     "bar.font-size",
     "bar.padding",
     "bar.spacing",
@@ -106,27 +106,54 @@ pub fn allows(app: &str, key: &str) -> bool {
 
 /// A `wallpaper.output.*` / `wallpaper.workspace.*` override key with a
 /// strict suffix: output and workspace names are 1 to 64 ASCII letters,
-/// digits, spaces and `_.+-`, and the leaf is one of the five look-level
-/// wallpaper leaves. The old prefix match accepted any suffix, so a quoted
-/// key carrying a newline, `=`, `[` or a quote sailed through and the
-/// renderer wrote it raw: a real `[autostart]` table out.
+/// digits, spaces and `_.+-`, and the leaf is one of the four
+/// non-image look-level wallpaper leaves. The old prefix match accepted
+/// any suffix, so a quoted key carrying a newline, `=`, `[` or a quote
+/// sailed through and the renderer wrote it raw: a real `[autostart]`
+/// table out.
+///
+/// `image` is not an override leaf (round 2 finding 4): only the
+/// top-level `wallpaper.image`, resolved to an absolute path through
+/// [`RenderInputs`](crate::render::RenderInputs) `wallpaper_abs`, names
+/// an image. An override would render a relative path with nothing to
+/// resolve it against, silently yielding no wallpaper, so it refuses.
+/// Per-output and per-workspace images belong in the user's own file.
+///
+/// Only one `.workspace.` layer parses: a second one under a
+/// `wallpaper.workspace.` prefix (`wallpaper.workspace.a.workspace.b.*`)
+/// is refused (round 2 finding 6). It used to pass and render an
+/// unknown key, which discards scoot's whole `[wallpaper]` section.
 pub fn is_wallpaper_override_key(key: &str) -> bool {
     /// Wallpaper leaves a look override may set per output or workspace:
-    /// the same five the top-level `[wallpaper]` allowlist holds. `sha256`
-    /// pins cannot be expressed per override, so URL wallpapers are refused
-    /// there; `filter` and the transition tunables stay render-time only.
-    const LEAVES: &[&str] = &["image", "color", "mode", "fill", "transition"];
-    let rest = key
-        .strip_prefix("wallpaper.output.")
-        .or_else(|| key.strip_prefix("wallpaper.workspace."));
-    let Some(rest) = rest else {
-        return false;
+    /// `color`, `mode`, `fill` and `transition`. `sha256` pins cannot be
+    /// expressed per override, so URL wallpapers are refused there;
+    /// `filter` and the transition tunables stay render-time only.
+    const LEAVES: &[&str] = &["color", "mode", "fill", "transition"];
+    if let Some(rest) = key.strip_prefix("wallpaper.workspace.") {
+        // No second `.workspace.` layer here: the output branch below
+        // is the only shape with two name segments.
+        if rest.contains(".workspace.") {
+            return false;
+        }
+        let Some((name, leaf)) = rest.rsplit_once('.') else {
+            return false;
+        };
+        // A dotted workspace name would split wrongly above; those names
+        // are not expressible as overrides, by design.
+        if name.contains('.') || !is_output_name(name) {
+            return false;
+        }
+        return LEAVES.contains(&leaf);
+    }
+    let rest = match key.strip_prefix("wallpaper.output.") {
+        Some(rest) => rest,
+        None => return false,
     };
     // `wallpaper.output.<OUT>.workspace.<WS>.<LEAF>`: peel one optional
     // `.workspace.<WS>` layer so per-workspace-on-an-output overrides work.
     let rest = match rest.split_once(".workspace.") {
         Some((output, tail)) => {
-            if !is_output_name(output) {
+            if !is_output_name(output) || tail.contains(".workspace.") {
                 return false;
             }
             tail
@@ -216,7 +243,6 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
             ])),
             "wallpaper.transition" => Some(ValueKind::Enum(&["none", "fade", "wipe", "grow"])),
             _ if is_wallpaper_override_key(key) => match key.rsplit('.').next() {
-                Some("image") => Some(ValueKind::ImagePath),
                 Some("color") | Some("fill") => Some(ValueKind::Color),
                 Some("mode") => Some(ValueKind::Enum(&[
                     "fill", "fit", "stretch", "center", "tile",
@@ -231,8 +257,6 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
             | "colors.dim" | "colors.urgent" => Some(ValueKind::Color),
             "bar.radius" | "bar.popup-radius" => Some(ValueKind::IntRange { min: 0, max: 512 }),
             "bar.opacity" => Some(ValueKind::Opacity),
-            "bar.font" => Some(ValueKind::Identifier),
-            "bar.fallback-fonts" => Some(ValueKind::FontList),
             "bar.font-size" => Some(ValueKind::IntRange { min: 1, max: 256 }),
             "bar.padding" | "bar.spacing" | "bar.separator" => {
                 Some(ValueKind::IntRange { min: 0, max: 1024 })
@@ -326,7 +350,7 @@ pub fn check_app_value(app: &str, key: &str, value: &toml::Value) -> Option<Gram
                 return Some(e);
             }
             let base = s.rsplit('/').next().unwrap_or(s);
-            if !is_permitted_look_file(base) {
+            if !is_image_file_name(base) {
                 return refused(
                     "file wallpapers must be .png, .jpg, .jpeg, .webp or .gif".to_string(),
                 );

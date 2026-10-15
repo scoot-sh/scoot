@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 fn presentation_passes() {
     assert!(allows("scoot", "appearance.focus_ring_active_color"));
     assert!(allows("scoot", "wallpaper.image"));
-    assert!(allows("scoot", "wallpaper.output.HDMI-A-1.image"));
+    assert!(allows("scoot", "wallpaper.output.HDMI-A-1.color"));
     assert!(allows("scootbar", "colors.accent"));
     assert!(allows("scootbar", "bar.radius"));
     assert!(allows("scootbar", "workspaces.inactive-color"));
@@ -56,11 +56,11 @@ fn wallpaper_output_suffix_is_strict() {
     // `wallpaper.output.` / `wallpaper.workspace.`, so a quoted key
     // carrying a newline, `=`, `[` or a quote sailed through and the
     // renderer wrote it raw: a real `[autostart]` table out.
-    assert!(allows("scoot", "wallpaper.output.HDMI-A-1.image"));
+    assert!(allows("scoot", "wallpaper.output.HDMI-A-1.color"));
     assert!(allows("scoot", "wallpaper.workspace.2.color"));
     assert!(allows(
         "scoot",
-        "wallpaper.output.HDMI-A-1.workspace.2.image"
+        "wallpaper.output.HDMI-A-1.workspace.2.color"
     ));
     for bad in [
         "wallpaper.output.x = 1\n[autostart]\ncommand",
@@ -76,5 +76,97 @@ fn wallpaper_output_suffix_is_strict() {
         "wallpaper.workspace.2.binds",
     ] {
         assert!(!allows("scoot", bad), "allows {bad:?}");
+    }
+}
+
+#[test]
+fn nested_workspace_override_refuses() {
+    // Round 2 finding 6: `wallpaper.workspace.a.workspace.b.image`
+    // passed the allowlist and rendered an unknown key, which discards
+    // scoot's whole `[wallpaper]` section. One `.workspace.` layer only.
+    for bad in [
+        "wallpaper.workspace.a.workspace.b.image",
+        "wallpaper.workspace.a.workspace.b.color",
+        "wallpaper.workspace.a.workspace.b.mode",
+    ] {
+        assert!(!allows("scoot", bad), "allows {bad}");
+        assert!(value_kind("scoot", bad).is_none(), "value kind for {bad}");
+    }
+    // `image` refuses at every level; single-level non-image leaves
+    // still pass.
+    assert!(!allows("scoot", "wallpaper.workspace.a.image"));
+    assert!(allows("scoot", "wallpaper.workspace.a.color"));
+}
+
+#[test]
+fn override_image_leaves_refuse() {
+    // Round 2 finding 4: per-output/workspace `image` overrides
+    // rendered a relative path with nothing to resolve it against, so
+    // the override silently yielded no wallpaper. Only the top-level
+    // `wallpaper.image` (resolved through `RenderInputs.wallpaper_abs`)
+    // names an image; overrides take color, mode, fill and transition.
+    for key in [
+        "wallpaper.output.DP-1.image",
+        "wallpaper.workspace.2.image",
+        "wallpaper.output.DP-1.workspace.2.image",
+    ] {
+        assert!(!allows("scoot", key), "allows {key}");
+        assert!(value_kind("scoot", key).is_none(), "kind for {key}");
+        let err = check_app_value("scoot", key, &toml::Value::String("a.png".into()));
+        assert!(err.is_some(), "{key} value passes");
+    }
+    assert!(allows("scoot", "wallpaper.output.DP-1.color"));
+    assert!(allows("scoot", "wallpaper.workspace.2.mode"));
+    assert!(allows("scoot", "wallpaper.output.DP-1.workspace.2.fill"));
+}
+
+#[test]
+fn image_path_refuses_non_images() {
+    // Round 2 finding 7: `is_permitted_look_file` also passes
+    // `look.toml`, `README.md`, `LICENSE*` and `.ttf`/`.otf`, none of
+    // which decodes as a wallpaper.
+    for bad in [
+        "look.toml",
+        "README.md",
+        "LICENSE",
+        "LICENSE-MIT",
+        "COPYING",
+        "font.ttf",
+        "font.otf",
+        "notes.txt",
+        "wallpaper",
+    ] {
+        let err = check_app_value("scoot", "wallpaper.image", &toml::Value::String(bad.into()));
+        assert!(err.is_some(), "{bad} passes as an image");
+    }
+    for good in [
+        "a.png",
+        "a.jpg",
+        "a.jpeg",
+        "a.webp",
+        "a.gif",
+        "A.JPG",
+        "dir/a.PNG",
+    ] {
+        let err = check_app_value(
+            "scoot",
+            "wallpaper.image",
+            &toml::Value::String(good.into()),
+        );
+        assert!(err.is_none(), "{good} refused: {err:?}");
+    }
+}
+
+#[test]
+fn scootbar_font_keys_refused() {
+    // Round 2 finding 3: scootbar's `font` and `fallback-fonts` are
+    // file paths, not family names, and only the tool's resolved
+    // `--ui-font-file` supplies them. No override spells them.
+    for key in ["bar.font", "bar.fallback-fonts"] {
+        assert!(!allows("scootbar", key), "allows {key}");
+        assert!(
+            value_kind("scootbar", key).is_none(),
+            "value kind for {key}"
+        );
     }
 }

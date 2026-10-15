@@ -17,6 +17,11 @@ publish = false
 [dependencies]
 serde.workspace = true
 toml = "1"
+# `main.rs` opens `look.toml` without blocking and checks the opened
+# handle, so a FIFO or device can never hang validation (round 2
+# finding 1): the same `rustix` the Wayland crates already pull in.
+# The library stays pure: only `main.rs` uses it.
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
 [[bin]]
 name = "scoot-look"

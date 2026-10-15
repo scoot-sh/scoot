@@ -902,6 +902,7 @@ dependencies = [
 name = "scoot-look"
 version = "0.2.1"
 dependencies = [
+ "rustix 1.1.4",
  "serde",
  "toml",
 ]

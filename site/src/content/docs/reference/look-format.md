@@ -96,14 +96,22 @@ per-output and per-workspace wallpaper overrides of the form
 `wallpaper.output.<name>.<leaf>`,
 `wallpaper.workspace.<name>.<leaf>` and
 `wallpaper.output.<name>.workspace.<name>.<leaf>`, where `<leaf>`
-is one of `image`, `color`, `mode`, `fill`, `transition`.
+is one of `color`, `mode`, `fill`, `transition`.
+Only one `.workspace.` layer parses: a second one under a
+`wallpaper.workspace.` prefix refuses.
 Output and workspace names hold 1 to 64 ASCII letters, digits,
 spaces and `_.+-`. Anything else in the suffix refuses, as does any
 key with a newline, `=`, `[` or quote. The renderer quotes every
-key on top of that.
+key on top of that. No override names an `image`: only the
+top-level `wallpaper.image`, resolved to an absolute path at build
+time, does. Per-output and per-workspace images belong in the
+user's own file.
 
 `scootbar` takes its six colors, bar style and per-module visual
-keys. `scootnotify`, `scootlaunch` and `scootgreet` take the thirteen
+keys. The bar's `font` and `fallback-fonts` are not overrides: scootbar
+reads file paths there, so only the tool's resolved `--ui-font-file`
+supplies them, and a fragment without one carries neither key.
+`scootnotify`, `scootlaunch` and `scootgreet` take the thirteen
 color roles plus face, size, opacity and radius.
 
 Every allowlisted key has a value kind, checked at parse. There is
@@ -114,13 +122,12 @@ no key whose value gets only a length check.
 | color keys (`appearance.*_color`, `colors.*`, `wallpaper.color`, `wallpaper.fill`, `workspaces.*-color`) | exactly `#rrggbb` |
 | `appearance.focus_ring_width`, `appearance.focus_ring_inactive_width`, `appearance.corner_radius` | whole number, 0 to 64 |
 | `appearance.cursor_size` | whole number, 4 to 256 |
-| `appearance.cursor_theme`, `bar.font`, shell `font` | identifier (see Values) |
-| `wallpaper.image` and its per-output/workspace leaves | relative image path (see below); never a URL |
+| `appearance.cursor_theme`, shell `font` | identifier (see Values) |
+| `wallpaper.image` | relative image path (see below); never a URL; never an override leaf |
 | `wallpaper.mode` and its leaves | `fill`, `fit`, `stretch`, `center` or `tile` |
 | `wallpaper.transition` and its leaves | `none`, `fade`, `wipe` or `grow` |
-| `bar.radius`, `bar.popup-radius` | whole number, 0 to 512 |
+| `bar.radius`, `bar.popup-radius` | whole number, 0 to 512 at parse; `bar.radius` renders clamped to half the default bar height (14) |
 | `bar.opacity`, shell `opacity` | number, 0 to 1 |
-| `bar.fallback-fonts` | array of up to 2 identifier strings |
 | `bar.font-size`, shell `font-size` | whole number, 1 to 256 |
 | `bar.padding`, `bar.spacing`, `bar.separator` | whole number, 0 to 1024 |
 | `workspaces.item-gap` | whole number, 0 to 1024 |
@@ -182,8 +189,11 @@ refuses.
 
 `scoot.toml` carries the compositor colors and widths, cursor,
 corner radius and the wallpaper unit. `bar.toml` carries the six
-bar colors, radius, `popup-radius` (only when the target binary
-has the `popup` feature), opacity, font and font size.
+bar colors, radius (clamped to half the default bar height, 14),
+`popup-radius` (only when the target binary
+has the `popup` feature), opacity and font size. `font` appears
+only with `--ui-font-file`: scootbar reads a file path there, and
+without one the bar falls back to its well-known font paths.
 Per-app overrides merge into those tables: each section renders
 once, with the override winning, so every fragment reparses.
 `render.json` names the source, its hash and the resolved inputs
@@ -197,19 +207,26 @@ lives in the caller.
 
 ```sh
 scoot-look validate ./moonrise --origin user
-scoot-look build ./moonrise --out /tmp/moonrise --wallpaper-abs /tmp/moonrise/wallpaper.png
+scoot-look build ./moonrise --out /tmp/moonrise --wallpaper-abs /tmp/moonrise/wallpaper.png --ui-font-file /usr/share/fonts/TTF/DejaVuSans.ttf
 ```
 
 `validate` refuses malformed files, unknown keys, values outside
 the grammar, non-allowlisted `[apps.*]` keys, per-key value
 mismatches, a `name` that does not match the directory, and
-contrast shortfalls per origin. `validate` skips contrast for a
+contrast shortfalls per origin. The `name` check is CLI-only: the
+library exposes `check_name_matches_dir`, and the tool resolves
+the directory through `canonicalize` first, so `validate .`
+checks the real directory name. A Nix store path
+(`<hash>-<name>`) strips its hash prefix; `--name NAME` checks
+against that instead of the directory for callers that lay the
+source down under another name. `validate` skips contrast for a
 look with `extends`: without the catalog only single-file looks
 resolve here. `build` takes a single source without `extends`
 and refuses one with it; resolve the catalog first. `build`
 writes `scoot.toml`, `bar.toml`
 and `render.json` into the output dir. Both read `look.toml`
-only through a regular file: symlinks, devices, FIFOs and
+only through a regular file opened without blocking: symlinks,
+directories, devices, FIFOs and
 sockets refuse. On Nix the same binary
 runs inside the render derivation with the look's font packages
 as build inputs. Exit nonzero names the field and the reason.

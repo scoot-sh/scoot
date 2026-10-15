@@ -54,7 +54,9 @@ pub use allowlist::{
 };
 pub use contrast::{ContrastPair, ContrastReport, check as check_contrast};
 pub use grammar::GrammarError;
-pub use render::{RenderInputs, render_bar, render_json, render_scoot, source_hash};
+pub use render::{
+    BAR_RADIUS_LIMIT, RenderInputs, render_bar, render_json, render_scoot, source_hash,
+};
 pub use resolve::resolve;
 pub use resolved::ResolvedLook;
 pub use schema::{Origin, RawLook, check_name_matches_dir, parse_look_toml, validate_for_origin};

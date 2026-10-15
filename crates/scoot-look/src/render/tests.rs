@@ -172,7 +172,7 @@ fn overrides_merge_into_base_tables() {
 
     let text = crate::schema::tests::minimal_toml().replacen(
         "[cursor]",
-        "[apps.scootbar]\n\"colors.accent\" = \"#000000\"\n\"bar.radius\" = 3\n\"bar.fallback-fonts\" = [\"DejaVu Sans\"]\n\"workspaces.inactive-color\" = \"#111111\"\n[cursor]",
+        "[apps.scootbar]\n\"colors.accent\" = \"#000000\"\n\"bar.radius\" = 3\n\"bar.padding\" = 7\n\"workspaces.inactive-color\" = \"#111111\"\n[cursor]",
         1,
     );
     let raw = parse_look_toml(text.as_bytes()).expect("parses");
@@ -189,10 +189,7 @@ fn overrides_merge_into_base_tables() {
     let parsed: toml::Table = toml::from_str(&frag).expect("bar fragment reparses");
     assert_eq!(parsed["colors"]["accent"].as_str(), Some("#000000"));
     assert_eq!(parsed["bar"]["radius"].as_integer(), Some(3));
-    assert_eq!(
-        parsed["bar"]["fallback-fonts"].as_array().map(|a| a.len()),
-        Some(1)
-    );
+    assert_eq!(parsed["bar"]["padding"].as_integer(), Some(7));
     assert_eq!(
         parsed["workspaces"]["inactive-color"].as_str(),
         Some("#111111")
@@ -248,8 +245,8 @@ fn hostile_keys_never_render_raw() {
     look.apps = BTreeMap::from([(
         "scoot".to_string(),
         BTreeMap::from([(
-            "wallpaper.output.My Monitor.image".to_string(),
-            toml::Value::String("wallpaper.png".to_string()),
+            "wallpaper.output.My Monitor.color".to_string(),
+            toml::Value::String("#000000".to_string()),
         )]),
     )]);
     let frag = render_scoot(&look, &inputs()).expect("renders");
@@ -266,6 +263,85 @@ fn hostile_keys_never_render_raw() {
     look.apps = BTreeMap::from([(
         "scoot".to_string(),
         BTreeMap::from([("bar.radius".to_string(), toml::Value::Integer(3))]),
+    )]);
+    assert!(render_scoot(&look, &inputs()).is_err());
+}
+
+#[test]
+fn bar_radius_clamped_to_half_default_height() {
+    // Round 2 finding 2: scootbar refuses `bar.radius` past half the
+    // height (`crates/scootbar/src/config.rs:1069-1081`; default height
+    // 28 from `crates/scootbar/src/bar.rs:28-30`, so the limit is 14),
+    // while `shape.radius` runs 0 to 64. The derived radius clamps.
+    let text = crate::schema::tests::minimal_toml().replacen("radius = 14", "radius = 64", 1);
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_bar(&look, &inputs()).expect("renders");
+    let parsed: toml::Table = toml::from_str(&frag).expect("reparses");
+    assert_eq!(parsed["bar"]["radius"].as_integer(), Some(14));
+    // The boundary passes through untouched.
+    let frag = render_bar(&moonrise(), &inputs()).expect("renders");
+    let parsed: toml::Table = toml::from_str(&frag).expect("reparses");
+    assert_eq!(parsed["bar"]["radius"].as_integer(), Some(14));
+}
+
+#[test]
+fn bar_radius_override_clamped_at_render() {
+    // Round 2 finding 2, second half: a `bar.radius` override parses
+    // (scootbar accepts it under a taller user bar) but the fragment
+    // must still pass the parser under the default height, so render
+    // clamps it too.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[apps.scootbar]\n\"bar.radius\" = 512\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_bar(&look, &inputs()).expect("renders");
+    let parsed: toml::Table = toml::from_str(&frag).expect("reparses");
+    assert_eq!(parsed["bar"]["radius"].as_integer(), Some(14));
+}
+
+#[test]
+fn bar_font_omitted_without_a_resolved_path() {
+    // Round 2 finding 3: scootbar's `font` is a file path
+    // (`crates/scootbar/src/config.rs:87-90`, `font.rs:1`), not the
+    // family name `fonts.ui` holds. Without `--ui-font-file` the
+    // fragment omits both keys and the bar falls back to its
+    // well-known paths; a family name would fail the font load.
+    let frag = render_bar(&moonrise(), &inputs()).expect("renders");
+    for line in frag.lines() {
+        let key = line.split('=').next().unwrap_or("").trim();
+        assert_ne!(key, "font", "family name emitted:\n{frag}");
+        assert_ne!(key, "fallback-fonts", "fallbacks emitted:\n{frag}");
+    }
+    let with_font = RenderInputs {
+        ui_font_file: Some("/fonts/DejaVuSans.ttf".to_string()),
+        ..inputs()
+    };
+    let frag = render_bar(&moonrise(), &with_font).expect("renders");
+    assert!(
+        frag.contains("font = \"/fonts/DejaVuSans.ttf\""),
+        "resolved font missing:\n{frag}"
+    );
+}
+
+#[test]
+fn render_checks_override_values() {
+    // Round 2 finding 5: the parse gate refuses bad override values,
+    // but a library caller can hand-build a `ResolvedLook` past it, so
+    // the render path checks values too. `i64::MAX` overflows scoot's
+    // `i32` `corner_radius`, which would discard the whole file there.
+    let mut look = moonrise();
+    look.apps = BTreeMap::from([(
+        "scoot".to_string(),
+        BTreeMap::from([(
+            "appearance.corner_radius".to_string(),
+            toml::Value::Integer(i64::MAX),
+        )]),
     )]);
     assert!(render_scoot(&look, &inputs()).is_err());
 }

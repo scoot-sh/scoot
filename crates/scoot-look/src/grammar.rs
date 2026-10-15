@@ -227,6 +227,21 @@ pub fn is_permitted_look_file(name: &str) -> bool {
     false
 }
 
+/// Wallpaper images only: `is_permitted_look_file` also passes
+/// `look.toml`, `preview.png`, `README.md`, `LICENSE*`/`COPYING*` and
+/// bundled `.ttf`/`.otf` fonts, none of which decodes as a wallpaper
+/// (round 2 finding 7). Suffixes match the refusal message both
+/// callers print.
+pub fn is_image_file_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    (lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".gif"))
+        && check_relative_path("file", name).is_none()
+}
+
 /// What is wrong with a wallpaper URL, if anything (section 3.5, findings
 /// F2/R5). `https://` only, at most 2048 bytes, printable ASCII without
 /// space, `"`, `'`, `\`, `<`, `>` or a backtick, and never `?`, `#` or `%`

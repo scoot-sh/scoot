@@ -279,3 +279,91 @@ fn name_must_match_the_directory() {
     let err = check_name_matches_dir(&raw, "other").expect("mismatch passes");
     assert_eq!(err.field, "name");
 }
+
+#[test]
+fn wallpaper_image_must_be_an_image() {
+    // Round 2 finding 7: `wallpaper.image = "look.toml"` passed.
+    for bad in [
+        "look.toml",
+        "README.md",
+        "LICENSE-MIT",
+        "font.ttf",
+        "notes.txt",
+    ] {
+        let text = MINIMAL.replacen(
+            "image = \"wallpaper.png\"",
+            &format!("image = \"{bad}\""),
+            1,
+        );
+        let err = parse_look_toml(text.as_bytes())
+            .expect_err(&format!("{bad} parses as wallpaper image"));
+        assert!(
+            err.iter().any(|e| e.field == "wallpaper.image"),
+            "wrong field for {bad}: {err:?}"
+        );
+    }
+}
+
+#[test]
+fn scootbar_font_keys_refuse_at_parse() {
+    // Round 2 finding 3: `bar.font` / `bar.fallback-fonts` are file
+    // paths the tool resolves, never overrides an author writes.
+    for key_value in [
+        "\"bar.font\" = \"DejaVu Sans\"",
+        "\"bar.fallback-fonts\" = [\"DejaVu Sans\"]",
+    ] {
+        let text = MINIMAL.replacen(
+            "[cursor]",
+            &format!("[apps.scootbar]\n{key_value}\n[cursor]"),
+            1,
+        );
+        assert!(
+            parse_look_toml(text.as_bytes()).is_err(),
+            "{key_value} parses"
+        );
+    }
+}
+
+#[test]
+fn override_image_leaf_refuses_at_parse() {
+    // Round 2 finding 4: per-output/workspace `image` overrides have
+    // no resolved absolute to render, so they refuse loudly instead of
+    // rendering a relative path that yields no wallpaper.
+    for key in [
+        "wallpaper.output.DP-1.image",
+        "wallpaper.workspace.2.image",
+        "wallpaper.output.DP-1.workspace.2.image",
+    ] {
+        let text = MINIMAL.replacen(
+            "[cursor]",
+            &format!("[apps.scoot]\n\"{key}\" = \"a.png\"\n[cursor]"),
+            1,
+        );
+        assert!(parse_look_toml(text.as_bytes()).is_err(), "{key} parses");
+    }
+}
+
+#[test]
+fn nested_workspace_refuses_at_parse() {
+    // Round 2 finding 6.
+    let text = MINIMAL.replacen(
+        "[cursor]",
+        "[apps.scoot]\n\"wallpaper.workspace.a.workspace.b.image\" = \"a.png\"\n[cursor]",
+        1,
+    );
+    assert!(parse_look_toml(text.as_bytes()).is_err());
+}
+
+#[test]
+fn i32_overflow_override_refuses_at_parse() {
+    // Round 2 finding 5 at the parse gate: scoot reads
+    // `appearance.corner_radius` as an `i32`
+    // (`crates/scoot/src/compositor/config.rs:174`), so an `i64`
+    // past its range would discard the whole file there.
+    let text = MINIMAL.replacen(
+        "[cursor]",
+        "[apps.scoot]\n\"appearance.corner_radius\" = 9223372036854775807\n[cursor]",
+        1,
+    );
+    assert!(parse_look_toml(text.as_bytes()).is_err());
+}

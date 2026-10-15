@@ -74,5 +74,15 @@ fn validate_render_contrast_without_nix() {
         let bar = render_bar(&look, &inputs).expect("renders bar.toml");
         let _: toml::Value = toml::from_str(&scoot).expect("scoot.toml parses");
         let _: toml::Value = toml::from_str(&bar).expect("bar.toml parses");
+        // Round 2 finding 3: without `--ui-font-file` the bar fragment
+        // carries no `font` key (scootbar's is a file path, not the
+        // family name), so the bar falls back to its well-known paths.
+        for line in bar.lines() {
+            let key = line.split('=').next().map(str::trim).unwrap_or("");
+            assert!(
+                key != "font" && key != "fallback-fonts",
+                "non-Nix default emits {key}"
+            );
+        }
     });
 }

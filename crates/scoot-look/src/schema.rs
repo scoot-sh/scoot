@@ -20,7 +20,7 @@ use serde::Deserialize;
 
 use crate::grammar::{
     GrammarError, MAX_FILE_BYTES, check_display_text, check_relative_path, check_wallpaper_url,
-    is_cursor_accent, is_hex_color, is_identifier, is_name, is_nix_attr_path,
+    is_cursor_accent, is_hex_color, is_identifier, is_image_file_name, is_name, is_nix_attr_path,
     is_permitted_look_file, is_sha256_hex,
 };
 
@@ -605,7 +605,7 @@ fn validate_wallpaper(wallpaper: &Wallpaper, errors: &mut Vec<GrammarError>) {
             ));
         } else if let Some(e) = check_relative_path("wallpaper.image", image) {
             errors.push(e);
-        } else if !is_permitted_look_file(image.rsplit('/').next().unwrap_or(image)) {
+        } else if !is_image_file_name(image.rsplit('/').next().unwrap_or(image)) {
             errors.push(GrammarError::new(
                 "wallpaper.image",
                 "file wallpapers must be .png, .jpg, .jpeg, .webp or .gif",

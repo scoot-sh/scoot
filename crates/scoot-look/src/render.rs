@@ -12,9 +12,17 @@
 
 use std::collections::BTreeMap;
 
-use crate::allowlist::allows;
+use crate::allowlist::check_app_value;
 use crate::grammar::GrammarError;
 use crate::resolved::{ResolvedLook, pt_to_px};
+
+/// The largest `bar.radius` the renderer emits: half scootbar's default
+/// height (`DEFAULT_HEIGHT = 28` in `crates/scootbar/src/bar.rs:28-30`;
+/// the `radius <= height / 2` refusal in `config.rs:1069-1081`). A look
+/// never sets the bar height, so the height in effect is the default.
+/// Overrides parse to 512 (valid under a taller user bar) and clamp
+/// here, so the fragment passes scootbar's own parser as rendered.
+pub const BAR_RADIUS_LIMIT: i64 = 14;
 
 /// What the environment resolved: the tool (or the Nix build) fills these
 /// in; the pure crate never touches the filesystem, fontconfig or the
@@ -24,8 +32,10 @@ pub struct RenderInputs {
     /// Absolute path of the wallpaper image. Required when the look names an
     /// image wallpaper; unused for a color wallpaper.
     pub wallpaper_abs: Option<String>,
-    /// Resolved UI font file for the bar. When absent the family name is
-    /// emitted and the bar resolves it.
+    /// Resolved UI font file for the bar (`--ui-font-file`). When absent
+    /// the fragment carries no `font` key and the bar falls back to its
+    /// well-known font paths: scootbar reads a file path here, never a
+    /// family name (`crates/scootbar/src/config.rs:87-90`).
     pub ui_font_file: Option<String>,
     /// Whether the target scootbar binary has the `popup` feature
     /// (`crates/scootbar/src/config.rs:396-401`): `popup-radius` is only
@@ -108,10 +118,13 @@ fn toml_dotted(path: &str) -> String {
     path.split('.').map(toml_key).collect::<Vec<_>>().join(".")
 }
 
-/// Split `[apps.<app>]` overrides by their first dotted segment, refusing
-/// any key no allowlist holds. The loader re-checks; the renderer never
-/// trusts the tool, not even itself. Values render through [`toml_value`];
-/// sections map each key once, so a repeated key is one entry, never two.
+/// Split `[apps.<app>]` overrides by their first dotted segment, checking
+/// each key's name and value against the allowlist's kinds. The loader
+/// re-checks; the renderer never trusts the tool, not even itself: the
+/// parse gate refuses bad values, but a library caller can hand-build a
+/// `ResolvedLook` past it, so this path checks values too, not only
+/// names. Values render through [`toml_value`]; sections map each key
+/// once, so a repeated key is one entry, never two.
 fn override_sections(
     app: &str,
     apps: &BTreeMap<String, BTreeMap<String, toml::Value>>,
@@ -119,11 +132,8 @@ fn override_sections(
     let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     if let Some(table) = apps.get(app) {
         for (key, value) in table {
-            if !allows(app, key) {
-                return Err(GrammarError::new(
-                    format!("apps.{app}[{key}]"),
-                    format!("key `{key}` is not in the `{app}` look allowlist"),
-                ));
+            if let Some(e) = check_app_value(app, key, value) {
+                return Err(e);
             }
             let (section, rest) = key.split_once('.').unwrap_or(("", key));
             sections
@@ -245,17 +255,29 @@ pub fn render_bar(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, 
         bar.insert("popup-radius".to_string(), look.shape.radius.to_string());
     }
     bar.insert("opacity".to_string(), format!("{:?}", look.opacity.bar));
-    let font = inputs
-        .ui_font_file
-        .clone()
-        .unwrap_or_else(|| look.fonts.ui.clone());
-    bar.insert("font".to_string(), toml_str(&font));
+    // scootbar's `font` is a file path, never the family name `fonts.ui`
+    // holds (`crates/scootbar/src/config.rs:87-90`, `font.rs:1`): emit
+    // it only with a resolved path, so a default `build` never writes a
+    // `bar.toml` the font load refuses. Without one the bar falls back
+    // to its well-known font paths.
+    if let Some(font) = &inputs.ui_font_file {
+        bar.insert("font".to_string(), toml_str(font));
+    }
     bar.insert(
         "font-size".to_string(),
         pt_to_px(look.fonts.size).to_string(),
     );
     for (section, keys) in override_sections("scootbar", &look.apps)? {
         sections.entry(section).or_default().extend(keys);
+    }
+    // Clamp `bar.radius` — derived and override alike — to what scootbar
+    // accepts under the height in effect (see [`BAR_RADIUS_LIMIT`]).
+    if let Some(bar) = sections.get_mut("bar")
+        && let Some(radius) = bar.get("radius")
+        && let Ok(n) = radius.parse::<i64>()
+        && n > BAR_RADIUS_LIMIT
+    {
+        bar.insert("radius".to_string(), BAR_RADIUS_LIMIT.to_string());
     }
     for (section, keys) in &sections {
         out.push_str(&format!("\n[{}]\n", toml_key(section)));
