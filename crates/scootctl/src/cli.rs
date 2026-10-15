@@ -26,7 +26,10 @@ use scoot_ipc::{Action, EventKind, Horizontal, PointerButton, Request, Vertical}
 pub const REQUESTS_HELP: &str = "\
     version | outputs | windows
     action ACTION [ARGUMENT...]
-    reload                          re-read the config file and re-apply it live
+    reload [--look]
+        re-read the config file and re-apply it live (--look: look layer only)
+        (`--look`: only the look layer, under the file's snapshot -- a swap
+        applies no pending edits)
     keyboard                        the active keyboard layout's name and
                                     index -- what a layout indicator shows
     locked                          whether the session is locked -- the
@@ -209,15 +212,26 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
         "outputs" => Request::Outputs,
         "windows" => Request::Windows,
         "reload" => {
+            let mut look = false;
             for flag in args.by_ref() {
                 match flag.as_str() {
                     "--json" => json = true,
+                    "--look" => look = true,
                     other => {
-                        return Err(hinted("flag", other.to_owned(), &["--json"], "help reload"));
+                        return Err(hinted(
+                            "flag",
+                            other.to_owned(),
+                            &["--json", "--look"],
+                            "help reload",
+                        ));
                     }
                 }
             }
-            Request::Reload
+            if look {
+                Request::ReloadLook
+            } else {
+                Request::Reload
+            }
         }
         "keyboard" => Request::Keyboard,
         "locked" => Request::Locked,
@@ -769,6 +783,14 @@ mod tests {
             parse_msg_args(&["reload"]),
             Ok(Msg {
                 request: Request::Reload,
+                out: None,
+                json: false,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["reload", "--look"]),
+            Ok(Msg {
+                request: Request::ReloadLook,
                 out: None,
                 json: false,
             })

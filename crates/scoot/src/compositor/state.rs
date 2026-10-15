@@ -548,6 +548,13 @@ pub struct State {
     /// Reloads resolve the same dir through the process environment, which
     /// `run` settles beside `WAYLAND_DISPLAY`.
     pub private_look_dir: Option<PathBuf>,
+    /// The user file's raw bytes from the last successful load (startup or
+    /// plain reload), or `None` when that load ran on defaults. A
+    /// look-scoped reload merges its fresh layer under this instead of
+    /// re-reading the file, so a swap never applies pending edits; a plain
+    /// reload refreshes it only after the load succeeds. Written only by
+    /// the config load paths (see `reload.rs` and `compositor::run`).
+    pub user_snapshot: Option<String>,
     /// Per-window persistent ring buffers -- see `decorations.rs`'s module
     /// doc for why these live here rather than being rebuilt every frame.
     pub decorations: Decorations,
@@ -1397,6 +1404,7 @@ impl State {
             appearance,
             look_identity: None,
             private_look_dir: None,
+            user_snapshot: None,
             decorations: Decorations::default(),
             cursor,
             compositor_state,

@@ -281,7 +281,8 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         std::env::var_os("HOME"),
     );
     // The look layer's identity at startup: the baseline reloads compare
-    // against, set without emitting (see `reload.rs`).
+    // against, set without emitting (see `reload.rs`). The user file's raw
+    // bytes beside it: the baseline a look-scoped reload merges under.
     state.look_identity = look_identity;
     // Per-session look state (design section 4.2): `--headless` is private
     // by default and any backend opts in with `--private-look`, so an
@@ -303,6 +304,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
+    state.user_snapshot = startup.user_text;
     state.startup_gpu = loaded.gpu.clone();
     state.startup_renderer_request = loaded.renderer;
     state.startup_autostart = loaded.autostart.clone();

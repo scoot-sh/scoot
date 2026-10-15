@@ -62,7 +62,7 @@ pub fn config_help() -> String {
     let mut text = String::with_capacity(CONFIG_BODY.len() + 256);
     text.push_str(CONFIG_BODY);
     text.push_str(&format!(
-        " `scoot msg reload`: {}.\n",
+        "\n    `scoot msg reload`: {}.\n",
         scootctl::help::RELOAD_DESCRIPTION
     ));
     text.push_str(&scoot_ipc::docs_tail("scoot/configure.md"));
@@ -1850,6 +1850,7 @@ mod tests {
             &["outputs"],
             &["windows"],
             &["reload"],
+            &["reload", "--look"],
             &["action", "focus-column", "left"],
             &["action", "move-window-to-workspace", "down"],
             &["action", "focus-workspace-index", "2"],

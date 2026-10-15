@@ -340,8 +340,11 @@ impl State {
             // Session-level like `windows`, not an `action`: actions are
             // window/focus operations (and refused while locked), while this
             // re-reads the session's own config file. Applies under lock by
-            // design -- see `reload.rs`.
+            // design -- see `reload.rs`. The scoped tag is distinct, so an
+            // older server meets it with an ordinary unknown-request error,
+            // never a silent plain reload.
             Request::Reload => self.reload(),
+            Request::ReloadLook => self.reload_scoped(),
             Request::Outputs => Response::Outputs {
                 outputs: self.output_snapshots(),
             },

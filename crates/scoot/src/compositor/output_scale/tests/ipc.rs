@@ -314,6 +314,7 @@ fn a_reload_reports_exactly_the_runtime_scales_it_moved() {
             refused: vec![],
             shadowed: vec![],
             invalid: vec![],
+            scope: None,
         }
     );
 }

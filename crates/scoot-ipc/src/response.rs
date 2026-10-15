@@ -360,10 +360,19 @@ pub enum Response {
     /// ignores the fields, and an older server's reply decodes with both
     /// empty.
     ///
+    /// `scope` names which reload ran: absent (plain `Reload`, which
+    /// re-read the file and the layer both), `"look"` (scoped `ReloadLook`,
+    /// which re-read only the layer under the snapshot). Added with a
+    /// default like `shadowed`, so no `PROTOCOL_VERSION` move: an older
+    /// client ignores it, and an older server's reply decodes with it
+    /// absent (plain). A scoped request against an older compositor never
+    /// reaches a reply: the unknown `reload_look` tag is answered with an
+    /// ordinary `Error`, never a plain reload.
+    ///
     /// A new variant, so this is the half that moved `PROTOCOL_VERSION` (see
     /// that constant's doc): an older client that somehow received one would
     /// fail to decode it. In practice only a client new enough to send
-    /// `Reload` ever receives one.
+    /// `Reload` or `ReloadLook` ever receives one.
     Reloaded {
         applied: Vec<String>,
         refused: Vec<String>,
@@ -371,6 +380,8 @@ pub enum Response {
         shadowed: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         invalid: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<crate::request::ReloadScope>,
     },
     /// What a `Subscribe` request answers on success: the event kinds this
     /// connection is now dedicated to, echoed back. Afterwards the

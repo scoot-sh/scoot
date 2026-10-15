@@ -51,6 +51,18 @@ this safe: scootbg refuses unknown section keys (`deny_unknown_fields`), so a
 newer scoot sending a key an older scootbg does not know fails loudly (exit 2,
 the session keeps its background color) instead of silently dropping it.
 
+The look-scoped reload follows the same rule, with the tag doing the work.
+`reload_look` (`scoot msg reload --look`) is a distinct request tag, not a
+`scope` field on `reload`: a `scope` field would be unsafe here because
+serde's internally-tagged unit variants drain and ignore extra fields, so an
+older compositor would decode `{"type":"reload","scope":"look"}` as a plain
+reload and apply the pending edits the scope exists to skip. With a distinct
+tag an older compositor answers an ordinary unknown-request `error` and keeps
+serving -- never a plain reload. The client prints that error and exits
+non-zero, with the running config untouched. An additive new request like
+this is not breaking, so `PROTOCOL_VERSION` stays 11 and the commit carries
+no `!` marker.
+
 ## How a version moves
 
 Conventional Commits feed the changelog and propose the bump. They do not

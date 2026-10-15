@@ -4,8 +4,8 @@
 use scoot_ipc::{
     Action, BindRow, EventKind, Horizontal, KeyboardLayout, OutputAdded, OutputChanged,
     OutputRemoved, OutputRestored, OutputSnapshot, OutputTarget, PROTOCOL_VERSION, PointerButton,
-    Rect, Request, Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, SkippedBind, WindowSnapshot,
-    WorkspaceSnapshot, decode, encode,
+    Rect, ReloadScope, Request, Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, SkippedBind,
+    WindowSnapshot, WorkspaceSnapshot, decode, encode,
 };
 use serde_json::{Value, json};
 fn json_of<T: serde::Serialize>(value: &T) -> Value {
@@ -462,6 +462,7 @@ fn a_reload_report_round_trips_with_both_lists() {
         refused: vec!["output.scale".into()],
         shadowed: Vec::new(),
         invalid: Vec::new(),
+        scope: None,
     };
     assert_eq!(
         json_of(&response),
@@ -501,6 +502,7 @@ fn reworded_reload_refusals_are_payload_not_wire_format() {
         ],
         shadowed: Vec::new(),
         invalid: Vec::new(),
+        scope: None,
     };
     assert_eq!(
         decode::<Response>(&encode(&response).unwrap()).unwrap(),
@@ -515,6 +517,7 @@ fn every_request_round_trips_on_one_line() {
         Request::Outputs,
         Request::Windows,
         Request::Reload,
+        Request::ReloadLook,
         Request::Action(Action::Spawn {
             command: vec!["foot".into()],
         }),
@@ -1540,6 +1543,7 @@ fn a_reload_report_round_trips_shadowed_and_invalid() {
             "wallpaper".into(),
         ],
         invalid: vec!["appearance.focus_ring_active_color".into()],
+        scope: None,
     };
     assert_eq!(
         json_of(&response),
@@ -1563,10 +1567,97 @@ fn a_reload_report_round_trips_shadowed_and_invalid() {
             refused,
             shadowed,
             invalid,
+            scope,
         } => {
             assert!(applied.is_empty() && refused.is_empty());
             assert!(shadowed.is_empty() && invalid.is_empty());
+            assert!(scope.is_none());
         }
         other => panic!("expected a reload report, got {other:?}"),
     }
+}
+
+/// The look-scoped reload on the wire: a distinct tag, not a `scope` field.
+///
+/// `{"type":"reload_look"}` decodes to the scoped request and
+/// `{"type":"reload"}` stays plain. The tag must be distinct because
+/// serde's internally-tagged unit variants drain and ignore extra fields:
+/// an older compositor would decode `{"type":"reload","scope":"look"}`
+/// (and even `"scope":"bogus"`) as a plain `Reload` and apply the pending
+/// edits the scope exists to skip. With a distinct tag an older server
+/// meets the scoped request with an ordinary unknown-request `Error`,
+/// never a silent plain reload. The reply carries the scope that ran; a
+/// plain reply omits it, so the old shape still decodes.
+#[test]
+fn a_look_scoped_reload_round_trips_as_its_own_tag() {
+    assert_eq!(
+        json_of(&Request::ReloadLook),
+        json!({ "type": "reload_look" })
+    );
+    assert_eq!(
+        decode::<Request>(r#"{"type":"reload_look"}"#).unwrap(),
+        Request::ReloadLook
+    );
+    assert_eq!(
+        decode::<Request>(r#"{"type":"reload"}"#).unwrap(),
+        Request::Reload
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&Request::ReloadLook).unwrap()).unwrap(),
+        Request::ReloadLook
+    );
+    let response = Response::Reloaded {
+        applied: vec!["appearance.focus_ring_active_color".into()],
+        refused: Vec::new(),
+        shadowed: Vec::new(),
+        invalid: Vec::new(),
+        scope: Some(ReloadScope::Look),
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "reloaded",
+            "applied": ["appearance.focus_ring_active_color"],
+            "refused": [],
+            "scope": "look",
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
+/// An older compositor meets a scoped reload with an error, never a plain
+/// reload. `OldRequest` is the pre-scoped request shape (a unit `Reload`,
+/// as on `origin/main` before the scoped tag): the new tag must fail its
+/// decode like any unknown request tag, while `{"type":"reload"}` still
+/// decodes to the plain reload it always was.
+#[test]
+fn a_scoped_reload_against_an_older_server_is_an_error_never_a_plain_reload() {
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum OldRequest {
+        Version,
+        Reload,
+    }
+
+    assert_eq!(
+        serde_json::from_str::<OldRequest>(r#"{"type":"reload"}"#).unwrap(),
+        OldRequest::Reload,
+        "plain reload keeps its wire shape"
+    );
+    assert!(
+        serde_json::from_str::<OldRequest>(r#"{"type":"reload_look"}"#).is_err(),
+        "an older server must answer the scoped tag with an unknown-request error"
+    );
+    // Why the tag had to be distinct: the old shape with a `scope` field
+    // would have degraded silently. Serde's internally-tagged unit
+    // variant drains and ignores the extra field, so this decodes as a
+    // plain reload -- exactly the harm the scope exists to prevent.
+    assert_eq!(
+        serde_json::from_str::<OldRequest>(r#"{"type":"reload","scope":"look"}"#).unwrap(),
+        OldRequest::Reload,
+        "a scope field would have degraded to a plain reload on an older server"
+    );
 }

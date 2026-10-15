@@ -781,6 +781,10 @@ impl LoadedConfig {
             },
             shadowed,
             invalid,
+            // The snapshot is set by the load entry points (`load`,
+            // `reload_from_with_layer`), which know whether these bytes are
+            // the file's -- never here, which only sees the parsed form.
+            user_text: None,
         }
     }
 }
@@ -788,11 +792,17 @@ impl LoadedConfig {
 /// A [`LoadedConfig`] built over an optional look layer, plus the look
 /// report: the user keys that override look tokens (`shadowed`), and the
 /// user keys whose bad values fell back to the layer's (`invalid`, each
-/// also in `shadowed`).
+/// also in `shadowed`). `user_text` is the snapshot for the look-scoped
+/// reload: the user file's raw bytes when they loaded successfully, `None`
+/// when the load ran on defaults (a look-only install with no user file).
+/// A scoped reload never commits this field -- the snapshot advances only
+/// on a successful plain load -- so it is `None` on that path by
+/// construction.
 pub struct LayeredLoaded {
     pub loaded: LoadedConfig,
     pub shadowed: Vec<String>,
     pub invalid: Vec<String>,
+    pub user_text: Option<String>,
 }
 
 /// The user file when there is none: what a look-only install merges its
@@ -876,19 +886,86 @@ pub fn reload_from_with_layer(
         Ok(text) => text,
         Err(source) if source.kind() == io::ErrorKind::NotFound && layer.is_some() => {
             let file = default_user_file();
-            return Ok(LoadedConfig::from_file_with_layer(
-                file,
-                path,
-                vt,
-                layer.as_ref(),
-            ));
+            let layered = LoadedConfig::from_file_with_layer(file, path, vt, layer.as_ref());
+            return Ok(LayeredLoaded {
+                loaded: layered.loaded,
+                shadowed: layered.shadowed,
+                invalid: layered.invalid,
+                user_text: None,
+            });
         }
         Err(source) => return Err(fail(source.to_string())),
     };
     toml::from_str::<FileConfig>(&text)
-        .map(|file| LoadedConfig::from_file_with_layer(file, path, vt, layer.as_ref()))
+        .map(|file| {
+            let layered = LoadedConfig::from_file_with_layer(file, path, vt, layer.as_ref());
+            LayeredLoaded {
+                loaded: layered.loaded,
+                shadowed: layered.shadowed,
+                invalid: layered.invalid,
+                user_text: Some(text),
+            }
+        })
         .map_err(|source| fail(source.to_string()))
 }
+
+/// Derives a [`LayeredLoaded`] for the look-scoped reload: the freshly read
+/// layer merged under `snapshot` -- the user file's raw bytes from the last
+/// successful plain load (`None` for a look-only install running on
+/// defaults) -- instead of re-reading the file. Pending edits wait for the
+/// user's own plain reload; a half-written file cannot refuse this path
+/// because it is never read.
+///
+/// A layer that fails the strict parse refuses the whole reload, and so
+/// does a snapshot that no longer parses (unreachable in practice: only
+/// successfully loaded bytes are ever stored) -- and in both cases the
+/// running config is untouched. The error names the look layer, never the
+/// user's file: this path never reads it.
+pub fn reload_scoped_from_snapshot(
+    snapshot: Option<&str>,
+    layer_text: &str,
+    path: &Path,
+    vt: bool,
+) -> Result<LayeredLoaded, ScopedReloadError> {
+    let layer = parse_layer(layer_text).map_err(|reason| ScopedReloadError { reason })?;
+    let file = match snapshot {
+        Some(text) => toml::from_str::<FileConfig>(text).map_err(|source| ScopedReloadError {
+            reason: format!("the saved config snapshot no longer parses: {source}"),
+        })?,
+        None => default_user_file(),
+    };
+    let layered = LoadedConfig::from_file_with_layer(file, path, vt, Some(&layer));
+    Ok(LayeredLoaded {
+        loaded: layered.loaded,
+        shadowed: layered.shadowed,
+        invalid: layered.invalid,
+        // Never committed: the snapshot advances only on a successful
+        // plain load (see `reload.rs`).
+        user_text: None,
+    })
+}
+
+/// A look-scoped reload that could not load. The running config is
+/// untouched; the message is what the scoped `reload` reply (and the log)
+/// carries. It names the look layer, never the user's config file: the
+/// scoped path never reads that file, so blaming it would send the user to
+/// the wrong place.
+#[derive(Debug)]
+pub struct ScopedReloadError {
+    reason: String,
+}
+
+impl fmt::Display for ScopedReloadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "could not reload the look layer: {}; keeping the running config",
+            self.reason
+        )
+    }
+}
+
+impl std::error::Error for ScopedReloadError {}
 
 /// Loads like [`load`], merged over the active look layer's fragment
 /// (`layer_text`, `None` for no layer). A layer that fails the strict parse
@@ -906,23 +983,27 @@ pub fn load_with_layer(
     layer_text: Option<&str>,
 ) -> Result<LayeredStartup, ConfigFileError> {
     let Some(text) = layer_text else {
+        let (loaded, user_text) = load(explicit)?;
         return Ok(LayeredStartup {
-            loaded: load(explicit)?,
+            loaded,
             shadowed: Vec::new(),
             invalid: Vec::new(),
             layer_warning: None,
+            user_text,
         });
     };
     let layer = match parse_layer(text) {
         Ok(layer) => layer,
         Err(reason) => {
+            let (loaded, user_text) = load(explicit)?;
             return Ok(LayeredStartup {
-                loaded: load(explicit)?,
+                loaded,
                 shadowed: Vec::new(),
                 invalid: Vec::new(),
                 layer_warning: Some(format!(
                     "the look layer is refused ({reason}); starting without it"
                 )),
+                user_text,
             });
         }
     };
@@ -932,8 +1013,11 @@ pub fn load_with_layer(
     // default file is silent defaults; an unreadable one or a parse
     // failure logs and falls back to defaults), but keep the parsed
     // `FileConfig` so the merge never re-reads: no second read to race the
-    // first, and no fall-through that drops the layer.
-    let (file, path) = match explicit {
+    // first, and no fall-through that drops the layer. `user_text` is the
+    // snapshot for the look-scoped reload: `Some` only when these exact
+    // bytes parsed, so the snapshot can never hold a file the session did
+    // not run.
+    let (file, path, user_text) = match explicit {
         Some(path) => match fs::read_to_string(path) {
             Err(source) => {
                 return Err(ConfigFileError {
@@ -942,13 +1026,13 @@ pub fn load_with_layer(
                 });
             }
             Ok(text) => match toml::from_str::<FileConfig>(&text) {
-                Ok(file) => (file, path.to_owned()),
+                Ok(file) => (file, path.to_owned(), Some(text)),
                 Err(error) => {
                     tracing::error!(
                         path = %path.display(), %error,
                         "could not parse config file; using defaults"
                     );
-                    (default_user_file(), path.to_owned())
+                    (default_user_file(), path.to_owned(), None)
                 }
             },
         },
@@ -959,27 +1043,27 @@ pub fn load_with_layer(
             ) {
                 // Neither XDG_CONFIG_HOME nor HOME is set: nowhere sensible
                 // to look, same as "the default file doesn't exist".
-                None => (default_user_file(), PathBuf::from("/config.toml")),
+                None => (default_user_file(), PathBuf::from("/config.toml"), None),
                 Some(path) => match fs::read_to_string(&path) {
                     Ok(text) => match toml::from_str::<FileConfig>(&text) {
-                        Ok(file) => (file, path),
+                        Ok(file) => (file, path, Some(text)),
                         Err(error) => {
                             tracing::error!(
                                 path = %path.display(), %error,
                                 "could not parse config file; using defaults"
                             );
-                            (default_user_file(), path)
+                            (default_user_file(), path, None)
                         }
                     },
                     Err(source) if source.kind() == io::ErrorKind::NotFound => {
-                        (default_user_file(), path)
+                        (default_user_file(), path, None)
                     }
                     Err(source) => {
                         tracing::error!(
                             path = %path.display(), %source,
                             "could not read the default config file; using defaults"
                         );
-                        (default_user_file(), path)
+                        (default_user_file(), path, None)
                     }
                 },
             }
@@ -991,17 +1075,25 @@ pub fn load_with_layer(
         shadowed: layered.shadowed,
         invalid: layered.invalid,
         layer_warning: None,
+        user_text,
     })
 }
 
 /// A [`load_with_layer`] result: the loaded config, the user keys that
 /// override look tokens, the user keys whose bad values fell back to the
-/// layer's, and the warning when the layer was refused.
+/// layer's, the warning when the layer was refused, and the snapshot text
+/// for the look-scoped reload: the user file's raw bytes when they parsed
+/// successfully, `None` when there was no file (or it did not parse, in
+/// which case the load ran on defaults). Startup seeds
+/// [`State::user_snapshot`](super::state::State::user_snapshot) from this;
+/// a scoped reload merges its fresh layer under that snapshot instead of
+/// re-reading the file.
 pub struct LayeredStartup {
     pub loaded: LoadedConfig,
     pub shadowed: Vec<String>,
     pub invalid: Vec<String>,
     pub layer_warning: Option<String>,
+    pub user_text: Option<String>,
 }
 
 /// A strictly validated look layer: the fragment's `[appearance]` and
@@ -1911,7 +2003,7 @@ impl std::error::Error for ConfigFileError {}
 /// Resolves the config path and loads it. `explicit` is `--config PATH`,
 /// when given. See the module doc for the three-way fallback behavior this
 /// implements.
-pub fn load(explicit: Option<&Path>) -> Result<LoadedConfig, ConfigFileError> {
+pub fn load(explicit: Option<&Path>) -> Result<(LoadedConfig, Option<String>), ConfigFileError> {
     match explicit {
         Some(path) => load_from(path, true),
         None => {
@@ -1922,7 +2014,7 @@ pub fn load(explicit: Option<&Path>) -> Result<LoadedConfig, ConfigFileError> {
                 Some(path) => load_from(&path, false),
                 // Neither XDG_CONFIG_HOME nor HOME is set: nowhere sensible
                 // to look, same as "the default file doesn't exist".
-                None => Ok(LoadedConfig::defaults()),
+                None => Ok((LoadedConfig::defaults(), None)),
             }
         }
     }
@@ -2094,7 +2186,10 @@ fn finish_new_file_write(
 /// Loads `path`. `explicit` says whether this came from `--config`, which is
 /// what decides whether a missing/unreadable file is a hard error or silent
 /// defaults -- see the module doc.
-fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileError> {
+fn load_from(
+    path: &Path,
+    explicit: bool,
+) -> Result<(LoadedConfig, Option<String>), ConfigFileError> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(source) if explicit => {
@@ -2106,7 +2201,7 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
         Err(source) if source.kind() == io::ErrorKind::NotFound => {
             // No config yet, or a fresh install: not a mistake, nothing to
             // warn about.
-            return Ok(LoadedConfig::defaults());
+            return Ok((LoadedConfig::defaults(), None));
         }
         Err(source) => {
             // Not `NotFound` (that's the arm above, including a broken
@@ -2118,7 +2213,7 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
                 path = %path.display(), %source,
                 "could not read the default config file; using defaults"
             );
-            return Ok(LoadedConfig::defaults());
+            return Ok((LoadedConfig::defaults(), None));
         }
     };
     Ok(parse_or_defaults(&text, path))
@@ -2179,15 +2274,18 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
 ///   worst case under it overflowed a debug build's 8 MiB (review of PR
 ///   #297, B1). Its drain is bounded now (`wallpaper/section.rs`, `Drain`),
 ///   and `wallpaper/tests/section.rs` pins the worst case on both paths.
-fn parse_or_defaults(text: &str, path: &Path) -> LoadedConfig {
+fn parse_or_defaults(text: &str, path: &Path) -> (LoadedConfig, Option<String>) {
     match toml::from_str::<FileConfig>(text) {
-        Ok(file) => LoadedConfig::from_file_with_vt(file, path, false),
+        Ok(file) => (
+            LoadedConfig::from_file_with_vt(file, path, false),
+            Some(text.to_owned()),
+        ),
         Err(error) => {
             tracing::error!(
                 path = %path.display(), %error,
                 "could not parse config file; using defaults"
             );
-            LoadedConfig::defaults()
+            (LoadedConfig::defaults(), None)
         }
     }
 }
@@ -2809,7 +2907,8 @@ mod tests {
     fn a_missing_file_at_the_default_path_uses_defaults() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("does-not-exist.toml");
-        let loaded = load_from(&missing, false).expect("a missing default path is not an error");
+        let (loaded, _) =
+            load_from(&missing, false).expect("a missing default path is not an error");
         assert_eq!(loaded.config, Config::default());
     }
 
@@ -2829,7 +2928,7 @@ mod tests {
             "super+h" = "close"
         "#,
         );
-        let loaded = load_from(&path, true).expect("valid config");
+        let (loaded, _) = load_from(&path, true).expect("valid config");
         assert_eq!(
             matched(
                 &loaded.keybindings,
@@ -2855,7 +2954,7 @@ mod tests {
             "super+3" = "move-window-to-workspace-index 2"
         "#,
         );
-        let loaded = load_from(&path, true).expect("valid config");
+        let (loaded, _) = load_from(&path, true).expect("valid config");
         assert_eq!(
             matched(
                 &loaded.keybindings,
@@ -2887,7 +2986,7 @@ mod tests {
             ),
         ] {
             let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
-            let loaded = load_from(&path, true).expect("valid config");
+            let (loaded, _) = load_from(&path, true).expect("valid config");
             assert_eq!(
                 matched(
                     &loaded.keybindings,
@@ -2918,7 +3017,7 @@ mod tests {
             index: 1,
         };
         let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
-        let loaded = load_from(&path, true).expect("valid config");
+        let (loaded, _) = load_from(&path, true).expect("valid config");
         assert_eq!(
             matched(
                 &loaded.keybindings,
@@ -2943,7 +3042,7 @@ mod tests {
         let spelling = "set-column-width 3";
         let action = Action::SetColumnWidth(3);
         let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
-        let loaded = load_from(&path, true).expect("valid config");
+        let (loaded, _) = load_from(&path, true).expect("valid config");
         assert_eq!(
             matched(
                 &loaded.keybindings,
@@ -2983,7 +3082,7 @@ mod tests {
             ),
         ] {
             let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
-            let loaded = load_from(&path, true).expect("valid config");
+            let (loaded, _) = load_from(&path, true).expect("valid config");
             assert_eq!(
                 matched(
                     &loaded.keybindings,
@@ -3023,7 +3122,7 @@ mod tests {
             ),
         ] {
             let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
-            let loaded = load_from(&path, true).expect("valid config");
+            let (loaded, _) = load_from(&path, true).expect("valid config");
             assert_eq!(
                 matched(
                     &loaded.keybindings,
@@ -3049,7 +3148,7 @@ mod tests {
             "super+n" = "focus-column right"
         "#,
         );
-        let loaded = load_from(&path, true).expect("the file still parses as toml");
+        let (loaded, _) = load_from(&path, true).expect("the file still parses as toml");
         assert_eq!(
             matched(
                 &loaded.keybindings,
@@ -3072,7 +3171,7 @@ mod tests {
             "super+m" = "close"
         "#,
         );
-        let loaded = load_from(&path, true).expect("the file still parses as toml");
+        let (loaded, _) = load_from(&path, true).expect("the file still parses as toml");
         assert_eq!(
             matched(
                 &loaded.keybindings,
@@ -3269,7 +3368,7 @@ mod tests {
             "XF86AudioRaiseVolume" = { action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+", repeat = true, allow_when_locked = true }
         "#,
         );
-        let loaded = load_from(&path, true).expect("valid config");
+        let (loaded, _) = load_from(&path, true).expect("valid config");
         assert_eq!(
             loaded.keybindings.match_key(
                 keysym_named("XF86AudioRaiseVolume").unwrap(),
@@ -3298,7 +3397,7 @@ mod tests {
             "XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
         "#,
         );
-        let loaded = load_from(&path, true).expect("valid config");
+        let (loaded, _) = load_from(&path, true).expect("valid config");
         assert_eq!(
             loaded.keybindings.match_key(
                 keysym_named("XF86AudioRaiseVolume").unwrap(),
@@ -3386,7 +3485,7 @@ mod tests {
             "super+m" = "close"
         "#,
         );
-        let loaded = load_from(&path, true).expect("the file still parses as toml");
+        let (loaded, _) = load_from(&path, true).expect("the file still parses as toml");
         assert_eq!(
             matched(
                 &loaded.keybindings,
@@ -3409,7 +3508,7 @@ mod tests {
             "super+m" = "close"
         "#,
         );
-        let loaded = load_from(&path, true).expect("the file still parses as toml");
+        let (loaded, _) = load_from(&path, true).expect("the file still parses as toml");
         assert_eq!(
             matched(
                 &loaded.keybindings,
@@ -3468,14 +3567,14 @@ mod tests {
     #[test]
     fn malformed_toml_falls_back_to_full_defaults_not_an_error() {
         let (_dir, path) = write_temp("this is not valid toml [[[");
-        let loaded = load_from(&path, true).expect("a parse failure must never fail startup");
+        let (loaded, _) = load_from(&path, true).expect("a parse failure must never fail startup");
         assert_eq!(loaded.config, Config::default());
     }
 
     #[test]
     fn an_unknown_field_falls_back_to_full_defaults_not_an_error() {
         let (_dir, path) = write_temp("[layout]\ngaps = 5\n");
-        let loaded = load_from(&path, true).expect("a bad field must never fail startup");
+        let (loaded, _) = load_from(&path, true).expect("a bad field must never fail startup");
         assert_eq!(loaded.config, Config::default());
     }
 
@@ -3502,7 +3601,7 @@ mod tests {
             "super+h" = "quit"
         "#,
         );
-        let loaded = load_from(&path, true).expect("valid toml");
+        let (loaded, _) = load_from(&path, true).expect("valid toml");
         assert_eq!(
             matched(
                 &loaded.keybindings,
@@ -3529,7 +3628,7 @@ mod tests {
             "A" = "close"
         "#,
         );
-        let loaded = load_from(&path, true).expect("valid toml");
+        let (loaded, _) = load_from(&path, true).expect("valid toml");
         assert_eq!(
             matched(&loaded.keybindings, Keysym::a, Modifiers::default()),
             Some(Bound::Action(Action::CloseFocused)),
@@ -3581,7 +3680,7 @@ mod tests {
             "shift+a" = "close"
         "#,
         );
-        let loaded = load_from(&path, true).expect("valid toml");
+        let (loaded, _) = load_from(&path, true).expect("valid toml");
         assert_eq!(
             matched(&loaded.keybindings, Keysym::a, Modifiers::default()),
             None,
@@ -3613,7 +3712,7 @@ mod tests {
             "shift+A" = "close"
         "#,
         );
-        let loaded = load_from(&path, true).expect("valid toml");
+        let (loaded, _) = load_from(&path, true).expect("valid toml");
         assert_eq!(
             matched(&loaded.keybindings, Keysym::a, Modifiers::default()),
             None,
@@ -3670,7 +3769,7 @@ mod tests {
             "logo+n" = "quit"
         "#,
         );
-        let loaded = load_from(&path, true).expect("valid toml");
+        let (loaded, _) = load_from(&path, true).expect("valid toml");
         assert_eq!(
             matched(
                 &loaded.keybindings,
@@ -3719,7 +3818,7 @@ mod tests {
     #[test]
     fn an_empty_autostart_list_means_nothing_runs() {
         let (_dir, path) = write_temp("[autostart]\ncommands = []\n");
-        let loaded = load_from(&path, true).expect("valid config");
+        let (loaded, _) = load_from(&path, true).expect("valid config");
         assert!(loaded.autostart.is_empty());
     }
 
@@ -3745,7 +3844,8 @@ mod tests {
             "super+n" = "focus-column right"
         "#,
         );
-        let loaded = load_from(&path, true).expect("a bad autostart entry must never fail startup");
+        let (loaded, _) =
+            load_from(&path, true).expect("a bad autostart entry must never fail startup");
         assert_eq!(
             loaded.autostart,
             vec![Action::Spawn(vec!["waybar".into()])],
@@ -3801,7 +3901,7 @@ mod tests {
         // (defaults, never a refusal), while a bad *entry* only costs that
         // entry (see the fail-open pin above).
         let (_dir, path) = write_temp("[autostart]\ncommands = \"spawn waybar\"\n");
-        let loaded = load_from(&path, true).expect("a mistyped field must never fail startup");
+        let (loaded, _) = load_from(&path, true).expect("a mistyped field must never fail startup");
         assert_eq!(loaded.config, Config::default());
         assert!(loaded.autostart.is_empty());
     }
@@ -4080,7 +4180,7 @@ mod tests {
             cursor_hide_after_ms = 3000
         "##,
         );
-        let loaded = load_from(&path, true).expect("valid config");
+        let (loaded, _) = load_from(&path, true).expect("valid config");
         assert_eq!(loaded.appearance.cursor_size, 48);
         assert_eq!(
             loaded.appearance.cursor_color,
@@ -4102,7 +4202,7 @@ mod tests {
     #[test]
     fn an_unset_cursor_hide_after_ms_is_zero() {
         let (_dir, path) = write_temp("[layout]\ngap = 8\n");
-        let loaded = load_from(&path, true).expect("valid config");
+        let (loaded, _) = load_from(&path, true).expect("valid config");
         assert_eq!(loaded.appearance.cursor_hide_after_ms, 0);
     }
 
@@ -4111,7 +4211,7 @@ mod tests {
     #[test]
     fn a_zero_cursor_hide_after_ms_is_off() {
         let (_dir, path) = write_temp("[appearance]\ncursor_hide_after_ms = 0\n");
-        let loaded = load_from(&path, true).expect("valid config");
+        let (loaded, _) = load_from(&path, true).expect("valid config");
         assert_eq!(loaded.appearance.cursor_hide_after_ms, 0);
     }
 
@@ -4121,7 +4221,7 @@ mod tests {
     fn an_absurd_cursor_hide_after_ms_is_clamped_to_a_day() {
         let (_dir, path) =
             write_temp("[appearance]\ncursor_hide_after_ms = 18446744073709551615\n");
-        let loaded = load_from(&path, true).expect("a huge delay must not fail startup");
+        let (loaded, _) = load_from(&path, true).expect("a huge delay must not fail startup");
         assert_eq!(
             loaded.appearance.cursor_hide_after_ms,
             Appearance::MAX_CURSOR_HIDE_AFTER_MS
@@ -4140,7 +4240,7 @@ mod tests {
             cursor_color = "ff8000"
         "##,
         );
-        let loaded = load_from(&path, true).expect("a bad color must not fail startup");
+        let (loaded, _) = load_from(&path, true).expect("a bad color must not fail startup");
         assert_eq!(
             loaded.appearance.cursor_color,
             Appearance::default().cursor_color,
@@ -4166,7 +4266,7 @@ mod tests {
             (i32::MIN, Appearance::MIN_CURSOR_SIZE),
         ] {
             let (_dir, path) = write_temp(&format!("[appearance]\ncursor_size = {configured}\n"));
-            let loaded = load_from(&path, true).expect("a bad size must not fail startup");
+            let (loaded, _) = load_from(&path, true).expect("a bad size must not fail startup");
             assert_eq!(
                 loaded.appearance.cursor_size, expected,
                 "cursor_size {configured} was not clamped"
@@ -4183,7 +4283,7 @@ mod tests {
     fn a_cursor_size_too_large_for_i32_is_a_whole_file_fallback() {
         let (_dir, path) =
             write_temp("[layout]\ngap = 20\n\n[appearance]\ncursor_size = 3000000000\n");
-        let loaded = load_from(&path, true).expect("a parse failure must never fail startup");
+        let (loaded, _) = load_from(&path, true).expect("a parse failure must never fail startup");
         assert_eq!(loaded.appearance, Appearance::default());
         assert_eq!(
             loaded.config.gap,
@@ -4421,7 +4521,7 @@ mod tests {
     fn an_absurdly_deep_config_file_falls_back_to_defaults_not_a_crash() {
         for form in NESTING_FORMS {
             let (_dir, path) = write_temp(&nested_toml(form, 100_000));
-            let loaded =
+            let (loaded, _) =
                 load_from(&path, true).expect("deep nesting must never fail startup either");
             assert_eq!(loaded.config, Config::default(), "{form}");
         }
@@ -4475,6 +4575,7 @@ mod tests {
                 let (_dir, path) = write_temp(&text);
                 load_from(&path, true)
                     .expect("the deepest possible file must never fail startup")
+                    .0
                     .config
             })
             .expect("spawn the 8 MiB parse thread")
@@ -4493,7 +4594,7 @@ mod tests {
         let dotted = "layout.gap = 7\nlayout.column_widths = [0.3, 0.7]\n";
         for text in [inline, dotted] {
             let (_dir, path) = write_temp(text);
-            let loaded = load_from(&path, true).expect("valid toml");
+            let (loaded, _) = load_from(&path, true).expect("valid toml");
             assert_eq!(loaded.config.gap, 7, "{text}");
             assert_eq!(loaded.config.column_widths, vec![0.3, 0.7], "{text}");
         }
@@ -4584,7 +4685,7 @@ mod tests {
         // is the graceful case above; a value that isn't even a string is
         // not.
         let (_dir, path) = write_temp("[layout]\ngap = 20\n\n[renderer]\nbackend = true\n");
-        let loaded = load_from(&path, true).expect("a parse failure must never fail startup");
+        let (loaded, _) = load_from(&path, true).expect("a parse failure must never fail startup");
         assert_eq!(loaded.renderer, None);
         assert_eq!(
             loaded.config.gap,
@@ -4748,7 +4849,7 @@ mod tests {
         // Same rule as any other type mismatch (see the module doc): the
         // file is discarded, not the key.
         let (_dir, path) = write_temp("[layout]\ngap = 20\n\n[xwayland]\nenabled = \"yes\"\n");
-        let loaded = load_from(&path, true).expect("a parse failure must never fail startup");
+        let (loaded, _) = load_from(&path, true).expect("a parse failure must never fail startup");
         assert!(!loaded.xwayland);
         assert_eq!(
             loaded.config.gap,
@@ -4795,7 +4896,7 @@ mod tests {
         // Same rule as any other type mismatch (see the module doc): the
         // file is discarded, not the key.
         let (_dir, path) = write_temp("[layout]\ngap = 20\n\n[tty]\ngpu = 5\n");
-        let loaded = load_from(&path, true).expect("a parse failure must never fail startup");
+        let (loaded, _) = load_from(&path, true).expect("a parse failure must never fail startup");
         assert_eq!(loaded.gpu, None);
         assert_eq!(
             loaded.config.gap,
@@ -4982,7 +5083,7 @@ mod tests {
              [[window_rule]]\nmatch_app_id = \"foot\"\nfloat = true\nsize = [800, 600]\n\n\
              [[window_rule]]\nmatch_title = \"*Save*\"\nfloat = false\n",
         );
-        let loaded = load(Some(&path)).expect("a loadable file");
+        let (loaded, _) = load(Some(&path)).expect("a loadable file");
         assert!(!loaded.floating.auto);
         assert_eq!(loaded.floating.rules.len(), 2);
         assert!(loaded.skipped_rules.is_empty());
@@ -4996,7 +5097,7 @@ mod tests {
              [[window_rule]]\nmatch_app_id = \"mpv\"\nfloat = true\n\n\
              [layout]\ngap = 4\n",
         );
-        let loaded = load(Some(&path)).expect("a loadable file");
+        let (loaded, _) = load(Some(&path)).expect("a loadable file");
         assert_eq!(loaded.floating.rules.len(), 1);
         assert_eq!(loaded.skipped_rules.len(), 2, "{:?}", loaded.skipped_rules);
         assert!(loaded.skipped_rules[0].starts_with("window_rule #1 ("));
@@ -5012,7 +5113,7 @@ mod tests {
         let (_dir, path) = write_temp(
             "[[window_rule]]\nmatch_appid = \"foot\"\nfloat = true\n\n[layout]\ngap = 4\n",
         );
-        let loaded = load(Some(&path)).expect("startup never fails over a parse error");
+        let (loaded, _) = load(Some(&path)).expect("startup never fails over a parse error");
         assert_eq!(loaded.config, Config::default());
         assert!(loaded.floating.rules.is_empty());
     }
@@ -5430,7 +5531,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temp dir");
         let path = dir.path().join("scoot/config.toml");
         write_default_config_to(&path).expect("a fresh path writes");
-        let loaded = load(Some(&path)).expect("the written file must load");
+        let (loaded, _) = load(Some(&path)).expect("the written file must load");
         assert_eq!(
             loaded.config,
             Config::default(),

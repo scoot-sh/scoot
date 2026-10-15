@@ -378,7 +378,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [The look format: the scoot-look crate, schema, value grammar, pure validation](./core/look-format.md) (high)
 - [The five shipped looks as look.toml under looks/, validated in CI](./core/look-shipped.md) (high, blocked on `look-format`)
 - [The compositor reads a look layer under the user's config](./core/look-layer-scoot.md) (high, blocked on `look-format`)
-- [A look-scoped reload in scoot](./core/look-scoped-reload.md) (high, blocked on `look-layer-scoot`)
+- [A look-scoped reload in scoot](./resolved/look-scoped-reload-done.md) (high) — RESOLVED 2026-10-15
 - [Reload wallpaper wait as a deferred reply](./core/reload-wallpaper-deferred-reply.md) (medium)
 - [Per-session look state for headless and `--private-look` sessions](./resolved/look-session-state-done.md) (medium, computer use)
 - [`scoot look apply`: the atomic swap, scoped reloads, rollback](./core/look-apply-cli.md) (high, blocked on `look-shipped`, `look-scoped-reload`)
