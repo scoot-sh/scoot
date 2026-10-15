@@ -2,8 +2,10 @@
 
 Astro Starlight + pnpm, built reproducibly through the flake
 (`nix build .#docs-site`). The page map is
-[OUTLINE.md](OUTLINE.md); `docs/*.md` files that feed the site are
-short stubs pointing at their `site/` pages.
+[OUTLINE.md](OUTLINE.md); the moved `docs/*.md` files (and
+`docs/scootbar/cli.md`, `docs/scootbg/cli.md`) are short stubs pointing
+at their `site/` pages. `docs/scootbar/README.md` and
+`docs/scootbg/README.md` are full guides, not stubs.
 
 ## Why Starlight, why this plugin
 
@@ -26,13 +28,14 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
 
 ## Add a page
 
-1. Write `src/content/docs/<section>/<slug>.mdx` (or `.md` for a plain
-   page) — plain Markdown only, no MDX
-   components (the `.md` twin serves the raw body; MDX imports would leak
-   into it). Small raw-HTML accents are allowed where Markdown cannot do
-   the job (the hero art, the home Looks grid, the 404 terminal chrome),
-   but they must keep the twin readable: real links, real alt text.
-   Need tabs, steps, asides or cards? Write `<slug>.mdx` instead (`Tabs`/`TabItem`, `Steps`, `Aside`, `LinkCard`/`CardGrid` from `@astrojs/starlight/components`): the twin route converts it to plain Markdown (imports stripped, `TabItem` → `###`, `Aside` → `> **Note:**`, `LinkCard` → link list; fences untouched; CRLF normalized to LF) and `pnpm test-mdx-twin` plus the llms gate fail on any leftover `<[A-Z]` / `</[A-Z]` JSX, on an unclosed wrapper, and on an unterminated fence (each finding names the line) — inline-code spans (single- and multi-backtick) are exempt from conversion and the gate, so backtick-quote generics like `` `<N>` `` and component names like `` `<TabItem>` ``. Attribute values are quote-aware (`title="a > b"` and escaped quotes in labels both parse), and multi-line `<Aside>` opens convert like single-line ones.
+1. Write `src/content/docs/<section>/<slug>.md` — plain Markdown only,
+   no MDX components (the `.md` twin serves the raw body; MDX imports
+   would leak into it). Small raw-HTML accents are allowed where
+   Markdown cannot do the job (the hero art, the home Looks grid, the
+   404 terminal chrome), but they must keep the twin readable: real
+   links, real alt text. Only `start/install.mdx` and
+   `start/compose.mdx` are `.mdx` and may use MDX. Need tabs, steps,
+   asides or cards on one of those? Use (`Tabs`/`TabItem`, `Steps`, `Aside`, `LinkCard`/`CardGrid` from `@astrojs/starlight/components`): the twin route converts it to plain Markdown (imports stripped, `TabItem` → `###`, `Aside` → `> **Note:**`, `LinkCard` → link list; fences untouched; CRLF normalized to LF) and `pnpm test-mdx-twin` plus the llms gate fail on any leftover `<[A-Z]` / `</[A-Z]` JSX, on an unclosed wrapper, and on an unterminated fence (each finding names the line) — inline-code spans (single- and multi-backtick) are exempt from conversion and the gate, so backtick-quote generics like `` `<N>` `` and component names like `` `<TabItem>` ``. Attribute values are quote-aware (`title="a > b"` and escaped quotes in labels both parse), and multi-line `<Aside>` opens convert like single-line ones.
 2. Add it to its app's `sidebar` group in `astro.config.mjs` (new app, new
    group per `OUTLINE.md`), to `promote` if it should sort near the top
    of the bundles, and to that app's `customSets` entry (new app, new

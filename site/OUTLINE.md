@@ -10,10 +10,13 @@
 > the contributor guide and the research/testing notes moved to `dev/`).
 > One deliberate deviation: `scootbar/modules`
 > is one searchable page rather than thirteen (see the PR).
-> Status 2026-10-15: historical sections below marked as superseded are
+> Status 2026-10-14: historical sections below marked as superseded are
 > kept as the record; the live structure is the sidebar in
-> `site/astro.config.mjs` (nested slugs, all sections live) and
-> `docs/*.md` files are short stubs pointing at their `site/` pages.
+> `site/astro.config.mjs` (nested slugs, all sections live). The moved
+> `docs/*.md` files (and `docs/scootbar/cli.md`, `docs/scootbg/cli.md`)
+> are short stubs pointing at their `site/` pages;
+> `docs/scootbar/README.md` and `docs/scootbg/README.md` are full guides,
+> not stubs.
 
 This is the page outline the `docs-site` ticket asked the maintainer to
 review. The move has executed: slugs nest under their app
@@ -143,7 +146,7 @@ What moves, exactly:
 - `docs/scootbar/spikes/**` → `dev/spikes/`
 - `docs/forks.md` → `dev/forks.md`
 - `docs/scootbar/backlog/lightest.md`, `docs/scootbar/research.md`, `docs/scootbar/testing.md`, `docs/scootbg/testing.md`, `docs/development.md` → `dev/ratchet/`, `dev/research/`, `dev/README.md`
-- Stays in `docs/` as moved stubs pointing at the site (rewritten in place, then published): `configuration.md`, `ipc.md`, `nix.md`, `tty.md`, `protocols.md`, `scootbar/cli.md`, `scootbar/icons.md`, `scootbg/cli.md`, `scootbar/README.md`, `scootbg/README.md`, `examples/**`, `assets/**`
+- Stays in `docs/` as moved stubs pointing at the site (rewritten in place, then published): `configuration.md`, `ipc.md`, `nix.md`, `tty.md`, `protocols.md`, `scootbar/cli.md`, `scootbar/icons.md`, `scootbg/cli.md`, `examples/**`, `assets/**`. `docs/scootbar/README.md` and `docs/scootbg/README.md` stay as full guides, not stubs.
 
 ## Every place that hard-codes those paths
 
