@@ -33,7 +33,9 @@ binds = true
 ```
 
 then restart the session (`scoot msg reload` refuses both keys with
-"takes effect on restart"). Keep `binds` off unless the remote user
+"takes effect on restart"). Without `binds`, remote `Super` moves no
+windows; with it, a remote chord runs the same bind the local keyboard
+would. Keep `binds` off unless the remote user
 owns the session — see the trust note below.
 
 Then connect a viewer (`vncviewer 127.0.0.1:5900`, or macOS Screen Sharing
@@ -50,7 +52,7 @@ until the screen changes or the pointer moves.
 | `[virtual_input] enabled` | bool | `false` | restart only | Offer the virtual-pointer (`zwlr_virtual_pointer_manager_v1`) and virtual-keyboard (`zwp_virtual_keyboard_manager_v1`) globals a remote-control tool like wayvnc needs to drive the session. Off unless asked: any same-uid client that binds them can type and click as the user, so with this off the globals are not advertised at all. |
 | `[virtual_input] binds` | bool | `false` | restart only | Let virtual-keyboard keys run compositor keybindings, matched by translated seat keysym. Off unless asked: with this on, a client that can bind the virtual keyboard can also spawn programs through binds (a terminal, a launcher) — the same trust boundary as `enabled` above. Needs `enabled` to matter (no globals, no keys). |
 
-Behavior notes:
+What to know before pointing wayvnc at a session:
 
 - **Off unless `[virtual_input] enabled`.** Any same-uid client that binds
   these globals can type and click as the user, so unlike the clipboard
