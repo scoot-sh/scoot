@@ -14,9 +14,7 @@ special case: X11 apps and the CPU-only minimal build.
 Just `scoot`, from the binary cache
 ([Use the binary cache](../start/binary-cache.md)). The GPU scanout
 tier is compiled in and reaches the GPU libraries at run time, so the
-same binary starts with and without a GPU stack installed. What used to
-be a build choice is now a run-time choice
-([Which renderer draws the frames](#which-renderer-draws-the-frames)).
+same binary starts with and without a GPU stack installed.
 
 The only remaining knob for X11 apps is **whether you turn them on**,
 not which package you install: every `scoot` already carries the
@@ -34,7 +32,7 @@ use `pgrep -x .scoot-wrapped`.
 
 ### Do I have a GPU?
 
-You do not need to answer this to pick a build anymore — but `auto`
+You do not need to answer this to pick a build — but `auto`
 behaves differently with and without one, so it is still worth one
 command:
 
@@ -44,7 +42,7 @@ ls /dev/dri/renderD*
 
 - **No output (no such directory, no matches)** → no GPU to use.
   The VM and container case is first-class, not degraded: `auto`
-  resolves to the CPU renderer there, and running with no GPU is a hard
+  resolves to the CPU renderer there — running with no GPU is a hard
   requirement, not a fallback tier.
 - **A render node listed (for example `renderD128`)** → a GPU exists.
   On real hardware, `auto` picks the GPU renderer under `--tty`. On a

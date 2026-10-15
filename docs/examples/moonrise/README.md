@@ -22,7 +22,7 @@ scootbar or scootbg changes unless you use these files.
 | [`regreet.css`](regreet.css) | ReGreet: the login screen in slate navy, cream and disc amber (NixOS greeter) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
-modules install it when the settings have a `[wallpaper]` table, from source
+modules install it when the settings have a `[wallpaper]` table, or, from source,
 `cargo install --path crates/scootbg`), a font file
 for scootbar (see the comment in [`bar.toml`](bar.toml)), and `load.sh` and
 `cpu.sh` somewhere on your `PATH` (see the comment in [`bar.toml`](bar.toml)).

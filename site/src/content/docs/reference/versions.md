@@ -5,7 +5,7 @@ description: "What a scoot version means, which builds work together, and how to
 
 scoot has one version for every binary, and every binary prints it with
 the protocol it speaks. When something disagrees after an upgrade, this
-page says which half to look at.
+page names the half to look at.
 
 ## Ask each binary what it is
 
@@ -39,7 +39,7 @@ scoot 0.2.1+14.g615608c (ipc protocol 11)
 ```
 
 That reads "14 commits past v0.2.1, at commit `615608c`". The protocol
-number is what decides compatibility, not the suffix. Before a version
+number decides compatibility, not the suffix. Before a version
 moves, the maintainer reviews it in a release pull request: a breaking
 change bumps the minor while scoot is below 1.0, anything else the
 patch.

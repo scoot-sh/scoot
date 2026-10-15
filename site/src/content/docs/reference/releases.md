@@ -100,7 +100,7 @@ sha256sum -c SHA256SUMS
 
 Every line must report `OK`. Then the provenance: each file carries a
 keyless GitHub attestation — no signing key to fetch, nothing to
-rotate. You need the `gh` CLI (recent: the flag spelling below is
+rotate. You need the `gh` CLI (the flag spelling below is
 checked against `gh attestation verify --help` at gh 2.92.0 and
 2.100.0; `ubuntu-latest` runners provide a recent `gh`):
 
@@ -112,8 +112,7 @@ Pinning `--signer-workflow` matters: `--owner` alone accepts a
 provenance attestation minted by any workflow in the org.
 
 A verified file prints who built it (the release workflow, on the
-tag's commit) and what went in. The SBOM is plain JSON for the same
-reason — read it with `jq`:
+tag's commit) and what went in. The SBOM is plain JSON — read it with `jq`:
 
 ```sh
 jq '.components | length' sbom-scoot-0.2.1.cyclonedx.json
@@ -128,7 +127,7 @@ it refuses a tag that disagrees with the workspace version, a tag not
 on main, and a re-publish of an existing release; builds the tarball,
 both architectures, the SBOM and the checksums; and publishes the GitHub
 Release with that version's changelog section as its notes. Nix users can
-ignore all of the above: every merge to main already lands tested
+skip the verification section above: every merge to main already lands tested
 binaries in the Cachix cache with the flake on FlakeHub — see
 [Install](../start/install.md). Cutting a release yourself is a
 maintainer task, described on the [cut a release](./cut-a-release.md)

@@ -6,10 +6,10 @@ description: "Build scoot from vendored sources with no network: toolchain, syst
 Build scoot the way a distro builder does: from a source tree that
 needs no network, with a toolchain and system libraries you provide.
 Start here if you maintain the Arch, deb or rpm package. The Arch
-PKGBUILDs (release and `-git`) have landed in
-[`packaging/arch/`][arch-pkg] and build on this page; the deb
-(`packaging/deb`, `deb.yml`) and rpm recipes have landed too --
-contributor history in [deb][deb-pkg], [rpm][rpm-pkg]. All three
+PKGBUILDs (release and `-git`) build on this page
+([`packaging/arch/`][arch-pkg]); the deb
+(`packaging/deb`, `deb.yml`) and rpm recipes have landed too
+([deb][deb-pkg], [rpm][rpm-pkg]). All three
 workflows are manual-only and no packages are shipped yet.
 
 [arch-pkg]: https://github.com/scoot-sh/scoot/blob/main/packaging/arch/README.md
@@ -77,11 +77,10 @@ what your package depends on, store paths are NixOS's and not yours.
 | `--no-default-features` (CPU-only minimal) | as default, minus nothing linked (there is neither GBM nor X11 code to link) | 6.7 MB |
 
 Notes on the table: sizes are `cargo build --release -p scoot` on
-aarch64, re-measured for this change (previously 6.8 MB default without
-the tier, 7.4 MB with `--features gpu-scanout`; the 8.3 MB default now
-includes `xwayland`, measured as the `+xwayland` delta before the fold).
-The single default build deliberately links no GPU stack even though it
-compiles the scanout tier — it must run on a box with no GPU libraries
+aarch64 (previously 6.8 MB default without the tier and 7.4 MB with
+`--features gpu-scanout`; the 8.3 MB default includes `xwayland`, measured as the
+`+xwayland` delta before the fold). The single default build deliberately links
+no GPU stack even though it compiles the scanout tier — it must run on a box with no GPU libraries
 installed, and CI fails a default build that references `libgbm` (with a
 positive control: the default binary must carry the stub's `libgbm.so.1`
 `dlopen` literal, or the negative check is vacuous). `libEGL`/`libGLESv2`

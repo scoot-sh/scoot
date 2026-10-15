@@ -36,24 +36,11 @@ merged release PR does not need it.
 The first tag was **v0.2.0**, never a 0.1.x: FlakeHub already published
 rolling `0.1.*` versions, and a 0.1 tag would sort below them. The
 workspace read `0.2.0` at the time. release-plz waited for this first tag, so
-it was cut by hand, once. (Both `v0.2.0` and `v0.2.1` exist now; what
-follows is the record, kept so the next project bootstrapping release-plz
-has the steps.)
+it was cut by hand, once. (Both `v0.2.0` and `v0.2.1` exist now; kept as the record for the next project bootstrapping release-plz.)
 
-First, a small PR that gives the release its changelog heading. In
-`CHANGELOG.md`, add the version heading, dated the day you tag
-(`YYYY-MM-DD`), directly under the Unreleased heading, so everything
-written so far becomes v0.2.0's notes:
-
-```text
-## Unreleased
-
-## [0.2.0] - YYYY-MM-DD
-
-### The built-in cursors are Mocu (behavior change)
-...
-```
-
+First, a small PR that adds `## [0.2.0] - YYYY-MM-DD` to `CHANGELOG.md`,
+dated the day you tag, directly under the Unreleased heading, so everything
+written so far becomes v0.2.0's notes.
 Merge it, then tag that merge commit on an up-to-date `main` and push the
 tag:
 
