@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Debian control metadata for the scoot .debs (docs/backlog/packaging/deb-package.md).
+"""Debian control metadata for the scoot .debs (docs/backlog/resolved/deb-package-done.md).
 
 Renders the `DEBIAN/control` each .deb ships and checks the
 `dpkg-shlibdeps` output the build feeds it against the `ldd`-derived

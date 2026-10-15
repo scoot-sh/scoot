@@ -11,7 +11,7 @@
 # `BuildRequires: gcc` below.
 #
 # The versioned `scootbg` requirement is the coupled pair from
-# docs/backlog/packaging/rpm-package.md: one tag (`v%%{version}`) releases
+# docs/backlog/resolved/rpm-package-done.md: one tag (`v%%{version}`) releases
 # every binary at the repository's one version (docs/versioning.md), so
 # the pair installs at that version.
 #

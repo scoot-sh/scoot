@@ -1,5 +1,5 @@
 # scoot RPM packages: the spec files for scoot, scootbg and scootbar
-# (docs/backlog/packaging/rpm-package.md).
+# (docs/backlog/resolved/rpm-package-done.md).
 #
 # WHAT IT DOES: stages the vendored-sources tarball with
 # scripts/vendor-release.sh, builds all three specs under `packaging/rpm/`

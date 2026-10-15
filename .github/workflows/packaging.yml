@@ -1,5 +1,5 @@
 # scoot packaging: the vendored-sources tarball path, the license gate
-# and the advisory gate (docs/backlog/packaging/vendoring-and-licenses.md).
+# and the advisory gate (docs/backlog/resolved/vendoring-and-licenses-done.md).
 #
 # WHY THIS IS NOT IN ci.yml: the advisory check needs a weekly schedule
 # (RustSec moves without any repo change), and a schedule trigger on
