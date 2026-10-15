@@ -50,11 +50,18 @@ where focus returns to once that surface goes away. So if a launcher is up,
 `type` and `key` go to the launcher, while `windows` still names the window
 behind it. There is no IPC request that reports a layer surface.
 
-The focus-family actions do take the keyboard back. `focus-column`,
-`focus-window`, `focus-window-id`, `focus-workspace` and
-`focus-workspace-index` -- with or without `--output ID` -- plus `focus-output`, `focus-output-index`, `focus-output-left/right` and `toggle-floating-focus` -- each spend a click that had given a *click-focused*
-(`on_demand`) layer surface the keyboard, so after one, keystrokes go to the
-window `windows` reports as focused. A `focus-window-id` naming no window
+The focus-family actions do take the keyboard back. Each spends a click
+that had given a *click-focused* (`on_demand`) layer surface the
+keyboard, so after one, keystrokes go to the window `windows` reports as
+focused:
+
+- `focus-column`, `focus-window`, `focus-window-id`, `focus-workspace`,
+  `focus-workspace-index` — with or without `--output ID`;
+- `focus-output`, `focus-output-index`, `focus-output-left`,
+  `focus-output-right`;
+- `toggle-floating-focus`.
+
+A `focus-window-id` naming no window
 is a miss: it answers `ok` and changes nothing, leaving the click -- and
 the keyboard it placed -- alone. The other actions — `move-*`, `close`,
 `spawn`, `cycle-column-width`, `set-column-width`, `toggle-fullscreen`, `set-fullscreen`, `toggle-maximize`, `set-maximized`, `quit` — change arrangement rather than where

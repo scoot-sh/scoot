@@ -10,8 +10,8 @@ Subscribe instead of polling: dedicate a connection to the event stream and lear
 A connection that wants push notifications subscribes instead of polling.
 `subscribe` names the event kinds it wants (`output`, `keyboard`,
 `workspace`, `lock` — the four
-kinds; bare `scoot msg subscribe` sends
-`output`); the reply echoes the subscription; and
+kinds; `scoot msg subscribe` with no names sends `output`; an empty
+`events` list on the raw socket is refused); the reply echoes the subscription; and
 afterwards that connection carries events until the session ends:
 
 ```sh
