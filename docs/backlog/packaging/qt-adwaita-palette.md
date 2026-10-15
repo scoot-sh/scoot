@@ -8,7 +8,7 @@ blocked: null
 
 # Qt palette under the Adwaita style ignores the look (measured)
 
-Filed 2026-10-15, from [`look-toolkit-live`](look-toolkit-live.md)
+Filed 2026-10-15, from [`look-toolkit-live`](../resolved/look-toolkit-live-done.md)
 ("first, settle the Qt question with a screenshot"). Serves
 **daily-drive** (Qt apps match the look's palette, not just its dark/light
 variant).

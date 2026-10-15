@@ -388,7 +388,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Nix: the `programs.scoot.looks` catalog and the switch rule](./packaging/look-nix-catalog.md) (high, breaking)
 - [`scoot look import-base16`: the one base16-to-token mapping](./core/look-import-base16.md) (medium)
 - [Stylix becomes a synthesized `stylix` look instead of a layer above the look](./packaging/look-stylix-source.md) (high, breaking)
-- [GTK, libadwaita, Qt, cursor and fonts follow a swap through dconf and the portal](./packaging/look-toolkit-live.md) (medium)
+- [GTK, libadwaita, Qt, cursor and fonts follow a swap through dconf and the portal](./resolved/look-toolkit-live-done.md) (medium) — RESOLVED 2026-10-15
 - [Qt palette under the Adwaita style ignores the look (measured)](./packaging/qt-adwaita-palette.md) (low)
 - [Look leaves for mako, wob, fcitx5 and the night light](./packaging/look-leaves-daemons.md) (medium)
 - [Look leaves for swaylock, fuzzel and the pickers](./packaging/look-leaves-launchers.md) (medium)
