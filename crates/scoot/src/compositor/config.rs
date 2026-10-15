@@ -198,7 +198,7 @@ impl AppearanceConfig {
         // layer provides that key (reported as invalid and shadowing by the
         // caller), else to the built-in default with a warning as before --
         // never neither the user's color nor the look's.
-        let color = |field: Option<String>,
+        let mut color = |field: Option<String>,
                      name: &'static str,
                      default: Color,
                      layer_key: &'static str| match field {
@@ -864,7 +864,7 @@ pub fn reload_from_with_layer(
     let text = fs::read_to_string(path).map_err(|source| fail(source.to_string()))?;
     toml::from_str::<FileConfig>(&text)
         .map(|file| LoadedConfig::from_file_with_layer(file, path, vt, layer.as_ref()))
-        .map_err(fail)
+        .map_err(|source| fail(source.to_string()))
 }
 
 /// Loads like [`load`], merged over the active look layer's fragment
