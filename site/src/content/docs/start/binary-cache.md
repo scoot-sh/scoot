@@ -120,7 +120,7 @@ A fresh empty store on an Asahi M2, asking only for the bar:
 nix --store ~/fx/cache-demo/store run github:scoot-sh/scoot#scootbar --accept-flake-config -- --version
 ```
 
-prints `scootbar 0.1.0` in 14.6 seconds with 7 paths fetched (1.1 MB
+prints `scootbar 0.2.1` in 14.6 seconds with 7 paths fetched (1.1 MB
 download, 58.6 MB unpacked) — the bar itself coming from
 `scoot-sh.cachix.org`, nothing compiled. The ticket's original cold
 build measured 5m10s for two packages on four vCPUs; current CI on a

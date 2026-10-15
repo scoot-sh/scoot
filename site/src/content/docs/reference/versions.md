@@ -18,12 +18,12 @@ scootbar --version
 Each prints one line and exits without starting anything:
 
 ```text
-scoot 0.2.0 (ipc protocol 10)
-scootbg 0.2.0 (protocol 1)
-scootbar 0.2.0
+scoot 0.2.1 (ipc protocol 10)
+scootbg 0.2.1 (protocol 1)
+scootbar 0.2.1
 ```
 
-`0.2.0` is the release, the same for all three: one tag, `v0.2.0`,
+`0.2.1` is the release, the same for all three: one tag, `v0.2.1`,
 releases every binary. `(ipc protocol 10)` is the control protocol
 `scoot msg` speaks, so a client can check compatibility before relying
 on newer requests. `scootbg` names its wallpaper protocol the same way.
@@ -35,10 +35,10 @@ A build that is not a release (from a git checkout or an Arch `-git`
 package) adds where it came from:
 
 ```text
-scoot 0.2.0+14.g615608c (ipc protocol 10)
+scoot 0.2.1+14.g615608c (ipc protocol 10)
 ```
 
-That reads "14 commits past v0.2.0, at commit `615608c`". The protocol
+That reads "14 commits past v0.2.1, at commit `615608c`". The protocol
 number is what decides compatibility, not the suffix. Before a version
 moves, the maintainer reviews it in a release pull request: a breaking
 change bumps the minor while scoot is below 1.0, anything else the

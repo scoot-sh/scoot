@@ -31,12 +31,14 @@ While it is off, the "Open or update the release PR" job fails with
 GitHub's "not permitted to create or approve pull requests" error. Tagging a
 merged release PR does not need it.
 
-## Cut the first release (v0.2.0) by hand
+## Cut the first release (v0.2.0) by hand (historical)
 
-The first tag is **v0.2.0**, never a 0.1.x: FlakeHub already published
+The first tag was **v0.2.0**, never a 0.1.x: FlakeHub already published
 rolling `0.1.*` versions, and a 0.1 tag would sort below them. The
-workspace already reads `0.2.0`. release-plz waits for this first tag, so
-cut it yourself, once.
+workspace read `0.2.0` at the time. release-plz waited for this first tag, so
+it was cut by hand, once. (Both `v0.2.0` and `v0.2.1` exist now; what
+follows is the record, kept so the next project bootstrapping release-plz
+has the steps.)
 
 First, a small PR that gives the release its changelog heading. In
 `CHANGELOG.md`, add the version heading, dated the day you tag
@@ -83,8 +85,8 @@ notes written under Unreleased.
 2. On the same branch, bump the distro packaging to that version:
    `pkgver` in the three Arch release PKGBUILDs (and their `.SRCINFO`),
    `Version` and a `%changelog` entry in the three RPM specs. The Arch
-   and RPM workflows run on the release tag and fail when these lag the
-   workspace version (`packaging/arch/README.md`,
+   and RPM workflows are manual-only (`gh workflow run`, not tag-triggered),
+   and their version-lag gate runs there (`packaging/arch/README.md`,
    `packaging/rpm/README.md`).
 3. Tidy the changelog section if it needs it, and let CI go green.
 4. Merge. release-plz pushes `vX.Y.Z`, and the release workflow builds
