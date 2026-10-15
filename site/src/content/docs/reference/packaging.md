@@ -77,8 +77,10 @@ what your package depends on, store paths are NixOS's and not yours.
 | `--no-default-features` (CPU-only minimal) | as default, minus nothing linked (there is neither GBM nor X11 code to link) | 6.7 MB |
 
 Notes on the table: sizes are `cargo build --release -p scoot` on
-aarch64; the 8.3 MB default includes `xwayland`. The single default build deliberately links no GPU stack even though it
-compiles the scanout tier — it must run on a box with no GPU libraries
+aarch64 (previously 6.8 MB default without the tier and 7.4 MB with
+`--features gpu-scanout`; the 8.3 MB default includes `xwayland`, measured as the
+`+xwayland` delta before the fold). The single default build deliberately links
+no GPU stack even though it compiles the scanout tier — it must run on a box with no GPU libraries
 installed, and CI fails a default build that references `libgbm` (with a
 positive control: the default binary must carry the stub's `libgbm.so.1`
 `dlopen` literal, or the negative check is vacuous). `libEGL`/`libGLESv2`

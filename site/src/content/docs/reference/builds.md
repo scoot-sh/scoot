@@ -32,7 +32,7 @@ use `pgrep -x .scoot-wrapped`.
 
 ### Do I have a GPU?
 
-You need no answer to pick a build — but `auto`
+You do not need to answer this to pick a build — but `auto`
 behaves differently with and without one, so it is still worth one
 command:
 
@@ -42,8 +42,8 @@ ls /dev/dri/renderD*
 
 - **No output (no such directory, no matches)** → no GPU to use.
   The VM and container case is first-class, not degraded: `auto`
-  resolves to the CPU renderer there — no GPU is a supported
-  configuration, not a fallback tier.
+  resolves to the CPU renderer there — running with no GPU is a hard
+  requirement, not a fallback tier.
 - **A render node listed (for example `renderD128`)** → a GPU exists.
   On real hardware, `auto` picks the GPU renderer under `--tty`. On a
   VM the node is usually software (llvmpipe) — there the GPU renderer

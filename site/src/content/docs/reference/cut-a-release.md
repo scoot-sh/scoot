@@ -7,7 +7,7 @@ A release is one tag, `vX.Y.Z`, that releases every binary at the
 repository's one version. You choose the version in a release pull request
 and merge it. release-plz then creates the tag and starts the
 [release workflow](https://github.com/scoot-sh/scoot/blob/main/.github/workflows/release.yml)
-on it. What a version means, and how
+on it, which builds and publishes everything. What a version means, and how
 bumps are proposed, is on the [versions](./versions.md) page and in
 `docs/versioning.md`.
 
@@ -36,7 +36,7 @@ merged release PR does not need it.
 The first tag was **v0.2.0**, never a 0.1.x: FlakeHub already published
 rolling `0.1.*` versions, and a 0.1 tag would sort below them. The
 workspace read `0.2.0` at the time. release-plz waited for this first tag, so
-it was cut by hand, once. (Kept as the record.)
+it was cut by hand, once. (Both `v0.2.0` and `v0.2.1` exist now; kept as the record for the next project bootstrapping release-plz.)
 
 First, a small PR that adds `## [0.2.0] - YYYY-MM-DD` to `CHANGELOG.md`,
 dated the day you tag, directly under the Unreleased heading, so everything
