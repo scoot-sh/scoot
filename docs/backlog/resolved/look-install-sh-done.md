@@ -44,6 +44,8 @@ The design this implements against: [live looks](../../../dev/research/live-look
 
 ## Resolution (2026-10-15)
 
+PR: https://github.com/scoot-sh/scoot/pull/629 (open, not merged).
+
 `--look NAME` installs all five shipped looks as plain files under
 `<prefix>/share/scoot/looks` (each `look.toml` plus its wallpaper image;
 vinyl-sunset is a flat color and ships no image), records them in the
