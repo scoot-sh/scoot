@@ -853,7 +853,9 @@ pub fn reload_from_with_layer(
         reason,
     };
     let layer = match layer_text {
-        Some(text) => Some(parse_layer(text).map_err(fail)?),
+        Some(text) => Some(parse_layer(text).map_err(|reason| {
+            fail(format!("the look layer is refused ({reason})"))
+        })?),
         None => None,
     };
     let text = fs::read_to_string(path).map_err(|source| fail(source.to_string()))?;
@@ -992,6 +994,26 @@ fn validate_layer(layer: &LayerFile) -> Result<(), String> {
         )?;
         check_layer_int("appearance.corner_radius", appearance.corner_radius)?;
         check_layer_int("appearance.cursor_size", appearance.cursor_size)?;
+        check_layer_str(
+            "appearance.focus_ring_active_color",
+            appearance.focus_ring_active_color.as_deref(),
+        )?;
+        check_layer_str(
+            "appearance.focus_ring_inactive_color",
+            appearance.focus_ring_inactive_color.as_deref(),
+        )?;
+        check_layer_str(
+            "appearance.background_color",
+            appearance.background_color.as_deref(),
+        )?;
+        check_layer_str(
+            "appearance.cursor_color",
+            appearance.cursor_color.as_deref(),
+        )?;
+        check_layer_str(
+            "appearance.cursor_theme",
+            appearance.cursor_theme.as_deref(),
+        )?;
         if appearance.cursor_hide_after_ms.is_some() {
             return Err("key `appearance.cursor_hide_after_ms` is not in the scoot look allowlist"
                 .to_owned());
