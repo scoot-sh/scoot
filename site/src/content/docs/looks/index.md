@@ -67,7 +67,7 @@ wrong.
 | Bar colors, radius, opacity, fonts | Live, on apply |
 | Wallpaper image or color | Live, on apply |
 | Dark mode, GTK theme, icons, cursor, app font (`color-scheme`, `gtk-theme`, `icon-theme`, `cursor-theme`, `cursor-size`, `font-name`) | Live, on apply (see below) |
-| GTK `gtk.css` colors | Next launch of each app; running apps keep their palette |
+| GTK `gtk.css` colors | Next launch: GTK 3 text selection plus libadwaita accent and surfaces follow; plain GTK 4 keeps its stock accent; running apps keep their palette |
 | Qt style variant and palette | Next launch of each app; under the Adwaita style QWidget apps keep Adwaita's fixed palette (see below) |
 | Launcher and notification configs | Next launch of each app |
 | Running terminals | Keep their palette; new terminals use the look's |
@@ -106,8 +106,9 @@ The dconf keys, all under `org.gnome.desktop.interface`: `color-scheme`
 (`prefer-dark`/`prefer-light` from the polarity), `gtk-theme`
 (`Adwaita-dark`/`Adwaita`), `icon-theme`, `cursor-theme`, `cursor-size`
 and `font-name`. The owned files, under `~/.config`: the two `gtk.css`
-shims (one `@import` of the state link's `gtk/gtk.css`, so new GTK apps
-take the new palette with no rewrite per swap), the two `settings.ini`
+shims (one `@import` of the state link's per-version `gtk/gtk-3.0.css`
+and `gtk/gtk-4.0.css`, so new GTK apps take the new palette with no
+rewrite per swap), the two `settings.ini`
 files, `qt6ct/qt6ct.conf` (through the link's scheme), and the
 fontconfig default. The tool owns a key or file only while it holds the
 record: it writes when the key is unset or holds what the tool last

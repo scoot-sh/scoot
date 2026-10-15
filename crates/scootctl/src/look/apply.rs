@@ -34,8 +34,8 @@ use scoot_look::state::{
     read_record, state_dir_from_env, write_record,
 };
 use scoot_look::{
-    Origin, RawLook, RenderInputs, check_contrast, render_bar, render_gtk_css, render_json,
-    render_qt_scheme, render_scoot, resolve, source_hash,
+    Origin, RawLook, RenderInputs, check_contrast, render_bar, render_gtk3_css, render_gtk4_css,
+    render_json, render_qt_scheme, render_scoot, resolve, source_hash,
 };
 
 use super::catalog::{Catalog, Entry, cache_home, config_home};
@@ -1242,7 +1242,8 @@ fn render_cached(
         if identity.get("name").and_then(|n| n.as_str()) == Some(name)
             && target.join("scoot.toml").is_file()
             && target.join("bar.toml").is_file()
-            && target.join("gtk/gtk.css").is_file()
+            && target.join("gtk/gtk-3.0.css").is_file()
+            && target.join("gtk/gtk-4.0.css").is_file()
             && target.join("qt/scoot-look.conf").is_file()
         {
             notes.push(format!("reusing cached render {}", target.display()));
@@ -1255,7 +1256,8 @@ fn render_cached(
         render_scoot(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
     let bar =
         render_bar(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
-    let gtk_css = render_gtk_css(merged);
+    let gtk3_css = render_gtk3_css(merged);
+    let gtk4_css = render_gtk4_css(merged);
     let qt_scheme = render_qt_scheme(merged);
     // The fragments must parse as TOML: the renderers quote, and this is
     // where a quoting failure shows itself, before any app reads them.
@@ -1296,7 +1298,8 @@ fn render_cached(
             ("scoot.toml", scoot.as_str()),
             ("bar.toml", bar.as_str()),
             ("render.json", rendered_json.as_str()),
-            ("gtk/gtk.css", gtk_css.as_str()),
+            ("gtk/gtk-3.0.css", gtk3_css.as_str()),
+            ("gtk/gtk-4.0.css", gtk4_css.as_str()),
             ("qt/scoot-look.conf", qt_scheme.as_str()),
         ] {
             let path = tmp.join(file);
@@ -1316,7 +1319,8 @@ fn render_cached(
         if target.is_dir()
             && target.join("scoot.toml").is_file()
             && target.join("bar.toml").is_file()
-            && target.join("gtk/gtk.css").is_file()
+            && target.join("gtk/gtk-3.0.css").is_file()
+            && target.join("gtk/gtk-4.0.css").is_file()
             && target.join("qt/scoot-look.conf").is_file()
         {
             notes.push(format!("reusing cached render {}", target.display()));

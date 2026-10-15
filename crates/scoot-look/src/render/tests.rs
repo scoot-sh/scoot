@@ -376,12 +376,36 @@ fn render_checks_override_values() {
 }
 
 #[test]
-fn gtk_css_carries_the_look_colors() {
+fn gtk3_css_carries_the_selection_rules() {
+    // No `:root` block (GTK 3's parser dies on it, measured:
+    // `Theme parsing error: gtk.css:18:1`) and no `@define-color`
+    // (proven without effect on its embedded Adwaita): just the
+    // selection rules, proven amber live on gtk3-widget-factory.
+    let css = render_gtk3_css(&moonrise());
+    for line in [
+        "entry selection,",
+        ".view selection,",
+        "textview selection,",
+        "row:selected {",
+        "background-color: #FFA45C;",
+        "color: #2B3648;",
+    ] {
+        assert!(css.contains(line), "missing {line}:\n{css}");
+    }
+    assert!(!css.contains(":root"), "a :root block breaks GTK 3:\n{css}");
+    assert!(
+        !css.contains("@define-color"),
+        "defines have no effect on GTK 3:\n{css}"
+    );
+}
+
+#[test]
+fn gtk4_css_carries_names_and_root_vars() {
     // The same names the profile's `gtkCss` writes
-    // (`nix/modules/theme-home.nix`): `@define-color` for plain GTK and
-    // the compat aliases, `:root` vars for libadwaita. Moonrise is dark,
-    // so the surfaces are its slate navy and the accent its amber.
-    let css = render_gtk_css(&moonrise());
+    // (`nix/modules/theme-home.nix`): `@define-color` plus the `:root`
+    // vars libadwaita widgets paint with. Moonrise is dark, so the
+    // surfaces are its slate navy and the accent its amber.
+    let css = render_gtk4_css(&moonrise());
     for line in [
         "@define-color accent_bg_color #FFA45C;",
         "@define-color accent_fg_color #2B3648;",

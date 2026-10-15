@@ -344,21 +344,38 @@ pub fn font_desc(family: &str, size: f64) -> String {
     }
 }
 
-/// Render the GTK `gtk.css` (both versions, same content): the look's
-/// accent and surfaces as the named colors the pinned libadwaita honors,
-/// plus the `:root` vars libadwaita widgets actually paint with. Moved
-/// from the home-manager profile (`nix/modules/theme-home.nix`)
-/// unchanged, so a look renders the same CSS with and without Nix.
-///
-/// Two blocks, both required: `@define-color` names (what plain GTK
-/// widgets and the compat aliases resolve) and a `:root` block with the
-/// matching `--var` names (what libadwaita widgets paint with; the
-/// `:root` defaults live in libadwaita's own stylesheet at THEME
-/// priority, so names alone never reach them). The literal hexes (never
-/// `@`-references, which resolve per provider) make the win
-/// unconditional. Semantic colors (destructive, success, warning,
-/// error) stay the toolkit defaults: the look names no hues for them.
-pub fn render_gtk_css(look: &ResolvedLook) -> String {
+/// Render the GTK 3 `gtk.css`: the look's selection as direct rules.
+/// GTK 3's parser dies on a `:root` block (`Theme parsing error:
+/// gtk.css:18:1: Invalid name of pseudo-class`, measured live against
+/// 3.24.52), and user `@define-color theme_*` overrides have no visible
+/// effect on its embedded Adwaita (three stock roles sampled against the
+/// look's tokens), so this file carries neither: just the selection
+/// rules, with literal hexes, proven amber live on `gtk3-widget-factory`.
+/// New GTK 3 apps take the look's selection; running ones keep theirs.
+pub fn render_gtk3_css(look: &ResolvedLook) -> String {
+    let p = &look.palette;
+    let mut out = format!(
+        "/* Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply. */\n",
+        toml_str(&look.name)
+    );
+    out.push_str("entry selection,\n.view selection,\ntextview selection,\nrow:selected {\n");
+    out.push_str(&format!("  background-color: {};\n", p.accent));
+    out.push_str(&format!("  color: {};\n", p.accent_fg));
+    out.push_str("}\n");
+    out
+}
+
+/// Render the GTK 4 `gtk.css`: the look's accent and surfaces as
+/// `@define-color` names plus the `:root` vars libadwaita widgets
+/// actually paint with. The `:root` defaults live in libadwaita's own
+/// stylesheet at THEME priority, so names alone never reach them; the
+/// literal hexes (never `@`-references, which resolve per provider) make
+/// the win unconditional. Measured live: libadwaita paints the look's
+/// accent and surfaces from this file, while plain GTK 4 widgets keep
+/// the stock accent (their theme does not read these names). Semantic
+/// colors (destructive, success, warning, error) stay the toolkit
+/// defaults: the look names no hues for them.
+pub fn render_gtk4_css(look: &ResolvedLook) -> String {
     let p = &look.palette;
     let mut out = format!(
         "/* Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply. */\n",

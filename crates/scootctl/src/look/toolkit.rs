@@ -438,11 +438,12 @@ pub struct OwnedFile {
     pub contents: String,
 }
 
-/// The wanted toolkit files for a look: the two `gtk.css` `@import`s of
-/// the link's `gtk/gtk.css` (new GTK apps take the new palette), the two
-/// `settings.ini`s, the qt6ct config through the link's scheme, and the
-/// fontconfig default. `link` is the state link's own path, so the
-/// indirection survives every swap with no rewrite.
+/// The wanted toolkit files for a look: the two `gtk.css` `@import`s
+/// (each of its version's fragment under the link, so new GTK apps take
+/// the new palette with no rewrite per swap), the two `settings.ini`s,
+/// the qt6ct config through the link's scheme, and the fontconfig
+/// default. `link` is the state link's own path, so the indirection
+/// survives every swap with no rewrite.
 pub fn wanted_files(look: &ResolvedLook, link: &Path) -> Result<Vec<OwnedFile>, String> {
     let link_text = link
         .to_str()
@@ -453,9 +454,15 @@ pub fn wanted_files(look: &ResolvedLook, link: &Path) -> Result<Vec<OwnedFile>, 
     {
         return Err("the state link path is not a plain path: toolkit files left alone".to_owned());
     }
-    let css = format!(
-        "/* {MANAGED_MARK}. Do not edit: re-rendered on every apply. New apps read the active look through the state link. */\n@import url(\"file://{link_text}/gtk/gtk.css\");\n"
-    );
+    // One shim per GTK version, each importing its own fragment: GTK 3's
+    // parser dies on the GTK 4 `:root` block, so the two contents differ.
+    let shim = |fragment: &str| {
+        format!(
+            "/* {MANAGED_MARK}. Do not edit: re-rendered on every apply. New apps read the active look through the state link. */\n@import url(\"file://{link_text}/gtk/{fragment}\");\n"
+        )
+    };
+    let css3 = shim("gtk-3.0.css");
+    let css4 = shim("gtk-4.0.css");
     let ini = render_gtk_ini(look);
     let scheme_path = format!("{link_text}/qt/scoot-look.conf");
     let qt_conf = render_qt6ct_conf(look, &scheme_path)
@@ -475,11 +482,11 @@ pub fn wanted_files(look: &ResolvedLook, link: &Path) -> Result<Vec<OwnedFile>, 
     Ok(vec![
         OwnedFile {
             rel: "gtk-3.0/gtk.css",
-            contents: css.clone(),
+            contents: css3,
         },
         OwnedFile {
             rel: "gtk-4.0/gtk.css",
-            contents: css,
+            contents: css4,
         },
         OwnedFile {
             rel: "gtk-3.0/settings.ini",

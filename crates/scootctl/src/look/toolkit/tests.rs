@@ -621,8 +621,13 @@ fn files_cover_gtk_qt_and_fonts() {
     let css = &files[0].contents;
     assert!(css.contains("@import url(\"file://"), "no @import:\n{css}");
     assert!(
-        css.contains("/gtk/gtk.css\""),
+        css.contains("/gtk/gtk-3.0.css\""),
         "not through the link:\n{css}"
+    );
+    let css4 = &files[1].contents;
+    assert!(
+        css4.contains("/gtk/gtk-4.0.css\""),
+        "not through the link:\n{css4}"
     );
     let qt = &files[4].contents;
     assert!(qt.contains("style=Adwaita-Dark"), "wrong style:\n{qt}");
