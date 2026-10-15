@@ -305,11 +305,11 @@ fn a_connection_answers_every_line() {
 #[test]
 fn a_scoped_ok_carries_its_scope_while_plain_stays_byte_identical() {
     let mut out = Vec::new();
-    protocol::write_reply(out, &protocol::Reply::Ok { scope: None });
+    protocol::write_reply(&mut out, &protocol::Reply::Ok { scope: None });
     assert_eq!(out, b"{\"type\":\"ok\"}\n");
     out.clear();
     protocol::write_reply(
-        out,
+        &mut out,
         &protocol::Reply::Ok {
             scope: Some("look"),
         },
