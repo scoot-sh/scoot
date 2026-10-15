@@ -38,11 +38,13 @@ fn the_runtime_dir_prefers_xdg_and_falls_back_to_uid() {
 }
 
 /// Serves one bar reload reply on a scratch socket: reads the request line
-/// and answers `reply`.
+/// and answers `reply`. The listener binds before returning, so the client
+/// never connects before the server exists.
 #[cfg(target_os = "linux")]
 fn serve_once(socket: PathBuf, reply: &'static str) -> std::thread::JoinHandle<String> {
+    let _ = std::fs::remove_file(&socket);
+    let listener = UnixListener::bind(&socket).expect("a scratch socket");
     std::thread::spawn(move || {
-        let listener = UnixListener::bind(&socket).expect("a scratch socket");
         let (stream, _) = listener.accept().expect("one connection");
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
@@ -99,10 +101,17 @@ fn an_error_reply_is_the_refusal() {
 #[test]
 fn a_closed_connection_is_a_named_refusal() {
     let socket = socket_path("closed");
+    let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).expect("a scratch socket");
     let peer = std::thread::spawn(move || {
         let (stream, _) = listener.accept().expect("one connection");
-        drop(stream);
+        // Read the request first, then close cleanly: the client sees EOF,
+        // not a reset.
+        let mut reader = BufReader::new(&stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("one request line");
+        drop(reader);
+        stream.shutdown(std::net::Shutdown::Both).ok();
     });
     let error = send_bar_reload(&socket).expect_err("a close refuses");
     assert!(
