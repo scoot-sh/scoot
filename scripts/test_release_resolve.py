@@ -449,11 +449,15 @@ class SyncFuzzLocksTests(unittest.TestCase):
             fuzz.mkdir(parents=True)
             lock = fuzz / "Cargo.lock"
             lock.write_text('[[package]]\nname = "scootbg-mem"\nversion = "0.2.0"\n\n'
-                            '[[package]]\nname = "serde"\nversion = "0.2.0"\n')
+                            '[[package]]\nname = "serde"\nversion = "0.2.0"\n\n'
+                            '[[package]]\nname = "scootbg-mem"\nversion = "9.0.0"\n'
+                            'source = "registry+https://github.com/rust-lang/crates.io-index"\n')
             r = subprocess.run([str(self.SCRIPT), "--root", d], capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertIn('name = "scootbg-mem"\nversion = "0.2.1"', lock.read_text())
             self.assertIn('name = "serde"\nversion = "0.2.0"', lock.read_text())
+            # A registry crate sharing a workspace crate's name is not rewritten.
+            self.assertIn('name = "scootbg-mem"\nversion = "9.0.0"', lock.read_text())
 
 
 if __name__ == "__main__":

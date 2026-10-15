@@ -20,7 +20,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PACKAGE = re.compile(r'(\[\[package\]\]\nname = "([^"]+)"\nversion = ")([^"]+)(")')
+# A path dependency has no `source =` line; a registry crate that merely
+# shares a workspace crate's name does, and is left alone.
+PACKAGE = re.compile(r'(\[\[package\]\]\nname = "([^"]+)"\nversion = ")([^"]+)(")(?!\nsource = )')
 
 
 def main(argv=None):

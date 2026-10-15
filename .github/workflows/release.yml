@@ -115,6 +115,7 @@ on:
       - 'scripts/release-resolve'
       - 'scripts/release-notes'
       - 'scripts/workspace-version'
+      - 'scripts/sync-fuzz-locks'
       - 'scripts/test_release_resolve.py'
   workflow_dispatch:
     inputs:
