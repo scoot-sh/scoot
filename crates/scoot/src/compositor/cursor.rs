@@ -418,7 +418,7 @@ impl Cursor {
         let mut keys: Vec<(u64, f64)> = Vec::with_capacity(input.scales.len() + 1);
         for scale in std::iter::once(1.0).chain(input.scales) {
             let key = scale_key(scale);
-            if !keys.contains(&key) {
+            if !keys.iter().any(|(known, _)| *known == key) {
                 keys.push((key, scale));
             }
         }
